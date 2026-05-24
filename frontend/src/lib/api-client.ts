@@ -4,21 +4,24 @@ interface ApiErrorDetails {
   message: string;
   status: number;
   details?: unknown;
+  reasonCodes?: string[];
 }
 
 export class ApiError extends Error {
   status: number;
   details?: unknown;
+  reasonCodes: string[];
 
-  constructor(message: string, status: number, details?: unknown) {
+  constructor(message: string, status: number, details?: unknown, reasonCodes: string[] = []) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.details = details;
+    this.reasonCodes = reasonCodes;
   }
 
   static fromResponse(details: ApiErrorDetails): ApiError {
-    return new ApiError(details.message, details.status, details.details);
+    return new ApiError(details.message, details.status, details.details, details.reasonCodes ?? []);
   }
 }
 
@@ -29,7 +32,8 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
     return ApiError.fromResponse({
       message,
       status: response.status,
-      details: body?.error?.details ?? body?.details
+      details: body?.error?.details ?? body?.details,
+      reasonCodes: Array.isArray(body?.error?.reasonCodes) ? body.error.reasonCodes : []
     });
   } catch {
     return ApiError.fromResponse({

@@ -40,7 +40,7 @@ import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
-import { assertPatientIdentifierAllowsBooking } from "./patient-identifier-requirement.js";
+import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 
 export interface CreateBookingResult {
@@ -105,7 +105,7 @@ export async function createBookingInternal(
 ): Promise<CreateBookingResult> {
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
-  await assertPatientIdentifierAllowsBooking(client, payload.patientId, userRole);
+  await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
   const caseCategory = await resolveBookingCaseCategory(client, payload.patientId, payload.caseCategory);
   const patientQrSettings = await readPatientQrSettings();
   const requiresReport =

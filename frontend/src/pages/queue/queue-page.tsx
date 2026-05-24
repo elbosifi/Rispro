@@ -7,6 +7,7 @@ import type { QueueEntry, QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
+import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { pushToast } from "@/lib/toast";
 import { Button, Card, Input, Badge, SectionLabel } from "@/components/shared";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
@@ -103,7 +104,7 @@ export default function QueuePage() {
       pushToast({
         type: "error",
         title: t("queue.scanFailed"),
-        message: err.message || t("queue.scanFailed")
+        message: getPatientRequirementStaffMessage(err, t) || err.message || t("queue.scanFailed")
       });
     }
   });
@@ -122,6 +123,13 @@ export default function QueuePage() {
         type: "success",
         title: t("queue.walkInSuccess"),
         message: t("queue.walkInSuccess")
+      });
+    },
+    onError: (err) => {
+      pushToast({
+        type: "error",
+        title: t("queue.walkInError"),
+        message: getPatientRequirementStaffMessage(err, t) || (err instanceof Error ? err.message : t("queue.walkInError"))
       });
     }
   });

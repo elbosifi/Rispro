@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import { fetchAppointments, fetchPatientQrSettings, fetchPublicSchedulingCapacitySettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
+import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -112,11 +113,15 @@ function isRoutinePriority(priority: { nameEn?: string | null; nameAr?: string |
   );
 }
 
-function localizeCreateAppointmentError(message: string, language: "ar" | "en"): string {
-  if (message.startsWith("This patient cannot be booked because they do not have a primary identifier.")) {
+function localizeCreateAppointmentError(error: unknown, language: "ar" | "en"): string {
+  const requirementMessage = getPatientRequirementStaffMessage(error, (key) => t(language, key));
+  if (requirementMessage) return requirementMessage;
+
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("This patient cannot be booked or entered into the queue because they do not have a primary identifier.")) {
     return t(language, "appointments.booking.patientIdentifierRequired");
   }
-  return message;
+  return message || t(language, "appointments.create.failedCreate");
 }
 
 export function CreateAppointmentTab({
@@ -593,7 +598,7 @@ export function CreateAppointmentTab({
 
       await createWithDecision(decision);
     } catch (error) {
-      setPageError(error instanceof Error ? localizeCreateAppointmentError(error.message, language) : t(language, "appointments.create.failedCreate"));
+      setPageError(localizeCreateAppointmentError(error, language));
     } finally {
       setSubmitLoading(false);
     }
@@ -1106,7 +1111,7 @@ export function CreateAppointmentTab({
                     try {
                       await createWithDecision(decision);
                     } catch (error) {
-                    setPageError(error instanceof Error ? localizeCreateAppointmentError(error.message, language) : t(language, "appointments.create.failedCreate"));
+                    setPageError(localizeCreateAppointmentError(error, language));
                     } finally {
                       setSubmitLoading(false);
                     }

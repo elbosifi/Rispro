@@ -6,6 +6,7 @@ import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils
 import { normalizePositiveInteger } from "../utils/normalize.js";
 import { createBooking } from "../modules/appointments-v2/booking/services/create-booking.service.js";
 import type { CreateBookingPayload } from "../modules/appointments-v2/booking/models/booking.js";
+import { assertPatientMeetsBookingQueueRequirements } from "../modules/appointments-v2/booking/services/patient-identifier-requirement.js";
 import { logAuditEntry } from "./audit-service.js";
 import { resolveScanValueToAccession } from "./dicom-service.js";
 import {
@@ -77,6 +78,7 @@ interface QueueEntryStateRow {
 
 interface AppointmentForQueueRow {
   id: number;
+  patient_id: number;
   appointment_date: string;
   status: AppointmentStatus;
   accession_number: string;
@@ -473,6 +475,8 @@ export async function scanAppointmentIntoQueue(
     if (APPOINTMENT_QUEUE_CLOSED_STATUSES.includes(appointment.status)) {
       throw new HttpError(409, `This appointment is already marked as ${appointment.status}.`);
     }
+
+    await assertPatientMeetsBookingQueueRequirements(client, appointment.patient_id, currentUser.role);
 
     const queueEntry = await enqueueAppointmentRecord(client, appointment, currentUser.sub, queueDate);
 

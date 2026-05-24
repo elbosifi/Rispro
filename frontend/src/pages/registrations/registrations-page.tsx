@@ -20,6 +20,7 @@ import { formatDateLy, formatDateTimeLy, isoDateDaysFromNow, todayIsoDateLy } fr
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
+import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
@@ -392,7 +393,7 @@ export default function RegistrationsPage() {
       pushToast({
         type: "error",
         title: t("registrations.rescheduleFailedTitle"),
-        message: err?.message || t("registrations.rescheduleFailedMessage"),
+        message: getPatientRequirementStaffMessage(err, t) || err?.message || t("registrations.rescheduleFailedMessage"),
       });
     },
   });

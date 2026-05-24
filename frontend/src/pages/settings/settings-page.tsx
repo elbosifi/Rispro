@@ -2033,7 +2033,7 @@ interface SettingControl {
 
 const SETTINGS_CATALOG: Record<string, SettingControl> = {
   // Patient Registration
-  phone1_required: { label: "Phone 1 Required", type: "dropdown", options: [
+  phone1_required: { label: "", type: "dropdown", options: [
     { value: "required", label: "مطلوب" },
     { value: "optional", label: "اختياري" }
   ]},
@@ -2133,6 +2133,9 @@ function friendlySettingLabel(category: string, key: string, t: (key: Translatio
   if (category === "patient_registration" && key === "national_id_required") {
     return t("settings.patientRegistration.identifierRequired");
   }
+  if (category === "patient_registration" && key === "phone1_required") {
+    return t("settings.patientRegistration.phone1Required");
+  }
   return key.replace(/_/g, " ");
 }
 
@@ -2180,6 +2183,7 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
           <div>
             <p className="text-sm font-semibold text-amber-800">{t("settings.patientRegistration.mrnPrefix")}</p>
             <p className="text-sm text-amber-700 mt-1">{t("settings.patientRegistration.mrnPrefixHint")}</p>
+            <p className="text-sm text-amber-700 mt-2">{t("settings.patientRegistration.requiredFieldsHint")}</p>
           </div>
           <div className="flex flex-col sm:flex-row sm:items-end gap-3">
             <div className="flex-1">

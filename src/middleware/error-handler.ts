@@ -16,6 +16,9 @@ export function errorHandler(
   const errorRecord = asUnknownRecord(error);
   const statusCode = typeof errorRecord.statusCode === "number" ? errorRecord.statusCode : 500;
   const isExpected = error instanceof HttpError;
+  const reasonCodes = Array.isArray(errorRecord.reasonCodes)
+    ? errorRecord.reasonCodes.filter((code): code is string => typeof code === "string")
+    : undefined;
 
   if (statusCode >= 500) {
     console.error(error);
@@ -27,7 +30,8 @@ export function errorHandler(
         statusCode >= 500 && env.isProduction && !isExpected
           ? "Unexpected server error."
           : String(errorRecord.message ?? "Unexpected server error."),
-      details: env.isProduction && !isExpected ? null : (errorRecord.details ?? null)
+      details: env.isProduction && !isExpected ? null : (errorRecord.details ?? null),
+      ...(reasonCodes && reasonCodes.length > 0 ? { reasonCodes } : {})
     }
   });
 }

@@ -16,6 +16,7 @@ import {
 import { ApiError } from "@/lib/api-client";
 import { fetchQueueSnapshot, fetchStatistics, scanIntoQueue } from "@/lib/api-hooks";
 import { chooseLocalized } from "@/lib/i18n";
+import { getPatientRequirementCheckInMessage } from "@/lib/patient-requirement-messages";
 import { todayIsoDateLy, formatDateTimeLy } from "@/lib/date-format";
 import type { QueueEntry, QueueSnapshot } from "@/types/api";
 import { useAuth } from "@/providers/auth-provider";
@@ -41,6 +42,9 @@ type ModalityRow = {
 };
 
 function getLocalizedScanError(t: ReturnType<typeof useLanguage>["t"], err: unknown): string {
+  const requirementMessage = getPatientRequirementCheckInMessage(err, t);
+  if (requirementMessage) return requirementMessage;
+
   if (err instanceof ApiError) {
     if (err.status === 404) return t("queue.checkInErrorNotFound");
     if (err.status === 400) return t("queue.checkInErrorInvalidCode");
