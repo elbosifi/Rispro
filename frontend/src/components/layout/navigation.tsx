@@ -12,6 +12,7 @@ import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import {
   LayoutGrid,
   Users,
+  GitMerge,
   CalendarDays,
   ClipboardList,
   ListOrdered,
@@ -33,6 +34,7 @@ import {
 type NavIcon =
   | "dashboard"
   | "patients"
+  | "patientMerge"
   | "appointments"
   | "overrideRequests"
   | "appointmentsV2Admin"
@@ -54,6 +56,7 @@ interface NavItemConfig {
   labelKey:
     | "nav.dashboard"
     | "nav.patients"
+    | "nav.patientMerge"
     | "nav.appointments"
     | "nav.schedulingOverrideRequests"
     | "nav.appointmentsV2Admin"
@@ -76,6 +79,7 @@ interface NavItemConfig {
 export const NAV_ITEMS: NavItemConfig[] = [
   { route: "dashboard", labelKey: "nav.dashboard", icon: "dashboard" },
   { route: "patients", labelKey: "nav.patients", icon: "patients" },
+  { route: "patients.merge", labelKey: "nav.patientMerge", icon: "patientMerge" },
   { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
   { route: "scheduling.override.requests", labelKey: "nav.schedulingOverrideRequests", icon: "overrideRequests" },
   { route: "v2.appointments.admin", labelKey: "nav.appointmentsV2Admin", icon: "appointmentsV2Admin", roles: ["supervisor", "super_admin"] },
@@ -106,6 +110,7 @@ function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilit
 const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
   dashboard: LayoutGrid,
   patients: Users,
+  patientMerge: GitMerge,
   appointments: CalendarDays,
   overrideRequests: ClipboardList,
   appointmentsV2Admin: Settings,

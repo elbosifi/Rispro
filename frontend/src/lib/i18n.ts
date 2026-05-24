@@ -38,6 +38,7 @@ const en = {
 
   "nav.dashboard": "Dashboard",
   "nav.patients": "Register patient",
+  "nav.patientMerge": "Patient Merge",
   "nav.appointments": "Create appointment",
   "nav.schedulingOverrideRequests": "Override Requests",
   "overrideRequests.title": "Override requests",
@@ -1387,6 +1388,7 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
 
   "nav.dashboard": "لوحة التحكم",
   "nav.patients": "تسجيل مريض",
+  "nav.patientMerge": "دمج المرضى",
   "nav.appointments": "إنشاء موعد",
   "nav.schedulingOverrideRequests": "طلبات التجاوز",
   "overrideRequests.title": "طلبات التجاوز",

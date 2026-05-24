@@ -10,6 +10,7 @@ const SETTINGS_KEY = "page_visibility_by_role";
 export const PAGE_VISIBILITY_ROUTE_KEYS = [
   "dashboard",
   "patients",
+  "patients.merge",
   "appointments",
   "v2.appointments.admin",
   "calendar",
@@ -35,6 +36,7 @@ const ALLOWED_ROUTE_KEYS = new Set<string>(PAGE_VISIBILITY_ROUTE_KEYS);
 export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = {
   dashboard: ["receptionist", "supervisor", "administrative", "super_admin"],
   patients: ["receptionist", "supervisor", "doctor", "super_admin"],
+  "patients.merge": ["supervisor", "super_admin"],
   appointments: ["receptionist", "supervisor", "super_admin"],
   "v2.appointments.admin": ["supervisor", "super_admin"],
   calendar: ["receptionist", "supervisor", "super_admin"],

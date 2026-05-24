@@ -162,7 +162,7 @@ function buildDraftFromPatient(patient: Patient): MergeDraft {
     identifierValue: patient.identifierValue || patient.nationalId || "",
     category: patient.category || "",
     ageYears: patient.ageYears ? String(patient.ageYears) : "",
-    estimatedDateOfBirth: patient.estimatedDateOfBirth || "",
+    estimatedDateOfBirth: dateInputValue(patient.estimatedDateOfBirth),
     sex: patient.sex || "",
     phone1: patient.phone1 || "",
     phone2: patient.phone2 || "",
@@ -172,6 +172,14 @@ function buildDraftFromPatient(patient: Patient): MergeDraft {
 
 function fieldValue(patient: Patient, key: MergeField): string {
   return buildDraftFromPatient(patient)[key] || "";
+}
+
+function dateInputValue(value: string | null | undefined): string {
+  return String(value || "").slice(0, 10);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "The merge request failed.";
 }
 
 function draftToPatientPayload(draft: MergeDraft): Partial<Patient> & { nationalIdConfirmation?: string } {
@@ -184,7 +192,7 @@ function draftToPatientPayload(draft: MergeDraft): Partial<Patient> & { national
     identifierValue: draft.identifierValue.trim(),
     category: draft.category === "oncology" || draft.category === "non_oncology" ? draft.category : null,
     ageYears: Number(draft.ageYears || 0),
-    estimatedDateOfBirth: draft.estimatedDateOfBirth.trim(),
+    estimatedDateOfBirth: dateInputValue(draft.estimatedDateOfBirth.trim()),
     sex: draft.sex.trim(),
     phone1: draft.phone1.trim(),
     phone2: draft.phone2.trim(),
@@ -407,11 +415,12 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
       setSelectedAction(null);
       setConfirmationText("");
       setSelectedPair(null);
-      pushToast({ type: "success", title: "Patients merged" });
+      pushToast({ type: "success", title: "Patients merged", message: "The duplicate source record was merged into the selected survivor." });
       await invalidateDuplicates();
     },
     onError: (error) => {
       if (isReAuthError(error)) onReAuthRequired(REAUTH_QUERY_KEY);
+      else pushToast({ type: "error", title: "Merge failed", message: errorMessage(error) });
     },
   });
 
@@ -421,17 +430,19 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
       setSelectedAction(null);
       setConfirmationText("");
       setSelectedPair(null);
-      pushToast({ type: "success", title: "Patient safely deleted" });
+      pushToast({ type: "success", title: "Patient safely deleted", message: "The duplicate record had no linked history and was removed." });
       await invalidateDuplicates();
     },
     onError: (error) => {
       if (isReAuthError(error)) onReAuthRequired(REAUTH_QUERY_KEY);
+      else pushToast({ type: "error", title: "Delete failed", message: errorMessage(error) });
     },
   });
 
   const mergeGroupMutation = useMutation({
     mutationFn: (action: Extract<SelectedAction, { type: "mergeGroup" }>) => mergePatientDuplicateGroup(action.targetId, action.sourceIds, confirmationText, draftToPatientPayload(mergeDraft)),
     onSuccess: async () => {
+      const mergedCount = selectedAction?.type === "mergeGroup" ? selectedAction.sourceIds.length : 0;
       setSelectedAction(null);
       setConfirmationText("");
       setSelectedPair(null);
@@ -439,11 +450,12 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
       setManualTargetId(null);
       setMergeDraft(EMPTY_MERGE_DRAFT);
       setFieldSources({});
-      pushToast({ type: "success", title: "Selected patients merged" });
+      pushToast({ type: "success", title: "Selected patients merged", message: `${mergedCount || "Selected"} duplicate record${mergedCount === 1 ? "" : "s"} merged into the survivor.` });
       await invalidateDuplicates();
     },
     onError: (error) => {
       if (isReAuthError(error)) onReAuthRequired(REAUTH_QUERY_KEY);
+      else pushToast({ type: "error", title: "Merge failed", message: errorMessage(error) });
     },
   });
 

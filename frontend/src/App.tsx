@@ -10,6 +10,7 @@ import { DashboardPage } from "@/pages/dashboard/dashboard-page";
 import SearchPage from "@/pages/search/search-page";
 import PatientsPage from "@/pages/patients/patients-page";
 import EditPatientPage from "@/pages/patients/edit-patient-page";
+import PatientMergePage from "@/pages/patient-merge/patient-merge-page";
 import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
 import SchedulingOverrideRequestsPage from "@/pages/scheduling-override-requests/scheduling-override-requests-page";
@@ -42,6 +43,7 @@ import {
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
   patients: "/patients",
+  "patients.merge": "/patients/merge",
   "patients.new": "/patients/new",
   appointments: "/appointments",
   "scheduling.override.requests": "/scheduling/override-requests",
@@ -156,6 +158,9 @@ function AppContent() {
     if (pathname.startsWith("/pacs/remap")) {
       return "pacs.remap";
     }
+    if (pathname.startsWith("/patients/merge")) {
+      return "patients.merge";
+    }
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
@@ -172,6 +177,8 @@ function AppContent() {
           return language === "ar" ? "لوحة التحكم" : "Dashboard";
         case "patients":
           return language === "ar" ? "المرضى" : "Patients";
+        case "patients.merge":
+          return language === "ar" ? "Ø¯Ù…Ø¬ Ø§Ù„Ù…Ø±Ø¶Ù‰" : "Patient Merge";
       case "appointments":
         return language === "ar" ? "إنشاء موعد" : "Create Appointment";
       case "scheduling.override.requests":
@@ -271,6 +278,7 @@ function AppContent() {
             <Route path="/" element={<Navigate to={effectiveDefaultLandingPath} replace />} />
             <Route path="/dashboard" element={guardedPage("dashboard", <DashboardPage />)} />
             <Route path="/patients" element={guardedPage("patients", <PatientsPage />)} />
+            <Route path="/patients/merge" element={guardedPage("patients.merge", <PatientMergePage />)} />
             <Route path="/patients/new" element={guardedPage("patients", <PatientsPage />)} />
             <Route path="/patients/:id/edit" element={guardedPage("patients", <EditPatientPage />)} />
             <Route path="/appointments" element={guardedPage("appointments", <AppointmentsV3CreatePage />)} />

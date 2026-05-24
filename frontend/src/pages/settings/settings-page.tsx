@@ -4073,6 +4073,7 @@ const ROLE_LABELS: Record<string, string> = {
 const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   dashboard: "Dashboard",
   patients: "Patients",
+  "patients.merge": "Patient Merge",
   appointments: "Appointments",
   "scheduling.override.requests": "Override Requests",
   "v2.appointments.admin": "Appointments Admin (V2)",

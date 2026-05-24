@@ -12,6 +12,7 @@ export const PAGE_VISIBILITY_ROLES: Role[] = [
 export const PAGE_VISIBILITY_ROUTE_KEYS = [
   "dashboard",
   "patients",
+  "patients.merge",
   "appointments",
   "scheduling.override.requests",
   "v2.appointments.admin",
@@ -35,6 +36,7 @@ export type PageVisibilityMatrix = Record<PageVisibilityRouteKey, Role[]>;
 export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = {
   dashboard: ["receptionist", "supervisor", "administrative", "super_admin"],
   patients: ["receptionist", "supervisor", "doctor", "super_admin"],
+  "patients.merge": ["supervisor", "super_admin"],
   appointments: ["receptionist", "supervisor", "super_admin"],
   "scheduling.override.requests": ["receptionist", "supervisor", "super_admin"],
   "v2.appointments.admin": ["supervisor", "super_admin"],
@@ -104,6 +106,7 @@ const DEFAULT_LANDING_PRIORITY: readonly PageVisibilityRouteKey[] = [
   "queue",
   "registrations",
   "patients",
+  "patients.merge",
   "appointments",
   "scheduling.override.requests",
   "calendar",
