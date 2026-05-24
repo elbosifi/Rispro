@@ -457,6 +457,34 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
   const actionReady = selectedAction && confirmationText.trim().toUpperCase() === actionLabel;
   const manualTarget = manualSelection.find((patient) => patient.id === manualTargetId) || null;
   const manualSources = manualSelection.filter((patient) => patient.id !== manualTargetId);
+  const confirmationPanel = selectedAction ? (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950">
+      <p className="text-sm font-semibold">
+        Type {actionLabel} to confirm{" "}
+        {selectedAction.type === "merge"
+          ? `merging patient #${selectedAction.sourceId} into #${selectedAction.targetId}`
+          : selectedAction.type === "mergeGroup"
+            ? `merging ${selectedAction.sourceIds.length} selected patient records into #${selectedAction.targetId}`
+            : `safe deleting patient #${selectedAction.patientId}`}.
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} className="input-premium h-10 flex-1 bg-white" placeholder={actionLabel} />
+        <Button
+          type="button"
+          size="sm"
+          disabled={!actionReady || mergeMutation.isPending || deleteMutation.isPending || mergeGroupMutation.isPending}
+          onClick={() => {
+            if (!selectedAction) return;
+            if (selectedAction.type === "merge") mergeMutation.mutate(selectedAction);
+            if (selectedAction.type === "mergeGroup") mergeGroupMutation.mutate(selectedAction);
+            if (selectedAction.type === "delete") deleteMutation.mutate(selectedAction);
+          }}
+        >
+          Confirm
+        </Button>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-4">
@@ -495,6 +523,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
             Merge selected
           </Button>
         </div>
+        {selectedAction?.type === "mergeGroup" ? <div className="mt-3">{confirmationPanel}</div> : null}
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(260px,420px)_1fr]">
           <div className="space-y-3">
@@ -746,34 +775,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                   <input value={dismissReason} onChange={(event) => setDismissReason(event.target.value)} className="input-premium h-10 w-full" placeholder="Optional note for audit log" />
                 </label>
 
-                {selectedAction ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950">
-                    <p className="text-sm font-semibold">
-                      Type {actionLabel} to confirm{" "}
-                      {selectedAction.type === "merge"
-                        ? `merging patient #${selectedAction.sourceId} into #${selectedAction.targetId}`
-                        : selectedAction.type === "mergeGroup"
-                          ? `merging ${selectedAction.sourceIds.length} selected patient records into #${selectedAction.targetId}`
-                          : `safe deleting patient #${selectedAction.patientId}`}.
-                    </p>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} className="input-premium h-10 flex-1 bg-white" placeholder={actionLabel} />
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={!actionReady || mergeMutation.isPending || deleteMutation.isPending || mergeGroupMutation.isPending}
-                        onClick={() => {
-                          if (!selectedAction) return;
-                          if (selectedAction.type === "merge") mergeMutation.mutate(selectedAction);
-                          if (selectedAction.type === "mergeGroup") mergeGroupMutation.mutate(selectedAction);
-                          if (selectedAction.type === "delete") deleteMutation.mutate(selectedAction);
-                        }}
-                      >
-                        Confirm
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
+                {selectedAction?.type !== "mergeGroup" ? confirmationPanel : null}
               </div>
             )}
           </div>
