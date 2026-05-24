@@ -21,3 +21,14 @@ test("duplicate resolver supports manual search and group merge UI", async () =>
   assert.match(source, /usePatientField/);
   assert.match(source, /draftToPatientPayload/);
 });
+
+test("duplicate resolver exposes matching controls and conflict review", async () => {
+  const source = await readFile(new URL("../../../frontend/src/pages/settings/patient-duplicate-resolver-section.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /Match threshold/);
+  assert.match(source, /Refresh candidates/);
+  assert.match(source, /candidateSort/);
+  assert.match(source, /SignalBadges/);
+  assert.match(source, /ConflictSummary/);
+  assert.match(source, /conflictsAcknowledged/);
+});

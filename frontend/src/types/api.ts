@@ -671,6 +671,17 @@ export interface PatientDuplicateCandidate {
   patientB: PatientDuplicateSummary;
   score: number;
   reasons: string[];
+  signals: Array<{
+    field: string;
+    label: string;
+    status: "match" | "similar" | "mismatch" | "info";
+    score?: number;
+  }>;
+  conflicts: Array<{
+    field: string;
+    patientAValue: string | null;
+    patientBValue: string | null;
+  }>;
   canSafeDeleteA: boolean;
   canSafeDeleteB: boolean;
   blockersA: PatientDuplicateBlockers;
@@ -680,6 +691,8 @@ export interface PatientDuplicateCandidate {
 export interface PatientDuplicateListResponse {
   candidates: PatientDuplicateCandidate[];
   threshold: number;
+  mode?: "strict" | "balanced" | "broad";
+  candidateCount?: number;
 }
 
 export interface PatientDuplicateDetailResponse {

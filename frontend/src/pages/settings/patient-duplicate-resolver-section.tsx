@@ -9,6 +9,7 @@ import {
   mergePatientDuplicateGroup,
   safeDeleteDuplicatePatient,
   searchPatientsForDuplicateResolver,
+  type PatientDuplicateCandidateFilters,
 } from "@/lib/api-hooks";
 import { ApiError } from "@/lib/api-client";
 import { pushToast } from "@/lib/toast";
@@ -42,6 +43,17 @@ type MergeField =
   | "address";
 
 type MergeDraft = Record<MergeField, string>;
+type CandidateSort = "confidence" | "newest" | "risk";
+
+const DEFAULT_CANDIDATE_FILTERS: PatientDuplicateCandidateFilters = {
+  threshold: 75,
+  mode: "balanced",
+  category: "",
+  sex: "",
+  dobProximity: "",
+  hasIdentifier: "",
+  hasPhone: "",
+};
 
 const MERGE_FIELDS: Array<{ key: MergeField; label: string; type?: "number" | "select" }> = [
   { key: "arabicFullName", label: "Arabic name" },
@@ -223,6 +235,47 @@ function BlockerSummary({ blockers }: { blockers: PatientDuplicateBlockers }) {
   );
 }
 
+function SignalBadges({ candidate }: { candidate: PatientDuplicateCandidate }) {
+  const signals = candidate.signals?.length ? candidate.signals : candidate.reasons.map((reason) => ({ field: reason, label: formatReason(reason), status: "info" as const }));
+  return (
+    <div className="flex flex-wrap gap-1">
+      {signals.map((signal, index) => (
+        <Badge
+          key={`${signal.field}-${signal.label}-${index}`}
+          variant="neutral"
+          className={`text-[10px] ${
+            signal.status === "mismatch"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : signal.status === "match"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : signal.status === "similar"
+                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  : ""
+          }`}
+        >
+          {signal.label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function ConflictSummary({ candidate }: { candidate: PatientDuplicateCandidate }) {
+  if (!candidate.conflicts?.length) return null;
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+      <p className="font-semibold">Hard conflicts need acknowledgement</p>
+      <div className="mt-2 space-y-1">
+        {candidate.conflicts.map((conflict) => (
+          <p key={conflict.field} className="font-mono text-xs">
+            {formatReason(conflict.field)}: {conflict.patientAValue || "-"} / {conflict.patientBValue || "-"}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CandidateButton({
   candidate,
   selected,
@@ -249,9 +302,8 @@ function CandidateButton({
         <p className="truncate text-sm">{displayPatientName(candidate.patientB)}</p>
       </div>
       <div className="mt-3 flex flex-wrap gap-1">
-        {candidate.reasons.slice(0, 4).map((reason) => (
-          <Badge key={reason} variant="neutral" className="text-[10px]">{formatReason(reason)}</Badge>
-        ))}
+        <SignalBadges candidate={{ ...candidate, signals: candidate.signals?.slice(0, 4) || [] }} />
+        {candidate.conflicts?.length ? <Badge variant="neutral" className="border-red-200 bg-red-50 text-[10px] text-red-700">{candidate.conflicts.length} conflict{candidate.conflicts.length === 1 ? "" : "s"}</Badge> : null}
       </div>
     </button>
   );
@@ -269,18 +321,21 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
   const [dismissReason, setDismissReason] = useState("");
   const [selectedAction, setSelectedAction] = useState<SelectedAction>(null);
   const [confirmationText, setConfirmationText] = useState("");
+  const [candidateFilters, setCandidateFilters] = useState<PatientDuplicateCandidateFilters>(DEFAULT_CANDIDATE_FILTERS);
+  const [appliedCandidateFilters, setAppliedCandidateFilters] = useState<PatientDuplicateCandidateFilters>(DEFAULT_CANDIDATE_FILTERS);
+  const [candidateSort, setCandidateSort] = useState<CandidateSort>("confidence");
+  const [conflictsAcknowledged, setConflictsAcknowledged] = useState(false);
 
   const candidatesQuery = useQuery({
-    queryKey: REAUTH_QUERY_KEY,
-    queryFn: fetchPatientDuplicateCandidates,
+    queryKey: [...REAUTH_QUERY_KEY, appliedCandidateFilters],
+    queryFn: () => fetchPatientDuplicateCandidates(appliedCandidateFilters),
     retry: false,
   });
 
   const candidates = candidatesQuery.data?.candidates || [];
   const filteredCandidates = useMemo(() => {
     const needle = candidateQuery.trim().toLowerCase();
-    if (!needle) return candidates;
-    return candidates.filter((candidate) => {
+    const visible = !needle ? candidates : candidates.filter((candidate) => {
       const haystack = [
         candidate.patientA.id,
         candidate.patientA.mrn,
@@ -299,7 +354,12 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
       ].join(" ").toLowerCase();
       return haystack.includes(needle);
     });
-  }, [candidates, candidateQuery]);
+    return [...visible].sort((a, b) => {
+      if (candidateSort === "newest") return Math.max(b.patientA.id, b.patientB.id) - Math.max(a.patientA.id, a.patientB.id);
+      if (candidateSort === "risk") return (b.conflicts?.length || 0) - (a.conflicts?.length || 0) || b.score - a.score;
+      return b.score - a.score || b.patientA.id - a.patientA.id;
+    });
+  }, [candidates, candidateQuery, candidateSort]);
 
   const manualSearchQuery = useQuery({
     queryKey: ["settings", "patient-duplicates", "manual-search", manualQuery.trim()],
@@ -410,6 +470,14 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     addManualPatient(duplicateSummaryToPatient(candidate.patientB));
   };
 
+  const addLikelyDuplicatesForPatient = (patientId: number) => {
+    const related = candidates.filter((candidate) => candidate.patientA.id === patientId || candidate.patientB.id === patientId);
+    related.forEach((candidate) => {
+      addManualPatient(duplicateSummaryToPatient(candidate.patientA));
+      addManualPatient(duplicateSummaryToPatient(candidate.patientB));
+    });
+  };
+
   const removeManualPatient = (patientId: number) => {
     setManualSelection((current) => current.filter((patient) => patient.id !== patientId));
     if (manualTargetId === patientId) {
@@ -454,7 +522,8 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
   const detail = detailQuery.data;
   const activeCandidate = detail?.candidate;
   const actionLabel = selectedAction?.type === "merge" || selectedAction?.type === "mergeGroup" ? "MERGE" : selectedAction?.type === "delete" ? "DELETE" : "";
-  const actionReady = selectedAction && confirmationText.trim().toUpperCase() === actionLabel;
+  const selectedMergeHasConflicts = selectedAction?.type === "merge" && Boolean(activeCandidate?.conflicts?.length);
+  const actionReady = selectedAction && confirmationText.trim().toUpperCase() === actionLabel && (!selectedMergeHasConflicts || conflictsAcknowledged);
   const manualTarget = manualSelection.find((patient) => patient.id === manualTargetId) || null;
   const manualSources = manualSelection.filter((patient) => patient.id !== manualTargetId);
   const confirmationPanel = selectedAction ? (
@@ -467,6 +536,12 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
             ? `merging ${selectedAction.sourceIds.length} selected patient records into #${selectedAction.targetId}`
             : `safe deleting patient #${selectedAction.patientId}`}.
       </p>
+      {selectedMergeHasConflicts ? (
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={conflictsAcknowledged} onChange={(event) => setConflictsAcknowledged(event.target.checked)} className="mt-1" />
+          <span>I reviewed the hard conflicts and still want to merge these records.</span>
+        </label>
+      ) : null}
       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} className="input-premium h-10 flex-1 bg-white" placeholder={actionLabel} />
         <Button
@@ -490,12 +565,90 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">Fuzzy matches at {candidatesQuery.data?.threshold || 75}% or higher.</p>
-          <p className="text-sm font-semibold text-foreground">{candidates.length} candidate pair{candidates.length === 1 ? "" : "s"} found</p>
+          <p className="text-sm text-muted-foreground">Fuzzy matches at {candidatesQuery.data?.threshold || 75}% or higher in {candidatesQuery.data?.mode || "balanced"} mode.</p>
+          <p className="text-sm font-semibold text-foreground">{candidatesQuery.data?.candidateCount ?? candidates.length} candidate pair{(candidatesQuery.data?.candidateCount ?? candidates.length) === 1 ? "" : "s"} found</p>
         </div>
         <div className="relative w-full lg:max-w-sm">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={candidateQuery} onChange={(event) => setCandidateQuery(event.target.value)} className="input-premium h-10 w-full pl-9" placeholder="Filter candidate queue" />
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-background p-3">
+        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <label className="space-y-1 md:col-span-2">
+            <span className="text-xs font-medium text-muted-foreground">Match threshold: {candidateFilters.threshold}</span>
+            <input
+              type="range"
+              min={40}
+              max={100}
+              value={candidateFilters.threshold || 75}
+              onChange={(event) => setCandidateFilters((current) => ({ ...current, threshold: Number(event.target.value) }))}
+              className="w-full"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Mode</span>
+            <select value={candidateFilters.mode || "balanced"} onChange={(event) => setCandidateFilters((current) => ({ ...current, mode: event.target.value as PatientDuplicateCandidateFilters["mode"] }))} className="input-premium h-9 w-full text-sm">
+              <option value="strict">Strict</option>
+              <option value="balanced">Balanced</option>
+              <option value="broad">Broad</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Sort</span>
+            <select value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as CandidateSort)} className="input-premium h-9 w-full text-sm">
+              <option value="confidence">Confidence</option>
+              <option value="newest">Newest</option>
+              <option value="risk">Risk</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Category</span>
+            <select value={candidateFilters.category || ""} onChange={(event) => setCandidateFilters((current) => ({ ...current, category: event.target.value as PatientDuplicateCandidateFilters["category"] }))} className="input-premium h-9 w-full text-sm">
+              <option value="">Any</option>
+              <option value="oncology">Oncology</option>
+              <option value="non_oncology">Non-oncology</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Sex</span>
+            <select value={candidateFilters.sex || ""} onChange={(event) => setCandidateFilters((current) => ({ ...current, sex: event.target.value }))} className="input-premium h-9 w-full text-sm">
+              <option value="">Any</option>
+              <option value="m">M</option>
+              <option value="f">F</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Identifier</span>
+            <select value={candidateFilters.hasIdentifier || ""} onChange={(event) => setCandidateFilters((current) => ({ ...current, hasIdentifier: event.target.value as PatientDuplicateCandidateFilters["hasIdentifier"] }))} className="input-premium h-9 w-full text-sm">
+              <option value="">Any</option>
+              <option value="true">Present</option>
+              <option value="false">Missing</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Phone</span>
+            <select value={candidateFilters.hasPhone || ""} onChange={(event) => setCandidateFilters((current) => ({ ...current, hasPhone: event.target.value as PatientDuplicateCandidateFilters["hasPhone"] }))} className="input-premium h-9 w-full text-sm">
+              <option value="">Any</option>
+              <option value="true">Present</option>
+              <option value="false">Missing</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={candidateFilters.dobProximity === "true"}
+              onChange={(event) => setCandidateFilters((current) => ({ ...current, dobProximity: event.target.checked ? "true" : "" }))}
+            />
+            DOB or age match
+          </label>
+          <Button type="button" size="sm" variant="secondary" onClick={() => { setAppliedCandidateFilters(candidateFilters); setSelectedPair(null); setSelectedAction(null); setConfirmationText(""); setConflictsAcknowledged(false); }} disabled={candidatesQuery.isFetching}>
+            {candidatesQuery.isFetching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+            Refresh candidates
+          </Button>
         </div>
       </div>
 
@@ -514,9 +667,10 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
             size="sm"
             disabled={!manualTarget || manualSources.length === 0}
             onClick={() => {
-              if (!manualTarget || manualSources.length === 0) return;
+            if (!manualTarget || manualSources.length === 0) return;
               setSelectedAction({ type: "mergeGroup", targetId: manualTarget.id, sourceIds: manualSources.map((patient) => patient.id) });
               setConfirmationText("");
+              setConflictsAcknowledged(false);
             }}
           >
             <GitMerge size={15} />
@@ -709,6 +863,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                   setSelectedPair([candidate.patientA.id, candidate.patientB.id]);
                   setSelectedAction(null);
                   setConfirmationText("");
+                  setConflictsAcknowledged(false);
                 }}
               />
             ))}
@@ -734,7 +889,14 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                     <UserPlus size={16} />
                     Add both to merge set
                   </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addLikelyDuplicatesForPatient(activeCandidate.patientA.id)}>
+                    <Users size={16} />
+                    Add likely set
+                  </Button>
                 </div>
+
+                <ConflictSummary candidate={activeCandidate} />
+                <SignalBadges candidate={activeCandidate} />
 
                 <div className="grid gap-3 xl:grid-cols-2">
                   <div className="space-y-3">
@@ -744,10 +906,10 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                       <Button type="button" size="sm" variant="outline" onClick={() => window.location.assign(`/patients/${activeCandidate.patientA.id}/edit`)}>
                         <UserRoundCheck size={15} /> Open
                       </Button>
-                      <Button type="button" size="sm" variant="secondary" onClick={() => { setSelectedAction({ type: "merge", targetId: activeCandidate.patientB.id, sourceId: activeCandidate.patientA.id }); setConfirmationText(""); }}>
+                      <Button type="button" size="sm" variant="secondary" onClick={() => { setSelectedAction({ type: "merge", targetId: activeCandidate.patientB.id, sourceId: activeCandidate.patientA.id }); setConfirmationText(""); setConflictsAcknowledged(false); }}>
                         <GitMerge size={15} /> Merge into B
                       </Button>
-                      <Button type="button" size="sm" variant="ghost" disabled={!activeCandidate.canSafeDeleteA} onClick={() => { setSelectedAction({ type: "delete", patientId: activeCandidate.patientA.id }); setConfirmationText(""); }}>
+                      <Button type="button" size="sm" variant="ghost" disabled={!activeCandidate.canSafeDeleteA} onClick={() => { setSelectedAction({ type: "delete", patientId: activeCandidate.patientA.id }); setConfirmationText(""); setConflictsAcknowledged(false); }}>
                         <Trash2 size={15} /> Safe delete
                       </Button>
                     </div>
@@ -760,10 +922,10 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                       <Button type="button" size="sm" variant="outline" onClick={() => window.location.assign(`/patients/${activeCandidate.patientB.id}/edit`)}>
                         <UserRoundCheck size={15} /> Open
                       </Button>
-                      <Button type="button" size="sm" variant="secondary" onClick={() => { setSelectedAction({ type: "merge", targetId: activeCandidate.patientA.id, sourceId: activeCandidate.patientB.id }); setConfirmationText(""); }}>
+                      <Button type="button" size="sm" variant="secondary" onClick={() => { setSelectedAction({ type: "merge", targetId: activeCandidate.patientA.id, sourceId: activeCandidate.patientB.id }); setConfirmationText(""); setConflictsAcknowledged(false); }}>
                         <GitMerge size={15} /> Merge into A
                       </Button>
-                      <Button type="button" size="sm" variant="ghost" disabled={!activeCandidate.canSafeDeleteB} onClick={() => { setSelectedAction({ type: "delete", patientId: activeCandidate.patientB.id }); setConfirmationText(""); }}>
+                      <Button type="button" size="sm" variant="ghost" disabled={!activeCandidate.canSafeDeleteB} onClick={() => { setSelectedAction({ type: "delete", patientId: activeCandidate.patientB.id }); setConfirmationText(""); setConflictsAcknowledged(false); }}>
                         <Trash2 size={15} /> Safe delete
                       </Button>
                     </div>

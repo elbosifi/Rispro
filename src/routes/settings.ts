@@ -248,8 +248,9 @@ settingsRouter.get(
 
 settingsRouter.get(
   "/patient-duplicates",
-  asyncRoute(async (_req: Request, res: Response) => {
-    const result = await listPatientDuplicateCandidates();
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const result = await listPatientDuplicateCandidates(request.query as Record<string, unknown>);
     res.json(result);
   })
 );

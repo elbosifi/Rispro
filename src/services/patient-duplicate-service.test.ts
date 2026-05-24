@@ -47,3 +47,24 @@ test("patient duplicate scoring catches fuzzy name with demographics", () => {
   assert.ok(result.reasons.includes("name_match") || result.reasons.includes("similar_name"));
   assert.ok(result.reasons.includes("date_of_birth_match"));
 });
+
+test("patient duplicate scoring weights English names like Arabic names", () => {
+  const result = scorePatientDuplicatePair(
+    { ...basePatient, arabic_full_name: "Alpha", normalized_arabic_name: "alpha", english_full_name: "Kawthar Abdullah Abdelrahim", phone_1: "0911111111" },
+    { ...basePatient, arabic_full_name: "Beta", normalized_arabic_name: "beta", english_full_name: "Kawthar Abdullah Abdelrahim", phone_1: "0922222222" }
+  );
+
+  assert.ok(result.score >= 75);
+  assert.ok(result.signals.some((signal) => signal.field === "english_name" && (signal.status === "match" || signal.status === "similar")));
+});
+
+test("patient duplicate scoring reports hard conflicts without blocking signal output", () => {
+  const result = scorePatientDuplicatePair(
+    { ...basePatient, national_id: "111111111111", identifier_value: "111111111111", sex: "M" },
+    { ...basePatient, national_id: "222222222222", identifier_value: "222222222222", sex: "F" }
+  );
+
+  assert.ok(result.conflicts.some((conflict) => conflict.field === "identifier"));
+  assert.ok(result.conflicts.some((conflict) => conflict.field === "sex"));
+  assert.ok(result.signals.some((signal) => signal.status === "mismatch"));
+});

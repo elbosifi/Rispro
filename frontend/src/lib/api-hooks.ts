@@ -1114,8 +1114,27 @@ export async function mergePatients(targetPatientId: number, sourcePatientId: nu
   });
 }
 
-export async function fetchPatientDuplicateCandidates(): Promise<PatientDuplicateListResponse> {
-  return api<PatientDuplicateListResponse>("/settings/patient-duplicates");
+export interface PatientDuplicateCandidateFilters {
+  threshold?: number;
+  mode?: "strict" | "balanced" | "broad";
+  category?: "" | "oncology" | "non_oncology";
+  sex?: string;
+  dobProximity?: "" | "true" | "false";
+  hasIdentifier?: "" | "true" | "false";
+  hasPhone?: "" | "true" | "false";
+}
+
+export async function fetchPatientDuplicateCandidates(filters: PatientDuplicateCandidateFilters = {}): Promise<PatientDuplicateListResponse> {
+  const params = new URLSearchParams();
+  if (filters.threshold) params.set("threshold", String(filters.threshold));
+  if (filters.mode) params.set("mode", filters.mode);
+  if (filters.category) params.set("category", filters.category);
+  if (filters.sex) params.set("sex", filters.sex);
+  if (filters.dobProximity) params.set("dobProximity", filters.dobProximity);
+  if (filters.hasIdentifier) params.set("hasIdentifier", filters.hasIdentifier);
+  if (filters.hasPhone) params.set("hasPhone", filters.hasPhone);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return api<PatientDuplicateListResponse>(`/settings/patient-duplicates${suffix}`);
 }
 
 export async function fetchPatientDuplicateDetail(patientAId: number, patientBId: number): Promise<PatientDuplicateDetailResponse> {

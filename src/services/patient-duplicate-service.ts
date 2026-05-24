@@ -1,13 +1,28 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
-import { getPatientDirectorySummary, mergePatients, searchPatients, updatePatient } from "./patient-service.js";
-import { scorePatientDuplicatePair } from "./patient-duplicate-scoring.js";
+import { getPatientDirectorySummary, mergePatients, searchPatients, updatePatient, type PatientRow } from "./patient-service.js";
+import { scorePatientDuplicatePair, type PatientDuplicateConflict, type PatientDuplicateSignal } from "./patient-duplicate-scoring.js";
+import { normalizeArabicName } from "../utils/normalize.js";
+import { normalizeIdentifierValue } from "../utils/identifier.js";
 import type { PoolClient } from "pg";
 import type { OptionalUserId, UnknownRecord, UserId } from "../types/http.js";
 
 const DEFAULT_DUPLICATE_THRESHOLD = 75;
 const MAX_DUPLICATE_CANDIDATES = 100;
+const MATCH_MODES = ["strict", "balanced", "broad"] as const;
+
+type DuplicateMatchMode = (typeof MATCH_MODES)[number];
+
+interface PatientDuplicateListOptions {
+  threshold: number;
+  mode: DuplicateMatchMode;
+  category: "oncology" | "non_oncology" | null;
+  sex: string | null;
+  dobProximity: boolean | null;
+  hasIdentifier: boolean | null;
+  hasPhone: boolean | null;
+}
 
 type PatientDuplicatePatientRow = {
   id: number;
@@ -58,10 +73,34 @@ export interface PatientDuplicateCandidate {
   patientB: PatientDuplicateSummary;
   score: number;
   reasons: string[];
+  signals: PatientDuplicateSignal[];
+  conflicts: PatientDuplicateConflict[];
   canSafeDeleteA: boolean;
   canSafeDeleteB: boolean;
   blockersA: PatientDuplicateBlockers;
   blockersB: PatientDuplicateBlockers;
+}
+
+function parseBooleanFilter(value: unknown): boolean | null {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
+function parseDuplicateListOptions(query?: Record<string, unknown>): PatientDuplicateListOptions {
+  const threshold = Math.max(40, Math.min(100, Number(query?.threshold ?? DEFAULT_DUPLICATE_THRESHOLD) || DEFAULT_DUPLICATE_THRESHOLD));
+  const mode = MATCH_MODES.includes(query?.mode as DuplicateMatchMode) ? (query?.mode as DuplicateMatchMode) : "balanced";
+  const category = query?.category === "oncology" || query?.category === "non_oncology" ? query.category : null;
+  const sex = typeof query?.sex === "string" && query.sex.trim() ? query.sex.trim().toLowerCase() : null;
+  return {
+    threshold,
+    mode,
+    category,
+    sex,
+    dobProximity: parseBooleanFilter(query?.dobProximity),
+    hasIdentifier: parseBooleanFilter(query?.hasIdentifier),
+    hasPhone: parseBooleanFilter(query?.hasPhone),
+  };
 }
 
 function normalizePair(patientAId: number, patientBId: number): [number, number] {
@@ -139,9 +178,9 @@ async function getSafeDeleteBlockers(client: PoolClient, patientId: number): Pro
   return blockers;
 }
 
-async function buildCandidate(client: PoolClient, a: PatientDuplicatePatientRow, b: PatientDuplicatePatientRow): Promise<PatientDuplicateCandidate | null> {
+async function buildCandidate(client: PoolClient, a: PatientDuplicatePatientRow, b: PatientDuplicatePatientRow, threshold: number): Promise<PatientDuplicateCandidate | null> {
   const scored = scorePatientDuplicatePair(a, b);
-  if (scored.score < DEFAULT_DUPLICATE_THRESHOLD) return null;
+  if (scored.score < threshold) return null;
   const [blockersA, blockersB] = await Promise.all([
     getSafeDeleteBlockers(client, Number(a.id)),
     getSafeDeleteBlockers(client, Number(b.id)),
@@ -151,6 +190,8 @@ async function buildCandidate(client: PoolClient, a: PatientDuplicatePatientRow,
     patientB: toSummary(b),
     score: scored.score,
     reasons: scored.reasons,
+    signals: scored.signals,
+    conflicts: scored.conflicts,
     canSafeDeleteA: blockersA.total === 0,
     canSafeDeleteB: blockersB.total === 0,
     blockersA,
@@ -158,7 +199,8 @@ async function buildCandidate(client: PoolClient, a: PatientDuplicatePatientRow,
   };
 }
 
-async function fetchDuplicatePatientRows(client: PoolClient): Promise<Array<{ a: PatientDuplicatePatientRow; b: PatientDuplicatePatientRow }>> {
+async function fetchDuplicatePatientRows(client: PoolClient, options: PatientDuplicateListOptions): Promise<Array<{ a: PatientDuplicatePatientRow; b: PatientDuplicatePatientRow }>> {
+  const nameSimilarityThreshold = options.mode === "strict" ? 0.7 : options.mode === "broad" ? 0.35 : 0.5;
   const { rows } = await client.query<{ a: PatientDuplicatePatientRow; b: PatientDuplicatePatientRow }>(
     `
       with patient_base as (
@@ -178,7 +220,8 @@ async function fetchDuplicatePatientRows(client: PoolClient): Promise<Array<{ a:
           p.phone_2,
           p.category,
           regexp_replace(coalesce(p.phone_1, ''), '\\D', '', 'g') as normalized_phone,
-          normalize_space.first_name_token
+          normalize_space.first_name_token,
+          lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) as normalized_english_name
         from patients p
         left join lateral (
           select pit.code as identifier_type, pi.value as identifier_value
@@ -199,6 +242,24 @@ async function fetchDuplicatePatientRows(client: PoolClient): Promise<Array<{ a:
       join patient_base b on a.id < b.id
       left join patient_duplicate_dismissals d on d.patient_a_id = a.id and d.patient_b_id = b.id
       where d.id is null
+        and ($2::text is null or a.category = $2::text or b.category = $2::text)
+        and ($3::text is null or lower(coalesce(a.sex, '')) = $3::text or lower(coalesce(b.sex, '')) = $3::text)
+        and (
+          $4::boolean is null
+          or ($4::boolean = true and (coalesce(a.identifier_value, a.national_id, '') <> '' or coalesce(b.identifier_value, b.national_id, '') <> ''))
+          or ($4::boolean = false and coalesce(a.identifier_value, a.national_id, '') = '' and coalesce(b.identifier_value, b.national_id, '') = '')
+        )
+        and (
+          $5::boolean is null
+          or ($5::boolean = true and (a.normalized_phone <> '' or b.normalized_phone <> ''))
+          or ($5::boolean = false and a.normalized_phone = '' and b.normalized_phone = '')
+        )
+        and (
+          $6::boolean is null
+          or $6::boolean = false
+          or a.estimated_date_of_birth = b.estimated_date_of_birth
+          or a.age_years = b.age_years
+        )
         and (
           (
             a.identifier_value is not null
@@ -207,6 +268,13 @@ async function fetchDuplicatePatientRows(client: PoolClient): Promise<Array<{ a:
           )
           or (a.national_id is not null and a.national_id <> '' and a.national_id = b.national_id)
           or (a.normalized_phone <> '' and a.normalized_phone = b.normalized_phone)
+          or similarity(a.normalized_arabic_name, b.normalized_arabic_name) >= $1
+          or similarity(a.normalized_english_name, b.normalized_english_name) >= $1
+          or (
+            a.normalized_english_name <> ''
+            and b.normalized_english_name <> ''
+            and soundex(a.normalized_english_name) = soundex(b.normalized_english_name)
+          )
           or (
             a.first_name_token <> ''
             and a.first_name_token = b.first_name_token
@@ -219,22 +287,31 @@ async function fetchDuplicatePatientRows(client: PoolClient): Promise<Array<{ a:
         )
       order by a.id desc
       limit 500
-    `
+    `,
+    [
+      nameSimilarityThreshold,
+      options.category,
+      options.sex,
+      options.hasIdentifier,
+      options.hasPhone,
+      options.dobProximity,
+    ]
   );
   return rows;
 }
 
-export async function listPatientDuplicateCandidates(): Promise<{ candidates: PatientDuplicateCandidate[]; threshold: number }> {
+export async function listPatientDuplicateCandidates(query?: Record<string, unknown>): Promise<{ candidates: PatientDuplicateCandidate[]; threshold: number; mode: DuplicateMatchMode; candidateCount: number }> {
+  const options = parseDuplicateListOptions(query);
   const client = await pool.connect();
   try {
-    const candidateRows = await fetchDuplicatePatientRows(client);
+    const candidateRows = await fetchDuplicatePatientRows(client, options);
     const candidates: PatientDuplicateCandidate[] = [];
     for (const row of candidateRows) {
-      const candidate = await buildCandidate(client, row.a, row.b);
+      const candidate = await buildCandidate(client, row.a, row.b, options.threshold);
       if (candidate) candidates.push(candidate);
     }
     candidates.sort((a, b) => b.score - a.score || b.patientA.id - a.patientA.id);
-    return { candidates: candidates.slice(0, MAX_DUPLICATE_CANDIDATES), threshold: DEFAULT_DUPLICATE_THRESHOLD };
+    return { candidates: candidates.slice(0, MAX_DUPLICATE_CANDIDATES), threshold: options.threshold, mode: options.mode, candidateCount: candidates.length };
   } finally {
     client.release();
   }
@@ -285,7 +362,8 @@ export async function getPatientDuplicateDetail(patientAId: number, patientBId: 
       fetchPatientDuplicateRow(client, orderedA),
       fetchPatientDuplicateRow(client, orderedB),
     ]);
-    const candidate = await buildCandidate(client, a, b);
+    const candidate = await buildCandidate(client, a, b, DEFAULT_DUPLICATE_THRESHOLD);
+    const scored = scorePatientDuplicatePair(a, b);
     const [summaryA, summaryB] = await Promise.all([
       getPatientDirectorySummary(orderedA),
       getPatientDirectorySummary(orderedB),
@@ -294,8 +372,10 @@ export async function getPatientDuplicateDetail(patientAId: number, patientBId: 
       candidate: candidate || {
         patientA: toSummary(a),
         patientB: toSummary(b),
-        score: scorePatientDuplicatePair(a, b).score,
-        reasons: scorePatientDuplicatePair(a, b).reasons,
+        score: scored.score,
+        reasons: scored.reasons,
+        signals: scored.signals,
+        conflicts: scored.conflicts,
         canSafeDeleteA: false,
         canSafeDeleteB: false,
         blockersA: await getSafeDeleteBlockers(client, orderedA),
@@ -344,7 +424,70 @@ export async function mergePatientDuplicateCandidate(targetPatientId: UserId, so
 export async function searchPatientsForDuplicateResolver(query: unknown) {
   const term = String(query || "").trim();
   if (term.length < 2) return [];
-  return searchPatients(term);
+  const [baseMatches, fuzzyMatches] = await Promise.all([searchPatients(term), searchPatientsForDuplicateResolverFuzzy(term)]);
+  const byId = new Map<number, PatientRow>();
+  for (const patient of [...baseMatches, ...fuzzyMatches]) byId.set(Number(patient.id), patient);
+  return [...byId.values()].slice(0, 25);
+}
+
+async function searchPatientsForDuplicateResolverFuzzy(term: string): Promise<PatientRow[]> {
+  const normalizedArabicTerm = normalizeArabicName(term);
+  const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
+  const normalizedIdentifierPattern = `%${normalizeIdentifierValue(term)}%`;
+  const { rows } = await pool.query<PatientRow>(
+    `
+      select
+        p.id,
+        p.mrn,
+        case
+          when coalesce(primary_identifier.identifier_type, p.identifier_type) = 'national_id'
+            then coalesce(primary_identifier.identifier_value, p.identifier_value, p.national_id)
+          else null
+        end as national_id,
+        coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
+        coalesce(primary_identifier.identifier_value, p.identifier_value) as identifier_value,
+        p.category,
+        p.arabic_full_name,
+        p.english_full_name,
+        p.age_years,
+        p.demographics_estimated,
+        p.sex,
+        p.phone_1,
+        p.phone_2,
+        p.address,
+        p.estimated_date_of_birth
+      from patients p
+      left join lateral (
+        select pit.code as identifier_type, pi.value as identifier_value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = p.id
+        order by pi.is_primary desc, pi.id asc
+        limit 1
+      ) as primary_identifier on true
+      where
+        similarity(p.normalized_arabic_name, $1) >= 0.35
+        or similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), $2) >= 0.35
+        or (
+          $2 <> ''
+          and lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) <> ''
+          and soundex(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g'))) = soundex($2)
+        )
+        or exists (
+          select 1
+          from patient_identifiers pi
+          where pi.patient_id = p.id and pi.normalized_value ilike $3
+        )
+      order by greatest(
+        similarity(p.normalized_arabic_name, $1),
+        similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), $2)
+      ) desc,
+      p.id desc
+      limit 25
+    `,
+    [normalizedArabicTerm, normalizedEnglishTerm, normalizedIdentifierPattern]
+  );
+  return rows;
 }
 
 export async function mergePatientDuplicateGroup(
