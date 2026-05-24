@@ -1905,7 +1905,7 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "registrations.viewAppointmentLink": "عرض رابط الموعد",
   "registrations.appointmentLinkTitle": "رابط الموعد",
   "registrations.appointmentLinkUnavailable": "لا يوجد رابط موعد عام متاح لهذا التسجيل.",
-  "registrations.report": "التقرير",
+  "registrations.report": "الصور و التقرير",
   "registrations.reportCheck": "فحص حالة التقرير",
   "registrations.reportChecking": "جاري الفحص...",
   "registrations.reportHint": "افحص حالة تقرير المريض باستخدام نفس قواعد رابط QR.",
