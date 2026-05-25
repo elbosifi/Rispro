@@ -14,6 +14,7 @@ export const ORTHANC_MWL_DEFAULTS: Record<string, string> = {
   password: "",
   timeout_seconds: "10",
   verify_tls: "true",
+  send_only_when_patient_enters_queue: "false",
   worklist_target: "",
   strategy_preference: "put_first",
   mwl_specific_character_set: "ISO_IR 192",
@@ -35,6 +36,7 @@ export interface ResolvedOrthancSettings {
   password: string;
   timeoutSeconds: number;
   verifyTls: boolean;
+  sendOnlyWhenPatientEntersQueue: boolean;
   worklistTarget: string;
   strategyPreference: "put_first" | "post_first";
   mwlCompatibility: MwlCompatibilityOptions;
@@ -45,7 +47,7 @@ export interface OrthancSettingsEntryInput {
   value?: unknown;
 }
 
-const ORTHANC_BOOLEAN_KEYS = new Set(["enabled", "shadow_mode", "verify_tls"]);
+const ORTHANC_BOOLEAN_KEYS = new Set(["enabled", "shadow_mode", "verify_tls", "send_only_when_patient_enters_queue"]);
 const ORTHANC_ALLOWED_KEYS = new Set(Object.keys(ORTHANC_MWL_DEFAULTS));
 const ORTHANC_PATIENT_ID_SOURCES = new Set(["identifier_value", "mrn", "national_id", "patient_id"]);
 const ORTHANC_PATIENT_NAME_SOURCES = new Set(["english_full_name", "arabic_full_name"]);
@@ -358,6 +360,7 @@ export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings>
     password: connectionMode === "external" && env.orthancAuthEnabled ? normalizeOptionalText(db.password) || env.orthancPassword : "",
     timeoutSeconds: parsePositiveInteger(db.timeout_seconds, env.orthancTimeoutSeconds),
     verifyTls: parseBoolean(db.verify_tls, env.orthancVerifyTls),
+    sendOnlyWhenPatientEntersQueue: parseBoolean(db.send_only_when_patient_enters_queue, false),
     worklistTarget: normalizeWorklistTargetValue(normalizeOptionalText(db.worklist_target) || env.orthancWorklistTarget),
     strategyPreference: parseStrategyPreference(db.strategy_preference, "put_first"),
     mwlCompatibility: {

@@ -9,6 +9,7 @@ test("validateOrthancSettingsEntries accepts valid payload", () => {
       { key: "connection_mode", value: { value: "external" } },
       { key: "base_url", value: { value: "https://orthanc.local:8042" } },
       { key: "shadow_mode", value: { value: "false" } },
+      { key: "send_only_when_patient_enters_queue", value: { value: "true" } },
       { key: "verify_tls", value: { value: "true" } },
       { key: "timeout_seconds", value: { value: "15" } },
     ])

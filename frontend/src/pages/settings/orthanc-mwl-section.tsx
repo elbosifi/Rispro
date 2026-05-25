@@ -17,6 +17,7 @@ type OrthancSettingsForm = {
   password: string;
   timeout_seconds: string;
   verify_tls: string;
+  send_only_when_patient_enters_queue: string;
   worklist_target: string;
   strategy_preference: string;
   mwl_specific_character_set: string;
@@ -153,6 +154,7 @@ function toInitialForm(settings: Record<string, string> | null | undefined): Ort
     password: map.password || "",
     timeout_seconds: map.timeout_seconds || "10",
     verify_tls: map.verify_tls || "true",
+    send_only_when_patient_enters_queue: map.send_only_when_patient_enters_queue || "false",
     worklist_target: worklistTarget,
     strategy_preference: map.strategy_preference || "put_first",
     mwl_specific_character_set: map.mwl_specific_character_set || "ISO_IR 192",
@@ -394,6 +396,19 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
             options={[
               { value: "false", label: "Primary mode" },
               { value: "true", label: "Shadow mode" },
+            ]}
+          />
+          <SettingField
+            label="Insert only when patient enters queue"
+            type="select"
+            value={form.send_only_when_patient_enters_queue}
+            onChange={(value) => {
+              setForm((prev) => ({ ...prev, send_only_when_patient_enters_queue: value }));
+              setDirty(true);
+            }}
+            options={[
+              { value: "false", label: "No, insert when scheduled" },
+              { value: "true", label: "Yes, wait for queue" },
             ]}
           />
           <SettingField

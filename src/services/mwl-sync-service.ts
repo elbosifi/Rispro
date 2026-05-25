@@ -6,6 +6,7 @@ import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 export type OrthancMwlOperation = "upsert" | "delete";
 
 type BookingStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
+const ORTHANC_QUEUE_STATUSES = new Set(["arrived", "waiting"]);
 
 interface BookingSyncSnapshot {
   id: number;
@@ -68,6 +69,17 @@ function deriveOperationFromStatus(status: string | null | undefined): OrthancMw
   return status === "scheduled" || status === "arrived" || status === "waiting" ? "upsert" : "delete";
 }
 
+export function shouldSkipOrthancInitialUpsertForQueueGate(input: {
+  sendOnlyWhenPatientEntersQueue: boolean;
+  previousSyncExists: boolean;
+  status: string | null | undefined;
+}): boolean {
+  return input.sendOnlyWhenPatientEntersQueue
+    && !input.previousSyncExists
+    && deriveOperationFromStatus(input.status) === "upsert"
+    && !ORTHANC_QUEUE_STATUSES.has(String(input.status || ""));
+}
+
 async function loadBookingSyncSnapshot(
   client: PoolClient,
   bookingId: number
@@ -110,6 +122,22 @@ async function loadBookingSyncSnapshot(
   return rows[0] ?? null;
 }
 
+async function hasPreviousOrthancSync(client: PoolClient, bookingId: number): Promise<boolean> {
+  const { rows } = await client.query<{ exists: boolean }>(
+    `
+      select exists(
+        select 1
+        from external_mwl_sync
+        where booking_id = $1::bigint
+          and external_system = 'orthanc'
+          and sync_status <> 'skipped'
+      )
+    `,
+    [bookingId]
+  );
+  return Boolean(rows[0]?.exists);
+}
+
 function computePayloadHash(snapshot: BookingSyncSnapshot | null): string | null {
   if (!snapshot) return null;
   const payload = {
@@ -140,7 +168,8 @@ function computePayloadHash(snapshot: BookingSyncSnapshot | null): string | null
 }
 
 export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<OrthancSyncEnqueueResult> {
-  if (!(await isOrthancMwlEnabled())) {
+  const settings = await resolveOrthancSettings();
+  if (!settings.enabled) {
     return { enqueued: false, jobId: null, operation: null, reason: "orthanc_mwl_disabled" };
   }
 
@@ -154,6 +183,16 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
     }
 
     const operation = deriveOperationFromStatus(snapshot.status);
+    const previousSyncExists = await hasPreviousOrthancSync(client, bookingId);
+    if (shouldSkipOrthancInitialUpsertForQueueGate({
+      sendOnlyWhenPatientEntersQueue: settings.sendOnlyWhenPatientEntersQueue,
+      previousSyncExists,
+      status: snapshot.status,
+    })) {
+      await client.query("rollback");
+      return { enqueued: false, jobId: null, operation: null, reason: "waiting_for_patient_queue" };
+    }
+
     const payloadHash = operation === "upsert" ? computePayloadHash(snapshot) : null;
 
     await client.query(

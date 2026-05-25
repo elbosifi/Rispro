@@ -16,6 +16,7 @@ beforeEach(() => {
     password: "",
     timeoutSeconds: 10,
     verifyTls: true,
+    sendOnlyWhenPatientEntersQueue: false,
     worklistTarget: "",
     strategyPreference: "put_first",
     mwlCompatibility: {},
