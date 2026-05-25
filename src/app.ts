@@ -146,13 +146,21 @@ export function createApp(): Application {
 
   // New React frontend (default)
   const newFrontendDir = path.join(rootDir, "dist-frontend");
-  app.use(express.static(newFrontendDir, { maxAge: env.isProduction ? "1h" : 0 }));
+  app.use(express.static(newFrontendDir, {
+    maxAge: env.isProduction ? "1h" : 0,
+    setHeaders(res, filePath) {
+      if (path.basename(filePath) === "index.html") {
+        res.setHeader("Cache-Control", "no-store");
+      }
+    }
+  }));
   app.get("/favicon.ico", (_req: Request, res: Response) => {
     res.status(204).end();
   });
 
   // SPA fallback for new frontend
   app.get("*", (req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
     res.sendFile(path.join(newFrontendDir, "index.html"));
   });
 

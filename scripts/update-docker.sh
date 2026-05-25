@@ -49,7 +49,7 @@ check_git_repo() {
 build_and_restart() {
   cd "${PROJECT_ROOT}"
   log 'Building and restarting containers...'
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build --force-recreate
   ok 'Containers rebuilt and restarted.'
 }
 
