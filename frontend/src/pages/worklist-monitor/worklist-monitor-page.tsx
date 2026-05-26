@@ -103,6 +103,14 @@ function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function isSupervisorReauthError(error: unknown): boolean {
+  if (!error) return false;
+  const status = error instanceof ApiError ? error.status : undefined;
+  const messageText = error instanceof Error ? error.message : String(error);
+  const normalized = messageText.toLowerCase();
+  return status === 403 && (normalized.includes("reauth") || normalized.includes("re-auth"));
+}
+
 export default function WorklistMonitorPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -189,12 +197,7 @@ export default function WorklistMonitorPage() {
   });
 
   const entries = entriesQuery.data?.entries || [];
-  const authError = [entriesQuery.error, orthancSummary.error, santeSummary.error].find((error) => {
-    if (!error) return false;
-    const status = error instanceof ApiError ? error.status : undefined;
-    const messageText = error instanceof Error ? error.message : String(error);
-    return status === 403 && messageText.toLowerCase().includes("reauth");
-  }) as Error | undefined;
+  const authError = [entriesQuery.error, orthancSummary.error, santeSummary.error].find(isSupervisorReauthError) as Error | undefined;
   const selectedPreview = selected
     ? tab === "orthanc"
       ? selected.orthanc.preview
@@ -224,16 +227,19 @@ export default function WorklistMonitorPage() {
       </div>
 
       {message && <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">{message}</div>}
-      {(entriesQuery.error || orthancSummary.error || santeSummary.error) && (
-        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-          {authError ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span>Supervisor re-authentication is required for MWL operations.</span>
-              <button type="button" className="btn-secondary text-xs" onClick={() => setShowReauth(true)}>Re-authenticate</button>
+      {authError ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">Supervisor re-authentication required</p>
+              <p className="text-xs text-amber-700">Re-enter your supervisor password to load MWL status and controls.</p>
             </div>
-          ) : (
-            (entriesQuery.error as Error | undefined)?.message || (orthancSummary.error as Error | undefined)?.message || (santeSummary.error as Error | undefined)?.message
-          )}
+            <button type="button" className="btn-secondary text-xs" onClick={() => setShowReauth(true)}>Re-authenticate</button>
+          </div>
+        </div>
+      ) : (entriesQuery.error || orthancSummary.error || santeSummary.error) && (
+        <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {(entriesQuery.error as Error | undefined)?.message || (orthancSummary.error as Error | undefined)?.message || (santeSummary.error as Error | undefined)?.message}
         </div>
       )}
       {showReauth && (
