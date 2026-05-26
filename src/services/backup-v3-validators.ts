@@ -89,7 +89,7 @@ export function validateBackupV3ManifestChecksums(
   actualFiles: Map<string, { sha256: string; byteSize: number }>
 ): string[] {
   const errors: string[] = [];
-  for (const file of manifest.files) {
+  for (const file of [...manifest.archiveEntries, ...manifest.files]) {
     const actual = actualFiles.get(file.archivePath);
     if (!actual) {
       errors.push(`Missing staged file: ${file.archivePath}`);

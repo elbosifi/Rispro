@@ -5,6 +5,8 @@ import { asOptionalString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { HttpError } from "../utils/http-error.js";
 import { buildBackupSnapshot, previewBackupRestore, restoreBackupSnapshot, scheduleSystemRestart } from "../services/admin-service.js";
+import { streamBackupV3Archive } from "../services/backup-v3-service.js";
+import { setBackupV3DownloadHeaders } from "../services/backup-v3-http.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
@@ -14,6 +16,17 @@ import {
 export const adminRouter = express.Router();
 
 adminRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+
+adminRouter.get(
+  "/backup/v3",
+  asyncRoute(async (req: Request, res: Response) => {
+    const passphrase = req.header("x-backup-passphrase") || req.query.passphrase;
+    const createdAt = new Date().toISOString();
+    const backupName = `rispro-backup-${createdAt.replace(/[:.]/g, "-")}.rispro.zip`;
+    setBackupV3DownloadHeaders(res, backupName);
+    await streamBackupV3Archive({ currentUserId: req.user!.sub, passphrase, output: res, backupName });
+  })
+);
 
 adminRouter.get(
   "/backup",

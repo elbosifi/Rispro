@@ -1,5 +1,6 @@
 import type {
   BackupV3ArchiveLimits,
+  BackupV3ArchiveManifestEntry,
   BackupV3FileManifestEntry,
   BackupV3Manifest,
   BackupV3SchemaMetadata,
@@ -21,6 +22,7 @@ export interface BuildBackupV3ManifestInput {
   initiatedByUserId: string | number | null;
   database: BackupV3SchemaMetadata;
   storageRoots: BackupV3StorageRoot[];
+  archiveEntries?: BackupV3ArchiveManifestEntry[];
   files: BackupV3FileManifestEntry[];
   envVariableNames: string[];
   limits?: Partial<BackupV3ArchiveLimits>;
@@ -38,6 +40,7 @@ export function buildBackupV3Manifest(input: BuildBackupV3ManifestInput): Backup
     initiatedByUserId: input.initiatedByUserId,
     database: input.database,
     storageRoots: [...input.storageRoots].sort((a, b) => a.id.localeCompare(b.id)),
+    archiveEntries: [...(input.archiveEntries || [])].sort((a, b) => a.archivePath.localeCompare(b.archivePath)),
     files: [...input.files].sort((a, b) => a.archivePath.localeCompare(b.archivePath)),
     env: {
       archivePath: "config/env.enc.json",

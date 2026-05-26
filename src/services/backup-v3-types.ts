@@ -55,6 +55,13 @@ export interface BackupV3FileManifestEntry {
   relativePath: string;
   byteSize: number;
   sha256: string;
+  crc32?: number;
+}
+
+export interface BackupV3ArchiveManifestEntry {
+  archivePath: string;
+  byteSize: number;
+  sha256: string;
 }
 
 export interface BackupV3ArchiveLimits {
@@ -74,6 +81,7 @@ export interface BackupV3Manifest {
   initiatedByUserId: string | number | null;
   database: BackupV3SchemaMetadata;
   storageRoots: BackupV3StorageRoot[];
+  archiveEntries: BackupV3ArchiveManifestEntry[];
   files: BackupV3FileManifestEntry[];
   env: {
     archivePath: "config/env.enc.json";
