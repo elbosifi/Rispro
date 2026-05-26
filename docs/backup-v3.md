@@ -12,9 +12,10 @@ max files 60000, max single file 3 GiB, and max total uncompressed size 3 GiB.
 Pre-restore database safety backup prefers `pg_dump -Fc` using `execFile` arguments.
 The database URL is passed through the child process environment and is not logged
 or placed in the command argument list by RISpro.
-The current Dockerfile does not install `postgresql-client`, so app containers built from
-that image should be expected to use the v3 snapshot fallback unless
-`postgresql-client` is added to the runtime image.
+The Docker runtime image installs `postgresql-client`, so `pg_dump` should be
+available in app containers. If `pg_dump` is unavailable at runtime, RISpro falls
+back to a current v3 snapshot safety backup and records that fallback method in
+the safety metadata.
 
 `POST /api/admin/restore/v3` is intentionally blocked until the full app-stack
 restore is complete. The current executable endpoint is

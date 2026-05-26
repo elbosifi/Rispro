@@ -83,6 +83,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff6 \
     libsndfile1 \
     libjpeg62-turbo \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
