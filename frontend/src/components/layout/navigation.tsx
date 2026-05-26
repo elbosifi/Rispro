@@ -50,6 +50,7 @@ type NavIcon =
   | "statistics"
   | "pacs"
   | "pacsRemap"
+  | "worklistMonitor"
   | "settings"
   | "legacy";
 
@@ -73,6 +74,7 @@ interface NavItemConfig {
     | "nav.statistics"
     | "nav.pacs"
     | "nav.pacsRemap"
+    | "nav.worklistMonitor"
     | "nav.settings"
     | "nav.legacyReception";
   icon: NavIcon;
@@ -97,6 +99,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
   { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
   { route: "pacs.remap", labelKey: "nav.pacsRemap", icon: "pacsRemap" },
+  { route: "worklist.monitor", labelKey: "nav.worklistMonitor", icon: "worklistMonitor" },
   { route: "legacy", labelKey: "nav.legacyReception", icon: "legacy" },
   { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["super_admin"] }
 ];
@@ -129,6 +132,7 @@ const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
   statistics: BarChart3,
   pacs: Database,
   pacsRemap: Database,
+  worklistMonitor: ClipboardList,
   settings: Settings,
   legacy: History
 };

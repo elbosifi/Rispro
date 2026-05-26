@@ -30,6 +30,7 @@ import {
   reconcileOrthancMwlProjection,
   resetOrthancMwlWindow
 } from "../services/orthanc-mwl-reconcile-service.js";
+import { enqueueOrthancSyncForBooking } from "../services/mwl-sync-service.js";
 import {
   getSanteHl7Summary,
   forceResyncSanteHl7Window,
@@ -37,6 +38,8 @@ import {
   retrySanteOutbox,
   sendSyntheticSanteTestFile,
 } from "../services/sante-hl7-outbox-service.js";
+import { getWorklistMonitorEntries } from "../services/worklist-monitor-service.js";
+import { logAuditEntry } from "../services/audit-service.js";
 import { resolveSanteWorklistSettings, testSanteOutputFolderAccess } from "../services/sante-worklist-settings-resolver.js";
 import {
   getAllServiceStatuses,
@@ -48,6 +51,12 @@ import fs from "fs/promises";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 export const dicomRouter = express.Router();
+
+function requireSuperAdminUser(request: Request & { user?: AuthenticatedUserContext }): void {
+  if (request.user?.role !== "super_admin") {
+    throw new HttpError(403, "Super admin access required for this action.");
+  }
+}
 
 function hasValidInternalMppsSecret(req: Request): boolean {
   const provided = String(req.headers["x-rispro-mpps-secret"] || "");
@@ -161,9 +170,18 @@ dicomRouter.get(
   })
 );
 
+dicomRouter.get(
+  "/worklist-monitor/entries",
+  asyncRoute(async (req: Request, res: Response) => {
+    const result = await getWorklistMonitorEntries(req.query as Record<string, unknown>);
+    res.json({ ok: true, ...result });
+  })
+);
+
 dicomRouter.post(
   "/orthanc-sync/reconcile",
   asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
     const body = asUnknownRecord(req.body);
     const dateFrom = String(body.dateFrom || "").trim();
     const dateTo = String(body.dateTo || "").trim();
@@ -174,12 +192,22 @@ dicomRouter.post(
     if (!dateFrom || !dateTo) {
       throw new HttpError(400, "dateFrom and dateTo are required (YYYY-MM-DD).");
     }
+    if (apply) {
+      requireSuperAdminUser(request);
+    }
 
     const result = await reconcileOrthancMwlProjection({
       dateFrom,
       dateTo,
       apply,
       limit
+    });
+
+    await logAuditEntry({
+      entityType: "orthanc_mwl",
+      actionType: apply ? "reconcile_apply" : "reconcile_dry_run",
+      newValues: { dateFrom, dateTo, apply, limit, result },
+      changedByUserId: request.user.sub as UserId,
     });
 
     res.json({ ok: true, result });
@@ -189,6 +217,8 @@ dicomRouter.post(
 dicomRouter.post(
   "/orthanc-sync/reset-window",
   asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
+    requireSuperAdminUser(request);
     const body = asUnknownRecord(req.body);
     const dateFrom = String(body.dateFrom || "").trim();
     const dateTo = String(body.dateTo || "").trim();
@@ -205,6 +235,33 @@ dicomRouter.post(
       limit,
     });
 
+    await logAuditEntry({
+      entityType: "orthanc_mwl",
+      actionType: "reset_window",
+      newValues: { dateFrom, dateTo, limit, result },
+      changedByUserId: request.user.sub as UserId,
+    });
+
+    res.json({ ok: true, result });
+  })
+);
+
+dicomRouter.post(
+  "/orthanc-sync/retry/:bookingId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
+    const bookingId = Number(req.params.bookingId);
+    if (!Number.isInteger(bookingId) || bookingId <= 0) {
+      throw new HttpError(400, "bookingId must be a positive integer.");
+    }
+    const result = await enqueueOrthancSyncForBooking(bookingId);
+    await logAuditEntry({
+      entityType: "orthanc_mwl",
+      entityId: bookingId as UserId,
+      actionType: "retry_booking",
+      newValues: result,
+      changedByUserId: request.user.sub as UserId,
+    });
     res.json({ ok: true, result });
   })
 );
@@ -252,6 +309,7 @@ dicomRouter.post(
 dicomRouter.post(
   "/sante-hl7/reconcile",
   asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
     const body = asUnknownRecord(req.body ?? {});
     const dateFrom = String(body.dateFrom || "").trim();
     const dateTo = String(body.dateTo || "").trim();
@@ -259,12 +317,21 @@ dicomRouter.post(
     const apply = body.apply === true || String(body.apply || "").toLowerCase() === "true";
     const limitRaw = Number(body.limit);
     if (!dateFrom || !dateTo) throw new HttpError(400, "dateFrom and dateTo are required.");
+    if (apply) {
+      requireSuperAdminUser(request);
+    }
     const result = await reconcileSanteHl7Window({
       dateFrom,
       dateTo,
       modalityCode,
       apply,
       limit: Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : 5000,
+    });
+    await logAuditEntry({
+      entityType: "integration",
+      actionType: apply ? "sante_hl7_reconcile_apply" : "sante_hl7_reconcile_dry_run",
+      newValues: { dateFrom, dateTo, modalityCode: modalityCode || null, apply, result },
+      changedByUserId: request.user.sub as UserId,
     });
     res.json({ ok: true, result });
   })
@@ -274,6 +341,7 @@ dicomRouter.post(
   "/sante-hl7/force-resync",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as Request & { user: AuthenticatedUserContext };
+    requireSuperAdminUser(request);
     const body = asUnknownRecord(req.body ?? {});
     const dateFrom = String(body.dateFrom || "").trim();
     const dateTo = String(body.dateTo || "").trim();

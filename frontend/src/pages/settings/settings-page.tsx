@@ -4091,6 +4091,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   statistics: "Statistics",
   pacs: "PACS",
   "pacs.remap": "PACS remap",
+  "worklist.monitor": "MWL Monitor",
   legacy: "Legacy",
   settings: "Settings",
 };

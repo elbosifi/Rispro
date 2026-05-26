@@ -27,6 +27,7 @@ export const PAGE_VISIBILITY_ROUTE_KEYS = [
   "statistics",
   "pacs",
   "pacs.remap",
+  "worklist.monitor",
   "legacy",
   "settings",
 ] as const;
@@ -52,6 +53,7 @@ export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = {
   statistics: ["administrative", "supervisor", "super_admin"],
   pacs: ["supervisor", "doctor", "super_admin"],
   "pacs.remap": ["supervisor", "doctor", "super_admin"],
+  "worklist.monitor": ["supervisor", "super_admin"],
   legacy: ["supervisor", "super_admin"],
   settings: ["super_admin"],
 };
@@ -119,6 +121,7 @@ const DEFAULT_LANDING_PRIORITY: readonly PageVisibilityRouteKey[] = [
   "print",
   "pacs",
   "pacs.remap",
+  "worklist.monitor",
   "legacy",
   "v2.appointments.admin",
   "settings",

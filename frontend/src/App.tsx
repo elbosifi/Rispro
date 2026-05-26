@@ -24,6 +24,7 @@ import DayListPrintPage from "@/pages/print/day-list-print-page";
 import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import PacsRemapPage from "@/pages/pacs/pacs-remap-page";
+import WorklistMonitorPage from "@/pages/worklist-monitor/worklist-monitor-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
@@ -60,6 +61,7 @@ const ROUTE_PATHS: Record<string, string> = {
   search: "/search",
   pacs: "/pacs",
   "pacs.remap": "/pacs/remap",
+  "worklist.monitor": "/worklist-monitor",
   settings: "/settings",
   legacy: "/legacy-access-viewer",
   "v2.appointments.admin": "/v2/appointments/admin",
@@ -301,6 +303,7 @@ function AppContent() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/pacs" element={guardedPage("pacs", <PacsPage />)} />
             <Route path="/pacs/remap" element={guardedPage("pacs.remap", <PacsRemapPage />)} />
+            <Route path="/worklist-monitor" element={guardedPage("worklist.monitor", <WorklistMonitorPage />)} />
             <Route path="/settings" element={guardedPage("settings", <SettingsPage />)} />
             <Route path="/legacy-access-viewer" element={guardedPage("legacy", <LegacyAccessViewerPage />)} />
             <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />

@@ -43,6 +43,8 @@ describe("page visibility settings service", () => {
 
     assert.equal(canRoleAccessPage("patients", "doctor", matrix), true);
     assert.equal(canRoleAccessPage("patients", "modality_staff", matrix), false);
+    assert.equal(canRoleAccessPage("worklist.monitor", "supervisor", matrix), true);
+    assert.equal(canRoleAccessPage("worklist.monitor", "modality_staff", matrix), false);
     assert.equal(canRoleAccessPage("settings", "super_admin", matrix), true);
   });
 });
