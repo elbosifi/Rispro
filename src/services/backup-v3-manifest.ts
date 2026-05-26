@@ -9,9 +9,9 @@ import type {
 import { BACKUP_V3_FORMAT_VERSION } from "./backup-v3-types.js";
 
 export const DEFAULT_BACKUP_V3_ARCHIVE_LIMITS: BackupV3ArchiveLimits = {
-  maxFiles: 100_000,
-  maxFileBytes: 2 * 1024 * 1024 * 1024,
-  maxTotalUncompressedBytes: 20 * 1024 * 1024 * 1024,
+  maxFiles: 60_000,
+  maxFileBytes: 3 * 1024 * 1024 * 1024,
+  maxTotalUncompressedBytes: 3 * 1024 * 1024 * 1024,
 };
 
 export interface BuildBackupV3ManifestInput {
@@ -41,7 +41,16 @@ export function buildBackupV3Manifest(input: BuildBackupV3ManifestInput): Backup
     database: input.database,
     storageRoots: [...input.storageRoots].sort((a, b) => a.id.localeCompare(b.id)),
     archiveEntries: [...(input.archiveEntries || [])].sort((a, b) => a.archivePath.localeCompare(b.archivePath)),
-    files: [...input.files].sort((a, b) => a.archivePath.localeCompare(b.archivePath)),
+    files: [...input.files]
+      .map((file) => ({
+        archivePath: file.archivePath,
+        rootId: file.rootId,
+        relativePath: file.relativePath,
+        byteSize: file.byteSize,
+        sha256: file.sha256,
+        crc32: file.crc32,
+      }))
+      .sort((a, b) => a.archivePath.localeCompare(b.archivePath)),
     env: {
       archivePath: "config/env.enc.json",
       variableNames: [...input.envVariableNames].sort(),

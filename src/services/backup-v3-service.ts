@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { PoolClient } from "pg";
@@ -44,6 +45,18 @@ function requirePassphrase(passphrase: unknown): string {
     throw new HttpError(400, "Backup passphrase must be at least 8 characters.");
   }
   return value;
+}
+
+function requireClassicZipLimits(limits: BackupV3ArchiveLimits): void {
+  if (limits.maxFiles >= 65_535) {
+    throw new HttpError(400, "Backup max file count must be below 65535 because ZIP64 is not enabled.");
+  }
+  if (limits.maxFileBytes >= 4 * 1024 * 1024 * 1024) {
+    throw new HttpError(400, "Backup max file size must be below 4 GiB because ZIP64 is not enabled.");
+  }
+  if (limits.maxTotalUncompressedBytes >= 4 * 1024 * 1024 * 1024) {
+    throw new HttpError(400, "Backup max total size must be below 4 GiB because ZIP64 is not enabled.");
+  }
 }
 
 async function readPackageMetadata(): Promise<{ name: string; version: string | null }> {
@@ -119,9 +132,27 @@ function archiveEntryForBuffer(archivePath: string, content: Buffer): BackupV3Ar
 export async function streamBackupV3Archive(options: StreamBackupV3Options): Promise<BackupV3ArchiveResult> {
   const passphrase = requirePassphrase(options.passphrase);
   const limits = { ...DEFAULT_BACKUP_V3_ARCHIVE_LIMITS, ...options.limits };
+  requireClassicZipLimits(limits);
   const client = await pool.connect();
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-v3-stage-"));
   const createdAt = new Date().toISOString();
   const backupName = options.backupName || `rispro-backup-${createdAt.replace(/[:.]/g, "-")}.rispro.zip`;
+  let archiveFileCount = 0;
+  let archiveTotalBytes = 0;
+
+  const trackArchiveEntry = (archivePath: string, byteSize: number) => {
+    if (byteSize > limits.maxFileBytes) {
+      throw new HttpError(413, `Backup entry exceeds max file size: ${archivePath}`);
+    }
+    archiveFileCount += 1;
+    if (archiveFileCount > limits.maxFiles) {
+      throw new HttpError(413, "Backup archive contains too many files.");
+    }
+    archiveTotalBytes += byteSize;
+    if (archiveTotalBytes > limits.maxTotalUncompressedBytes) {
+      throw new HttpError(413, "Backup archive exceeds max total uncompressed size.");
+    }
+  };
 
   try {
     await client.query("begin isolation level repeatable read read only");
@@ -137,7 +168,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
       dicomWorklistOutputDir: settings.get("dicom_gateway.worklist_output_dir"),
       santeHl7OutputFolderPath: settings.get("sante_worklist.output_folder_path") || env.santeHl7OutputFolderPath,
     });
-    const storageFiles = await collectBackupV3StorageFiles(storageRoots, limits);
+    const storageFiles = await collectBackupV3StorageFiles(storageRoots, limits, stagingDir);
     const envVariables = await collectEnvVariables();
     const envBundle = encryptBackupV3EnvPayload(
       { createdAt, variables: envVariables },
@@ -148,6 +179,8 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     const archiveEntries: BackupV3ArchiveManifestEntry[] = [];
     const envBuffer = Buffer.from(JSON.stringify(envBundle, null, 2));
     const schemaBuffer = Buffer.from(JSON.stringify(database, null, 2));
+    trackArchiveEntry("config/env.enc.json", envBuffer.length);
+    trackArchiveEntry("database/schema.json", schemaBuffer.length);
     archiveEntries.push(archiveEntryForBuffer("config/env.enc.json", envBuffer));
     archiveEntries.push(archiveEntryForBuffer("database/schema.json", schemaBuffer));
     await zip.addBuffer("config/env.enc.json", envBuffer);
@@ -156,6 +189,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     for (const table of database.tables) {
       const rows = await listRows(client, table.schema, table.name);
       const tableBuffer = Buffer.from(JSON.stringify(rows));
+      trackArchiveEntry(table.archivePath, tableBuffer.length);
       archiveEntries.push(archiveEntryForBuffer(table.archivePath, tableBuffer));
       await zip.addBuffer(table.archivePath, tableBuffer);
     }
@@ -168,7 +202,8 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
       if (file.crc32 === undefined) {
         throw new Error(`Missing CRC32 for ${file.archivePath}`);
       }
-      await zip.addFile(file.archivePath, path.join(root.absolutePath, file.relativePath), file.byteSize, file.crc32);
+      trackArchiveEntry(file.archivePath, file.byteSize);
+      await zip.addFile(file.archivePath, file.stagedPath, file.byteSize, file.crc32);
       archiveEntries.push({
         archivePath: file.archivePath,
         byteSize: file.byteSize,
@@ -198,6 +233,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     await client.query("rollback").catch(() => undefined);
     throw error;
   } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
     client.release();
   }
 }

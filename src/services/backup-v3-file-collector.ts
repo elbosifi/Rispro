@@ -4,15 +4,20 @@ import { sha256File } from "./backup-v3-checksums.js";
 import type { BackupV3ArchiveLimits, BackupV3FileManifestEntry, BackupV3StorageRoot } from "./backup-v3-types.js";
 import { HttpError } from "../utils/http-error.js";
 
+export interface CollectedBackupV3StorageFile extends BackupV3FileManifestEntry {
+  stagedPath: string;
+}
+
 function normalizeArchiveRelativePath(relativePath: string): string {
   return relativePath.split(path.sep).join("/");
 }
 
 export async function collectBackupV3StorageFiles(
   roots: BackupV3StorageRoot[],
-  limits: BackupV3ArchiveLimits
-): Promise<BackupV3FileManifestEntry[]> {
-  const files: BackupV3FileManifestEntry[] = [];
+  limits: BackupV3ArchiveLimits,
+  stagingDir?: string
+): Promise<CollectedBackupV3StorageFile[]> {
+  const files: CollectedBackupV3StorageFile[] = [];
   let totalBytes = 0;
   const seenArchivePaths = new Set<string>();
 
@@ -44,21 +49,28 @@ export async function collectBackupV3StorageFiles(
       if (stat.size > limits.maxFileBytes) {
         throw new HttpError(413, `Backup file exceeds max file size: ${absolutePath}`);
       }
-      if (files.length + 1 > limits.maxFiles) {
-        throw new HttpError(413, "Backup contains too many files.");
-      }
-      totalBytes += stat.size;
-      if (totalBytes > limits.maxTotalUncompressedBytes) {
-        throw new HttpError(413, "Backup exceeds max total uncompressed size.");
-      }
-
       const relativePath = normalizeArchiveRelativePath(path.relative(root.absolutePath, absolutePath));
       const archivePath = `${root.archivePrefix}/${relativePath}`;
       if (seenArchivePaths.has(archivePath)) {
         continue;
       }
       seenArchivePaths.add(archivePath);
-      const digest = await sha256File(absolutePath);
+      const stagedPath = stagingDir ? path.join(stagingDir, archivePath) : absolutePath;
+      if (stagingDir) {
+        await fs.mkdir(path.dirname(stagedPath), { recursive: true });
+        await fs.copyFile(absolutePath, stagedPath);
+      }
+      const digest = await sha256File(stagedPath);
+      if (digest.byteSize > limits.maxFileBytes) {
+        throw new HttpError(413, `Backup file exceeds max file size after staging: ${absolutePath}`);
+      }
+      if (files.length + 1 > limits.maxFiles) {
+        throw new HttpError(413, "Backup contains too many files.");
+      }
+      totalBytes += digest.byteSize;
+      if (totalBytes > limits.maxTotalUncompressedBytes) {
+        throw new HttpError(413, "Backup exceeds max total uncompressed size.");
+      }
       files.push({
         archivePath,
         rootId: root.id,
@@ -66,6 +78,7 @@ export async function collectBackupV3StorageFiles(
         byteSize: digest.byteSize,
         sha256: digest.sha256,
         crc32: digest.crc32,
+        stagedPath,
       });
     }
   }

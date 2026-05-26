@@ -46,3 +46,21 @@ export function encryptBackupV3EnvPayload(
     variableNames: Object.keys(payload.variables).sort(),
   };
 }
+
+export function decryptBackupV3EnvPayload(bundle: BackupV3EncryptedEnvBundle, passphrase: string): BackupV3EnvPayload {
+  if (bundle.cipher !== ENV_CIPHER || bundle.kdf !== ENV_KDF) {
+    throw new Error("Unsupported env encryption.");
+  }
+  const key = deriveEnvKey(passphrase, Buffer.from(bundle.salt, "base64"));
+  const decipher = crypto.createDecipheriv(ENV_CIPHER, key, Buffer.from(bundle.iv, "base64"));
+  decipher.setAuthTag(Buffer.from(bundle.authTag, "base64"));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(bundle.data, "base64")),
+    decipher.final(),
+  ]).toString("utf8");
+  const payload = JSON.parse(decrypted) as BackupV3EnvPayload;
+  if (!payload.variables || typeof payload.variables !== "object") {
+    throw new Error("Invalid env payload.");
+  }
+  return payload;
+}
