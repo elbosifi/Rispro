@@ -5,6 +5,9 @@ const ENV_CIPHER = "aes-256-gcm";
 const ENV_SALT_BYTES = 16;
 const ENV_IV_BYTES = 12;
 const ENV_KEY_BYTES = 32;
+const ENV_AUTH_TAG_BYTES = 16;
+
+const MANAGED_ENV_KEY_PATTERN = /^(RISPRO|DATABASE|DB_|JWT_|COOKIE_|ORTHANC|SANTE|MPPS|WEB_PUSH|UPLOADS_|REQUEST_|TRUST_|SEED_)/;
 
 export interface BackupV3EnvPayload {
   createdAt: string;
@@ -23,6 +26,24 @@ export interface BackupV3EncryptedEnvBundle {
 
 function deriveEnvKey(passphrase: string, salt: Buffer): Buffer {
   return crypto.scryptSync(passphrase, salt, ENV_KEY_BYTES);
+}
+
+function decodeBase64Field(value: unknown, expectedBytes: number | null, fieldName: string): Buffer {
+  if (typeof value !== "string" || !value) {
+    throw new Error(`Invalid env encryption field: ${fieldName}`);
+  }
+  const buffer = Buffer.from(value, "base64");
+  if (buffer.toString("base64").replace(/=+$/u, "") !== value.replace(/=+$/u, "")) {
+    throw new Error(`Invalid env encryption field: ${fieldName}`);
+  }
+  if (expectedBytes !== null && buffer.length !== expectedBytes) {
+    throw new Error(`Invalid env encryption field length: ${fieldName}`);
+  }
+  return buffer;
+}
+
+export function isBackupV3ManagedEnvKey(name: string): boolean {
+  return MANAGED_ENV_KEY_PATTERN.test(name);
 }
 
 export function encryptBackupV3EnvPayload(
@@ -51,16 +72,32 @@ export function decryptBackupV3EnvPayload(bundle: BackupV3EncryptedEnvBundle, pa
   if (bundle.cipher !== ENV_CIPHER || bundle.kdf !== ENV_KDF) {
     throw new Error("Unsupported env encryption.");
   }
-  const key = deriveEnvKey(passphrase, Buffer.from(bundle.salt, "base64"));
-  const decipher = crypto.createDecipheriv(ENV_CIPHER, key, Buffer.from(bundle.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(bundle.authTag, "base64"));
+  const salt = decodeBase64Field(bundle.salt, ENV_SALT_BYTES, "salt");
+  const iv = decodeBase64Field(bundle.iv, ENV_IV_BYTES, "iv");
+  const authTag = decodeBase64Field(bundle.authTag, ENV_AUTH_TAG_BYTES, "authTag");
+  const data = decodeBase64Field(bundle.data, null, "data");
+  const key = deriveEnvKey(passphrase, salt);
+  const decipher = crypto.createDecipheriv(ENV_CIPHER, key, iv);
+  decipher.setAuthTag(authTag);
   const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(bundle.data, "base64")),
+    decipher.update(data),
     decipher.final(),
   ]).toString("utf8");
   const payload = JSON.parse(decrypted) as BackupV3EnvPayload;
-  if (!payload.variables || typeof payload.variables !== "object") {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    typeof payload.createdAt !== "string" ||
+    !payload.variables ||
+    typeof payload.variables !== "object" ||
+    Array.isArray(payload.variables)
+  ) {
     throw new Error("Invalid env payload.");
+  }
+  for (const [name, value] of Object.entries(payload.variables)) {
+    if (typeof name !== "string" || typeof value !== "string") {
+      throw new Error("Invalid env payload.");
+    }
   }
   return payload;
 }
