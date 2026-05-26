@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { PoolClient } from "pg";
 import type { Writable } from "node:stream";
+import { once } from "node:events";
 import dotenv from "dotenv";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
@@ -37,6 +38,15 @@ export interface StreamBackupV3Options {
 export interface BackupV3ArchiveResult {
   backupName: string;
   manifest: ReturnType<typeof buildBackupV3Manifest>;
+}
+
+async function endWritable(output: Writable): Promise<void> {
+  if (output.writableEnded) {
+    return;
+  }
+  const finished = once(output, "finish");
+  output.end();
+  await finished;
 }
 
 function requirePassphrase(passphrase: unknown): string {
@@ -226,6 +236,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     });
     await zip.addBuffer("manifest.json", Buffer.from(JSON.stringify(manifest, null, 2)));
     await zip.finish();
+    await endWritable(options.output);
     await client.query("commit");
 
     return { backupName, manifest };

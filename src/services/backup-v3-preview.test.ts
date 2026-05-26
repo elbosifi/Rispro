@@ -103,6 +103,7 @@ test("extractStoredBackupV3ZipToStaging rejects hostile archive paths before tru
     }),
     /path traversal/
   );
+  assert.deepEqual(await fs.readdir(stagingDir).catch(() => []), []);
 });
 
 test("decryptBackupV3EnvPayload validates the backup passphrase", () => {
@@ -114,9 +115,10 @@ test("decryptBackupV3EnvPayload validates the backup passphrase", () => {
 
 test("admin route source adds v3 multipart preview without changing v2 restore", async () => {
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
+  const uploadSource = await fs.readFile(path.join(process.cwd(), "src/services/backup-v3-upload.ts"), "utf8");
 
   assert.match(source, /"\/restore\/v3\/preview"/);
-  assert.match(source, /Busboy/);
+  assert.match(uploadSource, /Busboy/);
   assert.match(source, /previewBackupV3RestoreFromArchive/);
   assert.match(source, /"\/restore\/preview",\s*\n\s*express\.json/);
 });
