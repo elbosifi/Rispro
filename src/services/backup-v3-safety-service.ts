@@ -12,6 +12,8 @@ import { resolveBackupV3StorageRoots } from "./backup-v3-storage-roots.js";
 import { streamBackupV3Archive } from "./backup-v3-service.js";
 import type { NullableUserId } from "../types/http.js";
 import { HttpError } from "../utils/http-error.js";
+import type { BackupV3Manifest } from "./backup-v3-types.js";
+import { restoreBackupV3DatabaseOnly } from "./backup-v3-db-restore.js";
 
 const execFileAsync = promisify(execFile);
 export const BACKUP_V3_RESTORE_LOCK_KEY = "rispro_restore_v3";
@@ -42,6 +44,17 @@ export interface BackupV3RestoreSkeletonResult {
   restoreNotExecuted: true;
   safetyBackupsCreated: BackupV3SafetyMetadata;
   restartRequired: false;
+}
+
+export interface BackupV3DbRestoreOnlyResult {
+  ok: true;
+  dbRestored: true;
+  storageRestored: false;
+  envRestored: false;
+  restartRequired: true;
+  tablesRestored: number;
+  rowsRestored: number;
+  safetyBackupsCreated: BackupV3SafetyMetadata;
 }
 
 function timestampId(): string {
@@ -88,7 +101,9 @@ async function createDbSafetyBackup(
   const dumpPath = path.join(outputDir, "database-pre-restore.dump");
   const method = selectBackupV3DbSafetyMethod(await isPgDumpAvailable());
   if (method === "pg_dump_custom") {
-    await execFileAsync("pg_dump", ["-Fc", "--file", dumpPath, env.databaseUrl]);
+    await execFileAsync("pg_dump", ["-Fc", "--file", dumpPath], {
+      env: { ...process.env, PGDATABASE: env.databaseUrl },
+    });
     return { method: "pg_dump_custom", path: dumpPath };
   }
 
@@ -200,6 +215,38 @@ export async function runBackupV3RestoreSafetySkeleton(
     await acquireBackupV3RestoreLock(client);
     locked = true;
     return await createBackupV3PreRestoreSafetyBackups(input);
+  } finally {
+    if (locked) {
+      await releaseBackupV3RestoreLock(client);
+    }
+    client.release();
+  }
+}
+
+async function readStagedManifest(stagingDir: string): Promise<BackupV3Manifest> {
+  return JSON.parse(await fs.readFile(path.join(stagingDir, "manifest.json"), "utf8")) as BackupV3Manifest;
+}
+
+export async function runBackupV3DatabaseRestoreOnly(input: CreateBackupV3SafetyInput & {
+  stagingDir: string;
+}): Promise<BackupV3DbRestoreOnlyResult> {
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    await acquireBackupV3RestoreLock(client);
+    locked = true;
+    const safety = await createBackupV3PreRestoreSafetyBackups(input);
+    const dbRestore = await restoreBackupV3DatabaseOnly(client, await readStagedManifest(input.stagingDir), input.stagingDir);
+    return {
+      ok: true,
+      dbRestored: true,
+      storageRestored: false,
+      envRestored: false,
+      restartRequired: true,
+      tablesRestored: dbRestore.tablesRestored,
+      rowsRestored: dbRestore.rowsRestored,
+      safetyBackupsCreated: safety.safetyBackupsCreated,
+    };
   } finally {
     if (locked) {
       await releaseBackupV3RestoreLock(client);

@@ -43,8 +43,10 @@ test("v3 restore skeleton route does not contain destructive restore operations"
   const combined = `${adminRoute}\n${safetyService}`;
 
   assert.match(adminRoute, /"\/restore\/v3"/);
-  assert.match(adminRoute, /runBackupV3RestoreSafetySkeleton/);
+  assert.match(adminRoute, /runBackupV3DatabaseRestoreOnly/);
+  assert.match(adminRoute, /previewBackupV3RestoreFromArchive[\s\S]*runBackupV3DatabaseRestoreOnly/);
   assert.match(combined, /pg_dump", \["-Fc"/);
+  assert.match(combined, /PGDATABASE: env\.databaseUrl/);
   assert.match(combined, /streamBackupV3Archive/);
   assert.match(combined, /copyEnvSafety/);
   assert.match(combined, /copyStorageSafety/);

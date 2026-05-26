@@ -8,3 +8,10 @@ path, prefix, entry type, compression method, duplicate status, per-file size, f
 
 ZIP64 is not implemented. v3 defaults stay below classic ZIP boundaries:
 max files 60000, max single file 3 GiB, and max total uncompressed size 3 GiB.
+
+Pre-restore database safety backup prefers `pg_dump -Fc` using `execFile` arguments.
+The database URL is passed through the child process environment and is not logged
+or placed in the command argument list by RISpro.
+The current Dockerfile does not install `postgresql-client`, so app containers built from
+that image should be expected to use the v3 snapshot fallback unless
+`postgresql-client` is added to the runtime image.

@@ -11,7 +11,7 @@ import { previewBackupV3RestoreFromArchive } from "../services/backup-v3-preview
 import { cleanupBackupV3StagedUpload, stageBackupV3MultipartUpload } from "../services/backup-v3-upload.js";
 import {
   requireBackupV3RestoreConfirmation,
-  runBackupV3RestoreSafetySkeleton,
+  runBackupV3DatabaseRestoreOnly,
 } from "../services/backup-v3-safety-service.js";
 import {
   deleteDocumentsByScope,
@@ -67,11 +67,12 @@ adminRouter.post(
       if (!preview.ok) {
         throw new HttpError(400, `Backup is not safe to restore: ${preview.errors.join("; ")}`);
       }
-      const result = await runBackupV3RestoreSafetySkeleton({
+      const result = await runBackupV3DatabaseRestoreOnly({
         currentUserId: req.user!.sub,
         uploadedArchivePath: staged.archivePath,
         uploadedArchiveName: staged.archiveFileName,
         passphrase: String(staged.passphrase || ""),
+        stagingDir: staged.stagingDir,
       });
       res.json(result);
     } finally {
