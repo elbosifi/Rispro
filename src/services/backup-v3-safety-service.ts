@@ -51,6 +51,7 @@ export interface BackupV3DbRestoreOnlyResult {
   dbRestored: true;
   storageRestored: false;
   envRestored: false;
+  restoreIncomplete: true;
   restartRequired: true;
   tablesRestored: number;
   rowsRestored: number;
@@ -242,6 +243,7 @@ export async function runBackupV3DatabaseRestoreOnly(input: CreateBackupV3Safety
       dbRestored: true,
       storageRestored: false,
       envRestored: false,
+      restoreIncomplete: true,
       restartRequired: true,
       tablesRestored: dbRestore.tablesRestored,
       rowsRestored: dbRestore.rowsRestored,

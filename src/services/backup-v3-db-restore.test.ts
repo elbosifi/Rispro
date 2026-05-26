@@ -191,3 +191,19 @@ test("restoreBackupV3DatabaseOnly rolls back completely on insert failure", asyn
   assert.ok(client.calls.some((call) => call.sql === "rollback"));
   assert.ok(!client.calls.some((call) => call.sql === "commit"));
 });
+
+test("restoreBackupV3DatabaseOnly rejects unknown row columns before transaction mutation", async () => {
+  const stagingDir = await writeStagedTables({
+    [usersTable.archivePath]: [{ id: 1, username: "admin", bad_column: "nope" }],
+    [patientsTable.archivePath]: [{ id: 2, created_by_user_id: 1 }],
+  });
+  const client = fakeRestoreClient();
+
+  await assert.rejects(
+    () => restoreBackupV3DatabaseOnly(client as never, manifest(), stagingDir),
+    /unknown column public\.users\.bad_column/
+  );
+
+  assert.ok(!client.calls.some((call) => call.sql === "begin"));
+  assert.ok(!client.calls.some((call) => /truncate table/i.test(call.sql)));
+});

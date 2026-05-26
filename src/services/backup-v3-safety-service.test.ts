@@ -42,7 +42,8 @@ test("v3 restore skeleton route does not contain destructive restore operations"
   const safetyService = await fs.readFile(path.join(process.cwd(), "src/services/backup-v3-safety-service.ts"), "utf8");
   const combined = `${adminRoute}\n${safetyService}`;
 
-  assert.match(adminRoute, /"\/restore\/v3"/);
+  assert.match(adminRoute, /"\/restore\/v3\/db-only"/);
+  assert.match(adminRoute, /Full v3 restore is not implemented yet/);
   assert.match(adminRoute, /runBackupV3DatabaseRestoreOnly/);
   assert.match(adminRoute, /previewBackupV3RestoreFromArchive[\s\S]*runBackupV3DatabaseRestoreOnly/);
   assert.match(combined, /pg_dump", \["-Fc"/);
@@ -50,6 +51,9 @@ test("v3 restore skeleton route does not contain destructive restore operations"
   assert.match(combined, /streamBackupV3Archive/);
   assert.match(combined, /copyEnvSafety/);
   assert.match(combined, /copyStorageSafety/);
+  assert.match(combined, /restoreIncomplete: true/);
+  assert.match(combined, /storageRestored: false/);
+  assert.match(combined, /envRestored: false/);
   assert.doesNotMatch(combined, /truncate table/i);
   assert.doesNotMatch(combined, /insertRows/);
   assert.doesNotMatch(combined, /restoreDocumentFiles/);

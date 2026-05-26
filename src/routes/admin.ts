@@ -58,7 +58,7 @@ adminRouter.post(
 );
 
 adminRouter.post(
-  "/restore/v3",
+  "/restore/v3/db-only",
   asyncRoute(async (req: Request, res: Response) => {
     const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-");
     try {
@@ -78,6 +78,16 @@ adminRouter.post(
     } finally {
       await cleanupBackupV3StagedUpload(staged).catch(() => undefined);
     }
+  })
+);
+
+adminRouter.post(
+  "/restore/v3",
+  asyncRoute(async (_req: Request, _res: Response) => {
+    throw new HttpError(
+      409,
+      "Full v3 restore is not implemented yet. Use /api/admin/restore/v3/db-only only for the experimental DB-only phase."
+    );
   })
 );
 

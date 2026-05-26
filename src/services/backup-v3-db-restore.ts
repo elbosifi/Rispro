@@ -284,6 +284,24 @@ async function readTableRows(stagingDir: string, table: BackupV3TableMetadata): 
   return parsed as UnknownRecord[];
 }
 
+function validateTableRowsBeforeMutation(
+  table: BackupV3TableRef,
+  rows: UnknownRecord[],
+  runtimeColumns: Map<string, Set<string>>
+): void {
+  const allowedColumns = runtimeColumns.get(table.key) || new Set<string>();
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new HttpError(400, `Invalid row in backup table: ${table.key}`);
+    }
+    for (const column of Object.keys(row)) {
+      if (!allowedColumns.has(column)) {
+        throw new HttpError(400, `Backup contains unknown column ${table.key}.${column}`);
+      }
+    }
+  }
+}
+
 export async function restoreBackupV3DatabaseOnly(
   client: PoolClient,
   manifest: BackupV3Manifest,
@@ -296,7 +314,10 @@ export async function restoreBackupV3DatabaseOnly(
   const jsonColumns = await listJsonColumns(client);
   const tableRows = new Map<string, UnknownRecord[]>();
   for (const table of manifest.database.tables) {
-    tableRows.set(tableKey(table.schema, table.name), await readTableRows(stagingDir, table));
+    const ref = toTableRef(table);
+    const rows = await readTableRows(stagingDir, table);
+    validateTableRowsBeforeMutation(ref, rows, runtimeColumns);
+    tableRows.set(ref.key, rows);
   }
 
   let rowsRestored = 0;

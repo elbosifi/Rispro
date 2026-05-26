@@ -15,3 +15,20 @@ or placed in the command argument list by RISpro.
 The current Dockerfile does not install `postgresql-client`, so app containers built from
 that image should be expected to use the v3 snapshot fallback unless
 `postgresql-client` is added to the runtime image.
+
+`POST /api/admin/restore/v3` is intentionally blocked until the full app-stack
+restore is complete. The current executable endpoint is
+`POST /api/admin/restore/v3/db-only`, which restores database rows only and
+returns `restoreIncomplete: true`, `storageRestored: false`, and
+`envRestored: false`.
+
+The DB-only endpoint is experimental. It is not a full RISpro restore because it
+does not replace app-owned storage, restore external documents, or write `.env`.
+Before production use, run the live DB integration test against a disposable
+PostgreSQL database:
+
+```powershell
+$env:BACKUP_V3_DB_RESTORE_INTEGRATION="1"
+$env:TEST_DATABASE_URL="postgresql://user:password@host:5432/throwaway_rispro_restore_test"
+node --import tsx --test src/services/backup-v3-db-restore.integration.test.ts
+```
