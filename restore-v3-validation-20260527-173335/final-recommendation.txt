@@ -1,0 +1,36 @@
+V3 Full Restore Staging Validation Recommendation
+
+Date: 2026-05-27
+Validator: Codex
+Git commit: not evaluated because Docker prerequisite failed
+Docker image/tag: not built
+PostgreSQL version: not evaluated in disposable container
+pg_dump version: not evaluated in app container
+
+Result:
+[ ] GO
+[x] NO-GO
+
+Summary:
+- Docker available: no
+- Backup generated successfully: not run
+- Restore completed successfully: not run
+- DB restored and sequences reseeded: not run
+- App-owned storage mirrored exactly: not run
+- External documents restored selectively: not run
+- .env behavior correct: not run
+- Secret masking verified: not run
+- Concurrent restore lock verified: not run
+- Partial-failure behavior verified: not run
+- RESTORE_V3_FULL_ENABLED disabled after test: not applicable; not enabled
+
+Evidence folder: see this directory
+
+Known issues:
+- Docker is not installed or not available on PATH on this machine.
+- Mandatory Docker image rebuild and in-container pg_dump verification could not be executed.
+
+Decision:
+Approve backend for admin UI wiring: no
+
+Approver:

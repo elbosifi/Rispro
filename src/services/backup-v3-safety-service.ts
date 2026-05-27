@@ -94,6 +94,17 @@ export function selectBackupV3DbSafetyMethod(pgDumpAvailable: boolean): "pg_dump
   return pgDumpAvailable ? "pg_dump_custom" : "v3_snapshot";
 }
 
+function pgDumpConnectionEnv(databaseUrl: string): NodeJS.ProcessEnv {
+  const url = new URL(databaseUrl);
+  return {
+    PGHOST: url.hostname,
+    PGPORT: url.port || "5432",
+    PGDATABASE: url.pathname.replace(/^\//, ""),
+    PGUSER: decodeURIComponent(url.username),
+    PGPASSWORD: decodeURIComponent(url.password),
+  };
+}
+
 async function createDbSafetyBackup(
   outputDir: string,
   currentUserId: NullableUserId,
@@ -102,10 +113,15 @@ async function createDbSafetyBackup(
   const dumpPath = path.join(outputDir, "database-pre-restore.dump");
   const method = selectBackupV3DbSafetyMethod(await isPgDumpAvailable());
   if (method === "pg_dump_custom") {
-    await execFileAsync("pg_dump", ["-Fc", "--file", dumpPath], {
-      env: { ...process.env, PGDATABASE: env.databaseUrl },
-    });
-    return { method: "pg_dump_custom", path: dumpPath };
+    try {
+      await execFileAsync("pg_dump", ["-Fc", "--file", dumpPath], {
+        env: { ...process.env, ...pgDumpConnectionEnv(env.databaseUrl) },
+      });
+      return { method: "pg_dump_custom", path: dumpPath };
+    } catch {
+      console.warn("pg_dump safety backup failed; falling back to v3 snapshot safety backup.");
+      await fs.rm(dumpPath, { force: true }).catch(() => undefined);
+    }
   }
 
   const snapshotPath = path.join(outputDir, "database-pre-restore.rispro.zip");

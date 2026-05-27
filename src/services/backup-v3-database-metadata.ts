@@ -92,17 +92,35 @@ export async function buildBackupV3DatabaseMetadata(client: PoolClient): Promise
 }
 
 async function readMigrationVersion(client: PoolClient): Promise<string | null> {
-  try {
-    const { rows } = await client.query<{ version: string }>(
-      `
-        select version::text
-        from public.schema_migrations
-        order by version desc
-        limit 1
-      `
-    );
-    return rows[0]?.version || null;
-  } catch {
+  const { rows: tableRows } = await client.query<{ exists: boolean }>(
+    `select to_regclass('public.schema_migrations') is not null as exists`
+  );
+  if (!tableRows[0]?.exists) {
     return null;
   }
+
+  const { rows: columnRows } = await client.query<{ column_name: string }>(
+    `
+      select column_name
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'schema_migrations'
+        and column_name in ('version', 'filename')
+      order by case column_name when 'version' then 0 else 1 end
+    `
+  );
+  const migrationColumn = columnRows[0]?.column_name;
+  if (!migrationColumn) {
+    return null;
+  }
+
+  const { rows } = await client.query<{ version: string }>(
+    `
+      select ${migrationColumn}::text as version
+      from public.schema_migrations
+      order by ${migrationColumn} desc
+      limit 1
+    `
+  );
+  return rows[0]?.version || null;
 }

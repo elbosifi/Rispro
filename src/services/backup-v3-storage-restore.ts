@@ -86,10 +86,14 @@ function assertAllowedRoot(root: BackupV3StorageRoot): void {
   }
 }
 
+function isAppOwnedStorageRoot(root: BackupV3StorageRoot): boolean {
+  return root.kind !== "document_storage";
+}
+
 function planRestoreRoots(manifest: BackupV3Manifest, currentRoots: BackupV3StorageRoot[]): BackupV3StorageRoot[] {
   const currentById = new Map(currentRoots.map((root) => [root.id, root]));
   const planned: BackupV3StorageRoot[] = [];
-  for (const manifestRoot of manifest.storageRoots) {
+  for (const manifestRoot of manifest.storageRoots.filter(isAppOwnedStorageRoot)) {
     assertAllowedRoot(manifestRoot);
     const current = currentById.get(manifestRoot.id);
     if (!current) {
@@ -98,7 +102,14 @@ function planRestoreRoots(manifest: BackupV3Manifest, currentRoots: BackupV3Stor
     assertAllowedRoot(current);
     planned.push(current);
   }
-  return planned.sort((a, b) => b.absolutePath.length - a.absolutePath.length);
+  const topLevelRoots: BackupV3StorageRoot[] = [];
+  for (const root of planned.sort((a, b) => a.absolutePath.length - b.absolutePath.length)) {
+    if (topLevelRoots.some((parent) => isSameOrInside(root.absolutePath, parent.absolutePath))) {
+      continue;
+    }
+    topLevelRoots.push(root);
+  }
+  return topLevelRoots;
 }
 
 function validateFileRoot(manifest: BackupV3Manifest, file: BackupV3FileManifestEntry, rootsById: Map<string, BackupV3StorageRoot>): BackupV3StorageRoot {
@@ -167,6 +178,46 @@ async function moveExistingAside(targetRoot: string): Promise<string | null> {
   return aside;
 }
 
+async function removeDirectoryContents(targetRoot: string): Promise<void> {
+  let entries: Array<import("node:fs").Dirent>;
+  try {
+    entries = await fs.readdir(targetRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await fs.mkdir(targetRoot, { recursive: true });
+      return;
+    }
+    throw error;
+  }
+  for (const entry of entries) {
+    await fs.rm(path.join(targetRoot, entry.name), { recursive: true, force: true });
+  }
+}
+
+async function copyDirectoryContents(sourceRoot: string, targetRoot: string): Promise<void> {
+  await fs.mkdir(targetRoot, { recursive: true });
+  let entries: Array<import("node:fs").Dirent>;
+  try {
+    entries = await fs.readdir(sourceRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  for (const entry of entries) {
+    const source = path.join(sourceRoot, entry.name);
+    const target = path.join(targetRoot, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirectoryContents(source, target);
+      continue;
+    }
+    if (entry.isFile()) {
+      await fs.copyFile(source, target);
+    }
+  }
+}
+
 async function removeAside(aside: string | null): Promise<void> {
   if (aside) {
     await fs.rm(aside, { recursive: true, force: true });
@@ -184,6 +235,16 @@ export async function restoreBackupV3AppOwnedStorageOnly(
 
   try {
     for (const file of options.manifest.files) {
+      const manifestRoot = options.manifest.storageRoots.find((root) => root.id === file.rootId);
+      if (!manifestRoot) {
+        throw new HttpError(400, `Backup file references unknown storage root: ${file.rootId}`);
+      }
+      if (manifestRoot?.kind === "document_storage") {
+        continue;
+      }
+      if (!rootsById.has(file.rootId)) {
+        continue;
+      }
       const currentRoot = validateFileRoot(options.manifest, file, rootsById);
       const relativePath = safeRelativePath(file.relativePath, file.archivePath);
       const stagedSource = resolveInside(options.stagingDir, file.archivePath);
@@ -202,13 +263,27 @@ export async function restoreBackupV3AppOwnedStorageOnly(
     for (const root of plannedRoots) {
       const replacementRoot = path.join(tempRoot, root.id);
       await fs.mkdir(replacementRoot, { recursive: true });
-      const aside = await moveExistingAside(root.absolutePath);
+      let aside: string | null = null;
+      let replaceMountedRoot = false;
+      try {
+        aside = await moveExistingAside(root.absolutePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EBUSY") {
+          throw error;
+        }
+        replaceMountedRoot = true;
+      }
       try {
         if (options.failAfterRemovingRootId === root.id) {
           throw new Error(`Injected storage restore failure after removing ${root.id}`);
         }
-        await fs.mkdir(path.dirname(root.absolutePath), { recursive: true });
-        await fs.rename(replacementRoot, root.absolutePath);
+        if (replaceMountedRoot) {
+          await removeDirectoryContents(root.absolutePath);
+          await copyDirectoryContents(replacementRoot, root.absolutePath);
+        } else {
+          await fs.mkdir(path.dirname(root.absolutePath), { recursive: true });
+          await fs.rename(replacementRoot, root.absolutePath);
+        }
         await removeAside(aside);
         restoredRoots.push({ id: root.id, path: root.absolutePath, files: filesByRoot.get(root.id)?.length || 0 });
       } catch (error) {

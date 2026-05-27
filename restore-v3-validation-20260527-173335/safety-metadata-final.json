@@ -1,0 +1,16 @@
+{
+    "timestamp":  "2026-05-27T17-42-35-912Z",
+    "initiatingUserId":  "2",
+    "uploadedArchiveName":  "backup-after-schema-fix.rispro.zip",
+    "uploadedArchiveSha256":  "f2c8fb81b583f5e5cbf8ada5c4a79d1e4d5f7ff282d8cdc74162157d75f5d31a",
+    "dbSafetyMethod":  "v3_snapshot",
+    "dbSafetyPath":  "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/database-pre-restore.rispro.zip",
+    "envSafetyPath":  "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/.env.pre-restore",
+    "storageSafetyRoot":  "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/storage",
+    "storageSafetyPaths":  [
+                               "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/storage/project-storage",
+                               "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/storage/sante-hl7-outbox",
+                               "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/storage/uploads"
+                           ],
+    "metadataPath":  "/app/.rispro-safety/pre-restore/2026-05-27T17-42-35-912Z/metadata.json"
+}

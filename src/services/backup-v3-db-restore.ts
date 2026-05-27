@@ -3,7 +3,11 @@ import path from "node:path";
 import type { PoolClient } from "pg";
 import { HttpError } from "../utils/http-error.js";
 import type { UnknownRecord } from "../types/http.js";
-import type { BackupV3Manifest, BackupV3TableMetadata } from "./backup-v3-types.js";
+import {
+  BACKUP_V3_TABLE_SCHEMAS,
+  type BackupV3Manifest,
+  type BackupV3TableMetadata,
+} from "./backup-v3-types.js";
 
 interface BackupV3TableRef {
   schema: string;
@@ -47,7 +51,7 @@ export async function listBackupV3RuntimeTables(client: PoolClient): Promise<Bac
         and table_name <> 'schema_migrations'
       order by table_schema, table_name
     `,
-    [<string[]>["public", "appointments_v2"]]
+    [[...BACKUP_V3_TABLE_SCHEMAS]]
   );
   return rows.map((row) => toTableRef({ schema: row.table_schema, name: row.table_name }));
 }
@@ -59,7 +63,7 @@ export async function listBackupV3RuntimeColumns(client: PoolClient): Promise<Ma
       from information_schema.columns
       where table_schema = any($1::text[])
     `,
-    [<string[]>["public", "appointments_v2"]]
+    [[...BACKUP_V3_TABLE_SCHEMAS]]
   );
   const columns = new Map<string, Set<string>>();
   for (const row of rows) {
@@ -79,7 +83,7 @@ async function listJsonColumns(client: PoolClient): Promise<Map<string, Set<stri
       where table_schema = any($1::text[])
         and udt_name in ('json', 'jsonb')
     `,
-    [<string[]>["public", "appointments_v2"]]
+    [[...BACKUP_V3_TABLE_SCHEMAS]]
   );
   const columns = new Map<string, Set<string>>();
   for (const row of rows) {
@@ -158,7 +162,7 @@ export async function getBackupV3InsertOrder(
       where constraint_row.contype = 'f'
         and child_schema.nspname = any($1::text[])
     `,
-    [<string[]>["public", "appointments_v2"]]
+    [[...BACKUP_V3_TABLE_SCHEMAS]]
   );
 
   for (const row of rows) {

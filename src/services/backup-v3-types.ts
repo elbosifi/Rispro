@@ -1,6 +1,6 @@
 export const BACKUP_V3_FORMAT_VERSION = 3;
 
-export const BACKUP_V3_TABLE_SCHEMAS = ["public", "appointments_v2"] as const;
+export const BACKUP_V3_TABLE_SCHEMAS = ["public", "appointments_v2", "doctor_portal"] as const;
 
 export const BACKUP_V3_EXCLUDED_TABLES = ["schema_migrations"] as const;
 

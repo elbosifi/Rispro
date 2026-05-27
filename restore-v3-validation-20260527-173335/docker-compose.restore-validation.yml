@@ -1,0 +1,49 @@
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: restore-validation
+    container_name: rispro-restore-validation-app
+    env_file:
+      - ./validation.env
+    environment:
+      DATABASE_URL: postgresql://rispro_validation:rispro_validation_password@postgres:5432/rispro_validation
+      RESTORE_V3_FULL_ENABLED: "true"
+      RESTORE_V3_DB_ONLY_ENABLED: "false"
+    ports:
+      - "3100:3000"
+    volumes:
+      - rispro-restore-validation-storage:/app/storage
+      - ./external-docs:/app/external-doc-validation
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rispro-restore-validation
+  postgres:
+    image: postgres:16-alpine
+    container_name: rispro-restore-validation-db
+    environment:
+      POSTGRES_USER: rispro_validation
+      POSTGRES_PASSWORD: rispro_validation_password
+      POSTGRES_DB: rispro_validation
+    volumes:
+      - rispro-restore-validation-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rispro_validation -d rispro_validation"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - rispro-restore-validation
+volumes:
+  rispro-restore-validation-storage:
+  rispro-restore-validation-postgres:
+networks:
+  rispro-restore-validation:
+    driver: bridge
+
+
+

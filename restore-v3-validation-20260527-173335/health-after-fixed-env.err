@@ -1,0 +1,9 @@
+Invoke-WebRequest : The underlying connection was closed: The connection was closed unexpectedly.
+At line:17 char:8
++ try { (Invoke-WebRequest -UseBasicParsing http://localhost:3100/api/h ...
++        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (System.Net.HttpWebRequest:HttpWebRequest) [Invoke-WebRequest], WebExc 
+   eption
+    + FullyQualifiedErrorId : WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeWebRequestCommand
+ 
+

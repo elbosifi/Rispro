@@ -161,6 +161,42 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["npx", "tsx", "src/server.ts"]
 
 # ---------------------------------------------------------------------------
+# Stage 4c: Restore validation runtime
+# ---------------------------------------------------------------------------
+# Used only for disposable v3 restore validation. It keeps the backend runtime
+# and pg_dump-capable base image, but skips the slow DCMTK/frontend build stages.
+FROM runtime-base AS restore-validation
+
+COPY package.json package-lock.json ./
+RUN NODE_ENV=development npm ci --prefer-offline --fetch-timeout=600000 --fetch-retries=5
+
+COPY src/ ./src/
+COPY tsconfig.json ./
+COPY index.html ./index.html
+COPY app.js ./app.js
+COPY styles.css ./styles.css
+COPY assets/ ./assets/
+COPY scripts/dicom-gateway/ ./scripts/dicom-gateway/
+COPY dist-frontend/ ./dist-frontend/
+
+RUN mkdir -p \
+    storage/dicom/worklist-source \
+    storage/dicom/worklists \
+    storage/uploads \
+    storage/legacy-viewer
+
+COPY docker/rispro/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/health" >/dev/null 2>&1 || exit 1
+
+EXPOSE 3000 11112
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["npx", "tsx", "src/server.ts"]
+
+# ---------------------------------------------------------------------------
 # Stage 4b: Orthanc-only runtime (no embedded DCMTK gateway toolchain)
 # ---------------------------------------------------------------------------
 FROM runtime-base AS production-orthanc

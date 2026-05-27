@@ -1,0 +1,1 @@
+select pg_advisory_lock(hashtext('rispro_restore_v3')); select pg_sleep(45);

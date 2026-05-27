@@ -174,7 +174,7 @@ test("restoreBackupV3AppOwnedStorageOnly mirrors app-owned storage exactly", asy
   await assert.rejects(() => fs.access(path.join(currentRoot.absolutePath, "old-dir", "extra.txt")));
 });
 
-test("external document and Orthanc roots are rejected and not touched", async () => {
+test("external document roots are ignored by app-owned storage restore and Orthanc roots are rejected", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-storage-restore-"));
   const externalRoot = root("document-storage", "document_storage", path.join(tempDir, "external-docs"), "documents/external");
   const orthancRoot = root("orthanc-data", "project_storage", path.join(tempDir, "orthanc"), "storage/orthanc");
@@ -186,15 +186,13 @@ test("external document and Orthanc roots are rejected and not touched", async (
   const external = await makeManifest(tempDir, [
     { root: externalRoot, relativePath: "external.txt", content: "new" },
   ]);
-  await assert.rejects(
-    () => restoreBackupV3AppOwnedStorageOnly({
-      manifest: external.manifest,
-      stagingDir: external.stagingDir,
-      currentRoots: [externalRoot],
-      safetyBackupsCreated: safetyMetadata(tempDir),
-    }),
-    /External document storage root/
-  );
+  const externalResult = await restoreBackupV3AppOwnedStorageOnly({
+    manifest: external.manifest,
+    stagingDir: external.stagingDir,
+    currentRoots: [externalRoot],
+    safetyBackupsCreated: safetyMetadata(tempDir),
+  });
+  assert.equal(externalResult.storageRestored, true);
   assert.equal(await fs.readFile(path.join(externalRoot.absolutePath, "external.txt"), "utf8"), "external");
 
   const orthanc = await makeManifest(tempDir, [

@@ -1,0 +1,7 @@
+Docker Desktop winget install attempt:
+- Package found: Docker.DockerDesktop 4.74.0
+- Installer downloaded: 625 MB
+- Installer hash verified
+- Install failed at admin elevation step
+- Exit code: 4294967291
+Conclusion: Docker Desktop installation requires an interactive administrator/UAC approval outside this terminal.

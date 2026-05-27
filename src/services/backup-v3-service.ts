@@ -176,7 +176,10 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     const storageRoots = resolveBackupV3StorageRoots({
       uploadsDir: env.uploadsDir,
       documentStorageRoot: settings.get("documents_and_uploads.storage_path"),
-      documentStorageAllowlist: [path.join(getProjectRootDir(), "storage")],
+      documentStorageAllowlist: [
+        path.join(getProjectRootDir(), "storage"),
+        settings.get("documents_and_uploads.storage_path"),
+      ].filter((root): root is string => Boolean(root)),
       dicomWorklistSourceDir: settings.get("dicom_gateway.worklist_source_dir"),
       dicomWorklistOutputDir: settings.get("dicom_gateway.worklist_output_dir"),
       santeHl7OutputFolderPath: settings.get("sante_worklist.output_folder_path") || env.santeHl7OutputFolderPath,
