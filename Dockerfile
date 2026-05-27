@@ -70,8 +70,18 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime-base
 
-# Install runtime dependencies for the app and DCMTK shared libraries
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies for the app and DCMTK shared libraries.
+# PostgreSQL client 16 is required so pg_dump matches the internal PostgreSQL 16 deployment.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     bash \
@@ -83,7 +93,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff6 \
     libsndfile1 \
     libjpeg62-turbo \
-    postgresql-client \
+    postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
