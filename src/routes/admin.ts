@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import { requireAnyRole, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { hasRecentSupervisorReauth, requireAnyRole, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
@@ -22,7 +22,38 @@ import {
 
 export const adminRouter = express.Router();
 
-adminRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+adminRouter.use(requireAuth, requireSupervisor);
+
+adminRouter.get(
+  "/restore/v3/status",
+  asyncRoute(async (req: Request, res: Response) => {
+    const enabled = process.env.RESTORE_V3_FULL_ENABLED === "true";
+    const dbOnlyEnabled = process.env.RESTORE_V3_DB_ONLY_ENABLED === "true";
+    const recentReauthSatisfied = hasRecentSupervisorReauth(req);
+    const userCanExecute = req.user?.role === "super_admin";
+    const disabledReason = !enabled
+      ? "V3 full restore is disabled by configuration."
+      : !userCanExecute
+        ? "V3 full restore requires super_admin."
+        : !recentReauthSatisfied
+          ? "Recent supervisor re-authentication is required."
+          : undefined;
+
+    res.json({
+      enabled,
+      dbOnlyEnabled,
+      requiresSuperAdmin: true,
+      userCanExecute,
+      recentReauthRequired: true,
+      recentReauthSatisfied,
+      confirmationText: "RESTORE RISPRO",
+      acceptedArchiveExtensions: [".rispro.zip"],
+      ...(disabledReason ? { disabledReason } : {}),
+    });
+  })
+);
+
+adminRouter.use(requireRecentSupervisorReauth);
 
 adminRouter.get(
   "/backup/v3",

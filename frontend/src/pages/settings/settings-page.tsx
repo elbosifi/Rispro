@@ -2838,6 +2838,18 @@ type BackupV3RestoreResult = {
   };
 };
 
+type BackupV3RestoreStatus = {
+  enabled: boolean;
+  dbOnlyEnabled: boolean;
+  requiresSuperAdmin: true;
+  userCanExecute: boolean;
+  recentReauthRequired: true;
+  recentReauthSatisfied: boolean;
+  confirmationText: string;
+  acceptedArchiveExtensions: string[];
+  disabledReason?: string;
+};
+
 const RESTORE_CONFIRMATION_TEXT = "RESTORE RISPRO";
 
 function isSensitiveText(value: unknown): boolean {
@@ -2876,6 +2888,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
   const [fullRestoreEnabled, setFullRestoreEnabled] = useState<boolean | null>(null);
+  const [restoreV3Status, setRestoreV3Status] = useState<BackupV3RestoreStatus | null>(null);
   const [fullRestoreStatus, setFullRestoreStatus] = useState("Checking v3 restore availability...");
   const [restoreV3Preview, setRestoreV3Preview] = useState<BackupV3Preview | null>(null);
   const [restorePreview, setRestorePreview] = useState<{
@@ -2904,7 +2917,10 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     : Math.round((restoreSteps.filter((step) => step.done).length / restoreSteps.length) * 100);
   const exportProgress = backupBusy ? 70 : backupPassphrase.length >= 8 ? 35 : 0;
   const exportV3Progress = backupV3Busy ? 70 : backupV3Passphrase.length >= 8 ? 35 : 0;
-  const canExecuteV3Restore = fullRestoreEnabled === true && user?.role === "super_admin" && Boolean(user.recentSupervisorReauth);
+  const canExecuteV3Restore =
+    restoreV3Status?.enabled === true &&
+    restoreV3Status.userCanExecute === true &&
+    restoreV3Status.recentReauthSatisfied === true;
   const v3PreviewHasErrors = Boolean(restoreV3Preview && (!restoreV3Preview.ok || restoreV3Preview.errors.length > 0));
 
   useImperativeHandle(ref, () => ({
@@ -2912,32 +2928,27 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   }));
 
   const probeV3RestoreAvailability = async () => {
-    if (user?.role !== "super_admin") {
-      setFullRestoreEnabled(false);
-      setFullRestoreStatus("V3 full restore execution is available only to super_admin users.");
-      return;
-    }
-    if (!user.recentSupervisorReauth) {
-      setFullRestoreEnabled(false);
-      setFullRestoreStatus("Recent supervisor re-authentication is required before v3 restore execution is shown.");
-      return;
-    }
     try {
-      const response = await fetch("/api/admin/restore/v3", {
-        method: "POST",
-        credentials: "include",
-        body: new FormData()
+      const response = await fetch("/api/admin/restore/v3/status", {
+        method: "GET",
+        credentials: "include"
       });
-      const message = await parseErrorMessage(response);
-      if (response.status === 403 && /disabled by configuration/i.test(message)) {
+      if (!response.ok) {
+        const message = await parseErrorMessage(response);
         setFullRestoreEnabled(false);
-        setFullRestoreStatus("V3 full restore is disabled by backend configuration.");
+        setRestoreV3Status(null);
+        setFullRestoreStatus(message);
         return;
       }
-      setFullRestoreEnabled(true);
-      setFullRestoreStatus("V3 full restore is enabled for this authenticated super_admin session.");
+      const status = (await response.json()) as BackupV3RestoreStatus;
+      setRestoreV3Status(status);
+      setFullRestoreEnabled(status.enabled);
+      setFullRestoreStatus(status.enabled && status.userCanExecute && status.recentReauthSatisfied
+        ? "V3 full restore is enabled for this authenticated super_admin session."
+        : status.disabledReason || "V3 full restore execution is unavailable for this session.");
     } catch {
       setFullRestoreEnabled(false);
+      setRestoreV3Status(null);
       setFullRestoreStatus("Could not confirm v3 full restore availability.");
     }
   };

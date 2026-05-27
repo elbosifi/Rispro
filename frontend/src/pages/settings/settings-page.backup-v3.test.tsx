@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BackupRestoreSection } from "./settings-page";
@@ -26,6 +26,23 @@ const okPreview = {
   counts: { tables: 80, rows: 189, archiveEntries: 85, storageFiles: 3, envVars: 57 },
   warnings: [],
   errors: [],
+};
+
+const enabledStatus = {
+  enabled: true,
+  dbOnlyEnabled: false,
+  requiresSuperAdmin: true,
+  userCanExecute: true,
+  recentReauthRequired: true,
+  recentReauthSatisfied: true,
+  confirmationText: "RESTORE RISPRO",
+  acceptedArchiveExtensions: [".rispro.zip"],
+};
+
+const disabledStatus = {
+  ...enabledStatus,
+  enabled: false,
+  disabledReason: "V3 full restore is disabled by backend configuration.",
 };
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -61,7 +78,7 @@ describe("BackupRestoreSection v3 UI", () => {
 
   it("downloads a v3 full app-stack backup without changing legacy v2 backup", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3") return jsonResponse({ error: { message: "A backup archive file is required." } }, 400);
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
       if (url === "/api/admin/backup/v3") {
         return new Response(new Blob(["zip"]), {
           status: 200,
@@ -90,7 +107,7 @@ describe("BackupRestoreSection v3 UI", () => {
 
   it("requires preview before restore execution and blocks preview errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3") return jsonResponse({ error: { message: "A backup archive file is required." } }, 400);
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
       if (url === "/api/admin/restore/v3/preview") {
         return jsonResponse({ ...okPreview, ok: false, errors: ["Schema mismatch"] });
       }
@@ -105,13 +122,19 @@ describe("BackupRestoreSection v3 UI", () => {
   });
 
   it("keeps restore unavailable when backend flag is off or user is not super_admin", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3") {
-        return jsonResponse({ error: { message: "V3 full restore is disabled by configuration." } }, 403);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/admin/restore/v3/status") {
+        const role = useAuthMock().user.role;
+        return jsonResponse(role === "super_admin" ? disabledStatus : {
+          ...enabledStatus,
+          userCanExecute: false,
+          disabledReason: "V3 full restore requires super_admin.",
+        });
       }
       if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
       return jsonResponse({}, 404);
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
     renderSection();
     await uploadV3AndPreview();
     expect(await screen.findByText(/disabled by backend configuration/i)).toBeTruthy();
@@ -120,13 +143,26 @@ describe("BackupRestoreSection v3 UI", () => {
     useAuthMock.mockReturnValue({
       user: { id: 3, username: "sup", fullName: "Supervisor", role: "supervisor", recentSupervisorReauth: true },
     });
+    cleanup();
     renderSection();
-    expect(await screen.findByText(/available only to super_admin/i)).toBeTruthy();
+    expect(await screen.findByText(/requires super_admin/i)).toBeTruthy();
+  });
+
+  it("uses the status endpoint and never probes restore execution for capability", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSection();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/restore/v3/status", expect.objectContaining({ method: "GET" })));
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/admin/restore/v3")).toBe(false);
   });
 
   it("requires exact confirmation before executing restore", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3") return jsonResponse({ error: { message: "A backup archive file is required." } }, 400);
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
       if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
       return jsonResponse({}, 404);
     }));
@@ -141,10 +177,9 @@ describe("BackupRestoreSection v3 UI", () => {
 
   it("displays partial failure, restartRequired, safety paths, and masks secrets", async () => {
     const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
       if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
       if (url === "/api/admin/restore/v3") {
-        const callCount = fetchMock.mock.calls.filter(([calledUrl]) => calledUrl === "/api/admin/restore/v3").length;
-        if (callCount === 1) return jsonResponse({ error: { message: "A backup archive file is required." } }, 400);
         return jsonResponse({
           ok: false,
           dbRestored: true,
@@ -165,6 +200,7 @@ describe("BackupRestoreSection v3 UI", () => {
 
     renderSection();
     await uploadV3AndPreview();
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/admin/restore/v3")).toBe(false);
     await userEvent.type(await screen.findByLabelText("V3 restore confirmation"), "RESTORE RISPRO");
     await userEvent.click(screen.getByRole("button", { name: /execute v3 full restore/i }));
 
@@ -176,7 +212,7 @@ describe("BackupRestoreSection v3 UI", () => {
 
   it("keeps legacy v2 restore preview and execution on JSON endpoints", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3") return jsonResponse({ error: { message: "V3 full restore is disabled by configuration." } }, 403);
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(disabledStatus);
       if (url === "/api/admin/restore/preview") {
         return jsonResponse({
           manifest: {

@@ -22,6 +22,30 @@ test("v3 full restore endpoint is disabled by default and requires release flag"
   assert.match(source, /V3 full restore is disabled by configuration/);
 });
 
+test("v3 restore status endpoint reports flags and capability without upload or mutation", async () => {
+  const source = await adminRouteSource();
+  assert.match(source, /"\/restore\/v3\/status"/);
+  assert.match(source, /method: "GET"|adminRouter\.get\(/);
+  assert.match(source, /enabled = process\.env\.RESTORE_V3_FULL_ENABLED === "true"/);
+  assert.match(source, /dbOnlyEnabled = process\.env\.RESTORE_V3_DB_ONLY_ENABLED === "true"/);
+  assert.match(source, /requiresSuperAdmin: true/);
+  assert.match(source, /userCanExecute/);
+  assert.match(source, /recentReauthRequired: true/);
+  assert.match(source, /recentReauthSatisfied/);
+  assert.match(source, /confirmationText: "RESTORE RISPRO"/);
+  assert.match(source, /acceptedArchiveExtensions: \["\.rispro\.zip"\]/);
+  assert.match(source, /disabledReason/);
+  assert.doesNotMatch(source.match(/"\/restore\/v3\/status"[\s\S]*?\n\);/)?.[0] || "", /stageBackupV3MultipartUpload|restoreBackupV3FullService|restoreBackupSnapshot/);
+});
+
+test("v3 restore status documents disabled, enabled, non-super_admin, and reauth states", async () => {
+  const source = await adminRouteSource();
+  assert.match(source, /!enabled[\s\S]*V3 full restore is disabled by configuration/);
+  assert.match(source, /!userCanExecute[\s\S]*requires super_admin/);
+  assert.match(source, /!recentReauthSatisfied[\s\S]*Recent supervisor re-authentication is required/);
+  assert.match(source, /req\.user\?\.role === "super_admin"/);
+});
+
 test("v3 full restore endpoint requires super_admin, confirmation, passphrase, and archive upload", async () => {
   const source = await combinedRestoreSource();
   assert.match(source, /"\/restore\/v3",\s*\n\s*requireAnyRole\(\["super_admin"\]\)/);
