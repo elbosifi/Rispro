@@ -3,9 +3,9 @@ import path from "node:path";
 import dotenv from "dotenv";
 import {
   decryptBackupV3EnvPayload,
-  isBackupV3ManagedEnvKey,
   type BackupV3EncryptedEnvBundle,
 } from "./backup-v3-env.js";
+import { isBackupV3ManagedEnvKey, isBackupV3LocalDeploymentEnvKey } from "./backup-v3-env-policy.js";
 import { HttpError } from "../utils/http-error.js";
 
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -19,6 +19,8 @@ export interface BackupV3EnvRestoreResult {
   restartRequired: true;
   restoreIncomplete: true;
   envVarsRestored: Array<{ name: string; isSecret: boolean; value: string }>;
+  ignoredArchiveKeys: string[];
+  preservedLocalKeys: Array<{ name: string; isSecret: boolean; value: string }>;
   safetyBackupPath: string | null;
 }
 
@@ -136,9 +138,15 @@ export async function restoreBackupV3EnvOnly(options: RestoreOptions): Promise<B
   const restoredVariables = Object.fromEntries(
     Object.entries(payload.variables).filter(([name]) => isBackupV3ManagedEnvKey(name))
   );
+  const ignoredArchiveKeys = Object.keys(payload.variables)
+    .filter((name) => !isBackupV3ManagedEnvKey(name))
+    .sort((a, b) => a.localeCompare(b));
   const existing = await readExistingEnv(options.envPath);
   const safetyBackupPath = await createSafetyBackup(options.envPath, existing, options.safetyBackupPath);
   const values = parseDotEnv(existing);
+  const preservedLocalKeys = [...values.keys()]
+    .filter((name) => !isBackupV3ManagedEnvKey(name) || isBackupV3LocalDeploymentEnvKey(name))
+    .sort((a, b) => a.localeCompare(b));
   for (const [name, value] of Object.entries(restoredVariables).sort(([a], [b]) => a.localeCompare(b))) {
     values.set(name, value);
   }
@@ -169,6 +177,12 @@ export async function restoreBackupV3EnvOnly(options: RestoreOptions): Promise<B
     envVarsRestored: Object.keys(restoredVariables)
       .sort((a, b) => a.localeCompare(b))
       .map((name) => ({ name, isSecret: isSecretEnvKey(name), value: maskEnvValue(name) })),
+    ignoredArchiveKeys,
+    preservedLocalKeys: preservedLocalKeys.map((name) => ({
+      name,
+      isSecret: isSecretEnvKey(name),
+      value: maskEnvValue(name),
+    })),
     safetyBackupPath,
   };
 }

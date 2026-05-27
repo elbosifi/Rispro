@@ -1,0 +1,243 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { NullableUserId } from "../types/http.js";
+import type { BackupV3Manifest, BackupV3StorageRoot } from "./backup-v3-types.js";
+import type { BackupV3SafetyMetadata } from "./backup-v3-safety-service.js";
+import { restoreBackupV3DatabaseOnly, type BackupV3DbRestoreResult } from "./backup-v3-db-restore.js";
+import { restoreBackupV3AppOwnedStorageOnly, BackupV3StoragePartialFailureError } from "./backup-v3-storage-restore.js";
+import {
+  restoreBackupV3ExternalDocumentsOnly,
+  BackupV3ExternalDocumentPartialFailureError,
+} from "./backup-v3-external-document-restore.js";
+import { restoreBackupV3EnvOnly, type BackupV3EnvRestoreResult } from "./backup-v3-env-restore.js";
+import { getProjectRootDir } from "./document-storage-path.js";
+
+export interface BackupV3FullRestoreInput {
+  currentUserId: NullableUserId;
+  uploadedArchivePath: string;
+  uploadedArchiveName: string | null;
+  passphrase: string;
+  stagingDir: string;
+  appOwnedStorageRoots?: BackupV3StorageRoot[];
+  approvedDocumentRoots?: BackupV3StorageRoot[];
+  envPath?: string;
+}
+
+export interface BackupV3FullRestoreResult {
+  ok: boolean;
+  dbRestored: boolean;
+  storageRestored: boolean | "partial";
+  externalDocumentsRestored: boolean | "partial";
+  envRestored: boolean;
+  restartRequired: boolean;
+  restoreIncomplete: boolean;
+  safetyBackupsCreated: BackupV3SafetyMetadata;
+  restoredCounts: {
+    tables: number;
+    rows: number;
+    storageFiles: number;
+    externalDocumentFiles: number;
+    envVars: number;
+  };
+  warnings: string[];
+  partialFailure?: {
+    component: "storage" | "external_documents" | "env";
+    message: string;
+    details?: unknown;
+  };
+  env?: Pick<BackupV3EnvRestoreResult, "envVarsRestored" | "ignoredArchiveKeys" | "preservedLocalKeys" | "safetyBackupPath">;
+}
+
+interface ValidatedArchive {
+  manifest: BackupV3Manifest;
+  warnings: string[];
+}
+
+export interface BackupV3FullRestoreDependencies {
+  validateArchive(input: BackupV3FullRestoreInput): Promise<ValidatedArchive>;
+  createSafetyBackups(input: BackupV3FullRestoreInput): Promise<BackupV3SafetyMetadata>;
+  restoreDatabase(input: BackupV3FullRestoreInput, manifest: BackupV3Manifest): Promise<BackupV3DbRestoreResult>;
+  restoreStorage(
+    input: BackupV3FullRestoreInput,
+    manifest: BackupV3Manifest,
+    safety: BackupV3SafetyMetadata
+  ): Promise<{ filesRestored: number }>;
+  restoreExternalDocuments(
+    input: BackupV3FullRestoreInput,
+    manifest: BackupV3Manifest,
+    safety: BackupV3SafetyMetadata
+  ): Promise<{ filesRestored: number }>;
+  restoreEnv(
+    input: BackupV3FullRestoreInput,
+    safety: BackupV3SafetyMetadata
+  ): Promise<BackupV3EnvRestoreResult>;
+}
+
+async function readStagedManifest(stagingDir: string): Promise<BackupV3Manifest> {
+  return JSON.parse(await fs.readFile(path.join(stagingDir, "manifest.json"), "utf8")) as BackupV3Manifest;
+}
+
+function defaultStorageRoots(manifest: BackupV3Manifest): BackupV3StorageRoot[] {
+  return manifest.storageRoots.filter((root) => root.kind !== "document_storage");
+}
+
+function defaultDocumentRoots(manifest: BackupV3Manifest): BackupV3StorageRoot[] {
+  return manifest.storageRoots.filter((root) => root.kind === "document_storage");
+}
+
+export const defaultBackupV3FullRestoreDependencies: BackupV3FullRestoreDependencies = {
+  async validateArchive(input) {
+    const { previewBackupV3RestoreFromArchive } = await import("./backup-v3-preview-service.js");
+    const preview = await previewBackupV3RestoreFromArchive(input.uploadedArchivePath, input.stagingDir, input.passphrase);
+    if (!preview.ok) {
+      throw new Error(`Backup is not safe to restore: ${preview.errors.join("; ")}`);
+    }
+    return {
+      manifest: await readStagedManifest(input.stagingDir),
+      warnings: preview.warnings,
+    };
+  },
+  async createSafetyBackups(input) {
+    const { createBackupV3PreRestoreSafetyBackups } = await import("./backup-v3-safety-service.js");
+    const safety = await createBackupV3PreRestoreSafetyBackups(input);
+    return safety.safetyBackupsCreated;
+  },
+  async restoreDatabase(input, manifest) {
+    const { pool } = await import("../db/pool.js");
+    const client = await pool.connect();
+    try {
+      return await restoreBackupV3DatabaseOnly(client, manifest, input.stagingDir);
+    } finally {
+      client.release();
+    }
+  },
+  async restoreStorage(input, manifest, safety) {
+    const roots = input.appOwnedStorageRoots || defaultStorageRoots(manifest);
+    const result = await restoreBackupV3AppOwnedStorageOnly({
+      manifest,
+      stagingDir: input.stagingDir,
+      currentRoots: roots,
+      safetyBackupsCreated: safety,
+    });
+    return { filesRestored: result.restoredRoots.reduce((sum, root) => sum + root.files, 0) };
+  },
+  async restoreExternalDocuments(input, manifest, safety) {
+    const roots = input.approvedDocumentRoots || defaultDocumentRoots(manifest);
+    const result = await restoreBackupV3ExternalDocumentsOnly({
+      manifest,
+      stagingDir: input.stagingDir,
+      approvedDocumentRoots: roots,
+      safetyBackupsCreated: safety,
+    });
+    return { filesRestored: result.filesRestored.length };
+  },
+  async restoreEnv(input, safety) {
+    return restoreBackupV3EnvOnly({
+      stagingDir: input.stagingDir,
+      passphrase: input.passphrase,
+      envPath: input.envPath || path.join(getProjectRootDir(), ".env"),
+      safetyBackupPath: safety.envSafetyPath,
+    });
+  },
+};
+
+export async function restoreBackupV3FullService(
+  input: BackupV3FullRestoreInput,
+  dependencies: BackupV3FullRestoreDependencies = defaultBackupV3FullRestoreDependencies
+): Promise<BackupV3FullRestoreResult> {
+  const validated = await dependencies.validateArchive(input);
+  const safetyBackupsCreated = await dependencies.createSafetyBackups(input);
+  const db = await dependencies.restoreDatabase(input, validated.manifest);
+  const base = {
+    safetyBackupsCreated,
+    warnings: validated.warnings,
+    restoredCounts: {
+      tables: db.tablesRestored,
+      rows: db.rowsRestored,
+      storageFiles: 0,
+      externalDocumentFiles: 0,
+      envVars: 0,
+    },
+  };
+
+  let storage;
+  try {
+    storage = await dependencies.restoreStorage(input, validated.manifest, safetyBackupsCreated);
+    base.restoredCounts.storageFiles = storage.filesRestored;
+  } catch (error) {
+    const details = error instanceof BackupV3StoragePartialFailureError ? error.result : undefined;
+    return {
+      ok: false,
+      dbRestored: true,
+      storageRestored: "partial",
+      externalDocumentsRestored: false,
+      envRestored: false,
+      restartRequired: true,
+      restoreIncomplete: true,
+      ...base,
+      partialFailure: {
+        component: "storage",
+        message: error instanceof Error ? error.message : String(error),
+        details,
+      },
+    };
+  }
+
+  try {
+    const externalDocuments = await dependencies.restoreExternalDocuments(input, validated.manifest, safetyBackupsCreated);
+    base.restoredCounts.externalDocumentFiles = externalDocuments.filesRestored;
+  } catch (error) {
+    const details = error instanceof BackupV3ExternalDocumentPartialFailureError ? error.result : undefined;
+    return {
+      ok: false,
+      dbRestored: true,
+      storageRestored: true,
+      externalDocumentsRestored: "partial",
+      envRestored: false,
+      restartRequired: true,
+      restoreIncomplete: true,
+      ...base,
+      partialFailure: {
+        component: "external_documents",
+        message: error instanceof Error ? error.message : String(error),
+        details,
+      },
+    };
+  }
+
+  try {
+    const envRestore = await dependencies.restoreEnv(input, safetyBackupsCreated);
+    base.restoredCounts.envVars = envRestore.envVarsRestored.length;
+    return {
+      ok: true,
+      dbRestored: true,
+      storageRestored: true,
+      externalDocumentsRestored: true,
+      envRestored: true,
+      restartRequired: true,
+      restoreIncomplete: false,
+      ...base,
+      env: {
+        envVarsRestored: envRestore.envVarsRestored,
+        ignoredArchiveKeys: envRestore.ignoredArchiveKeys,
+        preservedLocalKeys: envRestore.preservedLocalKeys,
+        safetyBackupPath: envRestore.safetyBackupPath,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      dbRestored: true,
+      storageRestored: true,
+      externalDocumentsRestored: true,
+      envRestored: false,
+      restartRequired: true,
+      restoreIncomplete: true,
+      ...base,
+      partialFailure: {
+        component: "env",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}

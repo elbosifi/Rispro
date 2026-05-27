@@ -7,8 +7,6 @@ const ENV_IV_BYTES = 12;
 const ENV_KEY_BYTES = 32;
 const ENV_AUTH_TAG_BYTES = 16;
 
-const MANAGED_ENV_KEY_PATTERN = /^(RISPRO|DATABASE|DB_|JWT_|COOKIE_|ORTHANC|SANTE|MPPS|WEB_PUSH|UPLOADS_|REQUEST_|TRUST_|SEED_)/;
-
 export interface BackupV3EnvPayload {
   createdAt: string;
   variables: Record<string, string>;
@@ -40,10 +38,6 @@ function decodeBase64Field(value: unknown, expectedBytes: number | null, fieldNa
     throw new Error(`Invalid env encryption field length: ${fieldName}`);
   }
   return buffer;
-}
-
-export function isBackupV3ManagedEnvKey(name: string): boolean {
-  return MANAGED_ENV_KEY_PATTERN.test(name);
 }
 
 export function encryptBackupV3EnvPayload(

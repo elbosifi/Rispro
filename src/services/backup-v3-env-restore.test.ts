@@ -106,18 +106,24 @@ test("malformed env key rejects before write", async () => {
 test("only RISpro-managed keys are restored and unrelated local keys are preserved", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-env-restore-"));
   const envPath = path.join(tempDir, ".env");
-  await fs.writeFile(envPath, "DATABASE_URL=old\nLOCAL_ONLY=keep\nUNMANAGED_BACKUP_KEY=local\n");
+  await fs.writeFile(envPath, "DATABASE_URL=old\nLOCAL_ONLY=keep\nUNMANAGED_BACKUP_KEY=local\nNODE_ENV=production\nPORT=3000\n");
   const stagingDir = await writeEnvBundle(tempDir, {
     DATABASE_URL: "new",
     UNMANAGED_BACKUP_KEY: "from-backup",
+    NODE_ENV: "development",
+    PORT: "9999",
   });
 
-  await restoreBackupV3EnvOnly({ stagingDir, passphrase: PASSPHRASE, envPath });
+  const result = await restoreBackupV3EnvOnly({ stagingDir, passphrase: PASSPHRASE, envPath });
   const values = await readEnvValues(envPath);
 
   assert.equal(values.DATABASE_URL, "new");
   assert.equal(values.LOCAL_ONLY, "keep");
   assert.equal(values.UNMANAGED_BACKUP_KEY, "local");
+  assert.equal(values.NODE_ENV, "production");
+  assert.equal(values.PORT, "3000");
+  assert.deepEqual(result.ignoredArchiveKeys, ["NODE_ENV", "PORT", "UNMANAGED_BACKUP_KEY"]);
+  assert.deepEqual(result.preservedLocalKeys.map((entry) => entry.name), ["LOCAL_ONLY", "NODE_ENV", "PORT", "UNMANAGED_BACKUP_KEY"]);
 });
 
 test("secret values are masked in restore result", async () => {

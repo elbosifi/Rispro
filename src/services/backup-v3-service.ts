@@ -12,6 +12,7 @@ import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { getProjectRootDir } from "./document-storage-path.js";
 import { encryptBackupV3EnvPayload } from "./backup-v3-env.js";
+import { isBackupV3ManagedEnvKey } from "./backup-v3-env-policy.js";
 import { sha256Buffer } from "./backup-v3-checksums.js";
 import { buildBackupV3DatabaseMetadata } from "./backup-v3-database-metadata.js";
 import { collectBackupV3StorageFiles } from "./backup-v3-file-collector.js";
@@ -108,7 +109,9 @@ async function readSettingValues(client: PoolClient): Promise<Map<string, string
 async function collectEnvVariables(): Promise<Record<string, string>> {
   try {
     const envContent = await fs.readFile(path.join(getProjectRootDir(), ".env"), "utf8");
-    return dotenv.parse(envContent);
+    return Object.fromEntries(
+      Object.entries(dotenv.parse(envContent)).filter(([key]) => isBackupV3ManagedEnvKey(key))
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
@@ -117,7 +120,7 @@ async function collectEnvVariables(): Promise<Record<string, string>> {
 
   const variables: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && /^(RISPRO|DATABASE|DB_|JWT_|COOKIE_|ORTHANC|SANTE|MPPS|WEB_PUSH|UPLOADS_|REQUEST_|TRUST_|SEED_)/.test(key)) {
+    if (value !== undefined && isBackupV3ManagedEnvKey(key)) {
       variables[key] = value;
     }
   }
