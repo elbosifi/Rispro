@@ -48,6 +48,7 @@ import {
   savePageVisibilityMatrix,
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
+import { useAuth } from "@/providers/auth-provider";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { chooseLocalized, type TranslationKey } from "@/lib/i18n";
 import { scanAppointmentRequest } from "@/lib/naps2-webscan";
@@ -2797,21 +2798,86 @@ function PatientImportSection({
   );
 }
 
-const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReAuthRequired: (key: string[]) => void }>(
+type BackupV3Preview = {
+  ok: boolean;
+  manifest: {
+    formatVersion: number;
+    createdAt: string;
+    appName: string;
+    packageVersion: string | null;
+    gitCommit: string | null;
+    migrationVersion: string | null;
+  };
+  counts: {
+    tables: number;
+    rows: number;
+    archiveEntries: number;
+    storageFiles: number;
+    envVars: number;
+  };
+  warnings: string[];
+  errors: string[];
+};
+
+type BackupV3RestoreResult = {
+  ok: boolean;
+  dbRestored?: boolean;
+  storageRestored?: boolean | "partial";
+  externalDocumentsRestored?: boolean | "partial";
+  envRestored?: boolean;
+  restoreIncomplete?: boolean;
+  restartRequired?: boolean;
+  safetyBackupsCreated?: Record<string, unknown>;
+  restoredCounts?: Record<string, unknown>;
+  warnings?: string[];
+  partialFailure?: { component?: string; message?: string; details?: unknown };
+  env?: {
+    envVarsRestored?: Array<{ name: string; value?: string; isSecret?: boolean }>;
+    ignoredArchiveKeys?: string[];
+    preservedLocalKeys?: Array<{ name: string; value?: string; isSecret?: boolean }>;
+  };
+};
+
+const RESTORE_CONFIRMATION_TEXT = "RESTORE RISPRO";
+
+function isSensitiveText(value: unknown): boolean {
+  return /secret|password|token|passphrase|database_url|cookie|private/i.test(String(value || ""));
+}
+
+function safeDisplayValue(value: unknown): string {
+  if (value == null) return "none";
+  if (isSensitiveText(value)) return "********";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReAuthRequired: (key: string[]) => void }>(
   function BackupRestoreSection({ onReAuthRequired }, ref) {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreV3File, setRestoreV3File] = useState<File | null>(null);
   const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupV3Passphrase, setBackupV3Passphrase] = useState("");
   const [restorePassphrase, setRestorePassphrase] = useState("");
+  const [restoreV3Passphrase, setRestoreV3Passphrase] = useState("");
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
+  const [restoreV3Confirmation, setRestoreV3Confirmation] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
+  const [backupV3Busy, setBackupV3Busy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewV3Busy, setPreviewV3Busy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreV3Busy, setRestoreV3Busy] = useState(false);
   const [restoreComplete, setRestoreComplete] = useState(false);
+  const [restoreV3Result, setRestoreV3Result] = useState<BackupV3RestoreResult | null>(null);
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartRequested, setRestartRequested] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
+  const [fullRestoreEnabled, setFullRestoreEnabled] = useState<boolean | null>(null);
+  const [fullRestoreStatus, setFullRestoreStatus] = useState("Checking v3 restore availability...");
+  const [restoreV3Preview, setRestoreV3Preview] = useState<BackupV3Preview | null>(null);
   const [restorePreview, setRestorePreview] = useState<{
     manifest: {
       createdAt: string;
@@ -2837,10 +2903,48 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     ? 100
     : Math.round((restoreSteps.filter((step) => step.done).length / restoreSteps.length) * 100);
   const exportProgress = backupBusy ? 70 : backupPassphrase.length >= 8 ? 35 : 0;
+  const exportV3Progress = backupV3Busy ? 70 : backupV3Passphrase.length >= 8 ? 35 : 0;
+  const canExecuteV3Restore = fullRestoreEnabled === true && user?.role === "super_admin" && Boolean(user.recentSupervisorReauth);
+  const v3PreviewHasErrors = Boolean(restoreV3Preview && (!restoreV3Preview.ok || restoreV3Preview.errors.length > 0));
 
   useImperativeHandle(ref, () => ({
     onReAuthSuccess: handleReAuthSuccess
   }));
+
+  const probeV3RestoreAvailability = async () => {
+    if (user?.role !== "super_admin") {
+      setFullRestoreEnabled(false);
+      setFullRestoreStatus("V3 full restore execution is available only to super_admin users.");
+      return;
+    }
+    if (!user.recentSupervisorReauth) {
+      setFullRestoreEnabled(false);
+      setFullRestoreStatus("Recent supervisor re-authentication is required before v3 restore execution is shown.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/admin/restore/v3", {
+        method: "POST",
+        credentials: "include",
+        body: new FormData()
+      });
+      const message = await parseErrorMessage(response);
+      if (response.status === 403 && /disabled by configuration/i.test(message)) {
+        setFullRestoreEnabled(false);
+        setFullRestoreStatus("V3 full restore is disabled by backend configuration.");
+        return;
+      }
+      setFullRestoreEnabled(true);
+      setFullRestoreStatus("V3 full restore is enabled for this authenticated super_admin session.");
+    } catch {
+      setFullRestoreEnabled(false);
+      setFullRestoreStatus("Could not confirm v3 full restore availability.");
+    }
+  };
+
+  useEffect(() => {
+    void probeV3RestoreAvailability();
+  }, [user?.role, user?.recentSupervisorReauth]);
 
   const parseErrorMessage = async (response: Response) => {
     const responseData = await response.json().catch(() => null);
@@ -2895,6 +2999,49 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     }
   };
 
+  const downloadV3Backup = async () => {
+    if (backupV3Passphrase.length < 8) {
+      setRestoreMessage({ type: "error", text: "V3 backup passphrase must be at least 8 characters." });
+      return;
+    }
+
+    setBackupV3Busy(true);
+    setRestoreMessage(null);
+    try {
+      const response = await fetch("/api/admin/backup/v3", {
+        method: "GET",
+        credentials: "include",
+        headers: { "x-backup-passphrase": backupV3Passphrase }
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          onReAuthRequired(["admin", "backup", "v3"]);
+          throw new Error("Recent supervisor re-authentication is required. Try v3 download again after re-auth.");
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const filename = filenameMatch?.[1] || `rispro-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.rispro.zip`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename.endsWith(".rispro.zip") ? filename : `${filename}.rispro.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setRestoreMessage({ type: "success", text: "V3 full app-stack backup downloaded. Keep the archive and passphrase in secure storage." });
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "V3 backup failed." });
+    } finally {
+      setBackupV3Busy(false);
+    }
+  };
+
   const readRestorePayload = async () => {
     if (!restoreFile) {
       throw new Error("Select a backup file first.");
@@ -2935,6 +3082,52 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
       setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Restore preview failed." });
     } finally {
       setPreviewBusy(false);
+    }
+  };
+
+  const handleV3Preview = async () => {
+    if (!restoreV3File) {
+      setRestoreMessage({ type: "error", text: "Select a .rispro.zip backup first." });
+      return;
+    }
+    if (restoreV3Passphrase.length < 8) {
+      setRestoreMessage({ type: "error", text: "Restore passphrase must be at least 8 characters." });
+      return;
+    }
+
+    setPreviewV3Busy(true);
+    setRestoreMessage(null);
+    setRestoreV3Preview(null);
+    setRestoreV3Result(null);
+    try {
+      const formData = new FormData();
+      formData.append("archive", restoreV3File, restoreV3File.name || "backup.rispro.zip");
+      formData.append("passphrase", restoreV3Passphrase);
+      const response = await fetch("/api/admin/restore/v3/preview", {
+        method: "POST",
+        credentials: "include",
+        body: formData
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          onReAuthRequired(["admin", "restore", "v3", "preview"]);
+          throw new Error("Recent supervisor re-authentication is required. Preview again after re-auth.");
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+
+      const preview = (await response.json()) as BackupV3Preview;
+      setRestoreV3Preview(preview);
+      setRestoreMessage({
+        type: preview.ok ? "success" : "error",
+        text: preview.ok ? "V3 backup preview completed. Review all counts and warnings before restore." : "V3 backup preview found errors. Restore is blocked."
+      });
+      await probeV3RestoreAvailability();
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "V3 restore preview failed." });
+    } finally {
+      setPreviewV3Busy(false);
     }
   };
 
@@ -2998,6 +3191,64 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     }
   };
 
+  const handleV3Restore = async () => {
+    if (!restoreV3Preview) {
+      setRestoreMessage({ type: "error", text: "Run v3 restore preview before restoring." });
+      return;
+    }
+    if (v3PreviewHasErrors) {
+      setRestoreMessage({ type: "error", text: "Preview errors block v3 restore execution." });
+      return;
+    }
+    if (!canExecuteV3Restore) {
+      setRestoreMessage({ type: "error", text: fullRestoreStatus });
+      return;
+    }
+    if (!restoreV3File) {
+      setRestoreMessage({ type: "error", text: "Select the .rispro.zip archive again before restore." });
+      return;
+    }
+    if (restoreV3Confirmation !== RESTORE_CONFIRMATION_TEXT) {
+      setRestoreMessage({ type: "error", text: "Type RESTORE RISPRO to confirm this destructive restore." });
+      return;
+    }
+
+    setRestoreV3Busy(true);
+    setRestoreMessage(null);
+    setRestoreV3Result(null);
+    try {
+      const formData = new FormData();
+      formData.append("archive", restoreV3File, restoreV3File.name || "backup.rispro.zip");
+      formData.append("passphrase", restoreV3Passphrase);
+      formData.append("confirmation", restoreV3Confirmation);
+      const response = await fetch("/api/admin/restore/v3", {
+        method: "POST",
+        credentials: "include",
+        body: formData
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          await probeV3RestoreAvailability();
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+
+      const result = (await response.json()) as BackupV3RestoreResult;
+      setRestoreV3Result(result);
+      setRestoreMessage({
+        type: result.ok && !result.restoreIncomplete ? "success" : "error",
+        text: result.ok && !result.restoreIncomplete
+          ? "V3 full app-stack restore completed. Restart RISpro before clinical use."
+          : "V3 restore finished with a partial failure. Do not retry blindly; review logs and safety backups."
+      });
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "V3 restore failed." });
+    } finally {
+      setRestoreV3Busy(false);
+    }
+  };
+
   const handleSystemRestart = async () => {
     if (!confirm("Restart RISpro now? The app may be unavailable for a few seconds while it starts again.")) {
       return;
@@ -3035,6 +3286,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
 
   // Auto-retry restore after successful re-auth
   const handleReAuthSuccess = async () => {
+    await probeV3RestoreAvailability();
     if (pendingPayload) {
       setRestoreBusy(true);
       setRestoreMessage({ type: "success", text: "Re-authenticated. Retrying restore..." });
@@ -3081,7 +3333,41 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
       <div className="space-y-3">
         {/* Download backup */}
         <div>
-          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Export</h4>
+          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">V3 full app-stack backup</h4>
+          <p className="mb-3 text-xs text-stone-600 dark:text-stone-300">
+            Downloads a <strong>.rispro.zip</strong> archive containing the database, app-owned storage, selected document files, and encrypted RISpro-managed config.
+          </p>
+          <div className="mb-3">
+            <div className="h-2 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                style={{ width: `${exportV3Progress}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              aria-label="V3 backup passphrase"
+              type="password"
+              value={backupV3Passphrase}
+              onChange={(event) => setBackupV3Passphrase(event.target.value)}
+              placeholder="V3 backup passphrase"
+              className="input-premium text-sm flex-1"
+              disabled={backupV3Busy}
+            />
+            <button
+              type="button"
+              onClick={downloadV3Backup}
+              disabled={backupV3Busy || backupV3Passphrase.length < 8}
+              className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {backupV3Busy ? "Preparing..." : "Download v3 full app-stack backup"}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Legacy v2 JSON backup</h4>
           <div className="mb-3">
             <div className="h-2 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
               <div
@@ -3099,7 +3385,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
               type="password"
               value={backupPassphrase}
               onChange={(event) => setBackupPassphrase(event.target.value)}
-              placeholder="Backup encryption passphrase"
+              placeholder="Legacy v2 backup passphrase"
               className="input-premium text-sm flex-1"
               disabled={backupBusy}
             />
@@ -3109,11 +3395,11 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
               disabled={backupBusy || backupPassphrase.length < 8}
               className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {backupBusy ? "Preparing..." : t("settings.downloadBackup")}
+              {backupBusy ? "Preparing..." : "Download legacy v2 backup"}
             </button>
           </div>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
-            The backup includes database rows, document files, and encrypted runtime variables. The passphrase is required to restore it.
+            Existing v2 JSON backup remains available for compatibility. Prefer v3 for full app-stack coverage.
           </p>
         </div>
 
@@ -3121,9 +3407,146 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
 
         {/* Restore from backup */}
         <div>
-          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Restore</h4>
+          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">V3 restore preview and gated execution</h4>
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+            <p className="font-semibold">Destructive restore warning</p>
+            <p className="mt-1">This replaces the database, mirrors app-owned storage and removes extra local files under app-owned roots, restores selected external documents, updates RISpro-managed .env keys, creates safety backups first, and requires restart. Do not run during active clinical workflow.</p>
+          </div>
+          <div className={`mb-3 rounded-lg border p-3 text-xs ${
+            canExecuteV3Restore
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200"
+              : "border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+          }`}>
+            {fullRestoreStatus}
+          </div>
+          <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
+            <input
+              aria-label="V3 restore archive"
+              type="file"
+              accept=".rispro.zip,application/zip"
+              onChange={(e) => {
+                setRestoreV3File(e.target.files?.[0] || null);
+                setRestoreV3Preview(null);
+                setRestoreV3Result(null);
+                setRestoreV3Confirmation("");
+              }}
+              className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-stone-100 dark:file:bg-stone-700 file:text-stone-700 dark:file:text-stone-300"
+              disabled={restoreV3Busy || previewV3Busy}
+            />
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input
+                aria-label="V3 restore passphrase"
+                type="password"
+                value={restoreV3Passphrase}
+                onChange={(event) => {
+                  setRestoreV3Passphrase(event.target.value);
+                  setRestoreV3Preview(null);
+                  setRestoreV3Result(null);
+                  setRestoreV3Confirmation("");
+                }}
+                placeholder="V3 backup passphrase"
+                className="input-premium text-sm flex-1"
+                disabled={restoreV3Busy || previewV3Busy}
+              />
+              <button
+                type="button"
+                onClick={handleV3Preview}
+                disabled={previewV3Busy || restoreV3Busy || !restoreV3File || restoreV3Passphrase.length < 8}
+                className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {previewV3Busy ? "Previewing..." : "Preview v3 restore"}
+              </button>
+            </div>
+
+            {restoreV3Preview && (
+              <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div><p className="text-xs text-stone-500">Format</p><p className="font-medium">v{restoreV3Preview.manifest.formatVersion}</p></div>
+                  <div><p className="text-xs text-stone-500">Created</p><p className="font-medium">{formatDateTimeLy(restoreV3Preview.manifest.createdAt)}</p></div>
+                  <div><p className="text-xs text-stone-500">App</p><p className="font-medium">{restoreV3Preview.manifest.appName} {restoreV3Preview.manifest.packageVersion || ""}</p></div>
+                  <div><p className="text-xs text-stone-500">Git</p><p className="font-medium">{restoreV3Preview.manifest.gitCommit || "not recorded"}</p></div>
+                  <div><p className="text-xs text-stone-500">Migration</p><p className="font-medium">{restoreV3Preview.manifest.migrationVersion || "not recorded"}</p></div>
+                  <div><p className="text-xs text-stone-500">Tables / rows</p><p className="font-medium">{restoreV3Preview.counts.tables} / {restoreV3Preview.counts.rows}</p></div>
+                  <div><p className="text-xs text-stone-500">Archive entries</p><p className="font-medium">{restoreV3Preview.counts.archiveEntries}</p></div>
+                  <div><p className="text-xs text-stone-500">Storage and document files</p><p className="font-medium">{restoreV3Preview.counts.storageFiles}</p></div>
+                  <div><p className="text-xs text-stone-500">RISpro config vars</p><p className="font-medium">{restoreV3Preview.counts.envVars} names, values hidden</p></div>
+                </div>
+                {restoreV3Preview.warnings.length > 0 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    <p className="font-semibold">Warnings</p>
+                    <ul className="list-disc pl-5">{restoreV3Preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+                  </div>
+                )}
+                {restoreV3Preview.errors.length > 0 && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-2 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+                    <p className="font-semibold">Errors block restore</p>
+                    <ul className="list-disc pl-5">{restoreV3Preview.errors.map((error) => <li key={error}>{error}</li>)}</ul>
+                  </div>
+                )}
+                <p className="text-xs text-stone-500 dark:text-stone-400">Secret config values are never displayed. Current preview API returns env variable counts only, not names.</p>
+
+                {canExecuteV3Restore && !v3PreviewHasErrors ? (
+                  <div className="space-y-2">
+                    <input
+                      aria-label="V3 restore confirmation"
+                      value={restoreV3Confirmation}
+                      onChange={(event) => setRestoreV3Confirmation(event.target.value)}
+                      placeholder="Type RESTORE RISPRO"
+                      className="input-premium text-sm w-full"
+                      disabled={restoreV3Busy}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleV3Restore}
+                      disabled={restoreV3Busy || restoreV3Confirmation !== RESTORE_CONFIRMATION_TEXT}
+                      className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {restoreV3Busy ? "Restoring..." : "Execute v3 full restore"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="rounded-md border border-stone-200 bg-stone-50 p-2 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
+                    Restore execution is unavailable until backend full restore is enabled, the user is super_admin, recent reauth is satisfied, and preview has no errors.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {restoreV3Result && (
+              <div className={`rounded-lg border p-3 text-sm ${
+                restoreV3Result.ok && !restoreV3Result.restoreIncomplete
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200"
+                  : "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200"
+              }`}>
+                <p className="font-semibold">{restoreV3Result.ok && !restoreV3Result.restoreIncomplete ? "V3 restore completed" : "V3 restore partial failure"}</p>
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <span>DB: {String(restoreV3Result.dbRestored)}</span>
+                  <span>Storage: {String(restoreV3Result.storageRestored)}</span>
+                  <span>External docs: {String(restoreV3Result.externalDocumentsRestored)}</span>
+                  <span>Env: {String(restoreV3Result.envRestored)}</span>
+                  <span>Incomplete: {String(restoreV3Result.restoreIncomplete)}</span>
+                  <span>Restart required: {String(restoreV3Result.restartRequired)}</span>
+                </div>
+                {restoreV3Result.restartRequired && <p className="mt-2 font-semibold">Restart required. Do not auto-restart from this screen.</p>}
+                {restoreV3Result.partialFailure && (
+                  <p className="mt-2">Partial failure in {restoreV3Result.partialFailure.component || "restore"}: {restoreV3Result.partialFailure.message || "Review server logs."} Do not retry blindly; review logs and safety backups.</p>
+                )}
+                {restoreV3Result.safetyBackupsCreated && (
+                  <pre className="mt-2 max-h-40 overflow-auto rounded bg-white/70 p-2 text-xs dark:bg-black/20">
+                    {safeDisplayValue(restoreV3Result.safetyBackupsCreated)}
+                  </pre>
+                )}
+                {restoreV3Result.restoredCounts && <p className="mt-2 text-xs">Restored counts: {safeDisplayValue(restoreV3Result.restoredCounts)}</p>}
+                {(restoreV3Result.warnings || []).length > 0 && <p className="mt-2 text-xs">Warnings: {restoreV3Result.warnings!.join(" ")}</p>}
+              </div>
+            )}
+          </div>
+
+          <hr className="my-4 border-stone-200 dark:border-stone-700" />
+          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Legacy v2 JSON restore</h4>
           <div className="space-y-3">
             <input
+              aria-label="Legacy v2 restore file"
               type="file"
               accept=".json"
               onChange={(e) => {
@@ -3137,6 +3560,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
             />
             <div className="flex flex-col sm:flex-row gap-3">
               <input
+                aria-label="Legacy v2 restore passphrase"
                 type="password"
                 value={restorePassphrase}
                 onChange={(event) => {
