@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { requireAnyRole, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
@@ -13,6 +13,7 @@ import {
   requireBackupV3RestoreConfirmation,
   runBackupV3DatabaseRestoreOnly,
 } from "../services/backup-v3-safety-service.js";
+import { restoreBackupV3FullService } from "../services/backup-v3-full-restore.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
@@ -60,9 +61,15 @@ adminRouter.post(
 adminRouter.post(
   "/restore/v3/db-only",
   asyncRoute(async (req: Request, res: Response) => {
+    if (process.env.RESTORE_V3_DB_ONLY_ENABLED !== "true") {
+      throw new HttpError(403, "V3 DB-only restore is experimental and disabled by configuration.");
+    }
     const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-");
     try {
       requireBackupV3RestoreConfirmation(staged.confirmation);
+      if (!staged.passphrase) {
+        throw new HttpError(400, "Backup passphrase is required.");
+      }
       const preview = await previewBackupV3RestoreFromArchive(staged.archivePath, staged.stagingDir, staged.passphrase);
       if (!preview.ok) {
         throw new HttpError(400, `Backup is not safe to restore: ${preview.errors.join("; ")}`);
@@ -71,7 +78,7 @@ adminRouter.post(
         currentUserId: req.user!.sub,
         uploadedArchivePath: staged.archivePath,
         uploadedArchiveName: staged.archiveFileName,
-        passphrase: String(staged.passphrase || ""),
+        passphrase: staged.passphrase,
         stagingDir: staged.stagingDir,
       });
       res.json(result);
@@ -83,11 +90,28 @@ adminRouter.post(
 
 adminRouter.post(
   "/restore/v3",
-  asyncRoute(async (_req: Request, _res: Response) => {
-    throw new HttpError(
-      409,
-      "Full v3 restore is not implemented yet. Use /api/admin/restore/v3/db-only only for the experimental DB-only phase."
-    );
+  requireAnyRole(["super_admin"]),
+  asyncRoute(async (req: Request, res: Response) => {
+    if (process.env.RESTORE_V3_FULL_ENABLED !== "true") {
+      throw new HttpError(403, "V3 full restore is disabled by configuration.");
+    }
+    const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-full-");
+    try {
+      requireBackupV3RestoreConfirmation(staged.confirmation);
+      if (!staged.passphrase) {
+        throw new HttpError(400, "Backup passphrase is required.");
+      }
+      const result = await restoreBackupV3FullService({
+        currentUserId: req.user!.sub,
+        uploadedArchivePath: staged.archivePath,
+        uploadedArchiveName: staged.archiveFileName,
+        passphrase: staged.passphrase,
+        stagingDir: staged.stagingDir,
+      });
+      res.json(result);
+    } finally {
+      await cleanupBackupV3StagedUpload(staged).catch(() => undefined);
+    }
   })
 );
 

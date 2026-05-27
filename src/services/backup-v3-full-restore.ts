@@ -55,6 +55,7 @@ interface ValidatedArchive {
 
 export interface BackupV3FullRestoreDependencies {
   validateArchive(input: BackupV3FullRestoreInput): Promise<ValidatedArchive>;
+  acquireRestoreLock(): Promise<{ release(): Promise<void> }>;
   createSafetyBackups(input: BackupV3FullRestoreInput): Promise<BackupV3SafetyMetadata>;
   restoreDatabase(input: BackupV3FullRestoreInput, manifest: BackupV3Manifest): Promise<BackupV3DbRestoreResult>;
   restoreStorage(
@@ -96,6 +97,28 @@ export const defaultBackupV3FullRestoreDependencies: BackupV3FullRestoreDependen
       manifest: await readStagedManifest(input.stagingDir),
       warnings: preview.warnings,
     };
+  },
+  async acquireRestoreLock() {
+    const { pool } = await import("../db/pool.js");
+    const { acquireBackupV3RestoreLock, releaseBackupV3RestoreLock } = await import("./backup-v3-safety-service.js");
+    const client = await pool.connect();
+    let locked = false;
+    try {
+      await acquireBackupV3RestoreLock(client);
+      locked = true;
+      return {
+        async release() {
+          if (locked) {
+            locked = false;
+            await releaseBackupV3RestoreLock(client);
+          }
+          client.release();
+        },
+      };
+    } catch (error) {
+      client.release();
+      throw error;
+    }
   },
   async createSafetyBackups(input) {
     const { createBackupV3PreRestoreSafetyBackups } = await import("./backup-v3-safety-service.js");
@@ -146,98 +169,107 @@ export async function restoreBackupV3FullService(
   dependencies: BackupV3FullRestoreDependencies = defaultBackupV3FullRestoreDependencies
 ): Promise<BackupV3FullRestoreResult> {
   const validated = await dependencies.validateArchive(input);
-  const safetyBackupsCreated = await dependencies.createSafetyBackups(input);
-  const db = await dependencies.restoreDatabase(input, validated.manifest);
-  const base = {
-    safetyBackupsCreated,
-    warnings: validated.warnings,
-    restoredCounts: {
-      tables: db.tablesRestored,
-      rows: db.rowsRestored,
-      storageFiles: 0,
-      externalDocumentFiles: 0,
-      envVars: 0,
-    },
-  };
-
-  let storage;
   try {
-    storage = await dependencies.restoreStorage(input, validated.manifest, safetyBackupsCreated);
-    base.restoredCounts.storageFiles = storage.filesRestored;
-  } catch (error) {
-    const details = error instanceof BackupV3StoragePartialFailureError ? error.result : undefined;
-    return {
-      ok: false,
-      dbRestored: true,
-      storageRestored: "partial",
-      externalDocumentsRestored: false,
-      envRestored: false,
-      restartRequired: true,
-      restoreIncomplete: true,
-      ...base,
-      partialFailure: {
-        component: "storage",
-        message: error instanceof Error ? error.message : String(error),
-        details,
-      },
-    };
-  }
+    const lock = await dependencies.acquireRestoreLock();
+    try {
+      const safetyBackupsCreated = await dependencies.createSafetyBackups(input);
+      const db = await dependencies.restoreDatabase(input, validated.manifest);
+      const base = {
+        safetyBackupsCreated,
+        warnings: validated.warnings,
+        restoredCounts: {
+          tables: db.tablesRestored,
+          rows: db.rowsRestored,
+          storageFiles: 0,
+          externalDocumentFiles: 0,
+          envVars: 0,
+        },
+      };
 
-  try {
-    const externalDocuments = await dependencies.restoreExternalDocuments(input, validated.manifest, safetyBackupsCreated);
-    base.restoredCounts.externalDocumentFiles = externalDocuments.filesRestored;
-  } catch (error) {
-    const details = error instanceof BackupV3ExternalDocumentPartialFailureError ? error.result : undefined;
-    return {
-      ok: false,
-      dbRestored: true,
-      storageRestored: true,
-      externalDocumentsRestored: "partial",
-      envRestored: false,
-      restartRequired: true,
-      restoreIncomplete: true,
-      ...base,
-      partialFailure: {
-        component: "external_documents",
-        message: error instanceof Error ? error.message : String(error),
-        details,
-      },
-    };
-  }
+      let storage;
+      try {
+        storage = await dependencies.restoreStorage(input, validated.manifest, safetyBackupsCreated);
+        base.restoredCounts.storageFiles = storage.filesRestored;
+      } catch (error) {
+        const details = error instanceof BackupV3StoragePartialFailureError ? error.result : undefined;
+        return {
+          ok: false,
+          dbRestored: true,
+          storageRestored: "partial",
+          externalDocumentsRestored: false,
+          envRestored: false,
+          restartRequired: true,
+          restoreIncomplete: true,
+          ...base,
+          partialFailure: {
+            component: "storage",
+            message: error instanceof Error ? error.message : String(error),
+            details,
+          },
+        };
+      }
 
-  try {
-    const envRestore = await dependencies.restoreEnv(input, safetyBackupsCreated);
-    base.restoredCounts.envVars = envRestore.envVarsRestored.length;
-    return {
-      ok: true,
-      dbRestored: true,
-      storageRestored: true,
-      externalDocumentsRestored: true,
-      envRestored: true,
-      restartRequired: true,
-      restoreIncomplete: false,
-      ...base,
-      env: {
-        envVarsRestored: envRestore.envVarsRestored,
-        ignoredArchiveKeys: envRestore.ignoredArchiveKeys,
-        preservedLocalKeys: envRestore.preservedLocalKeys,
-        safetyBackupPath: envRestore.safetyBackupPath,
-      },
-    };
+      try {
+        const externalDocuments = await dependencies.restoreExternalDocuments(input, validated.manifest, safetyBackupsCreated);
+        base.restoredCounts.externalDocumentFiles = externalDocuments.filesRestored;
+      } catch (error) {
+        const details = error instanceof BackupV3ExternalDocumentPartialFailureError ? error.result : undefined;
+        return {
+          ok: false,
+          dbRestored: true,
+          storageRestored: true,
+          externalDocumentsRestored: "partial",
+          envRestored: false,
+          restartRequired: true,
+          restoreIncomplete: true,
+          ...base,
+          partialFailure: {
+            component: "external_documents",
+            message: error instanceof Error ? error.message : String(error),
+            details,
+          },
+        };
+      }
+
+      try {
+        const envRestore = await dependencies.restoreEnv(input, safetyBackupsCreated);
+        base.restoredCounts.envVars = envRestore.envVarsRestored.length;
+        return {
+          ok: true,
+          dbRestored: true,
+          storageRestored: true,
+          externalDocumentsRestored: true,
+          envRestored: true,
+          restartRequired: true,
+          restoreIncomplete: false,
+          ...base,
+          env: {
+            envVarsRestored: envRestore.envVarsRestored,
+            ignoredArchiveKeys: envRestore.ignoredArchiveKeys,
+            preservedLocalKeys: envRestore.preservedLocalKeys,
+            safetyBackupPath: envRestore.safetyBackupPath,
+          },
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          dbRestored: true,
+          storageRestored: true,
+          externalDocumentsRestored: true,
+          envRestored: false,
+          restartRequired: true,
+          restoreIncomplete: true,
+          ...base,
+          partialFailure: {
+            component: "env",
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    } finally {
+      await lock.release();
+    }
   } catch (error) {
-    return {
-      ok: false,
-      dbRestored: true,
-      storageRestored: true,
-      externalDocumentsRestored: true,
-      envRestored: false,
-      restartRequired: true,
-      restoreIncomplete: true,
-      ...base,
-      partialFailure: {
-        component: "env",
-        message: error instanceof Error ? error.message : String(error),
-      },
-    };
+    throw error;
   }
 }

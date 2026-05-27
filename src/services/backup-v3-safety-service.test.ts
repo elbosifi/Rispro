@@ -43,7 +43,8 @@ test("v3 restore skeleton route does not contain destructive restore operations"
   const combined = `${adminRoute}\n${safetyService}`;
 
   assert.match(adminRoute, /"\/restore\/v3\/db-only"/);
-  assert.match(adminRoute, /Full v3 restore is not implemented yet/);
+  assert.match(adminRoute, /V3 full restore is disabled by configuration/);
+  assert.match(adminRoute, /RESTORE_V3_DB_ONLY_ENABLED/);
   assert.match(adminRoute, /runBackupV3DatabaseRestoreOnly/);
   assert.match(adminRoute, /previewBackupV3RestoreFromArchive[\s\S]*runBackupV3DatabaseRestoreOnly/);
   assert.match(combined, /pg_dump", \["-Fc"/);
