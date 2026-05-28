@@ -14,6 +14,7 @@ import {
   runBackupV3DatabaseRestoreOnly,
 } from "../services/backup-v3-safety-service.js";
 import { restoreBackupV3FullService } from "../services/backup-v3-full-restore.js";
+import { getBackupV3RestoreFlagStatus, updateBackupV3RestoreFlag } from "../services/backup-v3-restore-flag-service.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
@@ -53,7 +54,28 @@ adminRouter.get(
   })
 );
 
+adminRouter.get(
+  "/restore/v3/flag",
+  requireAnyRole(["super_admin"]),
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json(await getBackupV3RestoreFlagStatus());
+  })
+);
+
 adminRouter.use(requireRecentSupervisorReauth);
+
+adminRouter.post(
+  "/restore/v3/flag",
+  requireAnyRole(["super_admin"]),
+  express.json({ limit: "10kb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    if (typeof body.enabled !== "boolean") {
+      throw new HttpError(400, "enabled must be boolean.");
+    }
+    res.json(await updateBackupV3RestoreFlag(body.enabled));
+  })
+);
 
 adminRouter.get(
   "/backup/v3",

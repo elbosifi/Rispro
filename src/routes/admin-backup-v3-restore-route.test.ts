@@ -46,6 +46,14 @@ test("v3 restore status documents disabled, enabled, non-super_admin, and reauth
   assert.match(source, /req\.user\?\.role === "super_admin"/);
 });
 
+test("v3 full restore flag endpoints are super_admin-only and POST requires recent reauth", async () => {
+  const source = await adminRouteSource();
+  assert.match(source, /"\/restore\/v3\/flag",\s*\n\s*requireAnyRole\(\["super_admin"\]\)/);
+  assert.match(source, /getBackupV3RestoreFlagStatus\(\)/);
+  assert.match(source, /adminRouter\.use\(requireRecentSupervisorReauth\)[\s\S]*"\/restore\/v3\/flag"[\s\S]*updateBackupV3RestoreFlag\(body\.enabled\)/);
+  assert.match(source, /typeof body\.enabled !== "boolean"/);
+});
+
 test("v3 full restore endpoint requires super_admin, confirmation, passphrase, and archive upload", async () => {
   const source = await combinedRestoreSource();
   assert.match(source, /"\/restore\/v3",\s*\n\s*requireAnyRole\(\["super_admin"\]\)/);

@@ -45,6 +45,18 @@ const disabledStatus = {
   disabledReason: "V3 full restore is disabled by backend configuration.",
 };
 
+const disabledFlag = {
+  enabledInEnvFile: false,
+  enabledInRuntime: false,
+  restartRequired: false,
+};
+
+const enabledFlagNeedsRestart = {
+  enabledInEnvFile: true,
+  enabledInRuntime: false,
+  restartRequired: true,
+};
+
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
@@ -151,6 +163,7 @@ describe("BackupRestoreSection v3 UI", () => {
   it("uses the status endpoint and never probes restore execution for capability", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -160,9 +173,52 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/admin/restore/v3")).toBe(false);
   });
 
+  it("shows the v3 full restore flag toggle only for super_admin", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      return jsonResponse({}, 404);
+    }));
+
+    renderSection();
+    expect(await screen.findByLabelText("Enable V3 full restore")).toBeTruthy();
+
+    useAuthMock.mockReturnValue({
+      user: { id: 3, username: "sup", fullName: "Supervisor", role: "supervisor", recentSupervisorReauth: true },
+    });
+    cleanup();
+    renderSection();
+    expect(screen.queryByLabelText("Enable V3 full restore")).toBeNull();
+  });
+
+  it("updates the v3 full restore flag and shows restart required", async () => {
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(disabledStatus);
+      if (url === "/api/admin/restore/v3/flag" && init?.method === "POST") return jsonResponse(enabledFlagNeedsRestart);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSection();
+    await userEvent.click(await screen.findByLabelText("Enable V3 full restore"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/restore/v3/flag",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ enabled: true }),
+      })
+    ));
+    expect(confirmMock).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getAllByText("Restart required for this setting to take effect.").length).toBeGreaterThan(0));
+  });
+
   it("requires exact confirmation before executing restore", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
       if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
       return jsonResponse({}, 404);
     }));

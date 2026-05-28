@@ -2850,6 +2850,13 @@ type BackupV3RestoreStatus = {
   disabledReason?: string;
 };
 
+type BackupV3RestoreFlagStatus = {
+  enabledInEnvFile: boolean;
+  enabledInRuntime: boolean;
+  restartRequired: boolean;
+  safetyBackupPath?: string;
+};
+
 const RESTORE_CONFIRMATION_TEXT = "RESTORE RISPRO";
 
 function isSensitiveText(value: unknown): boolean {
@@ -2889,6 +2896,8 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
   const [fullRestoreEnabled, setFullRestoreEnabled] = useState<boolean | null>(null);
   const [restoreV3Status, setRestoreV3Status] = useState<BackupV3RestoreStatus | null>(null);
+  const [restoreV3FlagStatus, setRestoreV3FlagStatus] = useState<BackupV3RestoreFlagStatus | null>(null);
+  const [restoreV3FlagBusy, setRestoreV3FlagBusy] = useState(false);
   const [fullRestoreStatus, setFullRestoreStatus] = useState("Checking v3 restore availability...");
   const [restoreV3Preview, setRestoreV3Preview] = useState<BackupV3Preview | null>(null);
   const [restorePreview, setRestorePreview] = useState<{
@@ -2922,6 +2931,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     restoreV3Status.userCanExecute === true &&
     restoreV3Status.recentReauthSatisfied === true;
   const v3PreviewHasErrors = Boolean(restoreV3Preview && (!restoreV3Preview.ok || restoreV3Preview.errors.length > 0));
+  const isSuperAdmin = user?.role === "super_admin";
 
   useImperativeHandle(ref, () => ({
     onReAuthSuccess: handleReAuthSuccess
@@ -2953,8 +2963,29 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     }
   };
 
+  const fetchRestoreV3FlagStatus = async () => {
+    if (!isSuperAdmin) {
+      setRestoreV3FlagStatus(null);
+      return;
+    }
+    try {
+      const response = await fetch("/api/admin/restore/v3/flag", {
+        method: "GET",
+        credentials: "include"
+      });
+      if (!response.ok) {
+        setRestoreV3FlagStatus(null);
+        return;
+      }
+      setRestoreV3FlagStatus((await response.json()) as BackupV3RestoreFlagStatus);
+    } catch {
+      setRestoreV3FlagStatus(null);
+    }
+  };
+
   useEffect(() => {
     void probeV3RestoreAvailability();
+    void fetchRestoreV3FlagStatus();
   }, [user?.role, user?.recentSupervisorReauth]);
 
   const parseErrorMessage = async (response: Response) => {
@@ -3142,6 +3173,42 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     }
   };
 
+  const handleRestoreV3FlagChange = async (enabled: boolean) => {
+    if (!isSuperAdmin) return;
+    if (!user?.recentSupervisorReauth) {
+      onReAuthRequired(["admin", "restore", "v3", "flag"]);
+      setRestoreMessage({ type: "error", text: "Recent supervisor re-authentication is required before changing v3 restore availability." });
+      return;
+    }
+    if (enabled && !confirm("Enable V3 full restore? This destructive capability can replace the database, mirror app-owned storage, restore external documents, update RISpro-managed .env keys, and requires restart.")) {
+      return;
+    }
+
+    setRestoreV3FlagBusy(true);
+    setRestoreMessage(null);
+    try {
+      const response = await fetch("/api/admin/restore/v3/flag", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled })
+      });
+      if (!response.ok) {
+        if (response.status === 403) {
+          onReAuthRequired(["admin", "restore", "v3", "flag"]);
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+      setRestoreV3FlagStatus((await response.json()) as BackupV3RestoreFlagStatus);
+      setRestoreMessage({ type: "success", text: "Restart required for this setting to take effect." });
+      await probeV3RestoreAvailability();
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Could not update v3 full restore setting." });
+    } finally {
+      setRestoreV3FlagBusy(false);
+    }
+  };
+
   const doRestore = async (payload: unknown) => {
     const response = await fetch("/api/admin/restore", {
       method: "POST",
@@ -3298,6 +3365,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   // Auto-retry restore after successful re-auth
   const handleReAuthSuccess = async () => {
     await probeV3RestoreAvailability();
+    await fetchRestoreV3FlagStatus();
     if (pendingPayload) {
       setRestoreBusy(true);
       setRestoreMessage({ type: "success", text: "Re-authenticated. Retrying restore..." });
@@ -3430,6 +3498,26 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
           }`}>
             {fullRestoreStatus}
           </div>
+          {isSuperAdmin && (
+            <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
+              <label className="flex items-center gap-2 font-medium text-stone-900 dark:text-white">
+                <input
+                  type="checkbox"
+                  checked={restoreV3FlagStatus?.enabledInEnvFile === true}
+                  onChange={(event) => void handleRestoreV3FlagChange(event.target.checked)}
+                  disabled={restoreV3FlagBusy}
+                />
+                Enable V3 full restore
+              </label>
+              <p className="mt-2">
+                Saved: {restoreV3FlagStatus?.enabledInEnvFile ? "enabled" : "disabled"}.
+                Runtime: {restoreV3FlagStatus?.enabledInRuntime ? "enabled" : "disabled"}.
+              </p>
+              {restoreV3FlagStatus?.restartRequired && (
+                <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">Restart required for this setting to take effect.</p>
+              )}
+            </div>
+          )}
           <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
             <input
               aria-label="V3 restore archive"
