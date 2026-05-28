@@ -7,6 +7,7 @@
 
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../../../../middleware/auth.js";
+import { requireActionPin } from "../../../../middleware/action-pin.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { rescheduleBooking } from "../../booking/services/reschedule-booking.service.js";
@@ -110,6 +111,7 @@ router.get(
  */
 router.post(
   "/",
+  requireActionPin("appointment_create"),
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const body = req.body as CreateAppointmentDto;
 
@@ -178,6 +180,7 @@ router.post(
  */
 router.put(
   "/:id",
+  requireActionPin("appointment_reschedule"),
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const bookingId = parseInt(String(req.params.id), 10);
     if (isNaN(bookingId)) {
@@ -240,6 +243,7 @@ router.put(
  */
 router.post(
   "/:id/cancel",
+  requireActionPin("appointment_cancel"),
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const bookingId = parseInt(String(req.params.id), 10);
     if (isNaN(bookingId)) {
@@ -322,6 +326,7 @@ router.post(
  */
 router.post(
   "/:id/void",
+  requireActionPin("appointment_void"),
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const bookingId = parseInt(String(req.params.id), 10);
     if (isNaN(bookingId)) {

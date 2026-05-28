@@ -1,5 +1,6 @@
 import express, { Request, Response, Router } from "express";
 import { requireAnyRole, requireAuth } from "../middleware/auth.js";
+import { requireActionPin } from "../middleware/action-pin.js";
 import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
@@ -80,6 +81,7 @@ patientsRouter.get(
 
 patientsRouter.post(
   "/merge",
+  requireActionPin("patient_merge"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const userId: UserId = request.user.sub;
@@ -90,6 +92,7 @@ patientsRouter.post(
 
 patientsRouter.post(
   "/",
+  requireActionPin("patient_create"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const userId: UserId = request.user.sub;
@@ -138,6 +141,7 @@ patientsRouter.get(
 
 patientsRouter.put(
   "/:patientId",
+  requireActionPin("patient_update"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const patientId = asOptionalString(request.params?.patientId) ?? "";
@@ -150,6 +154,7 @@ patientsRouter.put(
 patientsRouter.delete(
   "/:patientId",
   requireAnyRole(["super_admin"]),
+  requireActionPin("patient_delete"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const patientId = asOptionalString(request.params?.patientId) ?? "";

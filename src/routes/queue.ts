@@ -1,5 +1,6 @@
 import express, { Request, Response, Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { requireActionPin } from "../middleware/action-pin.js";
 import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString, asUserId } from "../utils/request-coercion.js";
@@ -40,6 +41,7 @@ queueRouter.post(
 
 queueRouter.post(
   "/walk-in",
+  requireActionPin("queue_walk_in"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as QueueRequest;
     const body = request.body as UnknownRecord;
@@ -53,6 +55,7 @@ queueRouter.post(
 
 queueRouter.post(
   "/confirm-no-show",
+  requireActionPin("queue_confirm_no_show"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as QueueRequest;
     const body = request.body as UnknownRecord;

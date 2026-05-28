@@ -153,6 +153,7 @@ describe("action PIN middleware", () => {
       },
     }));
     let payload: unknown;
+    let nextCalled = false;
 
     await guard(
       { user: { sub: 1, role: "receptionist" }, cookies: {} } as Request,
@@ -165,9 +166,10 @@ describe("action PIN middleware", () => {
           return this;
         },
       } as unknown as Response,
-      () => undefined
+      () => { nextCalled = true; }
     );
 
     assert.deepEqual(payload, { error: "action_pin_disabled_for_role", actionKey: "patient_create" });
+    assert.equal(nextCalled, false);
   });
 });
