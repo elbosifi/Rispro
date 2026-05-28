@@ -91,6 +91,25 @@ function makeExecutor(initial?: PinRow): TestExecutor {
         verifications.push(created);
         return result([created]);
       }
+      if (sql.includes("update action_pin_verifications")) {
+        const userId = Number(params[0]);
+        const tokenHash = String(params[1]);
+        const actionKey = params[2] == null ? null : String(params[2]);
+        const requireActionScoped = params[3] === true;
+        const row = verifications.find((item) =>
+          item.user_id === userId &&
+          item.verification_token_hash === tokenHash &&
+          item.consumed_at == null &&
+          new Date(item.expires_at).getTime() > Date.now() &&
+          (
+            requireActionScoped
+              ? item.action_key === actionKey
+              : actionKey == null || item.action_key == null || item.action_key === actionKey
+          )
+        );
+        if (row) row.consumed_at = new Date().toISOString();
+        return result(row ? [row] : []);
+      }
       if (sql.includes("from action_pin_verifications")) {
         const userId = Number(params[0]);
         const tokenHash = String(params[1]);
@@ -102,12 +121,6 @@ function makeExecutor(initial?: PinRow): TestExecutor {
           new Date(item.expires_at).getTime() > Date.now() &&
           (item.action_key == null || item.action_key === actionKey)
         );
-        return result(row ? [row] : []);
-      }
-      if (sql.includes("update action_pin_verifications")) {
-        const id = Number(params[0]);
-        const row = verifications.find((item) => item.id === id);
-        if (row) row.consumed_at = new Date().toISOString();
         return result(row ? [row] : []);
       }
       throw new Error(`Unhandled SQL: ${sql}`);
@@ -272,6 +285,15 @@ describe("action PIN service", () => {
     assert.equal(second.ok, false);
     assert.equal(second.reason, "not_found");
     assert.ok(executor.verifications[0]?.consumed_at);
+  });
+
+  it("consumes every-time verification with a single predicate-checked update", async () => {
+    const source = await import("node:fs/promises").then((fs) => fs.readFile("src/services/action-pin-service.ts", "utf-8"));
+
+    assert.match(source, /update action_pin_verifications\s+set consumed_at = now\(\)\s+where user_id = \$1\s+and verification_token_hash = \$2\s+and consumed_at is null\s+and expires_at > now\(\)/s);
+    assert.match(source, /\$4::boolean = true and action_key = \$3::text/s);
+    assert.doesNotMatch(source, /where id = \(\s*select id/s);
+    assert.doesNotMatch(source, /where id = \$1 and consumed_at is null/);
   });
 
   it("rejects expired, other-user, and other-action verifications", async () => {

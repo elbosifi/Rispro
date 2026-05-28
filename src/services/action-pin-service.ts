@@ -384,8 +384,21 @@ export async function validateActionPinVerification({
   }
 
   const tokenHash = hashVerificationToken(cleanToken);
-  const { rows } = await executor.query(
+  const lookupSql = consume
+    ? `
+      update action_pin_verifications
+      set consumed_at = now()
+      where user_id = $1
+        and verification_token_hash = $2
+        and consumed_at is null
+        and expires_at > now()
+        and (
+          ($4::boolean = true and action_key = $3::text)
+          or ($4::boolean = false and ($3::text is null or action_key is null or action_key = $3::text))
+        )
+      returning id, user_id, action_key, reason, expires_at, consumed_at
     `
+    : `
       select id, user_id, action_key, reason, expires_at, consumed_at
       from action_pin_verifications
       where user_id = $1
@@ -399,27 +412,11 @@ export async function validateActionPinVerification({
         )
       order by created_at desc
       limit 1
-    `,
-    [userId, tokenHash, actionKey, requireActionScoped]
-  );
+    `;
+  const { rows } = await executor.query(lookupSql, [userId, tokenHash, actionKey, requireActionScoped]);
   const row = rows[0] as unknown as ActionPinVerificationRow | undefined;
   if (!row) {
     return { ok: false, reason: "not_found" };
-  }
-
-  if (consume) {
-    const consumed = await executor.query(
-      `
-        update action_pin_verifications
-        set consumed_at = now()
-        where id = $1 and consumed_at is null
-        returning id
-      `,
-      [row.id]
-    );
-    if (!consumed.rows[0]) {
-      return { ok: false, reason: "not_found" };
-    }
   }
 
   return {
