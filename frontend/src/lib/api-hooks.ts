@@ -904,6 +904,30 @@ export async function reAuthSupervisor(password: string): Promise<User> {
   return mapUser(res.user);
 }
 
+export interface ActionPinStatus {
+  hasPin: boolean;
+  lockedUntil: string | null;
+  pinExpiresAt: string | null;
+  isExpired: boolean;
+  policy: {
+    enabled: boolean;
+    pinLength: number;
+    allowUserPinChange: boolean;
+    requirePinToViewOwnPinSettings: boolean;
+  };
+}
+
+export async function fetchActionPinStatus(): Promise<ActionPinStatus> {
+  return api<ActionPinStatus>("/action-pin/status");
+}
+
+export async function setOwnActionPin(pin: string, currentPassword?: string): Promise<{ ok: true }> {
+  return api<{ ok: true }>("/action-pin/set", {
+    method: "POST",
+    body: JSON.stringify({ pin, currentPassword })
+  });
+}
+
 export async function logout() {
   await api("/auth/logout", { method: "POST" });
 }

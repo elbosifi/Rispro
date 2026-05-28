@@ -3,8 +3,10 @@ import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
+import { ActionPinProvider } from "@/providers/action-pin-provider";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { ProtectedRoute } from "@/components/auth/protected-route";
+import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
 import { LoginPage } from "@/pages/auth/login-page";
 import { DashboardPage } from "@/pages/dashboard/dashboard-page";
 import SearchPage from "@/pages/search/search-page";
@@ -265,7 +267,12 @@ function AppContent() {
             <span className="leading-none">{language === "ar" ? "رجوع" : "Back"}</span>
           </button>
         ) : undefined}
-        extraActions={<SchedulingOverrideApprovalCenter user={user} />}
+        extraActions={(
+          <>
+            <SchedulingOverrideApprovalCenter user={user} />
+            <ActionPinSettingsButton />
+          </>
+        )}
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}
@@ -371,7 +378,9 @@ export function App() {
       <BrowserRouter>
         <QueryProvider>
           <AuthProvider>
-            <RouterConfig />
+            <ActionPinProvider>
+              <RouterConfig />
+            </ActionPinProvider>
           </AuthProvider>
         </QueryProvider>
       </BrowserRouter>

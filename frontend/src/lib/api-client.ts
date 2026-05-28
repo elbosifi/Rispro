@@ -1,5 +1,14 @@
 const API_TIMEOUT_MS = 15_000;
 
+interface ActionPinChallenge {
+  actionKey: string;
+  requiresReason: boolean;
+}
+
+type ActionPinChallengeHandler = (challenge: ActionPinChallenge) => Promise<void>;
+
+let actionPinChallengeHandler: ActionPinChallengeHandler | null = null;
+
 interface ApiErrorDetails {
   message: string;
   status: number;
@@ -25,14 +34,29 @@ export class ApiError extends Error {
   }
 }
 
+interface ApiRequestOptions extends RequestInit {
+  skipActionPinRetry?: boolean;
+  actionPinRetried?: boolean;
+}
+
+export function setActionPinChallengeHandler(handler: ActionPinChallengeHandler | null) {
+  actionPinChallengeHandler = handler;
+}
+
+export function isActionPinRequiredError(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError) || error.status !== 403) return false;
+  const details = error.details as Record<string, unknown> | undefined;
+  return error.message === "action_pin_required" && typeof details?.actionKey === "string";
+}
+
 async function parseErrorResponse(response: Response): Promise<ApiError> {
   try {
     const body = await response.json();
-    const message = body?.error?.message || body?.message || response.statusText;
+    const message = body?.error?.message || (typeof body?.error === "string" ? body.error : undefined) || body?.message || response.statusText;
     return ApiError.fromResponse({
       message,
       status: response.status,
-      details: body?.error?.details ?? body?.details,
+      details: body?.error?.details ?? body?.details ?? body,
       reasonCodes: Array.isArray(body?.error?.reasonCodes) ? body.error.reasonCodes : []
     });
   } catch {
@@ -45,28 +69,43 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
 
 export async function api<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiRequestOptions = {},
   timeoutMs = API_TIMEOUT_MS
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const { skipActionPinRetry, actionPinRetried, ...fetchOptions } = options;
 
   try {
     const response = await fetch(`/api${path}`, {
-      ...options,
+      ...fetchOptions,
       credentials: "include",
       headers: isFormDataBody
-        ? options.headers
+        ? fetchOptions.headers
         : {
           "Content-Type": "application/json",
-          ...options.headers
+          ...fetchOptions.headers
         },
       signal: controller.signal
     });
 
     if (!response.ok) {
-      throw await parseErrorResponse(response);
+      const error = await parseErrorResponse(response);
+      const details = error.details as Record<string, unknown> | undefined;
+      if (
+        !skipActionPinRetry &&
+        !actionPinRetried &&
+        actionPinChallengeHandler &&
+        isActionPinRequiredError(error)
+      ) {
+        await actionPinChallengeHandler({
+          actionKey: String(details?.actionKey),
+          requiresReason: Boolean(details?.requiresReason)
+        });
+        return api<T>(path, { ...options, actionPinRetried: true }, timeoutMs);
+      }
+      throw error;
     }
 
     if (response.status === 204) {
