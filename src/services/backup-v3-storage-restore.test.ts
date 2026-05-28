@@ -174,6 +174,37 @@ test("restoreBackupV3AppOwnedStorageOnly mirrors app-owned storage exactly", asy
   await assert.rejects(() => fs.access(path.join(currentRoot.absolutePath, "old-dir", "extra.txt")));
 });
 
+test("nested app-owned roots are preserved as boundaries and restored by content replacement", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-storage-restore-"));
+  const projectRoot = root("project-storage", "project_storage", path.join(tempDir, "storage"), "storage/project");
+  const santeRoot = root("sante-hl7-outbox", "hl7_outbox", path.join(projectRoot.absolutePath, "sante-hl7-outbox"), "storage/sante-hl7-outbox");
+  await fs.mkdir(santeRoot.absolutePath, { recursive: true });
+  await fs.writeFile(path.join(projectRoot.absolutePath, "old.txt"), "old");
+  await fs.writeFile(path.join(santeRoot.absolutePath, "extra.hl7"), "extra");
+  const removedPaths: string[] = [];
+  const prepared = await makeManifest(tempDir, [
+    { root: projectRoot, relativePath: "top.txt", content: "top" },
+    { root: projectRoot, relativePath: "sante-hl7-outbox/duplicate-from-parent.hl7", content: "skip-parent-copy" },
+    { root: santeRoot, relativePath: "message.hl7", content: "hl7" },
+  ]);
+
+  const result = await restoreBackupV3AppOwnedStorageOnly({
+    manifest: prepared.manifest,
+    stagingDir: prepared.stagingDir,
+    currentRoots: [projectRoot, santeRoot],
+    safetyBackupsCreated: safetyMetadata(tempDir),
+    onRemovePath: (targetPath) => removedPaths.push(targetPath),
+  });
+
+  assert.equal(result.storageRestored, true);
+  assert.equal(await fs.readFile(path.join(projectRoot.absolutePath, "top.txt"), "utf8"), "top");
+  assert.equal(await fs.readFile(path.join(santeRoot.absolutePath, "message.hl7"), "utf8"), "hl7");
+  await assert.rejects(() => fs.access(path.join(projectRoot.absolutePath, "old.txt")));
+  await assert.rejects(() => fs.access(path.join(santeRoot.absolutePath, "extra.hl7")));
+  await assert.rejects(() => fs.access(path.join(santeRoot.absolutePath, "duplicate-from-parent.hl7")));
+  assert.equal(removedPaths.includes(santeRoot.absolutePath), false);
+});
+
 test("external document roots are ignored by app-owned storage restore and Orthanc roots are rejected", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-storage-restore-"));
   const externalRoot = root("document-storage", "document_storage", path.join(tempDir, "external-docs"), "documents/external");

@@ -1,0 +1,1 @@
+{"ok":true,"manifest":{"formatVersion":3,"createdAt":"2026-05-28T11:23:08.501Z","appName":"rispro-reception","packageVersion":"0.1.0","gitCommit":null,"migrationVersion":"085_orthanc_mwl_queue_gate.sql"},"counts":{"tables":80,"rows":188,"archiveEntries":86,"storageFiles":4,"envVars":57},"warnings":[],"errors":[]}

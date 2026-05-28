@@ -71,6 +71,17 @@ Required failure-mode checks:
 - `.env` failure reports partial failure.
 - Restore lock prevents concurrent full restore.
 
+Storage restore note:
+
+- Nested app-owned runtime directories under `/app/storage` such as uploads,
+  Sante HL7 outbox, and DICOM worklist roots are restore boundaries.
+- If storage restore reports `EBUSY`, `EPERM`, or `ENOTEMPTY` while removing a
+  mounted app-owned directory, treat it as a recoverable storage algorithm case
+  only after this boundary-preserving restore fix is deployed.
+- Do not retry blindly after an `EBUSY` partial failure on an unpatched build.
+  Confirm the patched restore preserves the mounted directory and replaces its
+  contents instead of removing the directory itself.
+
 Docker deployment smoke:
 
 ```powershell

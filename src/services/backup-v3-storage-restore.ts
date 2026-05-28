@@ -39,6 +39,7 @@ interface RestoreOptions {
   currentRoots: BackupV3StorageRoot[];
   safetyBackupsCreated: BackupV3SafetyMetadata;
   failAfterRemovingRootId?: string;
+  onRemovePath?: (targetPath: string) => void;
 }
 
 function isSameOrInside(child: string, parent: string): boolean {
@@ -102,14 +103,7 @@ function planRestoreRoots(manifest: BackupV3Manifest, currentRoots: BackupV3Stor
     assertAllowedRoot(current);
     planned.push(current);
   }
-  const topLevelRoots: BackupV3StorageRoot[] = [];
-  for (const root of planned.sort((a, b) => a.absolutePath.length - b.absolutePath.length)) {
-    if (topLevelRoots.some((parent) => isSameOrInside(root.absolutePath, parent.absolutePath))) {
-      continue;
-    }
-    topLevelRoots.push(root);
-  }
-  return topLevelRoots;
+  return planned.sort((a, b) => a.absolutePath.length - b.absolutePath.length);
 }
 
 function validateFileRoot(manifest: BackupV3Manifest, file: BackupV3FileManifestEntry, rootsById: Map<string, BackupV3StorageRoot>): BackupV3StorageRoot {
@@ -178,7 +172,26 @@ async function moveExistingAside(targetRoot: string): Promise<string | null> {
   return aside;
 }
 
-async function removeDirectoryContents(targetRoot: string): Promise<void> {
+function nestedBoundariesFor(root: BackupV3StorageRoot, roots: BackupV3StorageRoot[]): string[] {
+  return roots
+    .filter((candidate) => candidate.id !== root.id && isSameOrInside(candidate.absolutePath, root.absolutePath))
+    .map((candidate) => candidate.absolutePath)
+    .sort((a, b) => a.length - b.length);
+}
+
+function hasParentRestoreRoot(root: BackupV3StorageRoot, roots: BackupV3StorageRoot[]): boolean {
+  return roots.some((candidate) => candidate.id !== root.id && isSameOrInside(root.absolutePath, candidate.absolutePath));
+}
+
+function isBoundaryPath(targetPath: string, boundaries: string[]): boolean {
+  return boundaries.some((boundary) => path.resolve(targetPath) === path.resolve(boundary));
+}
+
+function containsBoundaryPath(targetPath: string, boundaries: string[]): boolean {
+  return boundaries.some((boundary) => isSameOrInside(path.resolve(boundary), path.resolve(targetPath)));
+}
+
+async function removeDirectoryContents(targetRoot: string, boundaries: string[], onRemovePath?: (targetPath: string) => void): Promise<void> {
   let entries: Array<import("node:fs").Dirent>;
   try {
     entries = await fs.readdir(targetRoot, { withFileTypes: true });
@@ -190,11 +203,28 @@ async function removeDirectoryContents(targetRoot: string): Promise<void> {
     throw error;
   }
   for (const entry of entries) {
-    await fs.rm(path.join(targetRoot, entry.name), { recursive: true, force: true });
+    const target = path.join(targetRoot, entry.name);
+    if (entry.isDirectory() && isBoundaryPath(target, boundaries)) {
+      continue;
+    }
+    if (entry.isDirectory() && containsBoundaryPath(target, boundaries)) {
+      await removeDirectoryContents(target, boundaries, onRemovePath);
+      continue;
+    }
+    onRemovePath?.(target);
+    try {
+      await fs.rm(target, { recursive: true, force: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (entry.isDirectory() && (code === "EBUSY" || code === "EPERM" || code === "ENOTEMPTY") && isBoundaryPath(target, boundaries)) {
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
-async function copyDirectoryContents(sourceRoot: string, targetRoot: string): Promise<void> {
+async function copyDirectoryContents(sourceRoot: string, targetRoot: string, boundaries: string[] = []): Promise<void> {
   await fs.mkdir(targetRoot, { recursive: true });
   let entries: Array<import("node:fs").Dirent>;
   try {
@@ -208,8 +238,15 @@ async function copyDirectoryContents(sourceRoot: string, targetRoot: string): Pr
   for (const entry of entries) {
     const source = path.join(sourceRoot, entry.name);
     const target = path.join(targetRoot, entry.name);
+    if (entry.isDirectory() && isBoundaryPath(target, boundaries)) {
+      continue;
+    }
+    if (entry.isDirectory() && containsBoundaryPath(target, boundaries)) {
+      await copyDirectoryContents(source, target, boundaries);
+      continue;
+    }
     if (entry.isDirectory()) {
-      await copyDirectoryContents(source, target);
+      await copyDirectoryContents(source, target, boundaries);
       continue;
     }
     if (entry.isFile()) {
@@ -222,6 +259,11 @@ async function removeAside(aside: string | null): Promise<void> {
   if (aside) {
     await fs.rm(aside, { recursive: true, force: true });
   }
+}
+
+function fileTargetsNestedRoot(root: BackupV3StorageRoot, file: BackupV3FileManifestEntry, roots: BackupV3StorageRoot[]): boolean {
+  const target = resolveInside(root.absolutePath, safeRelativePath(file.relativePath, file.archivePath));
+  return roots.some((candidate) => candidate.id !== root.id && isSameOrInside(candidate.absolutePath, root.absolutePath) && isSameOrInside(target, candidate.absolutePath));
 }
 
 export async function restoreBackupV3AppOwnedStorageOnly(
@@ -246,6 +288,9 @@ export async function restoreBackupV3AppOwnedStorageOnly(
         continue;
       }
       const currentRoot = validateFileRoot(options.manifest, file, rootsById);
+      if (fileTargetsNestedRoot(currentRoot, file, plannedRoots)) {
+        continue;
+      }
       const relativePath = safeRelativePath(file.relativePath, file.archivePath);
       const stagedSource = resolveInside(options.stagingDir, file.archivePath);
       const replacementRoot = path.join(tempRoot, currentRoot.id);
@@ -263,12 +308,16 @@ export async function restoreBackupV3AppOwnedStorageOnly(
     for (const root of plannedRoots) {
       const replacementRoot = path.join(tempRoot, root.id);
       await fs.mkdir(replacementRoot, { recursive: true });
+      const boundaries = nestedBoundariesFor(root, plannedRoots);
       let aside: string | null = null;
-      let replaceMountedRoot = false;
+      let replaceMountedRoot = boundaries.length > 0 || hasParentRestoreRoot(root, plannedRoots);
       try {
-        aside = await moveExistingAside(root.absolutePath);
+        if (!replaceMountedRoot) {
+          aside = await moveExistingAside(root.absolutePath);
+        }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EBUSY") {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
           throw error;
         }
         replaceMountedRoot = true;
@@ -278,8 +327,8 @@ export async function restoreBackupV3AppOwnedStorageOnly(
           throw new Error(`Injected storage restore failure after removing ${root.id}`);
         }
         if (replaceMountedRoot) {
-          await removeDirectoryContents(root.absolutePath);
-          await copyDirectoryContents(replacementRoot, root.absolutePath);
+          await removeDirectoryContents(root.absolutePath, boundaries, options.onRemovePath);
+          await copyDirectoryContents(replacementRoot, root.absolutePath, boundaries);
         } else {
           await fs.mkdir(path.dirname(root.absolutePath), { recursive: true });
           await fs.rename(replacementRoot, root.absolutePath);
