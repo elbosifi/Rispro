@@ -13,6 +13,27 @@ create index if not exists user_action_pins_locked_until_idx
   on user_action_pins (locked_until)
   where locked_until is not null;
 
+create table if not exists action_pin_verifications (
+  id bigserial primary key,
+  user_id bigint not null references users(id) on delete cascade,
+  action_key text,
+  reason text,
+  verification_token_hash text not null unique,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now(),
+  ip_address text,
+  user_agent text
+);
+
+create index if not exists action_pin_verifications_lookup_idx
+  on action_pin_verifications (user_id, verification_token_hash, expires_at)
+  where consumed_at is null;
+
+create index if not exists action_pin_verifications_action_idx
+  on action_pin_verifications (user_id, action_key, expires_at)
+  where consumed_at is null;
+
 insert into system_settings (category, setting_key, setting_value)
 values (
   'users_and_roles',

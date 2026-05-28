@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { createHash, randomBytes } from "node:crypto";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -29,6 +30,34 @@ export interface ActionPinVerifyResult {
   pinExpiresAt: string | null;
 }
 
+export interface ActionPinVerificationInput {
+  userId: UserId;
+  actionKey?: string | null;
+  reason?: string | null;
+  ttlSeconds: number;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  executor?: DbExecutor;
+}
+
+export interface ActionPinVerificationValidationInput {
+  userId: UserId;
+  token: unknown;
+  actionKey?: string | null;
+  consume: boolean;
+  requireActionScoped?: boolean;
+  executor?: DbExecutor;
+}
+
+export interface ActionPinVerificationValidationResult {
+  ok: boolean;
+  reason?: "missing_token" | "not_found";
+  verificationId?: number;
+  actionKey?: string | null;
+  actionReason?: string | null;
+  expiresAt?: string;
+}
+
 interface ActionPinRow {
   user_id: number;
   pin_hash: string;
@@ -36,6 +65,15 @@ interface ActionPinRow {
   pin_expires_at: string | null;
   failed_attempts: number;
   locked_until: string | null;
+}
+
+interface ActionPinVerificationRow {
+  id: number;
+  user_id: number;
+  action_key: string | null;
+  reason: string | null;
+  expires_at: string;
+  consumed_at: string | null;
 }
 
 export function validateActionPinFormat(pin: unknown): boolean {
@@ -65,6 +103,10 @@ async function getActionPinRow(userId: UserId, executor: DbExecutor = pool): Pro
 
 function shouldWriteAudit(executor: DbExecutor): boolean {
   return executor === pool;
+}
+
+function hashVerificationToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 export async function getActionPinStatus(userId: UserId, executor: DbExecutor = pool): Promise<ActionPinStatus> {
@@ -293,5 +335,98 @@ export async function verifyActionPin(
     failedAttempts: Number(updated?.failed_attempts ?? 0),
     lockedUntil: updated?.locked_until ?? null,
     pinExpiresAt: updated?.pin_expires_at ?? null,
+  };
+}
+
+export async function createActionPinVerification({
+  userId,
+  actionKey = null,
+  reason = null,
+  ttlSeconds,
+  ipAddress = null,
+  userAgent = null,
+  executor = pool,
+}: ActionPinVerificationInput): Promise<{ token: string; expiresAt: string; verificationId: number }> {
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = hashVerificationToken(token);
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  const { rows } = await executor.query(
+    `
+      insert into action_pin_verifications (
+        user_id,
+        action_key,
+        reason,
+        verification_token_hash,
+        expires_at,
+        ip_address,
+        user_agent
+      )
+      values ($1, $2, $3, $4, $5::timestamptz, $6, $7)
+      returning id, expires_at
+    `,
+    [userId, actionKey, reason, tokenHash, expiresAt, ipAddress, userAgent]
+  );
+  const row = rows[0] as { id?: number; expires_at?: string } | undefined;
+  return { token, expiresAt: String(row?.expires_at ?? expiresAt), verificationId: Number(row?.id ?? 0) };
+}
+
+export async function validateActionPinVerification({
+  userId,
+  token,
+  actionKey = null,
+  consume,
+  requireActionScoped = false,
+  executor = pool,
+}: ActionPinVerificationValidationInput): Promise<ActionPinVerificationValidationResult> {
+  const cleanToken = String(token ?? "").trim();
+  if (!cleanToken) {
+    return { ok: false, reason: "missing_token" };
+  }
+
+  const tokenHash = hashVerificationToken(cleanToken);
+  const { rows } = await executor.query(
+    `
+      select id, user_id, action_key, reason, expires_at, consumed_at
+      from action_pin_verifications
+      where user_id = $1
+        and verification_token_hash = $2
+        and consumed_at is null
+        and expires_at > now()
+        and (
+          $3::text is null
+          or ($4::boolean = true and action_key = $3::text)
+          or ($4::boolean = false and (action_key is null or action_key = $3::text))
+        )
+      order by created_at desc
+      limit 1
+    `,
+    [userId, tokenHash, actionKey, requireActionScoped]
+  );
+  const row = rows[0] as unknown as ActionPinVerificationRow | undefined;
+  if (!row) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  if (consume) {
+    const consumed = await executor.query(
+      `
+        update action_pin_verifications
+        set consumed_at = now()
+        where id = $1 and consumed_at is null
+        returning id
+      `,
+      [row.id]
+    );
+    if (!consumed.rows[0]) {
+      return { ok: false, reason: "not_found" };
+    }
+  }
+
+  return {
+    ok: true,
+    verificationId: row.id,
+    actionKey: row.action_key,
+    actionReason: row.reason,
+    expiresAt: row.expires_at,
   };
 }

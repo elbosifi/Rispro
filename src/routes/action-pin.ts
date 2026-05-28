@@ -1,7 +1,6 @@
 import express, { Request, Response } from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import {
-  buildActionPinVerificationToken,
   hasRecentActionPinVerification,
   parseActionKey,
   writeActionPinVerificationCookie,
@@ -12,6 +11,7 @@ import { asUnknownRecord } from "../utils/records.js";
 import { authenticateUser } from "../services/auth-service.js";
 import {
   clearActionPin,
+  createActionPinVerification,
   getActionPinStatus,
   setActionPin,
   verifyActionPin,
@@ -90,10 +90,17 @@ actionPinRouter.post(
       return;
     }
 
-    const expiresAt = new Date(Date.now() + policy.verificationTtlSeconds * 1000).toISOString();
-    const token = buildActionPinVerificationToken(request.user, policy.verificationTtlSeconds, actionKey);
-    writeActionPinVerificationCookie(res, token, policy.verificationTtlSeconds);
-    res.json({ ok: true, expiresAt });
+    const reason = asString(body.reason).trim() || null;
+    const verification = await createActionPinVerification({
+      userId: request.user.sub,
+      actionKey: actionKey ?? null,
+      reason,
+      ttlSeconds: policy.verificationTtlSeconds,
+      ipAddress: req.ip ?? null,
+      userAgent: req.get("user-agent") ?? null,
+    });
+    writeActionPinVerificationCookie(res, verification.token, policy.verificationTtlSeconds);
+    res.json({ ok: true, expiresAt: verification.expiresAt });
   })
 );
 
@@ -109,7 +116,8 @@ actionPinRouter.post(
     }
 
     const status = await getActionPinStatus(request.user.sub);
-    if (status.hasPin && policy.requirePinToViewOwnPinSettings && !hasRecentActionPinVerification(request)) {
+    const recentVerification = await hasRecentActionPinVerification(request);
+    if (status.hasPin && policy.requirePinToViewOwnPinSettings && !recentVerification.ok) {
       const currentPassword = asString(body.currentPassword);
       if (!currentPassword) {
         throw new HttpError(403, "Recent Action PIN verification or current password is required.");

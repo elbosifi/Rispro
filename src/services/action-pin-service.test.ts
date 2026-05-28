@@ -19,13 +19,30 @@ interface PinRow {
   pin_expires_at: string | null;
 }
 
-type TestExecutor = DbExecutor & { readonly row: PinRow | null };
+interface VerificationRow {
+  id: number;
+  user_id: number;
+  action_key: string | null;
+  reason: string | null;
+  verification_token_hash: string;
+  expires_at: string;
+  consumed_at: string | null;
+}
+
+type TestExecutor = DbExecutor & {
+  readonly row: PinRow | null;
+  readonly verifications: VerificationRow[];
+};
 
 function makeExecutor(initial?: PinRow): TestExecutor {
   let row = initial ?? null;
+  const verifications: VerificationRow[] = [];
   return {
     get row() {
       return row;
+    },
+    get verifications() {
+      return verifications;
     },
     async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<DbQueryResult<T>> {
       const result = (rows: unknown[]): DbQueryResult<T> => ({ rows: rows as T[] });
@@ -60,6 +77,38 @@ function makeExecutor(initial?: PinRow): TestExecutor {
         const deleted = row;
         row = null;
         return result(deleted ? [deleted] : []);
+      }
+      if (sql.includes("insert into action_pin_verifications")) {
+        const created: VerificationRow = {
+          id: verifications.length + 1,
+          user_id: Number(params[0]),
+          action_key: params[1] == null ? null : String(params[1]),
+          reason: params[2] == null ? null : String(params[2]),
+          verification_token_hash: String(params[3]),
+          expires_at: String(params[4]),
+          consumed_at: null,
+        };
+        verifications.push(created);
+        return result([created]);
+      }
+      if (sql.includes("from action_pin_verifications")) {
+        const userId = Number(params[0]);
+        const tokenHash = String(params[1]);
+        const actionKey = params[2] == null ? null : String(params[2]);
+        const row = verifications.find((item) =>
+          item.user_id === userId &&
+          item.verification_token_hash === tokenHash &&
+          item.consumed_at == null &&
+          new Date(item.expires_at).getTime() > Date.now() &&
+          (item.action_key == null || item.action_key === actionKey)
+        );
+        return result(row ? [row] : []);
+      }
+      if (sql.includes("update action_pin_verifications")) {
+        const id = Number(params[0]);
+        const row = verifications.find((item) => item.id === id);
+        if (row) row.consumed_at = new Date().toISOString();
+        return result(row ? [row] : []);
       }
       throw new Error(`Unhandled SQL: ${sql}`);
     },
@@ -156,5 +205,94 @@ describe("action PIN service", () => {
     assert.equal(result.hadPin, true);
     assert.equal(executor.row, null);
     assert.equal("pinHash" in result, false);
+  });
+
+  it("required_after_inactivity can reuse verification within TTL", async () => {
+    const { createActionPinVerification, validateActionPinVerification } = await import("./action-pin-service.js");
+    const executor = makeExecutor();
+    const created = await createActionPinVerification({
+      userId: 10,
+      actionKey: "patient_create",
+      reason: null,
+      ttlSeconds: 300,
+      ipAddress: null,
+      userAgent: null,
+      executor,
+    });
+
+    const first = await validateActionPinVerification({
+      userId: 10,
+      token: created.token,
+      actionKey: "patient_create",
+      consume: false,
+      executor,
+    });
+    const second = await validateActionPinVerification({
+      userId: 10,
+      token: created.token,
+      actionKey: "patient_create",
+      consume: false,
+      executor,
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(executor.verifications[0]?.consumed_at, null);
+  });
+
+  it("required_every_time consumes verification after one use", async () => {
+    const { createActionPinVerification, validateActionPinVerification } = await import("./action-pin-service.js");
+    const executor = makeExecutor();
+    const created = await createActionPinVerification({
+      userId: 10,
+      actionKey: "patient_create",
+      reason: null,
+      ttlSeconds: 300,
+      ipAddress: null,
+      userAgent: null,
+      executor,
+    });
+
+    const first = await validateActionPinVerification({
+      userId: 10,
+      token: created.token,
+      actionKey: "patient_create",
+      consume: true,
+      executor,
+    });
+    const second = await validateActionPinVerification({
+      userId: 10,
+      token: created.token,
+      actionKey: "patient_create",
+      consume: true,
+      executor,
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, false);
+    assert.equal(second.reason, "not_found");
+    assert.ok(executor.verifications[0]?.consumed_at);
+  });
+
+  it("rejects expired, other-user, and other-action verifications", async () => {
+    const { createActionPinVerification, validateActionPinVerification } = await import("./action-pin-service.js");
+    const executor = makeExecutor();
+    const created = await createActionPinVerification({
+      userId: 10,
+      actionKey: "patient_create",
+      reason: "correcting identifier",
+      ttlSeconds: 300,
+      ipAddress: null,
+      userAgent: null,
+      executor,
+    });
+
+    assert.equal((await validateActionPinVerification({ userId: 11, token: created.token, actionKey: "patient_create", consume: false, executor })).ok, false);
+    assert.equal((await validateActionPinVerification({ userId: 10, token: created.token, actionKey: "patient_update", consume: false, executor })).ok, false);
+
+    executor.verifications[0]!.expires_at = "2000-01-01T00:00:00.000Z";
+    const expired = await validateActionPinVerification({ userId: 10, token: created.token, actionKey: "patient_create", consume: false, executor });
+    assert.equal(expired.ok, false);
+    assert.equal(expired.reason, "not_found");
   });
 });

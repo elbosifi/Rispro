@@ -1,47 +1,24 @@
 import type { NextFunction, Request, Response } from "express";
-import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import {
   isActionPinActionKey,
   readActionPinPolicy,
   resolveActionPinRequirement,
   type ActionPinActionKey,
+  type ActionPinMode,
   type ActionPinPolicy,
 } from "../services/action-pin-policy-service.js";
+import { validateActionPinVerification, type ActionPinVerificationValidationResult } from "../services/action-pin-service.js";
 import { HttpError } from "../utils/http-error.js";
-import type { AuthenticatedUserContext } from "../types/http.js";
 
 export const ACTION_PIN_COOKIE_NAME = "rispro_action_pin";
 export const ACTION_PIN_TOKEN_PURPOSE = "action-pin";
 
-interface ActionPinTokenPayload extends AuthenticatedUserContext {
-  purpose: "action-pin";
-  actionKey?: string;
-}
-
 type PolicyReader = () => Promise<ActionPinPolicy>;
+type VerificationValidator = typeof validateActionPinVerification;
 
 function readActionPinToken(req: Request): string {
   return req.cookies?.[ACTION_PIN_COOKIE_NAME] ?? "";
-}
-
-function getReason(req: Request): string {
-  const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
-  return String(body.actionPinReason ?? body.reason ?? "").trim();
-}
-
-export function buildActionPinVerificationToken(user: AuthenticatedUserContext, ttlSeconds: number, actionKey?: string): string {
-  return jwt.sign(
-    {
-      sub: user.sub,
-      username: user.username,
-      role: user.role,
-      purpose: ACTION_PIN_TOKEN_PURPOSE,
-      actionKey,
-    },
-    env.jwtSecret,
-    { expiresIn: `${ttlSeconds}s` }
-  );
 }
 
 export function writeActionPinVerificationCookie(res: Response, token: string, ttlSeconds: number): void {
@@ -63,23 +40,29 @@ export function clearActionPinVerificationCookie(res: Response): void {
   });
 }
 
-export function hasRecentActionPinVerification(req: Request, actionKey?: ActionPinActionKey): boolean {
-  try {
-    const token = readActionPinToken(req);
-    if (!token || !req.user) return false;
-
-    const payload = jwt.verify(token, env.jwtSecret) as ActionPinTokenPayload;
-    if (payload?.purpose !== ACTION_PIN_TOKEN_PURPOSE || Number(payload.sub) !== Number(req.user.sub)) {
-      return false;
-    }
-
-    return !actionKey || !payload.actionKey || payload.actionKey === actionKey;
-  } catch {
-    return false;
-  }
+export async function hasRecentActionPinVerification(
+  req: Request,
+  actionKey?: ActionPinActionKey,
+  mode: ActionPinMode = "required_after_inactivity",
+  validateVerification: VerificationValidator = validateActionPinVerification
+): Promise<ActionPinVerificationValidationResult> {
+  if (!req.user) return { ok: false, reason: "missing_token" };
+  const consume = mode === "required_every_time" || mode === "required_every_time_with_reason";
+  const requireActionScoped = consume;
+  return validateVerification({
+    userId: req.user.sub,
+    token: readActionPinToken(req),
+    actionKey: actionKey ?? null,
+    consume,
+    requireActionScoped,
+  });
 }
 
-export function requireActionPin(actionKey: ActionPinActionKey, readPolicy: PolicyReader = readActionPinPolicy) {
+export function requireActionPin(
+  actionKey: ActionPinActionKey,
+  readPolicy: PolicyReader = readActionPinPolicy,
+  validateVerification: VerificationValidator = validateActionPinVerification
+) {
   return async function actionPinGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       if (!req.user) {
@@ -99,17 +82,18 @@ export function requireActionPin(actionKey: ActionPinActionKey, readPolicy: Poli
         return;
       }
 
-      if (requirement.requiresReason && !getReason(req)) {
-        res.status(403).json({ error: "action_pin_reason_required", actionKey });
-        return;
-      }
-
-      if (!hasRecentActionPinVerification(req, actionKey)) {
+      const verification = await hasRecentActionPinVerification(req, actionKey, requirement.mode, validateVerification);
+      if (!verification.ok) {
         res.status(403).json({
           error: "action_pin_required",
           actionKey,
           requiresReason: requirement.requiresReason,
         });
+        return;
+      }
+
+      if (requirement.requiresReason && !String(verification.actionReason ?? "").trim()) {
+        res.status(403).json({ error: "action_pin_reason_required", actionKey });
         return;
       }
 
