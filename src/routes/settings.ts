@@ -70,6 +70,7 @@ import {
 } from "../services/settings-catalog-import-export-service.js";
 import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-service.js";
 import { readPageVisibilityMatrix, savePageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
+import { readActionPinPolicy, saveActionPinPolicy } from "../services/action-pin-policy-service.js";
 import { ensurePatientWebPushConfig } from "../services/patient-web-push-service.js";
 import {
   dismissPatientDuplicateCandidate,
@@ -245,6 +246,35 @@ settingsRouter.put(
     const body = asUnknownRecord(request.body ?? {});
     const matrix = await savePageVisibilityMatrix(body.matrix, request.user.sub as UserId);
     res.json({ matrix });
+  })
+);
+
+settingsRouter.get(
+  "/users-and-roles/action-pin-policy",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") {
+      res.status(403).json({ message: "Only super_admin can view Action PIN policy." });
+      return;
+    }
+
+    const policy = await readActionPinPolicy();
+    res.json({ policy });
+  })
+);
+
+settingsRouter.put(
+  "/users-and-roles/action-pin-policy",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") {
+      res.status(403).json({ message: "Only super_admin can update Action PIN policy." });
+      return;
+    }
+
+    const body = asUnknownRecord(request.body ?? {});
+    const policy = await saveActionPinPolicy(body.policy ?? body, request.user.sub as UserId);
+    res.json({ policy });
   })
 );
 

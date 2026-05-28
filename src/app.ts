@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { env } from "./config/env.js";
 import { pingDatabase } from "./db/pool.js";
 import { authRouter } from "./routes/auth.js";
+import { actionPinRouter } from "./routes/action-pin.js";
 import { usersRouter } from "./routes/users.js";
 import { patientsRouter } from "./routes/patients.js";
 import { queueRouter } from "./routes/queue.js";
@@ -116,6 +117,7 @@ export function createApp(): Application {
 
   app.use("/api/auth", authRouter);
   app.use("/api", blockForcedPasswordChange);
+  app.use("/api/action-pin", actionPinRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/patients", patientsRouter);
   app.use("/api/queue", queueRouter);
