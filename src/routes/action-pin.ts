@@ -12,8 +12,11 @@ import { authenticateUser } from "../services/auth-service.js";
 import {
   clearActionPin,
   createActionPinVerification,
+  expireActionPinForUser,
   getActionPinStatus,
+  listActionPinAdminUsers,
   setActionPin,
+  unlockActionPinForUser,
   verifyActionPin,
 } from "../services/action-pin-service.js";
 import {
@@ -31,6 +34,68 @@ interface ActionPinRequest extends Request {
 export const actionPinRouter = express.Router();
 
 actionPinRouter.use(requireAuth);
+
+function requireActionPinAdmin(request: ActionPinRequest): void {
+  if (request.user.role !== "super_admin") {
+    throw new HttpError(403, "Only super_admin can manage Action PIN administration.");
+  }
+}
+
+function parseUserIdParam(value: unknown): UserId {
+  const userId = Number(value);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    throw new HttpError(400, "Invalid user ID.");
+  }
+  return userId as UserId;
+}
+
+actionPinRouter.get(
+  "/admin/users",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as ActionPinRequest;
+    requireActionPinAdmin(request);
+    const users = await listActionPinAdminUsers(request.user.sub);
+    res.json({ users });
+  })
+);
+
+actionPinRouter.post(
+  "/admin/users/:userId/reset",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as ActionPinRequest;
+    requireActionPinAdmin(request);
+    const result = await clearActionPin(parseUserIdParam(req.params.userId), request.user.sub);
+    res.json({ ok: true, ...result });
+  })
+);
+
+actionPinRouter.post(
+  "/admin/users/:userId/unlock",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as ActionPinRequest;
+    requireActionPinAdmin(request);
+    const result = await unlockActionPinForUser(parseUserIdParam(req.params.userId), request.user.sub);
+    res.json({ ok: true, ...result });
+  })
+);
+
+actionPinRouter.post(
+  "/admin/users/:userId/expire",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as ActionPinRequest;
+    requireActionPinAdmin(request);
+    const result = await expireActionPinForUser(parseUserIdParam(req.params.userId), request.user.sub);
+    res.json({ ok: true, ...result });
+  })
+);
 
 actionPinRouter.get(
   "/status",
@@ -140,12 +205,7 @@ actionPinRouter.post(
       throw new HttpError(403, "Only super_admin can reset Action PINs.");
     }
 
-    const userId = Number(req.params.userId);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      throw new HttpError(400, "Invalid user ID.");
-    }
-
-    const result = await clearActionPin(userId as UserId, request.user.sub);
+    const result = await clearActionPin(parseUserIdParam(req.params.userId), request.user.sub);
     res.json({ ok: true, ...result });
   })
 );

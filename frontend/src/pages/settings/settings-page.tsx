@@ -65,6 +65,7 @@ import AppointmentSlipSettingsSection from "./appointment-slip-settings-section"
 import PatientQrSettingsSection from "./patient-qr-settings-section";
 import PatientDuplicateResolverSection from "./patient-duplicate-resolver-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
+import ActionPinPolicySection from "./action-pin-policy-section";
 import type {
   User,
   DoctorProfile,
@@ -199,6 +200,7 @@ type SettingsSection =
   | "orthanc_mwl_sync"
   | "sante_worklist_hl7"
   | "users"
+  | "action_pin_policy"
   | "role_page_access"
   | "audit_log"
   | "exam_types"
@@ -225,6 +227,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "orthanc_mwl_sync",
   "sante_worklist_hl7",
   "users",
+  "action_pin_policy",
   "role_page_access",
   "audit_log",
   "exam_types",
@@ -261,6 +264,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   sante_worklist_hl7: "integrations",
   sonicdicom_reports: "integrations",
   users: "admin",
+  action_pin_policy: "admin",
   role_page_access: "admin",
   audit_log: "admin",
   documents_and_uploads: "system",
@@ -285,6 +289,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "sonicdicom_reports") {
     return "SonicDICOM Reports";
+  }
+  if (section === "action_pin_policy") {
+    return "Action PIN Policy";
   }
   if (section === "sante_worklist_hl7") {
     return "Sante Worklist Server";
@@ -442,6 +449,7 @@ export default function SettingsPage() {
             <h3 className="text-xl font-bold text-stone-900 dark:text-white mb-4">{sectionLabel(t, section)}</h3>
 
             {section === "users" && <UsersSection onReAuthRequired={requestReAuth} />}
+            {section === "action_pin_policy" && <ActionPinPolicySection onReAuthRequired={requestReAuth} />}
             {section === "role_page_access" && <RolePageAccessSection onReAuthRequired={requestReAuth} />}
             {section === "audit_log" && <AuditSection onReAuthRequired={requestReAuth} />}
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}

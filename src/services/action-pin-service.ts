@@ -20,6 +20,25 @@ export interface ActionPinStatus {
   failedAttempts: number;
 }
 
+export interface ActionPinAdminUserRow {
+  userId: number;
+  username: string;
+  fullName: string;
+  role: string;
+  isActive: boolean;
+  hasActionPin: boolean;
+  pinRotatedAt: string | null;
+  pinExpiresAt: string | null;
+  isExpired: boolean;
+  failedAttempts: number;
+  lockedUntil: string | null;
+  isLocked: boolean;
+  updatedAt: string | null;
+  updatedByUserId: number | null;
+  updatedByUsername: string | null;
+  updatedByFullName: string | null;
+}
+
 export type ActionPinVerifyFailureReason = "not_set" | "invalid_format" | "invalid" | "locked" | "expired";
 
 export interface ActionPinVerifyResult {
@@ -76,6 +95,23 @@ interface ActionPinVerificationRow {
   consumed_at: string | null;
 }
 
+interface ActionPinAdminDbRow {
+  user_id: number;
+  username: string;
+  full_name: string;
+  role: string;
+  is_active: boolean;
+  has_action_pin: boolean;
+  pin_rotated_at: string | null;
+  pin_expires_at: string | null;
+  failed_attempts: number | null;
+  locked_until: string | null;
+  updated_at: string | null;
+  updated_by_user_id: number | null;
+  updated_by_username: string | null;
+  updated_by_full_name: string | null;
+}
+
 export function validateActionPinFormat(pin: unknown): boolean {
   return /^\d{4}$/.test(String(pin ?? ""));
 }
@@ -119,6 +155,69 @@ export async function getActionPinStatus(userId: UserId, executor: DbExecutor = 
     isExpired: isPast(row?.pin_expires_at),
     failedAttempts: Number(row?.failed_attempts ?? 0),
   };
+}
+
+function mapActionPinAdminUser(row: ActionPinAdminDbRow): ActionPinAdminUserRow {
+  return {
+    userId: Number(row.user_id),
+    username: row.username,
+    fullName: row.full_name,
+    role: row.role,
+    isActive: row.is_active,
+    hasActionPin: row.has_action_pin,
+    pinRotatedAt: row.pin_rotated_at,
+    pinExpiresAt: row.pin_expires_at,
+    isExpired: isPast(row.pin_expires_at),
+    failedAttempts: Number(row.failed_attempts ?? 0),
+    lockedUntil: row.locked_until,
+    isLocked: isFuture(row.locked_until),
+    updatedAt: row.updated_at,
+    updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id),
+    updatedByUsername: row.updated_by_username,
+    updatedByFullName: row.updated_by_full_name,
+  };
+}
+
+export async function listActionPinAdminUsers(
+  viewedByUserId: NullableUserId,
+  executor: DbExecutor = pool
+): Promise<ActionPinAdminUserRow[]> {
+  const { rows } = await executor.query<ActionPinAdminDbRow>(
+    `
+      select
+        users.id as user_id,
+        users.username,
+        users.full_name,
+        users.role,
+        users.is_active,
+        (user_action_pins.user_id is not null) as has_action_pin,
+        user_action_pins.pin_rotated_at,
+        user_action_pins.pin_expires_at,
+        user_action_pins.failed_attempts,
+        user_action_pins.locked_until,
+        user_action_pins.updated_at,
+        user_action_pins.updated_by_user_id,
+        updated_by.username as updated_by_username,
+        updated_by.full_name as updated_by_full_name
+      from users
+      left join user_action_pins on user_action_pins.user_id = users.id
+      left join users updated_by on updated_by.id = user_action_pins.updated_by_user_id
+      order by users.is_active desc, users.full_name asc, users.username asc
+    `
+  );
+
+  if (shouldWriteAudit(executor)) {
+    await logAuditEntry({
+      entityType: "action_pin",
+      entityId: null,
+      actionType: "action_pin_admin_list_viewed",
+      oldValues: null,
+      newValues: { viewedUserCount: rows.length },
+      changedByUserId: viewedByUserId,
+    });
+  }
+
+  return rows.map((row) => mapActionPinAdminUser(row as ActionPinAdminDbRow));
 }
 
 export async function setActionPin(
@@ -195,6 +294,73 @@ export async function clearActionPin(
   }
 
   return { hadPin };
+}
+
+export async function unlockActionPinForUser(
+  userId: UserId,
+  updatedByUserId: NullableUserId,
+  executor: DbExecutor = pool
+): Promise<{ hadPin: boolean; failedAttempts: number; lockedUntil: string | null }> {
+  const previous = await getActionPinRow(userId, executor);
+  const { rows } = await executor.query(
+    `
+      update user_action_pins
+      set failed_attempts = 0,
+          locked_until = null,
+          updated_at = now(),
+          updated_by_user_id = $2
+      where user_id = $1
+      returning failed_attempts, locked_until
+    `,
+    [userId, updatedByUserId]
+  );
+  const row = rows[0] as Pick<ActionPinRow, "failed_attempts" | "locked_until"> | undefined;
+
+  if (shouldWriteAudit(executor)) {
+    await logAuditEntry({
+      entityType: "action_pin",
+      entityId: userId,
+      actionType: "action_pin_unlocked",
+      oldValues: { hadPin: Boolean(previous), failedAttempts: previous?.failed_attempts ?? 0, lockoutUntil: previous?.locked_until ?? null },
+      newValues: { userId, failedAttempts: Number(row?.failed_attempts ?? 0), lockoutUntil: row?.locked_until ?? null },
+      changedByUserId: updatedByUserId,
+    });
+  }
+
+  return { hadPin: Boolean(row), failedAttempts: Number(row?.failed_attempts ?? 0), lockedUntil: row?.locked_until ?? null };
+}
+
+export async function expireActionPinForUser(
+  userId: UserId,
+  updatedByUserId: NullableUserId,
+  executor: DbExecutor = pool
+): Promise<{ hadPin: boolean; pinExpiresAt: string | null }> {
+  const previous = await getActionPinRow(userId, executor);
+  const { rows } = await executor.query(
+    `
+      update user_action_pins
+      set pin_expires_at = now(),
+          updated_at = now(),
+          updated_by_user_id = $2
+      where user_id = $1
+      returning pin_expires_at
+    `,
+    [userId, updatedByUserId]
+  );
+  const row = rows[0] as Pick<ActionPinRow, "pin_expires_at"> | undefined;
+
+  if (shouldWriteAudit(executor)) {
+    await logAuditEntry({
+      entityType: "action_pin",
+      entityId: userId,
+      actionType: "action_pin_expired_by_admin",
+      oldValues: { hadPin: Boolean(previous), pinExpiresAt: previous?.pin_expires_at ?? null },
+      newValues: { userId, pinExpiresAt: row?.pin_expires_at ?? null },
+      changedByUserId: updatedByUserId,
+    });
+  }
+
+  return { hadPin: Boolean(row), pinExpiresAt: row?.pin_expires_at ?? null };
 }
 
 async function incrementFailedAttempt(

@@ -25,6 +25,16 @@ describe("action PIN route guardrails", () => {
     assert.doesNotMatch(service, /oldValues:\s*\{[^}]*pinHash/s);
     assert.doesNotMatch(service, /oldValues:\s*\{[^}]*pin_hash/s);
   });
+
+  it("protects admin user PIN management routes with supervisor reauth and super_admin checks", async () => {
+    const routes = await readFile("src/routes/action-pin.ts", "utf-8");
+
+    assert.match(routes, /"\/admin\/users",\s*requireSupervisor,\s*requireRecentSupervisorReauth,\s*asyncRoute/s);
+    assert.match(routes, /"\/admin\/users\/:userId\/reset",\s*requireSupervisor,\s*requireRecentSupervisorReauth,\s*asyncRoute/s);
+    assert.match(routes, /"\/admin\/users\/:userId\/unlock",\s*requireSupervisor,\s*requireRecentSupervisorReauth,\s*asyncRoute/s);
+    assert.match(routes, /"\/admin\/users\/:userId\/expire",\s*requireSupervisor,\s*requireRecentSupervisorReauth,\s*asyncRoute/s);
+    assert.match(routes, /request\.user\.role !== "super_admin"/);
+  });
 });
 
 describe("action PIN route enforcement wiring", () => {

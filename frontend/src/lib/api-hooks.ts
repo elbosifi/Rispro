@@ -1,5 +1,6 @@
 import { ApiError, api } from "@/lib/api-client";
 import { normalizePageVisibilityMatrix, type PageVisibilityMatrix } from "@/lib/page-visibility";
+import { normalizeActionPinPolicy, type ActionPinPolicy } from "@/lib/action-pin-policy";
 import {
   mapPatient,
   mapPatients,
@@ -2474,6 +2475,55 @@ export async function savePageVisibilityMatrix(matrix: PageVisibilityMatrix): Pr
     body: JSON.stringify({ matrix }),
   });
   return normalizePageVisibilityMatrix(raw.matrix ?? {});
+}
+
+export async function fetchActionPinPolicy(): Promise<ActionPinPolicy> {
+  const raw = await api<{ policy?: unknown }>("/settings/users-and-roles/action-pin-policy");
+  return normalizeActionPinPolicy(raw.policy ?? {});
+}
+
+export async function saveActionPinPolicy(policy: ActionPinPolicy): Promise<ActionPinPolicy> {
+  const raw = await api<{ policy?: unknown }>("/settings/users-and-roles/action-pin-policy", {
+    method: "PUT",
+    body: JSON.stringify({ policy }),
+  });
+  return normalizeActionPinPolicy(raw.policy ?? policy);
+}
+
+export interface ActionPinAdminUser {
+  userId: number;
+  username: string;
+  fullName: string;
+  role: string;
+  isActive: boolean;
+  hasActionPin: boolean;
+  pinRotatedAt: string | null;
+  pinExpiresAt: string | null;
+  isExpired: boolean;
+  failedAttempts: number;
+  lockedUntil: string | null;
+  isLocked: boolean;
+  updatedAt: string | null;
+  updatedByUserId: number | null;
+  updatedByUsername?: string | null;
+  updatedByFullName?: string | null;
+}
+
+export async function fetchActionPinAdminUsers(): Promise<ActionPinAdminUser[]> {
+  const raw = await api<{ users?: ActionPinAdminUser[] }>("/action-pin/admin/users");
+  return raw.users ?? [];
+}
+
+export async function resetUserActionPin(userId: number): Promise<{ ok: true; hadPin: boolean }> {
+  return api<{ ok: true; hadPin: boolean }>(`/action-pin/admin/users/${userId}/reset`, { method: "POST" });
+}
+
+export async function unlockUserActionPin(userId: number): Promise<{ ok: true; hadPin: boolean }> {
+  return api<{ ok: true; hadPin: boolean }>(`/action-pin/admin/users/${userId}/unlock`, { method: "POST" });
+}
+
+export async function expireUserActionPin(userId: number): Promise<{ ok: true; hadPin: boolean; pinExpiresAt: string | null }> {
+  return api<{ ok: true; hadPin: boolean; pinExpiresAt: string | null }>(`/action-pin/admin/users/${userId}/expire`, { method: "POST" });
 }
 
 export async function fetchSonicDicomSettings(): Promise<Record<string, unknown>> {

@@ -73,6 +73,11 @@ function makeExecutor(initial?: PinRow): TestExecutor {
         row = { ...row, failed_attempts: 0, locked_until: null };
         return result([row]);
       }
+      if (sql.includes("pin_expires_at = now()")) {
+        if (!row) return result([]);
+        row = { ...row, pin_expires_at: new Date().toISOString() };
+        return result([row]);
+      }
       if (sql.includes("delete from user_action_pins")) {
         const deleted = row;
         row = null;
@@ -218,6 +223,93 @@ describe("action PIN service", () => {
     assert.equal(result.hadPin, true);
     assert.equal(executor.row, null);
     assert.equal("pinHash" in result, false);
+  });
+
+  it("lists admin readiness rows without exposing secret fields", async () => {
+    const { listActionPinAdminUsers } = await import("./action-pin-service.js");
+    const executor: DbExecutor = {
+      async query<T = Record<string, unknown>>(sql: string): Promise<DbQueryResult<T>> {
+        assert.match(sql, /from users/s);
+        assert.doesNotMatch(sql, /pin_hash/);
+        assert.doesNotMatch(sql, /verification_token_hash/);
+        return {
+          rows: [{
+            user_id: 10,
+            username: "front",
+            full_name: "Front Desk",
+            role: "receptionist",
+            is_active: true,
+            has_action_pin: true,
+            pin_rotated_at: "2026-01-01T00:00:00.000Z",
+            pin_expires_at: null,
+            failed_attempts: 1,
+            locked_until: null,
+            updated_at: "2026-01-02T00:00:00.000Z",
+            updated_by_user_id: 1,
+            updated_by_username: "admin",
+            updated_by_full_name: "Admin User",
+          }] as T[],
+        };
+      },
+    };
+
+    const rows = await listActionPinAdminUsers(1, executor);
+    const serialized = JSON.stringify(rows);
+
+    assert.equal(rows[0]?.hasActionPin, true);
+    assert.equal(rows[0]?.updatedByUsername, "admin");
+    assert.equal(serialized.includes("pin_hash"), false);
+    assert.equal(serialized.includes("pinHash"), false);
+    assert.equal(serialized.includes("verification_token_hash"), false);
+    assert.equal(serialized.includes("token"), false);
+  });
+
+  it("admin unlock clears lockout state", async () => {
+    const { unlockActionPinForUser } = await import("./action-pin-service.js");
+    const hash = await bcrypt.hash("1234", 10);
+    const executor = makeExecutor({
+      user_id: 10,
+      pin_hash: hash,
+      failed_attempts: 5,
+      locked_until: new Date(Date.now() + 60_000).toISOString(),
+      pin_expires_at: null,
+    });
+
+    const result = await unlockActionPinForUser(10, 1, executor);
+
+    assert.equal(result.hadPin, true);
+    assert.equal(result.failedAttempts, 0);
+    assert.equal(result.lockedUntil, null);
+    assert.equal(executor.row?.failed_attempts, 0);
+    assert.equal(executor.row?.locked_until, null);
+  });
+
+  it("admin expire marks an existing PIN expired", async () => {
+    const { expireActionPinForUser } = await import("./action-pin-service.js");
+    const hash = await bcrypt.hash("1234", 10);
+    const executor = makeExecutor({
+      user_id: 10,
+      pin_hash: hash,
+      failed_attempts: 0,
+      locked_until: null,
+      pin_expires_at: null,
+    });
+
+    const result = await expireActionPinForUser(10, 1, executor);
+
+    assert.equal(result.hadPin, true);
+    assert.ok(result.pinExpiresAt);
+    assert.equal(new Date(result.pinExpiresAt!).getTime() <= Date.now(), true);
+  });
+
+  it("admin audit metadata does not include PIN secrets", async () => {
+    const source = await import("node:fs/promises").then((fs) => fs.readFile("src/services/action-pin-service.ts", "utf-8"));
+    const adminAuditBlock = [
+      source.slice(source.indexOf("action_pin_admin_list_viewed"), source.indexOf("export async function setActionPin")),
+      source.slice(source.indexOf("action_pin_unlocked"), source.indexOf("async function incrementFailedAttempt")),
+    ].join("\n");
+
+    assert.doesNotMatch(adminAuditBlock, /pin_hash|pinHash|verification_token_hash|tokenHash|cookie/i);
   });
 
   it("required_after_inactivity can reuse verification within TTL", async () => {
