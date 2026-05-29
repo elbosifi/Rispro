@@ -53,6 +53,12 @@ import type {
   DoctorCase,
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
+  ReportingBoardBulkAssignResult,
+  ReportingBoardCaseRow,
+  ReportingBoardFilters,
+  ReportingBoardNotificationSettings,
+  ReportingBoardSavedView,
+  ReportingBoardSettings,
   RosterDutyTypeConfig,
   RosterShiftImportMapping,
   RosterXmlImportPreview,
@@ -705,6 +711,85 @@ export async function assignDoctorCase(
   payload: { doctorId: number; rosterAssignmentId?: number | null; reason?: string | null }
 ): Promise<{ assignmentId: number }> {
   return api<{ assignmentId: number }>(`/doctor/cases/${appointmentId}/assign-doctor`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+function reportingBoardParams(filters: ReportingBoardFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === "") return;
+    params.set(key, String(value));
+  });
+  return params;
+}
+
+export async function fetchReportingBoardSettings(): Promise<ReportingBoardSettings> {
+  const raw = await api<{ settings: ReportingBoardSettings }>("/doctor/reporting-board/settings");
+  return raw.settings;
+}
+
+export async function updateReportingBoardSettings(payload: ReportingBoardSettings): Promise<ReportingBoardSettings> {
+  const raw = await api<{ settings: ReportingBoardSettings }>("/doctor/reporting-board/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return raw.settings;
+}
+
+export async function fetchReportingBoardCases(filters: ReportingBoardFilters): Promise<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }> {
+  return api<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }>(`/doctor/reporting-board/cases?${reportingBoardParams(filters).toString()}`);
+}
+
+export async function fetchReportingBoardSavedViews(): Promise<ReportingBoardSavedView[]> {
+  const raw = await api<{ savedViews: ReportingBoardSavedView[] }>("/doctor/reporting-board/saved-views");
+  return raw.savedViews;
+}
+
+export async function createReportingBoardSavedView(payload: {
+  name: string;
+  filters: ReportingBoardFilters;
+  notificationSettings: ReportingBoardNotificationSettings;
+}): Promise<ReportingBoardSavedView> {
+  const raw = await api<{ savedView: ReportingBoardSavedView }>("/doctor/reporting-board/saved-views", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.savedView;
+}
+
+export async function updateReportingBoardSavedView(
+  id: number,
+  payload: {
+    name?: string;
+    filters?: ReportingBoardFilters;
+    notificationSettings?: ReportingBoardNotificationSettings;
+    active?: boolean;
+  }
+): Promise<ReportingBoardSavedView> {
+  const raw = await api<{ savedView: ReportingBoardSavedView }>(`/doctor/reporting-board/saved-views/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.savedView;
+}
+
+export async function fetchReportingBoardSavedViewByToken(token: string): Promise<ReportingBoardSavedView> {
+  const raw = await api<{ savedView: ReportingBoardSavedView }>(`/doctor/reporting-board/saved-views/token/${encodeURIComponent(token)}`);
+  return raw.savedView;
+}
+
+export async function bulkAssignNextReportingCases(payload: {
+  doctorId: number;
+  count: number;
+  filters?: ReportingBoardFilters | null;
+  savedViewId?: number | null;
+  token?: string | null;
+  unassignedOnly?: boolean | null;
+  reason: string;
+}): Promise<ReportingBoardBulkAssignResult> {
+  return api<ReportingBoardBulkAssignResult>("/doctor/reporting-board/bulk-assign-next", {
     method: "POST",
     body: JSON.stringify(payload),
   });

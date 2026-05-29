@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BriefcaseMedical,
   CalendarDays,
+  ClipboardList,
   LayoutDashboard,
   LogOut,
   Settings,
@@ -19,6 +20,7 @@ import { DoctorRosterPage } from "./doctor-roster-page";
 import { DoctorTeamWorkloadPage } from "./doctor-team-workload-page";
 import { DoctorAvailabilityPage } from "./doctor-availability-page";
 import { DoctorAdminDoctorsPage } from "./doctor-admin-doctors-page";
+import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -33,6 +35,7 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
 ];
 
 const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
+  { path: "/doctor/reporting-board", label: "Reporting Board", icon: ClipboardList, management: true },
   { path: "/doctor/roster-planner", label: "Roster Planner", icon: CalendarDays, management: true },
   { path: "/doctor/doctors-directory", label: "Doctors Directory", icon: Users, management: true },
   { path: "/doctor/advanced-setup", label: "Advanced Setup", icon: Settings, management: true },
@@ -223,6 +226,10 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route path="cases" element={<Navigate to="/doctor/today-cases" replace />} />
       <Route
+        path="reporting-board"
+        element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+      />
+      <Route
         path="roster-planner"
         element={canManageRoster ? <DoctorRosterPage me={me} management /> : <Navigate to="/doctor/my-work" replace />}
       />
@@ -274,9 +281,12 @@ export default function DoctorPage() {
     const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV : [];
     const byPath = new Map<string, DoctorPortalNavItem>();
     baseNav.forEach((item) => byPath.set(item.path, item));
-    if (canManageClinicalRoster(me)) byPath.set(SUPERVISOR_NAV[0].path, SUPERVISOR_NAV[0]);
-    if (canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[1].path, SUPERVISOR_NAV[1]);
-    if (canManageClinicalRoster(me) || canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[2].path, SUPERVISOR_NAV[2]);
+    if (canManageClinicalRoster(me)) {
+      byPath.set(SUPERVISOR_NAV[0].path, SUPERVISOR_NAV[0]);
+      byPath.set(SUPERVISOR_NAV[1].path, SUPERVISOR_NAV[1]);
+    }
+    if (canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[2].path, SUPERVISOR_NAV[2]);
+    if (canManageClinicalRoster(me) || canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[3].path, SUPERVISOR_NAV[3]);
     return [...byPath.values()];
   }, [me]);
 

@@ -63,6 +63,14 @@ const setDoctorUserActiveMock = vi.fn();
 const inspectDoctorImportMock = vi.fn();
 const previewDoctorImportMock = vi.fn();
 const confirmDoctorImportMock = vi.fn();
+const fetchReportingBoardSettingsMock = vi.fn();
+const updateReportingBoardSettingsMock = vi.fn();
+const fetchReportingBoardCasesMock = vi.fn();
+const fetchReportingBoardSavedViewsMock = vi.fn();
+const createReportingBoardSavedViewMock = vi.fn();
+const updateReportingBoardSavedViewMock = vi.fn();
+const fetchReportingBoardSavedViewByTokenMock = vi.fn();
+const bulkAssignNextReportingCasesMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -122,6 +130,14 @@ vi.mock("@/lib/api-hooks", () => ({
   inspectDoctorImport: (...args: unknown[]) => inspectDoctorImportMock(...args),
   previewDoctorImport: (...args: unknown[]) => previewDoctorImportMock(...args),
   confirmDoctorImport: (...args: unknown[]) => confirmDoctorImportMock(...args),
+  fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
+  updateReportingBoardSettings: (...args: unknown[]) => updateReportingBoardSettingsMock(...args),
+  fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
+  fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
+  createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
+  updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
+  fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
+  bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -238,6 +254,14 @@ describe("Doctor Portal shell", () => {
     inspectDoctorImportMock.mockReset();
     previewDoctorImportMock.mockReset();
     confirmDoctorImportMock.mockReset();
+    fetchReportingBoardSettingsMock.mockReset();
+    updateReportingBoardSettingsMock.mockReset();
+    fetchReportingBoardCasesMock.mockReset();
+    fetchReportingBoardSavedViewsMock.mockReset();
+    createReportingBoardSavedViewMock.mockReset();
+    updateReportingBoardSavedViewMock.mockReset();
+    fetchReportingBoardSavedViewByTokenMock.mockReset();
+    bulkAssignNextReportingCasesMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -376,6 +400,21 @@ describe("Doctor Portal shell", () => {
       skippedRows: 0,
       failedRows: [],
     });
+    fetchReportingBoardSettingsMock.mockResolvedValue({
+      cutoffMode: "days_back",
+      defaultCutoffDate: null,
+      daysBack: 14,
+      enabledModalityCodes: ["CT", "MR"],
+      defaultRequiresReport: true,
+      defaultReportStatusFilter: "required_not_final",
+    });
+    updateReportingBoardSettingsMock.mockResolvedValue({});
+    fetchReportingBoardCasesMock.mockResolvedValue({ cases: [], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
+    fetchReportingBoardSavedViewsMock.mockResolvedValue([]);
+    createReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
+    updateReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
+    fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: { priorityCode: "urgent" }, notificationSettings: {}, active: true });
+    bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [1, 2], skipped: [] });
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -1232,6 +1271,19 @@ describe("Doctor Portal shell", () => {
 
     expect(await screen.findByText("Today’s Cases")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Run assignment/i })).toBeNull();
+  });
+
+  it("supervisor can open the Reporting Assignment Board route", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/reporting-board");
+
+    expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Bulk assign next cases/i })).toBeTruthy();
+    expect(screen.getByText("Saved views")).toBeTruthy();
   });
 
   it("normal doctor sees Protocols page empty state", async () => {
