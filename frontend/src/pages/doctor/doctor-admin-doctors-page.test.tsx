@@ -178,7 +178,10 @@ describe("DoctorAdminDoctorsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Modalities" }));
     await screen.findByText("Modality permissions: Dr Existing");
     const row = screen.getAllByText("CT").at(-1)!.closest("tr")!;
+    await waitFor(() => expect((within(row).getAllByRole("checkbox")[0] as HTMLInputElement).checked).toBe(true));
+    expect((within(row).getAllByRole("checkbox")[2] as HTMLInputElement).checked).toBe(true);
     fireEvent.click(within(row).getAllByRole("checkbox")[1]);
+    expect((within(row).getAllByRole("checkbox")[1] as HTMLInputElement).checked).toBe(true);
     await waitFor(() => expect(updateDoctorProfileModalitiesMock).toHaveBeenCalledWith(1, expect.arrayContaining([expect.objectContaining({ modalityId: 5, canProtocol: true })])));
 
     await screen.findByRole("option", { name: "New Profile (@new.profile)" });

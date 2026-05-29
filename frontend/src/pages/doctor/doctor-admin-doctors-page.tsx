@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDoctorWithUserForAdmin,
@@ -41,6 +41,13 @@ type DoctorProfileDraft = {
   canFinalizeReports: boolean;
   canAssignProtocols: boolean;
   canSupervise: boolean;
+};
+
+type ModalityPermissionDraft = {
+  canProtocol: boolean;
+  canReport: boolean;
+  canSupervise: boolean;
+  active: boolean;
 };
 
 const DOCTOR_ROLES: Array<{ value: DoctorProfileRole; label: string }> = [
@@ -96,6 +103,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   }>>({});
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
+  const [modalityDraft, setModalityDraft] = useState<Record<number, ModalityPermissionDraft>>({});
   const [resetPassword, setResetPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [draft, setDraft] = useState({
@@ -248,6 +256,22 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   const importPayload = () => ({ fileContentBase64: importFileBase64, format: importFormat, fileName: importFileName });
 
+  useEffect(() => {
+    if (!selectedProfileId || !modalitiesQuery.data) {
+      setModalityDraft({});
+      return;
+    }
+    setModalityDraft(Object.fromEntries(modalitiesQuery.data.map((permission) => [
+      permission.modalityId,
+      {
+        canProtocol: permission.canProtocol,
+        canReport: permission.canReport,
+        canSupervise: permission.canSupervise,
+        active: permission.active,
+      },
+    ])));
+  }, [modalitiesQuery.data, selectedProfileId]);
+
   const readImportFile = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -267,7 +291,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   };
 
   const modalityRows = (lookupsQuery.data?.modalities ?? []).map((modality) => {
-    const existing = (modalitiesQuery.data ?? []).find((permission) => permission.modalityId === modality.id);
+    const existing = modalityDraft[modality.id];
     return {
       modalityId: modality.id,
       label: modality.nameEn || modality.nameAr || modality.code || String(modality.id),
@@ -280,7 +304,9 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   const saveModalities = (patch?: Partial<DoctorModalityPermission> & { modalityId: number }) => {
     const rows = modalityRows.map((row) => row.modalityId === patch?.modalityId ? { ...row, ...patch } : row);
-    modalityMutation.mutate(rows.map(({ label: _label, ...row }) => row));
+    const permissions = rows.map(({ label: _label, ...row }) => row);
+    setModalityDraft(Object.fromEntries(permissions.map((permission) => [permission.modalityId, permission])));
+    modalityMutation.mutate(permissions);
   };
 
   const startEditing = (profile: DoctorProfile) => {
