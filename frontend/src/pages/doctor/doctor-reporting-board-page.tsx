@@ -436,6 +436,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     selectedDoctorName: selectedAssignedDoctor?.displayName ?? null,
   });
   const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
+  const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/mobile/reporting-view/${loadedSavedView.token}` : "";
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
@@ -452,10 +453,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   };
 
   const showSavedViewQr = async () => {
-    if (!savedViewLink) return;
+    if (!mobileSavedViewLink) return;
     try {
-      setSavedViewQr(await QRCode.toDataURL(savedViewLink, { margin: 1, width: 220 }));
-      setSavedViewMessage({ tone: "success", text: "QR link generated." });
+      setSavedViewQr(await QRCode.toDataURL(mobileSavedViewLink, { margin: 1, width: 220 }));
+      setSavedViewMessage({ tone: "success", text: "Mobile read-only QR link generated." });
     } catch {
       setSavedViewMessage({ tone: "error", text: "Could not generate QR link." });
     }
@@ -647,7 +648,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         <Copy size={14} /> Copy authenticated link
                       </button>
                       <button type="button" onClick={() => void showSavedViewQr()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-                        <QrCode size={14} /> Show QR link
+                        <QrCode size={14} /> Show mobile QR
                       </button>
                       <button
                         type="button"
@@ -671,7 +672,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                       {savedViewQr && (
                         <div className="rounded-lg border p-3 text-center" style={{ borderColor: "var(--border)" }}>
                           <img src={savedViewQr} alt="Saved view QR link" className="mx-auto h-auto max-w-full rounded" />
-                          <p className="mt-2 break-all text-xs" style={{ color: "var(--text-muted)" }}>{savedViewLink}</p>
+                          <p className="mt-2 text-xs font-semibold text-foreground">Mobile read-only saved view</p>
+                          <p className="mt-1 break-all text-xs" style={{ color: "var(--text-muted)" }}>{mobileSavedViewLink}</p>
                         </div>
                       )}
                     </>

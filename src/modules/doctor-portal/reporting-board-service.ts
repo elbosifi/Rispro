@@ -1,9 +1,11 @@
 import { HttpError } from "../../utils/http-error.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
+import { pool } from "../../db/pool.js";
 import { checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
+import { insertDoctorAuditEvent } from "./profile-repository.js";
 import {
   bulkAssignReportingCases,
   createAssignedToMeNotifications,
@@ -97,10 +99,36 @@ async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Requ
     assignmentStatus: input.assignmentStatus ?? "all",
     caseCategory: input.caseCategory ?? null,
     priorityCode: input.priorityCode ?? null,
+    q: input.q?.trim() || null,
     assignedDoctorId: input.assignedDoctorId ?? null,
     modalityId: input.modalityId ?? null,
     modalityCodes: input.modalityCodes ?? null,
   };
+}
+
+export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, input: ReportingBoardFilters = {}): ReportingBoardFilters {
+  const narrowed: ReportingBoardFilters = { ...savedViewFilters };
+  const keys: Array<keyof ReportingBoardFilters> = [
+    "assignedDoctorId",
+    "caseCategory",
+    "reportStatus",
+    "priorityCode",
+    "modalityId",
+    "modalityCode",
+    "assignmentStatus",
+  ];
+  for (const key of keys) {
+    if (savedViewFilters[key] === null || savedViewFilters[key] === undefined || savedViewFilters[key] === "") {
+      const value = input[key];
+      if (value !== null && value !== undefined && value !== "") {
+        narrowed[key] = value as never;
+      }
+    }
+  }
+  if (input.q?.trim()) narrowed.q = input.q.trim();
+  narrowed.limit = input.limit ?? savedViewFilters.limit ?? 100;
+  narrowed.offset = input.offset ?? 0;
+  return narrowed;
 }
 
 async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: ReportingBoardFilters["reportStatus"]) {
@@ -164,6 +192,124 @@ export async function getReportingBoardCases(actor: Actor, input: ReportingBoard
   const rows = await listReportingBoardCaseCandidates(scopedFilters);
   const cases = await applyReportStatuses(rows, filters.reportStatus);
   return { cases, filters };
+}
+
+function mobileCase(row: ReportingBoardCaseRow) {
+  return {
+    appointmentId: row.appointmentId,
+    patientName: row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`,
+    mrn: row.patientMrn,
+    accessionNumber: row.accessionNumber,
+    date: row.bookingDate,
+    time: row.bookingTime,
+    modality: row.modalityCode,
+    exam: row.examTypeName,
+    category: row.caseCategory,
+    assignedDoctor: row.assignedDoctorName,
+    priority: row.reportingPriorityName || row.reportingPriorityCode,
+    priorityCode: row.reportingPriorityCode,
+    reportStatus: row.reportStatus,
+    appointmentStatus: row.appointmentStatus,
+    assignmentStatus: row.assignmentStatus,
+    canAssign: row.canAssign,
+    exclusionReason: row.exclusionReason,
+  };
+}
+
+function mobileCounters(cases: ReportingBoardCaseRow[], actorDoctorId?: number | null) {
+  const today = todayIso();
+  return {
+    total: cases.length,
+    assignedToMe: actorDoctorId ? cases.filter((row) => row.assignedDoctorId === actorDoctorId).length : null,
+    unassigned: cases.filter((row) => row.assignmentStatus === "unassigned").length,
+    urgent: cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase())).length,
+    requiredNotFinal: cases.filter((row) => row.requiresReport && row.reportStatus !== "final").length,
+    overdue: cases.filter((row) => row.requiresReport && row.reportStatus !== "final" && row.bookingDate < today).length,
+  };
+}
+
+function filterSummary(filters: ReportingBoardFilters): string[] {
+  return [
+    filters.reportStatus ? String(filters.reportStatus).replaceAll("_", " ") : null,
+    filters.modalityCode ?? (filters.modalityCodes?.length ? filters.modalityCodes.join("/") : null),
+    filters.dateFrom && filters.dateTo ? `${filters.dateFrom} to ${filters.dateTo}` : filters.dateFrom ?? null,
+    filters.priorityCode ? `priority ${filters.priorityCode}` : null,
+    filters.assignmentStatus && filters.assignmentStatus !== "all" ? filters.assignmentStatus : null,
+  ].filter(Boolean) as string[];
+}
+
+async function getMobileIdentity(actor?: Actor | null) {
+  if (!actor) return null;
+  try {
+    return await requireRosterDoctor(actor);
+  } catch {
+    return null;
+  }
+}
+
+export async function getPublicReportingBoardMobileView(actor: Actor | null, token: string, input: ReportingBoardFilters = {}) {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  const identity = await getMobileIdentity(actor);
+  const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
+  const settings = await readReportingBoardSettings();
+  const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
+  const rows = await listReportingBoardCaseCandidates(scopedFilters);
+  const cases = await applyReportStatuses(rows, filters.reportStatus);
+  const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
+
+  await insertDoctorAuditEvent(pool, {
+    actorUserId: actor?.userId ?? null,
+    actorDoctorId: identity?.profile?.id ?? null,
+    eventType: "reporting_board_mobile_saved_view_opened",
+    targetType: "reporting_board_saved_view",
+    targetId: view.id,
+    metadata: { tokenScoped: true },
+    reason: null,
+  }).catch(() => undefined);
+
+  return {
+    savedView: { id: view.id, name: view.name, token: view.token },
+    filters,
+    filterSummary: filterSummary(filters),
+    counters: mobileCounters(cases, identity?.profile?.id ?? null),
+    cases: cases.map(mobileCase),
+    allowedActions: {
+      readOnly: !canManage,
+      assignToMe: canManage,
+      reassign: canManage,
+      batchReassign: canManage,
+      copyAccession: Boolean(identity),
+    },
+    refreshedAt: new Date().toISOString(),
+  };
+}
+
+export async function getPublicReportingBoardMobileCase(actor: Actor | null, token: string, appointmentId: number, input: ReportingBoardFilters = {}) {
+  const view = await getPublicReportingBoardMobileView(actor, token, { ...input, appointmentId, limit: 1, offset: 0 });
+  const found = view.cases.find((row) => row.appointmentId === appointmentId);
+  if (!found) throw new HttpError(404, "Case not found.");
+  return { savedView: view.savedView, case: found, allowedActions: view.allowedActions, refreshedAt: view.refreshedAt };
+}
+
+async function ensureCaseInSavedViewScope(token: string, appointmentId: number): Promise<void> {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { appointmentId, limit: 1, offset: 0 }));
+  const rows = await listReportingBoardCaseCandidates(filters);
+  if (!rows.some((row) => row.appointmentId === appointmentId)) throw new HttpError(404, "Case not found.");
+}
+
+export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: string, appointmentId: number, reason?: string | null) {
+  const me = await requireRosterManager(actor);
+  await ensureCaseInSavedViewScope(token, appointmentId);
+  return assignReportingBoardCaseToDoctor(actor, { appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
+}
+
+export async function reassignReportingBoardMobileCase(actor: Actor, token: string, appointmentId: number, doctorId: number, reason?: string | null) {
+  await requireRosterManager(actor);
+  await ensureCaseInSavedViewScope(token, appointmentId);
+  return assignReportingBoardCaseToDoctor(actor, { appointmentId, doctorId, reason: reason ?? "mobile saved-view reassignment" });
 }
 
 export async function listMyReportingBoardSavedViews(actor: Actor) {

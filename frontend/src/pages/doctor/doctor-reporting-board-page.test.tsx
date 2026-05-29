@@ -164,6 +164,16 @@ describe("DoctorReportingBoardPage", () => {
     expect(await screen.findByText("Test notification sent.")).toBeTruthy();
   });
 
+  it("generates QR links for the mobile read-only saved view route", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Show mobile QR/i }));
+
+    expect(await screen.findByText("Mobile read-only saved view")).toBeTruthy();
+    expect(await screen.findByText(/\/mobile\/reporting-view\/tok-9/)).toBeTruthy();
+  });
+
   it("validates and submits the bulk assignment modal", async () => {
     renderPage();
 

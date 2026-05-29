@@ -386,6 +386,16 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
     values.push(input.priorityCode);
     where.push(`rp.code = $${values.length}`);
   }
+  if (input.q) {
+    values.push(`%${input.q.trim().toLowerCase()}%`);
+    where.push(`(
+      lower(coalesce(p.english_full_name, '')) like $${values.length}
+      or lower(coalesce(p.arabic_full_name, '')) like $${values.length}
+      or lower(coalesce(p.mrn, '')) like $${values.length}
+      or lower('V2-' || lpad(b.id::text, 6, '0')) like $${values.length}
+      or lower(coalesce(et.name_en, '')) like $${values.length}
+    )`);
+  }
   if (input.appointmentId) {
     values.push(input.appointmentId);
     where.push(`b.id = $${values.length}`);

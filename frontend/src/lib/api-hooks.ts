@@ -58,6 +58,7 @@ import type {
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
   ReportingBoardNotificationEvent,
+  ReportingBoardMobileResponse,
   ReportingBoardPushConfig,
   ReportingBoardSavedView,
   ReportingBoardSettings,
@@ -742,6 +743,32 @@ export async function updateReportingBoardSettings(payload: ReportingBoardSettin
 
 export async function fetchReportingBoardCases(filters: ReportingBoardFilters): Promise<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }> {
   return api<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }>(`/doctor/reporting-board/cases?${reportingBoardParams(filters).toString()}`);
+}
+
+export async function fetchReportingBoardMobileView(token: string, filters: ReportingBoardFilters = {}): Promise<ReportingBoardMobileResponse> {
+  const params = reportingBoardParams(filters);
+  const query = params.toString();
+  return api<ReportingBoardMobileResponse>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile${query ? `?${query}` : ""}`);
+}
+
+export async function fetchReportingBoardMobileCase(token: string, appointmentId: number, filters: ReportingBoardFilters = {}): Promise<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }> {
+  const params = reportingBoardParams(filters);
+  const query = params.toString();
+  return api<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/cases/${appointmentId}${query ? `?${query}` : ""}`);
+}
+
+export async function assignReportingBoardMobileCaseToMe(token: string, appointmentId: number): Promise<{ assignmentId: number }> {
+  return api<{ assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/assign-to-me`, {
+    method: "POST",
+    body: JSON.stringify({ appointmentId }),
+  });
+}
+
+export async function reassignReportingBoardMobileCase(token: string, appointmentId: number, doctorId: number, reason: string): Promise<{ assignmentId: number }> {
+  return api<{ assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/reassign`, {
+    method: "POST",
+    body: JSON.stringify({ appointmentId, doctorId, reason }),
+  });
 }
 
 export async function fetchReportingBoardSavedViews(): Promise<ReportingBoardSavedView[]> {

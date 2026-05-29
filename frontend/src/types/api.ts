@@ -380,12 +380,15 @@ export interface ReportingBoardFilters {
   cutoffDate?: string | null;
   modalityId?: number | null;
   modalityCode?: string | null;
+  modalityCodes?: string[] | null;
   assignedDoctorId?: number | null;
   assignmentStatus?: ReportingBoardAssignmentStatus | null;
   caseCategory?: string | null;
   requiresReport?: boolean | null;
   reportStatus?: ReportingBoardReportStatus | null;
   priorityCode?: string | null;
+  q?: string | null;
+  appointmentId?: number | null;
   limit?: number | null;
   offset?: number | null;
 }
@@ -475,6 +478,49 @@ export interface ReportingBoardNotificationEvent {
 export interface ReportingBoardPushConfig {
   enabled: boolean;
   publicKey: string | null;
+}
+
+export interface ReportingBoardMobileCase {
+  appointmentId: number;
+  patientName: string;
+  mrn: string | null;
+  accessionNumber: string;
+  date: string;
+  time: string | null;
+  modality: string;
+  exam: string | null;
+  category: string;
+  assignedDoctor: string | null;
+  priority: string | null;
+  priorityCode: string | null;
+  reportStatus: string;
+  appointmentStatus: string;
+  assignmentStatus: "assigned" | "unassigned";
+  canAssign: boolean;
+  exclusionReason: string | null;
+}
+
+export interface ReportingBoardMobileResponse {
+  savedView: { id: number; name: string; token: string };
+  filters: ReportingBoardFilters;
+  filterSummary: string[];
+  counters: {
+    total: number;
+    assignedToMe: number | null;
+    unassigned: number;
+    urgent: number;
+    requiredNotFinal: number;
+    overdue: number;
+  };
+  cases: ReportingBoardMobileCase[];
+  allowedActions: {
+    readOnly: boolean;
+    assignToMe: boolean;
+    reassign: boolean;
+    batchReassign: boolean;
+    copyAccession: boolean;
+  };
+  refreshedAt: string;
 }
 
 export type ProtocolStatus = "draft" | "assigned" | "clarification_needed" | "cancelled";

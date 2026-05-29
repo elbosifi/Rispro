@@ -63,6 +63,29 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
   }
 }
 
+export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
+  try {
+    const token = readToken(req);
+    if (!token) return next();
+
+    const decoded = jwt.verify(token, env.jwtSecret);
+    const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
+    if (!payload || !payload.sub || !payload.role) return next();
+
+    req.user = {
+      sub: payload.sub as UserId,
+      role: parseRole(payload.role),
+      purpose: payload.purpose ? String(payload.purpose) : undefined,
+      username: payload.username ? String(payload.username) : undefined,
+      fullName: payload.fullName ? String(payload.fullName) : undefined,
+      mustChangePassword: payload.mustChangePassword === true
+    };
+    return next();
+  } catch {
+    return next();
+  }
+}
+
 export function blockForcedPasswordChange(req: AuthRequest, _res: Response, next: NextFunction): void {
   try {
     const token = readToken(req);

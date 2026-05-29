@@ -136,4 +136,25 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /sendSavedViewPushNotifications/);
     assert.match(repo, /clickUrl/);
   });
+
+  it("adds public read-only mobile saved-view routes with backend scope and authenticated writes", () => {
+    const app = readFileSync(`${root}/src/app.ts`, "utf8");
+    const publicRoutes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-public-routes.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+
+    assert.match(app, /app\.use\("\/api\/reporting", reportingBoardPublicRouter\)/);
+    assert.match(publicRoutes, /"\/saved-views\/public\/:token\/mobile"/);
+    assert.match(publicRoutes, /optionalAuth/);
+    assert.match(publicRoutes, /requireAuth/);
+    assert.match(publicRoutes, /assign-to-me/);
+    assert.match(publicRoutes, /reassign/);
+    assert.match(service, /findActiveSavedViewByToken\(token\)/);
+    assert.match(service, /narrowSavedViewFilters/);
+    assert.match(service, /savedViewFilters\[key\]/);
+    assert.match(service, /insertDoctorAuditEvent/);
+    assert.match(service, /assignReportingBoardCaseToDoctor/);
+    assert.match(repo, /lower\(coalesce\(p\.english_full_name/);
+    assert.match(repo, /lower\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\)/);
+  });
 });

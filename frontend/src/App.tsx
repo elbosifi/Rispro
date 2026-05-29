@@ -21,6 +21,7 @@ import QueuePage from "@/pages/queue/queue-page";
 import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
 import ModalityPage from "@/pages/modality/modality-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
+import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-page";
 import PrintPage from "@/pages/print/print-page";
 import DayListPrintPage from "@/pages/print/day-list-print-page";
 import ReportingBoardPrintPage from "@/pages/print/reporting-board-print-page";
@@ -348,6 +349,7 @@ function RouterConfig() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
+      <Route path="/mobile/reporting-view/:token" element={<ReportingBoardMobilePage />} />
       <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route path="/print/reporting-board" element={<ProtectedRoute><ReportingBoardPrintPage /></ProtectedRoute>} />
       <Route
