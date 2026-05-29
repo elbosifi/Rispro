@@ -52,6 +52,7 @@ describe("action PIN policy", () => {
     assert.ok(ACTION_PIN_ACTION_KEYS.includes("queue_walk_in"));
     assert.ok(ACTION_PIN_ACTION_KEYS.includes("duplicate_patient_safe_delete"));
     assert.ok(ACTION_PIN_ACTION_KEYS.includes("pacs_patient_remap"));
+    assert.ok(ACTION_PIN_ACTION_KEYS.includes("session_unlock"));
   });
 
   it("resolves disabled global policy as not required", async () => {

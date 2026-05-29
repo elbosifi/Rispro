@@ -109,10 +109,13 @@ export async function api<T>(
     }
 
     if (response.status === 204) {
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("rispro-api-activity"));
       return undefined as unknown as T;
     }
 
-    return response.json() as Promise<T>;
+    const json = response.json() as Promise<T>;
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("rispro-api-activity"));
+    return json;
   } catch (error) {
     // Surface a clearer message when client-side timeout aborts a long request.
     if (error instanceof DOMException && error.name === "AbortError") {

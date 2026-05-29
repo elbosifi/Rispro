@@ -1,5 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import { ApiError, api, setActionPinChallengeHandler } from "@/lib/api-client";
+import { fetchActionPinStatus, logout as logoutApi } from "@/lib/api-hooks";
+import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 
 interface ActionPinChallenge {
@@ -16,6 +20,10 @@ const ActionPinContext = createContext<null>(null);
 
 function actionLabel(actionKey: string) {
   return actionKey.replace(/_/g, " ");
+}
+
+function validatePin(pin: string, isArabic: boolean): string | null {
+  return /^\d{4}$/.test(pin) ? null : (isArabic ? "أدخل رمز PIN من 4 أرقام." : "Enter a 4-digit PIN.");
 }
 
 function ActionPinDialog({
@@ -43,8 +51,9 @@ function ActionPinDialog({
     event.preventDefault();
     setError(null);
 
-    if (!/^\d{4}$/.test(pin)) {
-      setError(isArabic ? "أدخل رمز PIN من 4 أرقام." : "Enter a 4-digit PIN.");
+    const pinError = validatePin(pin, isArabic);
+    if (pinError) {
+      setError(pinError);
       return;
     }
     if (challenge.requiresReason && !reason.trim()) {
@@ -150,6 +159,162 @@ function ActionPinDialog({
         </form>
       </div>
     </div>
+  );
+}
+
+function ActionPinIdleLockOverlay({
+  hasPin,
+  userFullName,
+  username,
+  onUnlocked
+}: {
+  hasPin: boolean;
+  userFullName?: string | null;
+  username?: string | null;
+  onUnlocked: () => void;
+}) {
+  const { language } = useLanguage();
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const isArabic = language === "ar";
+
+  const switchUser = async () => {
+    setPin("");
+    try {
+      await logoutApi();
+    } finally {
+      window.location.href = "/login";
+    }
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    const pinError = validatePin(pin, isArabic);
+    if (pinError) {
+      setError(pinError);
+      return;
+    }
+
+    setIsPending(true);
+    try {
+      await api<{ ok: true }>("/action-pin/verify", {
+        method: "POST",
+        skipActionPinRetry: true,
+        body: JSON.stringify({ pin, actionKey: "session_unlock" })
+      });
+      setPin("");
+      onUnlocked();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (isArabic ? "فشل فتح القفل." : "Unlock failed."));
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-stone-950 p-4 text-white" role="dialog" aria-modal="true">
+      <div className="w-full max-w-sm rounded-xl border border-white/10 bg-stone-900 p-6 shadow-2xl">
+        <h2 className="text-xl font-semibold">{isArabic ? "الجلسة مقفلة" : "Session locked"}</h2>
+        <p className="mt-2 text-sm text-stone-300">
+          {userFullName || username || (isArabic ? "المستخدم الحالي" : "Current user")}
+          {username ? <span className="block font-mono text-xs text-stone-400">{username}</span> : null}
+        </p>
+        {!hasPin ? (
+          <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+            Action PIN is required to unlock. Switch user or contact super admin.
+          </p>
+        ) : null}
+        <form onSubmit={submit} className="mt-4 space-y-4">
+          <input
+            aria-label="Unlock Action PIN"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            value={pin}
+            onChange={(event) => {
+              setPin(event.target.value.replace(/\D/g, "").slice(0, 4));
+              setError(null);
+            }}
+            autoComplete="off"
+            disabled={isPending || !hasPin}
+            className="w-full rounded-lg border border-white/10 bg-stone-800 px-4 py-2 text-white outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-60"
+          />
+          {error && <p className="text-sm text-red-300">{error}</p>}
+          <div className="flex gap-3">
+            <button type="button" onClick={switchUser} disabled={isPending} className="flex-1 rounded-lg bg-stone-700 px-4 py-2 text-sm font-medium hover:bg-stone-600 disabled:opacity-50">
+              {isArabic ? "تبديل المستخدم" : "Switch user"}
+            </button>
+            <button type="submit" disabled={isPending || !hasPin} className="flex-1 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium hover:bg-teal-700 disabled:bg-teal-400">
+              {isPending ? (isArabic ? "جار الفتح..." : "Unlocking...") : (isArabic ? "فتح" : "Unlock")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function ActionPinIdleLock({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  const [locked, setLocked] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { data: status } = useQuery({
+    queryKey: ["action-pin", "status", "idle-lock"],
+    queryFn: fetchActionPinStatus,
+    enabled: Boolean(user),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const policy = status?.policy;
+  const enabled = Boolean(user && policy?.enabled && policy?.idleLockEnabled);
+  const idleSeconds = Number(policy?.idleLockSeconds || 180);
+
+  const resetTimer = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!enabled || locked) return;
+    timerRef.current = setTimeout(() => setLocked(true), Math.max(idleSeconds, 0.1) * 1000);
+  };
+
+  useEffect(() => {
+    if (!enabled) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setLocked(false);
+      return;
+    }
+    resetTimer();
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [enabled, idleSeconds, locked, location.pathname]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const events = ["mousemove", "mousedown", "click", "keydown", "touchstart", "touchmove", "rispro-api-activity"];
+    for (const eventName of events) window.addEventListener(eventName, resetTimer, { passive: true });
+    return () => {
+      for (const eventName of events) window.removeEventListener(eventName, resetTimer);
+    };
+  }, [enabled, idleSeconds, locked]);
+
+  return (
+    <>
+      {children}
+      {locked && user ? (
+        <ActionPinIdleLockOverlay
+          hasPin={Boolean(status?.hasPin)}
+          userFullName={user.fullName}
+          username={user.username}
+          onUnlocked={() => {
+            setLocked(false);
+            resetTimer();
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

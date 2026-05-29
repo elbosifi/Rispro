@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { BrowserRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
 import { createPatient, addWalkIn } from "@/lib/api-hooks";
 import { api, setActionPinChallengeHandler } from "@/lib/api-client";
-import { ActionPinProvider } from "@/providers/action-pin-provider";
+import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
+import { AuthProvider } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider";
 import { createV2Booking } from "@/v2/appointments/api";
 
@@ -81,6 +83,83 @@ function renderWithQuery(ui: React.ReactNode) {
       <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
     </LanguageProvider>
   );
+}
+
+function renderIdleLock() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+  });
+  return render(
+    <LanguageProvider>
+      <BrowserRouter>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <ActionPinIdleLock>
+              <div>Patient screen content</div>
+            </ActionPinIdleLock>
+          </AuthProvider>
+        </QueryClientProvider>
+      </BrowserRouter>
+    </LanguageProvider>
+  );
+}
+
+function mockIdleFetch({
+  policyEnabled,
+  idleLockEnabled,
+  hasPin = true,
+  verifyOk = true,
+}: {
+  policyEnabled: boolean;
+  idleLockEnabled: boolean;
+  hasPin?: boolean;
+  verifyOk?: boolean;
+}) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url === "/api/auth/me") {
+      return jsonResponse(200, { user: { id: 7, username: "front", fullName: "Front Desk", role: "receptionist", isActive: true } });
+    }
+    if (url === "/api/action-pin/status") {
+      return jsonResponse(200, {
+        hasPin,
+        lockedUntil: null,
+        pinExpiresAt: null,
+        isExpired: false,
+        policy: {
+          enabled: policyEnabled,
+          pinLength: 4,
+          idleLockEnabled,
+          idleLockSeconds: 0.1,
+          verificationTtlSeconds: 300,
+          allowUserPinChange: true,
+          requirePinToViewOwnPinSettings: false,
+        },
+      });
+    }
+    if (url === "/api/action-pin/verify") {
+      return verifyOk ? jsonResponse(200, { ok: true }) : jsonResponse(403, { error: "invalid_action_pin" });
+    }
+    if (url === "/api/auth/logout") {
+      return jsonResponse(200, { ok: true });
+    }
+    if (url === "/api/patients") {
+      return jsonResponse(200, { ok: true });
+    }
+    return jsonResponse(404, { message: `Unexpected URL ${url}`, method: (init as RequestInit | undefined)?.method });
+  });
+}
+
+async function flushIdleQueries() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 describe("ActionPinProvider", () => {
@@ -342,5 +421,135 @@ describe("ActionPinSettingsButton", () => {
 
     expect(await screen.findByText("Action PIN changes are disabled by policy.")).toBeTruthy();
     expect(screen.queryByText("1357")).toBeNull();
+  });
+});
+
+describe("ActionPinIdleLock", () => {
+  beforeEach(() => {
+    localStorage.setItem("rispro-language", "en");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("does not activate when policy is disabled", async () => {
+    mockIdleFetch({ policyEnabled: false, idleLockEnabled: true });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+
+    expect(screen.queryByText("Session locked")).toBeNull();
+  });
+
+  it("does not activate when idle lock is disabled", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: false });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+
+    expect(screen.queryByText("Session locked")).toBeNull();
+  });
+
+  it("appears after idleLockSeconds when enabled and activity resets the timer", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(50);
+    fireEvent.mouseMove(window);
+    await delay(70);
+    expect(screen.queryByText("Session locked")).toBeNull();
+
+    await delay(60);
+    expect(screen.getByText("Session locked")).toBeTruthy();
+  });
+
+  it("submits unlock PIN only to verify and hides overlay on success", async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+    const fetchMock = mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+    expect(screen.getByText("Session locked")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Unlock Action PIN"), { target: { value: "1234" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Session locked")).toBeNull();
+    const verifyCall = fetchMock.mock.calls.find((call) => call[0] === "/api/action-pin/verify");
+    expect(String((verifyCall?.[1] as RequestInit).body)).toContain("1234");
+    expect(String((verifyCall?.[1] as RequestInit).body)).toContain("session_unlock");
+    expect(fetchMock.mock.calls.some((call) => call[0] === "/api/patients" && String((call[1] as RequestInit | undefined)?.body).includes("1234"))).toBe(false);
+    expect(setItemSpy.mock.calls.every((call) => !JSON.stringify(call).includes("1234"))).toBe(true);
+    expect(JSON.stringify(sessionStorage)).not.toContain("1234");
+  });
+
+  it("keeps overlay visible after failed unlock", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true, verifyOk: false });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+    expect(screen.getByText("Session locked")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Unlock Action PIN"), { target: { value: "9999" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("invalid_action_pin")).toBeTruthy();
+    expect(screen.getByText("Session locked")).toBeTruthy();
+  });
+
+  it("shows missing PIN message without bypassing lock", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true, hasPin: false });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+
+    expect(screen.getByText("Action PIN is required to unlock. Switch user or contact super admin.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Unlock" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("switch user logs out and redirects to login without preserving entered PIN", async () => {
+    const fetchMock = mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, href: "" } });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+    expect(screen.getByText("Session locked")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Unlock Action PIN"), { target: { value: "1234" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Switch user" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock.mock.calls.some((call) => call[0] === "/api/auth/logout")).toBe(true);
+    expect(window.location.href).toBe("/login");
+    expect(JSON.stringify(localStorage)).not.toContain("1234");
+    expect(JSON.stringify(sessionStorage)).not.toContain("1234");
+    Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
   });
 });

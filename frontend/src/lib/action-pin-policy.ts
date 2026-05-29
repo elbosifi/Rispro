@@ -39,6 +39,7 @@ export const ACTION_PIN_ACTION_KEYS = [
   "duplicate_patient_safe_delete",
   "patient_import_confirm",
   "pacs_patient_remap",
+  "session_unlock",
 ] as const;
 
 export type ActionPinRole = (typeof ACTION_PIN_ROLES)[number];
@@ -107,6 +108,7 @@ export const ACTION_PIN_ACTION_LABELS: Record<ActionPinActionKey, string> = {
   duplicate_patient_safe_delete: "Duplicate safe delete",
   patient_import_confirm: "Patient import confirmation",
   pacs_patient_remap: "PACS patient remap",
+  session_unlock: "Session unlock",
 };
 
 export const ACTION_PIN_GROUPS: Array<{ label: string; actions: ActionPinActionKey[] }> = [
@@ -151,6 +153,7 @@ export const ACTION_PIN_GROUPS: Array<{ label: string; actions: ActionPinActionK
       "duplicate_patient_safe_delete",
       "patient_import_confirm",
       "pacs_patient_remap",
+      "session_unlock",
     ],
   },
 ];

@@ -32,6 +32,7 @@ export const ACTION_PIN_ACTION_KEYS = [
   "duplicate_patient_safe_delete",
   "patient_import_confirm",
   "pacs_patient_remap",
+  "session_unlock",
 ] as const;
 
 export const ACTION_PIN_MODES = [

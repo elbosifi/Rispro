@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
-import { ActionPinProvider } from "@/providers/action-pin-provider";
+import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
@@ -379,7 +379,9 @@ export function App() {
         <QueryProvider>
           <ActionPinProvider>
             <AuthProvider>
-              <RouterConfig />
+              <ActionPinIdleLock>
+                <RouterConfig />
+              </ActionPinIdleLock>
             </AuthProvider>
           </ActionPinProvider>
         </QueryProvider>

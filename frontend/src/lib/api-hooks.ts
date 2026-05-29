@@ -913,6 +913,9 @@ export interface ActionPinStatus {
   policy: {
     enabled: boolean;
     pinLength: number;
+    idleLockEnabled: boolean;
+    idleLockSeconds: number;
+    verificationTtlSeconds: number;
     allowUserPinChange: boolean;
     requirePinToViewOwnPinSettings: boolean;
   };
