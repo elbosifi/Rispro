@@ -734,12 +734,14 @@ async function sendSavedViewPushNotifications(notification: CreatedNotificationR
   let failed = 0;
   for (const row of subscriptions.rows) {
     const subscription: PushSubscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
+    const clickUrl = notification.actionUrl?.replace(/^\/doctor\/reporting-board\/saved\//, "/mobile/reporting-view/")
+      ?? "/doctor/reporting-board";
     try {
       await webPush.sendNotification(subscription, JSON.stringify({
         eventType: "reporting_case_assigned_to_me",
         title: notification.title,
         body: notification.body,
-        clickUrl: notification.actionUrl ?? "/doctor/reporting-board",
+        clickUrl,
       }));
       await pool.query(
         `update doctor_portal.reporting_board_web_push_subscriptions set last_success_at = now(), updated_at = now() where id = $1`,

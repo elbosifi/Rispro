@@ -510,7 +510,7 @@ export async function sendReportingBoardSavedViewTestNotification(actor: Actor, 
   const { cases } = await getReportingBoardCases(actor, { ...view.filters, limit: 1, offset: 0 });
   return sendReportingBoardSavedViewTestPush({
     savedViewId: view.id,
-    actionUrl: `/doctor/reporting-board/saved/${view.token}`,
+    actionUrl: `/mobile/reporting-view/${view.token}`,
     caseRow: cases[0] ?? null,
   });
 }

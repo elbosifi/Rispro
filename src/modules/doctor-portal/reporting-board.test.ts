@@ -135,6 +135,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /reportingCaseNotificationText/);
     assert.match(repo, /sendSavedViewPushNotifications/);
     assert.match(repo, /clickUrl/);
+    assert.match(repo, /notification\.actionUrl\?\.replace/);
+    assert.match(repo, /"\/mobile\/reporting-view\/"/);
   });
 
   it("adds public read-only mobile saved-view routes with backend scope and authenticated writes", () => {
@@ -154,6 +156,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /savedViewFilters\[key\]/);
     assert.match(service, /insertDoctorAuditEvent/);
     assert.match(service, /assignReportingBoardCaseToDoctor/);
+    assert.match(service, /\/mobile\/reporting-view\/\$\{view\.token\}/);
     assert.match(repo, /lower\(coalesce\(p\.english_full_name/);
     assert.match(repo, /lower\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\)/);
   });
