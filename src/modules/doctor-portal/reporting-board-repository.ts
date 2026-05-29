@@ -50,6 +50,10 @@ interface NotificationTargetRow {
   recipientDoctorId: number;
 }
 
+function nullableNumber(value: unknown): number | null {
+  return value === null || value === undefined ? null : Number(value);
+}
+
 function cleanRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -415,7 +419,16 @@ export async function listReportingBoardCaseCandidates(
     `,
     values
   );
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    appointmentId: Number(row.appointmentId),
+    patientId: Number(row.patientId),
+    modalityId: Number(row.modalityId),
+    examTypeId: nullableNumber(row.examTypeId),
+    reportingPriorityId: nullableNumber(row.reportingPriorityId),
+    reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
+    assignedDoctorId: nullableNumber(row.assignedDoctorId),
+  }));
 }
 
 export async function findAssignableDoctorForReporting(doctorId: number) {
@@ -563,7 +576,7 @@ function notificationEvent(row: {
   readAt: string | null;
   dismissedAt: string | null;
 }): ReportingBoardNotificationEvent {
-  return row;
+  return { ...row, id: Number(row.id) };
 }
 
 export async function createAssignedToMeNotifications(input: {
