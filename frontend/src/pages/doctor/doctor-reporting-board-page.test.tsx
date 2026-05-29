@@ -130,9 +130,9 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
+    expect(await screen.findByText("V2-000042")).toBeTruthy();
     expect((await screen.findAllByText("STAT")).length).toBeGreaterThan(0);
-    expect(screen.getByText("draft")).toBeTruthy();
-    expect(screen.getByText("V2-000042")).toBeTruthy();
+    expect(screen.getAllByText(/draft/i).length).toBeGreaterThan(2);
   });
 
   it("opens and applies a saved view token", async () => {
@@ -153,8 +153,9 @@ describe("DoctorReportingBoardPage", () => {
 
     fireEvent.change(screen.getByLabelText("Doctor"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Number of cases"), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "daily distribution" } });
     expect(submit.disabled).toBe(false);
+    fireEvent.change(screen.getAllByLabelText("Modality").at(-1)!, { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Notes for assigned doctor"), { target: { value: "daily distribution" } });
     fireEvent.click(submit);
 
     await waitFor(() => expect(bulkAssignNextReportingCasesMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -162,6 +163,7 @@ describe("DoctorReportingBoardPage", () => {
       count: 2,
       unassignedOnly: true,
       reason: "daily distribution",
+      filters: expect.objectContaining({ modalityId: 1 }),
     })));
     expect(await screen.findByText(/2\/2 assigned/)).toBeTruthy();
   });

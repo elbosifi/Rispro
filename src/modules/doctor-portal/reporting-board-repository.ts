@@ -313,12 +313,12 @@ export async function findSavedViewById(id: number, ownerUserId: UserId): Promis
 }
 
 function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters, values: unknown[]) {
-  const where: string[] = ["b.status not in ('cancelled', 'discontinued', 'voided')"];
+  const where: string[] = ["b.status = 'completed'"];
   if (input.dateFrom) {
     values.push(input.dateFrom);
     where.push(`b.booking_date >= $${values.length}::date`);
   }
-  const dateTo = input.dateTo ?? input.cutoffDate;
+  const dateTo = input.dateTo;
   if (dateTo) {
     values.push(dateTo);
     where.push(`b.booking_date <= $${values.length}::date`);
@@ -399,10 +399,10 @@ export async function listReportingBoardCaseCandidates(
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         'unavailable'::text as "reportStatus",
         null::text as "reportStatusCheckedAt",
-        (b.requires_report = true and b.status not in ('cancelled', 'discontinued', 'voided')) as "canAssign",
+        (b.requires_report = true and b.status = 'completed') as "canAssign",
         case
           when b.requires_report = false then 'report_not_required'
-          when b.status in ('cancelled', 'discontinued', 'voided') then 'appointment_not_assignable'
+          when b.status <> 'completed' then 'study_not_completed'
           else null
         end as "exclusionReason"
       from appointments_v2.bookings b
@@ -464,7 +464,7 @@ export async function doctorCanReportAllModalities(doctorId: number, modalityIds
 export async function bulkAssignReportingCases(input: {
   doctorId: number;
   candidateAppointmentIds: number[];
-  reason: string;
+  reason: string | null;
   unassignedOnly: boolean;
   actor: AssignmentActor;
 }): Promise<BulkAssignNextCasesResult> {
@@ -512,7 +512,7 @@ export async function bulkAssignReportingCases(input: {
           from appointments_v2.bookings b
           where b.id = $1
             and b.requires_report = true
-            and b.status not in ('cancelled', 'discontinued', 'voided')
+            and b.status = 'completed'
           returning id
         `,
         [appointmentId, input.doctorId]
@@ -529,7 +529,7 @@ export async function bulkAssignReportingCases(input: {
         eventType: "reporting_board_bulk_case_assigned",
         targetType: "case_team_assignment",
         targetId: assignmentId,
-        metadata: { appointmentId, doctorId: input.doctorId },
+        metadata: { appointmentId, doctorId: input.doctorId, noteForDoctor: input.reason },
         reason: input.reason,
       });
     }
@@ -539,12 +539,13 @@ export async function bulkAssignReportingCases(input: {
       eventType: "reporting_board_bulk_assign_completed",
       targetType: "case_team_assignment",
       targetId: null,
-      metadata: {
-        doctorId: input.doctorId,
-        requestedCount: input.candidateAppointmentIds.length,
-        assignedCount: assignedAppointmentIds.length,
-        skipped,
-      },
+        metadata: {
+          doctorId: input.doctorId,
+          requestedCount: input.candidateAppointmentIds.length,
+          assignedCount: assignedAppointmentIds.length,
+          skipped,
+          noteForDoctor: input.reason,
+        },
       reason: input.reason,
     });
     await client.query("commit");

@@ -95,7 +95,7 @@ export interface BulkAssignNextCasesInput {
   savedViewId?: number | null;
   token?: string | null;
   unassignedOnly?: boolean | null;
-  reason: string;
+  reason?: string | null;
 }
 
 export interface BulkAssignNextCasesResult {

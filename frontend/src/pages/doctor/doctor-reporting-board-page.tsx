@@ -84,6 +84,14 @@ function labelStatus(status: string): string {
   return status.replaceAll("_", " ");
 }
 
+function cutoffFromSettings(settings?: ReportingBoardSettings): string | null {
+  if (!settings) return null;
+  if (settings.cutoffMode === "fixed_date") return settings.defaultCutoffDate;
+  const date = new Date();
+  date.setDate(date.getDate() - settings.daysBack);
+  return date.toISOString().slice(0, 10);
+}
+
 function compactFilters(filters: ReportingBoardFilters): ReportingBoardFilters {
   return Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined)) as ReportingBoardFilters;
 }
@@ -103,7 +111,11 @@ export function buildReportingBoardPrintUrl(input: {
 }
 
 function defaultFilters(settings?: ReportingBoardSettings): ReportingBoardFilters {
+  const cutoffDate = cutoffFromSettings(settings);
   return {
+    dateFrom: cutoffDate,
+    dateTo: null,
+    cutoffDate,
     assignmentStatus: "all",
     reportStatus: settings?.defaultReportStatusFilter ?? "required_not_final",
     requiresReport: settings?.defaultRequiresReport ?? true,
@@ -132,6 +144,13 @@ function PriorityChip({ row }: { row: ReportingBoardCaseRow }) {
 
 function ReportStatusChip({ status }: { status: ReportingBoardCaseRow["reportStatus"] }) {
   return <span className={chipClass(reportStatusTone(status))}>{labelStatus(status)}</span>;
+}
+
+function rowPriorityClass(code: string | null): string {
+  const tone = priorityTone(code);
+  if (tone === "danger") return "bg-red-50";
+  if (tone === "warning") return "bg-orange-50";
+  return "";
 }
 
 function AssignmentEditor({
@@ -185,6 +204,7 @@ function AssignmentEditor({
 function BulkAssignModal({
   open,
   doctors,
+  modalities,
   filters,
   savedView,
   onClose,
@@ -192,6 +212,7 @@ function BulkAssignModal({
 }: {
   open: boolean;
   doctors: DoctorProfile[];
+  modalities: Array<{ id: number; code?: string; nameEn: string }>;
   filters: ReportingBoardFilters;
   savedView: ReportingBoardSavedView | null;
   onClose: () => void;
@@ -199,19 +220,25 @@ function BulkAssignModal({
 }) {
   const [doctorId, setDoctorId] = useState("");
   const [count, setCount] = useState("5");
+  const [modalityId, setModalityId] = useState("");
   const [unassignedOnly, setUnassignedOnly] = useState(true);
-  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const mutation = useMutation({
-    mutationFn: () => bulkAssignNextReportingCases({
-      doctorId: Number(doctorId),
-      count: Number(count),
-      filters: savedView ? null : filters,
-      savedViewId: savedView?.id ?? null,
-      token: savedView?.token ?? null,
-      unassignedOnly,
-      reason,
-    }),
+    mutationFn: () => {
+      const scopedFilters: ReportingBoardFilters = modalityId
+        ? { ...filters, modalityId: Number(modalityId), modalityCode: null }
+        : filters;
+      return bulkAssignNextReportingCases({
+        doctorId: Number(doctorId),
+        count: Number(count),
+        filters: scopedFilters,
+        savedViewId: null,
+        token: null,
+        unassignedOnly,
+        reason: note.trim() || null,
+      });
+    },
     onSuccess: (result) => {
       onResult(result);
       onClose();
@@ -221,7 +248,7 @@ function BulkAssignModal({
 
   if (!open) return null;
 
-  const invalid = !doctorId || !Number.isInteger(Number(count)) || Number(count) <= 0 || !reason.trim();
+  const invalid = !doctorId || !Number.isInteger(Number(count)) || Number(count) <= 0;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
       <section className="w-full max-w-lg rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
@@ -239,12 +266,18 @@ function BulkAssignModal({
           <Field label="Number of cases">
             <input value={count} onChange={(event) => setCount(event.target.value)} type="number" min={1} className={inputClass()} />
           </Field>
+          <Field label="Modality">
+            <select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className={inputClass()}>
+              <option value="">Configured CT/MR</option>
+              {modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
+            </select>
+          </Field>
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="checkbox" checked={unassignedOnly} onChange={(event) => setUnassignedOnly(event.target.checked)} />
             Unassigned only
           </label>
-          <Field label="Reason">
-            <textarea value={reason} onChange={(event) => setReason(event.target.value)} className="min-h-20 w-full rounded-lg border px-3 py-2 text-sm" />
+          <Field label="Notes for assigned doctor">
+            <textarea value={note} onChange={(event) => setNote(event.target.value)} className="min-h-20 w-full rounded-lg border px-3 py-2 text-sm" />
           </Field>
         </div>
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -425,7 +458,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
                   {cases.map((row) => (
-                    <tr key={row.appointmentId}>
+                    <tr key={row.appointmentId} className={rowPriorityClass(row.reportingPriorityCode)}>
                       <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.includes(row.appointmentId)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, row.appointmentId] : current.filter((id) => id !== row.appointmentId))} /></td>
                       <td className="px-3 py-2"><PriorityChip row={row} /></td>
                       <td className="px-3 py-2 font-semibold text-foreground">{patientName(row)}</td>
@@ -532,6 +565,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       <BulkAssignModal
         open={bulkOpen}
         doctors={doctorsQuery.data ?? []}
+        modalities={lookupsQuery.data?.modalities ?? []}
         filters={compactFilters(filters)}
         savedView={loadedSavedView}
         onClose={() => setBulkOpen(false)}

@@ -67,11 +67,11 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /row\.reportStatus !== "final"/);
   });
 
-  it("bulk assign chooses next backend cases, requires reason, skips assigned by default, and audits", () => {
+  it("bulk assign chooses next backend cases, accepts optional notes, skips assigned by default, and audits", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
-    assert.match(service, /reason is required/);
+    assert.match(service, /reason: input\.reason\?\.trim\(\) \|\| null/);
     assert.match(service, /assignmentStatus: input\.unassignedOnly === false \? rawFilters\.assignmentStatus : "unassigned"/);
     assert.match(service, /eligible\.slice\(0, input\.count\)/);
     assert.match(repo, /for update of b/);

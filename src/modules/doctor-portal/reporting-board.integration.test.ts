@@ -234,7 +234,7 @@ async function createBooking(input: BookingInput): Promise<number> {
       input.time ?? "09:00",
       input.category ?? "oncology",
       input.requiresReport ?? true,
-      input.status ?? "scheduled",
+      input.status ?? "completed",
       policyVersionId,
       admin.id,
     ]
@@ -556,11 +556,11 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     statusByAppointmentId.set(finalCase, "final");
     await assignDirectly(alreadyAssigned, otherDoctor.doctorId);
 
-    const missingReason = await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+    const noNote = await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
       method: "POST",
-      body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "" },
+      body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: addDays(41), dateTo: addDays(41) }, reason: "" },
     });
-    assert.equal(missingReason.status, 400);
+    assert.equal(noNote.status, 200);
     assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "no" } })).status, 403);
     assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: inactiveDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "inactive" } })).status, 404);
     assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: noFinalizeDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "no finalize" } })).status, 400);

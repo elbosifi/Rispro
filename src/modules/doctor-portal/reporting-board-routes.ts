@@ -214,7 +214,7 @@ router.post(
       savedViewId: optionalPositiveInteger(body.savedViewId, "savedViewId"),
       token: asOptionalString(body.token) ?? null,
       unassignedOnly: asOptionalBoolean(body.unassignedOnly) ?? true,
-      reason: asString(body.reason),
+      reason: asOptionalString(body.reason) ?? null,
     });
     res.json(result);
   })

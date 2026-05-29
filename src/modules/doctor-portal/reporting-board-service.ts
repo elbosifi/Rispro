@@ -76,8 +76,8 @@ function normalizeOffset(offset?: number | null): number {
 async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters> {
   const settings = await readReportingBoardSettings();
   const cutoffDate =
-    input.cutoffDate ??
     input.dateFrom ??
+    input.cutoffDate ??
     (settings.cutoffMode === "fixed_date" && settings.defaultCutoffDate
       ? settings.defaultCutoffDate
       : addDays(todayIso(), -settings.daysBack));
@@ -237,7 +237,6 @@ async function filtersFromBulkInput(actor: Actor, input: BulkAssignNextCasesInpu
 
 export async function bulkAssignNextReportingBoardCases(actor: Actor, input: BulkAssignNextCasesInput) {
   const me = await requireRosterManager(actor);
-  if (!input.reason.trim()) throw new HttpError(400, "reason is required.");
   if (!Number.isInteger(input.count) || input.count <= 0 || input.count > MAX_BULK_ASSIGN_COUNT) {
     throw new HttpError(400, `count must be between 1 and ${MAX_BULK_ASSIGN_COUNT}.`);
   }
@@ -271,7 +270,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   const result = await bulkAssignReportingCases({
     doctorId: input.doctorId,
     candidateAppointmentIds: selected.map((row) => row.appointmentId),
-    reason: input.reason,
+    reason: input.reason?.trim() || null,
     unassignedOnly: input.unassignedOnly !== false,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
   });

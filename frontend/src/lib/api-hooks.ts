@@ -788,7 +788,7 @@ export async function bulkAssignNextReportingCases(payload: {
   savedViewId?: number | null;
   token?: string | null;
   unassignedOnly?: boolean | null;
-  reason: string;
+  reason?: string | null;
 }): Promise<ReportingBoardBulkAssignResult> {
   return api<ReportingBoardBulkAssignResult>("/doctor/reporting-board/bulk-assign-next", {
     method: "POST",
