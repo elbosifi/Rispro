@@ -6,7 +6,8 @@ import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import {
   bulkAssignReportingCases,
   createSavedView,
-  doctorCanReportAnyModality,
+  doctorCanReportAllModalities,
+  findActiveSavedViewByToken,
   findAssignableDoctorForReporting,
   findSavedViewById,
   findSavedViewByToken,
@@ -134,7 +135,7 @@ export async function putReportingBoardSettings(actor: Actor, input: unknown) {
 }
 
 export async function getReportingBoardCases(actor: Actor, input: ReportingBoardFilters) {
-  await requireRosterDoctor(actor);
+  await requireRosterManager(actor);
   const filters = await effectiveFilters(input);
   const settings = await readReportingBoardSettings();
   const scopedFilters =
@@ -190,8 +191,11 @@ export async function updateReportingBoardSavedView(
 }
 
 export async function loadReportingBoardSavedViewByToken(actor: Actor, token: string) {
-  await requireRosterDoctor(actor);
-  const view = await findSavedViewByToken(token, actor.userId);
+  const me = await requireRosterDoctor(actor);
+  let view = await findSavedViewByToken(token, actor.userId);
+  if (!view && (me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"))) {
+    view = await findActiveSavedViewByToken(token);
+  }
   if (!view) throw new HttpError(404, "Saved view not found.");
   return view;
 }
@@ -203,7 +207,11 @@ async function filtersFromBulkInput(actor: Actor, input: BulkAssignNextCasesInpu
     return view.filters;
   }
   if (input.token) {
-    const view = await findSavedViewByToken(input.token, actor.userId);
+    let view = await findSavedViewByToken(input.token, actor.userId);
+    if (!view) {
+      await requireRosterManager(actor);
+      view = await findActiveSavedViewByToken(input.token);
+    }
     if (!view) throw new HttpError(404, "Saved view not found.");
     return view.filters;
   }
@@ -237,7 +245,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     return true;
   });
   const selected = eligible.slice(0, input.count);
-  const hasModalityPermission = await doctorCanReportAnyModality(
+  const hasModalityPermission = await doctorCanReportAllModalities(
     input.doctorId,
     [...new Set(selected.map((row) => row.modalityId))]
   );

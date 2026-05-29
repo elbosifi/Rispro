@@ -1286,6 +1286,15 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByText("Saved views")).toBeTruthy();
   });
 
+  it("normal doctor cannot open the Reporting Assignment Board route or assignment controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/reporting-board");
+
+    expect(await screen.findByText("Clinical coordination workspace")).toBeTruthy();
+    expect(screen.queryByText("Reporting Assignment Board")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Bulk assign next cases/i })).toBeNull();
+  });
+
   it("normal doctor sees Protocols page empty state", async () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal("/doctor/protocols");

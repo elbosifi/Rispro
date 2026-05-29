@@ -47,6 +47,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
+    assert.match(service, /await requireRosterManager\(actor\)/);
     assert.match(service, /defaultRequiresReport/);
     assert.match(service, /enabledModalityCodes/);
     assert.match(repo, /b\.requires_report = \$\$\{values\.length\}/);
@@ -62,6 +63,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /checkSonicDicomReportStatus/);
     assert.match(service, /catch \{\s*status = "unavailable";\s*\}/);
     assert.match(service, /reportStatus === "required_not_final"/);
+    assert.match(service, /row\.reportStatus !== "final"/);
   });
 
   it("bulk assign chooses next backend cases, requires reason, skips assigned by default, and audits", () => {
@@ -72,7 +74,19 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /assignmentStatus: input\.unassignedOnly === false \? rawFilters\.assignmentStatus : "unassigned"/);
     assert.match(service, /eligible\.slice\(0, input\.count\)/);
     assert.match(repo, /for update of b/);
+    assert.match(repo, /doctorCanReportAllModalities/);
+    assert.match(repo, /result\.rows\.length === uniqueModalityIds\.length/);
     assert.match(repo, /reporting_board_bulk_case_assigned/);
     assert.match(repo, /reporting_board_bulk_assign_completed/);
+  });
+
+  it("saved view tokens are active-only and owner scoped unless loaded by a manager", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+
+    assert.match(repo, /where token = \$1 and owner_user_id = \$2 and active = true/);
+    assert.match(repo, /where token = \$1 and active = true/);
+    assert.match(service, /moduleCapabilities\.includes\("doctor_supervisor"\)/);
+    assert.match(service, /findActiveSavedViewByToken\(token\)/);
   });
 });

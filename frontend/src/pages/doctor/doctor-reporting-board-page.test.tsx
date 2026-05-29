@@ -166,6 +166,13 @@ describe("DoctorReportingBoardPage", () => {
     expect(await screen.findByText(/2\/2 assigned/)).toBeTruthy();
   });
 
+  it("does not expose editable settings for non-superadmin managers", async () => {
+    renderPage();
+
+    expect(await screen.findByText("Read-only. Only superadmin can update cutoff settings.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save settings" })).toBeNull();
+  });
+
   it("builds print URLs with reporting board parameters", () => {
     const url = buildReportingBoardPrintUrl({
       filters: { reportStatus: "required_not_final", assignedDoctorId: 5 },

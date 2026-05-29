@@ -254,6 +254,29 @@ export async function findSavedViewByToken(token: string, ownerUserId: UserId): 
   return result.rows[0] ? savedView(result.rows[0]) : null;
 }
 
+export async function findActiveSavedViewByToken(token: string): Promise<ReportingBoardSavedView | null> {
+  const result = await pool.query(
+    `
+      select
+        id,
+        owner_user_id as "ownerUserId",
+        owner_doctor_id as "ownerDoctorId",
+        name,
+        token,
+        filters_json as filters,
+        notification_settings_json as "notificationSettings",
+        active,
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      from doctor_portal.reporting_board_saved_views
+      where token = $1 and active = true
+      limit 1
+    `,
+    [token]
+  );
+  return result.rows[0] ? savedView(result.rows[0]) : null;
+}
+
 export async function findSavedViewById(id: number, ownerUserId: UserId): Promise<ReportingBoardSavedView | null> {
   const result = await pool.query(
     `
@@ -400,21 +423,21 @@ export async function findAssignableDoctorForReporting(doctorId: number) {
   return result.rows[0] ?? null;
 }
 
-export async function doctorCanReportAnyModality(doctorId: number, modalityIds: number[]): Promise<boolean> {
+export async function doctorCanReportAllModalities(doctorId: number, modalityIds: number[]): Promise<boolean> {
   if (modalityIds.length === 0) return true;
-  const result = await pool.query(
+  const uniqueModalityIds = [...new Set(modalityIds)];
+  const result = await pool.query<{ modality_id: number }>(
     `
-      select 1
+      select distinct modality_id
       from doctor_portal.doctor_modality_permissions
       where doctor_id = $1
         and modality_id = any($2::bigint[])
         and can_report = true
         and active = true
-      limit 1
     `,
-    [doctorId, modalityIds]
+    [doctorId, uniqueModalityIds]
   );
-  return Boolean(result.rows[0]);
+  return result.rows.length === uniqueModalityIds.length;
 }
 
 export async function bulkAssignReportingCases(input: {
