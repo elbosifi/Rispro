@@ -377,11 +377,11 @@ export function App() {
     <LanguageProvider>
       <BrowserRouter>
         <QueryProvider>
-          <AuthProvider>
-            <ActionPinProvider>
+          <ActionPinProvider>
+            <AuthProvider>
               <RouterConfig />
-            </ActionPinProvider>
-          </AuthProvider>
+            </AuthProvider>
+          </ActionPinProvider>
         </QueryProvider>
       </BrowserRouter>
     </LanguageProvider>

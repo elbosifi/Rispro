@@ -49,9 +49,12 @@ describe("action PIN route enforcement wiring", () => {
 
   it("protects selected queue mutations and leaves scan unprotected", async () => {
     const queue = await readFile("src/routes/queue.ts", "utf-8");
+    const readV2 = await readFile("src/modules/appointments-v2/api/routes/read-v2-routes.ts", "utf-8");
 
     assert.match(queue, /queueRouter\.post\(\s*"\/walk-in",\s*requireActionPin\("queue_walk_in"\),\s*asyncRoute/s);
     assert.match(queue, /queueRouter\.post\(\s*"\/confirm-no-show",\s*requireActionPin\("queue_confirm_no_show"\),\s*asyncRoute/s);
+    assert.match(readV2, /router\.post\(\s*"\/queue\/walk-in",\s*requirePageAccess\("queue"\),\s*requireActionPin\("queue_walk_in"\),\s*asyncRoute/s);
+    assert.match(readV2, /router\.post\(\s*"\/appointments\/:id\/no-show",\s*requireActionPin\("queue_confirm_no_show"\),\s*asyncRoute/s);
     assert.doesNotMatch(queue, /"\/scan",\s*requireActionPin/s);
   });
 
@@ -63,7 +66,8 @@ describe("action PIN route enforcement wiring", () => {
     assert.equal(settings.includes('requireActionPin("patient_import_confirm")'), false);
     assert.equal(settings.includes('requireActionPin("duplicate_patient_merge")'), false);
     assert.equal(settings.includes('requireActionPin("duplicate_patient_safe_delete")'), false);
-    assert.equal(readV2.includes("requireActionPin("), false);
+    assert.equal(readV2.includes('requireActionPin("appointment_complete")'), false);
+    assert.equal(readV2.includes('requireActionPin("queue_scan")'), false);
     assert.equal(publicCancel.includes("requireActionPin("), false);
   });
 });

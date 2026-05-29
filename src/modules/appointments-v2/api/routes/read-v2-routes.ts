@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../../../../db/pool.js";
 import { requireAuth } from "../../../../middleware/auth.js";
+import { requireActionPin } from "../../../../middleware/action-pin.js";
 import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
@@ -790,6 +791,7 @@ router.post(
 router.post(
   "/queue/walk-in",
   requirePageAccess("queue"),
+  requireActionPin("queue_walk_in"),
   asyncRoute(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patientId = Number(body.patientId);
@@ -830,6 +832,7 @@ router.post(
 
 router.post(
   "/appointments/:id/no-show",
+  requireActionPin("queue_confirm_no_show"),
   asyncRoute(async (req: Request, res: Response) => {
     const bookingId = Number(req.params.id);
     if (!Number.isInteger(bookingId) || bookingId <= 0) {
