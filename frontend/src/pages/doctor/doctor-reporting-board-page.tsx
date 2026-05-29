@@ -308,7 +308,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
     },
   });
-  const updateViewMutation = useMutation({
+  const updateViewMutation = useMutation<ReportingBoardSavedView, Error, boolean>({
     mutationFn: (active: boolean) => updateReportingBoardSavedView(loadedSavedView!.id, {
       name: saveName.trim() || loadedSavedView!.name,
       filters: compactFilters(filters),
