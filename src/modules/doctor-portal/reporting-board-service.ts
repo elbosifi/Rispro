@@ -20,10 +20,13 @@ import {
   markAllReportingBoardNotificationsRead,
   markReportingBoardNotificationRead,
   readReportingBoardSettings,
+  readReportingBoardPushConfig,
   updateSavedView,
   updateReportingBoardSettings,
+  upsertReportingBoardPushSubscription,
 } from "./reporting-board-repository.js";
 import type {
+  BrowserPushSubscriptionInput,
   BulkAssignNextCasesInput,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
@@ -330,4 +333,25 @@ export async function dismissMyReportingBoardNotification(actor: Actor, id: numb
 export async function readAllMyReportingBoardNotifications(actor: Actor) {
   await requireRosterDoctor(actor);
   return markAllReportingBoardNotificationsRead(actor.userId);
+}
+
+export async function getReportingBoardPushConfig(actor: Actor) {
+  await requireRosterDoctor(actor);
+  return readReportingBoardPushConfig();
+}
+
+export async function subscribeReportingBoardSavedViewPush(
+  actor: Actor,
+  input: { savedViewId: number; subscription: BrowserPushSubscriptionInput; userAgent?: string | null }
+) {
+  const me = await requireRosterDoctor(actor);
+  const view = await findSavedViewById(input.savedViewId, actor.userId);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return upsertReportingBoardPushSubscription({
+    savedViewId: view.id,
+    userId: actor.userId,
+    doctorId: me.profile!.id,
+    subscription: input.subscription,
+    userAgent: input.userAgent,
+  });
 }

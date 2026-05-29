@@ -472,6 +472,11 @@ export interface ReportingBoardNotificationEvent {
   dismissedAt: string | null;
 }
 
+export interface ReportingBoardPushConfig {
+  enabled: boolean;
+  publicKey: string | null;
+}
+
 export type ProtocolStatus = "draft" | "assigned" | "clarification_needed" | "cancelled";
 
 export interface ProtocolTask {

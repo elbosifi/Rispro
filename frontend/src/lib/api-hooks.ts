@@ -58,6 +58,7 @@ import type {
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
   ReportingBoardNotificationEvent,
+  ReportingBoardPushConfig,
   ReportingBoardSavedView,
   ReportingBoardSettings,
   RosterDutyTypeConfig,
@@ -827,6 +828,18 @@ export async function dismissReportingBoardNotification(id: number): Promise<Rep
 
 export async function markAllReportingBoardNotificationsRead(): Promise<{ count: number }> {
   return api<{ count: number }>("/doctor/reporting-board/notifications/read-all", { method: "POST" });
+}
+
+export async function fetchReportingBoardPushConfig(): Promise<ReportingBoardPushConfig> {
+  const raw = await api<{ config: ReportingBoardPushConfig }>("/doctor/reporting-board/push-config");
+  return raw.config;
+}
+
+export async function subscribeReportingBoardSavedViewPush(savedViewId: number, subscription: PushSubscriptionJSON): Promise<{ subscriptionId: number }> {
+  return api<{ subscriptionId: number }>(`/doctor/reporting-board/saved-views/${savedViewId}/push-subscribe`, {
+    method: "POST",
+    body: JSON.stringify({ subscription }),
+  });
 }
 
 function protocolParams(filters: ProtocolFilters): URLSearchParams {

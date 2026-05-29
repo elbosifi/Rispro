@@ -70,6 +70,8 @@ const fetchReportingBoardSavedViewsMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardSavedViewByTokenMock = vi.fn();
+const fetchReportingBoardPushConfigMock = vi.fn();
+const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const fetchReportingBoardNotificationsMock = vi.fn();
 const markReportingBoardNotificationReadMock = vi.fn();
@@ -141,6 +143,8 @@ vi.mock("@/lib/api-hooks", () => ({
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
   fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
+  fetchReportingBoardPushConfig: (...args: unknown[]) => fetchReportingBoardPushConfigMock(...args),
+  subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   fetchReportingBoardNotifications: (...args: unknown[]) => fetchReportingBoardNotificationsMock(...args),
   markReportingBoardNotificationRead: (...args: unknown[]) => markReportingBoardNotificationReadMock(...args),
@@ -269,6 +273,8 @@ describe("Doctor Portal shell", () => {
     createReportingBoardSavedViewMock.mockReset();
     updateReportingBoardSavedViewMock.mockReset();
     fetchReportingBoardSavedViewByTokenMock.mockReset();
+    fetchReportingBoardPushConfigMock.mockReset();
+    subscribeReportingBoardSavedViewPushMock.mockReset();
     bulkAssignNextReportingCasesMock.mockReset();
     fetchReportingBoardNotificationsMock.mockReset();
     markReportingBoardNotificationReadMock.mockReset();
@@ -426,6 +432,8 @@ describe("Doctor Portal shell", () => {
     createReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: { priorityCode: "urgent" }, notificationSettings: {}, active: true });
+    fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
+    subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [1, 2], skipped: [] });
     fetchReportingBoardNotificationsMock.mockResolvedValue([]);
     markReportingBoardNotificationReadMock.mockResolvedValue({});

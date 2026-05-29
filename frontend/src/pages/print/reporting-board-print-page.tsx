@@ -52,6 +52,11 @@ export default function ReportingBoardPrintPage() {
     const rows = casesQuery.data?.cases ?? [];
     return selectedIds.size > 0 ? rows.filter((row) => selectedIds.has(row.appointmentId)) : rows;
   }, [casesQuery.data?.cases, selectedIds]);
+  const selectedDoctorName = useMemo(() => {
+    const doctorId = filters.assignedDoctorId;
+    if (!doctorId) return null;
+    return cases.find((row) => row.assignedDoctorId === doctorId)?.assignedDoctorName ?? searchParams.get("doctorName");
+  }, [cases, filters.assignedDoctorId, searchParams]);
 
   useEffect(() => {
     if (!autoprint || printed || casesQuery.isLoading || casesQuery.error) return;
@@ -71,7 +76,7 @@ export default function ReportingBoardPrintPage() {
     savedViewQuery.data?.name ? `Saved view: ${savedViewQuery.data.name}` : "Current Reporting Board filters",
     `Cutoff: ${casesQuery.data?.filters.cutoffDate ?? casesQuery.data?.filters.dateFrom ?? "-"}`,
     filters.modalityCode ? `Modality: ${filters.modalityCode}` : filters.modalityId ? `Modality ID: ${filters.modalityId}` : "Configured modalities",
-    filters.assignedDoctorId ? `Doctor ID: ${filters.assignedDoctorId}` : filters.assignmentStatus ? `Assignment: ${filters.assignmentStatus}` : "All assignments",
+    filters.assignedDoctorId ? `Doctor: ${selectedDoctorName ?? `ID ${filters.assignedDoctorId}`}` : filters.assignmentStatus ? `Assignment: ${filters.assignmentStatus}` : "All assignments",
     filters.reportStatus ? `Report: ${String(filters.reportStatus).replaceAll("_", " ")}` : "",
   ].filter(Boolean);
 
@@ -115,7 +120,7 @@ export default function ReportingBoardPrintPage() {
           <div>
             <p className="brand">RISpro</p>
             <h1 className="title">RISpro Reporting Assignment List</h1>
-            <p>{savedViewQuery.data?.name ?? "Reporting Board handoff"}</p>
+            <p>{selectedDoctorName ? `Doctor handoff: ${selectedDoctorName}` : savedViewQuery.data?.name ?? "Reporting Board handoff"}</p>
           </div>
           <div className="meta">
             <div>Generated: {new Date().toLocaleString()}</div>

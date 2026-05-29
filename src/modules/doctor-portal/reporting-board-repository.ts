@@ -1,14 +1,19 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
+import webPush, { type PushSubscription } from "web-push";
+import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import type { UserId } from "../../types/http.js";
+import { HttpError } from "../../utils/http-error.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
+  BrowserPushSubscriptionInput,
   BulkAssignNextCasesResult,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
   ReportingBoardNotificationEvent,
+  ReportingBoardPushConfig,
   ReportingBoardSavedView,
   ReportingBoardSettings,
 } from "./reporting-board-types.js";
@@ -50,8 +55,37 @@ interface NotificationTargetRow {
   recipientDoctorId: number;
 }
 
+interface CreatedNotificationRow {
+  id: number;
+  savedViewId: number;
+  title: string;
+  body: string;
+  actionUrl: string | null;
+}
+
 function nullableNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : Number(value);
+}
+
+function normalizePushSubscription(input: BrowserPushSubscriptionInput): { endpoint: string; p256dh: string; auth: string } {
+  const endpoint = String(input.endpoint || "").trim();
+  const p256dh = String(input.keys?.p256dh || "").trim();
+  const auth = String(input.keys?.auth || "").trim();
+  if (!endpoint || !p256dh || !auth) {
+    throw new HttpError(400, "Push subscription endpoint and keys are required.");
+  }
+  return { endpoint, p256dh, auth };
+}
+
+function hashPushSubscription(input: { endpoint: string; p256dh: string }): string {
+  return createHash("sha256").update(`${input.endpoint}|${input.p256dh}`).digest("hex");
+}
+
+function pushConfig(): ReportingBoardPushConfig {
+  return {
+    enabled: Boolean(env.webPushEnabled && env.webPushVapidPublicKey && env.webPushVapidPrivateKey && env.webPushVapidSubject),
+    publicKey: env.webPushVapidPublicKey || null,
+  };
 }
 
 function cleanRecord(value: unknown): Record<string, unknown> {
@@ -580,6 +614,105 @@ function notificationEvent(row: {
   return { ...row, id: Number(row.id) };
 }
 
+export function readReportingBoardPushConfig(): ReportingBoardPushConfig {
+  return pushConfig();
+}
+
+export async function upsertReportingBoardPushSubscription(input: {
+  savedViewId: number;
+  userId: UserId;
+  doctorId: number | null;
+  subscription: BrowserPushSubscriptionInput;
+  userAgent?: string | null;
+}): Promise<{ subscriptionId: number }> {
+  const config = pushConfig();
+  if (!config.enabled) {
+    throw new HttpError(503, "Web Push is disabled.");
+  }
+  const normalized = normalizePushSubscription(input.subscription);
+  const subscriptionHash = hashPushSubscription(normalized);
+  const result = await pool.query<{ id: number }>(
+    `
+      insert into doctor_portal.reporting_board_web_push_subscriptions (
+        saved_view_id,
+        user_id,
+        doctor_id,
+        endpoint,
+        p256dh,
+        auth,
+        subscription_hash,
+        user_agent,
+        enabled,
+        disabled_at,
+        updated_at
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, true, null, now())
+      on conflict (saved_view_id, subscription_hash) do update
+      set user_id = excluded.user_id,
+          doctor_id = excluded.doctor_id,
+          endpoint = excluded.endpoint,
+          p256dh = excluded.p256dh,
+          auth = excluded.auth,
+          user_agent = excluded.user_agent,
+          enabled = true,
+          disabled_at = null,
+          updated_at = now()
+      returning id
+    `,
+    [
+      input.savedViewId,
+      input.userId,
+      input.doctorId,
+      normalized.endpoint,
+      normalized.p256dh,
+      normalized.auth,
+      subscriptionHash,
+      input.userAgent ?? null,
+    ]
+  );
+  return { subscriptionId: Number(result.rows[0].id) };
+}
+
+async function sendSavedViewPushNotifications(notification: CreatedNotificationRow): Promise<void> {
+  const config = pushConfig();
+  if (!config.enabled) return;
+  webPush.setVapidDetails(env.webPushVapidSubject, env.webPushVapidPublicKey, env.webPushVapidPrivateKey);
+  const subscriptions = await pool.query<{
+    id: number;
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+  }>(
+    `
+      select id, endpoint, p256dh, auth
+      from doctor_portal.reporting_board_web_push_subscriptions
+      where saved_view_id = $1
+        and enabled = true
+    `,
+    [notification.savedViewId]
+  );
+  for (const row of subscriptions.rows) {
+    const subscription: PushSubscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
+    try {
+      await webPush.sendNotification(subscription, JSON.stringify({
+        eventType: "reporting_case_assigned_to_me",
+        title: notification.title,
+        body: notification.body,
+        clickUrl: notification.actionUrl ?? "/doctor/reporting-board",
+      }));
+      await pool.query(
+        `update doctor_portal.reporting_board_web_push_subscriptions set last_success_at = now(), updated_at = now() where id = $1`,
+        [row.id]
+      );
+    } catch {
+      await pool.query(
+        `update doctor_portal.reporting_board_web_push_subscriptions set last_failure_at = now(), updated_at = now() where id = $1`,
+        [row.id]
+      );
+    }
+  }
+}
+
 export async function createAssignedToMeNotifications(input: {
   doctorId: number;
   appointmentIds: number[];
@@ -606,10 +739,11 @@ export async function createAssignedToMeNotifications(input: {
   if (targets.rows.length === 0) return 0;
 
   let created = 0;
+  const pushNotifications: CreatedNotificationRow[] = [];
   for (const target of targets.rows) {
     for (const appointmentId of input.appointmentIds) {
       const dedupeKey = `reporting_case_assigned_to_me:${target.savedViewId}:${target.recipientDoctorId}:${appointmentId}`;
-      const result = await pool.query(
+      const result = await pool.query<CreatedNotificationRow>(
         `
           insert into doctor_portal.reporting_board_notification_events (
             saved_view_id,
@@ -642,6 +776,12 @@ export async function createAssignedToMeNotifications(input: {
             now()
           )
           on conflict (dedupe_key) do nothing
+          returning
+            id,
+            saved_view_id as "savedViewId",
+            title,
+            body,
+            action_url as "actionUrl"
         `,
         [
           target.savedViewId,
@@ -654,8 +794,10 @@ export async function createAssignedToMeNotifications(input: {
         ]
       );
       created += Number(result.rowCount ?? 0);
+      if (result.rows[0]) pushNotifications.push(result.rows[0]);
     }
   }
+  await Promise.all(pushNotifications.map((notification) => sendSavedViewPushNotifications(notification)));
   return created;
 }
 

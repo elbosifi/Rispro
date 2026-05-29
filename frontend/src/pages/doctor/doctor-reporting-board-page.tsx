@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Printer, RefreshCw, Save, Settings, Users } from "lucide-react";
+import QRCode from "qrcode";
+import { Bell, ChevronLeft, ChevronRight, Copy, Printer, QrCode, RefreshCw, Save, Settings, Users } from "lucide-react";
 import {
   assignReportingBoardCase,
   bulkAssignNextReportingCases,
   createReportingBoardSavedView,
   fetchAppointmentLookups,
   fetchReportingBoardCases,
+  fetchReportingBoardPushConfig,
   fetchReportingBoardSavedViewByToken,
   fetchReportingBoardSavedViews,
   fetchReportingBoardSettings,
   fetchRosterDoctors,
+  subscribeReportingBoardSavedViewPush,
   updateReportingBoardSavedView,
   updateReportingBoardSettings,
 } from "@/lib/api-hooks";
@@ -92,6 +95,19 @@ function cutoffFromSettings(settings?: ReportingBoardSettings): string | null {
   return date.toISOString().slice(0, 10);
 }
 
+function urlBase64ToUint8Array(value: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output.buffer;
+}
+
+function pushSupported(): boolean {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
 function compactFilters(filters: ReportingBoardFilters): ReportingBoardFilters {
   return Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined)) as ReportingBoardFilters;
 }
@@ -101,11 +117,13 @@ export function buildReportingBoardPrintUrl(input: {
   savedViewToken?: string | null;
   selectedAppointmentIds?: number[];
   autoprint?: boolean;
+  selectedDoctorName?: string | null;
 }): string {
   const params = new URLSearchParams();
   Object.entries(compactFilters(input.filters)).forEach(([key, value]) => params.set(key, String(value)));
   if (input.savedViewToken) params.set("savedViewToken", input.savedViewToken);
   if (input.selectedAppointmentIds?.length) params.set("appointmentIds", input.selectedAppointmentIds.join(","));
+  if (input.selectedDoctorName) params.set("doctorName", input.selectedDoctorName);
   if (input.autoprint) params.set("autoprint", "1");
   return `/print/reporting-board?${params.toString()}`;
 }
@@ -132,7 +150,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
-
 function inputClass() {
   return "h-10 w-full rounded-lg border px-3 text-sm";
 }
@@ -165,7 +182,6 @@ function AssignmentEditor({
   const [open, setOpen] = useState(false);
   const [doctorId, setDoctorId] = useState(row.assignedDoctorId ? String(row.assignedDoctorId) : "");
   const [reason, setReason] = useState("");
-  const needsReason = Boolean(row.assignedDoctorId);
 
   if (!open) {
     return (
@@ -181,11 +197,11 @@ function AssignmentEditor({
         <option value="">Doctor</option>
         {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
       </select>
-      <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={needsReason ? "Reassignment reason" : "Assignment reason"} className="rounded-lg border px-2 py-1 text-xs" />
+      <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Notes for doctor" className="rounded-lg border px-2 py-1 text-xs" />
       <div className="flex gap-2">
         <button
           type="button"
-          disabled={!doctorId || (needsReason && !reason.trim())}
+          disabled={!doctorId}
           onClick={() => {
             onAssign(row.appointmentId, Number(doctorId), reason);
             setOpen(false);
@@ -305,12 +321,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
+  const [savedViewsOpen, setSavedViewsOpen] = useState(true);
+  const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
   const casesQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "cases", filters],
     queryFn: () => fetchReportingBoardCases(filters),
+    refetchInterval: 30000,
   });
+  const pushConfigQuery = useQuery({ queryKey: ["doctor", "reporting-board", "push-config"], queryFn: fetchReportingBoardPushConfig });
   const savedViewsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "saved-views"], queryFn: fetchReportingBoardSavedViews });
   const doctorsQuery = useQuery({ queryKey: ["doctor", "roster", "doctors"], queryFn: fetchRosterDoctors });
   const lookupsQuery = useQuery({ queryKey: ["lookups"], queryFn: fetchAppointmentLookups, staleTime: 1000 * 60 * 5 });
@@ -338,8 +359,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     onSuccess: async (view) => {
       setLoadedSavedView(view);
       setSaveName("");
+      setSavedViewQr(null);
+      setSavedViewMessage({ tone: "success", text: "Saved view created." });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
     },
+    onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not save view." }),
   });
   const updateViewMutation = useMutation<ReportingBoardSavedView, Error, boolean>({
     mutationFn: (active: boolean) => updateReportingBoardSavedView(loadedSavedView!.id, {
@@ -350,8 +374,31 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     }),
     onSuccess: async (view) => {
       setLoadedSavedView(view.active ? view : null);
+      setSavedViewQr(null);
+      setSavedViewMessage({ tone: "success", text: view.active ? "Saved view updated." : "Saved view deactivated." });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
     },
+    onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not update view." }),
+  });
+  const pushSubscribeMutation = useMutation({
+    mutationFn: async () => {
+      if (!loadedSavedView) throw new Error("Open or save a view first.");
+      if (!pushConfigQuery.data?.enabled || !pushConfigQuery.data.publicKey) throw new Error("Web Push is not configured.");
+      if (!pushSupported()) throw new Error("Browser push is not supported on this device.");
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Notification permission was not granted.");
+      const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+      const existing = await registration.pushManager.getSubscription();
+      const subscription =
+        existing ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(pushConfigQuery.data.publicKey),
+        }));
+      return subscribeReportingBoardSavedViewPush(loadedSavedView.id, subscription.toJSON());
+    },
+    onSuccess: () => setSavedViewMessage({ tone: "success", text: "Browser push enabled for this saved view." }),
+    onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not enable browser push." }),
   });
   const updateSettingsMutation = useMutation({
     mutationFn: () => updateReportingBoardSettings(settingsDraft!),
@@ -367,10 +414,39 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const canEditSettings = Boolean(me.isSuperAdmin);
   const canManage = isManager(me);
   const assignmentFilterValue = filters.assignedDoctorId ? `doctor:${filters.assignedDoctorId}` : filters.assignmentStatus === "unassigned" ? "unassigned" : "all";
-  const printUrl = buildReportingBoardPrintUrl({ filters: effectiveFilters, savedViewToken: loadedSavedView?.token ?? null, selectedAppointmentIds: selectedIds });
+  const selectedAssignedDoctor = filters.assignedDoctorId
+    ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === filters.assignedDoctorId) ?? null
+    : null;
+  const printUrl = buildReportingBoardPrintUrl({
+    filters: effectiveFilters,
+    savedViewToken: loadedSavedView?.token ?? null,
+    selectedAppointmentIds: selectedIds,
+    selectedDoctorName: selectedAssignedDoctor?.displayName ?? null,
+  });
+  const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
+  };
+
+  const copySavedViewLink = async () => {
+    if (!savedViewLink) return;
+    try {
+      await navigator.clipboard?.writeText(savedViewLink);
+      setSavedViewMessage({ tone: "success", text: "Saved view link copied." });
+    } catch {
+      setSavedViewMessage({ tone: "error", text: "Could not copy the saved view link." });
+    }
+  };
+
+  const showSavedViewQr = async () => {
+    if (!savedViewLink) return;
+    try {
+      setSavedViewQr(await QRCode.toDataURL(savedViewLink, { margin: 1, width: 220 }));
+      setSavedViewMessage({ tone: "success", text: "QR link generated." });
+    } catch {
+      setSavedViewMessage({ tone: "error", text: "Could not generate QR link." });
+    }
   };
 
   return (
@@ -380,7 +456,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Portal</p>
           <h2 className="mt-1 text-2xl font-semibold text-foreground">Reporting Assignment Board</h2>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            Effective cutoff: {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"} · Cutoff settings are controlled by superadmin.
+            Effective cutoff: {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"} - Cutoff settings are controlled by superadmin. {selectedAssignedDoctor ? `Selected doctor: ${selectedAssignedDoctor.displayName}.` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -444,7 +520,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         <Field label="Limit"><input type="number" min={1} max={100} value={filters.limit ?? 50} onChange={(event) => setFilter("limit", Number(event.target.value) || 50)} className={inputClass()} /></Field>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+      <div className={savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"}>
         <section className="space-y-3">
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
             <div className="overflow-x-auto">
@@ -494,71 +570,119 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         </section>
 
         <aside className="space-y-4">
-          <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-            <h3 className="font-semibold text-foreground">Saved views</h3>
-            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>In-app notifications are stored with each view.</p>
-            <div className="mt-3 space-y-2">
-              {(savedViewsQuery.data ?? []).map((view) => (
-                <button key={view.id} type="button" onClick={() => {
-                  setLoadedSavedView(view);
-                  setFilters({ ...defaultFilters(settingsQuery.data), ...view.filters });
-                  setNotifications({ ...EMPTY_NOTIFICATIONS, ...view.notificationSettings });
-                  setSearchParams({ savedViewToken: view.token });
-                }} className="block w-full rounded-lg border px-3 py-2 text-left text-sm" style={{ borderColor: loadedSavedView?.id === view.id ? "var(--accent)" : "var(--border)" }}>
-                  {view.name}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-2">
-              <input value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder={loadedSavedView?.name ?? "Saved view name"} className={inputClass()} />
-              {Object.keys(EMPTY_NOTIFICATIONS).map((key) => (
-                <label key={key} className="inline-flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(notifications[key as keyof ReportingBoardNotificationSettings])}
-                    onChange={(event) => setNotifications((current) => ({ ...current, [key]: event.target.checked }))}
-                  />
-                  {key.replace(/^notify/, "Notify ").replaceAll(/([A-Z])/g, " $1").toLowerCase()}
-                </label>
-              ))}
-              <button type="button" disabled={!saveName.trim()} onClick={() => saveViewMutation.mutate()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white disabled:bg-teal-300">
-                <Save size={14} /> Save new view
-              </button>
-              {loadedSavedView && (
-                <>
-                  <button type="button" onClick={() => updateViewMutation.mutate(true)} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Update current view</button>
-                  <button type="button" onClick={() => updateViewMutation.mutate(false)} className="h-9 rounded-lg border px-3 text-sm font-semibold text-red-700" style={{ borderColor: "var(--border)" }}>Deactivate view</button>
-                  <button type="button" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/doctor/reporting-board?savedViewToken=${loadedSavedView.token}`)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-                    <Copy size={14} /> Copy authenticated link
+          {!savedViewsOpen ? (
+            <button
+              type="button"
+              onClick={() => setSavedViewsOpen(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border p-3 text-sm font-semibold xl:min-h-44 xl:flex-col"
+              style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
+              aria-label="Open saved views"
+            >
+              <ChevronLeft size={16} />
+              <span className="xl:[writing-mode:vertical-rl]">Saved views</span>
+            </button>
+          ) : (
+            <>
+              <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold text-foreground">Saved views</h3>
+                    <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>In-app and browser push notifications are saved with each view.</p>
+                  </div>
+                  <button type="button" onClick={() => setSavedViewsOpen(false)} className="rounded-lg border p-2" style={{ borderColor: "var(--border)" }} aria-label="Collapse saved views">
+                    <ChevronRight size={16} />
                   </button>
-                </>
-              )}
-            </div>
-          </section>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(savedViewsQuery.data ?? []).map((view) => (
+                    <button key={view.id} type="button" onClick={() => {
+                      setLoadedSavedView(view);
+                      setFilters({ ...defaultFilters(settingsQuery.data), ...view.filters });
+                      setNotifications({ ...EMPTY_NOTIFICATIONS, ...view.notificationSettings });
+                      setSearchParams({ savedViewToken: view.token });
+                      setSavedViewQr(null);
+                      setSavedViewMessage({ tone: "success", text: `Loaded saved view: ${view.name}.` });
+                    }} className="block w-full rounded-lg border px-3 py-2 text-left text-sm" style={{ borderColor: loadedSavedView?.id === view.id ? "var(--accent)" : "var(--border)" }}>
+                      {view.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-2">
+                  <input value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder={loadedSavedView?.name ?? "Saved view name"} className={inputClass()} />
+                  {Object.keys(EMPTY_NOTIFICATIONS).map((key) => (
+                    <label key={key} className="inline-flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(notifications[key as keyof ReportingBoardNotificationSettings])}
+                        onChange={(event) => setNotifications((current) => ({ ...current, [key]: event.target.checked }))}
+                      />
+                      {key.replace(/^notify/, "Notify ").replaceAll(/([A-Z])/g, " $1").toLowerCase()}
+                    </label>
+                  ))}
+                  {savedViewMessage && (
+                    <p className={savedViewMessage.tone === "success" ? "rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" : "rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"}>
+                      {savedViewMessage.text}
+                    </p>
+                  )}
+                  <button type="button" disabled={!saveName.trim() || saveViewMutation.isPending} onClick={() => saveViewMutation.mutate()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white disabled:bg-teal-300">
+                    <Save size={14} /> {saveViewMutation.isPending ? "Saving..." : "Save new view"}
+                  </button>
+                  {loadedSavedView && (
+                    <>
+                      <button type="button" disabled={updateViewMutation.isPending} onClick={() => updateViewMutation.mutate(true)} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Update current view</button>
+                      <button type="button" disabled={updateViewMutation.isPending} onClick={() => updateViewMutation.mutate(false)} className="h-9 rounded-lg border px-3 text-sm font-semibold text-red-700" style={{ borderColor: "var(--border)" }}>Deactivate view</button>
+                      <button type="button" onClick={() => void copySavedViewLink()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                        <Copy size={14} /> Copy authenticated link
+                      </button>
+                      <button type="button" onClick={() => void showSavedViewQr()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                        <QrCode size={14} /> Show QR link
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!pushConfigQuery.data?.enabled || pushSubscribeMutation.isPending}
+                        onClick={() => pushSubscribeMutation.mutate()}
+                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:opacity-50"
+                        style={{ borderColor: "var(--border)" }}
+                      >
+                        <Bell size={14} /> {pushSubscribeMutation.isPending ? "Enabling..." : "Enable web push"}
+                      </button>
+                      {!pushConfigQuery.data?.enabled && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Web Push is not configured on this server.</p>}
+                      {savedViewQr && (
+                        <div className="rounded-lg border p-3 text-center" style={{ borderColor: "var(--border)" }}>
+                          <img src={savedViewQr} alt="Saved view QR link" className="mx-auto h-auto max-w-full rounded" />
+                          <p className="mt-2 break-all text-xs" style={{ color: "var(--text-muted)" }}>{savedViewLink}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </section>
 
-          <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-            <h3 className="inline-flex items-center gap-2 font-semibold text-foreground"><Settings size={16} /> Board settings</h3>
-            {settingsDraft && (
-              <div className="mt-3 grid gap-2 text-sm">
-                <Field label="Cutoff mode">
-                  <select disabled={!canEditSettings} value={settingsDraft.cutoffMode} onChange={(event) => setSettingsDraft({ ...settingsDraft, cutoffMode: event.target.value as ReportingBoardSettings["cutoffMode"] })} className={inputClass()}>
-                    <option value="days_back">Days back</option>
-                    <option value="fixed_date">Fixed date</option>
-                  </select>
-                </Field>
-                <Field label="Default cutoff date"><input disabled={!canEditSettings} type="date" value={settingsDraft.defaultCutoffDate ?? ""} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultCutoffDate: event.target.value || null })} className={inputClass()} /></Field>
-                <Field label="Days back"><input disabled={!canEditSettings} type="number" value={settingsDraft.daysBack} onChange={(event) => setSettingsDraft({ ...settingsDraft, daysBack: Number(event.target.value) || 0 })} className={inputClass()} /></Field>
-                <Field label="Enabled modality codes"><input disabled={!canEditSettings} value={settingsDraft.enabledModalityCodes.join(",")} onChange={(event) => setSettingsDraft({ ...settingsDraft, enabledModalityCodes: event.target.value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) })} className={inputClass()} /></Field>
-                <Field label="Default report status">
-                  <select disabled={!canEditSettings} value={settingsDraft.defaultReportStatusFilter} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultReportStatusFilter: event.target.value as ReportingBoardReportStatus })} className={inputClass()}>
-                    {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
-                {!canEditSettings && <p style={{ color: "var(--text-muted)" }}>Read-only. Only superadmin can update cutoff settings.</p>}
-                {canEditSettings && <button type="button" onClick={() => updateSettingsMutation.mutate()} className="h-9 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">Save settings</button>}
-              </div>
-            )}
-          </section>
+              <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+                <h3 className="inline-flex items-center gap-2 font-semibold text-foreground"><Settings size={16} /> Board settings</h3>
+                {settingsDraft && (
+                  <div className="mt-3 grid gap-2 text-sm">
+                    <Field label="Cutoff mode">
+                      <select disabled={!canEditSettings} value={settingsDraft.cutoffMode} onChange={(event) => setSettingsDraft({ ...settingsDraft, cutoffMode: event.target.value as ReportingBoardSettings["cutoffMode"] })} className={inputClass()}>
+                        <option value="days_back">Days back</option>
+                        <option value="fixed_date">Fixed date</option>
+                      </select>
+                    </Field>
+                    <Field label="Default cutoff date"><input disabled={!canEditSettings} type="date" value={settingsDraft.defaultCutoffDate ?? ""} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultCutoffDate: event.target.value || null })} className={inputClass()} /></Field>
+                    <Field label="Days back"><input disabled={!canEditSettings} type="number" value={settingsDraft.daysBack} onChange={(event) => setSettingsDraft({ ...settingsDraft, daysBack: Number(event.target.value) || 0 })} className={inputClass()} /></Field>
+                    <Field label="Enabled modality codes"><input disabled={!canEditSettings} value={settingsDraft.enabledModalityCodes.join(",")} onChange={(event) => setSettingsDraft({ ...settingsDraft, enabledModalityCodes: event.target.value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) })} className={inputClass()} /></Field>
+                    <Field label="Default report status">
+                      <select disabled={!canEditSettings} value={settingsDraft.defaultReportStatusFilter} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultReportStatusFilter: event.target.value as ReportingBoardReportStatus })} className={inputClass()}>
+                        {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </Field>
+                    {!canEditSettings && <p style={{ color: "var(--text-muted)" }}>Read-only. Only superadmin can update cutoff settings.</p>}
+                    {canEditSettings && <button type="button" onClick={() => updateSettingsMutation.mutate()} className="h-9 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">Save settings</button>}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </aside>
       </div>
 

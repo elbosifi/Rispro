@@ -11,6 +11,7 @@ import {
   createReportingBoardSavedView,
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
+  getReportingBoardPushConfig,
   getReportingBoardSettings,
   getMyReportingBoardNotifications,
   listMyReportingBoardSavedViews,
@@ -18,6 +19,7 @@ import {
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
+  subscribeReportingBoardSavedViewPush,
   updateReportingBoardSavedView,
 } from "./reporting-board-service.js";
 
@@ -152,6 +154,25 @@ router.patch(
       active: body.active === undefined ? undefined : asOptionalBoolean(body.active),
     });
     res.json({ savedView: view });
+  })
+);
+
+router.get(
+  "/push-config",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ config: await getReportingBoardPushConfig(actor(req)) });
+  })
+);
+
+router.post(
+  "/saved-views/:id/push-subscribe",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await subscribeReportingBoardSavedViewPush(actor(req), {
+      savedViewId: requiredPositiveInteger(req.params.id, "id"),
+      subscription: asUnknownRecord(body.subscription ?? body),
+      userAgent: req.get("user-agent") ?? null,
+    }));
   })
 );
 

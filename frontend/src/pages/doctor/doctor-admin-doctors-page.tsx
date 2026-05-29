@@ -97,6 +97,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
   const [resetPassword, setResetPassword] = useState("");
+  const [adminMessage, setAdminMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [draft, setDraft] = useState({
     userId: "",
     displayName: "",
@@ -140,6 +141,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     }),
     onSuccess: async (profile) => {
       setSelectedProfileId(profile.id);
+      setAdminMessage({ tone: "success", text: "Doctor profile created." });
       await invalidateProfiles();
     },
   });
@@ -155,6 +157,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       setSelectedProfileId(result.profile.id);
       setCreateDoctorDraft(DEFAULT_CREATE_DOCTOR_DRAFT);
       setCreateDoctorModalities({});
+      setAdminMessage({ tone: "success", text: "Doctor user and profile created." });
       await invalidateProfiles();
       await queryClient.invalidateQueries({ queryKey: ["users"] });
     },
@@ -162,7 +165,10 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   const updateMutation = useMutation({
     mutationFn: (payload: { profileId: number; patch: Partial<typeof draft> }) => updateDoctorProfileForAdmin(payload.profileId, payload.patch),
-    onSuccess: invalidateProfiles,
+    onSuccess: async () => {
+      setAdminMessage({ tone: "success", text: "Doctor profile updated." });
+      await invalidateProfiles();
+    },
   });
 
   const editMutation = useMutation({
@@ -173,6 +179,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     onSuccess: async () => {
       setEditingProfileId(null);
       setResetPassword("");
+      setAdminMessage({ tone: "success", text: "Doctor profile saved." });
       await invalidateProfiles();
     },
   });
@@ -184,6 +191,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     },
     onSuccess: async () => {
       setResetPassword("");
+      setAdminMessage({ tone: "success", text: "Temporary password updated." });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await invalidateProfiles();
     },
@@ -195,6 +203,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       return forceDoctorUserPasswordChange(editingProfile.userId);
     },
     onSuccess: async () => {
+      setAdminMessage({ tone: "success", text: "Password change will be required at next login." });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await invalidateProfiles();
     },
@@ -206,6 +215,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       return setDoctorUserActive(editingProfile.userId, active);
     },
     onSuccess: async () => {
+      setAdminMessage({ tone: "success", text: "Linked user account updated." });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await invalidateProfiles();
     },
@@ -215,6 +225,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     mutationFn: (permissions: Array<{ modalityId: number; canProtocol: boolean; canReport: boolean; canSupervise: boolean; active: boolean }>) =>
       updateDoctorProfileModalities(selectedProfileId!, permissions),
     onSuccess: async () => {
+      setAdminMessage({ tone: "success", text: "Modality permissions saved." });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "profiles", selectedProfileId, "modalities"] });
       await queryClient.invalidateQueries({ queryKey: ["doctor", "me"] });
     },
@@ -274,6 +285,8 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   const startEditing = (profile: DoctorProfile) => {
     setEditingProfileId(profile.id);
+    setSelectedProfileId(profile.id);
+    setAdminMessage(null);
     setEditDraft({
       displayName: profile.displayName,
       doctorRole: profile.doctorRole,
@@ -301,6 +314,11 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       {formError && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {formError instanceof Error ? formError.message : "Doctor admin action failed."}
+        </div>
+      )}
+      {adminMessage && (
+        <div className={adminMessage.tone === "success" ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700" : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"}>
+          {adminMessage.text}
         </div>
       )}
 
@@ -469,13 +487,22 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
             <h3 className="font-semibold">Edit doctor profile: {editingProfile.displayName}</h3>
             <button type="button" onClick={() => setEditingProfileId(null)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Close</button>
           </div>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            Profile permissions control Reporting Board eligibility. Use modality permissions below for CT/MR report access.
+          </p>
           <div className="mt-3 grid gap-2 md:grid-cols-3">
-            <input value={editDraft.displayName} onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
-            <select value={editDraft.doctorRole} onChange={(event) => setEditDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
-              {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-            </select>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Display name</span>
+              <input value={editDraft.displayName} onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Doctor role</span>
+              <select value={editDraft.doctorRole} onChange={(event) => setEditDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
+                {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+              </select>
+            </label>
             <button type="button" disabled={!editDraft.displayName || editMutation.isPending} onClick={() => editMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
-              Save profile
+              {editMutation.isPending ? "Saving..." : "Save profile"}
             </button>
           </div>
           <div className="mt-3 flex flex-wrap gap-4 text-sm">
@@ -509,6 +536,9 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       {selectedProfile && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <h3 className="font-semibold">Modality permissions: {selectedProfile.displayName}</h3>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            Toggle Report for every modality this doctor can receive on the Reporting Assignment Board.
+          </p>
           <div className="mt-3 overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead><tr>{["Modality", "Active", "Protocol", "Report", "Supervise"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>

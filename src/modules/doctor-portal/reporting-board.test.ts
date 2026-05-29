@@ -117,4 +117,18 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /createAssignedToMeNotifications/);
     assert.match(service, /result\.assignedAppointmentIds/);
   });
+
+  it("adds authenticated saved-view Web Push subscription storage", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/090_reporting_board_saved_view_web_push.sql`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+
+    assert.match(migration, /doctor_portal\.reporting_board_web_push_subscriptions/);
+    assert.match(migration, /saved_view_id bigint not null references doctor_portal\.reporting_board_saved_views\(id\) on delete cascade/);
+    assert.match(migration, /subscription_hash text not null/);
+    assert.match(routes, /"\/push-config"/);
+    assert.match(routes, /"\/saved-views\/:id\/push-subscribe"/);
+    assert.match(repo, /sendSavedViewPushNotifications/);
+    assert.match(repo, /clickUrl/);
+  });
 });

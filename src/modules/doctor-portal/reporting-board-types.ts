@@ -118,3 +118,16 @@ export interface ReportingBoardNotificationEvent {
   readAt: string | null;
   dismissedAt: string | null;
 }
+
+export interface ReportingBoardPushConfig {
+  enabled: boolean;
+  publicKey: string | null;
+}
+
+export interface BrowserPushSubscriptionInput {
+  endpoint?: unknown;
+  keys?: {
+    p256dh?: unknown;
+    auth?: unknown;
+  };
+}

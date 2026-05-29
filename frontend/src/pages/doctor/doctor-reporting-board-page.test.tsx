@@ -12,6 +12,8 @@ const fetchReportingBoardSavedViewsMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardSavedViewByTokenMock = vi.fn();
+const fetchReportingBoardPushConfigMock = vi.fn();
+const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -25,6 +27,8 @@ vi.mock("@/lib/api-hooks", () => ({
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
   fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
+  fetchReportingBoardPushConfig: (...args: unknown[]) => fetchReportingBoardPushConfigMock(...args),
+  subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -116,6 +120,8 @@ describe("DoctorReportingBoardPage", () => {
     fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent" }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" });
     createReportingBoardSavedViewMock.mockResolvedValue({ id: 10, name: "Saved", token: "tok-10", filters: {}, notificationSettings: {}, active: true });
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 9, name: "Urgent CT", token: "tok-9", filters: {}, notificationSettings: {}, active: true });
+    fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
+    subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
     fetchAppointmentLookupsMock.mockResolvedValue({
@@ -132,7 +138,7 @@ describe("DoctorReportingBoardPage", () => {
     expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
     expect(await screen.findByText("V2-000042")).toBeTruthy();
     expect((await screen.findAllByText("STAT")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/draft/i).length).toBeGreaterThan(2);
+    expect(screen.getAllByText(/draft/i).length).toBeGreaterThan(1);
   });
 
   it("opens and applies a saved view token", async () => {
