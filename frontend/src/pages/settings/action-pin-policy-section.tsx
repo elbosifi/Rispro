@@ -372,7 +372,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         <BoolField label="Idle lock enabled" checked={draft.idleLockEnabled} onChange={(checked) => update("idleLockEnabled", checked)} />
         <BoolField label="Allow user PIN change" checked={draft.allowUserPinChange} onChange={(checked) => update("allowUserPinChange", checked)} />
         <BoolField label="Allow user PIN regenerate" checked={draft.allowUserPinRegenerate} onChange={(checked) => update("allowUserPinRegenerate", checked)} />
-        <BoolField label="Require PIN to view own PIN settings" checked={draft.requirePinToViewOwnPinSettings} onChange={(checked) => update("requirePinToViewOwnPinSettings", checked)} />
+        <BoolField label="Require user password to view own PIN settings" checked={draft.requirePinToViewOwnPinSettings} onChange={(checked) => update("requirePinToViewOwnPinSettings", checked)} />
         <BoolField label="Notify user on PIN change" checked={draft.notifyUserOnPinChange} onChange={(checked) => update("notifyUserOnPinChange", checked)} />
       </div>
 

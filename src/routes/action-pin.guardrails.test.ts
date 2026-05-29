@@ -35,6 +35,14 @@ describe("action PIN route guardrails", () => {
     assert.match(routes, /"\/admin\/users\/:userId\/expire",\s*requireSupervisor,\s*requireRecentSupervisorReauth,\s*asyncRoute/s);
     assert.match(routes, /request\.user\.role !== "super_admin"/);
   });
+
+  it("requires current password, not Action PIN verification, to change own PIN when protected", async () => {
+    const routes = await readFile("src/routes/action-pin.ts", "utf-8");
+
+    assert.match(routes, /Current password is required to change Action PIN settings\./);
+    assert.match(routes, /await authenticateUser\(asString\(request\.user\.username\), currentPassword\)/);
+    assert.doesNotMatch(routes, /Recent Action PIN verification/);
+  });
 });
 
 describe("action PIN route enforcement wiring", () => {

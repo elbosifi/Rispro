@@ -1,7 +1,6 @@
 import express, { Request, Response } from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import {
-  hasRecentActionPinVerification,
   parseActionKey,
   writeActionPinVerificationCookie,
 } from "../middleware/action-pin.js";
@@ -181,11 +180,10 @@ actionPinRouter.post(
     }
 
     const status = await getActionPinStatus(request.user.sub);
-    const recentVerification = await hasRecentActionPinVerification(request);
-    if (status.hasPin && policy.requirePinToViewOwnPinSettings && !recentVerification.ok) {
+    if (status.hasPin && policy.requirePinToViewOwnPinSettings) {
       const currentPassword = asString(body.currentPassword);
       if (!currentPassword) {
-        throw new HttpError(403, "Recent Action PIN verification or current password is required.");
+        throw new HttpError(403, "Current password is required to change Action PIN settings.");
       }
       await authenticateUser(asString(request.user.username), currentPassword);
     }

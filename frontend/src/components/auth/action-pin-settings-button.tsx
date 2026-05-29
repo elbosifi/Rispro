@@ -46,6 +46,7 @@ export function ActionPinSettingsButton() {
 
   const status = statusQuery.data;
   const canChange = status?.policy.allowUserPinChange !== false;
+  const requiresCurrentPassword = Boolean(status?.hasPin && status.policy.requirePinToViewOwnPinSettings);
 
   return (
     <>
@@ -101,7 +102,7 @@ export function ActionPinSettingsButton() {
                 className="w-full rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-stone-900 outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-60 dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
 
-              {status?.hasPin && status.policy.requirePinToViewOwnPinSettings && (
+              {requiresCurrentPassword && (
                 <input
                   aria-label={isArabic ? "كلمة المرور الحالية" : "Current password"}
                   type="password"
@@ -134,7 +135,7 @@ export function ActionPinSettingsButton() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!canChange || setPinMutation.isPending}
+                  disabled={!canChange || setPinMutation.isPending || (requiresCurrentPassword && !currentPassword.trim())}
                   className="flex-1 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:bg-teal-400"
                 >
                   {setPinMutation.isPending ? (isArabic ? "جار الحفظ..." : "Saving...") : (isArabic ? "حفظ" : "Save")}

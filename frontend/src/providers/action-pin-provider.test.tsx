@@ -422,6 +422,36 @@ describe("ActionPinSettingsButton", () => {
     expect(await screen.findByText("Action PIN changes are disabled by policy.")).toBeTruthy();
     expect(screen.queryByText("1357")).toBeNull();
   });
+
+  it("requires current password before saving a protected existing Action PIN", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, {
+        hasPin: true,
+        lockedUntil: null,
+        pinExpiresAt: null,
+        isExpired: false,
+        policy: {
+          enabled: true,
+          pinLength: 4,
+          allowUserPinChange: true,
+          requirePinToViewOwnPinSettings: true
+        }
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+    renderWithQuery(<ActionPinSettingsButton />);
+    await userEvent.click(screen.getByRole("button", { name: "Action PIN settings" }));
+    await screen.findByText("You have an Action PIN set.");
+
+    await userEvent.type(screen.getByLabelText("New Action PIN"), "2468");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await userEvent.type(screen.getByLabelText("Current password"), "account-password");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/action-pin/set"));
+    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toBe(JSON.stringify({ pin: "2468", currentPassword: "account-password" }));
+  });
 });
 
 describe("ActionPinIdleLock", () => {
