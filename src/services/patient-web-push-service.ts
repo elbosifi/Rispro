@@ -209,6 +209,18 @@ export async function isPatientWebPushConfigured(settings?: PatientQrSettings): 
   return Boolean(config.enabled && config.publicKey);
 }
 
+export async function getPatientWebPushSharedConfig(): Promise<{ enabled: boolean; publicKey: string }> {
+  const config = await resolveWebPushConfig();
+  return {
+    enabled: Boolean(config.enabled && config.publicKey),
+    publicKey: config.enabled ? config.publicKey : "",
+  };
+}
+
+export async function configurePatientWebPushVapid(): Promise<boolean> {
+  return configureVapidIfNeeded();
+}
+
 export async function ensurePatientWebPushConfig(options: { updatedByUserId?: number | string | null; settings?: PatientQrSettings } = {}): Promise<{ enabled: boolean; generated: boolean; publicKey: string; source: string }> {
   const envConfig = envWebPushConfig();
   if (envConfig) return { enabled: true, generated: false, publicKey: envConfig.publicKey, source: envConfig.source };

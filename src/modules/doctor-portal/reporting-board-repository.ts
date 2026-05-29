@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import webPush, { type PushSubscription } from "web-push";
-import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import type { UserId } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
+import { configurePatientWebPushVapid, getPatientWebPushSharedConfig } from "../../services/patient-web-push-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
   BrowserPushSubscriptionInput,
@@ -79,13 +79,6 @@ function normalizePushSubscription(input: BrowserPushSubscriptionInput): { endpo
 
 function hashPushSubscription(input: { endpoint: string; p256dh: string }): string {
   return createHash("sha256").update(`${input.endpoint}|${input.p256dh}`).digest("hex");
-}
-
-function pushConfig(): ReportingBoardPushConfig {
-  return {
-    enabled: Boolean(env.webPushEnabled && env.webPushVapidPublicKey && env.webPushVapidPrivateKey && env.webPushVapidSubject),
-    publicKey: env.webPushVapidPublicKey || null,
-  };
 }
 
 function cleanRecord(value: unknown): Record<string, unknown> {
@@ -614,8 +607,12 @@ function notificationEvent(row: {
   return { ...row, id: Number(row.id) };
 }
 
-export function readReportingBoardPushConfig(): ReportingBoardPushConfig {
-  return pushConfig();
+export async function readReportingBoardPushConfig(): Promise<ReportingBoardPushConfig> {
+  const config = await getPatientWebPushSharedConfig();
+  return {
+    enabled: config.enabled,
+    publicKey: config.publicKey || null,
+  };
 }
 
 export async function upsertReportingBoardPushSubscription(input: {
@@ -625,7 +622,7 @@ export async function upsertReportingBoardPushSubscription(input: {
   subscription: BrowserPushSubscriptionInput;
   userAgent?: string | null;
 }): Promise<{ subscriptionId: number }> {
-  const config = pushConfig();
+  const config = await readReportingBoardPushConfig();
   if (!config.enabled) {
     throw new HttpError(503, "Web Push is disabled.");
   }
@@ -674,9 +671,7 @@ export async function upsertReportingBoardPushSubscription(input: {
 }
 
 async function sendSavedViewPushNotifications(notification: CreatedNotificationRow): Promise<void> {
-  const config = pushConfig();
-  if (!config.enabled) return;
-  webPush.setVapidDetails(env.webPushVapidSubject, env.webPushVapidPublicKey, env.webPushVapidPrivateKey);
+  if (!(await configurePatientWebPushVapid())) return;
   const subscriptions = await pool.query<{
     id: number;
     endpoint: string;

@@ -128,6 +128,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /subscription_hash text not null/);
     assert.match(routes, /"\/push-config"/);
     assert.match(routes, /"\/saved-views\/:id\/push-subscribe"/);
+    assert.match(repo, /getPatientWebPushSharedConfig/);
+    assert.match(repo, /configurePatientWebPushVapid/);
     assert.match(repo, /sendSavedViewPushNotifications/);
     assert.match(repo, /clickUrl/);
   });
