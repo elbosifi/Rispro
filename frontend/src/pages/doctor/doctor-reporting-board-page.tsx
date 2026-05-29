@@ -309,7 +309,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     },
   });
   const updateViewMutation = useMutation({
-    mutationFn: (active = true) => updateReportingBoardSavedView(loadedSavedView!.id, {
+    mutationFn: (active: boolean) => updateReportingBoardSavedView(loadedSavedView!.id, {
       name: saveName.trim() || loadedSavedView!.name,
       filters: compactFilters(filters),
       notificationSettings: notifications,
