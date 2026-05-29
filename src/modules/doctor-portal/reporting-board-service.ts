@@ -487,6 +487,12 @@ export async function getReportingBoardPushConfig(actor: Actor) {
   return readReportingBoardPushConfig();
 }
 
+export async function getPublicReportingBoardMobilePushConfig(token: string) {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return readReportingBoardPushConfig();
+}
+
 export async function subscribeReportingBoardSavedViewPush(
   actor: Actor,
   input: { savedViewId: number; subscription: BrowserPushSubscriptionInput; userAgent?: string | null }
@@ -498,6 +504,21 @@ export async function subscribeReportingBoardSavedViewPush(
     savedViewId: view.id,
     userId: actor.userId,
     doctorId: me.profile!.id,
+    subscription: input.subscription,
+    userAgent: input.userAgent,
+  });
+}
+
+export async function subscribePublicReportingBoardMobilePush(
+  token: string,
+  input: { subscription: BrowserPushSubscriptionInput; userAgent?: string | null }
+) {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return upsertReportingBoardPushSubscription({
+    savedViewId: view.id,
+    userId: null,
+    doctorId: null,
     subscription: input.subscription,
     userAgent: input.userAgent,
   });

@@ -9,12 +9,16 @@ const fetchReportingBoardMobileViewMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const assignReportingBoardMobileCaseToMeMock = vi.fn();
 const reassignReportingBoardMobileCaseMock = vi.fn();
+const fetchReportingBoardMobilePushConfigMock = vi.fn();
+const subscribeReportingBoardMobilePushMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardMobileView: (...args: unknown[]) => fetchReportingBoardMobileViewMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   assignReportingBoardMobileCaseToMe: (...args: unknown[]) => assignReportingBoardMobileCaseToMeMock(...args),
   reassignReportingBoardMobileCase: (...args: unknown[]) => reassignReportingBoardMobileCaseMock(...args),
+  fetchReportingBoardMobilePushConfig: (...args: unknown[]) => fetchReportingBoardMobilePushConfigMock(...args),
+  subscribeReportingBoardMobilePush: (...args: unknown[]) => subscribeReportingBoardMobilePushMock(...args),
 }));
 
 const mobileResponse: ReportingBoardMobileResponse = {
@@ -86,6 +90,8 @@ describe("ReportingBoardMobilePage", () => {
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, displayName: "Dr Target" }]);
     assignReportingBoardMobileCaseToMeMock.mockResolvedValue({ assignmentId: 1 });
     reassignReportingBoardMobileCaseMock.mockResolvedValue({ assignmentId: 2 });
+    fetchReportingBoardMobilePushConfigMock.mockResolvedValue({ enabled: true, publicKey: "AAAA" });
+    subscribeReportingBoardMobilePushMock.mockResolvedValue({ subscriptionId: 7 });
   });
 
   it("renders a mobile read-only saved view without desktop navigation", async () => {
@@ -122,5 +128,21 @@ describe("ReportingBoardMobilePage", () => {
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ q: "005279" })));
     fireEvent.click(await screen.findByRole("button", { name: /Refresh/i }));
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledTimes(3));
+  });
+
+  it("subscribes to saved-view notifications from the public QR page", async () => {
+    const subscribe = vi.fn().mockResolvedValue({ endpoint: "https://push.example/sub", toJSON: () => ({ endpoint: "https://push.example/sub", keys: { p256dh: "p", auth: "a" } }) });
+    const register = vi.fn().mockResolvedValue({ pushManager: { subscribe } });
+    Object.defineProperty(window, "Notification", { configurable: true, value: { permission: "granted", requestPermission: vi.fn() } });
+    Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { register } });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Enable notifications/i }));
+
+    await waitFor(() => expect(fetchReportingBoardMobilePushConfigMock).toHaveBeenCalledWith("tok-9"));
+    await waitFor(() => expect(subscribeReportingBoardMobilePushMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ endpoint: "https://push.example/sub" })));
+    expect(await screen.findByText("Notifications enabled for this saved view.")).toBeTruthy();
   });
 });

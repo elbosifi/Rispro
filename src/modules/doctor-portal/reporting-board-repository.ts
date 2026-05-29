@@ -637,7 +637,7 @@ export async function readReportingBoardPushConfig(): Promise<ReportingBoardPush
 
 export async function upsertReportingBoardPushSubscription(input: {
   savedViewId: number;
-  userId: UserId;
+  userId: UserId | null;
   doctorId: number | null;
   subscription: BrowserPushSubscriptionInput;
   userAgent?: string | null;

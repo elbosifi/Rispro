@@ -1,12 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { Calendar, Clipboard, FileText, Flame, RefreshCw, Search, SlidersHorizontal, User, UserCheck, Users } from "lucide-react";
+import { Bell, Calendar, Clipboard, FileText, Flame, RefreshCw, Search, SlidersHorizontal, User, UserCheck, Users } from "lucide-react";
 import {
   assignReportingBoardMobileCaseToMe,
+  fetchReportingBoardMobilePushConfig,
   fetchReportingBoardMobileView,
   fetchRosterDoctors,
   reassignReportingBoardMobileCase,
+  subscribeReportingBoardMobilePush,
 } from "@/lib/api-hooks";
 import type { ReportingBoardFilters, ReportingBoardMobileCase } from "@/types/api";
 
@@ -34,6 +36,19 @@ function priorityTone(code: string | null): "red" | "orange" | "slate" {
 
 function dateTime(row: ReportingBoardMobileCase): string {
   return row.time ? `${row.date} ${row.time}` : row.date;
+}
+
+function urlBase64ToUint8Array(value: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output.buffer;
+}
+
+function pushSupported(): boolean {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
 function Counter({ icon, label, value }: { icon: ReactNode; label: string; value: number | null }) {
@@ -94,6 +109,7 @@ export function ReportingBoardMobilePage() {
   const [reassignDoctorId, setReassignDoctorId] = useState("");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
 
   const viewQuery = useQuery({
     queryKey: ["reporting-board", "mobile", token, filters],
@@ -127,6 +143,25 @@ export function ReportingBoardMobilePage() {
       await invalidate();
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : "Reassignment failed."),
+  });
+  const pushSubscribeMutation = useMutation({
+    mutationFn: async () => {
+      if (!pushSupported()) throw new Error("Browser notifications are not supported on this device.");
+      const config = await fetchReportingBoardMobilePushConfig(token);
+      if (!config.enabled || !config.publicKey) throw new Error("Web Push is not configured.");
+      const permission = window.Notification.permission === "granted"
+        ? "granted"
+        : await window.Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Notification permission was not granted.");
+      const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+      });
+      return subscribeReportingBoardMobilePush(token, subscription.toJSON());
+    },
+    onSuccess: () => setPushMessage("Notifications enabled for this saved view."),
+    onError: (error) => setPushMessage(error instanceof Error ? error.message : "Could not enable notifications."),
   });
 
   const data = viewQuery.data;
@@ -194,9 +229,20 @@ export function ReportingBoardMobilePage() {
       </section>
 
       <footer className="fixed inset-x-0 bottom-0 border-t border-teal-100 bg-white/95 p-4 backdrop-blur">
-        <div className="mx-auto max-w-xl">
-          <p className="font-bold text-slate-950">Read-only via QR.</p>
-          <p className="text-sm text-slate-500">{data.allowedActions.readOnly ? "Sign in to RISpro to reassign cases." : "Authenticated actions are available for your account."}</p>
+        <div className="mx-auto grid max-w-xl gap-3">
+          <div>
+            <p className="font-bold text-slate-950">Read-only via QR.</p>
+            <p className="text-sm text-slate-500">{data.allowedActions.readOnly ? "Sign in to RISpro to reassign cases." : "Authenticated actions are available for your account."}</p>
+          </div>
+          <button
+            type="button"
+            disabled={pushSubscribeMutation.isPending}
+            onClick={() => pushSubscribeMutation.mutate()}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white disabled:opacity-60"
+          >
+            <Bell size={16} /> {pushSubscribeMutation.isPending ? "Enabling..." : "Enable notifications"}
+          </button>
+          {pushMessage && <p className="text-sm font-medium text-teal-700">{pushMessage}</p>}
         </div>
       </footer>
 

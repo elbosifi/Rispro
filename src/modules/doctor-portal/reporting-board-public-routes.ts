@@ -3,14 +3,17 @@ import { optionalAuth, requireAuth } from "../../middleware/auth.js";
 import { createRateLimiter } from "../../middleware/rate-limit.js";
 import { asyncRoute } from "../../utils/async-route.js";
 import { asOptionalString } from "../../utils/request-coercion.js";
+import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import type { ReportingBoardFilters } from "./reporting-board-types.js";
 import {
   assignReportingBoardMobileCaseToMe,
+  getPublicReportingBoardMobilePushConfig,
   getPublicReportingBoardMobileCase,
   getPublicReportingBoardMobileView,
   reassignReportingBoardMobileCase,
+  subscribePublicReportingBoardMobilePush,
 } from "./reporting-board-service.js";
 
 const router = Router();
@@ -83,6 +86,26 @@ router.get(
       requiredPositiveInteger(req.params.caseId, "caseId"),
       mobileFilters(req.query)
     ));
+  })
+);
+
+router.get(
+  "/saved-views/public/:token/mobile/push-config",
+  mobileLimiter,
+  asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
+    res.json({ config: await getPublicReportingBoardMobilePushConfig(String(req.params.token || "")) });
+  })
+);
+
+router.post(
+  "/saved-views/public/:token/mobile/push-subscribe",
+  mobileLimiter,
+  asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await subscribePublicReportingBoardMobilePush(String(req.params.token || ""), {
+      subscription: asUnknownRecord(body.subscription ?? body),
+      userAgent: req.get("user-agent") ?? null,
+    }));
   })
 );
 

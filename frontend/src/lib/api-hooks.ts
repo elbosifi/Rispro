@@ -757,6 +757,18 @@ export async function fetchReportingBoardMobileCase(token: string, appointmentId
   return api<{ case: ReportingBoardMobileResponse["cases"][number]; savedView: ReportingBoardMobileResponse["savedView"]; allowedActions: ReportingBoardMobileResponse["allowedActions"]; refreshedAt: string }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/cases/${appointmentId}${query ? `?${query}` : ""}`);
 }
 
+export async function fetchReportingBoardMobilePushConfig(token: string): Promise<ReportingBoardPushConfig> {
+  const raw = await api<{ config: ReportingBoardPushConfig }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/push-config`);
+  return raw.config;
+}
+
+export async function subscribeReportingBoardMobilePush(token: string, subscription: PushSubscriptionJSON): Promise<{ subscriptionId: number }> {
+  return api<{ subscriptionId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/push-subscribe`, {
+    method: "POST",
+    body: JSON.stringify({ subscription }),
+  });
+}
+
 export async function assignReportingBoardMobileCaseToMe(token: string, appointmentId: number): Promise<{ assignmentId: number }> {
   return api<{ assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/assign-to-me`, {
     method: "POST",
