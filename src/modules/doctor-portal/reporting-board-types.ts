@@ -23,6 +23,7 @@ export interface ReportingBoardFilters {
   requiresReport?: boolean | null;
   reportStatus?: ReportingBoardReportStatus | null;
   priorityCode?: string | null;
+  appointmentId?: number | null;
   limit?: number | null;
   offset?: number | null;
 }

@@ -19,6 +19,7 @@ import {
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
+  sendReportingBoardSavedViewTestNotification,
   subscribeReportingBoardSavedViewPush,
   updateReportingBoardSavedView,
 } from "./reporting-board-service.js";
@@ -173,6 +174,13 @@ router.post(
       subscription: asUnknownRecord(body.subscription ?? body),
       userAgent: req.get("user-agent") ?? null,
     }));
+  })
+);
+
+router.post(
+  "/saved-views/:id/test-push",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await sendReportingBoardSavedViewTestNotification(actor(req), requiredPositiveInteger(req.params.id, "id")));
   })
 );
 

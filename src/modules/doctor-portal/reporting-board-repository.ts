@@ -63,6 +63,12 @@ interface CreatedNotificationRow {
   actionUrl: string | null;
 }
 
+interface PushDeliveryResult {
+  attempted: number;
+  sent: number;
+  failed: number;
+}
+
 function nullableNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : Number(value);
 }
@@ -380,6 +386,10 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
     values.push(input.priorityCode);
     where.push(`rp.code = $${values.length}`);
   }
+  if (input.appointmentId) {
+    values.push(input.appointmentId);
+    where.push(`b.id = $${values.length}`);
+  }
   return where;
 }
 
@@ -670,8 +680,32 @@ export async function upsertReportingBoardPushSubscription(input: {
   return { subscriptionId: Number(result.rows[0].id) };
 }
 
-async function sendSavedViewPushNotifications(notification: CreatedNotificationRow): Promise<void> {
-  if (!(await configurePatientWebPushVapid())) return;
+function reportingCaseNotificationText(row: ReportingBoardCaseRow | null): { title: string; body: string } {
+  if (!row) {
+    return {
+      title: "RISpro test reporting notification",
+      body: "Test notification for Reporting Board saved view alerts.",
+    };
+  }
+  const patient = row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`;
+  const exam = row.examTypeName ? `${row.modalityCode} ${row.examTypeName}` : row.modalityCode;
+  const appointmentTime = row.bookingTime ? `${row.bookingDate} ${row.bookingTime}` : row.bookingDate;
+  const priority = row.reportingPriorityName || row.reportingPriorityCode;
+  return {
+    title: `Reporting case assigned: ${row.accessionNumber}`,
+    body: [
+      patient,
+      row.patientMrn ? `MRN ${row.patientMrn}` : null,
+      exam,
+      appointmentTime,
+      priority ? `Priority ${priority}` : null,
+      row.assignedDoctorName ? `Assigned to ${row.assignedDoctorName}` : "Assigned to you",
+    ].filter(Boolean).join(" - "),
+  };
+}
+
+async function sendSavedViewPushNotifications(notification: CreatedNotificationRow): Promise<PushDeliveryResult> {
+  if (!(await configurePatientWebPushVapid())) return { attempted: 0, sent: 0, failed: 0 };
   const subscriptions = await pool.query<{
     id: number;
     endpoint: string;
@@ -686,6 +720,8 @@ async function sendSavedViewPushNotifications(notification: CreatedNotificationR
     `,
     [notification.savedViewId]
   );
+  let sent = 0;
+  let failed = 0;
   for (const row of subscriptions.rows) {
     const subscription: PushSubscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
     try {
@@ -699,13 +735,31 @@ async function sendSavedViewPushNotifications(notification: CreatedNotificationR
         `update doctor_portal.reporting_board_web_push_subscriptions set last_success_at = now(), updated_at = now() where id = $1`,
         [row.id]
       );
+      sent += 1;
     } catch {
       await pool.query(
         `update doctor_portal.reporting_board_web_push_subscriptions set last_failure_at = now(), updated_at = now() where id = $1`,
         [row.id]
       );
+      failed += 1;
     }
   }
+  return { attempted: subscriptions.rows.length, sent, failed };
+}
+
+export async function sendReportingBoardSavedViewTestPush(input: {
+  savedViewId: number;
+  actionUrl: string;
+  caseRow?: ReportingBoardCaseRow | null;
+}): Promise<PushDeliveryResult> {
+  const text = reportingCaseNotificationText(input.caseRow ?? null);
+  return sendSavedViewPushNotifications({
+    id: 0,
+    savedViewId: input.savedViewId,
+    title: text.title,
+    body: text.body,
+    actionUrl: input.actionUrl,
+  });
 }
 
 export async function createAssignedToMeNotifications(input: {
@@ -737,6 +791,8 @@ export async function createAssignedToMeNotifications(input: {
   const pushNotifications: CreatedNotificationRow[] = [];
   for (const target of targets.rows) {
     for (const appointmentId of input.appointmentIds) {
+      const [caseRow] = await listReportingBoardCaseCandidates({ appointmentId, limit: 1, offset: 0 });
+      const text = reportingCaseNotificationText(caseRow ?? null);
       const dedupeKey = `reporting_case_assigned_to_me:${target.savedViewId}:${target.recipientDoctorId}:${appointmentId}`;
       const result = await pool.query<CreatedNotificationRow>(
         `
@@ -763,8 +819,8 @@ export async function createAssignedToMeNotifications(input: {
             'reporting_case_assigned_to_me',
             'in_app',
             'delivered',
-            'New reporting case assigned',
-            'A reporting case has been assigned to you. Open RISpro to review your reporting board.',
+            $8,
+            $9,
             $5,
             $6,
             $7::jsonb,
@@ -786,6 +842,8 @@ export async function createAssignedToMeNotifications(input: {
           `/doctor/reporting-board/saved/${target.token}`,
           dedupeKey,
           JSON.stringify({ notificationType: "reporting_case_assigned_to_me" }),
+          text.title,
+          text.body,
         ]
       );
       created += Number(result.rowCount ?? 0);

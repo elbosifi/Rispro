@@ -21,6 +21,7 @@ import {
   markReportingBoardNotificationRead,
   readReportingBoardSettings,
   readReportingBoardPushConfig,
+  sendReportingBoardSavedViewTestPush,
   updateSavedView,
   updateReportingBoardSettings,
   upsertReportingBoardPushSubscription,
@@ -353,5 +354,17 @@ export async function subscribeReportingBoardSavedViewPush(
     doctorId: me.profile!.id,
     subscription: input.subscription,
     userAgent: input.userAgent,
+  });
+}
+
+export async function sendReportingBoardSavedViewTestNotification(actor: Actor, savedViewId: number) {
+  await requireRosterDoctor(actor);
+  const view = await findSavedViewById(savedViewId, actor.userId);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  const { cases } = await getReportingBoardCases(actor, { ...view.filters, limit: 1, offset: 0 });
+  return sendReportingBoardSavedViewTestPush({
+    savedViewId: view.id,
+    actionUrl: `/doctor/reporting-board/saved/${view.token}`,
+    caseRow: cases[0] ?? null,
   });
 }

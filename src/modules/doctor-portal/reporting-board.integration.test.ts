@@ -611,10 +611,11 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       [notifyView.id, notifyCase]
     );
     assert.equal(events.rowCount, 1);
-    assert.equal(events.rows[0].title, "New reporting case assigned");
-    assert.equal(events.rows[0].body, "A reporting case has been assigned to you. Open RISpro to review your reporting board.");
+    assert.match(events.rows[0].title, /Reporting case assigned/);
+    assert.match(events.rows[0].body, /Notify Patient/);
+    assert.match(events.rows[0].body, /V2-/);
+    assert.match(events.rows[0].body, /CT/);
     assert.match(events.rows[0].action_url, new RegExp(`/doctor/reporting-board/saved/${notifyView.token}`));
-    assert.doesNotMatch(`${events.rows[0].title} ${events.rows[0].body}`, /Notify Patient|V2-|diagnosis|report text|clinical/i);
 
     assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${notifyCase}/assign-doctor`, { method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "repeat" } })).status, 200);
     assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where saved_view_id = $1 and appointment_id = $2`, [notifyView.id, notifyCase])).rowCount, 1);

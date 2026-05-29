@@ -101,8 +101,9 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /dedupe_key text not null unique/);
     assert.match(repo, /notifyAssignedToMe/);
     assert.match(repo, /on conflict \(dedupe_key\) do nothing/);
-    assert.match(repo, /New reporting case assigned/);
-    assert.match(repo, /A reporting case has been assigned to you\. Open RISpro to review your reporting board\./);
+    assert.match(repo, /Reporting case assigned/);
+    assert.match(repo, /patientEnglishName/);
+    assert.match(repo, /accessionNumber/);
     assert.match(routes, /"\/notifications"/);
     assert.match(routes, /"\/notifications\/:id\/read"/);
     assert.match(routes, /"\/notifications\/:id\/dismiss"/);
@@ -128,8 +129,10 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /subscription_hash text not null/);
     assert.match(routes, /"\/push-config"/);
     assert.match(routes, /"\/saved-views\/:id\/push-subscribe"/);
+    assert.match(routes, /"\/saved-views\/:id\/test-push"/);
     assert.match(repo, /getPatientWebPushSharedConfig/);
     assert.match(repo, /configurePatientWebPushVapid/);
+    assert.match(repo, /reportingCaseNotificationText/);
     assert.match(repo, /sendSavedViewPushNotifications/);
     assert.match(repo, /clickUrl/);
   });

@@ -842,6 +842,12 @@ export async function subscribeReportingBoardSavedViewPush(savedViewId: number, 
   });
 }
 
+export async function sendReportingBoardSavedViewTestPush(savedViewId: number): Promise<{ attempted: number; sent: number; failed: number }> {
+  return api<{ attempted: number; sent: number; failed: number }>(`/doctor/reporting-board/saved-views/${savedViewId}/test-push`, {
+    method: "POST",
+  });
+}
+
 function protocolParams(filters: ProtocolFilters): URLSearchParams {
   const params = new URLSearchParams({ dateFrom: filters.dateFrom, dateTo: filters.dateTo });
   if (filters.modalityId) params.set("modalityId", String(filters.modalityId));

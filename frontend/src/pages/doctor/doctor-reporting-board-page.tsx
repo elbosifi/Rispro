@@ -14,6 +14,7 @@ import {
   fetchReportingBoardSavedViews,
   fetchReportingBoardSettings,
   fetchRosterDoctors,
+  sendReportingBoardSavedViewTestPush,
   subscribeReportingBoardSavedViewPush,
   updateReportingBoardSavedView,
   updateReportingBoardSettings,
@@ -400,6 +401,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     onSuccess: () => setSavedViewMessage({ tone: "success", text: "Browser push enabled for this saved view." }),
     onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not enable browser push." }),
   });
+  const pushTestMutation = useMutation({
+    mutationFn: () => {
+      if (!loadedSavedView) throw new Error("Open or save a view first.");
+      return sendReportingBoardSavedViewTestPush(loadedSavedView.id);
+    },
+    onSuccess: (result) => setSavedViewMessage({
+      tone: result.sent > 0 ? "success" : "error",
+      text: result.sent > 0 ? "Test notification sent." : "No active web push subscription found for this view.",
+    }),
+    onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not send test notification." }),
+  });
   const updateSettingsMutation = useMutation({
     mutationFn: () => updateReportingBoardSettings(settingsDraft!),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "settings"] }),
@@ -645,6 +657,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         style={{ borderColor: "var(--border)" }}
                       >
                         <Bell size={14} /> {pushSubscribeMutation.isPending ? "Enabling..." : "Enable web push"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!pushConfigQuery.data?.enabled || pushTestMutation.isPending}
+                        onClick={() => pushTestMutation.mutate()}
+                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:opacity-50"
+                        style={{ borderColor: "var(--border)" }}
+                      >
+                        <Bell size={14} /> {pushTestMutation.isPending ? "Sending..." : "Send test notification"}
                       </button>
                       {!pushConfigQuery.data?.enabled && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Web Push is not configured on this server.</p>}
                       {savedViewQr && (

@@ -14,6 +14,7 @@ const updateReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardSavedViewByTokenMock = vi.fn();
 const fetchReportingBoardPushConfigMock = vi.fn();
 const subscribeReportingBoardSavedViewPushMock = vi.fn();
+const sendReportingBoardSavedViewTestPushMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -29,6 +30,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
   fetchReportingBoardPushConfig: (...args: unknown[]) => fetchReportingBoardPushConfigMock(...args),
   subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
+  sendReportingBoardSavedViewTestPush: (...args: unknown[]) => sendReportingBoardSavedViewTestPushMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -122,6 +124,7 @@ describe("DoctorReportingBoardPage", () => {
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 9, name: "Urgent CT", token: "tok-9", filters: {}, notificationSettings: {}, active: true });
     fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
     subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
+    sendReportingBoardSavedViewTestPushMock.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
     fetchAppointmentLookupsMock.mockResolvedValue({
@@ -148,6 +151,17 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => {
       expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent" }));
     });
+  });
+
+  it("sends a test web push notification for the loaded saved view", async () => {
+    fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: true, publicKey: "public-key" });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Send test notification/i }));
+
+    await waitFor(() => expect(sendReportingBoardSavedViewTestPushMock).toHaveBeenCalledWith(9));
+    expect(await screen.findByText("Test notification sent.")).toBeTruthy();
   });
 
   it("validates and submits the bulk assignment modal", async () => {
