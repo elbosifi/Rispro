@@ -80,6 +80,7 @@ export async function api<T>(
   try {
     const response = await fetch(`/api${path}`, {
       ...fetchOptions,
+      cache: fetchOptions.cache ?? "no-store",
       credentials: "include",
       headers: isFormDataBody
         ? fetchOptions.headers
