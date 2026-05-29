@@ -6,13 +6,18 @@ import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import type { ReportingBoardFilters, ReportingBoardNotificationSettings } from "./reporting-board-types.js";
 import {
+  assignReportingBoardCaseToDoctor,
   bulkAssignNextReportingBoardCases,
   createReportingBoardSavedView,
+  dismissMyReportingBoardNotification,
   getReportingBoardCases,
   getReportingBoardSettings,
+  getMyReportingBoardNotifications,
   listMyReportingBoardSavedViews,
   loadReportingBoardSavedViewByToken,
   putReportingBoardSettings,
+  readAllMyReportingBoardNotifications,
+  readMyReportingBoardNotification,
   updateReportingBoardSavedView,
 } from "./reporting-board-service.js";
 
@@ -95,8 +100,8 @@ function notificationSettings(value: unknown): ReportingBoardNotificationSetting
 
 router.get(
   "/settings",
-  asyncRoute(async (_req: DoctorRequest, res: Response) => {
-    res.json({ settings: await getReportingBoardSettings() });
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ settings: await getReportingBoardSettings(actor(req)) });
   })
 );
 
@@ -154,6 +159,47 @@ router.get(
   "/saved-views/token/:token",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json({ savedView: await loadReportingBoardSavedViewByToken(actor(req), asString(req.params.token)) });
+  })
+);
+
+router.post(
+  "/:appointmentId/assign-doctor",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await assignReportingBoardCaseToDoctor(actor(req), {
+      appointmentId: requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      doctorId: requiredPositiveInteger(body.doctorId, "doctorId"),
+      reason: asOptionalString(body.reason) ?? null,
+    });
+    res.json(result);
+  })
+);
+
+router.get(
+  "/notifications",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ notifications: await getMyReportingBoardNotifications(actor(req)) });
+  })
+);
+
+router.post(
+  "/notifications/read-all",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ count: await readAllMyReportingBoardNotifications(actor(req)) });
+  })
+);
+
+router.post(
+  "/notifications/:id/read",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ notification: await readMyReportingBoardNotification(actor(req), requiredPositiveInteger(req.params.id, "id")) });
+  })
+);
+
+router.post(
+  "/notifications/:id/dismiss",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ notification: await dismissMyReportingBoardNotification(actor(req), requiredPositiveInteger(req.params.id, "id")) });
   })
 );
 

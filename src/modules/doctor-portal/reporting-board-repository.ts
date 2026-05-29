@@ -8,6 +8,7 @@ import type {
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
+  ReportingBoardNotificationEvent,
   ReportingBoardSavedView,
   ReportingBoardSettings,
 } from "./reporting-board-types.js";
@@ -40,6 +41,13 @@ interface CaseQueryOptions {
 interface CandidateAssignment {
   id: number | null;
   appointmentId: number;
+}
+
+interface NotificationTargetRow {
+  savedViewId: number;
+  token: string;
+  recipientUserId: number;
+  recipientDoctorId: number;
 }
 
 function cleanRecord(value: unknown): Record<string, unknown> {
@@ -301,7 +309,7 @@ export async function findSavedViewById(id: number, ownerUserId: UserId): Promis
 }
 
 function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters, values: unknown[]) {
-  const where: string[] = [];
+  const where: string[] = ["b.status not in ('cancelled', 'discontinued', 'voided')"];
   if (input.dateFrom) {
     values.push(input.dateFrom);
     where.push(`b.booking_date >= $${values.length}::date`);
@@ -541,4 +549,182 @@ export async function bulkAssignReportingCases(input: {
     assignedAppointmentIds,
     skipped,
   };
+}
+
+function notificationEvent(row: {
+  id: number;
+  eventType: "reporting_case_assigned_to_me";
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  status: "pending" | "delivered" | "read" | "dismissed" | "failed";
+  createdAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
+  dismissedAt: string | null;
+}): ReportingBoardNotificationEvent {
+  return row;
+}
+
+export async function createAssignedToMeNotifications(input: {
+  doctorId: number;
+  appointmentIds: number[];
+}): Promise<number> {
+  if (input.appointmentIds.length === 0) return 0;
+  const targets = await pool.query<NotificationTargetRow>(
+    `
+      select
+        rbsv.id as "savedViewId",
+        rbsv.token,
+        dp.user_id as "recipientUserId",
+        dp.id as "recipientDoctorId"
+      from doctor_portal.reporting_board_saved_views rbsv
+      join doctor_portal.doctor_profiles dp on dp.id = rbsv.owner_doctor_id
+      join users u on u.id = dp.user_id
+      where rbsv.owner_doctor_id = $1
+        and rbsv.active = true
+        and dp.active = true
+        and u.is_active = true
+        and coalesce((rbsv.notification_settings_json->>'notifyAssignedToMe')::boolean, false) = true
+    `,
+    [input.doctorId]
+  );
+  if (targets.rows.length === 0) return 0;
+
+  let created = 0;
+  for (const target of targets.rows) {
+    for (const appointmentId of input.appointmentIds) {
+      const dedupeKey = `reporting_case_assigned_to_me:${target.savedViewId}:${target.recipientDoctorId}:${appointmentId}`;
+      const result = await pool.query(
+        `
+          insert into doctor_portal.reporting_board_notification_events (
+            saved_view_id,
+            recipient_user_id,
+            recipient_doctor_id,
+            appointment_id,
+            event_type,
+            delivery_channel,
+            status,
+            title,
+            body,
+            action_url,
+            dedupe_key,
+            metadata_json,
+            delivered_at
+          )
+          values (
+            $1,
+            $2,
+            $3,
+            $4,
+            'reporting_case_assigned_to_me',
+            'in_app',
+            'delivered',
+            'New reporting case assigned',
+            'A reporting case has been assigned to you. Open RISpro to review your reporting board.',
+            $5,
+            $6,
+            $7::jsonb,
+            now()
+          )
+          on conflict (dedupe_key) do nothing
+        `,
+        [
+          target.savedViewId,
+          target.recipientUserId,
+          target.recipientDoctorId,
+          appointmentId,
+          `/doctor/reporting-board/saved/${target.token}`,
+          dedupeKey,
+          JSON.stringify({ notificationType: "reporting_case_assigned_to_me" }),
+        ]
+      );
+      created += Number(result.rowCount ?? 0);
+    }
+  }
+  return created;
+}
+
+export async function listReportingBoardNotifications(userId: UserId): Promise<ReportingBoardNotificationEvent[]> {
+  const result = await pool.query<ReportingBoardNotificationEvent>(
+    `
+      select
+        id,
+        event_type as "eventType",
+        title,
+        body,
+        action_url as "actionUrl",
+        status,
+        created_at as "createdAt",
+        delivered_at as "deliveredAt",
+        read_at as "readAt",
+        dismissed_at as "dismissedAt"
+      from doctor_portal.reporting_board_notification_events
+      where recipient_user_id = $1
+        and status <> 'dismissed'
+      order by created_at desc, id desc
+      limit 50
+    `,
+    [userId]
+  );
+  return result.rows.map(notificationEvent);
+}
+
+export async function markReportingBoardNotificationRead(userId: UserId, id: number): Promise<ReportingBoardNotificationEvent | null> {
+  const result = await pool.query<ReportingBoardNotificationEvent>(
+    `
+      update doctor_portal.reporting_board_notification_events
+      set status = 'read', read_at = coalesce(read_at, now())
+      where id = $1 and recipient_user_id = $2
+      returning
+        id,
+        event_type as "eventType",
+        title,
+        body,
+        action_url as "actionUrl",
+        status,
+        created_at as "createdAt",
+        delivered_at as "deliveredAt",
+        read_at as "readAt",
+        dismissed_at as "dismissedAt"
+    `,
+    [id, userId]
+  );
+  return result.rows[0] ? notificationEvent(result.rows[0]) : null;
+}
+
+export async function dismissReportingBoardNotification(userId: UserId, id: number): Promise<ReportingBoardNotificationEvent | null> {
+  const result = await pool.query<ReportingBoardNotificationEvent>(
+    `
+      update doctor_portal.reporting_board_notification_events
+      set status = 'dismissed', dismissed_at = coalesce(dismissed_at, now())
+      where id = $1 and recipient_user_id = $2
+      returning
+        id,
+        event_type as "eventType",
+        title,
+        body,
+        action_url as "actionUrl",
+        status,
+        created_at as "createdAt",
+        delivered_at as "deliveredAt",
+        read_at as "readAt",
+        dismissed_at as "dismissedAt"
+    `,
+    [id, userId]
+  );
+  return result.rows[0] ? notificationEvent(result.rows[0]) : null;
+}
+
+export async function markAllReportingBoardNotificationsRead(userId: UserId): Promise<number> {
+  const result = await pool.query(
+    `
+      update doctor_portal.reporting_board_notification_events
+      set status = 'read', read_at = coalesce(read_at, now())
+      where recipient_user_id = $1
+        and status = 'delivered'
+    `,
+    [userId]
+  );
+  return Number(result.rowCount ?? 0);
 }

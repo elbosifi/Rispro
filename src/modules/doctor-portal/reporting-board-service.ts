@@ -3,16 +3,22 @@ import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
+import { assignDoctorCase } from "./cases-service.js";
 import {
   bulkAssignReportingCases,
+  createAssignedToMeNotifications,
   createSavedView,
   doctorCanReportAllModalities,
+  dismissReportingBoardNotification,
   findActiveSavedViewByToken,
   findAssignableDoctorForReporting,
   findSavedViewById,
   findSavedViewByToken,
   listReportingBoardCaseCandidates,
+  listReportingBoardNotifications,
   listSavedViews,
+  markAllReportingBoardNotificationsRead,
+  markReportingBoardNotificationRead,
   readReportingBoardSettings,
   updateSavedView,
   updateReportingBoardSettings,
@@ -31,6 +37,11 @@ interface Actor {
 
 const MAX_CASE_LIST_LIMIT = 100;
 const MAX_BULK_ASSIGN_COUNT = 100;
+let reportStatusChecker = checkSonicDicomReportStatus;
+
+export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
+  reportStatusChecker = checker ?? checkSonicDicomReportStatus;
+}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -94,7 +105,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   for (const row of rows) {
     let status: ReportingBoardCaseRow["reportStatus"] = "unavailable";
     try {
-      const result = await checkSonicDicomReportStatus(
+      const result = await reportStatusChecker(
         {
           bookingId: row.appointmentId,
           accessionNumber: row.accessionNumber,
@@ -125,7 +136,10 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
 
-export async function getReportingBoardSettings() {
+export async function getReportingBoardSettings(actor: Actor) {
+  if (actor.appRole !== "super_admin") {
+    await requireRosterDoctor(actor);
+  }
   return readReportingBoardSettings();
 }
 
@@ -135,8 +149,11 @@ export async function putReportingBoardSettings(actor: Actor, input: unknown) {
 }
 
 export async function getReportingBoardCases(actor: Actor, input: ReportingBoardFilters) {
-  await requireRosterManager(actor);
-  const filters = await effectiveFilters(input);
+  const me = await requireRosterDoctor(actor);
+  const canManage =
+    me.moduleCapabilities.includes("doctor_supervisor") ||
+    me.moduleCapabilities.includes("doctor_admin");
+  const filters = await effectiveFilters(canManage ? input : { ...input, assignedDoctorId: me.profile!.id, assignmentStatus: "assigned" });
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
@@ -258,6 +275,10 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     unassignedOnly: input.unassignedOnly !== false,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
   });
+  await createAssignedToMeNotifications({
+    doctorId: input.doctorId,
+    appointmentIds: result.assignedAppointmentIds,
+  });
   const selectedIds = new Set(selected.map((row) => row.appointmentId));
   const preSkipped = cases
     .filter((row) => !selectedIds.has(row.appointmentId))
@@ -269,4 +290,45 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     skippedCount: result.skippedCount + preSkipped.length,
     skipped: [...result.skipped, ...preSkipped],
   };
+}
+
+export async function assignReportingBoardCaseToDoctor(
+  actor: Actor,
+  input: { appointmentId: number; doctorId: number; reason?: string | null }
+) {
+  await requireRosterManager(actor);
+  const result = await assignDoctorCase(actor, {
+    appointmentId: input.appointmentId,
+    doctorId: input.doctorId,
+    reason: input.reason ?? null,
+  });
+  await createAssignedToMeNotifications({
+    doctorId: input.doctorId,
+    appointmentIds: [input.appointmentId],
+  });
+  return result;
+}
+
+export async function getMyReportingBoardNotifications(actor: Actor) {
+  await requireRosterDoctor(actor);
+  return listReportingBoardNotifications(actor.userId);
+}
+
+export async function readMyReportingBoardNotification(actor: Actor, id: number) {
+  await requireRosterDoctor(actor);
+  const notification = await markReportingBoardNotificationRead(actor.userId, id);
+  if (!notification) throw new HttpError(404, "Notification not found.");
+  return notification;
+}
+
+export async function dismissMyReportingBoardNotification(actor: Actor, id: number) {
+  await requireRosterDoctor(actor);
+  const notification = await dismissReportingBoardNotification(actor.userId, id);
+  if (!notification) throw new HttpError(404, "Notification not found.");
+  return notification;
+}
+
+export async function readAllMyReportingBoardNotifications(actor: Actor) {
+  await requireRosterDoctor(actor);
+  return markAllReportingBoardNotificationsRead(actor.userId);
 }

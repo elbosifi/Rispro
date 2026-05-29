@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Bell,
   BriefcaseMedical,
   CalendarDays,
   ClipboardList,
@@ -11,7 +12,13 @@ import {
   Stethoscope,
   Users,
 } from "lucide-react";
-import { fetchDoctorMe } from "@/lib/api-hooks";
+import {
+  dismissReportingBoardNotification,
+  fetchDoctorMe,
+  fetchReportingBoardNotifications,
+  markAllReportingBoardNotificationsRead,
+  markReportingBoardNotificationRead,
+} from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
 import type { DoctorMe } from "@/types/api";
 import { DoctorCasesPage } from "./doctor-cases-page";
@@ -230,6 +237,10 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
         element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
+        path="reporting-board/saved/:token"
+        element={canAccessClinical ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+      />
+      <Route
         path="roster-planner"
         element={canManageRoster ? <DoctorRosterPage me={me} management /> : <Navigate to="/doctor/my-work" replace />}
       />
@@ -261,6 +272,87 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route path="*" element={<Navigate to="/doctor/my-work" replace />} />
     </Routes>
+  );
+}
+
+function ReportingBoardNotificationsButton() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const notificationsQuery = useQuery({
+    queryKey: ["doctor", "reporting-board", "notifications"],
+    queryFn: fetchReportingBoardNotifications,
+    refetchInterval: 60_000,
+  });
+  const markReadMutation = useMutation({
+    mutationFn: markReportingBoardNotificationRead,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "notifications"] }),
+  });
+  const dismissMutation = useMutation({
+    mutationFn: dismissReportingBoardNotification,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "notifications"] }),
+  });
+  const readAllMutation = useMutation({
+    mutationFn: markAllReportingBoardNotificationsRead,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "notifications"] }),
+  });
+  const notifications = notificationsQuery.data ?? [];
+  const unreadCount = notifications.filter((item) => item.status === "delivered" || item.status === "pending").length;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="relative inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold"
+        style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}
+        aria-label="Notifications"
+      >
+        <Bell size={14} />
+        Notifications
+        {unreadCount > 0 && (
+          <span className="ml-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{unreadCount}</span>
+        )}
+      </button>
+      {open && (
+        <section className="absolute right-0 z-50 mt-2 w-80 rounded-lg border p-3 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
+            <button type="button" onClick={() => readAllMutation.mutate()} className="text-xs font-semibold" style={{ color: "var(--accent)" }}>
+              Mark all read
+            </button>
+          </div>
+          <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No notifications.</p>
+            ) : (
+              notifications.map((notification) => (
+                <article key={notification.id} className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: notification.status === "read" ? "var(--background)" : "color-mix(in srgb, var(--accent) 8%, var(--card))" }}>
+                  <button
+                    type="button"
+                    className="block w-full text-left"
+                    onClick={() => {
+                      markReadMutation.mutate(notification.id);
+                      if (notification.actionUrl) navigate(notification.actionUrl);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="font-semibold text-foreground">{notification.title}</span>
+                    <span className="mt-1 block text-xs leading-5" style={{ color: "var(--text-muted)" }}>{notification.body}</span>
+                  </button>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{new Date(notification.createdAt).toLocaleString()}</span>
+                    <button type="button" onClick={() => dismissMutation.mutate(notification.id)} className="text-xs font-semibold text-red-700">
+                      Dismiss
+                    </button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -316,6 +408,7 @@ export default function DoctorPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
             {me.canAccessCoreWorkspace && (
               <button
                 type="button"

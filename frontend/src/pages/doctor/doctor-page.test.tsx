@@ -71,6 +71,10 @@ const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardSavedViewByTokenMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
+const fetchReportingBoardNotificationsMock = vi.fn();
+const markReportingBoardNotificationReadMock = vi.fn();
+const dismissReportingBoardNotificationMock = vi.fn();
+const markAllReportingBoardNotificationsReadMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -138,6 +142,10 @@ vi.mock("@/lib/api-hooks", () => ({
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
   fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
+  fetchReportingBoardNotifications: (...args: unknown[]) => fetchReportingBoardNotificationsMock(...args),
+  markReportingBoardNotificationRead: (...args: unknown[]) => markReportingBoardNotificationReadMock(...args),
+  dismissReportingBoardNotification: (...args: unknown[]) => dismissReportingBoardNotificationMock(...args),
+  markAllReportingBoardNotificationsRead: (...args: unknown[]) => markAllReportingBoardNotificationsReadMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -262,6 +270,10 @@ describe("Doctor Portal shell", () => {
     updateReportingBoardSavedViewMock.mockReset();
     fetchReportingBoardSavedViewByTokenMock.mockReset();
     bulkAssignNextReportingCasesMock.mockReset();
+    fetchReportingBoardNotificationsMock.mockReset();
+    markReportingBoardNotificationReadMock.mockReset();
+    dismissReportingBoardNotificationMock.mockReset();
+    markAllReportingBoardNotificationsReadMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -415,6 +427,10 @@ describe("Doctor Portal shell", () => {
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: { priorityCode: "urgent" }, notificationSettings: {}, active: true });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [1, 2], skipped: [] });
+    fetchReportingBoardNotificationsMock.mockResolvedValue([]);
+    markReportingBoardNotificationReadMock.mockResolvedValue({});
+    dismissReportingBoardNotificationMock.mockResolvedValue({});
+    markAllReportingBoardNotificationsReadMock.mockResolvedValue({ count: 0 });
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -1293,6 +1309,53 @@ describe("Doctor Portal shell", () => {
     expect(await screen.findByText("Clinical coordination workspace")).toBeTruthy();
     expect(screen.queryByText("Reporting Assignment Board")).toBeNull();
     expect(screen.queryByRole("button", { name: /Bulk assign next cases/i })).toBeNull();
+  });
+
+  it("shows Reporting Board notification badge, marks read, and navigates to action URL", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchReportingBoardNotificationsMock.mockResolvedValue([{
+      id: 22,
+      eventType: "reporting_case_assigned_to_me",
+      title: "New reporting case assigned",
+      body: "A reporting case has been assigned to you. Open RISpro to review your reporting board.",
+      actionUrl: "/doctor/reporting-board/saved/tok",
+      status: "delivered",
+      createdAt: "2026-05-29T08:00:00.000Z",
+      deliveredAt: "2026-05-29T08:00:00.000Z",
+      readAt: null,
+      dismissedAt: null,
+    }]);
+    renderDoctorPortal("/doctor/my-work");
+
+    const notificationsButton = await screen.findByRole("button", { name: /Notifications/i });
+    await waitFor(() => expect(notificationsButton.textContent).toContain("1"));
+    fireEvent.click(notificationsButton);
+    expect(await screen.findByText("New reporting case assigned")).toBeTruthy();
+    expect(screen.queryByText(/V2-/)).toBeNull();
+    fireEvent.click(screen.getByText("New reporting case assigned"));
+    await waitFor(() => expect(markReportingBoardNotificationReadMock.mock.calls[0]?.[0]).toBe(22));
+    await waitFor(() => expect(fetchReportingBoardSavedViewByTokenMock).toHaveBeenCalledWith("tok"));
+  });
+
+  it("dismisses Reporting Board notifications for the current user", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchReportingBoardNotificationsMock.mockResolvedValue([{
+      id: 23,
+      eventType: "reporting_case_assigned_to_me",
+      title: "New reporting case assigned",
+      body: "A reporting case has been assigned to you. Open RISpro to review your reporting board.",
+      actionUrl: "/doctor/reporting-board/saved/tok",
+      status: "delivered",
+      createdAt: "2026-05-29T08:00:00.000Z",
+      deliveredAt: "2026-05-29T08:00:00.000Z",
+      readAt: null,
+      dismissedAt: null,
+    }]);
+    renderDoctorPortal("/doctor/my-work");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Notifications/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(dismissReportingBoardNotificationMock.mock.calls[0]?.[0]).toBe(23));
   });
 
   it("normal doctor sees Protocols page empty state", async () => {

@@ -47,7 +47,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
-    assert.match(service, /await requireRosterManager\(actor\)/);
+    assert.match(service, /const me = await requireRosterDoctor\(actor\)/);
+    assert.match(service, /assignedDoctorId: me\.profile!\.id/);
     assert.match(service, /defaultRequiresReport/);
     assert.match(service, /enabledModalityCodes/);
     assert.match(repo, /b\.requires_report = \$\$\{values\.length\}/);
@@ -88,5 +89,32 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /where token = \$1 and active = true/);
     assert.match(service, /moduleCapabilities\.includes\("doctor_supervisor"\)/);
     assert.match(service, /findActiveSavedViewByToken\(token\)/);
+  });
+
+  it("adds in-app Reporting Board notification event storage and safe body text", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/088_doctor_portal_reporting_board_notifications.sql`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+
+    assert.match(migration, /doctor_portal\.reporting_board_notification_events/);
+    assert.match(migration, /reporting_case_assigned_to_me/);
+    assert.match(migration, /dedupe_key text not null unique/);
+    assert.match(repo, /notifyAssignedToMe/);
+    assert.match(repo, /on conflict \(dedupe_key\) do nothing/);
+    assert.match(repo, /New reporting case assigned/);
+    assert.match(repo, /A reporting case has been assigned to you\. Open RISpro to review your reporting board\./);
+    assert.match(routes, /"\/notifications"/);
+    assert.match(routes, /"\/notifications\/:id\/read"/);
+    assert.match(routes, /"\/notifications\/:id\/dismiss"/);
+  });
+
+  it("creates notifications only from Reporting Board assignment paths", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+
+    assert.match(routes, /"\/:appointmentId\/assign-doctor"/);
+    assert.match(service, /assignReportingBoardCaseToDoctor/);
+    assert.match(service, /createAssignedToMeNotifications/);
+    assert.match(service, /result\.assignedAppointmentIds/);
   });
 });

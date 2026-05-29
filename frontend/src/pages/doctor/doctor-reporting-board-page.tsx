@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Printer, RefreshCw, Save, Settings, Users } from "lucide-react";
 import {
-  assignDoctorCase,
+  assignReportingBoardCase,
   bulkAssignNextReportingCases,
   createReportingBoardSavedView,
   fetchAppointmentLookups,
@@ -262,7 +262,8 @@ function BulkAssignModal({
 export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const savedViewToken = searchParams.get("savedViewToken");
+  const params = useParams();
+  const savedViewToken = params.token ?? searchParams.get("savedViewToken");
   const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, limit: 50, offset: 0 });
   const [loadedSavedView, setLoadedSavedView] = useState<ReportingBoardSavedView | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -324,7 +325,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "settings"] }),
   });
   const assignMutation = useMutation({
-    mutationFn: (payload: { appointmentId: number; doctorId: number; reason: string }) => assignDoctorCase(payload.appointmentId, { doctorId: payload.doctorId, reason: payload.reason }),
+    mutationFn: (payload: { appointmentId: number; doctorId: number; reason: string }) => assignReportingBoardCase(payload.appointmentId, { doctorId: payload.doctorId, reason: payload.reason }),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
   });
 
@@ -462,6 +463,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         <aside className="space-y-4">
           <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <h3 className="font-semibold text-foreground">Saved views</h3>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>In-app notifications are stored with each view.</p>
             <div className="mt-3 space-y-2">
               {(savedViewsQuery.data ?? []).map((view) => (
                 <button key={view.id} type="button" onClick={() => {

@@ -105,3 +105,16 @@ export interface BulkAssignNextCasesResult {
   assignedAppointmentIds: number[];
   skipped: Array<{ appointmentId: number; reason: string }>;
 }
+
+export interface ReportingBoardNotificationEvent {
+  id: number;
+  eventType: "reporting_case_assigned_to_me";
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  status: "pending" | "delivered" | "read" | "dismissed" | "failed";
+  createdAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
+  dismissedAt: string | null;
+}

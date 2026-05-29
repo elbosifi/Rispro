@@ -57,6 +57,7 @@ import type {
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
+  ReportingBoardNotificationEvent,
   ReportingBoardSavedView,
   ReportingBoardSettings,
   RosterDutyTypeConfig,
@@ -793,6 +794,39 @@ export async function bulkAssignNextReportingCases(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function assignReportingBoardCase(
+  appointmentId: number,
+  payload: { doctorId: number; reason?: string | null }
+): Promise<{ assignmentId: number }> {
+  return api<{ assignmentId: number }>(`/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchReportingBoardNotifications(): Promise<ReportingBoardNotificationEvent[]> {
+  const raw = await api<{ notifications: ReportingBoardNotificationEvent[] }>("/doctor/reporting-board/notifications");
+  return raw.notifications;
+}
+
+export async function markReportingBoardNotificationRead(id: number): Promise<ReportingBoardNotificationEvent> {
+  const raw = await api<{ notification: ReportingBoardNotificationEvent }>(`/doctor/reporting-board/notifications/${id}/read`, {
+    method: "POST",
+  });
+  return raw.notification;
+}
+
+export async function dismissReportingBoardNotification(id: number): Promise<ReportingBoardNotificationEvent> {
+  const raw = await api<{ notification: ReportingBoardNotificationEvent }>(`/doctor/reporting-board/notifications/${id}/dismiss`, {
+    method: "POST",
+  });
+  return raw.notification;
+}
+
+export async function markAllReportingBoardNotificationsRead(): Promise<{ count: number }> {
+  return api<{ count: number }>("/doctor/reporting-board/notifications/read-all", { method: "POST" });
 }
 
 function protocolParams(filters: ProtocolFilters): URLSearchParams {

@@ -15,7 +15,7 @@ const fetchReportingBoardSavedViewByTokenMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
-const assignDoctorCaseMock = vi.fn();
+const assignReportingBoardCaseMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -28,7 +28,7 @@ vi.mock("@/lib/api-hooks", () => ({
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
-  assignDoctorCase: (...args: unknown[]) => assignDoctorCaseMock(...args),
+  assignReportingBoardCase: (...args: unknown[]) => assignReportingBoardCaseMock(...args),
 }));
 
 const managerMe: DoctorMe = {
@@ -123,7 +123,7 @@ describe("DoctorReportingBoardPage", () => {
       examTypes: [],
       priorities: [{ id: 3, code: "stat", nameEn: "STAT", nameAr: "STAT", sortOrder: 0 }],
     });
-    assignDoctorCaseMock.mockResolvedValue({ assignmentId: 100 });
+    assignReportingBoardCaseMock.mockResolvedValue({ assignmentId: 100 });
   });
 
   it("renders priority and status chips with board rows", async () => {
