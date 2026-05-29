@@ -92,7 +92,13 @@ function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
-function UserPinManagementTable({ policyEnabled }: { policyEnabled: boolean }) {
+function UserPinManagementTable({
+  policyEnabled,
+  onReAuthRequired,
+}: {
+  policyEnabled: boolean;
+  onReAuthRequired: (key: string[]) => void;
+}) {
   const queryClient = useQueryClient();
   const [roleFilter, setRoleFilter] = useState("all");
   const [activeOnly, setActiveOnly] = useState(true);
@@ -103,6 +109,12 @@ function UserPinManagementTable({ policyEnabled }: { policyEnabled: boolean }) {
     queryFn: fetchActionPinAdminUsers,
     retry: false,
   });
+
+  useEffect(() => {
+    if (query.error && isReAuthRequiredError(query.error)) {
+      onReAuthRequired(["action-pin", "admin", "users"]);
+    }
+  }, [onReAuthRequired, query.error]);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["action-pin", "admin", "users"] });
@@ -151,7 +163,10 @@ function UserPinManagementTable({ policyEnabled }: { policyEnabled: boolean }) {
   };
 
   if (query.isLoading) return <p className="description-center">Loading user PIN readiness...</p>;
-  if (query.error) return <p className="text-sm text-red-600">{query.error instanceof Error ? query.error.message : "Failed to load user PIN readiness."}</p>;
+  if (query.error) {
+    if (isReAuthRequiredError(query.error)) return null;
+    return <p className="text-sm text-red-600">{query.error instanceof Error ? query.error.message : "Failed to load user PIN readiness."}</p>;
+  }
 
   return (
     <div className="space-y-4">
@@ -262,6 +277,12 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
     if (query.data) setDraft(normalizeActionPinPolicy(query.data));
   }, [query.data]);
 
+  useEffect(() => {
+    if (query.error && isReAuthRequiredError(query.error)) {
+      onReAuthRequired(["settings", "users_and_roles", "action_pin_policy"]);
+    }
+  }, [onReAuthRequired, query.error]);
+
   const update = <K extends keyof ActionPinPolicy>(key: K, value: ActionPinPolicy[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setMessage("");
@@ -302,7 +323,10 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
   });
 
   if (query.isLoading) return <p className="description-center">Loading Action PIN policy...</p>;
-  if (query.error) return <p className="text-sm text-red-600">{query.error instanceof Error ? query.error.message : "Failed to load Action PIN policy."}</p>;
+  if (query.error) {
+    if (isReAuthRequiredError(query.error)) return null;
+    return <p className="text-sm text-red-600">{query.error instanceof Error ? query.error.message : "Failed to load Action PIN policy."}</p>;
+  }
 
   return (
     <div className="space-y-6">
@@ -408,7 +432,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         {isArabic ? <span className="text-xs text-stone-500">واجهة السياسة باللغة الإنجليزية حالياً.</span> : null}
       </div>
 
-      <UserPinManagementTable policyEnabled={draft.enabled} />
+      <UserPinManagementTable policyEnabled={draft.enabled} onReAuthRequired={onReAuthRequired} />
     </div>
   );
 }

@@ -78,14 +78,14 @@ function adminUsers() {
   ];
 }
 
-function renderSection() {
+function renderSection(onReAuthRequired = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
   return render(
     <LanguageProvider>
       <QueryClientProvider client={queryClient}>
-        <ActionPinPolicySection onReAuthRequired={vi.fn()} />
+        <ActionPinPolicySection onReAuthRequired={onReAuthRequired} />
       </QueryClientProvider>
     </LanguageProvider>
   );
@@ -221,6 +221,22 @@ describe("ActionPinPolicySection", () => {
     expect(await screen.findByText("Only super_admin can update Action PIN policy.")).toBeTruthy();
   });
 
+  it("requests supervisor re-auth when policy load is blocked", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/action-pin/status") return jsonResponse(200, { hasPin: true, policy: { enabled: false, pinLength: 4, allowUserPinChange: true, requirePinToViewOwnPinSettings: false } });
+      if (url === "/api/settings/users-and-roles/action-pin-policy") return jsonResponse(403, { message: "Recent supervisor re-authentication is required." });
+      return jsonResponse(200, { users: adminUsers() });
+    });
+    const onReAuthRequired = vi.fn();
+
+    renderSection(onReAuthRequired);
+
+    await waitFor(() => {
+      expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "users_and_roles", "action_pin_policy"]);
+    });
+  });
+
   it("loads readiness table and shows missing PIN summary when policy is enabled", async () => {
     mockPolicyFetch({ ...basePolicy(), enabled: true });
 
@@ -280,5 +296,22 @@ describe("ActionPinPolicySection", () => {
     renderSection();
 
     expect(await screen.findByText("Only super_admin can manage Action PIN administration.")).toBeTruthy();
+  });
+
+  it("requests supervisor re-auth when user readiness load is blocked", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/action-pin/status") return jsonResponse(200, { hasPin: true, policy: { enabled: false, pinLength: 4, allowUserPinChange: true, requirePinToViewOwnPinSettings: false } });
+      if (url === "/api/action-pin/admin/users") return jsonResponse(403, { message: "Recent supervisor re-authentication is required." });
+      if (url === "/api/settings/users-and-roles/action-pin-policy" && (init as RequestInit | undefined)?.method !== "PUT") return jsonResponse(200, { policy: basePolicy() });
+      return jsonResponse(200, { policy: basePolicy() });
+    });
+    const onReAuthRequired = vi.fn();
+
+    renderSection(onReAuthRequired);
+
+    await waitFor(() => {
+      expect(onReAuthRequired).toHaveBeenCalledWith(["action-pin", "admin", "users"]);
+    });
   });
 });
