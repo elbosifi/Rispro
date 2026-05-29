@@ -19,6 +19,7 @@ import type { DoctorRole } from "./profile-repository.js";
 import { resetUserTemporaryPassword, setUserMustChangePassword, updateUserActiveState } from "../../services/user-service.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
+import { doctorReportingBoardRouter } from "./reporting-board-routes.js";
 import { doctorProtocolsRouter } from "./protocol-routes.js";
 import { doctorWorkloadRouter } from "./workload-routes.js";
 import { doctorAvailabilityRouter, doctorLeaveRouter } from "./availability-routes.js";
@@ -44,6 +45,7 @@ router.use((_req, _res, next) => {
 });
 router.use("/roster", doctorRosterRouter);
 router.use("/cases", doctorCasesRouter);
+router.use("/reporting-board", doctorReportingBoardRouter);
 router.use("/protocols", doctorProtocolsRouter);
 router.use("/workload", doctorWorkloadRouter);
 router.use("/availability", doctorAvailabilityRouter);
