@@ -246,10 +246,17 @@ export async function markOldNoShowCandidates(reason: string, userId: number | n
     await client.query("begin");
     const result = await client.query<BookingStatusRow>(
       `
+        with candidates as (
+          select id
+          from appointments_v2.bookings
+          where booking_date < ($1::date - ($2::int * interval '1 day'))
+            and status = 'scheduled'
+          order by booking_date asc, created_at asc, id asc
+          limit 200
+        )
         update appointments_v2.bookings
         set status = 'no-show', updated_at = now(), updated_by_user_id = $3
-        where booking_date < ($1::date - ($2::int * interval '1 day'))
-          and status = 'scheduled'
+        where id in (select id from candidates)
         returning id, 'scheduled'::text as status, booking_date::text
       `,
       [today, settings.cleanupDays, userId]

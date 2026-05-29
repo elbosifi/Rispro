@@ -31,6 +31,11 @@ describe("status booking service source guards", () => {
     assert.match(source, /old_no_show_bulk_confirm/);
   });
 
+  it("bulk cleanup is capped to the reviewed candidate batch", () => {
+    assert.match(source, /with candidates as/);
+    assert.match(source, /limit 200/);
+  });
+
   it("syncs worklists after status changes", () => {
     assert.match(source, /scheduleBookingWorklistSync\(bookingId\)/);
     assert.match(source, /for \(const bookingId of markedIds\)/);
