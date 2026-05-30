@@ -65,6 +65,7 @@ export function SchedulingAdminV2Page() {
           modalities={lookups.data?.modalities ?? []}
           examTypes={examTypeCatalog.data ?? []}
           policyUsers={policyUsers.data ?? []}
+          displayLookups={status.data.displayLookups}
         />
       ) : (
         <div
@@ -115,6 +116,7 @@ export function SchedulingAdminV2Page() {
 
       <PolicyDraftEditor
         snapshot={draftSnapshot}
+        displayLookups={status.data?.displayLookups}
         isSaving={saveDraft.isPending}
         onSave={async (nextSnapshot, changeNote) => {
           if (!draftVersionId) {

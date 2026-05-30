@@ -45,6 +45,7 @@ async function runValidateWithMocks(
   versionRow: Record<string, unknown> | null,
   rules: Record<string, unknown>[],
   modalityCapacities: Record<number, number | null> = {},
+  examRestrictionRules: Record<string, unknown>[] = [],
   examMixRules: Record<string, unknown>[] = []
 ): Promise<{ isValid: boolean; errors: string[]; warnings: string[] }> {
   const mockClient = new MockPoolClient();
@@ -68,6 +69,7 @@ async function runValidateWithMocks(
     }));
     mockClient.queueResults(rows);
   }
+  mockClient.queueResults(examRestrictionRules);
   mockClient.queueResults(examMixRules);
 
   // Mock pool.connect to return our mock client
@@ -296,6 +298,7 @@ describe("validatePolicy — exam mix rule validations", () => {
       version,
       [],
       {},
+      [],
       [
         {
           id: 10,
@@ -325,6 +328,7 @@ describe("validatePolicy — exam mix rule validations", () => {
       version,
       [],
       {},
+      [],
       [
         {
           id: 10,
@@ -357,6 +361,41 @@ describe("validatePolicy — exam mix rule validations", () => {
       ]
     );
     assert.ok(result.warnings.some((w) => w.includes("Exam mix overlap warning")));
+  });
+});
+
+describe("validatePolicy — exam restriction rule validations", () => {
+  afterEach(() => mock.restoreAll());
+
+  const version = {
+    id: 1,
+    policySetId: 1,
+    versionNo: 1,
+    status: "draft",
+    configHash: "abc123",
+    changeNote: null,
+    publishedAt: null,
+  };
+
+  it("rejects active exam restriction rules with no linked exam types", async () => {
+    const result = await runValidateWithMocks(
+      1,
+      version,
+      [
+        {
+          id: 20,
+          ruleType: "exam_type_rule",
+          modalityId: 7,
+          isActive: true,
+          examTypeIds: [],
+        },
+      ],
+      {},
+      [{ id: 20, isActive: true, examTypeIds: [] }]
+    );
+
+    assert.equal(result.isValid, false);
+    assert.ok(result.errors.some((e) => e.includes("Exam restriction rule 20") && e.includes("at least one exam type")));
   });
 });
 

@@ -75,6 +75,7 @@ async function savePolicyDraftInternal(
   await validateCategoryCapacityPolicy(client, policySnapshot);
   await validateSpecialQuotaPolicy(client, policySnapshot);
   validateSpecialReasonCodes(policySnapshot);
+  validateExamRestrictionPolicy(policySnapshot);
   validateExamMixPolicy(policySnapshot);
 
   // 3. Delete all existing versioned rules for this version (authoritative replace)
@@ -353,6 +354,28 @@ function validateExamMixPolicy(policySnapshot: PolicySnapshotDto): void {
         field: `policySnapshot.examMixQuotaRules[${index}].weekday`,
         code: "exam_mix_weekday_required",
         message: "weekly_recurrence exam mix rule requires weekday.",
+      });
+    }
+  }
+  if (fieldErrors.length > 0) {
+    throw new SchedulingError(
+      400,
+      "Validation failed",
+      ["validation_failed"],
+      { fieldErrors }
+    );
+  }
+}
+
+function validateExamRestrictionPolicy(policySnapshot: PolicySnapshotDto): void {
+  const fieldErrors: FieldValidationErrorDto[] = [];
+  for (const [index, row] of policySnapshot.examTypeRules.entries()) {
+    if (!row.isActive) continue;
+    if (!Array.isArray(row.examTypeIds) || row.examTypeIds.length === 0) {
+      fieldErrors.push({
+        field: `policySnapshot.examTypeRules[${index}].examTypeIds`,
+        code: "exam_rule_exam_types_required",
+        message: "Active exam restriction rule must include at least one linked exam type.",
       });
     }
   }

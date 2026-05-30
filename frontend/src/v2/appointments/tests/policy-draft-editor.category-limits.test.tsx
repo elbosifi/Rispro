@@ -2,6 +2,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PolicyDraftEditor } from "../components/policy-draft-editor";
 
+vi.mock("@/providers/language-provider", () => ({
+  useLanguage: () => ({ language: "en" }),
+}));
+
 vi.mock("../api", () => ({
   useV2Lookups: () => ({
     data: {
@@ -70,7 +74,7 @@ describe("PolicyDraftEditor category daily limits", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Save Draft Snapshot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByText("Duplicate active category limits detected for the same modality/category.")).toBeTruthy();

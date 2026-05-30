@@ -141,6 +141,33 @@ async function validatePolicyDraftInternal(
     }
   }
 
+  const examRestrictionRules = await client.query<{
+    id: number;
+    isActive: boolean;
+    examTypeIds: number[];
+  }>(
+    `
+      select
+        etr.id,
+        etr.is_active as "isActive",
+        coalesce(array_agg(etri.exam_type_id order by etri.exam_type_id)
+          filter (where etri.exam_type_id is not null), '{}') as "examTypeIds"
+      from appointments_v2.exam_type_rules etr
+      left join appointments_v2.exam_type_rule_items etri
+        on etri.rule_id = etr.id
+      where etr.policy_version_id = $1
+      group by etr.id
+      order by etr.id asc
+    `,
+    [policyVersionId]
+  );
+
+  for (const row of examRestrictionRules.rows.filter((rule) => rule.isActive)) {
+    if (!Array.isArray(row.examTypeIds) || row.examTypeIds.length === 0) {
+      errors.push(`Exam restriction rule ${row.id}: at least one exam type is required.`);
+    }
+  }
+
   const examMixRules = await client.query<{
     id: number;
     modalityId: number;

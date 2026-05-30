@@ -446,6 +446,7 @@ export interface PolicyUserDto {
   username: string;
   fullName: string;
   role: import("@/types/api").Role;
+  isActive?: boolean;
 }
 
 export interface PolicyExamMixQuotaRuleDto {
@@ -497,12 +498,19 @@ export interface PolicyVersionDto {
   publishedAt: string | null;
 }
 
+export interface PolicyDisplayLookupsDto {
+  modalities: Array<Pick<ModalityDto, "id" | "name" | "nameAr" | "nameEn" | "code" | "isActive">>;
+  examTypes: Array<Pick<ExamTypeDto, "id" | "name" | "nameAr" | "nameEn" | "code" | "modalityId" | "isActive">>;
+  users: Array<PolicyUserDto & { isActive: boolean }>;
+}
+
 export interface PolicyStatusDto {
   policySet: PolicySetDto | null;
   published: PolicyVersionDto | null;
   draft: PolicyVersionDto | null;
   publishedSnapshot: PolicySnapshotDto;
   draftSnapshot: PolicySnapshotDto;
+  displayLookups: PolicyDisplayLookupsDto;
 }
 
 export interface PolicyRuleDiffDto {

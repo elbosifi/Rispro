@@ -12,7 +12,17 @@ import {
   findDraftVersion,
 } from "../repositories/admin-policy.repo.js";
 import { loadPolicySnapshot } from "./policy-snapshot.service.js";
+import {
+  collectPolicyDisplayLookupIds,
+  loadPolicyDisplayLookups,
+} from "./policy-display-lookups.service.js";
 import type { PolicyStatusDto, PolicyVersionDto } from "../../api/dto/admin-scheduling.dto.js";
+
+const EMPTY_DISPLAY_LOOKUPS = {
+  modalities: [],
+  examTypes: [],
+  users: [],
+};
 
 export async function getPolicyStatus(
   policySetKey: string = "default"
@@ -42,6 +52,7 @@ export async function getPolicyStatus(
           examMixQuotaRules: [],
           specialReasonCodes: [],
         },
+        displayLookups: EMPTY_DISPLAY_LOOKUPS,
       };
     }
 
@@ -83,6 +94,10 @@ export async function getPolicyStatus(
       loadPolicySnapshot(client, published?.id ?? null),
       loadPolicySnapshot(client, draft?.id ?? null),
     ]);
+    const displayLookups = await loadPolicyDisplayLookups(
+      client,
+      collectPolicyDisplayLookupIds(publishedSnapshot, draftSnapshot)
+    );
 
     return {
       policySet: {
@@ -94,6 +109,7 @@ export async function getPolicyStatus(
       draft,
       publishedSnapshot,
       draftSnapshot,
+      displayLookups,
     };
   } finally {
     client.release();

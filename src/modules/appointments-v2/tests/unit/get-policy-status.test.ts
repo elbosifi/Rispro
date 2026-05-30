@@ -93,7 +93,7 @@ describe("getPolicyStatus — source verification", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/get-policy-status.service.ts",
+      "src/modules/appointments-v2/admin/services/get-policy-status.service.ts",
       "utf-8"
     );
   });
@@ -151,7 +151,7 @@ describe("GET /policy — route wiring", () => {
   it("imports getPolicyStatus from service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      "src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
       "utf-8"
     );
     assert.ok(
@@ -163,7 +163,7 @@ describe("GET /policy — route wiring", () => {
   it("calls getPolicyStatus with policySetKey from query", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      "src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
       "utf-8"
     );
     assert.ok(source.includes("getPolicyStatus(policySetKey)"), "Should call getPolicyStatus");
@@ -173,7 +173,7 @@ describe("GET /policy — route wiring", () => {
   it("returns typed policy status response in route", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      "src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
       "utf-8"
     );
     assert.ok(source.includes("res.json(result)"), "Should return typed service result");
@@ -182,7 +182,7 @@ describe("GET /policy — route wiring", () => {
   it("no longer returns placeholder message", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      "src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
       "utf-8"
     );
     assert.ok(

@@ -121,12 +121,40 @@ export interface PolicySetDto {
   name: string;
 }
 
+export interface PolicyDisplayLookupsDto {
+  modalities: Array<{
+    id: number;
+    name: string;
+    nameAr: string | null;
+    nameEn: string | null;
+    code: string | null;
+    isActive: boolean;
+  }>;
+  examTypes: Array<{
+    id: number;
+    name: string;
+    nameAr: string | null;
+    nameEn: string | null;
+    code: string | null;
+    modalityId: number | null;
+    isActive: boolean;
+  }>;
+  users: Array<{
+    id: number;
+    username: string;
+    fullName: string;
+    role: string;
+    isActive: boolean;
+  }>;
+}
+
 export interface PolicyStatusDto {
   policySet: PolicySetDto | null;
   published: PolicyVersionDto | null;
   draft: PolicyVersionDto | null;
   publishedSnapshot: PolicySnapshotDto;
   draftSnapshot: PolicySnapshotDto;
+  displayLookups: PolicyDisplayLookupsDto;
 }
 
 export interface PolicyRuleDiffDto {

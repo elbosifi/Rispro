@@ -8,6 +8,7 @@ import type {
   PolicyExamMixQuotaRuleDto,
   PolicyExamTypeRuleDto,
   PolicyExamTypeSpecialQuotaDto,
+  PolicyDisplayLookupsDto,
   PolicyModalityBlockedRuleDto,
   PolicySnapshotDto,
 } from "../types";
@@ -116,10 +117,12 @@ function validateCategoryDailyLimits(
 
 export function PolicyDraftEditor({
   snapshot,
+  displayLookups,
   onSave,
   isSaving,
 }: {
   snapshot: PolicySnapshotDto | null;
+  displayLookups?: PolicyDisplayLookupsDto;
   onSave: (nextSnapshot: PolicySnapshotDto, changeNote: string | null) => Promise<void>;
   isSaving: boolean;
 }) {
@@ -209,8 +212,11 @@ export function PolicyDraftEditor({
     for (const examType of examTypeCatalog.data ?? []) {
       map.set(Number(examType.id), examType);
     }
+    for (const examType of displayLookups?.examTypes ?? []) {
+      map.set(Number(examType.id), examType);
+    }
     return map;
-  }, [examTypeCatalog.data]);
+  }, [displayLookups?.examTypes, examTypeCatalog.data]);
 
   const policyUserOptions = useMemo(() => {
     return (policyUsers.data ?? [])
@@ -245,6 +251,16 @@ export function PolicyDraftEditor({
       setSaveValidationError(categoryLimitsError);
       return;
     }
+    const emptyActiveExamRule = draft.examTypeRules.find((row) => row.isActive && row.examTypeIds.length === 0);
+    if (emptyActiveExamRule) {
+      setSaveValidationError("Active exam restriction rules must include at least one selected exam type.");
+      return;
+    }
+    const emptyActiveExamMixGroup = (draft.examMixQuotaRules ?? []).find((row) => row.isActive && row.examTypeIds.length === 0);
+    if (emptyActiveExamMixGroup) {
+      setSaveValidationError("Active exam mix quota groups must include at least one selected exam type.");
+      return;
+    }
     await onSave(draft, changeNote.trim() || null);
   }
 
@@ -260,6 +276,42 @@ export function PolicyDraftEditor({
 
   // Standardized input style - matches input-premium
   const inputBase = "input-premium text-xs";
+
+  function formatExamTypeLabel(examTypeId: number): string {
+    const examType = examTypeById.get(Number(examTypeId));
+    if (!examType) return `Unknown exam type ID ${examTypeId}`;
+    const label = chooseLocalized(language, examType.nameAr, examType.nameEn) || examType.name || examType.code || `Exam type ${examTypeId}`;
+    const withCode = examType.code ? `${label} (${examType.code})` : label;
+    return examType.isActive === false ? `${withCode} (inactive)` : withCode;
+  }
+
+  function updateExamRuleModality(index: number, modalityId: number): void {
+    const current = draft.examTypeRules[index];
+    if (current?.examTypeIds.length && !window.confirm("Changing modality will clear selected exams for this rule. Continue?")) {
+      return;
+    }
+    setDraft((prev) => ({
+      ...prev,
+      examTypeRules: prev.examTypeRules.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        return { ...item, modalityId, examTypeIds: [] };
+      }),
+    }));
+  }
+
+  function updateExamMixModality(index: number, modalityId: number): void {
+    const current = draft.examMixQuotaRules?.[index];
+    if (current?.examTypeIds.length && !window.confirm("Changing modality will clear selected exams for this group. Continue?")) {
+      return;
+    }
+    setDraft((prev) => ({
+      ...prev,
+      examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        return { ...item, modalityId, examTypeIds: [] };
+      }),
+    }));
+  }
 
   return (
     <Card>
@@ -699,16 +751,7 @@ export function PolicyDraftEditor({
                   <select
                     className={inputBase}
                     value={row.modalityId}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        examTypeRules: prev.examTypeRules.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? { ...item, modalityId: Number(event.target.value), examTypeIds: [] }
-                            : item
-                        ),
-                      }))
-                    }
+                    onChange={(event) => updateExamRuleModality(index, Number(event.target.value))}
                   >
                     <option value={0}>Select modality...</option>
                     {modalityOptions.map((modality) => (
@@ -759,16 +802,21 @@ export function PolicyDraftEditor({
                     <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Restricted exams</p>
                     {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
-                    ) : examTypeOptionsForRow.length === 0 ? (
-                      <div className="text-[11px] text-stone-400 dark:text-stone-500 leading-relaxed">
-                        <p>No exam types configured for {selectedModalityLabel}.</p>
-                        <p className="mt-1 text-[10px] text-stone-400">Add exam types in Settings before using this modality.</p>
-                      </div>
                     ) : (
                       <div>
-                        <p className="mb-2 text-[10px] text-stone-500 dark:text-stone-400">
-                          Checked exams are the ones this rule blocks or restricts.
-                        </p>
+                        {row.examTypeIds.length > 0 && (
+                          <div className="mb-2">
+                            <p className="mb-1 text-[10px] font-semibold text-stone-600 dark:text-stone-300">Selected exams</p>
+                            <div className="flex flex-wrap gap-1">
+                              {row.examTypeIds.map((examTypeId) => (
+                                <span key={examTypeId} className="rounded border border-stone-300 px-2 py-1 text-[10px] dark:border-stone-600">
+                                  {formatExamTypeLabel(examTypeId)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <p className="mb-1 text-[10px] font-semibold text-stone-600 dark:text-stone-300">Available exams to add</p>
                         <div className="mb-2 flex gap-2">
                           <button
                             type="button"
@@ -778,11 +826,15 @@ export function PolicyDraftEditor({
                                 ...prev,
                                 examTypeRules: prev.examTypeRules.map((item, itemIndex) =>
                                   itemIndex === index
-                                    ? { ...item, examTypeIds: examTypeOptionsForRow.map((option) => option.value) }
+                                    ? {
+                                        ...item,
+                                        examTypeIds: [...new Set([...item.examTypeIds, ...examTypeOptionsForRow.map((option) => option.value)])],
+                                      }
                                     : item
                                 ),
                               }))
                             }
+                            disabled={examTypeOptionsForRow.length === 0}
                           >
                             Select all
                           </button>
@@ -801,31 +853,42 @@ export function PolicyDraftEditor({
                             Clear all
                           </button>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {examTypeOptionsForRow.map((examTypeOption) => (
-                            <label key={examTypeOption.value} className="inline-flex items-center gap-1">
-                              <input
-                                type="checkbox"
-                                checked={row.examTypeIds.includes(examTypeOption.value)}
-                                onChange={(event) =>
-                                  setDraft((prev) => ({
-                                    ...prev,
-                                    examTypeRules: prev.examTypeRules.map((item, itemIndex) => {
-                                      if (itemIndex !== index) return item;
-                                      return {
-                                        ...item,
-                                        examTypeIds: event.target.checked
-                                          ? [...item.examTypeIds, examTypeOption.value]
-                                          : item.examTypeIds.filter((id) => id !== examTypeOption.value),
-                                      };
-                                    }),
-                                  }))
-                                }
-                              />
-                              {examTypeOption.label}
-                            </label>
-                          ))}
-                        </div>
+                        {examTypeOptionsForRow.length === 0 ? (
+                          <p className="text-[11px] text-stone-400 dark:text-stone-500">
+                            No active exam types available to add for {selectedModalityLabel}.
+                          </p>
+                        ) : (
+                          <>
+                            <p className="mb-2 text-[10px] text-stone-500 dark:text-stone-400">
+                              Checked exams are the ones this rule blocks or restricts.
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {examTypeOptionsForRow.map((examTypeOption) => (
+                                <label key={examTypeOption.value} className="inline-flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.examTypeIds.includes(examTypeOption.value)}
+                                    onChange={(event) =>
+                                      setDraft((prev) => ({
+                                        ...prev,
+                                        examTypeRules: prev.examTypeRules.map((item, itemIndex) => {
+                                          if (itemIndex !== index) return item;
+                                          return {
+                                            ...item,
+                                            examTypeIds: event.target.checked
+                                              ? [...new Set([...item.examTypeIds, examTypeOption.value])]
+                                              : item.examTypeIds.filter((id) => id !== examTypeOption.value),
+                                          };
+                                        }),
+                                      }))
+                                    }
+                                  />
+                                  {examTypeOption.label}
+                                </label>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1033,16 +1096,7 @@ export function PolicyDraftEditor({
                   <select
                     className={inputBase}
                     value={row.modalityId}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
-                          itemIndex === index
-                            ? { ...item, modalityId: Number(event.target.value), examTypeIds: [] }
-                            : item
-                        ),
-                      }))
-                    }
+                    onChange={(event) => updateExamMixModality(index, Number(event.target.value))}
                   >
                     <option value={0}>Select modality...</option>
                     {modalityOptions.map((modality) => (
@@ -1100,36 +1154,52 @@ export function PolicyDraftEditor({
                     <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Exam types in group</p>
                     {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
-                    ) : examTypeOptionsForRow.length === 0 ? (
-                      <div className="text-[11px] text-stone-400 dark:text-stone-500 leading-relaxed">
-                        <p>No exam types configured for {selectedModalityLabel}.</p>
-                        <p className="mt-1 text-[10px] text-stone-400">Add exam types in Settings before using this modality.</p>
-                      </div>
                     ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {examTypeOptionsForRow.map((examTypeOption) => (
-                          <label key={examTypeOption.value} className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={row.examTypeIds.includes(examTypeOption.value)}
-                              onChange={(event) =>
-                                setDraft((prev) => ({
-                                  ...prev,
-                                  examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) => {
-                                    if (itemIndex !== index) return item;
-                                    return {
-                                      ...item,
-                                      examTypeIds: event.target.checked
-                                        ? [...item.examTypeIds, examTypeOption.value]
-                                        : item.examTypeIds.filter((id) => id !== examTypeOption.value),
-                                    };
-                                  }),
-                                }))
-                              }
-                            />
-                            {examTypeOption.label}
-                          </label>
-                        ))}
+                      <div>
+                        {row.examTypeIds.length > 0 && (
+                          <div className="mb-2">
+                            <p className="mb-1 text-[10px] font-semibold text-stone-600 dark:text-stone-300">Selected exams</p>
+                            <div className="flex flex-wrap gap-1">
+                              {row.examTypeIds.map((examTypeId) => (
+                                <span key={examTypeId} className="rounded border border-stone-300 px-2 py-1 text-[10px] dark:border-stone-600">
+                                  {formatExamTypeLabel(examTypeId)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <p className="mb-1 text-[10px] font-semibold text-stone-600 dark:text-stone-300">Available exams to add</p>
+                        {examTypeOptionsForRow.length === 0 ? (
+                          <p className="text-[11px] text-stone-400 dark:text-stone-500">
+                            No active exam types available to add for {selectedModalityLabel}.
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {examTypeOptionsForRow.map((examTypeOption) => (
+                              <label key={examTypeOption.value} className="inline-flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={row.examTypeIds.includes(examTypeOption.value)}
+                                  onChange={(event) =>
+                                    setDraft((prev) => ({
+                                      ...prev,
+                                      examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) => {
+                                        if (itemIndex !== index) return item;
+                                        return {
+                                          ...item,
+                                          examTypeIds: event.target.checked
+                                            ? [...new Set([...item.examTypeIds, examTypeOption.value])]
+                                            : item.examTypeIds.filter((id) => id !== examTypeOption.value),
+                                        };
+                                      }),
+                                    }))
+                                  }
+                                />
+                                {examTypeOption.label}
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
