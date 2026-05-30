@@ -825,8 +825,9 @@ export function PolicyDraftEditor({
           <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Exam restriction rules</summary>
           <div style={{ display: "grid", gap: 8 }}>
             {draft.examTypeRules.map((row, index) => {
-              const examTypeOptionsForRow = examTypeOptionsByModality.get(row.modalityId) ?? [];
-              const selectedModalityLabel = modalityOptions.find((m) => m.value === row.modalityId)?.label ?? "selected modality";
+              const rowModalityId = Number(row.modalityId);
+              const examTypeOptionsForRow = examTypeOptionsByModality.get(rowModalityId) ?? [];
+              const selectedModalityLabel = modalityOptions.find((m) => m.value === rowModalityId)?.label ?? "selected modality";
               const filterKey = `exam-rule-${row.id}-${index}`;
               const filteredExamTypeOptions = getFilteredExamOptions(filterKey, examTypeOptionsForRow);
               return (
@@ -1079,7 +1080,7 @@ export function PolicyDraftEditor({
                           </button>
                         </div>
                       </div>
-                      {row.modalityId === 0 ? (
+                      {rowModalityId === 0 ? (
                         <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
                       ) : examTypeOptionsForRow.length === 0 ? (
                         <p className="text-[11px] text-stone-400 dark:text-stone-500">
@@ -1226,8 +1227,9 @@ export function PolicyDraftEditor({
           <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Exam mix quota groups</summary>
           <div style={{ display: "grid", gap: 8 }}>
             {(draft.examMixQuotaRules ?? []).map((row, index) => {
-              const examTypeOptionsForRow = examTypeOptionsByModality.get(row.modalityId) ?? [];
-              const selectedModalityLabel = modalityOptions.find((m) => m.value === row.modalityId)?.label ?? "selected modality";
+              const rowModalityId = Number(row.modalityId);
+              const examTypeOptionsForRow = examTypeOptionsByModality.get(rowModalityId) ?? [];
+              const selectedModalityLabel = modalityOptions.find((m) => m.value === rowModalityId)?.label ?? "selected modality";
               const filterKey = `exam-mix-${row.id}-${index}`;
               const filteredExamTypeOptions = getFilteredExamOptions(filterKey, examTypeOptionsForRow);
               return (
@@ -1492,7 +1494,7 @@ export function PolicyDraftEditor({
                           </button>
                         </div>
                       </div>
-                      {row.modalityId === 0 ? (
+                      {rowModalityId === 0 ? (
                         <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
                       ) : examTypeOptionsForRow.length === 0 ? (
                         <p className="text-[11px] text-stone-400 dark:text-stone-500">

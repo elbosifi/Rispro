@@ -298,6 +298,43 @@ describe("PolicyDraftEditor exam type helper text", () => {
       expect(screen.getByText("CT Chest")).toBeTruthy();
     });
 
+    it("loads available exams when a saved rule has a string-backed modality id", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [
+              {
+                id: 1,
+                modalityId: "1" as unknown as number,
+                ruleType: "specific_date",
+                effectMode: "restriction_overridable",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                examTypeIds: [],
+                title: null,
+                notes: null,
+                isActive: true,
+              },
+            ],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      expect(screen.getByText(/CT - Specific date/)).toBeTruthy();
+      expect(screen.getByLabelText("CT Head")).toBeTruthy();
+    });
+
     it("selects and clears all restricted exams", () => {
       const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       render(
@@ -587,6 +624,42 @@ describe("PolicyDraftEditor exam type helper text", () => {
 
       expect(screen.getByText("CT Head")).toBeTruthy();
       expect(screen.getByText("CT Chest")).toBeTruthy();
+    });
+
+    it("loads available exams when a saved exam mix group has a string-backed modality id", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [
+              {
+                id: 1,
+                modalityId: "1" as unknown as number,
+                title: null,
+                ruleType: "specific_date",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                dailyLimit: 1,
+                examTypeIds: [],
+                isActive: true,
+              },
+            ],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      expect(screen.getByText(/CT - Specific date/)).toBeTruthy();
+      expect(screen.getByLabelText("CT Head")).toBeTruthy();
     });
 
     it("shows readable card header and bulk action parity", () => {
