@@ -22,6 +22,13 @@ vi.mock("../api", () => ({
     data: [
       { id: "101" as unknown as number, modalityId: "1" as unknown as number, name: "CT Head", code: "CTH" },
       { id: "102" as unknown as number, modalityId: "1" as unknown as number, name: "CT Chest", code: "CTC" },
+      { id: "104" as unknown as number, modalityId: "1" as unknown as number, name: "CT Abdomen", code: "CTA" },
+      { id: "105" as unknown as number, modalityId: "1" as unknown as number, name: "CT Pelvis", code: "CTP" },
+      { id: "106" as unknown as number, modalityId: "1" as unknown as number, name: "CT Spine", code: "CTS" },
+      { id: "107" as unknown as number, modalityId: "1" as unknown as number, name: "CT Sinus", code: "CTSIN" },
+      { id: "108" as unknown as number, modalityId: "1" as unknown as number, name: "CT Neck", code: "CTN" },
+      { id: "109" as unknown as number, modalityId: "1" as unknown as number, name: "CT Angio", code: "CTANG" },
+      { id: "110" as unknown as number, modalityId: "1" as unknown as number, name: "CT Cardiac", code: "CTCARD" },
     ],
     isLoading: false,
     isError: false,
@@ -83,7 +90,9 @@ describe("PolicyDraftEditor exam type helper text", () => {
         />
       );
 
-      expect(screen.getByText("Selected exams")).toBeTruthy();
+      expect(screen.getByText("Exam restriction rule #1")).toBeTruthy();
+      expect(screen.getAllByText(/Supervisor-overridable restriction/).length).toBeGreaterThan(0);
+      expect(screen.getByText("Selected exams (2)")).toBeTruthy();
       expect(screen.getByText("Old CT Angio (CTA) (inactive)")).toBeTruthy();
       expect(screen.getByText("Unknown exam type ID 999")).toBeTruthy();
 
@@ -172,7 +181,8 @@ describe("PolicyDraftEditor exam type helper text", () => {
       );
 
       expect(screen.getByText("Exam restriction rules")).toBeTruthy();
-      expect(screen.getByText("Restricted exams")).toBeTruthy();
+      expect(screen.getByText("Exam restriction rule #1")).toBeTruthy();
+      expect(screen.getByText("Selected exams (0)")).toBeTruthy();
       expect(screen.getByText("Checked exams are the ones this rule blocks or restricts.")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Select all" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
@@ -289,6 +299,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
     });
 
     it("selects and clears all restricted exams", () => {
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       render(
         <PolicyDraftEditor
           isSaving={false}
@@ -326,8 +337,101 @@ describe("PolicyDraftEditor exam type helper text", () => {
       expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(true);
 
       fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+      expect(confirm).toHaveBeenCalledWith("Clear all selected exams from this exam restriction rule?");
       expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(false);
       expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("filters available exams without hiding selected chips and preserves selections on save", async () => {
+      let savedSnapshot: PolicySnapshotDto | null = null;
+      const onSave = vi.fn(async (nextSnapshot: PolicySnapshotDto) => {
+        savedSnapshot = nextSnapshot;
+      });
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={onSave}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [
+              {
+                id: 1,
+                modalityId: 1,
+                ruleType: "specific_date",
+                effectMode: "restriction_overridable",
+                specificDate: "2027-01-01",
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                examTypeIds: [101],
+                title: null,
+                notes: null,
+                isActive: true,
+              },
+            ],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      expect(screen.getByText("Selected exams (1)")).toBeTruthy();
+      expect(screen.getByText("CT Head (CTH)")).toBeTruthy();
+
+      fireEvent.change(screen.getByPlaceholderText("Search available exams"), { target: { value: "abdomen" } });
+
+      expect(screen.getByText("CT Head (CTH)")).toBeTruthy();
+      expect(screen.getByLabelText("CT Abdomen")).toBeTruthy();
+      expect(screen.queryByLabelText("CT Chest")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+      expect(onSave).toHaveBeenCalledTimes(1);
+      expect((savedSnapshot as PolicySnapshotDto | null)?.examTypeRules[0]?.examTypeIds).toEqual([101]);
+    });
+
+    it("requires confirmation before clearing selected exam restriction exams", () => {
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [
+              {
+                id: 1,
+                modalityId: 1,
+                ruleType: "specific_date",
+                effectMode: "restriction_overridable",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                examTypeIds: [101],
+                title: null,
+                notes: null,
+                isActive: true,
+              },
+            ],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+      expect(confirm).toHaveBeenCalledWith("Clear all selected exams from this exam restriction rule?");
+      expect(screen.getByText("CT Head (CTH)")).toBeTruthy();
     });
   });
 
@@ -371,7 +475,8 @@ describe("PolicyDraftEditor exam type helper text", () => {
         />
       );
 
-      expect(screen.getByText("Selected exams")).toBeTruthy();
+      expect(screen.getByText("Exam mix group #1")).toBeTruthy();
+      expect(screen.getByText("Selected exams (1)")).toBeTruthy();
       expect(screen.getByText("Legacy MRI (LMRI) (inactive)")).toBeTruthy();
       expect(screen.getByText(/No active exam types available to add for/)).toBeTruthy();
       expect(screen.queryByText(/No exam types configured for/)).toBeNull();
@@ -482,6 +587,88 @@ describe("PolicyDraftEditor exam type helper text", () => {
 
       expect(screen.getByText("CT Head")).toBeTruthy();
       expect(screen.getByText("CT Chest")).toBeTruthy();
+    });
+
+    it("shows readable card header and bulk action parity", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [
+              {
+                id: 1,
+                modalityId: 1,
+                title: null,
+                ruleType: "specific_date",
+                specificDate: "2027-01-01",
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                dailyLimit: 2,
+                examTypeIds: [],
+                isActive: true,
+              },
+            ],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      expect(screen.getByText("Exam mix group #1")).toBeTruthy();
+      expect(screen.getByText("Selected exams (0)")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Select all" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
+    });
+
+    it("selects and confirms clearing all exam mix group exams", () => {
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [
+              {
+                id: 1,
+                modalityId: 1,
+                title: null,
+                ruleType: "specific_date",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                dailyLimit: 1,
+                examTypeIds: [],
+                isActive: true,
+              },
+            ],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+      expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+      expect(confirm).toHaveBeenCalledWith("Clear all selected exams from this exam mix group?");
+      expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(false);
     });
   });
 });
