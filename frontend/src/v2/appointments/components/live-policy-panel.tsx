@@ -56,7 +56,7 @@ function formatModality(
   modalities: Array<Pick<ModalityDto, "id" | "name" | "nameAr" | "nameEn" | "code" | "isActive">>,
   language: string
 ): string {
-  const modality = modalities.find((row) => row.id === modalityId);
+  const modality = modalities.find((row) => Number(row.id) === Number(modalityId));
   if (!modality) return `Unknown modality ID ${modalityId}`;
   const name = language === "ar" ? modality.nameAr || modality.name : modality.nameEn || modality.name;
   const label = modality.code ? `${name} (${modality.code})` : name;
@@ -71,7 +71,7 @@ function formatExamTypes(
   if (examTypeIds.length === 0) return "—";
   return examTypeIds
     .map((examTypeId) => {
-      const examType = examTypes.find((row) => row.id === examTypeId);
+      const examType = examTypes.find((row) => Number(row.id) === Number(examTypeId));
       if (!examType) return `Unknown exam type ID ${examTypeId}`;
       const name = language === "ar" ? examType.nameAr || examType.name : examType.nameEn || examType.name;
       const label = examType.code ? `${name} (${examType.code})` : name;
@@ -84,7 +84,7 @@ function formatAllowedUsers(userIds: number[], policyUsers: PolicyUserDto[]): st
   if (userIds.length === 0) return "Super admin only";
   return userIds
     .map((userId) => {
-      const user = policyUsers.find((row) => row.id === userId);
+      const user = policyUsers.find((row) => Number(row.id) === Number(userId));
       return user
         ? withInactiveMarker(`${user.fullName || user.username} (${user.username})`, user.isActive)
         : `Unknown user ID ${userId}`;

@@ -91,4 +91,53 @@ describe("LivePolicyPanel", () => {
     expect(screen.getByText("Spine MRI (SMRI)")).toBeTruthy();
     expect(screen.getByText("Supervisor User (supervisor) (inactive), Unknown user ID 21")).toBeTruthy();
   });
+
+  it("resolves live policy references when display lookup ids are string-backed", () => {
+    render(
+      <LivePolicyPanel
+        snapshot={{
+          categoryDailyLimits: [
+            { id: 1, modalityId: 7, caseCategory: "oncology", dailyLimit: 2, isActive: true },
+          ],
+          modalityBlockedRules: [],
+          examTypeRules: [],
+          examTypeSpecialQuotas: [
+            { id: 4, examTypeId: 13, dailyExtraSlots: 1, allowedUserIds: [20], isActive: true },
+          ],
+          examMixQuotaRules: [
+            {
+              id: 5,
+              modalityId: 7,
+              title: "Mix",
+              ruleType: "specific_date",
+              specificDate: "2027-01-01",
+              startDate: null,
+              endDate: null,
+              weekday: null,
+              alternateWeeks: false,
+              recurrenceAnchorDate: null,
+              dailyLimit: 2,
+              examTypeIds: [11, 12],
+              isActive: true,
+            },
+          ],
+          specialReasonCodes: [],
+        }}
+        displayLookups={{
+          modalities: [{ id: "7" as unknown as number, name: "MRI", nameAr: null, nameEn: "MRI", code: "MR", isActive: true }],
+          examTypes: [
+            { id: "11" as unknown as number, name: "Brain MRI", nameAr: null, nameEn: "Brain MRI", code: "BMRI", modalityId: 7, isActive: true },
+            { id: "12" as unknown as number, name: "Spine MRI", nameAr: null, nameEn: "Spine MRI", code: "SMRI", modalityId: 7, isActive: true },
+            { id: "13" as unknown as number, name: "Special MRI", nameAr: null, nameEn: "Special MRI", code: "SPMRI", modalityId: 7, isActive: true },
+          ],
+          users: [{ id: "20" as unknown as number, username: "supervisor", fullName: "Supervisor User", role: "supervisor", isActive: true }],
+        }}
+      />
+    );
+
+    expect(screen.getAllByText("MRI (MR)").length).toBeGreaterThan(0);
+    expect(screen.getByText("Brain MRI (BMRI), Spine MRI (SMRI)")).toBeTruthy();
+    expect(screen.getByText("Special MRI (SPMRI)")).toBeTruthy();
+    expect(screen.getByText("Supervisor User (supervisor)")).toBeTruthy();
+  });
 });
