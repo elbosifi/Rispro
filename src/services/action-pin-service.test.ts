@@ -139,11 +139,12 @@ const limits: ActionPinPolicyLimits = {
 };
 
 describe("action PIN service", () => {
-  it("validates exactly four digits", async () => {
+  it("validates four to eight digits", async () => {
     const { validateActionPinFormat } = await import("./action-pin-service.js");
     assert.equal(validateActionPinFormat("1234"), true);
+    assert.equal(validateActionPinFormat("12345678"), true);
     assert.equal(validateActionPinFormat("123"), false);
-    assert.equal(validateActionPinFormat("12345"), false);
+    assert.equal(validateActionPinFormat("123456789"), false);
     assert.equal(validateActionPinFormat("12a4"), false);
   });
 

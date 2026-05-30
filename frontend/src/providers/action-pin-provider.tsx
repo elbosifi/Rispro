@@ -23,7 +23,7 @@ function actionLabel(actionKey: string) {
 }
 
 function validatePin(pin: string, isArabic: boolean): string | null {
-  return /^\d{4}$/.test(pin) ? null : (isArabic ? "أدخل رمز PIN من 4 أرقام." : "Enter a 4-digit PIN.");
+  return /^\d{4,8}$/.test(pin) ? null : (isArabic ? "أدخل رمز PIN من 4 إلى 8 أرقام." : "Enter a 4-8 digit PIN.");
 }
 
 function ActionPinDialog({
@@ -97,25 +97,25 @@ function ActionPinDialog({
         className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-6 shadow-xl dark:border-stone-700 dark:bg-stone-800"
       >
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-          {isArabic ? "تأكيد PIN الإجراء" : "Confirm Action PIN"}
+          {isArabic ? "تأكيد إجراء مقيد" : "Confirm Restricted Action"}
         </h3>
         <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">
           {isArabic
-            ? `أدخل PIN الخاص بك لتأكيد ${actionLabel(challenge.actionKey)}.`
-            : `Enter your PIN to confirm ${actionLabel(challenge.actionKey)}.`}
+            ? `أدخل PIN إجراء الأمان لتأكيد ${actionLabel(challenge.actionKey)}.`
+            : `Enter your Security Action PIN to confirm ${actionLabel(challenge.actionKey)}.`}
         </p>
 
         <form onSubmit={submit} className="mt-4 space-y-4">
           <input
             ref={inputRef}
-            aria-label={isArabic ? "رمز PIN" : "Action PIN"}
+            aria-label={isArabic ? "PIN إجراء الأمان" : "Security Action PIN"}
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={8}
             value={pin}
             onChange={(event) => {
-              setPin(event.target.value.replace(/\D/g, "").slice(0, 4));
+              setPin(event.target.value.replace(/\D/g, "").slice(0, 8));
               setError(null);
             }}
             autoComplete="off"
@@ -125,7 +125,7 @@ function ActionPinDialog({
 
           {challenge.requiresReason && (
             <textarea
-              aria-label={isArabic ? "سبب الإجراء" : "Action PIN reason"}
+              aria-label={isArabic ? "سبب الإجراء" : "Action reason"}
               value={reason}
               onChange={(event) => {
                 setReason(event.target.value);
@@ -232,10 +232,10 @@ function ActionPinIdleLockOverlay({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={8}
             value={pin}
             onChange={(event) => {
-              setPin(event.target.value.replace(/\D/g, "").slice(0, 4));
+              setPin(event.target.value.replace(/\D/g, "").slice(0, 8));
               setError(null);
             }}
             autoComplete="off"

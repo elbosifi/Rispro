@@ -1102,10 +1102,17 @@ export async function fetchActionPinStatus(): Promise<ActionPinStatus> {
   return api<ActionPinStatus>("/action-pin/status");
 }
 
-export async function setOwnActionPin(pin: string, currentPassword?: string): Promise<{ ok: true }> {
+export async function setOwnActionPin(pin: string, confirmPin: string, currentPassword: string): Promise<{ ok: true }> {
   return api<{ ok: true }>("/action-pin/set", {
     method: "POST",
-    body: JSON.stringify({ pin, currentPassword })
+    body: JSON.stringify({ pin, confirmPin, currentPassword })
+  });
+}
+
+export async function disableOwnActionPin(currentPassword: string): Promise<{ ok: true }> {
+  return api<{ ok: true }>("/action-pin/disable", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword })
   });
 }
 

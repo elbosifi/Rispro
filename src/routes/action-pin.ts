@@ -8,6 +8,8 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { authenticateUser } from "../services/auth-service.js";
+import { createRateLimiter } from "../middleware/rate-limit.js";
+import { logAuditEntry } from "../services/audit-service.js";
 import {
   clearActionPin,
   createActionPinVerification,
@@ -31,6 +33,11 @@ interface ActionPinRequest extends Request {
 }
 
 export const actionPinRouter = express.Router();
+const actionPinManagementPasswordRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 10,
+  message: "Too many Security Action PIN password attempts. Please wait a few minutes and try again.",
+});
 
 actionPinRouter.use(requireAuth);
 
@@ -46,6 +53,50 @@ function parseUserIdParam(value: unknown): UserId {
     throw new HttpError(400, "Invalid user ID.");
   }
   return userId as UserId;
+}
+
+async function verifyCurrentAccountPassword(request: ActionPinRequest, body: Record<string, unknown>): Promise<void> {
+  const currentPassword = asString(body.currentPassword);
+  if (!currentPassword) {
+    throw new HttpError(403, "Current account password is required.");
+  }
+
+  try {
+    await authenticateUser(asString(request.user.username), currentPassword);
+  } catch (error) {
+    if (error instanceof HttpError && error.statusCode === 401) {
+      await logAuditEntry({
+        entityType: "action_pin",
+        entityId: request.user.sub,
+        actionType: "security_pin_password_failed_attempt",
+        oldValues: null,
+        newValues: { userId: request.user.sub, reason: "incorrect_password" },
+        changedByUserId: request.user.sub,
+      });
+      throw new HttpError(403, "Account password is incorrect.");
+    }
+    throw error;
+  }
+}
+
+function validatePinManagementBody(body: Record<string, unknown>): string {
+  const pin = asString(body.pin);
+  const confirmPin = asString(body.confirmPin);
+
+  if (!pin) {
+    throw new HttpError(400, "PIN is required.");
+  }
+  if (!/^\d+$/.test(pin)) {
+    throw new HttpError(400, "PIN must contain digits only.");
+  }
+  if (!/^\d{4,8}$/.test(pin)) {
+    throw new HttpError(400, "PIN must be 4-8 digits.");
+  }
+  if (confirmPin && confirmPin !== pin) {
+    throw new HttpError(400, "PINs do not match.");
+  }
+
+  return pin;
 }
 
 actionPinRouter.get(
@@ -170,6 +221,7 @@ actionPinRouter.post(
 
 actionPinRouter.post(
   "/set",
+  actionPinManagementPasswordRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as ActionPinRequest;
     const body = asUnknownRecord(request.body ?? {});
@@ -180,15 +232,35 @@ actionPinRouter.post(
     }
 
     const status = await getActionPinStatus(request.user.sub);
-    if (status.hasPin && policy.requirePinToViewOwnPinSettings) {
-      const currentPassword = asString(body.currentPassword);
-      if (!currentPassword) {
-        throw new HttpError(403, "Current password is required to change Action PIN settings.");
-      }
-      await authenticateUser(asString(request.user.username), currentPassword);
+    await verifyCurrentAccountPassword(request, body);
+
+    const pin = validatePinManagementBody(body);
+    await setActionPin(
+      request.user.sub,
+      pin,
+      request.user.sub,
+      null,
+      undefined,
+      status.hasPin ? "security_pin_reset_by_user" : "security_pin_created"
+    );
+    res.json({ ok: true });
+  })
+);
+
+actionPinRouter.post(
+  "/disable",
+  actionPinManagementPasswordRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as ActionPinRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const policy = await readActionPinPolicy();
+
+    if (!policy.allowUserPinChange) {
+      throw new HttpError(403, "Action PIN changes are disabled by policy.");
     }
 
-    await setActionPin(request.user.sub, body.pin, request.user.sub);
+    await verifyCurrentAccountPassword(request, body);
+    await clearActionPin(request.user.sub, request.user.sub, undefined, "security_pin_disabled");
     res.json({ ok: true });
   })
 );

@@ -183,7 +183,7 @@ describe("ActionPinProvider", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
 
     expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(screen.getByLabelText("Action PIN")).toBeTruthy();
+    expect(screen.getByLabelText("Security Action PIN")).toBeTruthy();
   });
 
   it("verifies the PIN then retries the original mutation without sending the raw PIN", async () => {
@@ -195,7 +195,7 @@ describe("ActionPinProvider", () => {
 
     renderWithActionPin(<TestMutationButton />);
     await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await screen.findByText("ok");
@@ -221,13 +221,13 @@ describe("ActionPinProvider", () => {
 
     renderWithActionPin(<TestMutationButton />);
     await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     expect(await screen.findByText("Reason is required.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await userEvent.type(screen.getByLabelText("Action PIN reason"), "Confirming demographics change");
+    await userEvent.type(screen.getByLabelText("Action reason"), "Confirming demographics change");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await screen.findByText("ok");
@@ -241,7 +241,7 @@ describe("ActionPinProvider", () => {
 
     renderWithActionPin(<TestMutationButton />);
     await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "9999");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "9999");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     expect(await screen.findByText("invalid_action_pin")).toBeTruthy();
@@ -258,7 +258,7 @@ describe("ActionPinProvider", () => {
 
     renderWithActionPin(<TestMutationButton />);
     await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     expect(await screen.findByText("action_pin_required")).toBeTruthy();
@@ -274,7 +274,7 @@ describe("ActionPinProvider", () => {
 
     renderWithActionPin(<TestMutationButton />);
     await userEvent.click(screen.getByRole("button", { name: "Create patient" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     expect(await screen.findByText("Patient name is required")).toBeTruthy();
@@ -300,7 +300,7 @@ describe("ActionPinProvider", () => {
       <TestRealApiButton label="Real patient create" run={() => createPatient({ arabicFullName: "Ada" } as any)} />
     );
     await userEvent.click(screen.getByRole("button", { name: "Real patient create" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await screen.findByText("ok");
@@ -318,7 +318,7 @@ describe("ActionPinProvider", () => {
       <TestRealApiButton label="Real appointment create" run={() => createV2Booking({ patientId: 1 } as any)} />
     );
     await userEvent.click(screen.getByRole("button", { name: "Real appointment create" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await screen.findByText("ok");
@@ -336,7 +336,7 @@ describe("ActionPinProvider", () => {
       <TestRealApiButton label="Real queue walk-in" run={() => addWalkIn({ patientId: 1, modalityId: 2, appointmentDate: "2026-05-29" })} />
     );
     await userEvent.click(screen.getByRole("button", { name: "Real queue walk-in" }));
-    await userEvent.type(await screen.findByLabelText("Action PIN"), "1234");
+    await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await screen.findByText("ok");
@@ -356,7 +356,7 @@ describe("ActionPinSettingsButton", () => {
     localStorage.clear();
   });
 
-  it("lets the current user set or change a 4-digit Action PIN", async () => {
+  it("lets the current user set a Security Action PIN with account password confirmation", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(200, {
         hasPin: false,
@@ -385,18 +385,20 @@ describe("ActionPinSettingsButton", () => {
       }));
 
     renderWithQuery(<ActionPinSettingsButton />);
-    await userEvent.click(screen.getByRole("button", { name: "Action PIN settings" }));
-    expect(await screen.findByText("No Action PIN is set.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Manage Security PIN" }));
+    expect(await screen.findByText("Set Security Action PIN")).toBeTruthy();
 
-    await userEvent.type(screen.getByLabelText("New Action PIN"), "2468");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.type(screen.getByLabelText("Account password"), "account-password");
+    await userEvent.type(screen.getByLabelText("New PIN"), "2468");
+    await userEvent.type(screen.getByLabelText("Confirm PIN"), "2468");
+    await userEvent.click(screen.getByRole("button", { name: "Save PIN" }));
 
-    await screen.findByText("Action PIN saved.");
+    await screen.findByText("Security Action PIN saved.");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/action-pin/set");
-    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toBe(JSON.stringify({ pin: "2468" }));
+    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toBe(JSON.stringify({ pin: "2468", confirmPin: "2468", currentPassword: "account-password" }));
   });
 
-  it("shows a clear set/change failure without exposing plaintext PIN", async () => {
+  it("shows existing-PIN management actions without exposing plaintext PIN", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(200, {
         hasPin: true,
@@ -409,21 +411,19 @@ describe("ActionPinSettingsButton", () => {
           allowUserPinChange: true,
           requirePinToViewOwnPinSettings: false
         }
-      }))
-      .mockResolvedValueOnce(jsonResponse(403, { message: "Action PIN changes are disabled by policy." }));
+      }));
 
     renderWithQuery(<ActionPinSettingsButton />);
-    await userEvent.click(screen.getByRole("button", { name: "Action PIN settings" }));
-    await screen.findByText("You have an Action PIN set.");
+    await userEvent.click(screen.getByRole("button", { name: "Manage Security PIN" }));
+    await screen.findByText("Manage Security Action PIN");
 
-    await userEvent.type(screen.getByLabelText("New Action PIN"), "1357");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(await screen.findByText("Action PIN changes are disabled by policy.")).toBeTruthy();
+    expect(screen.getByText("PIN is set")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset PIN" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disable PIN" })).toBeTruthy();
     expect(screen.queryByText("1357")).toBeNull();
   });
 
-  it("requires current password before saving a protected existing Action PIN", async () => {
+  it("requires password and matching PINs before resetting an existing Security Action PIN", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(200, {
         hasPin: true,
@@ -440,17 +440,57 @@ describe("ActionPinSettingsButton", () => {
       .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
 
     renderWithQuery(<ActionPinSettingsButton />);
-    await userEvent.click(screen.getByRole("button", { name: "Action PIN settings" }));
-    await screen.findByText("You have an Action PIN set.");
+    await userEvent.click(screen.getByRole("button", { name: "Manage Security PIN" }));
+    await screen.findByText("Manage Security Action PIN");
+    await userEvent.click(screen.getByRole("button", { name: "Reset PIN" }));
 
-    await userEvent.type(screen.getByLabelText("New Action PIN"), "2468");
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Reset PIN" }));
+    expect(await screen.findByText("Account password is required.")).toBeTruthy();
 
-    await userEvent.type(screen.getByLabelText("Current password"), "account-password");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.type(screen.getByLabelText("Account password"), "account-password");
+    await userEvent.type(screen.getByLabelText("New PIN"), "2468");
+    await userEvent.type(screen.getByLabelText("Confirm PIN"), "1357");
+    await userEvent.click(screen.getByRole("button", { name: "Reset PIN" }));
+    expect(await screen.findByText("PINs do not match.")).toBeTruthy();
+
+    await userEvent.clear(screen.getByLabelText("Confirm PIN"));
+    await userEvent.type(screen.getByLabelText("Confirm PIN"), "2468");
+    await userEvent.click(screen.getByRole("button", { name: "Reset PIN" }));
 
     await waitFor(() => expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/action-pin/set"));
-    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toBe(JSON.stringify({ pin: "2468", currentPassword: "account-password" }));
+    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toBe(JSON.stringify({ pin: "2468", confirmPin: "2468", currentPassword: "account-password" }));
+  });
+
+  it("requires account password before disabling Security Action PIN", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, {
+        hasPin: true,
+        lockedUntil: null,
+        pinExpiresAt: null,
+        isExpired: false,
+        policy: {
+          enabled: true,
+          pinLength: 4,
+          allowUserPinChange: true,
+          requirePinToViewOwnPinSettings: false
+        }
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+    renderWithQuery(<ActionPinSettingsButton />);
+    await userEvent.click(screen.getByRole("button", { name: "Manage Security PIN" }));
+    await screen.findByText("Manage Security Action PIN");
+    await userEvent.click(screen.getByRole("button", { name: "Disable PIN" }));
+
+    expect(screen.getByText("Disabling your Security Action PIN may prevent you from confirming restricted actions until a new PIN is set.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Disable PIN" }));
+    expect(await screen.findByText("Account password is required.")).toBeTruthy();
+
+    await userEvent.type(screen.getByLabelText("Account password"), "account-password");
+    await userEvent.click(screen.getByRole("button", { name: "Disable PIN" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/action-pin/disable"));
+    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toBe(JSON.stringify({ currentPassword: "account-password" }));
   });
 });
 

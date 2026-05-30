@@ -113,7 +113,7 @@ interface ActionPinAdminDbRow {
 }
 
 export function validateActionPinFormat(pin: unknown): boolean {
-  return /^\d{4}$/.test(String(pin ?? ""));
+  return /^\d{4,8}$/.test(String(pin ?? ""));
 }
 
 function isFuture(value: string | null | undefined): boolean {
@@ -225,10 +225,11 @@ export async function setActionPin(
   pin: unknown,
   updatedByUserId: NullableUserId,
   pinExpiresAt: string | null = null,
-  executor: DbExecutor = pool
+  executor: DbExecutor = pool,
+  auditActionType?: string
 ): Promise<{ changed: boolean; pinExpiresAt: string | null }> {
   if (!validateActionPinFormat(pin)) {
-    throw new HttpError(400, "Action PIN must be exactly 4 digits.");
+    throw new HttpError(400, "Security Action PIN must be 4-8 digits.");
   }
 
   const previous = await getActionPinRow(userId, executor);
@@ -257,7 +258,7 @@ export async function setActionPin(
     await logAuditEntry({
       entityType: "action_pin",
       entityId: userId,
-      actionType: previous ? "action_pin_changed" : "action_pin_set",
+      actionType: auditActionType ?? (previous ? "action_pin_changed" : "action_pin_set"),
       oldValues: { hadPin: Boolean(previous) },
       newValues: { userId, pinExpiresAt },
       changedByUserId: updatedByUserId,
@@ -270,7 +271,8 @@ export async function setActionPin(
 export async function clearActionPin(
   userId: UserId,
   updatedByUserId: NullableUserId,
-  executor: DbExecutor = pool
+  executor: DbExecutor = pool,
+  auditActionType = "action_pin_reset"
 ): Promise<{ hadPin: boolean }> {
   const { rows } = await executor.query(
     `
@@ -286,7 +288,7 @@ export async function clearActionPin(
     await logAuditEntry({
       entityType: "action_pin",
       entityId: userId,
-      actionType: "action_pin_reset",
+      actionType: auditActionType,
       oldValues: { hadPin },
       newValues: { userId },
       changedByUserId: updatedByUserId,

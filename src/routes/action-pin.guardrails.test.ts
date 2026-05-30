@@ -36,12 +36,32 @@ describe("action PIN route guardrails", () => {
     assert.match(routes, /request\.user\.role !== "super_admin"/);
   });
 
-  it("requires current password, not Action PIN verification, to change own PIN when protected", async () => {
+  it("requires current password, not Action PIN verification, for every self-service PIN management route", async () => {
     const routes = await readFile("src/routes/action-pin.ts", "utf-8");
 
-    assert.match(routes, /Current password is required to change Action PIN settings\./);
-    assert.match(routes, /await authenticateUser\(asString\(request\.user\.username\), currentPassword\)/);
+    assert.match(routes, /"\/set"/);
+    assert.match(routes, /"\/disable"/);
+    assert.match(routes, /actionPinManagementPasswordRateLimiter/);
+    assert.match(routes, /"\/set",\s*actionPinManagementPasswordRateLimiter,\s*asyncRoute/s);
+    assert.match(routes, /"\/disable",\s*actionPinManagementPasswordRateLimiter,\s*asyncRoute/s);
+    assert.match(routes, /Current account password is required\./);
+    assert.match(routes, /await verifyCurrentAccountPassword\(request, body\)/);
     assert.doesNotMatch(routes, /Recent Action PIN verification/);
+  });
+
+  it("audits wrong account-password attempts without storing password or PIN", async () => {
+    const routes = await readFile("src/routes/action-pin.ts", "utf-8");
+
+    assert.match(routes, /actionType:\s*"security_pin_password_failed_attempt"/);
+    assert.doesNotMatch(routes, /newValues:\s*\{[^}]*currentPassword/s);
+    assert.doesNotMatch(routes, /newValues:\s*\{[^}]*pin/s);
+  });
+
+  it("accepts Security Action PIN formats from four to eight digits", async () => {
+    const service = await readFile("src/services/action-pin-service.ts", "utf-8");
+
+    assert.match(service, /\\d\{4,8\}/);
+    assert.doesNotMatch(service, /exactly 4 digits/);
   });
 });
 
