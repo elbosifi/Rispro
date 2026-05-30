@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PolicyDraftEditor } from "../components/policy-draft-editor";
+import type { PolicySnapshotDto } from "../types";
 
 vi.mock("@/providers/language-provider", () => ({
   useLanguage: () => ({ language: "en" }),
@@ -39,7 +40,10 @@ afterEach(() => {
 describe("PolicyDraftEditor exam type helper text", () => {
   describe("Exam date rules section", () => {
     it("shows selected inactive and unknown exams after load and preserves them on save", async () => {
-      const onSave = vi.fn(async () => {});
+      let savedSnapshot: PolicySnapshotDto | null = null;
+      const onSave = vi.fn(async (nextSnapshot: PolicySnapshotDto) => {
+        savedSnapshot = nextSnapshot;
+      });
       render(
         <PolicyDraftEditor
           isSaving={false}
@@ -86,7 +90,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
       fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
       expect(onSave).toHaveBeenCalledTimes(1);
-      expect(onSave.mock.calls[0][0].examTypeRules[0].examTypeIds).toEqual([103, 999]);
+      expect((savedSnapshot as PolicySnapshotDto | null)?.examTypeRules[0]?.examTypeIds).toEqual([103, 999]);
     });
 
     it("does not clear selected exams on modality change when confirmation is declined", () => {

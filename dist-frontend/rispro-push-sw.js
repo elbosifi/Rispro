@@ -22,7 +22,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const clickUrl = String(event.notification.data?.clickUrl || "/");
+  const clickUrl = new URL(String(event.notification.data?.clickUrl || "/"), self.location.origin).href;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
