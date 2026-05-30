@@ -328,6 +328,7 @@ export function mapQueueSnapshot(raw: RawRecord): QueueSnapshot {
     queueDate: str(raw, 'queue_date') || str(raw, 'queueDate'),
     reviewTime: str(raw, 'review_time') || str(raw, 'reviewTime'),
     reviewActive: bool(raw, 'review_active', bool(raw, 'reviewActive', false)),
+    autoNoShowEnabled: bool(raw, 'auto_no_show_enabled', bool(raw, 'autoNoShowEnabled', false)),
     noShowConfirmationRequired: bool(raw, 'no_show_confirmation_required', bool(raw, 'noShowConfirmationRequired', true)),
     autoNoShowCount: num(raw, 'auto_no_show_count') || num(raw, 'autoNoShowCount'),
     autoNoShowCleanupDays: num(raw, 'auto_no_show_cleanup_days') || num(raw, 'autoNoShowCleanupDays'),

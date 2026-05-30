@@ -950,62 +950,62 @@ export async function rebuildAllV2DicomWorklistSources(): Promise<{ ok: boolean;
   }
 }
 
+interface ScheduledBookingWorklistSync {
+  bookingId: UserId;
+  replacement: boolean;
+}
+
+const scheduledBookingWorklistSyncQueue: ScheduledBookingWorklistSync[] = [];
+let isDrainingScheduledBookingWorklistSyncs = false;
+
+async function drainScheduledBookingWorklistSyncs(): Promise<void> {
+  if (isDrainingScheduledBookingWorklistSyncs) {
+    return;
+  }
+
+  isDrainingScheduledBookingWorklistSyncs = true;
+  try {
+    while (scheduledBookingWorklistSyncQueue.length > 0) {
+      const item = scheduledBookingWorklistSyncQueue.shift();
+      if (!item) {
+        continue;
+      }
+
+      await syncBookingWorklistSources(item.bookingId).catch((error) => {
+        console.warn(
+          `[DICOM Worklist] Failed to sync booking ${item.bookingId}. Will retry on next mutation.`,
+          error
+        );
+      });
+
+      await enqueueOrthancSyncForBooking(Number(item.bookingId)).catch((error) => {
+        console.warn(
+          `[Orthanc MWL] Failed to enqueue sync job for booking ${item.bookingId}.`,
+          error
+        );
+      });
+
+      const enqueueSante = item.replacement ? enqueueSanteHl7ReplacementForBooking : enqueueSanteHl7ForBooking;
+      await enqueueSante(Number(item.bookingId)).catch((error) => {
+        console.warn(
+          `[Sante HL7] Failed to enqueue ${item.replacement ? "replacement " : ""}delivery job for booking ${item.bookingId}.`,
+          error
+        );
+      });
+    }
+  } finally {
+    isDrainingScheduledBookingWorklistSyncs = false;
+  }
+}
+
 export function scheduleBookingWorklistSync(bookingId: UserId): void {
-  Promise.resolve()
-    .then(() => syncBookingWorklistSources(bookingId))
-    .catch((error) => {
-      console.warn(
-        `[DICOM Worklist] Failed to sync booking ${bookingId}. Will retry on next mutation.`,
-        error
-      );
-    });
-
-  Promise.resolve()
-    .then(() => enqueueOrthancSyncForBooking(Number(bookingId)))
-    .catch((error) => {
-      console.warn(
-        `[Orthanc MWL] Failed to enqueue sync job for booking ${bookingId}.`,
-        error
-      );
-    });
-
-  Promise.resolve()
-    .then(() => enqueueSanteHl7ForBooking(Number(bookingId)))
-    .catch((error) => {
-      console.warn(
-        `[Sante HL7] Failed to enqueue delivery job for booking ${bookingId}.`,
-        error
-      );
-    });
+  scheduledBookingWorklistSyncQueue.push({ bookingId, replacement: false });
+  void drainScheduledBookingWorklistSyncs();
 }
 
 export function scheduleBookingWorklistDetailReplacement(bookingId: UserId): void {
-  Promise.resolve()
-    .then(() => syncBookingWorklistSources(bookingId))
-    .catch((error) => {
-      console.warn(
-        `[DICOM Worklist] Failed to sync booking ${bookingId}. Will retry on next mutation.`,
-        error
-      );
-    });
-
-  Promise.resolve()
-    .then(() => enqueueOrthancSyncForBooking(Number(bookingId)))
-    .catch((error) => {
-      console.warn(
-        `[Orthanc MWL] Failed to enqueue sync job for booking ${bookingId}.`,
-        error
-      );
-    });
-
-  Promise.resolve()
-    .then(() => enqueueSanteHl7ReplacementForBooking(Number(bookingId)))
-    .catch((error) => {
-      console.warn(
-        `[Sante HL7] Failed to enqueue replacement delivery job for booking ${bookingId}.`,
-        error
-      );
-    });
+  scheduledBookingWorklistSyncQueue.push({ bookingId, replacement: true });
+  void drainScheduledBookingWorklistSyncs();
 }
 
 export function scheduleV2WorklistRebuild(): void {

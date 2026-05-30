@@ -50,6 +50,7 @@ values
   ('queue_and_arrival', 'barcode_check_in', '{"value":"enabled"}'::jsonb),
   ('queue_and_arrival', 'walk_in_queue', '{"value":"enabled"}'::jsonb),
   ('queue_and_arrival', 'no_show_review_time', '{"value":"17:00"}'::jsonb),
+  ('queue_and_arrival', 'auto_no_show_enabled', '{"value":"disabled"}'::jsonb),
   ('queue_and_arrival', 'no_show_confirmation_required', '{"value":"enabled"}'::jsonb),
   ('queue_and_arrival', 'auto_no_show_cleanup_days', '{"value":"1"}'::jsonb),
 

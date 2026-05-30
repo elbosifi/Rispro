@@ -33,6 +33,7 @@ interface BookingStatusRow {
 export interface QueueNoShowSettings {
   reviewTime: string;
   reviewActive: boolean;
+  autoNoShowEnabled: boolean;
   manualConfirmationRequired: boolean;
   cleanupDays: number;
 }
@@ -92,15 +93,20 @@ export async function getQueueNoShowSettings(): Promise<QueueNoShowSettings> {
       select setting_key, setting_value
       from system_settings
       where category = 'queue_and_arrival'
-        and setting_key in ('no_show_review_time', 'no_show_confirmation_required', 'auto_no_show_cleanup_days')
+        and setting_key in ('no_show_review_time', 'auto_no_show_enabled', 'no_show_confirmation_required', 'auto_no_show_cleanup_days')
     `
   );
 
   const reviewTime = String(settingValue(rows, "no_show_review_time", DEFAULT_NO_SHOW_REVIEW_TIME) || DEFAULT_NO_SHOW_REVIEW_TIME);
   const manualConfirmationRequired = parseEnabled(settingValue(rows, "no_show_confirmation_required", "enabled"));
+  const autoNoShowEnabled = parseEnabled(
+    settingValue(rows, "auto_no_show_enabled", manualConfirmationRequired ? "disabled" : "enabled"),
+    false
+  );
   return {
     reviewTime,
     reviewActive: getTripoliMinutesSinceMidnight() >= parseTimeToMinutes(reviewTime),
+    autoNoShowEnabled,
     manualConfirmationRequired,
     cleanupDays: parseCleanupDays(settingValue(rows, "auto_no_show_cleanup_days", DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS)),
   };
@@ -191,7 +197,7 @@ export async function updateBookingStatusManual(
 
 export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings, today: string): Promise<{ autoMarkedIds: number[] }> {
   const autoMarkedIds: number[] = [];
-  if (!settings.reviewActive || settings.manualConfirmationRequired) {
+  if (!settings.reviewActive || !settings.autoNoShowEnabled) {
     return { autoMarkedIds };
   }
 

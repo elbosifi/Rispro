@@ -26,6 +26,12 @@ describe("status booking service source guards", () => {
     assert.doesNotMatch(source, /status in \('scheduled', 'arrived', 'waiting'\)/);
   });
 
+  it("auto no-show is controlled by an explicit auto setting", () => {
+    assert.match(source, /auto_no_show_enabled/);
+    assert.match(source, /autoNoShowEnabled/);
+    assert.match(source, /!settings\.autoNoShowEnabled/);
+  });
+
   it("bulk cleanup only targets older scheduled bookings", () => {
     assert.match(source, /booking_date < \(\$1::date - \(\$2::int \* interval '1 day'\)\)/);
     assert.match(source, /old_no_show_bulk_confirm/);

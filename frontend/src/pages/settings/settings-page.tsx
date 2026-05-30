@@ -2101,6 +2101,10 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "disabled", label: "غير مفعل" }
   ]},
   no_show_review_time: { label: "وقت مراجعة الغياب", type: "time" },
+  auto_no_show_enabled: { label: "Automatic no-show after review time / تحويل الغياب تلقائياً بعد وقت المراجعة", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled / مفعل" },
+    { value: "disabled", label: "Disabled / غير مفعل" }
+  ]},
   no_show_confirmation_required: { label: "Require manual no-show confirmation / اشتراط تأكيد الغياب يدوياً", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }

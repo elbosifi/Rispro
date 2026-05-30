@@ -719,13 +719,14 @@ router.get(
       queue_date: today,
       review_time: noShowSettings.reviewTime,
       review_active: noShowSettings.reviewActive,
+      auto_no_show_enabled: noShowSettings.autoNoShowEnabled,
       no_show_confirmation_required: noShowSettings.manualConfirmationRequired,
       auto_no_show_count: autoNoShowResult.autoMarkedIds.length,
       auto_no_show_cleanup_days: noShowSettings.cleanupDays,
       summary: summaryRow,
       queue_entries: entries.rows,
       no_show_candidates:
-        noShowSettings.reviewActive && noShowSettings.manualConfirmationRequired
+        noShowSettings.reviewActive && noShowSettings.manualConfirmationRequired && !noShowSettings.autoNoShowEnabled
           ? entries.rows
               .filter((r) => r.appointment_status === "scheduled")
               .map((r) => ({

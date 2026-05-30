@@ -963,6 +963,7 @@ export interface QueueSnapshot {
   queueDate: string;
   reviewTime: string;
   reviewActive: boolean;
+  autoNoShowEnabled?: boolean;
   noShowConfirmationRequired?: boolean;
   autoNoShowCount?: number;
   autoNoShowCleanupDays?: number;
