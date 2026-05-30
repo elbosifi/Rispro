@@ -124,11 +124,11 @@ describe("LivePolicyPanel", () => {
           specialReasonCodes: [],
         }}
         displayLookups={{
-          modalities: [{ id: "7" as unknown as number, name: "MRI", nameAr: null, nameEn: "MRI", code: "MR", isActive: true }],
+          modalities: [{ id: "7" as unknown as number, name: "MRI", nameAr: "MRI AR", nameEn: "MRI", code: "MR", isActive: true }],
           examTypes: [
-            { id: "11" as unknown as number, name: "Brain MRI", nameAr: null, nameEn: "Brain MRI", code: "BMRI", modalityId: 7, isActive: true },
-            { id: "12" as unknown as number, name: "Spine MRI", nameAr: null, nameEn: "Spine MRI", code: "SMRI", modalityId: 7, isActive: true },
-            { id: "13" as unknown as number, name: "Special MRI", nameAr: null, nameEn: "Special MRI", code: "SPMRI", modalityId: 7, isActive: true },
+            { id: "11" as unknown as number, name: "Brain MRI", nameAr: "Brain MRI AR", nameEn: "Brain MRI", code: "BMRI", modalityId: 7, isActive: true },
+            { id: "12" as unknown as number, name: "Spine MRI", nameAr: "Spine MRI AR", nameEn: "Spine MRI", code: "SMRI", modalityId: 7, isActive: true },
+            { id: "13" as unknown as number, name: "Special MRI", nameAr: "Special MRI AR", nameEn: "Special MRI", code: "SPMRI", modalityId: 7, isActive: true },
           ],
           users: [{ id: "20" as unknown as number, username: "supervisor", fullName: "Supervisor User", role: "supervisor", isActive: true }],
         }}
