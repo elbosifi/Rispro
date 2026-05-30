@@ -118,11 +118,13 @@ function validateCategoryDailyLimits(
 export function PolicyDraftEditor({
   snapshot,
   displayLookups,
+  externalValidationErrors = [],
   onSave,
   isSaving,
 }: {
   snapshot: PolicySnapshotDto | null;
   displayLookups?: PolicyDisplayLookupsDto;
+  externalValidationErrors?: string[];
   onSave: (nextSnapshot: PolicySnapshotDto, changeNote: string | null) => Promise<void>;
   isSaving: boolean;
 }) {
@@ -246,6 +248,10 @@ export function PolicyDraftEditor({
 
   async function handleSave() {
     if (!hasDraftSnapshot) return;
+    if (externalValidationErrors.length > 0) {
+      setSaveValidationError(externalValidationErrors[0] ?? "Resolve validation errors before saving.");
+      return;
+    }
     const categoryLimitsError = validateCategoryDailyLimits(draft.categoryDailyLimits, modalityOptions);
     if (categoryLimitsError) {
       setSaveValidationError(categoryLimitsError);
@@ -265,6 +271,9 @@ export function PolicyDraftEditor({
   }
 
   function applyRawJson() {
+    if (!window.confirm("Apply raw JSON changes to the draft form? This can overwrite structured edits.")) {
+      return;
+    }
     try {
       const parsed = JSON.parse(advancedJsonValue) as PolicySnapshotDto;
       setDraft(parsed);
