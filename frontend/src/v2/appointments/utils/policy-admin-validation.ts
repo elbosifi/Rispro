@@ -24,15 +24,15 @@ function isValidDateRange(startDate: string | null, endDate: string | null): boo
 }
 
 function isValidWeekday(weekday: number | null): boolean {
-  return Number.isInteger(weekday) && weekday >= 0 && weekday <= 6;
+  return typeof weekday === "number" && Number.isInteger(weekday) && weekday >= 0 && weekday <= 6;
 }
 
 function isValidMonth(month: number | null): boolean {
-  return Number.isInteger(month) && month >= 1 && month <= 12;
+  return typeof month === "number" && Number.isInteger(month) && month >= 1 && month <= 12;
 }
 
 function isValidDay(day: number | null): boolean {
-  return Number.isInteger(day) && day >= 1 && day <= 31;
+  return typeof day === "number" && Number.isInteger(day) && day >= 1 && day <= 31;
 }
 
 function examTypeLabel(id: number, lookups: PolicyDisplayLookupsDto): string {
