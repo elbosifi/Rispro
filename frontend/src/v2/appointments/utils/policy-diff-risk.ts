@@ -36,6 +36,20 @@ function hasId(ids: number[], value: number): boolean {
   return ids.map(Number).includes(Number(value));
 }
 
+function addRemovedActiveRuleWarnings<T extends { id: number; isActive: boolean }>(
+  highRiskWarnings: PolicyDiffRiskWarning[],
+  section: string,
+  publishedRows: T[] | undefined,
+  draftRows: T[] | undefined
+): void {
+  const draftById = byId(draftRows);
+  for (const row of publishedRows ?? []) {
+    if (row.isActive && !draftById.has(Number(row.id))) {
+      highRiskWarnings.push({ section, ruleId: row.id, message: "Active rule removed." });
+    }
+  }
+}
+
 function collectExamTypeIds(snapshot: PolicySnapshotDto): number[] {
   return [
     ...snapshot.examTypeRules.flatMap((row) => row.examTypeIds.map(Number)),
@@ -75,18 +89,9 @@ export function getPolicyDiffRiskSummary(
   pushAffected(affected, "examTypeSpecialQuotas", publishedSnapshot.examTypeSpecialQuotas, draftSnapshot.examTypeSpecialQuotas);
   pushAffected(affected, "specialReasonCodes", publishedSnapshot.specialReasonCodes, draftSnapshot.specialReasonCodes);
 
-  for (const [section, publishedRows, draftRows] of [
-    ["Exam restriction rules", publishedSnapshot.examTypeRules, draftSnapshot.examTypeRules],
-    ["Exam mix quota groups", publishedSnapshot.examMixQuotaRules ?? [], draftSnapshot.examMixQuotaRules ?? []],
-    ["Blocked dates", publishedSnapshot.modalityBlockedRules, draftSnapshot.modalityBlockedRules],
-  ] as const) {
-    const draftById = byId(draftRows);
-    for (const row of publishedRows) {
-      if (row.isActive && !draftById.has(Number(row.id))) {
-        highRiskWarnings.push({ section, ruleId: row.id, message: "Active rule removed." });
-      }
-    }
-  }
+  addRemovedActiveRuleWarnings(highRiskWarnings, "Exam restriction rules", publishedSnapshot.examTypeRules, draftSnapshot.examTypeRules);
+  addRemovedActiveRuleWarnings(highRiskWarnings, "Exam mix quota groups", publishedSnapshot.examMixQuotaRules ?? [], draftSnapshot.examMixQuotaRules ?? []);
+  addRemovedActiveRuleWarnings(highRiskWarnings, "Blocked dates", publishedSnapshot.modalityBlockedRules, draftSnapshot.modalityBlockedRules);
 
   for (const publishedRow of publishedSnapshot.examTypeRules) {
     const draftRow = byId(draftSnapshot.examTypeRules).get(Number(publishedRow.id));
