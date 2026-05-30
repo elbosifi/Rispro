@@ -12,6 +12,12 @@ export function PolicyPreviewPanel({
 }) {
   const affectedSections = riskSummary?.affectedSections ?? [];
   const highRiskWarnings = riskSummary?.highRiskWarnings ?? [];
+  const warningGroups = highRiskWarnings.reduce<Array<{ section: string; warnings: typeof highRiskWarnings }>>((groups, warning) => {
+    const existing = groups.find((group) => group.section === warning.section);
+    if (existing) existing.warnings.push(warning);
+    else groups.push({ section: warning.section, warnings: [warning] });
+    return groups;
+  }, []);
 
   return (
     <div
@@ -44,14 +50,19 @@ export function PolicyPreviewPanel({
             <strong>High-risk changes:</strong>{" "}
             {highRiskWarnings.length > 0 ? `${highRiskWarnings.length} warning${highRiskWarnings.length === 1 ? "" : "s"}` : "none"}
           </div>
-          {highRiskWarnings.length > 0 && (
-            <ul style={{ margin: 0, paddingInlineStart: 18, color: "var(--color-warning, #92400e)" }}>
-              {highRiskWarnings.slice(0, 6).map((warning, index) => (
-                <li key={`${warning.section}-${warning.ruleId ?? "none"}-${index}`}>
-                  <strong>{warning.section}:</strong> {warning.message}
-                </li>
+          {warningGroups.length > 0 && (
+            <div style={{ display: "grid", gap: 8, color: "var(--color-warning, #92400e)" }}>
+              {warningGroups.map((group) => (
+                <div key={group.section}>
+                  <strong>{group.section} ({group.warnings.length})</strong>
+                  <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
+                    {group.warnings.slice(0, 4).map((warning, index) => (
+                      <li key={`${warning.ruleId ?? "none"}-${index}`}>{warning.message}</li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       )}

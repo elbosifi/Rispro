@@ -91,35 +91,121 @@ const LOAD_ALL_RULES_FOR_VERSION_SQL = `
   select
     'category_daily_limit' as rule_type,
     cdl.id, cdl.modality_id as "modalityId", cdl.case_category as "caseCategory",
-    cdl.daily_limit as "dailyLimit", cdl.is_active as "isActive"
+    cdl.daily_limit as "dailyLimit", cdl.is_active as "isActive",
+    concat_ws('|', 'category_daily_limit', cdl.modality_id, cdl.case_category) as "identityKey",
+    jsonb_build_object(
+      'ruleType', 'category_daily_limit',
+      'modalityId', cdl.modality_id,
+      'caseCategory', cdl.case_category,
+      'dailyLimit', cdl.daily_limit,
+      'isActive', cdl.is_active
+    )::text as "contentKey"
   from appointments_v2.category_daily_limits cdl
   where cdl.policy_version_id = $1
   union all
   select
     'modality_blocked' as rule_type,
     mbr.id, mbr.modality_id as "modalityId", null as "caseCategory",
-    null as "dailyLimit", mbr.is_active as "isActive"
+    null as "dailyLimit", mbr.is_active as "isActive",
+    concat_ws('|', 'modality_blocked', mbr.modality_id, mbr.rule_type, coalesce(mbr.specific_date::text, ''), coalesce(mbr.start_date::text, ''), coalesce(mbr.end_date::text, ''), coalesce(mbr.recur_start_month::text, ''), coalesce(mbr.recur_start_day::text, ''), coalesce(mbr.recur_end_month::text, ''), coalesce(mbr.recur_end_day::text, '')) as "identityKey",
+    jsonb_build_object(
+      'ruleType', 'modality_blocked',
+      'modalityId', mbr.modality_id,
+      'blockRuleType', mbr.rule_type,
+      'specificDate', mbr.specific_date::text,
+      'startDate', mbr.start_date::text,
+      'endDate', mbr.end_date::text,
+      'recurStartMonth', mbr.recur_start_month,
+      'recurStartDay', mbr.recur_start_day,
+      'recurEndMonth', mbr.recur_end_month,
+      'recurEndDay', mbr.recur_end_day,
+      'isOverridable', mbr.is_overridable,
+      'isActive', mbr.is_active,
+      'title', coalesce(mbr.title, ''),
+      'notes', coalesce(mbr.notes, '')
+    )::text as "contentKey"
   from appointments_v2.modality_blocked_rules mbr
   where mbr.policy_version_id = $1
   union all
   select
     'exam_type_rule' as rule_type,
     etr.id, etr.modality_id as "modalityId", null as "caseCategory",
-    null as "dailyLimit", etr.is_active as "isActive"
+    null as "dailyLimit", etr.is_active as "isActive",
+    case
+      when nullif(trim(coalesce(etr.title, '')), '') is not null
+        then concat_ws('|', 'exam_type_rule', etr.modality_id, 'title', lower(trim(etr.title)))
+      else concat_ws('|', 'exam_type_rule', etr.modality_id, etr.rule_type, coalesce(etr.specific_date::text, ''), coalesce(etr.start_date::text, ''), coalesce(etr.end_date::text, ''), coalesce(etr.weekday::text, ''), coalesce(etr.alternate_weeks::text, ''), coalesce(etr.recurrence_anchor_date::text, ''))
+    end as "identityKey",
+    jsonb_build_object(
+      'ruleType', 'exam_type_rule',
+      'modalityId', etr.modality_id,
+      'examRuleType', etr.rule_type,
+      'effectMode', etr.effect_mode,
+      'specificDate', etr.specific_date::text,
+      'startDate', etr.start_date::text,
+      'endDate', etr.end_date::text,
+      'weekday', etr.weekday,
+      'alternateWeeks', etr.alternate_weeks,
+      'recurrenceAnchorDate', etr.recurrence_anchor_date::text,
+      'title', coalesce(etr.title, ''),
+      'notes', coalesce(etr.notes, ''),
+      'isActive', etr.is_active,
+      'examTypeIds', coalesce((
+        select jsonb_agg(etri.exam_type_id order by etri.exam_type_id)
+        from appointments_v2.exam_type_rule_items etri
+        where etri.rule_id = etr.id
+      ), '[]'::jsonb)
+    )::text as "contentKey"
   from appointments_v2.exam_type_rules etr
   where etr.policy_version_id = $1
   union all
   select
     'special_quota' as rule_type,
     etsq.id, null as "modalityId", null as "caseCategory",
-    etsq.daily_extra_slots as "dailyLimit", etsq.is_active as "isActive"
+    etsq.daily_extra_slots as "dailyLimit", etsq.is_active as "isActive",
+    concat_ws('|', 'special_quota', etsq.exam_type_id) as "identityKey",
+    jsonb_build_object(
+      'ruleType', 'special_quota',
+      'examTypeId', etsq.exam_type_id,
+      'dailyExtraSlots', etsq.daily_extra_slots,
+      'isActive', etsq.is_active,
+      'allowedUserIds', coalesce((
+        select jsonb_agg(etsqu.user_id order by etsqu.user_id)
+        from appointments_v2.exam_type_special_quota_users etsqu
+        where etsqu.quota_id = etsq.id
+      ), '[]'::jsonb)
+    )::text as "contentKey"
   from appointments_v2.exam_type_special_quotas etsq
   where etsq.policy_version_id = $1
   union all
   select
     'exam_mix_quota' as rule_type,
     emqr.id, emqr.modality_id as "modalityId", null as "caseCategory",
-    emqr.daily_limit as "dailyLimit", emqr.is_active as "isActive"
+    emqr.daily_limit as "dailyLimit", emqr.is_active as "isActive",
+    case
+      when nullif(trim(coalesce(emqr.title, '')), '') is not null
+        then concat_ws('|', 'exam_mix_quota', emqr.modality_id, 'title', lower(trim(emqr.title)))
+      else concat_ws('|', 'exam_mix_quota', emqr.modality_id, emqr.rule_type, coalesce(emqr.specific_date::text, ''), coalesce(emqr.start_date::text, ''), coalesce(emqr.end_date::text, ''), coalesce(emqr.weekday::text, ''), coalesce(emqr.alternate_weeks::text, ''), coalesce(emqr.recurrence_anchor_date::text, ''))
+    end as "identityKey",
+    jsonb_build_object(
+      'ruleType', 'exam_mix_quota',
+      'modalityId', emqr.modality_id,
+      'mixRuleType', emqr.rule_type,
+      'specificDate', emqr.specific_date::text,
+      'startDate', emqr.start_date::text,
+      'endDate', emqr.end_date::text,
+      'weekday', emqr.weekday,
+      'alternateWeeks', emqr.alternate_weeks,
+      'recurrenceAnchorDate', emqr.recurrence_anchor_date::text,
+      'title', coalesce(emqr.title, ''),
+      'dailyLimit', emqr.daily_limit,
+      'isActive', emqr.is_active,
+      'examTypeIds', coalesce((
+        select jsonb_agg(emqri.exam_type_id order by emqri.exam_type_id)
+        from appointments_v2.exam_mix_quota_rule_items emqri
+        where emqri.rule_id = emqr.id
+      ), '[]'::jsonb)
+    )::text as "contentKey"
   from appointments_v2.exam_mix_quota_rules emqr
   where emqr.policy_version_id = $1
 `;
@@ -252,6 +338,8 @@ export interface PolicyRuleRow {
   caseCategory: string | null;
   dailyLimit: number | null;
   isActive: boolean;
+  identityKey?: string | null;
+  contentKey?: string | null;
 }
 
 export async function loadAllRulesForVersion(

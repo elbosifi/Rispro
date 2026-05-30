@@ -14,6 +14,34 @@ function emptySnapshot(): PolicySnapshotDto {
 }
 
 describe("getPolicyDiffRiskSummary", () => {
+  it("does not report high-risk removals for cloned snapshots with different DB ids", () => {
+    const published = emptySnapshot();
+    published.examTypeRules.push({
+      id: 1,
+      modalityId: 7,
+      ruleType: "specific_date",
+      effectMode: "restriction_overridable",
+      specificDate: "2027-01-01",
+      startDate: null,
+      endDate: null,
+      weekday: null,
+      alternateWeeks: false,
+      recurrenceAnchorDate: null,
+      examTypeIds: [11],
+      title: "Whole Spine",
+      notes: null,
+      isActive: true,
+    });
+
+    const draft = emptySnapshot();
+    draft.examTypeRules.push({ ...published.examTypeRules[0]!, id: 99 });
+
+    const result = getPolicyDiffRiskSummary(published, draft);
+
+    expect(result.highRiskWarnings).toEqual([]);
+    expect(result.affectedSections).toEqual([]);
+  });
+
   it("reports exam selections cleared and hard restriction changes", () => {
     const published = emptySnapshot();
     published.examTypeRules.push({
@@ -28,7 +56,7 @@ describe("getPolicyDiffRiskSummary", () => {
       alternateWeeks: false,
       recurrenceAnchorDate: null,
       examTypeIds: [11],
-      title: null,
+      title: "Whole Spine",
       notes: null,
       isActive: true,
     });
@@ -39,8 +67,8 @@ describe("getPolicyDiffRiskSummary", () => {
     const result = getPolicyDiffRiskSummary(published, draft);
 
     expect(result.affectedSections).toContain("Exam restriction rules");
-    expect(result.highRiskWarnings.some((warning) => warning.message === "Exam selection cleared.")).toBe(true);
-    expect(result.highRiskWarnings.some((warning) => warning.message.includes("hard restriction"))).toBe(true);
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("Whole Spine") && warning.message.includes("1 selected exam"))).toBe(true);
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("Supervisor-overridable restriction -> Hard restriction"))).toBe(true);
   });
 
   it("reports reduced category, exam mix, and special quota limits", () => {
@@ -70,8 +98,58 @@ describe("getPolicyDiffRiskSummary", () => {
 
     const result = getPolicyDiffRiskSummary(published, draft);
 
-    expect(result.highRiskWarnings.some((warning) => warning.message === "Category daily limit reduced.")).toBe(true);
-    expect(result.highRiskWarnings.some((warning) => warning.message === "Exam mix quota daily limit reduced.")).toBe(true);
-    expect(result.highRiskWarnings.some((warning) => warning.message === "Special quota extra slots reduced.")).toBe(true);
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("daily limit 10 -> 8"))).toBe(true);
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("daily limit 5 -> 4"))).toBe(true);
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("extra slots 3 -> 1"))).toBe(true);
+  });
+
+  it("reports removed active exam restriction and exam mix rules with names", () => {
+    const published = emptySnapshot();
+    published.examTypeRules.push({
+      id: 1,
+      modalityId: 7,
+      ruleType: "weekly_recurrence",
+      effectMode: "hard_restriction",
+      specificDate: null,
+      startDate: null,
+      endDate: null,
+      weekday: 1,
+      alternateWeeks: false,
+      recurrenceAnchorDate: null,
+      examTypeIds: [11],
+      title: "Whole Spine",
+      notes: null,
+      isActive: true,
+    });
+    published.examMixQuotaRules = [{
+      id: 2,
+      modalityId: 8,
+      title: "Breast ultrasound",
+      ruleType: "date_range",
+      specificDate: null,
+      startDate: "2026-04-01",
+      endDate: "2028-01-01",
+      weekday: null,
+      alternateWeeks: false,
+      recurrenceAnchorDate: null,
+      dailyLimit: 10,
+      examTypeIds: [12],
+      isActive: true,
+    }];
+
+    const result = getPolicyDiffRiskSummary(published, emptySnapshot(), {
+      modalities: [
+        { id: 7, name: "MRI", nameAr: "MRI AR", nameEn: "MRI", code: "MR", isActive: true },
+        { id: 8, name: "Ultrasound", nameAr: "US AR", nameEn: "Ultrasound", code: "US", isActive: true },
+      ],
+      examTypes: [
+        { id: 11, name: "Spine", nameAr: null, nameEn: "Spine", code: "SP", modalityId: 7, isActive: true },
+        { id: 12, name: "Breast US", nameAr: null, nameEn: "Breast US", code: "BUS", modalityId: 8, isActive: true },
+      ],
+      users: [],
+    });
+
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("MRI (MR)") && warning.message.includes("Whole Spine") && warning.message.includes("Weekly recurrence Monday"))).toBe(true);
+    expect(result.highRiskWarnings.some((warning) => warning.message.includes("Ultrasound (US)") && warning.message.includes("Breast ultrasound") && warning.message.includes("daily limit 10"))).toBe(true);
   });
 });

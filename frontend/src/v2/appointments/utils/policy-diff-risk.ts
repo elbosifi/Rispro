@@ -1,4 +1,12 @@
-import type { PolicyDisplayLookupsDto, PolicySnapshotDto } from "../types";
+import type {
+  PolicyCategoryDailyLimitDto,
+  PolicyDisplayLookupsDto,
+  PolicyExamMixQuotaRuleDto,
+  PolicyExamTypeRuleDto,
+  PolicyExamTypeSpecialQuotaDto,
+  PolicyModalityBlockedRuleDto,
+  PolicySnapshotDto,
+} from "../types";
 
 export interface PolicyDiffRiskWarning {
   section: string;
@@ -11,66 +19,157 @@ export interface PolicyDiffRiskSummary {
   highRiskWarnings: PolicyDiffRiskWarning[];
 }
 
-const sectionLabels = {
-  categoryDailyLimits: "Daily category limits",
-  modalityBlockedRules: "Blocked dates",
-  examTypeRules: "Exam restriction rules",
-  examMixQuotaRules: "Exam mix quota groups",
-  examTypeSpecialQuotas: "Special quotas",
-  specialReasonCodes: "Special reason codes",
-} as const;
-
-function byId<T extends { id: number }>(rows: T[] | undefined): Map<number, T> {
-  return new Map((rows ?? []).map((row) => [Number(row.id), row]));
+interface DiffRows<T extends { id: number }> {
+  added: T[];
+  removed: T[];
+  matched: Array<{ published: T; draft: T }>;
+  ambiguousKeys: string[];
 }
 
-function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
+const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function sortedNumbers(values: number[] | undefined): number[] {
+  return [...(values ?? [])].map(Number).filter((value) => Number.isInteger(value)).sort((a, b) => a - b);
 }
 
-function pushAffected(affected: Set<string>, section: keyof typeof sectionLabels, published: unknown, draft: unknown): void {
-  if (!sameJson(published, draft)) affected.add(sectionLabels[section]);
+function normalized(value: unknown): string {
+  return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
 }
 
-function hasId(ids: number[], value: number): boolean {
-  return ids.map(Number).includes(Number(value));
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
 }
 
-function addRemovedActiveRuleWarnings<T extends { id: number; isActive: boolean }>(
-  highRiskWarnings: PolicyDiffRiskWarning[],
+function modalityLabel(modalityId: number, lookups?: PolicyDisplayLookupsDto): string {
+  const modality = lookups?.modalities.find((row) => Number(row.id) === Number(modalityId));
+  if (!modality) return `Modality ${modalityId}`;
+  return modality.code ? `${modality.nameEn || modality.name} (${modality.code})` : modality.nameEn || modality.name;
+}
+
+function examTypeLabel(examTypeId: number, lookups?: PolicyDisplayLookupsDto): string {
+  const examType = lookups?.examTypes.find((row) => Number(row.id) === Number(examTypeId));
+  if (!examType) return `Exam type ${examTypeId}`;
+  return examType.code ? `${examType.nameEn || examType.name} (${examType.code})` : examType.nameEn || examType.name;
+}
+
+function ruleTypeLabel(ruleType: string): string {
+  if (ruleType === "date_range") return "Date range";
+  if (ruleType === "weekly_recurrence") return "Weekly recurrence";
+  if (ruleType === "yearly_recurrence") return "Yearly recurrence";
+  return "Specific date";
+}
+
+function effectLabel(effectMode: string): string {
+  return effectMode === "hard_restriction" ? "Hard restriction" : "Supervisor-overridable restriction";
+}
+
+function scheduleSummary(row: {
+  ruleType: string;
+  specificDate?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  weekday?: number | null;
+  alternateWeeks?: boolean;
+  recurrenceAnchorDate?: string | null;
+  recurStartMonth?: number | null;
+  recurStartDay?: number | null;
+  recurEndMonth?: number | null;
+  recurEndDay?: number | null;
+}): string {
+  if (row.ruleType === "date_range") return `Date range ${row.startDate ?? "-"} to ${row.endDate ?? "-"}`;
+  if (row.ruleType === "weekly_recurrence") {
+    const weekday = row.weekday == null ? "weekday not set" : weekdays[row.weekday] ?? "weekday not set";
+    return `Weekly recurrence ${weekday}${row.alternateWeeks ? " alternate weeks" : ""}`;
+  }
+  if (row.ruleType === "yearly_recurrence") {
+    return `Yearly recurrence ${row.recurStartMonth ?? "-"}/${row.recurStartDay ?? "-"} to ${row.recurEndMonth ?? "-"}/${row.recurEndDay ?? "-"}`;
+  }
+  return `Specific date ${row.specificDate ?? "-"}`;
+}
+
+function examSelectionSummary(examTypeIds: number[], lookups?: PolicyDisplayLookupsDto): string {
+  const ids = sortedNumbers(examTypeIds);
+  if (ids.length === 0) return "0 selected exams";
+  const names = ids.slice(0, 3).map((id) => examTypeLabel(id, lookups)).join(", ");
+  const suffix = ids.length > 3 ? `, +${ids.length - 3} more` : "";
+  return `${ids.length} selected exam${ids.length === 1 ? "" : "s"} (${names}${suffix})`;
+}
+
+function examRuleIdentity(row: PolicyExamTypeRuleDto, lookups?: PolicyDisplayLookupsDto): string {
+  const title = row.title?.trim() || `Exam restriction rule #${row.id}`;
+  return `${modalityLabel(row.modalityId, lookups)} - ${title} - ${ruleTypeLabel(row.ruleType)} - ${scheduleSummary(row)}`;
+}
+
+function examMixIdentity(row: PolicyExamMixQuotaRuleDto, lookups?: PolicyDisplayLookupsDto): string {
+  const title = row.title?.trim() || `Exam mix group #${row.id}`;
+  return `${modalityLabel(row.modalityId, lookups)} - ${title} - ${ruleTypeLabel(row.ruleType)} - ${scheduleSummary(row)}`;
+}
+
+function blockedIdentity(row: PolicyModalityBlockedRuleDto, lookups?: PolicyDisplayLookupsDto): string {
+  const title = row.title?.trim() || `Blocked date rule #${row.id}`;
+  return `${modalityLabel(row.modalityId, lookups)} - ${title} - ${ruleTypeLabel(row.ruleType)} - ${scheduleSummary(row)}`;
+}
+
+function exactFingerprint(section: string, row: unknown): string {
+  const value = row as Record<string, unknown>;
+  const withoutId = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "id"));
+  if (Array.isArray(withoutId.examTypeIds)) withoutId.examTypeIds = sortedNumbers(withoutId.examTypeIds as number[]);
+  if (Array.isArray(withoutId.allowedUserIds)) withoutId.allowedUserIds = sortedNumbers(withoutId.allowedUserIds as number[]);
+  return `${section}:${normalized(withoutId)}`;
+}
+
+function diffRows<T extends { id: number }>(
+  publishedRows: T[],
+  draftRows: T[],
   section: string,
-  publishedRows: T[] | undefined,
-  draftRows: T[] | undefined
-): void {
-  const draftById = byId(draftRows);
-  for (const row of publishedRows ?? []) {
-    if (row.isActive && !draftById.has(Number(row.id))) {
-      highRiskWarnings.push({ section, ruleId: row.id, message: "Active rule removed." });
+  identityKey: (row: T) => string
+): DiffRows<T> {
+  const unmatchedPublished = [...publishedRows];
+  const unmatchedDraft = [...draftRows];
+  const matched: Array<{ published: T; draft: T }> = [];
+
+  for (let draftIndex = unmatchedDraft.length - 1; draftIndex >= 0; draftIndex--) {
+    const fingerprint = exactFingerprint(section, unmatchedDraft[draftIndex]);
+    const publishedIndex = unmatchedPublished.findIndex((row) => exactFingerprint(section, row) === fingerprint);
+    if (publishedIndex >= 0) {
+      unmatchedDraft.splice(draftIndex, 1);
+      unmatchedPublished.splice(publishedIndex, 1);
     }
   }
+
+  const draftKeyCounts = countKeys(unmatchedDraft, identityKey);
+  const publishedKeyCounts = countKeys(unmatchedPublished, identityKey);
+  const ambiguousKeys: string[] = [];
+
+  for (let draftIndex = unmatchedDraft.length - 1; draftIndex >= 0; draftIndex--) {
+    const draft = unmatchedDraft[draftIndex];
+    const key = identityKey(draft);
+    if (!key) continue;
+    const draftCount = draftKeyCounts.get(key) ?? 0;
+    const publishedCount = publishedKeyCounts.get(key) ?? 0;
+    if (draftCount !== 1 || publishedCount !== 1) {
+      if (draftCount > 0 && publishedCount > 0) ambiguousKeys.push(key);
+      continue;
+    }
+    const publishedIndex = unmatchedPublished.findIndex((row) => identityKey(row) === key);
+    if (publishedIndex >= 0) {
+      matched.push({ published: unmatchedPublished[publishedIndex], draft });
+      unmatchedDraft.splice(draftIndex, 1);
+      unmatchedPublished.splice(publishedIndex, 1);
+    }
+  }
+
+  return { added: unmatchedDraft, removed: unmatchedPublished, matched, ambiguousKeys: [...new Set(ambiguousKeys)] };
 }
 
-function collectExamTypeIds(snapshot: PolicySnapshotDto): number[] {
-  return [
-    ...snapshot.examTypeRules.flatMap((row) => row.examTypeIds.map(Number)),
-    ...(snapshot.examMixQuotaRules ?? []).flatMap((row) => row.examTypeIds.map(Number)),
-    ...snapshot.examTypeSpecialQuotas.map((row) => Number(row.examTypeId)),
-  ].filter((id) => Number.isInteger(id) && id > 0);
-}
-
-function collectModalityIds(snapshot: PolicySnapshotDto): number[] {
-  return [
-    ...snapshot.categoryDailyLimits.map((row) => Number(row.modalityId)),
-    ...snapshot.modalityBlockedRules.map((row) => Number(row.modalityId)),
-    ...snapshot.examTypeRules.map((row) => Number(row.modalityId)),
-    ...(snapshot.examMixQuotaRules ?? []).map((row) => Number(row.modalityId)),
-  ].filter((id) => Number.isInteger(id) && id > 0);
-}
-
-function collectUserIds(snapshot: PolicySnapshotDto): number[] {
-  return snapshot.examTypeSpecialQuotas
-    .flatMap((row) => (row.allowedUserIds ?? []).map(Number))
-    .filter((id) => Number.isInteger(id) && id > 0);
+function countKeys<T>(rows: T[], identityKey: (row: T) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = identityKey(row);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export function getPolicyDiffRiskSummary(
@@ -78,92 +177,134 @@ export function getPolicyDiffRiskSummary(
   draftSnapshot: PolicySnapshotDto | undefined,
   displayLookups?: PolicyDisplayLookupsDto
 ): PolicyDiffRiskSummary {
+  if (!publishedSnapshot || !draftSnapshot) return { affectedSections: [], highRiskWarnings: [] };
+
   const affected = new Set<string>();
   const highRiskWarnings: PolicyDiffRiskWarning[] = [];
-  if (!publishedSnapshot || !draftSnapshot) return { affectedSections: [], highRiskWarnings };
 
-  pushAffected(affected, "categoryDailyLimits", publishedSnapshot.categoryDailyLimits, draftSnapshot.categoryDailyLimits);
-  pushAffected(affected, "modalityBlockedRules", publishedSnapshot.modalityBlockedRules, draftSnapshot.modalityBlockedRules);
-  pushAffected(affected, "examTypeRules", publishedSnapshot.examTypeRules, draftSnapshot.examTypeRules);
-  pushAffected(affected, "examMixQuotaRules", publishedSnapshot.examMixQuotaRules ?? [], draftSnapshot.examMixQuotaRules ?? []);
-  pushAffected(affected, "examTypeSpecialQuotas", publishedSnapshot.examTypeSpecialQuotas, draftSnapshot.examTypeSpecialQuotas);
-  pushAffected(affected, "specialReasonCodes", publishedSnapshot.specialReasonCodes, draftSnapshot.specialReasonCodes);
-
-  addRemovedActiveRuleWarnings(highRiskWarnings, "Exam restriction rules", publishedSnapshot.examTypeRules, draftSnapshot.examTypeRules);
-  addRemovedActiveRuleWarnings(highRiskWarnings, "Exam mix quota groups", publishedSnapshot.examMixQuotaRules ?? [], draftSnapshot.examMixQuotaRules ?? []);
-  addRemovedActiveRuleWarnings(highRiskWarnings, "Blocked dates", publishedSnapshot.modalityBlockedRules, draftSnapshot.modalityBlockedRules);
-
-  for (const publishedRow of publishedSnapshot.examTypeRules) {
-    const draftRow = byId(draftSnapshot.examTypeRules).get(Number(publishedRow.id));
-    if (!draftRow) continue;
-    if (publishedRow.examTypeIds.length > 0 && draftRow.examTypeIds.length === 0) {
-      highRiskWarnings.push({ section: "Exam restriction rules", ruleId: draftRow.id, message: "Exam selection cleared." });
-    }
-    if (publishedRow.effectMode === "restriction_overridable" && draftRow.effectMode === "hard_restriction") {
+  const categories = diffRows(
+    publishedSnapshot.categoryDailyLimits,
+    draftSnapshot.categoryDailyLimits,
+    "Daily category limits",
+    (row) => `${row.modalityId}|${row.caseCategory}`
+  );
+  if (categories.added.length || categories.removed.length || categories.matched.length) affected.add("Daily category limits");
+  for (const { published, draft } of categories.matched) {
+    if (Number(draft.dailyLimit) < Number(published.dailyLimit)) {
       highRiskWarnings.push({
-        section: "Exam restriction rules",
-        ruleId: draftRow.id,
-        message: "Restriction changed from supervisor-overridable to hard restriction.",
+        section: "Daily category limits",
+        ruleId: draft.id,
+        message: `Category daily limit reduced: ${modalityLabel(draft.modalityId, displayLookups)} - ${draft.caseCategory} - daily limit ${published.dailyLimit} -> ${draft.dailyLimit}.`,
       });
     }
-    if (Number(publishedRow.modalityId) !== Number(draftRow.modalityId)) {
-      highRiskWarnings.push({ section: "Exam restriction rules", ruleId: draftRow.id, message: "Modality changed." });
+  }
+
+  const blocked = diffRows(
+    publishedSnapshot.modalityBlockedRules,
+    draftSnapshot.modalityBlockedRules,
+    "Blocked dates",
+    (row) => `${row.modalityId}|${row.ruleType}|${row.specificDate ?? ""}|${row.startDate ?? ""}|${row.endDate ?? ""}|${row.recurStartMonth ?? ""}|${row.recurStartDay ?? ""}|${row.recurEndMonth ?? ""}|${row.recurEndDay ?? ""}`
+  );
+  if (blocked.added.length || blocked.removed.length || blocked.matched.length) affected.add("Blocked dates");
+  for (const row of blocked.removed) {
+    if (row.isActive) {
+      highRiskWarnings.push({ section: "Blocked dates", ruleId: row.id, message: `Active blocked date removed: ${blockedIdentity(row, displayLookups)}.` });
     }
   }
 
-  for (const publishedRow of publishedSnapshot.categoryDailyLimits) {
-    const draftRow = byId(draftSnapshot.categoryDailyLimits).get(Number(publishedRow.id));
-    if (draftRow && Number(draftRow.dailyLimit) < Number(publishedRow.dailyLimit)) {
-      highRiskWarnings.push({ section: "Daily category limits", ruleId: draftRow.id, message: "Category daily limit reduced." });
+  const examRules = diffRows(
+    publishedSnapshot.examTypeRules,
+    draftSnapshot.examTypeRules,
+    "Exam restriction rules",
+    (row) => row.title?.trim()
+      ? `${row.modalityId}|title|${normalizeText(row.title)}`
+      : `${row.modalityId}|${row.ruleType}|${row.specificDate ?? ""}|${row.startDate ?? ""}|${row.endDate ?? ""}|${row.weekday ?? ""}|${row.alternateWeeks}|${row.recurrenceAnchorDate ?? ""}`
+  );
+  if (examRules.added.length || examRules.removed.length || examRules.matched.length) affected.add("Exam restriction rules");
+  for (const row of examRules.removed) {
+    if (row.isActive) {
+      highRiskWarnings.push({
+        section: "Exam restriction rules",
+        ruleId: row.id,
+        message: `Exam restriction rule removed: ${examRuleIdentity(row, displayLookups)} - ${effectLabel(row.effectMode)} - ${examSelectionSummary(row.examTypeIds, displayLookups)}.`,
+      });
+    }
+  }
+  for (const { published, draft } of examRules.matched) {
+    if (published.examTypeIds.length > 0 && draft.examTypeIds.length === 0) {
+      highRiskWarnings.push({
+        section: "Exam restriction rules",
+        ruleId: draft.id,
+        message: `Exam selection cleared: ${examRuleIdentity(draft, displayLookups)} - ${examSelectionSummary(published.examTypeIds, displayLookups)} removed.`,
+      });
+    }
+    if (published.effectMode === "restriction_overridable" && draft.effectMode === "hard_restriction") {
+      highRiskWarnings.push({
+        section: "Exam restriction rules",
+        ruleId: draft.id,
+        message: `Exam restriction changed: ${examRuleIdentity(draft, displayLookups)} - ${effectLabel(published.effectMode)} -> ${effectLabel(draft.effectMode)}.`,
+      });
     }
   }
 
-  for (const publishedRow of publishedSnapshot.examMixQuotaRules ?? []) {
-    const draftRow = byId(draftSnapshot.examMixQuotaRules ?? []).get(Number(publishedRow.id));
-    if (!draftRow) continue;
-    if (publishedRow.examTypeIds.length > 0 && draftRow.examTypeIds.length === 0) {
-      highRiskWarnings.push({ section: "Exam mix quota groups", ruleId: draftRow.id, message: "Exam selection cleared." });
+  const mixes = diffRows(
+    publishedSnapshot.examMixQuotaRules ?? [],
+    draftSnapshot.examMixQuotaRules ?? [],
+    "Exam mix quota groups",
+    (row) => row.title?.trim()
+      ? `${row.modalityId}|title|${normalizeText(row.title)}`
+      : `${row.modalityId}|${row.ruleType}|${row.specificDate ?? ""}|${row.startDate ?? ""}|${row.endDate ?? ""}|${row.weekday ?? ""}|${row.alternateWeeks}|${row.recurrenceAnchorDate ?? ""}`
+  );
+  if (mixes.added.length || mixes.removed.length || mixes.matched.length) affected.add("Exam mix quota groups");
+  for (const row of mixes.removed) {
+    if (row.isActive) {
+      highRiskWarnings.push({
+        section: "Exam mix quota groups",
+        ruleId: row.id,
+        message: `Exam mix group removed: ${examMixIdentity(row, displayLookups)} - daily limit ${row.dailyLimit} - ${examSelectionSummary(row.examTypeIds, displayLookups)}.`,
+      });
     }
-    if (Number(draftRow.dailyLimit) < Number(publishedRow.dailyLimit)) {
-      highRiskWarnings.push({ section: "Exam mix quota groups", ruleId: draftRow.id, message: "Exam mix quota daily limit reduced." });
+  }
+  for (const { published, draft } of mixes.matched) {
+    if (published.examTypeIds.length > 0 && draft.examTypeIds.length === 0) {
+      highRiskWarnings.push({
+        section: "Exam mix quota groups",
+        ruleId: draft.id,
+        message: `Exam selection cleared: ${examMixIdentity(draft, displayLookups)} - ${examSelectionSummary(published.examTypeIds, displayLookups)} removed.`,
+      });
     }
-    if (Number(publishedRow.modalityId) !== Number(draftRow.modalityId)) {
-      highRiskWarnings.push({ section: "Exam mix quota groups", ruleId: draftRow.id, message: "Modality changed." });
+    if (Number(draft.dailyLimit) < Number(published.dailyLimit)) {
+      highRiskWarnings.push({
+        section: "Exam mix quota groups",
+        ruleId: draft.id,
+        message: `Exam mix quota reduced: ${examMixIdentity(draft, displayLookups)} - daily limit ${published.dailyLimit} -> ${draft.dailyLimit}.`,
+      });
     }
   }
 
-  for (const publishedRow of publishedSnapshot.examTypeSpecialQuotas) {
-    const draftRow = byId(draftSnapshot.examTypeSpecialQuotas).get(Number(publishedRow.id));
-    if (draftRow && Number(draftRow.dailyExtraSlots) < Number(publishedRow.dailyExtraSlots)) {
-      highRiskWarnings.push({ section: "Special quotas", ruleId: draftRow.id, message: "Special quota extra slots reduced." });
+  const quotas = diffRows(
+    publishedSnapshot.examTypeSpecialQuotas,
+    draftSnapshot.examTypeSpecialQuotas,
+    "Special quotas",
+    (row) => String(row.examTypeId)
+  );
+  if (quotas.added.length || quotas.removed.length || quotas.matched.length) affected.add("Special quotas");
+  for (const { published, draft } of quotas.matched) {
+    if (Number(draft.dailyExtraSlots) < Number(published.dailyExtraSlots)) {
+      highRiskWarnings.push({
+        section: "Special quotas",
+        ruleId: draft.id,
+        message: `Special quota reduced: ${examTypeLabel(draft.examTypeId, displayLookups)} - extra slots ${published.dailyExtraSlots} -> ${draft.dailyExtraSlots}.`,
+      });
     }
   }
 
-  const publishedModalityIds = collectModalityIds(publishedSnapshot);
-  const publishedExamTypeIds = collectExamTypeIds(publishedSnapshot);
-  const publishedUserIds = collectUserIds(publishedSnapshot);
-
-  const modalityById = new Map((displayLookups?.modalities ?? []).map((row) => [Number(row.id), row]));
-  const examTypeById = new Map((displayLookups?.examTypes ?? []).map((row) => [Number(row.id), row]));
-  const userById = new Map((displayLookups?.users ?? []).map((row) => [Number(row.id), row]));
-
-  for (const modalityId of collectModalityIds(draftSnapshot)) {
-    if (hasId(publishedModalityIds, modalityId)) continue;
-    const modality = modalityById.get(modalityId);
-    if (!modality) highRiskWarnings.push({ section: "References", message: `Unknown modality reference introduced: ${modalityId}.` });
-    else if (modality.isActive === false) highRiskWarnings.push({ section: "References", message: `Inactive modality reference introduced: ${modality.nameEn || modality.name}.` });
-  }
-  for (const examTypeId of collectExamTypeIds(draftSnapshot)) {
-    if (hasId(publishedExamTypeIds, examTypeId)) continue;
-    const examType = examTypeById.get(examTypeId);
-    if (!examType) highRiskWarnings.push({ section: "References", message: `Unknown exam type reference introduced: ${examTypeId}.` });
-    else if (examType.isActive === false) highRiskWarnings.push({ section: "References", message: `Inactive exam type reference introduced: ${examType.nameEn || examType.name}.` });
-  }
-  for (const userId of collectUserIds(draftSnapshot)) {
-    if (hasId(publishedUserIds, userId)) continue;
-    const user = userById.get(userId);
-    if (!user) highRiskWarnings.push({ section: "References", message: `Unknown user reference introduced: ${userId}.` });
-    else if (user.isActive === false) highRiskWarnings.push({ section: "References", message: `Inactive user reference introduced: ${user.fullName || user.username}.` });
+  const ambiguous = [...categories.ambiguousKeys, ...blocked.ambiguousKeys, ...examRules.ambiguousKeys, ...mixes.ambiguousKeys, ...quotas.ambiguousKeys];
+  if (ambiguous.length > 0) {
+    highRiskWarnings.push({
+      section: "Diff identity",
+      message: "Ambiguous rule identity; shown as added/removed instead of modified.",
+    });
   }
 
   return { affectedSections: [...affected], highRiskWarnings };

@@ -246,6 +246,13 @@ export function SchedulingAdminV2Page() {
                 : "not loaded"}
             </div>
             <div><strong>High-risk warnings:</strong> {riskSummary.highRiskWarnings.length}</div>
+            {riskSummary.highRiskWarnings.length > 0 && (
+              <ul style={{ margin: 0, paddingInlineStart: 18, color: "var(--color-warning, #92400e)" }}>
+                {riskSummary.highRiskWarnings.slice(0, 3).map((warning, index) => (
+                  <li key={`${warning.section}-${warning.ruleId ?? "none"}-${index}`}>{warning.message}</li>
+                ))}
+              </ul>
+            )}
             <div style={{ color: "var(--text-muted, #64748b)" }}>Publishing makes this draft the live policy.</div>
           </div>
           <PolicyPreviewPanel preview={preview.data} isLoading={preview.isLoading} riskSummary={riskSummary} />

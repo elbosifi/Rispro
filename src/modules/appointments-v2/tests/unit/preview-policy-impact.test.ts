@@ -242,6 +242,20 @@ describe("previewPolicyImpact — no published version", () => {
 describe("previewPolicyImpact — no differences", () => {
   afterEach(() => mock.restoreAll());
 
+  it("does not treat cloned rules with new DB ids as added and removed", async () => {
+    const result = await runPreviewWithMocks(
+      10,
+      DRAFT_VERSION,
+      PUBLISHED_VERSION,
+      [makeRule(101, "modality_blocked", 10, null), makeRule(102, "category_daily_limit", 20, 5)],
+      [makeRule(1, "modality_blocked", 10, null), makeRule(2, "category_daily_limit", 20, 5)]
+    );
+
+    assert.equal(result.addedRulesCount, 0);
+    assert.equal(result.removedRulesCount, 0);
+    assert.equal(result.modifiedRulesCount, 0);
+  });
+
   it("warns when draft and published are identical", async () => {
     const rules = [makeRule(1, "modality_blocked", 10, null)];
     const result = await runPreviewWithMocks(
@@ -254,6 +268,21 @@ describe("previewPolicyImpact — no differences", () => {
 
     const warnings = result.warnings as string[];
     assert.ok(warnings.some((w) => w.includes("No rule differences")));
+  });
+
+  it("does not force a modified match when identity is ambiguous", async () => {
+    const result = await runPreviewWithMocks(
+      10,
+      DRAFT_VERSION,
+      PUBLISHED_VERSION,
+      [makeRule(101, "category_daily_limit", 10, 7), makeRule(102, "category_daily_limit", 10, 8)],
+      [makeRule(1, "category_daily_limit", 10, 5), makeRule(2, "category_daily_limit", 10, 6)]
+    );
+
+    assert.equal(result.modifiedRulesCount, 0);
+    assert.equal(result.addedRulesCount, 2);
+    assert.equal(result.removedRulesCount, 2);
+    assert.ok(result.warnings.some((warning) => warning.includes("Ambiguous rule identity")));
   });
 });
 
