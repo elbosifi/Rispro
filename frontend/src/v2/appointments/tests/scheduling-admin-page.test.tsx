@@ -2,12 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SchedulingAdminV2Page } from "../scheduling-admin-page";
-import type { PolicyStatusDto } from "../types";
+import type { PolicyPreviewDto, PolicyStatusDto } from "../types";
 
 const createDraftMock = vi.fn();
 const saveDraftMock = vi.fn();
 const publishDraftMock = vi.fn();
 let policyStatus: PolicyStatusDto;
+let policyPreview: PolicyPreviewDto | null;
 
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({ user: { id: 1, role: "supervisor" } }),
@@ -26,7 +27,7 @@ vi.mock("../api", () => ({
   useV2CreatePolicyDraft: () => ({ mutateAsync: createDraftMock, isPending: false }),
   useV2SavePolicyDraft: () => ({ mutateAsync: saveDraftMock, isPending: false }),
   useV2PublishPolicyDraft: () => ({ mutateAsync: publishDraftMock, isPending: false }),
-  useV2PolicyPreview: () => ({ data: null, isLoading: false }),
+  useV2PolicyPreview: () => ({ data: policyPreview, isLoading: false }),
   useV2Lookups: () => ({ data: { modalities: [] }, isLoading: false, isError: false }),
   useV2ExamTypeCatalog: () => ({ data: [], isLoading: false, isError: false }),
   useV2PolicyUsers: () => ({ data: [], isLoading: false, isError: false }),
@@ -87,6 +88,17 @@ function renderPage() {
 describe("SchedulingAdminV2Page", () => {
   beforeEach(() => {
     policyStatus = baseStatus();
+    policyPreview = {
+      draftVersionId: 11,
+      publishedVersionId: 10,
+      addedRulesCount: 1,
+      removedRulesCount: 0,
+      modifiedRulesCount: 0,
+      addedRules: [],
+      removedRules: [],
+      modifiedRules: [],
+      warnings: [],
+    };
   });
 
   it("shows clear section structure", () => {
@@ -142,5 +154,42 @@ describe("SchedulingAdminV2Page", () => {
     expect(publish.disabled).toBe(true);
     expect(screen.getByText("Resolve blocking validation errors before publishing.")).toBeTruthy();
     expect(screen.getByText(/Active exam restriction rule must select at least one exam/)).toBeTruthy();
+  });
+
+  it("shows before-publishing validation, preview, and risk context", () => {
+    policyStatus = baseStatus();
+    policyStatus.publishedSnapshot.examTypeRules = [{
+      id: 2,
+      modalityId: 1,
+      ruleType: "specific_date",
+      effectMode: "restriction_overridable",
+      specificDate: "2027-01-01",
+      startDate: null,
+      endDate: null,
+      weekday: null,
+      alternateWeeks: false,
+      recurrenceAnchorDate: null,
+      examTypeIds: [10],
+      title: null,
+      notes: null,
+      isActive: true,
+    }];
+    policyStatus.draftSnapshot.examTypeRules = [{
+      ...policyStatus.publishedSnapshot.examTypeRules[0]!,
+      effectMode: "hard_restriction",
+    }];
+    policyStatus.displayLookups = {
+      modalities: [{ id: 1, name: "MRI", nameAr: "MRI AR", nameEn: "MRI", code: "MR", isActive: true }],
+      examTypes: [{ id: 10, name: "Brain MRI", nameAr: "Brain MRI AR", nameEn: "Brain MRI", code: "BMRI", modalityId: 1, isActive: true }],
+      users: [],
+    };
+
+    renderPage();
+
+    expect(screen.getByText("Before publishing")).toBeTruthy();
+    expect(screen.getAllByText(/Validation:/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/1 added, 0 removed, 0 modified/)).toBeTruthy();
+    expect(screen.getAllByText(/High-risk warnings:/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Publishing makes this draft the live policy.")).toBeTruthy();
   });
 });

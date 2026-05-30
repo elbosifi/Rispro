@@ -1,14 +1,18 @@
 import type { PolicyPreviewDto } from "../types";
-import { useLanguage } from "@/providers/language-provider";
+import type { PolicyDiffRiskSummary } from "../utils/policy-diff-risk";
 
 export function PolicyPreviewPanel({
   preview,
   isLoading,
+  riskSummary,
 }: {
   preview: PolicyPreviewDto | null | undefined;
   isLoading: boolean;
+  riskSummary?: PolicyDiffRiskSummary;
 }) {
-  const { language } = useLanguage();
+  const affectedSections = riskSummary?.affectedSections ?? [];
+  const highRiskWarnings = riskSummary?.highRiskWarnings ?? [];
+
   return (
     <div
       style={{
@@ -18,20 +22,37 @@ export function PolicyPreviewPanel({
         backgroundColor: "var(--bg-surface, #f8fafc)",
       }}
     >
-      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{language === "ar" ? "معاينة المسودة" : "Draft Preview"}</h2>
+      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Draft Preview</h2>
       {isLoading ? (
-        <p style={{ fontSize: 14 }}>{language === "ar" ? "جاري تحميل المعاينة..." : "Loading preview..."}</p>
+        <p style={{ fontSize: 14 }}>Loading preview...</p>
       ) : !preview ? (
-        <p style={{ fontSize: 14, color: "var(--text-muted, #64748b)" }}>{language === "ar" ? "لا توجد معاينة بعد." : "No preview yet."}</p>
+        <p style={{ fontSize: 14, color: "var(--text-muted, #64748b)" }}>No preview yet.</p>
       ) : (
         <div style={{ display: "grid", gap: 8, fontSize: 14 }}>
-          <div><strong>{language === "ar" ? "مضافة:" : "Added:"}</strong> {preview.addedRulesCount}</div>
-          <div><strong>{language === "ar" ? "محذوفة:" : "Removed:"}</strong> {preview.removedRulesCount}</div>
-          <div><strong>{language === "ar" ? "معدلة:" : "Modified:"}</strong> {preview.modifiedRulesCount}</div>
-          <div>
-            <strong>{language === "ar" ? "تحذيرات:" : "Warnings:"}</strong>{" "}
-            {preview.warnings.length > 0 ? preview.warnings.join("; ") : (language === "ar" ? "لا يوجد" : "none")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+            <div><strong>Added:</strong> {preview.addedRulesCount}</div>
+            <div><strong>Removed:</strong> {preview.removedRulesCount}</div>
+            <div><strong>Modified:</strong> {preview.modifiedRulesCount}</div>
           </div>
+          <div>
+            <strong>Affected sections:</strong> {affectedSections.length > 0 ? affectedSections.join(", ") : "none"}
+          </div>
+          <div>
+            <strong>Backend warnings:</strong> {preview.warnings.length > 0 ? preview.warnings.join("; ") : "none"}
+          </div>
+          <div>
+            <strong>High-risk changes:</strong>{" "}
+            {highRiskWarnings.length > 0 ? `${highRiskWarnings.length} warning${highRiskWarnings.length === 1 ? "" : "s"}` : "none"}
+          </div>
+          {highRiskWarnings.length > 0 && (
+            <ul style={{ margin: 0, paddingInlineStart: 18, color: "var(--color-warning, #92400e)" }}>
+              {highRiskWarnings.slice(0, 6).map((warning, index) => (
+                <li key={`${warning.section}-${warning.ruleId ?? "none"}-${index}`}>
+                  <strong>{warning.section}:</strong> {warning.message}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

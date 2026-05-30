@@ -18,6 +18,7 @@ import { PolicyDraftEditor } from "./components/policy-draft-editor";
 import { PolicyPreviewPanel } from "./components/policy-preview-panel";
 import { PublishPolicyDialog } from "./components/publish-policy-dialog";
 import { PolicyValidationSummary } from "./components/policy-validation-summary";
+import { getPolicyDiffRiskSummary } from "./utils/policy-diff-risk";
 import { validatePolicyDraftForAdmin } from "./utils/policy-admin-validation";
 import type { PolicySnapshotDto } from "./types";
 
@@ -64,6 +65,10 @@ export function SchedulingAdminV2Page() {
   const validation = useMemo(
     () => validatePolicyDraftForAdmin(draftSnapshot, status.data?.displayLookups),
     [draftSnapshot, status.data?.displayLookups]
+  );
+  const riskSummary = useMemo(
+    () => getPolicyDiffRiskSummary(status.data?.publishedSnapshot, status.data?.draftSnapshot, status.data?.displayLookups),
+    [status.data?.displayLookups, status.data?.draftSnapshot, status.data?.publishedSnapshot]
   );
   const hasBlockingValidationErrors = validation.errors.length > 0;
   const hasValidationWarnings = validation.warnings.length > 0;
@@ -213,7 +218,38 @@ export function SchedulingAdminV2Page() {
       </SectionCard>
 
       <SectionCard title="Preview / Diff">
-        <PolicyPreviewPanel preview={preview.data} isLoading={preview.isLoading} />
+        <div style={{ display: "grid", gap: 12 }}>
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 8,
+              border: "1px solid var(--border-color, #e2e8f0)",
+              backgroundColor: "var(--bg-surface, #f8fafc)",
+              fontSize: 13,
+              display: "grid",
+              gap: 6,
+            }}
+          >
+            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Before publishing</h2>
+            <div>
+              <strong>Validation:</strong>{" "}
+              {hasBlockingValidationErrors
+                ? `${validation.errors.length} blocking error${validation.errors.length === 1 ? "" : "s"}`
+                : hasValidationWarnings
+                ? `${validation.warnings.length} warning${validation.warnings.length === 1 ? "" : "s"}`
+                : "valid"}
+            </div>
+            <div>
+              <strong>Preview:</strong>{" "}
+              {preview.data
+                ? `${preview.data.addedRulesCount} added, ${preview.data.removedRulesCount} removed, ${preview.data.modifiedRulesCount} modified`
+                : "not loaded"}
+            </div>
+            <div><strong>High-risk warnings:</strong> {riskSummary.highRiskWarnings.length}</div>
+            <div style={{ color: "var(--text-muted, #64748b)" }}>Publishing makes this draft the live policy.</div>
+          </div>
+          <PolicyPreviewPanel preview={preview.data} isLoading={preview.isLoading} riskSummary={riskSummary} />
+        </div>
       </SectionCard>
 
       <SectionCard title="Advanced">
