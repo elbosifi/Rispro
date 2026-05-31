@@ -34,16 +34,21 @@ function isPermanentPushFailure(error: unknown): boolean {
 
 export async function getUserWebPushConfig(userId: number): Promise<{ enabled: boolean; publicKey: string | null; subscribed: boolean }> {
   const config = await getPatientWebPushSharedConfig();
-  await touchUserWebPushSubscriptions(userId);
-  const count = await pool.query<{ count: string }>(
-    `select count(*)::text as count from user_web_push_subscriptions where user_id = $1 and enabled = true`,
-    [userId]
-  );
-  return {
-    enabled: config.enabled,
-    publicKey: config.publicKey || null,
-    subscribed: Number(count.rows[0]?.count ?? "0") > 0,
-  };
+  try {
+    await touchUserWebPushSubscriptions(userId);
+    const count = await pool.query<{ count: string }>(
+      `select count(*)::text as count from user_web_push_subscriptions where user_id = $1 and enabled = true`,
+      [userId]
+    );
+    return {
+      enabled: config.enabled,
+      publicKey: config.publicKey || null,
+      subscribed: Number(count.rows[0]?.count ?? "0") > 0,
+    };
+  } catch (error) {
+    if (isMissingUserPushTable(error)) return { enabled: false, publicKey: null, subscribed: false };
+    throw error;
+  }
 }
 
 export async function touchUserWebPushSubscriptions(userId: number): Promise<void> {
@@ -105,25 +110,37 @@ export async function unsubscribeUserWebPush(input: {
 export async function sendUserWebPush(userId: number, payload: UserPushPayload): Promise<{ attempted: number; sent: number; failed: number }> {
   if (!(await configurePatientWebPushVapid())) return { attempted: 0, sent: 0, failed: 0 };
 
-  const subscriptions = await pool.query<{
+  let subscriptions: Array<{
     id: number;
     endpoint: string;
     p256dh: string;
     auth: string;
-  }>(
-    `
-      select id, endpoint, p256dh, auth
-      from user_web_push_subscriptions
-      where user_id = $1
-        and enabled = true
-        and coalesce(last_seen_at, updated_at, created_at) >= now() - ($2::text || ' hours')::interval
-    `,
-    [userId, env.sessionHours]
-  );
+  }> = [];
+  try {
+    const result = await pool.query<{
+      id: number;
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+    }>(
+      `
+        select id, endpoint, p256dh, auth
+        from user_web_push_subscriptions
+        where user_id = $1
+          and enabled = true
+          and coalesce(last_seen_at, updated_at, created_at) >= now() - ($2::text || ' hours')::interval
+      `,
+      [userId, env.sessionHours]
+    );
+    subscriptions = result.rows;
+  } catch (error) {
+    if (isMissingUserPushTable(error)) return { attempted: 0, sent: 0, failed: 0 };
+    throw error;
+  }
 
   let sent = 0;
   let failed = 0;
-  for (const row of subscriptions.rows) {
+  for (const row of subscriptions) {
     const subscription: PushSubscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
     try {
       await webPush.sendNotification(subscription, JSON.stringify(payload));
@@ -148,7 +165,11 @@ export async function sendUserWebPush(userId: number, payload: UserPushPayload):
       failed += 1;
     }
   }
-  return { attempted: subscriptions.rows.length, sent, failed };
+  return { attempted: subscriptions.length, sent, failed };
+}
+
+function isMissingUserPushTable(error: unknown): boolean {
+  return String((error as { code?: unknown } | null)?.code ?? "") === "42P01";
 }
 
 async function approverUserIds(request: SchedulingOverrideRequestRow): Promise<number[]> {

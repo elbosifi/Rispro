@@ -17,6 +17,7 @@ import { asString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import type { Role } from "../types/domain.js";
 import { updateOwnPassword } from "../services/user-service.js";
+import { touchUserWebPushSubscriptions } from "../services/user-web-push-service.js";
 
 interface AuthSessionRequest extends Request {
   body: Record<string, unknown>;
@@ -92,6 +93,7 @@ authRouter.post("/logout", (_req: Request, res: Response) => {
 authRouter.get("/me", requireAuth, (req: Request, res: Response) => {
   const request = req as AuthSessionRequest;
   const currentUser = requireCurrentUser(request);
+  void touchUserWebPushSubscriptions(Number(currentUser.sub)).catch(() => undefined);
   res.json({
     user: {
       ...currentUser,

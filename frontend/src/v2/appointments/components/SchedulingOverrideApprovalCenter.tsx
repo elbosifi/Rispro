@@ -45,7 +45,6 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   const { language } = useLanguage();
   const [open, setOpen] = useState(false);
   const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
-  const pushConfigQuery = useUserPushConfig();
 
   const actionableCount = badgeQuery.data?.requests.filter((request) => {
     if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
@@ -88,7 +87,7 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
               </button>
             </div>
 
-            <OverridePushControls configQuery={pushConfigQuery} />
+            <OverridePushControls />
             <SchedulingOverrideRequestsWorkspace user={user} variant="drawer" />
           </aside>
         </div>
@@ -97,7 +96,8 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   );
 }
 
-function OverridePushControls({ configQuery }: { configQuery: ReturnType<typeof useUserPushConfig> }) {
+function OverridePushControls() {
+  const configQuery = useUserPushConfig();
   const subscribeMutation = useSubscribeUserPush();
   const unsubscribeMutation = useUnsubscribeUserPush();
   const testMutation = useSendUserTestPush();
