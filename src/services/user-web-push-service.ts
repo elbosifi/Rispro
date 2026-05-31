@@ -2,6 +2,7 @@ import webPush, { type PushSubscription } from "web-push";
 import { pool } from "../db/pool.js";
 import {
   configurePatientWebPushVapid,
+  ensurePatientWebPushConfig,
   getPatientWebPushSharedConfig,
   hashPushSubscription,
   type BrowserPushSubscriptionInput,
@@ -33,7 +34,13 @@ function isPermanentPushFailure(error: unknown): boolean {
 }
 
 export async function getUserWebPushConfig(userId: number): Promise<{ enabled: boolean; publicKey: string | null; subscribed: boolean }> {
-  const config = await getPatientWebPushSharedConfig();
+  let config = await getPatientWebPushSharedConfig();
+  if (!config.enabled || !config.publicKey) {
+    const ensured = await ensurePatientWebPushConfig({ updatedByUserId: userId }).catch(() => null);
+    if (ensured?.enabled && ensured.publicKey) {
+      config = { enabled: true, publicKey: ensured.publicKey };
+    }
+  }
   try {
     await touchUserWebPushSubscriptions(userId);
     const count = await pool.query<{ count: string }>(

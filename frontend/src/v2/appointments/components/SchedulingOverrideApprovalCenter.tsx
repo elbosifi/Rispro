@@ -104,6 +104,15 @@ function OverridePushControls() {
   const [message, setMessage] = useState<string | null>(null);
   const supported = pushSupported();
   const config = configQuery.data;
+  const unavailableReason = !supported
+    ? "Not supported on this device."
+    : configQuery.isLoading
+      ? "Checking browser notification setup..."
+      : !config?.enabled
+        ? "Browser notification setup is not available yet."
+        : config.subscribed
+          ? "Enabled for override request alerts."
+          : "Enable alerts for override request updates.";
 
   async function currentSubscription(): Promise<PushSubscription | null> {
     if (!supported) return null;
@@ -154,13 +163,7 @@ function OverridePushControls() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-foreground">Browser notifications</p>
-          <p className="text-xs text-muted-foreground">
-            {!supported
-              ? "Not supported on this device."
-              : config?.subscribed
-                ? "Enabled for override request alerts."
-                : "Enable alerts for override request updates."}
-          </p>
+          <p className="text-xs text-muted-foreground">{unavailableReason}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {config?.subscribed ? (
