@@ -19,7 +19,6 @@ import {
   markAllReportingBoardNotificationsRead,
   markReportingBoardNotificationRead,
 } from "@/lib/api-hooks";
-import { useLanguage } from "@/providers/language-provider";
 import type { DoctorMe } from "@/types/api";
 import { DoctorCasesPage } from "./doctor-cases-page";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
@@ -357,8 +356,6 @@ function ReportingBoardNotificationsButton() {
 }
 
 export default function DoctorPage() {
-  const { language } = useLanguage();
-  const isRtl = language === "ar";
   const location = useLocation();
   const navigate = useNavigate();
   const { data: me, isLoading } = useQuery({
@@ -393,7 +390,7 @@ export default function DoctorPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }} dir={isRtl ? "rtl" : "ltr"}>
+    <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }} lang="en" dir="ltr">
       <header className="border-b" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <div className="flex h-14 items-center justify-between gap-3 px-4 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">

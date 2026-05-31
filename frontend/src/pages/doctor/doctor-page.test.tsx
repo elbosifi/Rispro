@@ -450,6 +450,16 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("button", { name: /My Work/i })).toBeTruthy();
   });
 
+  it("keeps the doctor portal LTR when the saved app language is Arabic", async () => {
+    localStorage.setItem("rispro-language", "ar");
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+
+    renderDoctorPortal();
+
+    const heading = await screen.findByRole("heading", { name: "Doctor Portal" });
+    expect(heading.closest("[dir]")?.getAttribute("dir")).toBe("ltr");
+  });
+
   it("redirects a non-doctor away from /doctor", async () => {
     fetchDoctorMeMock.mockResolvedValue({
       ...normalDoctor,

@@ -168,14 +168,14 @@ export function ReportingBoardMobilePage() {
   const lastUpdated = useMemo(() => data ? new Date(data.refreshedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-", [data]);
 
   if (viewQuery.isLoading) {
-    return <main className="min-h-screen bg-slate-50 p-5 text-slate-950">Loading reporting view...</main>;
+    return <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-5 text-slate-950">Loading reporting view...</main>;
   }
   if (viewQuery.isError || !data) {
-    return <main className="min-h-screen bg-slate-50 p-5 text-slate-950">Saved view is unavailable.</main>;
+    return <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-5 text-slate-950">Saved view is unavailable.</main>;
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 pb-28 pt-5 text-slate-950">
+    <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-28 pt-5 text-slate-950">
       <header className="mx-auto max-w-xl">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white">RIS<br />pro</div>

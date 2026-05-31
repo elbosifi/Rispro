@@ -108,6 +108,15 @@ describe("ReportingBoardMobilePage", () => {
     expect(screen.queryByRole("button", { name: "Assign to me" })).toBeNull();
   });
 
+  it("renders the QR reporting view as English LTR", async () => {
+    renderPage();
+
+    const heading = await screen.findByRole("heading", { name: "Seraj - Reporting Board" });
+    const page = heading.closest("main");
+    expect(page?.getAttribute("lang")).toBe("en");
+    expect(page?.getAttribute("dir")).toBe("ltr");
+  });
+
   it("opens a mobile case detail sheet", async () => {
     renderPage();
 

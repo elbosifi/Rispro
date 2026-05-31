@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
@@ -123,6 +123,22 @@ function QueueCheckInAccessRoute() {
       </PageAccessRoute>
     </ProtectedRoute>
   );
+}
+
+function EnglishOnlyRoute({ children }: { children: ReactNode }) {
+  const { language } = useLanguage();
+
+  useEffect(() => {
+    document.documentElement.setAttribute("lang", "en");
+    document.documentElement.setAttribute("dir", "ltr");
+
+    return () => {
+      document.documentElement.setAttribute("lang", language === "ar" ? "ar-LY" : "en");
+      document.documentElement.setAttribute("dir", language === "ar" ? "rtl" : "ltr");
+    };
+  }, [language]);
+
+  return <div lang="en" dir="ltr">{children}</div>;
 }
 
 function AppContent() {
@@ -349,7 +365,7 @@ function RouterConfig() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
-      <Route path="/mobile/reporting-view/:token" element={<ReportingBoardMobilePage />} />
+      <Route path="/mobile/reporting-view/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />
       <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route path="/print/reporting-board" element={<ProtectedRoute><ReportingBoardPrintPage /></ProtectedRoute>} />
       <Route
@@ -360,7 +376,7 @@ function RouterConfig() {
         path="/doctor/*"
         element={
           <ProtectedRoute>
-            <DoctorPage />
+            <EnglishOnlyRoute><DoctorPage /></EnglishOnlyRoute>
           </ProtectedRoute>
         }
       />
