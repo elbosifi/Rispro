@@ -35,6 +35,7 @@ describe("user web push service", () => {
     assert.match(source, /enabled = case when \$2 then false else enabled end/);
     assert.match(source, /last_seen_at = now\(\)/);
     assert.match(source, /coalesce\(last_seen_at, updated_at, created_at\) >= now\(\) - \(\$2::text \|\| ' hours'\)::interval/);
+    assert.match(source, /create table if not exists user_web_push_subscriptions/);
   });
 
   it("wires create approve and reject lifecycle hooks without awaiting delivery", async () => {

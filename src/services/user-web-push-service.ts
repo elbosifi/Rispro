@@ -28,6 +28,32 @@ function normalizeSubscription(input: BrowserPushSubscriptionInput): { endpoint:
   return { endpoint, p256dh, auth };
 }
 
+async function ensureUserWebPushStorage(): Promise<void> {
+  await pool.query(`
+    create table if not exists user_web_push_subscriptions (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      endpoint text not null,
+      p256dh text not null,
+      auth text not null,
+      subscription_hash text not null,
+      user_agent text,
+      enabled boolean not null default true,
+      last_seen_at timestamptz,
+      last_success_at timestamptz,
+      last_failure_at timestamptz,
+      disabled_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      constraint user_web_push_subscriptions_user_hash_unique unique (user_id, subscription_hash)
+    )
+  `);
+  await pool.query(`
+    create index if not exists user_web_push_subscriptions_user_enabled_idx
+      on user_web_push_subscriptions(user_id, enabled)
+  `);
+}
+
 function isPermanentPushFailure(error: unknown): boolean {
   const statusCode = Number((error as { statusCode?: unknown } | null)?.statusCode);
   return statusCode === 404 || statusCode === 410;
@@ -41,6 +67,7 @@ export async function getUserWebPushConfig(userId: number): Promise<{ enabled: b
       config = { enabled: true, publicKey: ensured.publicKey };
     }
   }
+  await ensureUserWebPushStorage();
   try {
     await touchUserWebPushSubscriptions(userId);
     const count = await pool.query<{ count: string }>(
@@ -59,6 +86,7 @@ export async function getUserWebPushConfig(userId: number): Promise<{ enabled: b
 }
 
 export async function touchUserWebPushSubscriptions(userId: number): Promise<void> {
+  await ensureUserWebPushStorage();
   await pool.query(
     `update user_web_push_subscriptions set last_seen_at = now(), updated_at = now() where user_id = $1 and enabled = true`,
     [userId]
@@ -70,6 +98,7 @@ export async function upsertUserWebPushSubscription(input: {
   subscription: BrowserPushSubscriptionInput;
   userAgent?: string | null;
 }): Promise<{ subscriptionId: number }> {
+  await ensureUserWebPushStorage();
   const normalized = normalizeSubscription(input.subscription);
   const subscriptionHash = hashPushSubscription(normalized);
   const result = await pool.query<{ id: number }>(
@@ -98,6 +127,7 @@ export async function unsubscribeUserWebPush(input: {
   userId: number;
   subscription?: BrowserPushSubscriptionInput | null;
 }): Promise<{ disabled: boolean }> {
+  await ensureUserWebPushStorage();
   const normalized = input.subscription ? normalizeSubscription(input.subscription) : null;
   const result = await pool.query(
     `
@@ -116,6 +146,7 @@ export async function unsubscribeUserWebPush(input: {
 
 export async function sendUserWebPush(userId: number, payload: UserPushPayload): Promise<{ attempted: number; sent: number; failed: number }> {
   if (!(await configurePatientWebPushVapid())) return { attempted: 0, sent: 0, failed: 0 };
+  await ensureUserWebPushStorage();
 
   let subscriptions: Array<{
     id: number;
