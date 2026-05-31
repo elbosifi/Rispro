@@ -564,6 +564,18 @@ test("searchPatients: matches Arabic compound names with or without spaces", asy
     const abdulrahmanCompact = await insertPatient(`عبدالرحمن ${suffix}`, `Abdulrahman ${suffix}`);
     const nuruddinCompact = await insertPatient(`نورالدين ${suffix}`, `Nuruddin ${suffix}`);
     const normalArabic = await insertPatient(`محمد علي ${suffix}`, `Mohamed Ali ${suffix}`);
+    const identifierQuery = `أبو بكر ${suffix}`;
+    const compactNameMatch = await insertPatient(`ابوبكر ${suffix}`, `Abu Bakr ${suffix}`);
+    const identifierMatch = await insertPatient(`مريض مختلف ${suffix}`, `Different Patient ${suffix}`);
+    await pool.query(
+      `
+        update patients
+        set identifier_type = 'other',
+            identifier_value = $2
+        where id = $1
+      `,
+      [identifierMatch, identifierQuery]
+    );
 
     assert.equal((await searchPatients(`عبد الله ${suffix}`)).find((row) => Number(row.id) === abdullahCompact)?.arabic_full_name, `عبدالله ${suffix}`);
     assert.equal((await searchPatients(`عبدالله ${suffix}`)).find((row) => Number(row.id) === abdullahSpaced)?.arabic_full_name, `عبد الله ${suffix}`);
@@ -571,6 +583,10 @@ test("searchPatients: matches Arabic compound names with or without spaces", asy
     assert.ok((await searchPatients(`نور الدين ${suffix}`)).some((row) => Number(row.id) === nuruddinCompact));
     assert.ok((await searchPatients(`محمد ${suffix}`)).some((row) => Number(row.id) === normalArabic));
     assert.ok((await searchPatients(`Mohamed Ali ${suffix}`)).some((row) => Number(row.id) === normalArabic));
+    const rankedIds = (await searchPatients(identifierQuery)).map((row) => Number(row.id));
+    assert.ok(rankedIds.indexOf(identifierMatch) >= 0);
+    assert.ok(rankedIds.indexOf(compactNameMatch) >= 0);
+    assert.ok(rankedIds.indexOf(identifierMatch) < rankedIds.indexOf(compactNameMatch));
   } finally {
     if (createdPatientIds.length > 0) {
       await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);

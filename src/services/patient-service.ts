@@ -694,7 +694,11 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
       or p.phone_2 ilike $2
       or p.arabic_full_name ilike $2
       or p.normalized_arabic_name ilike $3
-      or coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) ilike $14
+      or (
+        $13 <> ''
+        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) <> ''
+        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) ilike $14
+      )
       or p.english_full_name ilike $2
       or (
         $11 <> ''
@@ -721,9 +725,11 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
                 or pi.normalized_value ilike $4
               )
           ) then 1
-        when coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) = $13 then 2
-        when p.normalized_arabic_name = $5 then 3
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 3
+        when p.normalized_arabic_name = $5 then 2
+        when $13 <> ''
+          and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) <> ''
+          and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) = $13 then 2
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 2
         when p.normalized_arabic_name like $7 then 4
         when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 4
         when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 5
@@ -1500,7 +1506,11 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
       or p.phone_2 ilike '${normalizedTerm}'
       or p.arabic_full_name ilike '${normalizedTerm}'
       or p.normalized_arabic_name ilike '${normalizedPattern}'
-      or coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) ilike '${normalizedCompactPattern}'
+      or (
+        '${normalizedArabicCompactTerm}' <> ''
+        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
+        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) ilike '${normalizedCompactPattern}'
+      )
       or p.english_full_name ilike '${normalizedTerm}'
       or exists (
         select 1 from patient_identifiers pi
@@ -1544,13 +1554,15 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
             or p.identifier_value ilike '${normalizedTerm}'
             or p.phone_1 ilike '${normalizedTerm}'
             or p.phone_2 ilike '${normalizedTerm}' then 1
-          when coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) = '${normalizedArabicCompactTerm}' then 2
+          when p.normalized_arabic_name = '${normalizedArabicTerm}' then 2
+          when '${normalizedArabicCompactTerm}' <> ''
+            and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
+            and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) = '${normalizedArabicCompactTerm}' then 2
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = '${normalizedEnglishTerm}' then 2
           when split_part(p.normalized_arabic_name, ' ', 1) = '${normalizedArabicTerm}' then 3
           when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = '${normalizedEnglishTerm}' then 3
           when split_part(p.normalized_arabic_name, ' ', 1) like '${normalizedArabicPrefixPattern}' then 4
           when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like '${normalizedEnglishPrefixPattern}' then 4
-          when p.normalized_arabic_name = '${normalizedArabicTerm}' then 5
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = '${normalizedEnglishTerm}' then 5
           when p.normalized_arabic_name like '${normalizedArabicPrefixPattern}' then 6
           when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishPrefixPattern}' then 6
           when p.normalized_arabic_name like '${normalizedArabicLaterTokenPattern}' then 7

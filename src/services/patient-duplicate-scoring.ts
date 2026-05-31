@@ -1,4 +1,4 @@
-import { normalizeArabicName } from "../utils/normalize.js";
+import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 import { normalizeIdentifierValue } from "../utils/identifier.js";
 
 export type PatientDuplicateScoringRow = {
@@ -8,6 +8,7 @@ export type PatientDuplicateScoringRow = {
   arabic_full_name: string;
   english_full_name: string | null;
   normalized_arabic_name: string;
+  normalized_arabic_name_compact?: string | null;
   age_years: number;
   estimated_date_of_birth: string | null;
   sex: string | null;
@@ -64,14 +65,17 @@ function stringSimilarity(a: string, b: string): number {
   return Math.round((1 - distance / Math.max(a.length, b.length)) * 100);
 }
 
-function nameScores(a: PatientDuplicateScoringRow, b: PatientDuplicateScoringRow): { arabic: number; english: number; combined: number } {
+function nameScores(a: PatientDuplicateScoringRow, b: PatientDuplicateScoringRow): { arabic: number; compactArabic: number; english: number; combined: number } {
   const arabicA = normalizeArabicName(a.arabic_full_name || a.normalized_arabic_name || "");
   const arabicB = normalizeArabicName(b.arabic_full_name || b.normalized_arabic_name || "");
+  const compactArabicA = a.normalized_arabic_name_compact || normalizeArabicNameCompact(a.arabic_full_name || a.normalized_arabic_name || "");
+  const compactArabicB = b.normalized_arabic_name_compact || normalizeArabicNameCompact(b.arabic_full_name || b.normalized_arabic_name || "");
   const englishA = normalizeName(a.english_full_name);
   const englishB = normalizeName(b.english_full_name);
   const arabic = stringSimilarity(arabicA, arabicB);
+  const compactArabic = stringSimilarity(compactArabicA, compactArabicB);
   const english = stringSimilarity(englishA, englishB);
-  return { arabic, english, combined: Math.max(arabic, english) };
+  return { arabic, compactArabic, english, combined: Math.max(arabic, compactArabic, english) };
 }
 
 function normalizedIdentifier(row: PatientDuplicateScoringRow): string {
@@ -119,6 +123,9 @@ export function scorePatientDuplicatePair(a: PatientDuplicateScoringRow, b: Pati
   }
   if (names.arabic > 0) {
     signals.push({ field: "arabic_name", label: `Arabic name ${names.arabic}%`, status: names.arabic >= 92 ? "match" : names.arabic >= 82 ? "similar" : "info", score: names.arabic });
+  }
+  if (names.compactArabic > 0 && names.compactArabic > names.arabic) {
+    signals.push({ field: "arabic_name_compact", label: `Compact Arabic name ${names.compactArabic}%`, status: names.compactArabic >= 92 ? "match" : names.compactArabic >= 82 ? "similar" : "info", score: names.compactArabic });
   }
   if (names.english > 0) {
     signals.push({ field: "english_name", label: `English name ${names.english}%`, status: names.english >= 92 ? "match" : names.english >= 82 ? "similar" : "info", score: names.english });

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scorePatientDuplicatePair } from "./patient-duplicate-scoring.js";
+import { normalizeArabicNameCompact } from "../utils/normalize.js";
 
 const basePatient = {
   id: 1,
@@ -11,6 +12,7 @@ const basePatient = {
   arabic_full_name: "محمد علي",
   english_full_name: "Mohamed Ali",
   normalized_arabic_name: "محمد علي",
+  normalized_arabic_name_compact: "محمدعلي",
   age_years: 40,
   estimated_date_of_birth: "1986-01-01",
   sex: "M",
@@ -67,4 +69,36 @@ test("patient duplicate scoring reports hard conflicts without blocking signal o
   assert.ok(result.conflicts.some((conflict) => conflict.field === "identifier"));
   assert.ok(result.conflicts.some((conflict) => conflict.field === "sex"));
   assert.ok(result.signals.some((signal) => signal.status === "mismatch"));
+});
+
+test("patient duplicate scoring treats compact Arabic compound variants as name matches", () => {
+  const result = scorePatientDuplicatePair(
+    { ...basePatient, arabic_full_name: "عبد الله", normalized_arabic_name: "عبد الله", normalized_arabic_name_compact: normalizeArabicNameCompact("عبد الله"), english_full_name: "First Person" },
+    { ...basePatient, arabic_full_name: "عبدالله", normalized_arabic_name: "عبدالله", normalized_arabic_name_compact: normalizeArabicNameCompact("عبدالله"), english_full_name: "Second Person", phone_1: "0922222222" }
+  );
+
+  assert.ok(result.score >= 75);
+  assert.ok(result.reasons.includes("name_match"));
+  assert.ok(result.signals.some((signal) => signal.field === "arabic_name_compact" && signal.status === "match"));
+});
+
+test("patient duplicate scoring does not match empty compact Arabic names", () => {
+  const result = scorePatientDuplicatePair(
+    { ...basePatient, arabic_full_name: "", normalized_arabic_name: "", normalized_arabic_name_compact: "", english_full_name: "", phone_1: "0911111111" },
+    { ...basePatient, arabic_full_name: "", normalized_arabic_name: "", normalized_arabic_name_compact: "", english_full_name: "", phone_1: "0922222222" }
+  );
+
+  assert.equal(result.reasons.includes("name_match"), false);
+  assert.equal(result.signals.some((signal) => signal.field === "arabic_name_compact"), false);
+});
+
+test("patient duplicate scoring does not make compact fuzzy demographic conflicts high confidence by itself", () => {
+  const result = scorePatientDuplicatePair(
+    { ...basePatient, arabic_full_name: "عبد الله", normalized_arabic_name: "عبد الله", normalized_arabic_name_compact: normalizeArabicNameCompact("عبد الله"), estimated_date_of_birth: "1986-01-01", sex: "M", phone_1: "0911111111" },
+    { ...basePatient, arabic_full_name: "عبدالله", normalized_arabic_name: "عبدالله", normalized_arabic_name_compact: normalizeArabicNameCompact("عبدالله"), estimated_date_of_birth: "1999-01-01", sex: "F", phone_1: "0922222222" }
+  );
+
+  assert.ok(result.score < 75);
+  assert.ok(result.conflicts.some((conflict) => conflict.field === "date_of_birth"));
+  assert.ok(result.conflicts.some((conflict) => conflict.field === "sex"));
 });

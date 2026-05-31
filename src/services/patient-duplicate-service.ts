@@ -3,7 +3,7 @@ import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getPatientDirectorySummary, mergePatients, searchPatients, updatePatient, type PatientRow } from "./patient-service.js";
 import { scorePatientDuplicatePair, type PatientDuplicateConflict, type PatientDuplicateSignal } from "./patient-duplicate-scoring.js";
-import { normalizeArabicName } from "../utils/normalize.js";
+import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 import { normalizeIdentifierValue } from "../utils/identifier.js";
 import type { PoolClient } from "pg";
 import type { OptionalUserId, UnknownRecord, UserId } from "../types/http.js";
@@ -33,6 +33,7 @@ type PatientDuplicatePatientRow = {
   arabic_full_name: string;
   english_full_name: string | null;
   normalized_arabic_name: string;
+  normalized_arabic_name_compact: string | null;
   age_years: number;
   estimated_date_of_birth: string | null;
   sex: string | null;
@@ -213,6 +214,7 @@ async function fetchDuplicatePatientRows(client: PoolClient, options: PatientDup
           p.arabic_full_name,
           p.english_full_name,
           p.normalized_arabic_name,
+          coalesce(p.normalized_arabic_name_compact, '') as normalized_arabic_name_compact,
           p.age_years,
           p.estimated_date_of_birth::text,
           p.sex,
@@ -268,8 +270,24 @@ async function fetchDuplicatePatientRows(client: PoolClient, options: PatientDup
           )
           or (a.national_id is not null and a.national_id <> '' and a.national_id = b.national_id)
           or (a.normalized_phone <> '' and a.normalized_phone = b.normalized_phone)
-          or similarity(a.normalized_arabic_name, b.normalized_arabic_name) >= $1
-          or similarity(a.normalized_english_name, b.normalized_english_name) >= $1
+          or (
+            a.normalized_arabic_name <> ''
+            and b.normalized_arabic_name <> ''
+            and similarity(a.normalized_arabic_name, b.normalized_arabic_name) >= $1
+          )
+          or (
+            a.normalized_arabic_name_compact <> ''
+            and b.normalized_arabic_name_compact <> ''
+            and (
+              a.normalized_arabic_name_compact = b.normalized_arabic_name_compact
+              or similarity(a.normalized_arabic_name_compact, b.normalized_arabic_name_compact) >= $1
+            )
+          )
+          or (
+            a.normalized_english_name <> ''
+            and b.normalized_english_name <> ''
+            and similarity(a.normalized_english_name, b.normalized_english_name) >= $1
+          )
           or (
             a.normalized_english_name <> ''
             and b.normalized_english_name <> ''
@@ -329,6 +347,7 @@ async function fetchPatientDuplicateRow(client: PoolClient, patientId: number): 
         p.arabic_full_name,
         p.english_full_name,
         p.normalized_arabic_name,
+        coalesce(p.normalized_arabic_name_compact, '') as normalized_arabic_name_compact,
         p.age_years,
         p.estimated_date_of_birth::text,
         p.sex,
@@ -432,6 +451,8 @@ export async function searchPatientsForDuplicateResolver(query: unknown) {
 
 async function searchPatientsForDuplicateResolverFuzzy(term: string): Promise<PatientRow[]> {
   const normalizedArabicTerm = normalizeArabicName(term);
+  const normalizedArabicCompactTerm = normalizeArabicNameCompact(term);
+  const normalizedArabicCompactPattern = `${normalizedArabicCompactTerm}%`;
   const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
   const normalizedIdentifierPattern = `%${normalizeIdentifierValue(term)}%`;
   const { rows } = await pool.query<PatientRow>(
@@ -466,8 +487,25 @@ async function searchPatientsForDuplicateResolverFuzzy(term: string): Promise<Pa
         limit 1
       ) as primary_identifier on true
       where
-        similarity(p.normalized_arabic_name, $1) >= 0.35
-        or similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), $2) >= 0.35
+        (
+          p.normalized_arabic_name <> ''
+          and $1 <> ''
+          and similarity(p.normalized_arabic_name, $1) >= 0.35
+        )
+        or (
+          coalesce(p.normalized_arabic_name_compact, '') <> ''
+          and $4 <> ''
+          and (
+            p.normalized_arabic_name_compact = $4
+            or p.normalized_arabic_name_compact like $5
+            or similarity(p.normalized_arabic_name_compact, $4) >= 0.35
+          )
+        )
+        or (
+          lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) <> ''
+          and $2 <> ''
+          and similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), $2) >= 0.35
+        )
         or (
           $2 <> ''
           and lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) <> ''
@@ -479,13 +517,14 @@ async function searchPatientsForDuplicateResolverFuzzy(term: string): Promise<Pa
           where pi.patient_id = p.id and pi.normalized_value ilike $3
         )
       order by greatest(
-        similarity(p.normalized_arabic_name, $1),
-        similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), $2)
+        case when p.normalized_arabic_name <> '' and $1 <> '' then similarity(p.normalized_arabic_name, $1) else 0 end,
+        case when coalesce(p.normalized_arabic_name_compact, '') <> '' and $4 <> '' then similarity(p.normalized_arabic_name_compact, $4) else 0 end,
+        case when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) <> '' and $2 <> '' then similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), $2) else 0 end
       ) desc,
       p.id desc
       limit 25
     `,
-    [normalizedArabicTerm, normalizedEnglishTerm, normalizedIdentifierPattern]
+    [normalizedArabicTerm, normalizedEnglishTerm, normalizedIdentifierPattern, normalizedArabicCompactTerm, normalizedArabicCompactPattern]
   );
   return rows;
 }
