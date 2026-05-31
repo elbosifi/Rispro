@@ -7,6 +7,8 @@ import type { UserId } from "../types/http.js";
 
 export const NO_SHOW_BOOKING_BLOCKED_MESSAGE =
   "This patient has a previous no-show appointment and cannot be booked by reception. A supervisor or super admin must authorize a new booking with a reason.";
+export const NON_ONCOLOGY_NO_SHOW_SUPER_ADMIN_MESSAGE =
+  "This non-oncology patient has a previous no-show appointment. Only a super admin can authorize a new booking after no-show, and a clear reason is required.";
 
 function httpErrorWithReasonCodes(statusCode: number, message: string, reasonCodes: string[]): HttpError {
   const error = new HttpError(statusCode, message, { reasonCodes }) as HttpError & { reasonCodes?: string[] };
@@ -50,6 +52,11 @@ interface RestrictionRow {
 
 function canAuthorizeNoShowBooking(role: Role | undefined): boolean {
   return role === "supervisor" || role === "super_admin";
+}
+
+function canAuthorizePatientCategory(role: Role | undefined, category: string | null): boolean {
+  if (category === "non_oncology") return role === "super_admin";
+  return canAuthorizeNoShowBooking(role);
 }
 
 export async function getPatientNoShowRestriction(patientId: number): Promise<PatientNoShowRestriction> {
@@ -207,16 +214,17 @@ export async function authorizeNoShowBookingRestriction(
   patientId: number,
   userId: number,
   reason: string,
-  appointmentId: number | null = null
+  appointmentId: number | null = null,
+  userRole?: Role
 ): Promise<void> {
   const cleanReason = reason.trim();
   if (!cleanReason) {
     throw new HttpError(400, "Authorization reason is required.");
   }
 
-  const previous = await client.query(
+  const previous = await client.query<{ category: string | null }>(
     `
-      select no_show_count, no_show_booking_blocked, no_show_block_reset_at, no_show_block_reset_by, no_show_block_reset_reason
+      select no_show_count, no_show_booking_blocked, no_show_block_reset_at, no_show_block_reset_by, no_show_block_reset_reason, category
       from patients
       where id = $1
       for update
@@ -225,6 +233,9 @@ export async function authorizeNoShowBookingRestriction(
   );
   if (!previous.rows[0]) {
     throw new HttpError(404, "Patient not found.");
+  }
+  if (userRole && !canAuthorizePatientCategory(userRole, previous.rows[0].category)) {
+    throw httpErrorWithReasonCodes(403, NON_ONCOLOGY_NO_SHOW_SUPER_ADMIN_MESSAGE, ["non_oncology_no_show_super_admin_required"]);
   }
 
   await client.query(
@@ -262,9 +273,9 @@ export async function enforceOrAuthorizeNoShowBooking(
   userRole: Role | undefined,
   reason: string | null | undefined
 ): Promise<boolean> {
-  const result = await client.query<{ no_show_booking_blocked: boolean }>(
+  const result = await client.query<{ no_show_booking_blocked: boolean; category: string | null }>(
     `
-      select no_show_booking_blocked
+      select no_show_booking_blocked, category
       from patients
       where id = $1
       for update
@@ -279,8 +290,12 @@ export async function enforceOrAuthorizeNoShowBooking(
     return false;
   }
 
-  if (!canAuthorizeNoShowBooking(userRole)) {
-    throw httpErrorWithReasonCodes(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE, ["patient_no_show_booking_blocked"]);
+  if (!canAuthorizePatientCategory(userRole, row.category)) {
+    throw httpErrorWithReasonCodes(
+      403,
+      row.category === "non_oncology" ? NON_ONCOLOGY_NO_SHOW_SUPER_ADMIN_MESSAGE : NO_SHOW_BOOKING_BLOCKED_MESSAGE,
+      row.category === "non_oncology" ? ["non_oncology_no_show_super_admin_required"] : ["patient_no_show_booking_blocked"]
+    );
   }
 
   const cleanReason = String(reason || "").trim();
@@ -288,7 +303,7 @@ export async function enforceOrAuthorizeNoShowBooking(
     throw httpErrorWithReasonCodes(403, "No-show booking authorization reason is required.", ["no_show_authorization_reason_required"]);
   }
 
-  await authorizeNoShowBookingRestriction(client, patientId, userId, cleanReason);
+  await authorizeNoShowBookingRestriction(client, patientId, userId, cleanReason, null, userRole);
   return true;
 }
 

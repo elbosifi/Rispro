@@ -32,6 +32,12 @@ describe("patient no-show restriction source guards", () => {
     assert.match(restrictionSource, /booking_restriction_authorized/);
   });
 
+  it("requires super admin for non-oncology restriction authorization", () => {
+    assert.match(restrictionSource, /NON_ONCOLOGY_NO_SHOW_SUPER_ADMIN_MESSAGE/);
+    assert.match(restrictionSource, /category === "non_oncology"/);
+    assert.match(restrictionSource, /non_oncology_no_show_super_admin_required/);
+  });
+
   it("enforces restriction inside create booking service", () => {
     assert.match(createSource, /isNoShowBookingBlocked/);
     assert.match(createSource, /authorizeNoShowBookingRestriction/);

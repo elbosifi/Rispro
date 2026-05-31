@@ -146,7 +146,7 @@ patientsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const patientId = asOptionalString(request.params?.patientId) ?? "";
-    const summary = await authorizePatientNoShowBooking(patientId, request.body?.reason, request.user.sub);
+    const summary = await authorizePatientNoShowBooking(patientId, request.body?.reason, request.user.sub, request.user.role);
     res.json(summary);
   })
 );

@@ -216,6 +216,8 @@ export function CreateAppointmentTab({
   const isReceptionist = currentUserRole === "receptionist";
   const isSupervisor = currentUserRole === "supervisor";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const isSelectedPatientNonOncology = form.patient?.category === "non_oncology";
+  const canDirectlyAuthorizeNoShowRestriction = isSuperAdmin || (isSupervisor && !isSelectedPatientNonOncology);
   const createOverrideRequestMutation = useCreateSchedulingOverrideRequest();
   const walkInSettingRaw = String(queueArrivalSettings?.walk_in_queue ?? "disabled").trim().toLowerCase();
   const isWalkInEnabled = queueArrivalSettings != null && ["enabled", "on", "true", "yes", "1"].includes(walkInSettingRaw);
@@ -511,7 +513,7 @@ export function CreateAppointmentTab({
       requiresReport: form.requiresReport,
       override,
       noShowAuthorizationReason:
-        patientNoShowSummary?.bookingRestricted && !override && (isSupervisor || isSuperAdmin)
+        patientNoShowSummary?.bookingRestricted && !override && canDirectlyAuthorizeNoShowRestriction
           ? noShowAuthorizationReason.trim()
           : null,
     };
@@ -579,12 +581,16 @@ export function CreateAppointmentTab({
     }
 
     if (patientNoShowSummary?.bookingRestricted) {
-      if (isSupervisor || isSuperAdmin) {
+      if (canDirectlyAuthorizeNoShowRestriction) {
         if (!noShowAuthorizationReason.trim()) {
           setSubmitLoading(false);
           setPageError(t(language, "appointments.create.noShowAuthorizationReasonRequired"));
           return;
         }
+      } else if (isSupervisor && isSelectedPatientNonOncology) {
+        setSubmitLoading(false);
+        setPageError(t(language, "appointments.create.noShowRestrictionBlockedNonOncology"));
+        return;
       } else {
         setPendingDecision(buildNoShowRestrictionDecision());
         setShowOverrideModal(true);
@@ -812,9 +818,9 @@ export function CreateAppointmentTab({
                 {patientNoShowSummary?.bookingRestricted && (
                   <div className="p-3 sm:p-4 border border-red-300 rounded-xl" style={{ background: "rgba(239, 68, 68, 0.06)", color: "#b91c1c" }}>
                     <div className="text-sm font-bold">
-                      {t(language, "appointments.create.noShowRestrictionBlocked")}
+                      {t(language, isSelectedPatientNonOncology ? "appointments.create.noShowRestrictionBlockedNonOncology" : "appointments.create.noShowRestrictionBlocked")}
                     </div>
-                    {(isSupervisor || isSuperAdmin) && (
+                    {canDirectlyAuthorizeNoShowRestriction && (
                       <div className="mt-3">
                         <label className="block text-xs font-semibold mb-1">{t(language, "appointments.create.noShowAuthorizationReason")}</label>
                         <textarea

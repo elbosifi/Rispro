@@ -28,6 +28,7 @@ import { scheduleBookingWorklistDetailReplacement } from "./dicom-service.js";
 import type { UserId, OptionalUserId, UnknownRecord } from "../types/http.js";
 import type { NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
+import type { Role } from "../types/domain.js";
 import type { PoolClient } from "pg";
 import {
   authorizeNoShowBookingRestriction,
@@ -613,7 +614,7 @@ export async function getPatientNoShowSummary(patientId: UserId): Promise<Patien
   };
 }
 
-export async function authorizePatientNoShowBooking(patientId: UserId, reason: unknown, userId: UserId): Promise<PatientNoShowRestriction> {
+export async function authorizePatientNoShowBooking(patientId: UserId, reason: unknown, userId: UserId, userRole?: Role): Promise<PatientNoShowRestriction> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const cleanUserId = normalizePositiveInteger(userId, "userId") as number;
   const cleanReason = String(reason || "").trim();
@@ -624,7 +625,7 @@ export async function authorizePatientNoShowBooking(patientId: UserId, reason: u
   const client = await pool.connect();
   try {
     await client.query("begin");
-    await authorizeNoShowBookingRestriction(client, cleanPatientId, cleanUserId, cleanReason);
+    await authorizeNoShowBookingRestriction(client, cleanPatientId, cleanUserId, cleanReason, null, userRole);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback");

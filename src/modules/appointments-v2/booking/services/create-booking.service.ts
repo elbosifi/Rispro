@@ -112,7 +112,7 @@ export async function createBookingInternal(
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
-  let noShowAuthorization: { userId: number; reason: string } | null = null;
+  let noShowAuthorization: { userId: number; reason: string; role: Role } | null = null;
   if (await isNoShowBookingBlocked(client, payload.patientId)) {
     if (payload.override) {
       const supervisor = await authenticateSupervisor(
@@ -122,11 +122,11 @@ export async function createBookingInternal(
       );
       const reason = String(payload.override.reason || "").trim();
       if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
-      noShowAuthorization = { userId: supervisor.id, reason };
+      noShowAuthorization = { userId: supervisor.id, reason, role: supervisor.role as Role };
     } else if (userRole === "supervisor" || userRole === "super_admin") {
       const reason = String(payload.noShowAuthorizationReason || "").trim();
       if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
-      noShowAuthorization = { userId, reason };
+      noShowAuthorization = { userId, reason, role: userRole };
     } else {
       const error = new HttpError(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE) as HttpError & { reasonCodes?: string[] };
       error.reasonCodes = ["patient_no_show_booking_blocked"];
@@ -391,7 +391,7 @@ export async function createBookingInternal(
   const consumedSpecialQuota = decision.consumedCapacityMode === "special";
 
   if (noShowAuthorization) {
-    await authorizeNoShowBookingRestriction(client, payload.patientId, noShowAuthorization.userId, noShowAuthorization.reason);
+    await authorizeNoShowBookingRestriction(client, payload.patientId, noShowAuthorization.userId, noShowAuthorization.reason, null, noShowAuthorization.role);
   }
 
   // 10. Insert the booking

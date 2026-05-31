@@ -14,6 +14,7 @@ describe("no-show restriction UI source guards", () => {
   it("shows the active no-show booking restriction and requires authorization reason", () => {
     expect(source).toContain("patientNoShowSummary?.bookingRestricted");
     expect(source).toContain("appointments.create.noShowRestrictionBlocked");
+    expect(source).toContain("appointments.create.noShowRestrictionBlockedNonOncology");
     expect(source).toContain("noShowAuthorizationReason");
     expect(source).toContain("appointments.create.noShowAuthorizationReasonRequired");
   });
@@ -22,7 +23,8 @@ describe("no-show restriction UI source guards", () => {
     expect(drawerSource).toContain("No-show booking restriction");
     expect(drawerSource).toContain("summary.noShow.noShowCount");
     expect(drawerSource).toContain("summary.noShow.bookingRestricted");
-    expect(drawerSource).toContain("Authorize booking after no-show");
+    expect(drawerSource).toContain("patients.noShowRestriction.authorize");
+    expect(drawerSource).toContain("patients.noShowRestriction.superAdminOnlyNonOncology");
     expect(drawerSource).toContain("authorizePatientNoShowBooking");
   });
 });

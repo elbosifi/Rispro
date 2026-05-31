@@ -196,7 +196,7 @@ export async function rescheduleBookingInternal(
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
   }
   await assertPatientMeetsBookingQueueRequirements(client, booking.patientId, userRole);
-  let noShowAuthorization: { userId: number; reason: string } | null = null;
+  let noShowAuthorization: { userId: number; reason: string; role: Role } | null = null;
   if (await isNoShowBookingBlocked(client, booking.patientId)) {
     if (override) {
       const supervisor = await authenticateSupervisor(
@@ -206,11 +206,11 @@ export async function rescheduleBookingInternal(
       );
       const reason = String(override.reason || "").trim();
       if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
-      noShowAuthorization = { userId: supervisor.id, reason };
+      noShowAuthorization = { userId: supervisor.id, reason, role: supervisor.role as Role };
     } else if (userRole === "supervisor" || userRole === "super_admin") {
       const reason = String(noShowAuthorizationReason || "").trim();
       if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
-      noShowAuthorization = { userId, reason };
+      noShowAuthorization = { userId, reason, role: userRole };
     } else {
       const error = new HttpError(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE) as HttpError & { reasonCodes?: string[] };
       error.reasonCodes = ["patient_no_show_booking_blocked"];
@@ -550,7 +550,7 @@ export async function rescheduleBookingInternal(
   }
 
   if (noShowAuthorization) {
-    await authorizeNoShowBookingRestriction(client, booking.patientId, noShowAuthorization.userId, noShowAuthorization.reason, bookingId);
+    await authorizeNoShowBookingRestriction(client, booking.patientId, noShowAuthorization.userId, noShowAuthorization.reason, bookingId, noShowAuthorization.role);
   }
 
   await updateBookingForReschedule(

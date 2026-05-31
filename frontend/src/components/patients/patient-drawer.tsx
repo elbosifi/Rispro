@@ -71,7 +71,6 @@ export function PatientDrawer({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isRtl = language === "ar";
-  const canAuthorizeNoShow = user?.role === "supervisor" || user?.role === "super_admin";
 
   const { data: summary, isLoading, error } = useQuery({
     queryKey: ["patient-directory-summary", patientId],
@@ -140,6 +139,9 @@ export function PatientDrawer({
   }
 
   if (!summary) return null;
+  const canAuthorizeNoShow =
+    user?.role === "super_admin" ||
+    (user?.role === "supervisor" && summary.category !== "non_oncology");
   const lastAppointmentId = summary.lastAppointment?.id ?? null;
   const registeredBy =
     summary.registration?.createdByName ||
@@ -322,21 +324,21 @@ export function PatientDrawer({
 
           <section>
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-              {language === "ar" ? "تقييد عدم الحضور" : "No-show booking restriction"}
+              {t(language, "patients.noShowRestriction.title")}
             </h3>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{language === "ar" ? "عدد عدم الحضور" : "No-show count"}</span>
+                <span className="text-muted-foreground">{t(language, "patients.noShowRestriction.count")}</span>
                 <span>{summary.noShow.noShowCount}</span>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{language === "ar" ? "الحجز مقيد حاليا" : "Booking currently restricted"}</span>
+                <span className="text-muted-foreground">{t(language, "patients.noShowRestriction.currentlyRestricted")}</span>
                 <Badge variant={summary.noShow.bookingRestricted ? "error" : "success"} size="sm">
                   {summary.noShow.bookingRestricted ? (language === "ar" ? "نعم" : "Yes") : (language === "ar" ? "لا" : "No")}
                 </Badge>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{language === "ar" ? "آخر عدم حضور" : "Last no-show appointment"}</span>
+                <span className="text-muted-foreground">{t(language, "patients.noShowRestriction.lastNoShow")}</span>
                 <span className="text-end">
                   {summary.noShow.lastNoShowAppointment
                     ? `${summary.noShow.lastNoShowAppointment.date} ${summary.noShow.lastNoShowAppointment.modalityName}`
@@ -344,7 +346,7 @@ export function PatientDrawer({
                 </span>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{language === "ar" ? "آخر سماح" : "Last authorization"}</span>
+                <span className="text-muted-foreground">{t(language, "patients.noShowRestriction.lastAuthorization")}</span>
                 <span className="text-end">
                   {summary.noShow.lastAuthorizationDate
                     ? `${formatDateTimeLy(summary.noShow.lastAuthorizationDate)} - ${summary.noShow.lastAuthorizationUser?.fullName || summary.noShow.lastAuthorizationUser?.username || "—"}`
@@ -353,14 +355,19 @@ export function PatientDrawer({
               </div>
               {summary.noShow.lastAuthorizationReason && (
                 <div className="rounded-lg border border-border bg-muted/20 p-2">
-                  <div className="text-muted-foreground">{language === "ar" ? "سبب آخر سماح" : "Last authorization reason"}</div>
+                  <div className="text-muted-foreground">{t(language, "patients.noShowRestriction.lastAuthorizationReason")}</div>
                   <div>{summary.noShow.lastAuthorizationReason}</div>
                 </div>
               )}
               {summary.noShow.bookingRestricted && canAuthorizeNoShow && (
                 <Button size="sm" variant="outline" onClick={handleAuthorizeNoShow} disabled={authorizeNoShow.isPending}>
-                  {language === "ar" ? "السماح بالحجز بعد عدم الحضور" : "Authorize booking after no-show"}
+                  {t(language, "patients.noShowRestriction.authorize")}
                 </Button>
+              )}
+              {summary.noShow.bookingRestricted && summary.category === "non_oncology" && user?.role === "supervisor" && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                  {t(language, "patients.noShowRestriction.superAdminOnlyNonOncology")}
+                </div>
               )}
             </div>
           </section>
