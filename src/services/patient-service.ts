@@ -1532,6 +1532,15 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   } else if (sortBy === "mrn") {
     orderBy = "fp.mrn asc nulls last, fp.id desc";
   }
+  if (term) {
+    if (sortBy === "recent") {
+      orderBy = "fp.rank asc, fp.id desc";
+    } else if (sortBy === "mrn") {
+      orderBy = "fp.rank asc, fp.mrn asc nulls last, fp.id desc";
+    } else {
+      orderBy = "fp.rank asc, fp.normalized_arabic_name asc, fp.arabic_full_name asc";
+    }
+  }
 
   const query = `
     with filtered_patients as (

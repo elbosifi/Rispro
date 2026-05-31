@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { getPatientDirectory } from "./patient-service.js";
+import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 
 function uniqueSuffix(): string {
   return `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
@@ -169,5 +170,74 @@ test("patient directory maps next and last appointments into camelCase rows", as
     });
   } finally {
     poolWithQuery.query = originalQuery;
+  }
+});
+
+test("patient directory search orders by best match before recent sort", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+
+  const suffix = uniqueSuffix();
+  const passwordHash = bcrypt.hashSync("test-pass", 10);
+  const user = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_dir_rank_${suffix}`, `Directory Rank Tester ${suffix}`, passwordHash],
+  );
+  const userId = Number(user.rows[0]?.id);
+  const createdIds: number[] = [];
+
+  const insertPatient = async (arabicFullName: string, englishFullName: string) => {
+    const result = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name, normalized_arabic_name_compact,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, 'national_id', $1::text, $2, $3, $4, $5, 30, '1996-01-01', 'M', $6, 'city', $7, $7)
+        returning id
+      `,
+      [
+        String(Math.floor(Math.random() * 1000000000000)).padStart(12, "0"),
+        arabicFullName,
+        englishFullName,
+        normalizeArabicName(arabicFullName),
+        normalizeArabicNameCompact(arabicFullName),
+        `09${String(Math.floor(Math.random() * 100000000)).padStart(8, "0")}`,
+        userId,
+      ],
+    );
+    const id = Number(result.rows[0]?.id);
+    createdIds.push(id);
+    return id;
+  };
+
+  try {
+    const exactOlder = await insertPatient(`عبدالله ${suffix}`, `Exact Older ${suffix}`);
+    const weakNewer = await insertPatient(`مريض عبدالله ${suffix}`, `Weak Newer ${suffix}`);
+
+    assert.ok(weakNewer > exactOlder, "fixture requires weaker match to be newer");
+
+    const directory = await getPatientDirectory({
+      search: `عبد الله ${suffix}`,
+      sortBy: "recent",
+      page: 1,
+      pageSize: 25,
+    });
+    const rankedIds = directory.patients.map((patient) => patient.id);
+
+    assert.ok(rankedIds.indexOf(exactOlder) >= 0);
+    assert.ok(rankedIds.indexOf(weakNewer) >= 0);
+    assert.ok(rankedIds.indexOf(exactOlder) < rankedIds.indexOf(weakNewer));
+  } finally {
+    if (createdIds.length > 0) {
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [userId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);
   }
 });
