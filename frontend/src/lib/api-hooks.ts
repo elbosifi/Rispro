@@ -1117,7 +1117,6 @@ export async function disableOwnActionPin(currentPassword: string): Promise<{ ok
 }
 
 export async function logout() {
-  await api("/user-notifications/push-unsubscribe", { method: "POST", body: JSON.stringify({ subscription: null }) }).catch(() => undefined);
   await api("/auth/logout", { method: "POST" });
 }
 

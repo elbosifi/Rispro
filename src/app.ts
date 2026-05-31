@@ -16,7 +16,6 @@ import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
 import { settingsRouter } from "./routes/settings.js";
-import { userNotificationsRouter } from "./routes/user-notifications.js";
 import { nameDictionaryRouter } from "./routes/name-dictionary.js";
 import { dicomRouter } from "./routes/dicom.js";
 import { pacsRouter } from "./routes/pacs.js";
@@ -130,7 +129,6 @@ export function createApp(): Application {
   app.use("/api/modality", modalityRouter);
   app.use("/api/audit", auditRouter);
   app.use("/api/settings", settingsRouter);
-  app.use("/api/user-notifications", userNotificationsRouter);
   app.use("/api/name-dictionary", nameDictionaryRouter);
   app.use("/api/dicom", dicomRouter);
   app.use("/api/pacs", pacsRouter);
