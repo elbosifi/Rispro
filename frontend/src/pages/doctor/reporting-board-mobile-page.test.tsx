@@ -139,6 +139,30 @@ describe("ReportingBoardMobilePage", () => {
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledTimes(3));
   });
 
+  it("does not pin the notification controls over the case list", async () => {
+    renderPage();
+
+    const button = await screen.findByRole("button", { name: /Enable notifications/i });
+    expect(button.closest("footer")).toBeNull();
+    const container = button.closest("section");
+    const className = container?.getAttribute("class") ?? "";
+    expect(className).not.toContain("fixed");
+    expect(className).not.toContain("bottom-0");
+  });
+
+  it("does not show read-only copy when authenticated actions are available", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true },
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: /Enable notifications/i })).toBeTruthy();
+    expect(screen.queryByText("Read-only via QR.")).toBeNull();
+    expect(screen.getByText("Authenticated actions are available for your account.")).toBeTruthy();
+  });
+
   it("subscribes to saved-view notifications from the public QR page", async () => {
     const subscribe = vi.fn().mockResolvedValue({ endpoint: "https://push.example/sub", toJSON: () => ({ endpoint: "https://push.example/sub", keys: { p256dh: "p", auth: "a" } }) });
     const register = vi.fn().mockResolvedValue({ pushManager: { subscribe } });

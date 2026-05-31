@@ -175,7 +175,7 @@ export function ReportingBoardMobilePage() {
   }
 
   return (
-    <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-28 pt-5 text-slate-950">
+    <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-5 text-slate-950">
       <header className="mx-auto max-w-xl">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white">RIS<br />pro</div>
@@ -223,28 +223,28 @@ export function ReportingBoardMobilePage() {
         </div>
       </section>
 
+      <section className="mx-auto mt-4 grid max-w-xl gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div>
+          {data.allowedActions.readOnly && <p className="font-bold text-slate-950">Read-only via QR.</p>}
+          <p className="text-sm text-slate-500">
+            {data.allowedActions.readOnly ? "Sign in to RISpro to reassign cases." : "Authenticated actions are available for your account."}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={pushSubscribeMutation.isPending}
+          onClick={() => pushSubscribeMutation.mutate()}
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white disabled:opacity-60"
+        >
+          <Bell size={16} /> {pushSubscribeMutation.isPending ? "Enabling..." : "Enable notifications"}
+        </button>
+        {pushMessage && <p className="text-sm font-medium text-teal-700">{pushMessage}</p>}
+      </section>
+
       <section className="mx-auto mt-5 grid max-w-xl gap-3">
         {data.cases.map((row) => <CaseCard key={row.appointmentId} row={row} onOpen={() => setSelectedCase(row)} />)}
         {data.cases.length === 0 && <p className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-sm text-slate-500">No cases match this saved view.</p>}
       </section>
-
-      <footer className="fixed inset-x-0 bottom-0 border-t border-teal-100 bg-white/95 p-4 backdrop-blur">
-        <div className="mx-auto grid max-w-xl gap-3">
-          <div>
-            <p className="font-bold text-slate-950">Read-only via QR.</p>
-            <p className="text-sm text-slate-500">{data.allowedActions.readOnly ? "Sign in to RISpro to reassign cases." : "Authenticated actions are available for your account."}</p>
-          </div>
-          <button
-            type="button"
-            disabled={pushSubscribeMutation.isPending}
-            onClick={() => pushSubscribeMutation.mutate()}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white disabled:opacity-60"
-          >
-            <Bell size={16} /> {pushSubscribeMutation.isPending ? "Enabling..." : "Enable notifications"}
-          </button>
-          {pushMessage && <p className="text-sm font-medium text-teal-700">{pushMessage}</p>}
-        </div>
-      </footer>
 
       {selectedCase && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setSelectedCase(null); }}>
