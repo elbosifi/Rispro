@@ -10,7 +10,11 @@ import {
   useApproveSchedulingOverrideRequest,
   useCancelSchedulingOverrideRequest,
   useRejectSchedulingOverrideRequest,
+  useSendUserTestPush,
   useSchedulingOverrideRequests,
+  useSubscribeUserPush,
+  useUnsubscribeUserPush,
+  useUserPushConfig,
 } from "../api";
 import type { SchedulingOverrideRequestDto, SchedulingOverrideRequestStatus, SchedulingOverrideType } from "../types";
 import {
@@ -23,6 +27,19 @@ import {
 const STATUS_OPTIONS: Array<SchedulingOverrideRequestStatus | ""> = ["", "pending", "approved", "rejected", "cancelled", "failed", "expired"];
 const REQUEST_TYPE_OPTIONS = ["", "create_booking", "reschedule_booking"] as const;
 const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_weekday_override", "category_override", "exam_mix_override", "total_capacity_override"];
+
+function pushSupported(): boolean {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function urlBase64ToUint8Array(value: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output.buffer;
+}
 
 export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }) {
   const { language } = useLanguage();
@@ -67,11 +84,98 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
               </button>
             </div>
 
+            <OverridePushControls />
             <SchedulingOverrideRequestsWorkspace user={user} variant="drawer" />
           </aside>
         </div>
       ) : null}
     </>
+  );
+}
+
+function OverridePushControls() {
+  const configQuery = useUserPushConfig();
+  const subscribeMutation = useSubscribeUserPush();
+  const unsubscribeMutation = useUnsubscribeUserPush();
+  const testMutation = useSendUserTestPush();
+  const [message, setMessage] = useState<string | null>(null);
+  const supported = pushSupported();
+  const config = configQuery.data;
+
+  async function currentSubscription(): Promise<PushSubscription | null> {
+    if (!supported) return null;
+    const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+    return registration.pushManager.getSubscription();
+  }
+
+  async function enable() {
+    setMessage(null);
+    if (!config?.enabled || !config.publicKey) throw new Error("Browser notifications are not configured.");
+    if (!supported) throw new Error("Browser notifications are not supported on this device.");
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Notification permission was not granted.");
+    const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+    const existing = await registration.pushManager.getSubscription();
+    const subscription = existing ?? await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+    });
+    await subscribeMutation.mutateAsync(subscription.toJSON());
+    setMessage("Browser notifications enabled.");
+  }
+
+  async function disable() {
+    setMessage(null);
+    const subscription = await currentSubscription();
+    await unsubscribeMutation.mutateAsync(subscription?.toJSON() ?? null);
+    await subscription?.unsubscribe().catch(() => false);
+    setMessage("Browser notifications disabled.");
+  }
+
+  async function sendTest() {
+    setMessage(null);
+    const result = await testMutation.mutateAsync();
+    setMessage(result.sent > 0 ? "Test notification sent." : "No active browser subscription found.");
+  }
+
+  async function run(action: () => Promise<void>, fallback: string) {
+    try {
+      await action();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : fallback);
+    }
+  }
+
+  return (
+    <div className="border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-foreground">Browser notifications</p>
+          <p className="text-xs text-muted-foreground">
+            {!supported
+              ? "Not supported on this device."
+              : config?.subscribed
+                ? "Enabled for override request alerts."
+                : "Enable alerts for override request updates."}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {config?.subscribed ? (
+            <Button type="button" size="sm" variant="secondary" onClick={() => void run(disable, "Could not disable notifications.")} disabled={unsubscribeMutation.isPending}>
+              Disable notifications
+            </Button>
+          ) : (
+            <Button type="button" size="sm" variant="secondary" onClick={() => void run(enable, "Could not enable notifications.")} disabled={!supported || !config?.enabled || subscribeMutation.isPending}>
+              Enable notifications
+            </Button>
+          )}
+          <Button type="button" size="sm" variant="secondary" onClick={() => void run(sendTest, "Could not send test notification.")} disabled={!config?.subscribed || testMutation.isPending}>
+            Send test notification
+          </Button>
+        </div>
+      </div>
+      {message ? <p className="mt-2 text-xs text-muted-foreground">{message}</p> : null}
+    </div>
   );
 }
 
