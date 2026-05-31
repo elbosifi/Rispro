@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { invalidateAllCache } from "../utils/cache.js";
+import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 import {
   searchPatients,
   createPatient,
@@ -505,6 +506,71 @@ test("searchPatients: ranks adjacent first-second name tokens before later order
     assert.ok(idxLaterOrdered >= 0, "Later ordered name should appear");
     assert.ok(idxFirstSecondThird < idxFirstThirdSecond, "First-second-third should rank before first-third-second");
     assert.ok(idxFirstSecondThird < idxLaterOrdered, "First-second-third should rank before later ordered match");
+  } finally {
+    if (createdPatientIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]).catch(() => undefined);
+  }
+});
+
+test("searchPatients: matches Arabic compound names with or without spaces", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_ar_compound_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const createdPatientIds: number[] = [];
+
+  const insertPatient = async (arabicFullName: string, englishFullName: string) => {
+    const nationalId = uniqueNationalId("5");
+    const inserted = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name, normalized_arabic_name_compact,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, 'national_id', $1::text, $2, $3, $4, $5, 30, '1996-01-01', 'M', '0912345678', 'city', $6, $6)
+        returning id
+      `,
+      [
+        nationalId,
+        arabicFullName,
+        englishFullName,
+        normalizeArabicName(arabicFullName),
+        normalizeArabicNameCompact(arabicFullName),
+        receptionistUserId,
+      ]
+    );
+    const id = Number(inserted.rows[0]?.id);
+    createdPatientIds.push(id);
+    return id;
+  };
+
+  try {
+    const abdullahCompact = await insertPatient(`عبدالله ${suffix}`, `Abdullah ${suffix}`);
+    const abdullahSpaced = await insertPatient(`عبد الله ${suffix}`, `Abd Allah ${suffix}`);
+    const abdulrahmanCompact = await insertPatient(`عبدالرحمن ${suffix}`, `Abdulrahman ${suffix}`);
+    const nuruddinCompact = await insertPatient(`نورالدين ${suffix}`, `Nuruddin ${suffix}`);
+    const normalArabic = await insertPatient(`محمد علي ${suffix}`, `Mohamed Ali ${suffix}`);
+
+    assert.equal((await searchPatients(`عبد الله ${suffix}`)).find((row) => Number(row.id) === abdullahCompact)?.arabic_full_name, `عبدالله ${suffix}`);
+    assert.equal((await searchPatients(`عبدالله ${suffix}`)).find((row) => Number(row.id) === abdullahSpaced)?.arabic_full_name, `عبد الله ${suffix}`);
+    assert.ok((await searchPatients(`عبد الرحمن ${suffix}`)).some((row) => Number(row.id) === abdulrahmanCompact));
+    assert.ok((await searchPatients(`نور الدين ${suffix}`)).some((row) => Number(row.id) === nuruddinCompact));
+    assert.ok((await searchPatients(`محمد ${suffix}`)).some((row) => Number(row.id) === normalArabic));
+    assert.ok((await searchPatients(`Mohamed Ali ${suffix}`)).some((row) => Number(row.id) === normalArabic));
   } finally {
     if (createdPatientIds.length > 0) {
       await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);

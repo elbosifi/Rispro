@@ -1,3 +1,5 @@
+import { normalizeArabicName, normalizeArabicNameCompact } from "./normalize.js";
+
 export interface NameDictionaryLookup {
   arabic_text: string;
   english_text: string;
@@ -6,17 +8,6 @@ export interface NameDictionaryLookup {
 export interface NameGenerationResult {
   englishName: string;
   missingTokens: string[];
-}
-
-function normalizeArabicToken(text: string): string {
-  return text
-    .trim()
-    .replace(/[\u0623\u0625\u0622]/g, "\u0627")
-    .replace(/\u0629/g, "\u0647")
-    .replace(/\u0649/g, "\u064A")
-    .replace(/\u0624/g, "\u0648")
-    .replace(/\u0626/g, "\u064A")
-    .replace(/\s+/g, " ");
 }
 
 export function generateEnglishFromDictionary(
@@ -30,16 +21,30 @@ export function generateEnglishFromDictionary(
   const normalizedDict = new Map<string, string>();
 
   for (const entry of dictionary) {
-    const normalizedKey = normalizeArabicToken(entry.arabic_text);
+    const normalizedKey = normalizeArabicName(entry.arabic_text);
+    const compactKey = normalizeArabicNameCompact(entry.arabic_text);
+
     normalizedDict.set(normalizedKey, entry.english_text);
+    normalizedDict.set(compactKey, entry.english_text);
   }
 
   const englishParts: string[] = [];
   const missingTokens: string[] = [];
 
-  for (const token of tokens) {
-    const normalizedToken = normalizeArabicToken(token);
-    const englishMatch = normalizedDict.get(normalizedToken);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const twoTokenPhrase = tokens.slice(index, index + 2).join(" ");
+    const phraseMatch = normalizedDict.get(normalizeArabicName(twoTokenPhrase))
+      || normalizedDict.get(normalizeArabicNameCompact(twoTokenPhrase));
+
+    if (phraseMatch) {
+      englishParts.push(phraseMatch);
+      index += 1;
+      continue;
+    }
+
+    const token = tokens[index] || "";
+    const englishMatch = normalizedDict.get(normalizeArabicName(token))
+      || normalizedDict.get(normalizeArabicNameCompact(token));
 
     if (englishMatch) {
       englishParts.push(englishMatch);

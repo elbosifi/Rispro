@@ -1,6 +1,13 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { normalizePositiveInteger, buildEstimatedDobFromAge, formatDateForSql, normalizeArabicName, normalizeLibyanPhone } from "../utils/normalize.js";
+import {
+  normalizePositiveInteger,
+  buildEstimatedDobFromAge,
+  formatDateForSql,
+  normalizeArabicName,
+  normalizeArabicNameCompact,
+  normalizeLibyanPhone
+} from "../utils/normalize.js";
 import { validateIsoDate } from "../utils/date.js";
 import { getCached, setCached } from "../utils/cache.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -96,6 +103,7 @@ export interface ValidatedPatientPayload {
   arabicFullName: string;
   englishFullName: string;
   normalizedArabicName: string;
+  normalizedArabicNameCompact: string;
   parsedAge: number;
   demographicsEstimated: boolean;
   estimatedDob: string | null;
@@ -512,6 +520,7 @@ async function validatePatientPayload(
     arabicFullName: arabicFullName.trim(),
     englishFullName: finalEnglishName,
     normalizedArabicName: normalizeArabicName(arabicFullName),
+    normalizedArabicNameCompact: normalizeArabicNameCompact(arabicFullName),
     parsedAge: finalAge,
     demographicsEstimated: cleanDemographicsEstimated,
     estimatedDob: finalDob || formatDateForSql(buildEstimatedDobFromAge(finalAge)),
@@ -620,7 +629,9 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
   const pattern = `%${term}%`;
   const searchTokens = term ? term.toLowerCase().replace(/\s+/g, " ").split(" ").filter(Boolean) : [];
   const normalizedArabicTerm = normalizeArabicName(term);
+  const normalizedArabicCompactTerm = normalizeArabicNameCompact(term);
   const normalizedPattern = `%${normalizedArabicTerm}%`;
+  const normalizedCompactPattern = `%${normalizedArabicCompactTerm}%`;
   const normalizedIdentifierPattern = `%${normalizeIdentifierValue(term)}%`;
   const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
   const normalizedArabicPrefixPattern = `${normalizedArabicTerm}%`;
@@ -683,6 +694,7 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
       or p.phone_2 ilike $2
       or p.arabic_full_name ilike $2
       or p.normalized_arabic_name ilike $3
+      or coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) ilike $14
       or p.english_full_name ilike $2
       or (
         $11 <> ''
@@ -694,19 +706,35 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
     order by
       case
         when $1 = '' then 99
-        when p.normalized_arabic_name = $5 then 1
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 1
-        when p.normalized_arabic_name like $7 then 2
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 2
-        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 3
-        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 3
-        when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 4
-        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 4
-        when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 5
-        when $12 <> '' and p.normalized_arabic_name ~* $12 then 5
-        when p.normalized_arabic_name like $9 then 6
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 6
-        else 7
+        when p.mrn ilike $2
+          or p.national_id ilike $2
+          or p.identifier_value ilike $2
+          or p.phone_1 ilike $2
+          or p.phone_2 ilike $2
+          or exists (
+            select 1
+            from patient_identifiers pi
+            where
+              pi.patient_id = p.id
+              and (
+                pi.value ilike $2
+                or pi.normalized_value ilike $4
+              )
+          ) then 1
+        when coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) = $13 then 2
+        when p.normalized_arabic_name = $5 then 3
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 3
+        when p.normalized_arabic_name like $7 then 4
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 4
+        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 5
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 5
+        when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 6
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 6
+        when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 7
+        when $12 <> '' and p.normalized_arabic_name ~* $12 then 7
+        when p.normalized_arabic_name like $9 then 8
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 8
+        else 9
       end asc,
       p.id desc
     limit 25
@@ -724,7 +752,9 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
     normalizedArabicLaterTokenPattern,
     normalizedEnglishLaterTokenPattern,
     orderedEnglishPattern,
-    orderedArabicPattern
+    orderedArabicPattern,
+    normalizedArabicCompactTerm,
+    normalizedCompactPattern
   ]);
   return rows;
 }
@@ -939,6 +969,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
             arabic_full_name,
             english_full_name,
             normalized_arabic_name,
+            normalized_arabic_name_compact,
             age_years,
             demographics_estimated,
             estimated_date_of_birth,
@@ -962,12 +993,13 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
             $9,
             $10,
             $11,
-            nullif($12, ''),
+            $12,
             nullif($13, ''),
             nullif($14, ''),
-            $15,
+            nullif($15, ''),
             $16,
-            $16
+            $17,
+            $17
           )
           returning *
         `,
@@ -979,6 +1011,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
           validated.arabicFullName,
           validated.englishFullName,
           validated.normalizedArabicName,
+          validated.normalizedArabicNameCompact,
           validated.parsedAge,
           validated.demographicsEstimated,
           validated.estimatedDob,
@@ -1057,15 +1090,16 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
           arabic_full_name = $5,
           english_full_name = nullif($6, ''),
           normalized_arabic_name = $7,
-          age_years = $8,
-          demographics_estimated = $9,
-          estimated_date_of_birth = $10,
-          sex = $11,
-          phone_1 = nullif($12, ''),
-          phone_2 = nullif($13, ''),
-          address = nullif($14, ''),
-          category = $15,
-          updated_by_user_id = $16,
+          normalized_arabic_name_compact = $8,
+          age_years = $9,
+          demographics_estimated = $10,
+          estimated_date_of_birth = $11,
+          sex = $12,
+          phone_1 = nullif($13, ''),
+          phone_2 = nullif($14, ''),
+          address = nullif($15, ''),
+          category = $16,
+          updated_by_user_id = $17,
           updated_at = now()
         where id = $1
         returning *
@@ -1078,6 +1112,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
         validated.arabicFullName,
         validated.englishFullName,
         validated.normalizedArabicName,
+        validated.normalizedArabicNameCompact,
         validated.parsedAge,
         validated.demographicsEstimated,
         validated.estimatedDob,
@@ -1437,7 +1472,9 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
 
   const normalizedTerm = term ? `%${term}%` : "%";
   const normalizedArabicTerm = term ? normalizeArabicName(term) : "";
+  const normalizedArabicCompactTerm = term ? normalizeArabicNameCompact(term) : "";
   const normalizedPattern = normalizedArabicTerm ? `%${normalizedArabicTerm}%` : "%";
+  const normalizedCompactPattern = normalizedArabicCompactTerm ? `%${normalizedArabicCompactTerm}%` : "%";
   const normalizedIdentifierPattern = term ? `%${normalizeIdentifierValue(term)}%` : "%";
   const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
   const normalizedArabicPrefixPattern = `${normalizedArabicTerm}%`;
@@ -1463,6 +1500,7 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
       or p.phone_2 ilike '${normalizedTerm}'
       or p.arabic_full_name ilike '${normalizedTerm}'
       or p.normalized_arabic_name ilike '${normalizedPattern}'
+      or coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) ilike '${normalizedCompactPattern}'
       or p.english_full_name ilike '${normalizedTerm}'
       or exists (
         select 1 from patient_identifiers pi
@@ -1501,17 +1539,23 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         p.estimated_date_of_birth,
         case
           when '${term}' = '' then 99
-          when split_part(p.normalized_arabic_name, ' ', 1) = '${normalizedArabicTerm}' then 1
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = '${normalizedEnglishTerm}' then 1
-          when split_part(p.normalized_arabic_name, ' ', 1) like '${normalizedArabicPrefixPattern}' then 2
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like '${normalizedEnglishPrefixPattern}' then 2
-          when p.normalized_arabic_name = '${normalizedArabicTerm}' then 3
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = '${normalizedEnglishTerm}' then 3
-          when p.normalized_arabic_name like '${normalizedArabicPrefixPattern}' then 4
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishPrefixPattern}' then 4
-          when p.normalized_arabic_name like '${normalizedArabicLaterTokenPattern}' then 5
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishLaterTokenPattern}' then 5
-          else 6
+          when p.mrn ilike '${normalizedTerm}'
+            or p.national_id ilike '${normalizedTerm}'
+            or p.identifier_value ilike '${normalizedTerm}'
+            or p.phone_1 ilike '${normalizedTerm}'
+            or p.phone_2 ilike '${normalizedTerm}' then 1
+          when coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) = '${normalizedArabicCompactTerm}' then 2
+          when split_part(p.normalized_arabic_name, ' ', 1) = '${normalizedArabicTerm}' then 3
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = '${normalizedEnglishTerm}' then 3
+          when split_part(p.normalized_arabic_name, ' ', 1) like '${normalizedArabicPrefixPattern}' then 4
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like '${normalizedEnglishPrefixPattern}' then 4
+          when p.normalized_arabic_name = '${normalizedArabicTerm}' then 5
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = '${normalizedEnglishTerm}' then 5
+          when p.normalized_arabic_name like '${normalizedArabicPrefixPattern}' then 6
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishPrefixPattern}' then 6
+          when p.normalized_arabic_name like '${normalizedArabicLaterTokenPattern}' then 7
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishLaterTokenPattern}' then 7
+          else 8
         end as rank
       from patients p
       where ${searchWhere}

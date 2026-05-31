@@ -8,6 +8,8 @@ const arabicVariants: [RegExp, string][] = [
   [/\u0626/g, "\u064A"]
 ];
 
+const arabicDiacriticsAndTatweel = /[\u0640\u064B-\u065F\u0670]/g;
+
 export interface NormalizePositiveIntegerOptions {
   required?: boolean;
   max?: number;
@@ -53,6 +55,12 @@ export function normalizeArabicName(value: unknown): string {
   }
 
   return result;
+}
+
+export function normalizeArabicNameCompact(value: unknown): string {
+  return normalizeArabicName(value)
+    .replace(arabicDiacriticsAndTatweel, "")
+    .replace(/\s+/g, "");
 }
 
 export function normalizeLibyanPhone(value: unknown): string {
