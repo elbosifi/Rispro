@@ -7,6 +7,7 @@ create table if not exists user_web_push_subscriptions (
   subscription_hash text not null,
   user_agent text,
   enabled boolean not null default true,
+  last_seen_at timestamptz,
   last_success_at timestamptz,
   last_failure_at timestamptz,
   disabled_at timestamptz,

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { changeOwnPassword, fetchCurrentSession, login as loginApi, logout as logoutApi, reAuthSupervisor } from "@/lib/api-hooks";
+import { unsubscribeUserPush } from "@/v2/appointments/api";
 import type { User } from "@/types/api";
 
 interface AuthContextValue {
@@ -78,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    await unsubscribeUserPush(null).catch(() => undefined);
     await logoutMutation.mutateAsync();
   };
 

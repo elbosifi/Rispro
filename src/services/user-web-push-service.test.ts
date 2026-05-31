@@ -9,6 +9,7 @@ describe("user web push service", () => {
     assert.match(migration, /create table if not exists user_web_push_subscriptions/);
     assert.match(migration, /user_id bigint not null references users\(id\)/);
     assert.match(migration, /unique \(user_id, subscription_hash\)/);
+    assert.match(migration, /last_seen_at timestamptz/);
     assert.doesNotMatch(migration, /patient_web_push_subscriptions/);
     assert.doesNotMatch(migration, /reporting_board_web_push_subscriptions/);
   });
@@ -32,6 +33,8 @@ describe("user web push service", () => {
     assert.match(source, /id <> \$2/);
     assert.match(source, /statusCode === 404 \|\| statusCode === 410/);
     assert.match(source, /enabled = case when \$2 then false else enabled end/);
+    assert.match(source, /last_seen_at = now\(\)/);
+    assert.match(source, /coalesce\(last_seen_at, updated_at, created_at\) >= now\(\) - \(\$2::text \|\| ' hours'\)::interval/);
   });
 
   it("wires create approve and reject lifecycle hooks without awaiting delivery", async () => {

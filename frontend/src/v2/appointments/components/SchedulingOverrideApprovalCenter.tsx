@@ -45,6 +45,7 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   const { language } = useLanguage();
   const [open, setOpen] = useState(false);
   const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
+  const pushConfigQuery = useUserPushConfig();
 
   const actionableCount = badgeQuery.data?.requests.filter((request) => {
     if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
@@ -76,15 +77,18 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
           <aside className="absolute bottom-0 right-0 top-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div>
-                <h2 className="text-base font-semibold text-foreground">{t(language, "overrideRequests.title")}</h2>
-                <p className="text-xs text-muted-foreground">{t(language, "overrideRequests.pendingNotConfirmed")}</p>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-semibold text-foreground">Override notifications</h2>
+                  {actionableCount > 0 ? <Badge variant="error">{actionableCount}</Badge> : null}
+                </div>
+                <p className="text-xs text-muted-foreground">Browser alerts and pending override requests in one drawer.</p>
               </div>
               <button type="button" className="btn-ghost" onClick={() => setOpen(false)} aria-label={t(language, "overrideRequests.close")}>
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <OverridePushControls />
+            <OverridePushControls configQuery={pushConfigQuery} />
             <SchedulingOverrideRequestsWorkspace user={user} variant="drawer" />
           </aside>
         </div>
@@ -93,8 +97,7 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   );
 }
 
-function OverridePushControls() {
-  const configQuery = useUserPushConfig();
+function OverridePushControls({ configQuery }: { configQuery: ReturnType<typeof useUserPushConfig> }) {
   const subscribeMutation = useSubscribeUserPush();
   const unsubscribeMutation = useUnsubscribeUserPush();
   const testMutation = useSendUserTestPush();

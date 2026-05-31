@@ -8,6 +8,7 @@ import {
 } from "./patient-web-push-service.js";
 import { HttpError } from "../utils/http-error.js";
 import type { SchedulingOverrideRequestRow } from "../modules/appointments-v2/scheduling-override-requests/models/scheduling-override-request.js";
+import { env } from "../config/env.js";
 
 export interface UserPushPayload {
   eventType: string;
@@ -33,6 +34,7 @@ function isPermanentPushFailure(error: unknown): boolean {
 
 export async function getUserWebPushConfig(userId: number): Promise<{ enabled: boolean; publicKey: string | null; subscribed: boolean }> {
   const config = await getPatientWebPushSharedConfig();
+  await touchUserWebPushSubscriptions(userId);
   const count = await pool.query<{ count: string }>(
     `select count(*)::text as count from user_web_push_subscriptions where user_id = $1 and enabled = true`,
     [userId]
@@ -42,6 +44,13 @@ export async function getUserWebPushConfig(userId: number): Promise<{ enabled: b
     publicKey: config.publicKey || null,
     subscribed: Number(count.rows[0]?.count ?? "0") > 0,
   };
+}
+
+export async function touchUserWebPushSubscriptions(userId: number): Promise<void> {
+  await pool.query(
+    `update user_web_push_subscriptions set last_seen_at = now(), updated_at = now() where user_id = $1 and enabled = true`,
+    [userId]
+  );
 }
 
 export async function upsertUserWebPushSubscription(input: {
@@ -54,15 +63,16 @@ export async function upsertUserWebPushSubscription(input: {
   const result = await pool.query<{ id: number }>(
     `
       insert into user_web_push_subscriptions (
-        user_id, endpoint, p256dh, auth, subscription_hash, user_agent, enabled, disabled_at, updated_at
+        user_id, endpoint, p256dh, auth, subscription_hash, user_agent, enabled, last_seen_at, disabled_at, updated_at
       )
-      values ($1, $2, $3, $4, $5, $6, true, null, now())
+      values ($1, $2, $3, $4, $5, $6, true, now(), null, now())
       on conflict (user_id, subscription_hash) do update
       set endpoint = excluded.endpoint,
           p256dh = excluded.p256dh,
           auth = excluded.auth,
           user_agent = excluded.user_agent,
           enabled = true,
+          last_seen_at = now(),
           disabled_at = null,
           updated_at = now()
       returning id
@@ -104,9 +114,11 @@ export async function sendUserWebPush(userId: number, payload: UserPushPayload):
     `
       select id, endpoint, p256dh, auth
       from user_web_push_subscriptions
-      where user_id = $1 and enabled = true
+      where user_id = $1
+        and enabled = true
+        and coalesce(last_seen_at, updated_at, created_at) >= now() - ($2::text || ' hours')::interval
     `,
-    [userId]
+    [userId, env.sessionHours]
   );
 
   let sent = 0;

@@ -530,6 +530,7 @@ export function useUserPushConfig() {
     queryKey: ["user-notifications", "push-config"] as const,
     queryFn: fetchUserPushConfig,
     staleTime: 30_000,
+    refetchInterval: 5 * 60_000,
   });
 }
 
