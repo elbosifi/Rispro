@@ -156,6 +156,7 @@ router.post(
         specialReasonNote: body.specialReasonNote ?? null,
         notes: body.notes ?? null,
         isWalkIn: body.isWalkIn ?? false,
+        noShowAuthorizationReason: body.noShowAuthorizationReason ?? null,
         override: body.override,
       },
       userId,
@@ -223,6 +224,7 @@ router.put(
       body.specialReasonCode ?? null,
       body.specialReasonNote ?? null,
       body.rescheduleReason ?? null,
+      body.noShowAuthorizationReason ?? null,
       body.requiresReport,
       body.studyInstanceUid ?? undefined,
       body.policySetKey ?? "default"

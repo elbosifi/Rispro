@@ -5,6 +5,7 @@ import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import type { BookingStatus } from "../../shared/types/common.js";
+import { activateNoShowRestrictionForBooking } from "../../../../services/patient-no-show-restriction-service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -179,6 +180,9 @@ export async function updateBookingStatusManual(
         [bookingId, targetStatus, userId]
       );
       await auditStatusChange(client, booking, targetStatus, cleanReason || null, userId, "manual_status_change");
+      if (targetStatus === "no-show") {
+        await activateNoShowRestrictionForBooking(client, bookingId, cleanReason || null, userId);
+      }
     }
 
     await client.query("commit");
@@ -218,6 +222,7 @@ export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings,
     for (const booking of todayResult.rows) {
       autoMarkedIds.push(Number(booking.id));
       await auditStatusChange(client, booking, "no-show", "Auto no-show after configured review time.", null, "auto_no_show");
+      await activateNoShowRestrictionForBooking(client, Number(booking.id), "Auto no-show after configured review time.", null);
     }
 
     await client.query("commit");
@@ -271,6 +276,7 @@ export async function markOldNoShowCandidates(reason: string, userId: number | n
     for (const booking of result.rows) {
       markedIds.push(Number(booking.id));
       await auditStatusChange(client, booking, "no-show", cleanReason, userId, "old_no_show_bulk_confirm");
+      await activateNoShowRestrictionForBooking(client, Number(booking.id), cleanReason, userId);
     }
 
     await client.query("commit");

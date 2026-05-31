@@ -1,12 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, CalendarPlus, ChevronRight, Copy, Pencil, Printer, X } from "lucide-react";
-import { fetchPatientDirectorySummary } from "@/lib/api-hooks";
+import { authorizePatientNoShowBooking, fetchPatientDirectorySummary } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { t, type Language } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
+import { useAuth } from "@/providers/auth-provider";
 import { Badge, Button } from "@/components/shared";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import type { PatientDirectorySummary } from "@/types/api";
@@ -66,8 +67,11 @@ export function PatientDrawer({
   onClose: () => void;
 }) {
   const { language } = useLanguage();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const isRtl = language === "ar";
+  const canAuthorizeNoShow = user?.role === "supervisor" || user?.role === "super_admin";
 
   const { data: summary, isLoading, error } = useQuery({
     queryKey: ["patient-directory-summary", patientId],
@@ -75,6 +79,30 @@ export function PatientDrawer({
     staleTime: 1000 * 30,
     retry: 1,
   });
+  const authorizeNoShow = useMutation({
+    mutationFn: (reason: string) => authorizePatientNoShowBooking(patientId, reason),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["patient-directory-summary", patientId] });
+      pushToast({
+        type: "success",
+        title: language === "ar" ? "تم السماح بالحجز" : "Booking authorized",
+        message: language === "ar" ? "تم رفع تقييد الحجز بعد عدم الحضور." : "No-show booking restriction cleared.",
+      });
+    },
+    onError: (error) => {
+      pushToast({
+        type: "error",
+        title: language === "ar" ? "تعذر السماح بالحجز" : "Authorization failed",
+        message: error instanceof Error ? error.message : "Unable to authorize booking.",
+      });
+    },
+  });
+
+  const handleAuthorizeNoShow = () => {
+    const reason = window.prompt(language === "ar" ? "سبب السماح بالحجز بعد عدم الحضور" : "Reason to authorize booking after no-show");
+    if (!reason?.trim()) return;
+    authorizeNoShow.mutate(reason.trim());
+  };
 
   if (isLoading) {
     return (
@@ -291,6 +319,51 @@ export function PatientDrawer({
               <PatientCategoryBadge category={summary.category} />
             </section>
           )}
+
+          <section>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              {language === "ar" ? "تقييد عدم الحضور" : "No-show booking restriction"}
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{language === "ar" ? "عدد عدم الحضور" : "No-show count"}</span>
+                <span>{summary.noShow.noShowCount}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{language === "ar" ? "الحجز مقيد حاليا" : "Booking currently restricted"}</span>
+                <Badge variant={summary.noShow.bookingRestricted ? "error" : "success"} size="sm">
+                  {summary.noShow.bookingRestricted ? (language === "ar" ? "نعم" : "Yes") : (language === "ar" ? "لا" : "No")}
+                </Badge>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{language === "ar" ? "آخر عدم حضور" : "Last no-show appointment"}</span>
+                <span className="text-end">
+                  {summary.noShow.lastNoShowAppointment
+                    ? `${summary.noShow.lastNoShowAppointment.date} ${summary.noShow.lastNoShowAppointment.modalityName}`
+                    : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{language === "ar" ? "آخر سماح" : "Last authorization"}</span>
+                <span className="text-end">
+                  {summary.noShow.lastAuthorizationDate
+                    ? `${formatDateTimeLy(summary.noShow.lastAuthorizationDate)} - ${summary.noShow.lastAuthorizationUser?.fullName || summary.noShow.lastAuthorizationUser?.username || "—"}`
+                    : "—"}
+                </span>
+              </div>
+              {summary.noShow.lastAuthorizationReason && (
+                <div className="rounded-lg border border-border bg-muted/20 p-2">
+                  <div className="text-muted-foreground">{language === "ar" ? "سبب آخر سماح" : "Last authorization reason"}</div>
+                  <div>{summary.noShow.lastAuthorizationReason}</div>
+                </div>
+              )}
+              {summary.noShow.bookingRestricted && canAuthorizeNoShow && (
+                <Button size="sm" variant="outline" onClick={handleAuthorizeNoShow} disabled={authorizeNoShow.isPending}>
+                  {language === "ar" ? "السماح بالحجز بعد عدم الحضور" : "Authorize booking after no-show"}
+                </Button>
+              )}
+            </div>
+          </section>
 
           {(summary.warnings.missingPhone ||
             summary.warnings.missingDob ||

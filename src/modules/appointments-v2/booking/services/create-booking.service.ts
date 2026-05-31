@@ -42,6 +42,12 @@ import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-sett
 import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
+import {
+  NO_SHOW_BOOKING_BLOCKED_MESSAGE,
+  authorizeNoShowBookingRestriction,
+  isNoShowBookingBlocked
+} from "../../../../services/patient-no-show-restriction-service.js";
+import { HttpError } from "../../../../utils/http-error.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -106,6 +112,27 @@ export async function createBookingInternal(
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
+  let noShowAuthorization: { userId: number; reason: string } | null = null;
+  if (await isNoShowBookingBlocked(client, payload.patientId)) {
+    if (payload.override) {
+      const supervisor = await authenticateSupervisor(
+        client,
+        payload.override.supervisorUsername,
+        payload.override.supervisorPassword
+      );
+      const reason = String(payload.override.reason || "").trim();
+      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+      noShowAuthorization = { userId: supervisor.id, reason };
+    } else if (userRole === "supervisor" || userRole === "super_admin") {
+      const reason = String(payload.noShowAuthorizationReason || "").trim();
+      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+      noShowAuthorization = { userId, reason };
+    } else {
+      const error = new HttpError(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE) as HttpError & { reasonCodes?: string[] };
+      error.reasonCodes = ["patient_no_show_booking_blocked"];
+      throw error;
+    }
+  }
   const caseCategory = await resolveBookingCaseCategory(client, payload.patientId, payload.caseCategory);
   const patientQrSettings = await readPatientQrSettings();
   const requiresReport =
@@ -362,6 +389,10 @@ export async function createBookingInternal(
 
   // 9. Determine whether special quota was consumed
   const consumedSpecialQuota = decision.consumedCapacityMode === "special";
+
+  if (noShowAuthorization) {
+    await authorizeNoShowBookingRestriction(client, payload.patientId, noShowAuthorization.userId, noShowAuthorization.reason);
+  }
 
   // 10. Insert the booking
   const booking = await insertBooking(client, {

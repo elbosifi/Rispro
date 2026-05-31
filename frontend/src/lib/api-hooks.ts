@@ -1264,6 +1264,7 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
     lastAppointment: RawRecord | null;
     nextAppointment: RawRecord | null;
     recentAppointments: RawRecord[];
+    noShow?: RawRecord;
   }>(`/patients/${patientId}/directory-summary`);
 
   return {
@@ -1315,7 +1316,15 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
     },
     lastAppointment: raw.lastAppointment as PatientDirectorySummary["lastAppointment"],
     nextAppointment: raw.nextAppointment as PatientDirectorySummary["nextAppointment"],
-    recentAppointments: (raw.recentAppointments as PatientDirectorySummary["recentAppointments"]) || []
+    recentAppointments: (raw.recentAppointments as PatientDirectorySummary["recentAppointments"]) || [],
+    noShow: {
+      noShowCount: Number(raw.noShow?.noShowCount ?? 0),
+      bookingRestricted: Boolean(raw.noShow?.bookingRestricted),
+      lastNoShowAppointment: (raw.noShow?.lastNoShowAppointment as PatientDirectorySummary["noShow"]["lastNoShowAppointment"]) ?? null,
+      lastAuthorizationUser: (raw.noShow?.lastAuthorizationUser as PatientDirectorySummary["noShow"]["lastAuthorizationUser"]) ?? null,
+      lastAuthorizationDate: (raw.noShow?.lastAuthorizationDate as string | null) ?? null,
+      lastAuthorizationReason: (raw.noShow?.lastAuthorizationReason as string | null) ?? null,
+    }
   };
 }
 
@@ -1391,7 +1400,14 @@ export async function safeDeleteDuplicatePatient(patientId: number, confirmation
 }
 
 export async function fetchPatientNoShowHistory(patientId: number) {
-  return api<{ noShowCount: number; lastNoShowDate: string | null }>(`/patients/${patientId}/no-show`);
+  return api<PatientDirectorySummary["noShow"] & { lastNoShowDate: string | null }>(`/patients/${patientId}/no-show`);
+}
+
+export async function authorizePatientNoShowBooking(patientId: number, reason: string) {
+  return api<PatientDirectorySummary["noShow"]>(`/patients/${patientId}/no-show/authorize-booking`, {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  });
 }
 
 // -- Appointments --

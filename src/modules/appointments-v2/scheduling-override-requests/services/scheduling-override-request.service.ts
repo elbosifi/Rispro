@@ -601,6 +601,7 @@ export async function approveSchedulingOverrideRequest(
         null,
         null,
         reschedule.rescheduleReason ?? approvalReason,
+        null,
         reschedule.requiresReport,
         reschedule.studyInstanceUid ?? undefined,
         payload.policySetKey,

@@ -46,6 +46,12 @@ import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-sett
 import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
+import {
+  NO_SHOW_BOOKING_BLOCKED_MESSAGE,
+  authorizeNoShowBookingRestriction,
+  isNoShowBookingBlocked
+} from "../../../../services/patient-no-show-restriction-service.js";
+import { HttpError } from "../../../../utils/http-error.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -113,6 +119,7 @@ export async function rescheduleBooking(
   specialReasonCode: string | null = null,
   specialReasonNote: string | null = null,
   rescheduleReason: string | null = null,
+  noShowAuthorizationReason: string | null = null,
   requiresReport?: boolean,
   studyInstanceUid?: string | null,
   policySetKey: string = "default",
@@ -134,6 +141,7 @@ export async function rescheduleBooking(
       specialReasonCode,
       specialReasonNote,
       rescheduleReason,
+      noShowAuthorizationReason,
       requiresReport,
       studyInstanceUid,
       policySetKey,
@@ -176,6 +184,7 @@ export async function rescheduleBookingInternal(
   specialReasonCode: string | null,
   specialReasonNote: string | null,
   rescheduleReason: string | null,
+  noShowAuthorizationReason: string | null,
   requiresReport: boolean | undefined,
   studyInstanceUid: string | null | undefined,
   policySetKey: string,
@@ -187,6 +196,27 @@ export async function rescheduleBookingInternal(
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
   }
   await assertPatientMeetsBookingQueueRequirements(client, booking.patientId, userRole);
+  let noShowAuthorization: { userId: number; reason: string } | null = null;
+  if (await isNoShowBookingBlocked(client, booking.patientId)) {
+    if (override) {
+      const supervisor = await authenticateSupervisor(
+        client,
+        override.supervisorUsername,
+        override.supervisorPassword
+      );
+      const reason = String(override.reason || "").trim();
+      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+      noShowAuthorization = { userId: supervisor.id, reason };
+    } else if (userRole === "supervisor" || userRole === "super_admin") {
+      const reason = String(noShowAuthorizationReason || "").trim();
+      if (!reason) throw new HttpError(403, "No-show booking authorization reason is required.");
+      noShowAuthorization = { userId, reason };
+    } else {
+      const error = new HttpError(403, NO_SHOW_BOOKING_BLOCKED_MESSAGE) as HttpError & { reasonCodes?: string[] };
+      error.reasonCodes = ["patient_no_show_booking_blocked"];
+      throw error;
+    }
+  }
 
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
@@ -517,6 +547,10 @@ export async function rescheduleBookingInternal(
       "Special quota extra mode requires specialReasonCode.",
       ["special_reason_code_required"]
     );
+  }
+
+  if (noShowAuthorization) {
+    await authorizeNoShowBookingRestriction(client, booking.patientId, noShowAuthorization.userId, noShowAuthorization.reason, bookingId);
   }
 
   await updateBookingForReschedule(

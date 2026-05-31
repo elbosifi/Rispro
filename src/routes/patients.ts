@@ -8,6 +8,7 @@ import { pool } from "../db/pool.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import {
   listActivePatientIdentifierTypes,
+  authorizePatientNoShowBooking,
   createPatient,
   deletePatient,
   getPatientById,
@@ -135,6 +136,17 @@ patientsRouter.get(
     const request = req as PatientsRequest;
     const patientId = asOptionalString(request.params?.patientId) ?? "";
     const summary = await getPatientNoShowSummary(patientId);
+    res.json(summary);
+  })
+);
+
+patientsRouter.post(
+  "/:patientId/no-show/authorize-booking",
+  requireAnyRole(["supervisor", "super_admin"]),
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as PatientsRequest;
+    const patientId = asOptionalString(request.params?.patientId) ?? "";
+    const summary = await authorizePatientNoShowBooking(patientId, request.body?.reason, request.user.sub);
     res.json(summary);
   })
 );

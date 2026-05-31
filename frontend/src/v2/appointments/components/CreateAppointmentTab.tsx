@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
-import { fetchAppointments, fetchPatientQrSettings, fetchPublicSchedulingCapacitySettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
+import { fetchAppointments, fetchPatientNoShowHistory, fetchPatientQrSettings, fetchPublicSchedulingCapacitySettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { useLanguage } from "@/providers/language-provider";
@@ -124,6 +124,28 @@ function localizeCreateAppointmentError(error: unknown, language: "ar" | "en"): 
   return message || t(language, "appointments.create.failedCreate");
 }
 
+function buildNoShowRestrictionDecision(): SchedulingDecisionDto {
+  return {
+    isAllowed: false,
+    requiresSupervisorOverride: true,
+    displayStatus: "restricted",
+    suggestedBookingMode: "override",
+    consumedCapacityMode: null,
+    remainingStandardCapacity: null,
+    remainingSpecialQuota: null,
+    matchedRuleIds: [],
+    reasons: [
+      {
+        code: "patient_no_show_booking_blocked",
+        severity: "warning",
+        message: "Patient has an active no-show booking restriction.",
+      },
+    ],
+    policy: { policySetKey: "default", versionId: 0, versionNo: 0, configHash: "" },
+    decisionTrace: { evaluatedAt: new Date().toISOString(), input: null },
+  };
+}
+
 export function CreateAppointmentTab({
   patientLookups: _patientLookups,
   modalityOptions,
@@ -177,6 +199,8 @@ export function CreateAppointmentTab({
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
   const [printNowLoading, setPrintNowLoading] = useState(false);
   const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string; status: string }>>([]);
+  const [patientNoShowSummary, setPatientNoShowSummary] = useState<Awaited<ReturnType<typeof fetchPatientNoShowHistory>> | null>(null);
+  const [noShowAuthorizationReason, setNoShowAuthorizationReason] = useState("");
   const [noShowLoading, setNoShowLoading] = useState(false);
   const [availabilityOffset, setAvailabilityOffset] = useState(0);
   const [showFullDays, setShowFullDays] = useState(false);
@@ -296,6 +320,8 @@ export function CreateAppointmentTab({
   useEffect(() => {
     if (!form.patientId) {
       setPatientNoShows([]);
+      setPatientNoShowSummary(null);
+      setNoShowAuthorizationReason("");
       setNoShowLoading(false);
       return;
     }
@@ -303,12 +329,15 @@ export function CreateAppointmentTab({
     let cancelled = false;
     setNoShowLoading(true);
 
-    fetchAppointments({
-      status: ["no-show", "cancelled"],
-      patientId: String(form.patientId),
-      dateTo: new Date().toISOString().slice(0, 10),
-    })
-        .then((appointments) => {
+    Promise.all([
+      fetchAppointments({
+        status: ["no-show", "cancelled"],
+        patientId: String(form.patientId),
+        dateTo: new Date().toISOString().slice(0, 10),
+      }),
+      fetchPatientNoShowHistory(form.patientId),
+    ])
+      .then(([appointments, summary]) => {
         if (cancelled) return;
         const history = appointments
           .slice(0, 5)
@@ -325,10 +354,12 @@ export function CreateAppointmentTab({
             status: String(appointment.status || ""),
           }));
         setPatientNoShows(history);
+        setPatientNoShowSummary(summary);
       })
       .catch(() => {
         if (!cancelled) {
           setPatientNoShows([]);
+          setPatientNoShowSummary(null);
         }
       })
       .finally(() => {
@@ -479,6 +510,10 @@ export function CreateAppointmentTab({
       isWalkIn: form.isWalkIn,
       requiresReport: form.requiresReport,
       override,
+      noShowAuthorizationReason:
+        patientNoShowSummary?.bookingRestricted && !override && (isSupervisor || isSuperAdmin)
+          ? noShowAuthorizationReason.trim()
+          : null,
     };
 
     const response = await onCreateAppointment(request);
@@ -541,6 +576,21 @@ export function CreateAppointmentTab({
       setSubmitLoading(false);
       setPageError(validationError);
       return;
+    }
+
+    if (patientNoShowSummary?.bookingRestricted) {
+      if (isSupervisor || isSuperAdmin) {
+        if (!noShowAuthorizationReason.trim()) {
+          setSubmitLoading(false);
+          setPageError("No-show booking authorization reason is required.");
+          return;
+        }
+      } else {
+        setPendingDecision(buildNoShowRestrictionDecision());
+        setShowOverrideModal(true);
+        setSubmitLoading(false);
+        return;
+      }
     }
 
     try {
@@ -757,8 +807,26 @@ export function CreateAppointmentTab({
               }}
             />
 
-            {form.patientId != null && patientNoShows.length > 0 && (
-              <div className="mt-4 sm:mt-5 p-3 sm:p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
+            {form.patientId != null && (patientNoShows.length > 0 || patientNoShowSummary?.bookingRestricted) && (
+              <div className="mt-4 sm:mt-5 space-y-3">
+                {patientNoShowSummary?.bookingRestricted && (
+                  <div className="p-3 sm:p-4 border border-red-300 rounded-xl" style={{ background: "rgba(239, 68, 68, 0.06)", color: "#b91c1c" }}>
+                    <div className="text-sm font-bold">
+                      This patient has a previous no-show appointment and cannot be booked by reception. A supervisor or super admin must authorize a new booking with a reason.
+                    </div>
+                    {(isSupervisor || isSuperAdmin) && (
+                      <div className="mt-3">
+                        <label className="block text-xs font-semibold mb-1">Authorize booking after no-show reason</label>
+                        <textarea
+                          value={noShowAuthorizationReason}
+                          onChange={(event) => setNoShowAuthorizationReason(event.target.value)}
+                          className="input-premium input-ltr w-full"
+                          rows={2}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="text-sm font-bold mb-3" style={{ color: "var(--amber)" }}>
                   {t(language, "appointments.create.previousNoShows")}
                 </div>
@@ -766,12 +834,26 @@ export function CreateAppointmentTab({
                   <div className="text-sm" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.loadingNoShows")}</div>
                 ) : (
                   <ul className="space-y-2">
-                    {patientNoShows.map((item) => (
+                    {patientNoShows.filter((item) => item.status === "no-show").map((item) => (
                       <li key={item.id} className="text-sm text-muted-foreground">
                         {item.appointmentDate} — {item.examTypeName} ({item.status})
                       </li>
                     ))}
                   </ul>
+                )}
+                {patientNoShows.some((item) => item.status === "cancelled") && (
+                  <div className="p-3 sm:p-4 border border-sky-200 rounded-xl" style={{ background: "rgba(14, 165, 233, 0.06)" }}>
+                    <div className="text-sm font-bold mb-3" style={{ color: "#0369a1" }}>
+                      Previous cancelled appointments
+                    </div>
+                    <ul className="space-y-2">
+                      {patientNoShows.filter((item) => item.status === "cancelled").map((item) => (
+                        <li key={item.id} className="text-sm text-muted-foreground">
+                          {item.appointmentDate} - {item.examTypeName} ({item.status})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             )}
@@ -967,6 +1049,7 @@ export function CreateAppointmentTab({
                     actions.resetAll();
                     setSafetyAcknowledged(false);
                     setShowSafetyModal(false);
+                    setNoShowAuthorizationReason("");
                   }}
                   disabled={submitLoading}
                 >

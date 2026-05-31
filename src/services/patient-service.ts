@@ -29,6 +29,11 @@ import type { UserId, OptionalUserId, UnknownRecord } from "../types/http.js";
 import type { NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
 import type { PoolClient } from "pg";
+import {
+  authorizeNoShowBookingRestriction,
+  getPatientNoShowRestriction,
+  type PatientNoShowRestriction
+} from "./patient-no-show-restriction-service.js";
 
 export interface PatientRegistrationRules {
   nationalIdRule: string;
@@ -599,25 +604,36 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
   return patient;
 }
 
-export async function getPatientNoShowSummary(patientId: UserId): Promise<{ noShowCount: number; lastNoShowDate: string | null }> {
+export async function getPatientNoShowSummary(patientId: UserId): Promise<PatientNoShowRestriction & { lastNoShowDate: string | null }> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
-  const { rows } = await pool.query<PatientNoShowSummaryRow>(
-    `
-      select
-        count(*) filter (where status = 'no-show') as no_show_count,
-        max(booking_date) filter (where status = 'no-show') as last_no_show_date
-      from appointments_v2.bookings
-      where patient_id = $1
-    `,
-    [cleanPatientId]
-  );
-
-  const summary = rows[0];
-
+  const summary = await getPatientNoShowRestriction(cleanPatientId);
   return {
-    noShowCount: Number(summary?.no_show_count || 0),
-    lastNoShowDate: summary?.last_no_show_date || null
+    ...summary,
+    lastNoShowDate: summary.lastNoShowAppointment?.date ?? null
   };
+}
+
+export async function authorizePatientNoShowBooking(patientId: UserId, reason: unknown, userId: UserId): Promise<PatientNoShowRestriction> {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
+  const cleanUserId = normalizePositiveInteger(userId, "userId") as number;
+  const cleanReason = String(reason || "").trim();
+  if (!cleanReason) {
+    throw new HttpError(400, "Authorization reason is required.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await authorizeNoShowBookingRestriction(client, cleanPatientId, cleanUserId, cleanReason);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return getPatientNoShowRestriction(cleanPatientId);
 }
 
 function escapeRegexLiteral(value: string): string {
@@ -1754,6 +1770,7 @@ interface PatientDirectorySummaryOutput {
     modalityName: string;
     examTypeName: string;
   }>;
+  noShow: PatientNoShowRestriction;
 }
 
 export async function getPatientDirectorySummary(patientId: UserId): Promise<PatientDirectorySummaryOutput> {
@@ -1772,7 +1789,7 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
     is_dupe: boolean;
   };
 
-  const [lastApptResult, nextApptResult, recentApptsResult, duplicateResult] = await Promise.all([
+  const [lastApptResult, nextApptResult, recentApptsResult, duplicateResult, noShow] = await Promise.all([
     pool.query<AppointmentSummaryRow>(
       `
         select
@@ -1837,7 +1854,8 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
         ) as is_dupe
       `,
       [cleanPatientId, patient.phone_1 || null, patient.national_id || null]
-    )
+    ),
+    getPatientNoShowRestriction(cleanPatientId)
   ]);
 
   const toAppointmentSummary = (row?: AppointmentSummaryRow | null) =>
@@ -1904,6 +1922,7 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
     },
     lastAppointment: toAppointmentSummary(lastApptResult.rows[0]),
     nextAppointment: toAppointmentSummary(nextApptResult.rows[0]),
-    recentAppointments: recentApptsResult.rows.map((row) => toAppointmentSummary(row)).filter(Boolean) as NonNullable<PatientDirectorySummaryOutput["recentAppointments"][number]>[]
+    recentAppointments: recentApptsResult.rows.map((row) => toAppointmentSummary(row)).filter(Boolean) as NonNullable<PatientDirectorySummaryOutput["recentAppointments"][number]>[],
+    noShow
   };
 }

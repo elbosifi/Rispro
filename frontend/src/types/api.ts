@@ -789,6 +789,24 @@ export interface PatientDirectorySummary {
     modalityName: string;
     examTypeName: string;
   }>;
+  noShow: {
+    noShowCount: number;
+    bookingRestricted: boolean;
+    lastNoShowAppointment: {
+      id: number;
+      date: string;
+      status: string;
+      modalityName: string;
+      examTypeName: string;
+    } | null;
+    lastAuthorizationUser: {
+      id: number;
+      fullName: string | null;
+      username: string | null;
+    } | null;
+    lastAuthorizationDate: string | null;
+    lastAuthorizationReason: string | null;
+  };
 }
 
 export interface PatientDuplicateSummary {

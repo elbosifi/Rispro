@@ -48,6 +48,7 @@ export interface CreateBookingPayload {
   specialReasonNote?: string | null;
   notes?: string | null;
   isWalkIn?: boolean;
+  noShowAuthorizationReason?: string | null;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;
