@@ -12,6 +12,14 @@ import { createBookingInternal } from "../../booking/services/create-booking.ser
 import { rescheduleBookingInternal } from "../../booking/services/reschedule-booking.service.js";
 import { scheduleBookingWorklistSync, scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
+import {
+  safeNotifySchedulingOverrideApprovalFailed,
+  safeNotifySchedulingOverrideApproved,
+  safeNotifySchedulingOverrideCancelled,
+  safeNotifySchedulingOverrideCreated,
+  safeNotifySchedulingOverrideExpired,
+  safeNotifySchedulingOverrideRejected,
+} from "../../../../services/user-web-push-service.js";
 import { getUserSchedulingOverridePermission } from "../../../../services/user-service.js";
 import {
   findSchedulingOverrideRequestById,
@@ -365,7 +373,7 @@ export async function createSchedulingOverrideRequest(
     throw new SchedulingError(400, "Requester reason is required.", ["requester_reason_required"]);
   }
 
-  return withTransaction(async (client) => {
+  const created = await withTransaction(async (client) => {
     if (role === "receptionist" && !(await canReceptionistCreateOverrideRequest(client, userId))) {
       throw new SchedulingError(403, "This reception user is not allowed to request scheduling override approval.", ["override_requests_disabled"]);
     }
@@ -445,6 +453,8 @@ export async function createSchedulingOverrideRequest(
     });
     return hydrateRequestDisplayName(client, request);
   }, { isolationLevel: "serializable", operationName: "create_scheduling_override_request" });
+  safeNotifySchedulingOverrideCreated(created);
+  return created;
 }
 
 export async function listSchedulingOverrideRequestsForUser(
@@ -618,6 +628,7 @@ export async function approveSchedulingOverrideRequest(
   }, { isolationLevel: "serializable", operationName: "approve_scheduling_override_request" });
 
   if (result.request.status === "failed") {
+    safeNotifySchedulingOverrideApprovalFailed(result.request, approverUserId);
     throw new SchedulingError(
       409,
       result.request.failureMessage ?? "The current scheduling state has changed. This request could not be approved.",
@@ -626,6 +637,7 @@ export async function approveSchedulingOverrideRequest(
     );
   }
   if (result.request.status === "expired") {
+    safeNotifySchedulingOverrideExpired(result.request);
     throw new SchedulingError(409, "This request has expired.", ["override_request_expired"], result);
   }
 
@@ -645,6 +657,7 @@ export async function approveSchedulingOverrideRequest(
     }
   }
 
+  safeNotifySchedulingOverrideApproved(result.request);
   return result;
 }
 
@@ -655,7 +668,7 @@ export async function rejectSchedulingOverrideRequest(
   approverReason: string
 ): Promise<SchedulingOverrideRequestRow> {
   if (!approverReason.trim()) throw new SchedulingError(400, "Approver reason is required.", ["approver_reason_required"]);
-  return withTransaction(async (client) => {
+  const rejected = await withTransaction(async (client) => {
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
@@ -664,6 +677,8 @@ export async function rejectSchedulingOverrideRequest(
     }
     return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestRejected(client, id, approverUserId, approverReason.trim()));
   }, { isolationLevel: "serializable", operationName: "reject_scheduling_override_request" });
+  safeNotifySchedulingOverrideRejected(rejected);
+  return rejected;
 }
 
 export async function cancelSchedulingOverrideRequest(
@@ -671,7 +686,7 @@ export async function cancelSchedulingOverrideRequest(
   userId: number,
   role: Role | undefined
 ): Promise<SchedulingOverrideRequestRow> {
-  return withTransaction(async (client) => {
+  const cancelled = await withTransaction(async (client) => {
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
@@ -679,6 +694,8 @@ export async function cancelSchedulingOverrideRequest(
     if (!canCancel) throw new SchedulingError(403, "You do not have permission to cancel this request.", ["override_cancel_forbidden"]);
     return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestCancelled(client, id, canSeeAll(role) ? userId : null));
   }, { isolationLevel: "serializable", operationName: "cancel_scheduling_override_request" });
+  safeNotifySchedulingOverrideCancelled(cancelled, userId);
+  return cancelled;
 }
 
 export function parseSchedulingOverrideRequestFilters(query: Record<string, unknown>): SchedulingOverrideRequestFilters {

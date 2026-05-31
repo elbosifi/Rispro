@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bell, X } from "lucide-react";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { Button, Badge } from "@/components/shared";
@@ -10,7 +10,11 @@ import {
   useApproveSchedulingOverrideRequest,
   useCancelSchedulingOverrideRequest,
   useRejectSchedulingOverrideRequest,
+  useSendUserTestPush,
+  useSubscribeUserPush,
   useSchedulingOverrideRequests,
+  useUnsubscribeUserPush,
+  useUserPushConfig,
 } from "../api";
 import type { SchedulingOverrideRequestDto, SchedulingOverrideRequestStatus, SchedulingOverrideType } from "../types";
 import {
@@ -23,6 +27,19 @@ import {
 const STATUS_OPTIONS: Array<SchedulingOverrideRequestStatus | ""> = ["", "pending", "approved", "rejected", "cancelled", "failed", "expired"];
 const REQUEST_TYPE_OPTIONS = ["", "create_booking", "reschedule_booking"] as const;
 const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_weekday_override", "category_override", "exam_mix_override", "total_capacity_override"];
+
+function pushSupported(): boolean {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function urlBase64ToUint8Array(value: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output.buffer;
+}
 
 export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }) {
   const { language } = useLanguage();
@@ -59,19 +76,159 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
           <aside className="absolute bottom-0 right-0 top-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div>
-                <h2 className="text-base font-semibold text-foreground">{t(language, "overrideRequests.title")}</h2>
-                <p className="text-xs text-muted-foreground">{t(language, "overrideRequests.pendingNotConfirmed")}</p>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-semibold text-foreground">Override notifications</h2>
+                  {actionableCount > 0 ? <Badge variant="error" size="sm">{actionableCount}</Badge> : null}
+                </div>
+                <p className="text-xs text-muted-foreground">Browser alerts and pending override requests in one drawer.</p>
               </div>
               <button type="button" className="btn-ghost" onClick={() => setOpen(false)} aria-label={t(language, "overrideRequests.close")}>
                 <X className="h-4 w-4" />
               </button>
             </div>
 
+            <OverridePushControls enabled={open} userId={Number(user.id)} />
             <SchedulingOverrideRequestsWorkspace user={user} variant="drawer" />
           </aside>
         </div>
       ) : null}
     </>
+  );
+}
+
+function OverridePushControls({ enabled, userId }: { enabled: boolean; userId: number }) {
+  const configQuery = useUserPushConfig(enabled);
+  const subscribeMutation = useSubscribeUserPush();
+  const unsubscribeMutation = useUnsubscribeUserPush();
+  const testMutation = useSendUserTestPush();
+  const supported = pushSupported();
+  const [message, setMessage] = useState<string | null>(null);
+  const [currentBrowserSubscribed, setCurrentBrowserSubscribed] = useState(false);
+  const [checkingBrowser, setCheckingBrowser] = useState(false);
+  const storageKey = `rispro-override-push-enabled:${userId}`;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function readCurrentSubscription() {
+      if (!enabled || !supported) return;
+      setCheckingBrowser(true);
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        const subscription = await registration?.pushManager.getSubscription();
+        if (!subscription) localStorage.removeItem(storageKey);
+        if (!cancelled) setCurrentBrowserSubscribed(Boolean(subscription && localStorage.getItem(storageKey) === "1"));
+      } catch {
+        if (!cancelled) setCurrentBrowserSubscribed(false);
+      } finally {
+        if (!cancelled) setCheckingBrowser(false);
+      }
+    }
+
+    void readCurrentSubscription();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, supported, configQuery.data?.subscribed, storageKey]);
+
+  const config = configQuery.data;
+  const setupAvailable = Boolean(supported && config?.enabled && config.publicKey);
+  const busy = subscribeMutation.isPending || unsubscribeMutation.isPending || testMutation.isPending;
+  const statusText = !supported
+    ? "Browser notifications are not supported in this browser."
+    : configQuery.isLoading || checkingBrowser
+      ? "Checking browser notification setup..."
+      : !config?.enabled || !config.publicKey
+        ? "Browser notification setup is not available yet."
+        : currentBrowserSubscribed
+          ? "Enabled on this browser."
+          : config.subscribed
+            ? "Enabled on another device. Enable this browser to receive alerts here."
+            : "Enable alerts for override request updates.";
+
+  async function enableThisBrowser() {
+    setMessage(null);
+    try {
+      if (!config?.publicKey) throw new Error("Browser notification setup is not available yet.");
+      if (!pushSupported()) throw new Error("Browser notifications are not supported in this browser.");
+      const permission = window.Notification.permission === "granted"
+        ? "granted"
+        : await window.Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Notification permission was not granted.");
+      const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing ?? await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+      });
+      await subscribeMutation.mutateAsync(subscription.toJSON());
+      localStorage.setItem(storageKey, "1");
+      setCurrentBrowserSubscribed(true);
+      setMessage("Browser notifications enabled on this browser.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not enable browser notifications.");
+    }
+  }
+
+  async function disableThisBrowser() {
+    setMessage(null);
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      if (!subscription) {
+        setCurrentBrowserSubscribed(false);
+        setMessage("This browser is not subscribed.");
+        return;
+      }
+      await unsubscribeMutation.mutateAsync(subscription.toJSON());
+      await subscription.unsubscribe();
+      localStorage.removeItem(storageKey);
+      setCurrentBrowserSubscribed(false);
+      setMessage("Browser notifications disabled on this browser.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not disable browser notifications.");
+    }
+  }
+
+  async function sendTest() {
+    setMessage(null);
+    try {
+      const result = await testMutation.mutateAsync();
+      setMessage(result.sent > 0 ? "Test notification sent." : "No active browser subscription found.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not send test notification.");
+    }
+  }
+
+  return (
+    <section className="border-b border-border px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Browser notifications</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{statusText}</p>
+        </div>
+        {currentBrowserSubscribed ? <Badge variant="success" size="sm">Enabled</Badge> : null}
+      </div>
+      {message ? <p className="mt-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">{message}</p> : null}
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Button
+          type="button"
+          variant={currentBrowserSubscribed ? "secondary" : "primary"}
+          onClick={currentBrowserSubscribed ? disableThisBrowser : enableThisBrowser}
+          disabled={busy || checkingBrowser || (currentBrowserSubscribed ? !supported : !setupAvailable)}
+        >
+          {currentBrowserSubscribed ? "Disable this browser" : "Enable this browser"}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={sendTest}
+          disabled={busy || (!config?.subscribed && !currentBrowserSubscribed)}
+        >
+          Send test notification
+        </Button>
+      </div>
+    </section>
   );
 }
 

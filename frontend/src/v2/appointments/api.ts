@@ -251,6 +251,37 @@ export async function cancelSchedulingOverrideRequest(id: number | string): Prom
   });
 }
 
+export interface UserPushConfig {
+  enabled: boolean;
+  publicKey: string | null;
+  subscribed: boolean;
+}
+
+export async function fetchUserPushConfig(): Promise<UserPushConfig> {
+  const response = await api<{ config: UserPushConfig }>("/user-notifications/push-config");
+  return response.config;
+}
+
+export async function subscribeUserPush(subscription: PushSubscriptionJSON): Promise<{ subscriptionId: number }> {
+  return api<{ subscriptionId: number }>("/user-notifications/push-subscribe", {
+    method: "POST",
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export async function unsubscribeUserPush(subscription?: PushSubscriptionJSON | null): Promise<{ ok: true; disabled: boolean }> {
+  return api<{ ok: true; disabled: boolean }>("/user-notifications/push-unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ subscription: subscription ?? null }),
+  });
+}
+
+export async function sendUserTestPush(): Promise<{ attempted: number; sent: number; failed: number }> {
+  return api<{ attempted: number; sent: number; failed: number }>("/user-notifications/test-push", {
+    method: "POST",
+  });
+}
+
 export async function listV2Bookings(params: {
   modalityId: number;
   dateFrom: string;
@@ -491,6 +522,41 @@ export function useCancelSchedulingOverrideRequest() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
     },
+  });
+}
+
+export function useUserPushConfig(enabled = true) {
+  return useQuery({
+    queryKey: ["user-notifications", "push-config"] as const,
+    queryFn: fetchUserPushConfig,
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useSubscribeUserPush() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: subscribeUserPush,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user-notifications", "push-config"] });
+    },
+  });
+}
+
+export function useUnsubscribeUserPush() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: unsubscribeUserPush,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user-notifications", "push-config"] });
+    },
+  });
+}
+
+export function useSendUserTestPush() {
+  return useMutation({
+    mutationFn: sendUserTestPush,
   });
 }
 

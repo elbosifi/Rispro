@@ -10,7 +10,11 @@ import type { User } from "@/types/api";
 const mockApprove = vi.fn();
 const mockReject = vi.fn();
 const mockCancel = vi.fn();
+const mockSubscribePush = vi.fn();
+const mockUnsubscribePush = vi.fn();
+const mockTestPush = vi.fn();
 let mockRequests: SchedulingOverrideRequestDto[] = [];
+let mockPushConfig = { enabled: true, publicKey: "test-public-key", subscribed: false };
 
 vi.mock("@/lib/toast", () => ({
   pushToast: vi.fn(),
@@ -38,6 +42,23 @@ vi.mock("../api", () => ({
   }),
   useCancelSchedulingOverrideRequest: () => ({
     mutateAsync: mockCancel,
+    isPending: false,
+  }),
+  useUserPushConfig: () => ({
+    data: mockPushConfig,
+    isLoading: false,
+    isError: false,
+  }),
+  useSubscribeUserPush: () => ({
+    mutateAsync: mockSubscribePush,
+    isPending: false,
+  }),
+  useUnsubscribeUserPush: () => ({
+    mutateAsync: mockUnsubscribePush,
+    isPending: false,
+  }),
+  useSendUserTestPush: () => ({
+    mutateAsync: mockTestPush,
     isPending: false,
   }),
 }));
@@ -107,9 +128,16 @@ describe("SchedulingOverrideApprovalCenter", () => {
     mockApprove.mockReset();
     mockReject.mockReset();
     mockCancel.mockReset();
+    mockSubscribePush.mockReset();
+    mockUnsubscribePush.mockReset();
+    mockTestPush.mockReset();
     mockApprove.mockResolvedValue({ request: request({ status: "approved" }) });
     mockReject.mockResolvedValue({ request: request({ status: "rejected" }) });
     mockCancel.mockResolvedValue({ request: request({ status: "cancelled" }) });
+    mockSubscribePush.mockResolvedValue({ subscriptionId: 1 });
+    mockUnsubscribePush.mockResolvedValue({ ok: true, disabled: true });
+    mockTestPush.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
+    mockPushConfig = { enabled: true, publicKey: "test-public-key", subscribed: false };
     mockRequests = [request()];
   });
 
@@ -179,5 +207,19 @@ describe("SchedulingOverrideApprovalCenter", () => {
     await waitFor(() => {
       expect(mockCancel).toHaveBeenCalledWith(13);
     });
+  });
+
+  it("shows browser notification controls inside the override drawer", async () => {
+    mockPushConfig = { enabled: true, publicKey: "test-public-key", subscribed: true };
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+
+    expect(screen.getByText("Override notifications")).toBeTruthy();
+    expect(screen.getByText("Browser notifications")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enable this browser" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Send test notification" }));
+
+    expect(mockTestPush).toHaveBeenCalledTimes(1);
   });
 });
