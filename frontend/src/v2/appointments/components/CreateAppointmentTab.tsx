@@ -582,7 +582,7 @@ export function CreateAppointmentTab({
       if (isSupervisor || isSuperAdmin) {
         if (!noShowAuthorizationReason.trim()) {
           setSubmitLoading(false);
-          setPageError("No-show booking authorization reason is required.");
+          setPageError(t(language, "appointments.create.noShowAuthorizationReasonRequired"));
           return;
         }
       } else {
@@ -812,11 +812,11 @@ export function CreateAppointmentTab({
                 {patientNoShowSummary?.bookingRestricted && (
                   <div className="p-3 sm:p-4 border border-red-300 rounded-xl" style={{ background: "rgba(239, 68, 68, 0.06)", color: "#b91c1c" }}>
                     <div className="text-sm font-bold">
-                      This patient has a previous no-show appointment and cannot be booked by reception. A supervisor or super admin must authorize a new booking with a reason.
+                      {t(language, "appointments.create.noShowRestrictionBlocked")}
                     </div>
                     {(isSupervisor || isSuperAdmin) && (
                       <div className="mt-3">
-                        <label className="block text-xs font-semibold mb-1">Authorize booking after no-show reason</label>
+                        <label className="block text-xs font-semibold mb-1">{t(language, "appointments.create.noShowAuthorizationReason")}</label>
                         <textarea
                           value={noShowAuthorizationReason}
                           onChange={(event) => setNoShowAuthorizationReason(event.target.value)}
@@ -844,7 +844,7 @@ export function CreateAppointmentTab({
                 {patientNoShows.some((item) => item.status === "cancelled") && (
                   <div className="p-3 sm:p-4 border border-sky-200 rounded-xl" style={{ background: "rgba(14, 165, 233, 0.06)" }}>
                     <div className="text-sm font-bold mb-3" style={{ color: "#0369a1" }}>
-                      Previous cancelled appointments
+                      {t(language, "appointments.create.previousCancelledAppointments")}
                     </div>
                     <ul className="space-y-2">
                       {patientNoShows.filter((item) => item.status === "cancelled").map((item) => (

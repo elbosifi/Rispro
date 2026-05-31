@@ -7,15 +7,15 @@ describe("no-show restriction UI source guards", () => {
   it("splits no-show warnings from cancelled appointment information", () => {
     expect(source).toContain('item.status === "no-show"');
     expect(source).toContain('item.status === "cancelled"');
-    expect(source).toContain("Previous cancelled appointments");
+    expect(source).toContain("appointments.create.previousCancelledAppointments");
     expect(source).toContain("border-sky-200");
   });
 
   it("shows the active no-show booking restriction and requires authorization reason", () => {
     expect(source).toContain("patientNoShowSummary?.bookingRestricted");
-    expect(source).toContain("cannot be booked by reception");
+    expect(source).toContain("appointments.create.noShowRestrictionBlocked");
     expect(source).toContain("noShowAuthorizationReason");
-    expect(source).toContain("No-show booking authorization reason is required.");
+    expect(source).toContain("appointments.create.noShowAuthorizationReasonRequired");
   });
 
   it("shows patient profile no-show state and supervised authorization action", () => {
