@@ -6,6 +6,8 @@ import { safeEnqueuePatientNotificationEvent } from "../../../../services/patien
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import type { BookingStatus } from "../../shared/types/common.js";
 import { activateNoShowRestrictionForBooking } from "../../../../services/patient-no-show-restriction-service.js";
+import type { Role } from "../../../../types/domain.js";
+import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -27,6 +29,7 @@ interface SettingsRow {
 
 interface BookingStatusRow {
   id: string | number;
+  patient_id: string | number;
   status: BookingStatus;
   booking_date?: string;
 }
@@ -138,7 +141,8 @@ export async function updateBookingStatusManual(
   bookingId: number,
   nextStatus: string,
   reason: string | null | undefined,
-  userId: number
+  userId: number,
+  userRole?: Role
 ): Promise<{ id: number; previousStatus: BookingStatus; status: BookingStatus }> {
   if (!MANUAL_STATUS_TARGETS.has(nextStatus as BookingStatus)) {
     throw new SchedulingError(400, "Invalid appointment status.", ["invalid_status"]);
@@ -155,7 +159,7 @@ export async function updateBookingStatusManual(
     await client.query("begin");
     const { rows } = await client.query<BookingStatusRow>(
       `
-        select id, status, booking_date::text
+        select id, patient_id, status, booking_date::text
         from appointments_v2.bookings
         where id = $1
         for update
@@ -171,6 +175,10 @@ export async function updateBookingStatusManual(
     }
 
     if (booking.status !== targetStatus) {
+      if (targetStatus === "arrived" || targetStatus === "waiting") {
+        await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), userRole);
+      }
+
       await client.query(
         `
           update appointments_v2.bookings

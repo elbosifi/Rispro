@@ -13,6 +13,9 @@ import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.j
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public-appointment-url-core.js";
 import {
+  assertPatientMeetsBookingQueueRequirements,
+} from "../../booking/services/patient-identifier-requirement.js";
+import {
   finalizeAutoNoShowsForQueue,
   getQueueNoShowSettings,
   getTripoliToday,
@@ -769,19 +772,42 @@ router.post(
       return;
     }
 
-    const result = await pool.query(
-      `
-        update appointments_v2.bookings
-        set status = 'arrived', updated_at = now(), updated_by_user_id = $2
-        where id = $1 and status in ('scheduled', 'waiting')
-        returning id
-      `,
-      [bookingId, Number((req as AuthedRequest).user?.sub ?? 0)]
-    );
+    const user = (req as AuthedRequest).user;
+    const userId = Number(user?.sub ?? 0);
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const bookingResult = await client.query<{ id: number; patient_id: number; status: string }>(
+        `
+          select id, patient_id, status
+          from appointments_v2.bookings
+          where id = $1
+          for update
+        `,
+        [bookingId]
+      );
+      const booking = bookingResult.rows[0];
+      if (!booking || !["scheduled", "waiting"].includes(booking.status)) {
+        await client.query("rollback");
+        res.status(409).json({ error: "Booking is not eligible for scan/arrival." });
+        return;
+      }
 
-    if (!result.rowCount) {
-      res.status(409).json({ error: "Booking is not eligible for scan/arrival." });
-      return;
+      await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), user?.role);
+      await client.query(
+        `
+          update appointments_v2.bookings
+          set status = 'arrived', updated_at = now(), updated_by_user_id = $2
+          where id = $1
+        `,
+        [bookingId, userId]
+      );
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
     }
 
     scheduleBookingWorklistSync(bookingId);
@@ -842,7 +868,13 @@ router.post(
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>;
-    await updateBookingStatusManual(bookingId, "no-show", String(body.reason || "Manual no-show"), Number((req as AuthedRequest).user?.sub ?? 0));
+    await updateBookingStatusManual(
+      bookingId,
+      "no-show",
+      String(body.reason || "Manual no-show"),
+      Number((req as AuthedRequest).user?.sub ?? 0),
+      (req as AuthedRequest).user?.role
+    );
     res.json({ ok: true });
   })
 );
@@ -859,7 +891,13 @@ router.post(
     const body = (req.body ?? {}) as Record<string, unknown>;
     const status = String(body.status || "").trim();
     const reason = body.reason == null ? null : String(body.reason);
-    const result = await updateBookingStatusManual(bookingId, status, reason, Number((req as AuthedRequest).user?.sub ?? 0));
+    const result = await updateBookingStatusManual(
+      bookingId,
+      status,
+      reason,
+      Number((req as AuthedRequest).user?.sub ?? 0),
+      (req as AuthedRequest).user?.role
+    );
     res.json({ ok: true, ...result });
   })
 );
@@ -948,7 +986,13 @@ router.post(
       return;
     }
 
-    await updateBookingStatusManual(bookingId, "completed", null, Number((req as AuthedRequest).user?.sub ?? 0));
+    await updateBookingStatusManual(
+      bookingId,
+      "completed",
+      null,
+      Number((req as AuthedRequest).user?.sub ?? 0),
+      (req as AuthedRequest).user?.role
+    );
     res.json({ ok: true });
   })
 );

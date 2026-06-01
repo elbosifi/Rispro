@@ -14,9 +14,6 @@ export const BOOKING_PATIENT_PHONE_REQUIRED_MESSAGE =
 export const BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE =
   "This patient cannot be booked or entered into the queue because Phone 1 and primary identifier are missing. Open the patient record and add a phone number and a National ID, passport number, or other identifier.";
 
-export const SUPER_ADMIN_IDENTIFIER_BYPASS_MESSAGE =
-  "Only a super admin can book or reschedule a patient without a primary identifier.";
-
 interface RequirementSettings {
   phoneRequired: boolean;
   identifierRequired: boolean;
@@ -54,9 +51,9 @@ async function loadPatientRequirements(client: PoolClient, patientId: number): P
       select
         p.phone_1,
         coalesce(
-          nullif(primary_identifier.value, ''),
-          nullif(p.identifier_value, ''),
-          nullif(p.national_id, '')
+          nullif(trim(primary_identifier.value), ''),
+          nullif(trim(p.identifier_value), ''),
+          nullif(trim(p.national_id), '')
         ) as primary_identifier
       from patients p
       left join lateral (
@@ -86,21 +83,14 @@ function throwPatientRequirementError(reasonCodes: string[]): never {
   const hasIdentifier = reasonCodes.includes("patient_primary_identifier_required");
 
   if (hasPhone && hasIdentifier) {
-    throw new SchedulingError(400, BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes, {
-      superAdminOnlyMessage: SUPER_ADMIN_IDENTIFIER_BYPASS_MESSAGE,
-    });
+    throw new SchedulingError(400, BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes);
   }
 
   if (hasPhone) {
     throw new SchedulingError(400, BOOKING_PATIENT_PHONE_REQUIRED_MESSAGE, reasonCodes);
   }
 
-  throw new SchedulingError(
-    400,
-    BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE,
-    reasonCodes,
-    { superAdminOnlyMessage: SUPER_ADMIN_IDENTIFIER_BYPASS_MESSAGE }
-  );
+  throw new SchedulingError(400, BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes);
 }
 
 export async function assertPatientMeetsBookingQueueRequirements(
@@ -122,8 +112,7 @@ export async function assertPatientMeetsBookingQueueRequirements(
 
   if (
     settings.identifierRequired &&
-    !String(patient.primary_identifier || "").trim() &&
-    userRole !== "super_admin"
+    !String(patient.primary_identifier || "").trim()
   ) {
     reasonCodes.push("patient_primary_identifier_required");
   }
@@ -146,7 +135,7 @@ export async function assertPatientIdentifierAllowsBooking(
   }
 
   const patient = await loadPatientRequirements(client, patientId);
-  if (String(patient.primary_identifier || "").trim() || userRole === "super_admin") {
+  if (String(patient.primary_identifier || "").trim()) {
     return;
   }
 

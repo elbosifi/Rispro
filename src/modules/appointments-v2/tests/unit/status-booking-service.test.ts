@@ -6,6 +6,10 @@ const source = readFileSync(
   new URL("../../booking/services/status-booking.service.ts", import.meta.url),
   "utf8"
 );
+const readV2RoutesSource = readFileSync(
+  new URL("../../api/routes/read-v2-routes.ts", import.meta.url),
+  "utf8"
+);
 
 describe("status booking service source guards", () => {
   it("allows manual status targets but rejects voided", () => {
@@ -45,5 +49,26 @@ describe("status booking service source guards", () => {
   it("syncs worklists after status changes", () => {
     assert.match(source, /scheduleBookingWorklistSync\(bookingId\)/);
     assert.match(source, /for \(const bookingId of markedIds\)/);
+  });
+
+  it("V2 manual status update cannot set arrived/waiting without patient queue requirements", () => {
+    assert.match(source, /assertPatientMeetsBookingQueueRequirements/);
+    assert.match(source, /select id, patient_id, status, booking_date::text/);
+    assert.match(source, /targetStatus === "arrived" \|\| targetStatus === "waiting"/);
+    assert.match(source, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), userRole\)/);
+  });
+
+  it("manual status update to non-queue statuses keeps existing behavior", () => {
+    assert.match(source, /MANUAL_STATUS_TARGETS/);
+    assert.match(source, /"completed"/);
+    assert.match(source, /"no-show"/);
+    assert.doesNotMatch(source, /targetStatus === "completed"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
+  });
+
+  it("V2 queue scan cannot set arrived without patient queue requirements", () => {
+    assert.match(readV2RoutesSource, /"\/queue\/scan"/);
+    assert.match(readV2RoutesSource, /select id, patient_id, status[\s\S]*for update/);
+    assert.match(readV2RoutesSource, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), user\?\.role\)/);
+    assert.match(readV2RoutesSource, /set status = 'arrived'/);
   });
 });

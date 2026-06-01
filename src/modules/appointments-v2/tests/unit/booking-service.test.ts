@@ -7,11 +7,23 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import {
   assertPatientIdentifierAllowsBooking,
   BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE,
 } from "../../booking/services/patient-identifier-requirement.js";
+
+const transactionSource = readFileSync(new URL("../../shared/utils/transactions.ts", import.meta.url), "utf8");
+const rescheduleServiceSource = readFileSync(
+  new URL("../../booking/services/reschedule-booking.service.ts", import.meta.url),
+  "utf8"
+);
+const cancelServiceSource = readFileSync(
+  new URL("../../booking/services/cancel-booking.service.ts", import.meta.url),
+  "utf8"
+);
+const commonTypesSource = readFileSync(new URL("../../shared/types/common.ts", import.meta.url), "utf8");
 
 describe("Create booking — validation", () => {
   it("SchedulingError includes reasonCodes for hard blocks", () => {
@@ -51,7 +63,7 @@ describe("Create booking - patient identifier requirement", () => {
     );
   });
 
-  it("super admins can bypass missing patient primary identifier for booking", async () => {
+  it("super admins cannot bypass missing patient primary identifier for booking", async () => {
     const client = {
       query: async (sql: string) => {
         if (sql.includes("system_settings")) return { rows: [{ value: "required" }] };
@@ -59,7 +71,14 @@ describe("Create booking - patient identifier requirement", () => {
       },
     };
 
-    await assert.doesNotReject(() => assertPatientIdentifierAllowsBooking(client as never, 1, "super_admin"));
+    await assert.rejects(
+      () => assertPatientIdentifierAllowsBooking(client as never, 1, "super_admin"),
+      (error: unknown) => {
+        assert.ok(error instanceof SchedulingError);
+        assert.deepEqual(error.reasonCodes, ["patient_primary_identifier_required"]);
+        return true;
+      }
+    );
   });
 });
 
@@ -174,13 +193,8 @@ describe("Create booking — Booking model shape", () => {
 });
 
 describe("Create booking — transaction wrapper", () => {
-  it("withTransaction calls the provided function", async () => {
-    // We can't test withTransaction with a real DB, but we can
-    // verify it's imported and callable.
-    const { withTransaction } = await import(
-      "../../shared/utils/transactions.js"
-    );
-    assert.equal(typeof withTransaction, "function");
+  it("withTransaction is exported", () => {
+    assert.match(transactionSource, /export async function withTransaction/);
   });
 });
 
@@ -198,11 +212,8 @@ describe("Create booking — supervisor auth helper", () => {
 // ---------------------------------------------------------------------------
 
 describe("Reschedule booking — service structure", () => {
-  it("rescheduleBooking is a function", async () => {
-    const { rescheduleBooking } = await import(
-      "../../booking/services/reschedule-booking.service.js"
-    );
-    assert.equal(typeof rescheduleBooking, "function");
+  it("rescheduleBooking is exported", () => {
+    assert.match(rescheduleServiceSource, /export async function rescheduleBooking/);
   });
 
   it("RescheduleBookingResult has the expected shape", () => {
@@ -287,12 +298,8 @@ describe("Reschedule booking — repository functions", () => {
 // ---------------------------------------------------------------------------
 
 describe("Reschedule booking — backend status validation", () => {
-  it("RESCHEDULABLE_STATUSES constant is imported from shared types", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const serviceContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts",
-      "utf-8"
-    );
+  it("RESCHEDULABLE_STATUSES constant is imported from shared types", () => {
+    const serviceContent = rescheduleServiceSource;
     assert.ok(
       serviceContent.includes('from "../../shared/types/common.js"'),
       "Service imports RESCHEDULABLE_STATUSES from shared types"
@@ -300,24 +307,16 @@ describe("Reschedule booking — backend status validation", () => {
     assert.ok(!serviceContent.includes("const RESCHEDULABLE_STATUSES"), "Service does not define its own constant");
   });
 
-  it("RESCHEDULABLE_STATUSES in shared types includes scheduled, arrived, waiting", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const sharedContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/shared/types/common.ts",
-      "utf-8"
-    );
+  it("RESCHEDULABLE_STATUSES in shared types includes scheduled, arrived, waiting", () => {
+    const sharedContent = commonTypesSource;
     assert.ok(sharedContent.includes("RESCHEDULABLE_STATUSES"));
     assert.ok(sharedContent.includes('"scheduled"'));
     assert.ok(sharedContent.includes('"arrived"'));
     assert.ok(sharedContent.includes('"waiting"'));
   });
 
-  it("RESCHEDULABLE_STATUSES excludes completed, no-show, cancelled", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const sharedContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/shared/types/common.ts",
-      "utf-8"
-    );
+  it("RESCHEDULABLE_STATUSES excludes completed, no-show, cancelled", () => {
+    const sharedContent = commonTypesSource;
     const match = sharedContent.match(/RESCHEDULABLE_STATUSES.*?\[[\s\S]*?\]/);
     assert.ok(match, "Found RESCHEDULABLE_STATUSES definition");
     const def = match[0];
@@ -326,22 +325,14 @@ describe("Reschedule booking — backend status validation", () => {
     assert.ok(!def.includes('"cancelled"'), "Should not include cancelled");
   });
 
-  it("service rejects non-reschedulable status with SchedulingError", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const serviceContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts",
-      "utf-8"
-    );
+  it("service rejects non-reschedulable status with SchedulingError", () => {
+    const serviceContent = rescheduleServiceSource;
     assert.ok(serviceContent.includes("booking_not_reschedulable"));
     assert.ok(serviceContent.includes("RESCHEDULABLE_STATUSES.includes"));
   });
 
-  it("service still has separate cancelled check before general validation", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const serviceContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts",
-      "utf-8"
-    );
+  it("service still has separate cancelled check before general validation", () => {
+    const serviceContent = rescheduleServiceSource;
     assert.ok(serviceContent.includes("booking_cancelled"));
     assert.ok(serviceContent.includes("is cancelled and cannot be rescheduled"));
   });
@@ -352,12 +343,8 @@ describe("Reschedule booking — backend status validation", () => {
 // ---------------------------------------------------------------------------
 
 describe("Cancel booking — backend status validation", () => {
-  it("cancelBooking service imports CANCELLABLE_STATUSES from shared types", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const serviceContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+  it("cancelBooking service imports CANCELLABLE_STATUSES from shared types", () => {
+    const serviceContent = cancelServiceSource;
     assert.ok(
       serviceContent.includes('from "../../shared/types/common.js"'),
       "Cancel service imports CANCELLABLE_STATUSES from shared types"
@@ -365,24 +352,16 @@ describe("Cancel booking — backend status validation", () => {
     assert.ok(!serviceContent.includes("const CANCELLABLE_STATUSES"), "Cancel service does not define its own constant");
   });
 
-  it("CANCELLABLE_STATUSES in shared types includes scheduled, arrived, waiting", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const sharedContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/shared/types/common.ts",
-      "utf-8"
-    );
+  it("CANCELLABLE_STATUSES in shared types includes scheduled, arrived, waiting", () => {
+    const sharedContent = commonTypesSource;
     assert.ok(sharedContent.includes("CANCELLABLE_STATUSES"));
     assert.ok(sharedContent.includes('"scheduled"'));
     assert.ok(sharedContent.includes('"arrived"'));
     assert.ok(sharedContent.includes('"waiting"'));
   });
 
-  it("CANCELLABLE_STATUSES excludes completed, no-show, cancelled", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const sharedContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/shared/types/common.ts",
-      "utf-8"
-    );
+  it("CANCELLABLE_STATUSES excludes completed, no-show, cancelled", () => {
+    const sharedContent = commonTypesSource;
     const match = sharedContent.match(/CANCELLABLE_STATUSES.*?\[[\s\S]*?\]/);
     assert.ok(match, "Found CANCELLABLE_STATUSES definition");
     const def = match[0];
@@ -391,22 +370,14 @@ describe("Cancel booking — backend status validation", () => {
     assert.ok(!def.includes('"cancelled"'), "Should not include cancelled");
   });
 
-  it("cancel service rejects non-cancellable status with SchedulingError", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const serviceContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+  it("cancel service rejects non-cancellable status with SchedulingError", () => {
+    const serviceContent = cancelServiceSource;
     assert.ok(serviceContent.includes("booking_not_cancellable"));
     assert.ok(serviceContent.includes("CANCELLABLE_STATUSES.includes"));
   });
 
-  it("cancel service still has already-cancelled check before general validation", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const serviceContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+  it("cancel service still has already-cancelled check before general validation", () => {
+    const serviceContent = cancelServiceSource;
     assert.ok(serviceContent.includes("booking_already_cancelled"));
     assert.ok(serviceContent.includes("is already cancelled"));
   });
