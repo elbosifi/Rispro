@@ -69,6 +69,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
               orthanc_target_key: null,
               matching_strategy: "study_uid_preferred_accession_fallback",
               completion_threshold: "study_exists",
+              minimum_series_count: 2,
+              below_minimum_series_action: "leave_unchanged",
               poll_interval_minutes: 15,
               lookback_hours: 24,
               stop_after_hours: 72,
@@ -108,6 +110,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
               matchValue: "V2-123",
               candidateCount: 3,
               completionThreshold: "study_exists",
+              minimumSeriesCount: 2,
+              belowMinimumSeriesAction: "leave_unchanged",
               lastError: "No matching study",
             },
           };
@@ -130,6 +134,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
             matchValue: "1.2.3",
             candidateCount: null,
             completionThreshold: "study_exists",
+            minimumSeriesCount: 2,
+            belowMinimumSeriesAction: "leave_unchanged",
             lastError: null,
           },
         };
@@ -150,6 +156,9 @@ describe("PacsSettingsSection auto-completion controls", () => {
     await user.click(screen.getByRole("checkbox", { name: "Enable" }));
     await user.selectOptions(screen.getByLabelText("Orthanc target"), "CT_REMOTE");
     await user.selectOptions(screen.getByLabelText("Completion threshold"), "series_exists");
+    await user.clear(screen.getByLabelText("Minimum series count"));
+    await user.type(screen.getByLabelText("Minimum series count"), "3");
+    await user.selectOptions(screen.getByLabelText("When series count is below minimum"), "discontinue");
     await user.clear(screen.getByLabelText("Poll interval minutes"));
     await user.type(screen.getByLabelText("Poll interval minutes"), "5");
     await user.clear(screen.getByLabelText("Lookback hours"));
@@ -172,6 +181,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(payload.orthancTargetKey).toBe("CT_REMOTE");
     expect(payload.matchingStrategy).toBe("study_uid_preferred_accession_fallback");
     expect(payload.completionThreshold).toBe("series_exists");
+    expect(payload.minimumSeriesCount).toBe(3);
+    expect(payload.belowMinimumSeriesAction).toBe("discontinue");
     expect(payload.pollIntervalMinutes).toBe(5);
     expect(payload.lookbackHours).toBe(12);
     expect(payload.stopAfterHours).toBe(36);
@@ -271,6 +282,9 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(screen.getByText("3")).toBeTruthy();
     expect(screen.getByText("Threshold")).toBeTruthy();
     expect(screen.getAllByText("study_exists").length).toBeGreaterThan(0);
+    expect(screen.getByText("Minimum series count")).toBeTruthy();
+    expect(screen.getByText("When series count is below minimum")).toBeTruthy();
+    expect(screen.getAllByText("leave_unchanged").length).toBeGreaterThan(0);
     expect(screen.getByText("Result status")).toBeTruthy();
     expect(screen.getByText("not_found")).toBeTruthy();
     expect(screen.getAllByText("No matching study").length).toBeGreaterThan(0);

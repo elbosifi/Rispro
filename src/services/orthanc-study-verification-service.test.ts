@@ -190,7 +190,41 @@ test("study date conflict blocks completion", async () => {
   assert.equal(result.lastError, "study_date_conflict");
 });
 
-test("missing series count fails series_exists", async () => {
+test("series_exists honors configurable minimum series count", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") return orthancResponse(studyPayload());
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, {
+    ...baseSetting,
+    completion_threshold: "series_exists",
+    minimum_series_count: 2,
+  });
+  assert.equal(result.status, "insufficient_evidence");
+  assert.equal(result.lastError, "series_count_below_minimum");
+  assert.equal(result.resultJson.minimumSeriesCount, 2);
+});
+
+test("series_exists matches when series count meets configurable minimum", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") return orthancResponse(studyPayload({ CountSeries: 3 }));
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 3, CountInstances: 6 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, {
+    ...baseSetting,
+    completion_threshold: "series_exists",
+    minimum_series_count: 2,
+  });
+  assert.equal(result.status, "matched");
+});
+
+test("missing series count completes anyway for series_exists", async () => {
   service.__setOrthancFetchForTests(async (path) => {
     if (path === "/tools/find") return orthancResponse(["study-1"]);
     if (path === "/studies/study-1") return orthancResponse(studyPayload({ CountSeries: undefined, CountInstances: undefined }));
@@ -199,8 +233,8 @@ test("missing series count fails series_exists", async () => {
   });
 
   const result = await service.verifyBookingStudyWithOrthanc(baseBooking, { ...baseSetting, completion_threshold: "series_exists" });
-  assert.equal(result.status, "insufficient_evidence");
-  assert.equal(result.lastError, "series_count_unavailable");
+  assert.equal(result.status, "matched");
+  assert.equal(result.resultJson.seriesCountUnavailableAccepted, true);
 });
 
 test("missing instance count fails instance_exists", async () => {
@@ -236,8 +270,8 @@ test("remote C-FIND answer without reliable counts only satisfies study_exists",
     { ...baseBooking, study_instance_uid: null },
     { ...remoteSetting, completion_threshold: "series_exists" }
   );
-  assert.equal(seriesResult.status, "insufficient_evidence");
-  assert.equal(seriesResult.lastError, "series_count_unavailable");
+  assert.equal(seriesResult.status, "matched");
+  assert.equal(seriesResult.resultJson.seriesCountUnavailableAccepted, true);
 });
 
 test("Orthanc timeout/error returns error with lastError", async () => {

@@ -20,10 +20,34 @@ test("worker preserves manually or MPPS completed rows after for update re-check
   assert.match(source, /return false/);
 });
 
+test("worker excludes bookings after manual PACS auto-completion override", () => {
+  assert.match(source, /b\.pacs_auto_completion_disabled_at is null/);
+  assert.match(source, /select id, status, pacs_auto_completion_disabled_at/);
+  assert.match(source, /current\.pacs_auto_completion_disabled_at/);
+});
+
 test("worker writes orthanc_auto_complete audit payload", () => {
   assert.match(source, /actionType: "orthanc_auto_complete"/);
   assert.match(source, /entityType: "appointments_v2_booking"/);
   assert.match(source, /verificationCheckId: historyId/);
+});
+
+test("worker can auto-discontinue below-minimum matched studies", () => {
+  assert.match(source, /below_minimum_series_action/);
+  assert.match(source, /series_count_below_minimum/);
+  assert.match(source, /setting\.below_minimum_series_action !== "discontinue"/);
+  assert.match(source, /status = 'discontinued'/);
+  assert.match(source, /orthanc_auto_discontinue_below_minimum_series/);
+});
+
+test("worker does not auto-discontinue unavailable series counts", () => {
+  assert.match(source, /result\.lastError === "series_count_below_minimum"/);
+  assert.doesNotMatch(source, /series_count_unavailable[\s\S]*status = 'discontinued'/);
+});
+
+test("worker setting defaults include minimum series count of 2", () => {
+  assert.match(source, /coalesce\(s\.minimum_series_count, 2\) as minimum_series_count/);
+  assert.match(source, /normalizePositive\(payload\.minimumSeriesCount \?\? payload\.minimum_series_count, "minimumSeriesCount", 2\)/);
 });
 
 test("worker updates settings last check fields", () => {

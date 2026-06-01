@@ -9,6 +9,7 @@ import {
   listOrthancVerificationTargets,
   verifyBookingStudyWithOrthanc,
   type OrthancAutoCompletionSettingLike,
+  type BelowMinimumSeriesAction,
   type OrthancBookingVerificationContext,
   type OrthancCompletionThreshold,
   type OrthancMatchingStrategy,
@@ -32,6 +33,8 @@ export interface PacsAutoCompletionSettingRow {
   orthanc_target_key: string | null;
   matching_strategy: OrthancMatchingStrategy;
   completion_threshold: OrthancCompletionThreshold;
+  minimum_series_count: number;
+  below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
@@ -68,6 +71,8 @@ interface EligibleBookingRow extends OrthancBookingVerificationContext {
   orthanc_target_key: string | null;
   matching_strategy: OrthancMatchingStrategy;
   completion_threshold: OrthancCompletionThreshold;
+  minimum_series_count: number;
+  below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
@@ -105,6 +110,8 @@ export interface PacsAutoCompletionTestDiagnostics {
   matchValue: string | null;
   candidateCount: number | null;
   completionThreshold: OrthancCompletionThreshold;
+  minimumSeriesCount: number;
+  belowMinimumSeriesAction: BelowMinimumSeriesAction;
   lastError: string | null;
   legacyRawAccessionFallbackUsed: boolean;
 }
@@ -144,6 +151,12 @@ function normalizeThreshold(value: unknown): OrthancCompletionThreshold {
   throw new HttpError(400, "completionThreshold must be study_exists, series_exists, or instance_exists.");
 }
 
+function normalizeBelowMinimumSeriesAction(value: unknown): BelowMinimumSeriesAction {
+  const clean = normalizeOptionalText(value) || "leave_unchanged";
+  if (clean === "leave_unchanged" || clean === "discontinue") return clean;
+  throw new HttpError(400, "belowMinimumSeriesAction must be leave_unchanged or discontinue.");
+}
+
 function normalizePositive(value: unknown, fieldName: string, fallback: number): number {
   if (value === undefined || value === null || value === "") return fallback;
   return normalizePositiveInteger(value, fieldName) ?? fallback;
@@ -167,6 +180,8 @@ function mapSetting(row: EligibleBookingRow | PacsAutoCompletionSettingRow): Ort
     orthanc_target_key: row.orthanc_target_key,
     matching_strategy: row.matching_strategy,
     completion_threshold: row.completion_threshold,
+    minimum_series_count: row.minimum_series_count,
+    below_minimum_series_action: row.below_minimum_series_action,
   };
 }
 
@@ -207,6 +222,8 @@ function buildTestDiagnostics(booking: EligibleBookingRow, setting: PacsAutoComp
     matchValue: result.matchValue,
     candidateCount: readCandidateCount(result.resultJson),
     completionThreshold: setting.completion_threshold,
+    minimumSeriesCount: Number(setting.minimum_series_count || 2),
+    belowMinimumSeriesAction: setting.below_minimum_series_action,
     lastError: result.lastError,
     legacyRawAccessionFallbackUsed: Boolean(
       result.resultJson &&
@@ -239,6 +256,8 @@ export async function listPacsAutoCompletionSettings(): Promise<PacsAutoCompleti
         s.orthanc_target_key,
         coalesce(s.matching_strategy, 'study_uid_preferred_accession_fallback') as matching_strategy,
         coalesce(s.completion_threshold, 'study_exists') as completion_threshold,
+        coalesce(s.minimum_series_count, 2) as minimum_series_count,
+        coalesce(s.below_minimum_series_action, 'leave_unchanged') as below_minimum_series_action,
         coalesce(s.poll_interval_minutes, 15) as poll_interval_minutes,
         coalesce(s.lookback_hours, 24) as lookback_hours,
         coalesce(s.stop_after_hours, 72) as stop_after_hours,
@@ -273,6 +292,8 @@ export async function upsertPacsAutoCompletionSetting(
     : "";
   const matchingStrategy = normalizeMatchingStrategy(payload.matchingStrategy ?? payload.matching_strategy);
   const completionThreshold = normalizeThreshold(payload.completionThreshold ?? payload.completion_threshold);
+  const minimumSeriesCount = normalizePositive(payload.minimumSeriesCount ?? payload.minimum_series_count, "minimumSeriesCount", 2);
+  const belowMinimumSeriesAction = normalizeBelowMinimumSeriesAction(payload.belowMinimumSeriesAction ?? payload.below_minimum_series_action);
   const enabled = normalizeBoolean(payload.enabled);
   const pollIntervalMinutes = normalizePositive(payload.pollIntervalMinutes ?? payload.poll_interval_minutes, "pollIntervalMinutes", 15);
   const lookbackHours = normalizeNonNegative(payload.lookbackHours ?? payload.lookback_hours, "lookbackHours", 24);
@@ -291,12 +312,14 @@ export async function upsertPacsAutoCompletionSetting(
         orthanc_target_key,
         matching_strategy,
         completion_threshold,
+        minimum_series_count,
+        below_minimum_series_action,
         poll_interval_minutes,
         lookback_hours,
         stop_after_hours,
         updated_at
       )
-      values ($1, $2, $3, nullif($4, ''), $5, $6, $7, $8, $9, now())
+      values ($1, $2, $3, nullif($4, ''), $5, $6, $7, $8, $9, $10, $11, now())
       on conflict (modality_id) do update
       set
         enabled = excluded.enabled,
@@ -304,6 +327,8 @@ export async function upsertPacsAutoCompletionSetting(
         orthanc_target_key = excluded.orthanc_target_key,
         matching_strategy = excluded.matching_strategy,
         completion_threshold = excluded.completion_threshold,
+        minimum_series_count = excluded.minimum_series_count,
+        below_minimum_series_action = excluded.below_minimum_series_action,
         poll_interval_minutes = excluded.poll_interval_minutes,
         lookback_hours = excluded.lookback_hours,
         stop_after_hours = excluded.stop_after_hours,
@@ -317,6 +342,8 @@ export async function upsertPacsAutoCompletionSetting(
       targetKey,
       matchingStrategy,
       completionThreshold,
+      minimumSeriesCount,
+      belowMinimumSeriesAction,
       pollIntervalMinutes,
       lookbackHours,
       stopAfterHours,
@@ -347,6 +374,8 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
         s.orthanc_target_key,
         s.matching_strategy,
         s.completion_threshold,
+        s.minimum_series_count,
+        s.below_minimum_series_action,
         s.poll_interval_minutes,
         s.lookback_hours,
         s.stop_after_hours
@@ -384,6 +413,8 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
     orthanc_target_key: setting.orthanc_target_key,
     matching_strategy: setting.matching_strategy,
     completion_threshold: setting.completion_threshold,
+    minimum_series_count: setting.minimum_series_count,
+    below_minimum_series_action: setting.below_minimum_series_action,
     poll_interval_minutes: setting.poll_interval_minutes,
     lookback_hours: setting.lookback_hours,
     stop_after_hours: setting.stop_after_hours,
@@ -491,6 +522,95 @@ async function markHistoryCompleted(historyId: number, client: PoolClient): Prom
   );
 }
 
+function isBelowMinimumSeriesResult(result: OrthancVerificationResult): boolean {
+  return result.status === "insufficient_evidence" && result.lastError === "series_count_below_minimum";
+}
+
+async function discontinueBookingForBelowMinimumSeries({
+  booking,
+  setting,
+  result,
+  historyId,
+}: {
+  booking: OrthancBookingVerificationContext;
+  setting: OrthancAutoCompletionSettingLike;
+  result: OrthancVerificationResult;
+  historyId: number;
+}): Promise<boolean> {
+  if (!isBelowMinimumSeriesResult(result) || setting.below_minimum_series_action !== "discontinue") {
+    return false;
+  }
+
+  const bookingId = Number(booking.id);
+  if (!Number.isInteger(bookingId) || bookingId <= 0) {
+    return false;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{ id: number; status: string; pacs_auto_completion_disabled_at: string | null }>(
+      `
+        select id, status, pacs_auto_completion_disabled_at
+        from appointments_v2.bookings
+        where id = $1
+        for update
+      `,
+      [bookingId]
+    );
+    const current = rows[0];
+    if (
+      !current ||
+      current.pacs_auto_completion_disabled_at ||
+      !ELIGIBLE_BOOKING_STATUSES.includes(current.status as typeof ELIGIBLE_BOOKING_STATUSES[number])
+    ) {
+      await client.query("commit");
+      return false;
+    }
+
+    await client.query(
+      `
+        update appointments_v2.bookings
+        set
+          status = 'discontinued',
+          updated_at = now(),
+          updated_by_user_id = null
+        where id = $1
+      `,
+      [bookingId]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "appointments_v2_booking",
+        entityId: bookingId,
+        actionType: "orthanc_auto_discontinue_below_minimum_series",
+        oldValues: { status: current.status },
+        newValues: {
+          status: "discontinued",
+          reason: "Orthanc matched the study, but series count was below the configured minimum.",
+          minimumSeriesCount: setting.minimum_series_count ?? 2,
+          belowMinimumSeriesAction: setting.below_minimum_series_action,
+          seriesCount: result.seriesCount,
+          instanceCount: result.instanceCount,
+          verificationCheckId: historyId,
+        },
+        changedByUserId: null,
+      },
+      client
+    );
+
+    await client.query("commit");
+    scheduleBookingWorklistSync(bookingId);
+    return true;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function completeBookingIfStillEligible({
   booking,
   setting,
@@ -514,9 +634,9 @@ async function completeBookingIfStillEligible({
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const { rows } = await client.query<{ id: number; status: string }>(
+    const { rows } = await client.query<{ id: number; status: string; pacs_auto_completion_disabled_at: string | null }>(
       `
-        select id, status
+        select id, status, pacs_auto_completion_disabled_at
         from appointments_v2.bookings
         where id = $1
         for update
@@ -524,7 +644,11 @@ async function completeBookingIfStillEligible({
       [bookingId]
     );
     const current = rows[0];
-    if (!current || !ELIGIBLE_BOOKING_STATUSES.includes(current.status as typeof ELIGIBLE_BOOKING_STATUSES[number])) {
+    if (
+      !current ||
+      current.pacs_auto_completion_disabled_at ||
+      !ELIGIBLE_BOOKING_STATUSES.includes(current.status as typeof ELIGIBLE_BOOKING_STATUSES[number])
+    ) {
       await client.query("commit");
       return false;
     }
@@ -590,6 +714,15 @@ async function runVerificationForBooking(booking: EligibleBookingRow): Promise<{
     completedBooking: false,
   });
   await updateSettingLastCheck(setting.id, result);
+  const discontinued = await discontinueBookingForBelowMinimumSeries({
+    booking: mapBooking(booking),
+    setting,
+    result,
+    historyId: history.id,
+  });
+  if (discontinued) {
+    return { result, history, completed: false };
+  }
   const completed = await completeBookingIfStillEligible({
     booking: mapBooking(booking),
     setting,
@@ -639,6 +772,8 @@ export async function testPacsAutoCompletionForModality({
           s.orthanc_target_key,
           s.matching_strategy,
           s.completion_threshold,
+          s.minimum_series_count,
+          s.below_minimum_series_action,
           s.poll_interval_minutes,
           s.lookback_hours,
           s.stop_after_hours
@@ -703,6 +838,8 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
         s.orthanc_target_key,
         s.matching_strategy,
         s.completion_threshold,
+        s.minimum_series_count,
+        s.below_minimum_series_action,
         s.poll_interval_minutes,
         s.lookback_hours,
         s.stop_after_hours
@@ -712,6 +849,7 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
       join appointments_v2.pacs_auto_completion_settings s on s.modality_id = b.modality_id
       where s.enabled = true
         and b.status = any($1::text[])
+        and b.pacs_auto_completion_disabled_at is null
         and b.booking_date::timestamptz <= now()
         and b.booking_date::timestamptz >= now() - make_interval(hours => s.lookback_hours)
         and b.booking_date::timestamptz >= now() - make_interval(hours => s.stop_after_hours)

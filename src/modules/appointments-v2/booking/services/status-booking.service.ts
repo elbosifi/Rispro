@@ -32,6 +32,9 @@ interface BookingStatusRow {
   patient_id: string | number;
   status: BookingStatus;
   booking_date?: string;
+  auto_completed_by?: string | null;
+  auto_completed_at?: string | null;
+  pacs_auto_completion_disabled_at?: string | null;
 }
 
 export interface QueueNoShowSettings {
@@ -143,7 +146,13 @@ export async function updateBookingStatusManual(
   reason: string | null | undefined,
   userId: number,
   userRole?: Role
-): Promise<{ id: number; previousStatus: BookingStatus; status: BookingStatus }> {
+): Promise<{
+  id: number;
+  previousStatus: BookingStatus;
+  status: BookingStatus;
+  autoCompletionDisabled?: boolean;
+  autoCompletionDisabledMessage?: string;
+}> {
   if (!MANUAL_STATUS_TARGETS.has(nextStatus as BookingStatus)) {
     throw new SchedulingError(400, "Invalid appointment status.", ["invalid_status"]);
   }
@@ -159,7 +168,14 @@ export async function updateBookingStatusManual(
     await client.query("begin");
     const { rows } = await client.query<BookingStatusRow>(
       `
-        select id, patient_id, status, booking_date::text
+        select
+          id,
+          patient_id,
+          status,
+          booking_date::text,
+          auto_completed_by,
+          auto_completed_at,
+          pacs_auto_completion_disabled_at
         from appointments_v2.bookings
         where id = $1
         for update
@@ -174,20 +190,59 @@ export async function updateBookingStatusManual(
       throw new SchedulingError(409, "Voided bookings cannot be changed from manual status management.", ["manual_status_voided_rejected"]);
     }
 
+    let autoCompletionDisabled = false;
+    let autoCompletionDisabledMessage: string | undefined;
+
     if (booking.status !== targetStatus) {
       if (targetStatus === "arrived" || targetStatus === "waiting") {
         await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), userRole);
       }
 
+      autoCompletionDisabled =
+        booking.status === "completed" &&
+        targetStatus !== "completed" &&
+        booking.auto_completed_by === "orthanc_pacs_auto_completion" &&
+        !booking.pacs_auto_completion_disabled_at;
+      autoCompletionDisabledMessage = autoCompletionDisabled
+        ? "PACS auto-completion has been disabled for this booking because staff manually changed the status after Orthanc completed it."
+        : undefined;
+
       await client.query(
         `
           update appointments_v2.bookings
-          set status = $2, updated_at = now(), updated_by_user_id = $3
+          set
+            status = $2,
+            updated_at = now(),
+            updated_by_user_id = $3,
+            pacs_auto_completion_disabled_at = case when $4 then now() else pacs_auto_completion_disabled_at end,
+            pacs_auto_completion_disabled_by_user_id = case when $4 then $3 else pacs_auto_completion_disabled_by_user_id end,
+            pacs_auto_completion_disabled_reason = case when $4 then $5 else pacs_auto_completion_disabled_reason end
           where id = $1
         `,
-        [bookingId, targetStatus, userId]
+        [bookingId, targetStatus, userId, autoCompletionDisabled, autoCompletionDisabledMessage ?? null]
       );
       await auditStatusChange(client, booking, targetStatus, cleanReason || null, userId, "manual_status_change");
+      if (autoCompletionDisabled) {
+        await logAuditEntry(
+          {
+            entityType: "appointment_v2_booking",
+            entityId: bookingId,
+            actionType: "orthanc_auto_completion_disabled",
+            oldValues: {
+              status: booking.status,
+              auto_completed_by: booking.auto_completed_by,
+              auto_completed_at: booking.auto_completed_at,
+            },
+            newValues: {
+              status: targetStatus,
+              reason: autoCompletionDisabledMessage,
+              manualReason: cleanReason || null,
+            },
+            changedByUserId: userId,
+          },
+          client
+        );
+      }
       if (targetStatus === "no-show") {
         await activateNoShowRestrictionForBooking(client, bookingId, cleanReason || null, userId);
       }
@@ -198,7 +253,13 @@ export async function updateBookingStatusManual(
     if (targetStatus === "cancelled") {
       void safeEnqueuePatientNotificationEvent({ bookingId, eventType: "appointment_cancelled" });
     }
-    return { id: bookingId, previousStatus: booking.status, status: targetStatus };
+    return {
+      id: bookingId,
+      previousStatus: booking.status,
+      status: targetStatus,
+      autoCompletionDisabled,
+      autoCompletionDisabledMessage,
+    };
   } catch (error) {
     await client.query("rollback");
     throw error;

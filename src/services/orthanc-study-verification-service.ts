@@ -6,6 +6,7 @@ export type OrthancCompletionThreshold = "study_exists" | "series_exists" | "ins
 export type OrthancMatchingStrategy = "study_uid_preferred_accession_fallback";
 export type OrthancVerificationStatus = "matched" | "not_found" | "ambiguous" | "error" | "insufficient_evidence";
 export type OrthancMatchKey = "study_instance_uid" | "accession_number";
+export type BelowMinimumSeriesAction = "leave_unchanged" | "discontinue";
 
 export interface OrthancAutoCompletionSettingLike {
   id?: number | null;
@@ -15,6 +16,8 @@ export interface OrthancAutoCompletionSettingLike {
   orthanc_target_key?: string | null;
   matching_strategy: OrthancMatchingStrategy;
   completion_threshold: OrthancCompletionThreshold;
+  minimum_series_count?: number | string | null;
+  below_minimum_series_action?: BelowMinimumSeriesAction | null;
 }
 
 export interface OrthancBookingVerificationContext {
@@ -323,13 +326,23 @@ function hasConflict(booking: OrthancBookingVerificationContext, candidate: Stud
   return null;
 }
 
-function thresholdSatisfied(candidate: StudyCandidate, threshold: OrthancCompletionThreshold): { ok: boolean; reason?: string } {
+function normalizeMinimumSeriesCount(value: unknown): number {
+  const parsed = Number(value ?? 2);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 2;
+}
+
+function thresholdSatisfied(
+  candidate: StudyCandidate,
+  setting: OrthancAutoCompletionSettingLike
+): { ok: boolean; reason?: string; minimumSeriesCount?: number } {
+  const threshold = setting.completion_threshold;
   if (threshold === "study_exists") return { ok: true };
   if (threshold === "series_exists") {
-    if (!candidate.reliableSeriesCount) return { ok: false, reason: "series_count_unavailable" };
-    return candidate.seriesCount != null && candidate.seriesCount > 0
+    const minimumSeriesCount = normalizeMinimumSeriesCount(setting.minimum_series_count);
+    if (!candidate.reliableSeriesCount) return { ok: true, reason: "series_count_unavailable", minimumSeriesCount };
+    return candidate.seriesCount != null && candidate.seriesCount >= minimumSeriesCount
       ? { ok: true }
-      : { ok: false, reason: "series_count_zero" };
+      : { ok: false, reason: "series_count_below_minimum", minimumSeriesCount };
   }
 
   if (!candidate.reliableInstanceCount) return { ok: false, reason: "instance_count_unavailable" };
@@ -343,13 +356,13 @@ function evaluateCandidates({
   candidates,
   matchKey,
   matchValue,
-  threshold,
+  setting,
 }: {
   booking: OrthancBookingVerificationContext;
   candidates: StudyCandidate[];
   matchKey: OrthancMatchKey;
   matchValue: string;
-  threshold: OrthancCompletionThreshold;
+  setting: OrthancAutoCompletionSettingLike;
 }): OrthancVerificationResult {
   if (candidates.length === 0) {
     return makeResult("not_found", {
@@ -382,7 +395,7 @@ function evaluateCandidates({
     });
   }
 
-  const thresholdResult = thresholdSatisfied(candidate, threshold);
+  const thresholdResult = thresholdSatisfied(candidate, setting);
   if (!thresholdResult.ok) {
     return makeResult("insufficient_evidence", {
       matchKey,
@@ -391,7 +404,12 @@ function evaluateCandidates({
       accessionNumber: candidate.accessionNumber,
       seriesCount: candidate.seriesCount,
       instanceCount: candidate.instanceCount,
-      resultJson: { reason: thresholdResult.reason, candidate: candidate.raw },
+      resultJson: {
+        reason: thresholdResult.reason,
+        minimumSeriesCount: thresholdResult.minimumSeriesCount ?? null,
+        belowMinimumSeriesAction: setting.below_minimum_series_action ?? "leave_unchanged",
+        candidate: candidate.raw,
+      },
       lastError: thresholdResult.reason || null,
     });
   }
@@ -403,7 +421,11 @@ function evaluateCandidates({
     accessionNumber: candidate.accessionNumber,
     seriesCount: candidate.seriesCount,
     instanceCount: candidate.instanceCount,
-    resultJson: { candidate: candidate.raw },
+    resultJson: {
+      candidate: candidate.raw,
+      minimumSeriesCount: thresholdResult.minimumSeriesCount ?? null,
+      seriesCountUnavailableAccepted: thresholdResult.reason === "series_count_unavailable",
+    },
   });
 }
 
@@ -496,7 +518,7 @@ async function runQuery(
     candidates,
     matchKey,
     matchValue,
-    threshold: setting.completion_threshold,
+    setting,
   });
 }
 

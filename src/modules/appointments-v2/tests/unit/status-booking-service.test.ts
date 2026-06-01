@@ -53,9 +53,22 @@ describe("status booking service source guards", () => {
 
   it("V2 manual status update cannot set arrived/waiting without patient queue requirements", () => {
     assert.match(source, /assertPatientMeetsBookingQueueRequirements/);
-    assert.match(source, /select id, patient_id, status, booking_date::text/);
+    assert.match(source, /patient_id,[\s\S]*status,[\s\S]*booking_date::text/);
     assert.match(source, /targetStatus === "arrived" \|\| targetStatus === "waiting"/);
     assert.match(source, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), userRole\)/);
+  });
+
+  it("manual reversal of Orthanc auto-completed bookings disables future auto-completion", () => {
+    assert.match(source, /auto_completed_by/);
+    assert.match(source, /booking\.status === "completed"[\s\S]*targetStatus !== "completed"[\s\S]*orthanc_pacs_auto_completion/);
+    assert.match(source, /pacs_auto_completion_disabled_at = case when \$4 then now\(\)/);
+    assert.match(source, /orthanc_auto_completion_disabled/);
+    assert.match(source, /autoCompletionDisabledMessage/);
+  });
+
+  it("manual reversal does not disable future auto-completion for non-Orthanc completed bookings", () => {
+    assert.match(source, /booking\.auto_completed_by === "orthanc_pacs_auto_completion"/);
+    assert.match(source, /!booking\.pacs_auto_completion_disabled_at/);
   });
 
   it("manual status update to non-queue statuses keeps existing behavior", () => {

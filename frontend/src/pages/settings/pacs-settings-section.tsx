@@ -17,6 +17,7 @@ interface OrthancRemoteModality {
 
 type OrthancTargetType = "local" | "remote_modality";
 type CompletionThreshold = "study_exists" | "series_exists" | "instance_exists";
+type BelowMinimumSeriesAction = "leave_unchanged" | "discontinue";
 
 interface OrthancVerificationTarget {
   type: OrthancTargetType;
@@ -32,6 +33,8 @@ interface PacsAutoCompletionSetting {
   orthanc_target_key: string | null;
   matching_strategy: "study_uid_preferred_accession_fallback";
   completion_threshold: CompletionThreshold;
+  minimum_series_count: number;
+  below_minimum_series_action: BelowMinimumSeriesAction;
   poll_interval_minutes: number;
   lookback_hours: number;
   stop_after_hours: number;
@@ -59,6 +62,8 @@ interface PacsAutoCompletionTestDiagnostics {
   matchValue: string | null;
   candidateCount: number | null;
   completionThreshold: CompletionThreshold;
+  minimumSeriesCount: number;
+  belowMinimumSeriesAction: BelowMinimumSeriesAction;
   lastError: string | null;
 }
 
@@ -83,6 +88,8 @@ type AutoCompletionDraft = {
   orthancTargetKey: string;
   matchingStrategy: "study_uid_preferred_accession_fallback";
   completionThreshold: CompletionThreshold;
+  minimumSeriesCount: number | "";
+  belowMinimumSeriesAction: BelowMinimumSeriesAction;
   pollIntervalMinutes: number | "";
   lookbackHours: number | "";
   stopAfterHours: number | "";
@@ -138,6 +145,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
           orthancTargetKey: setting.orthanc_target_key || "",
           matchingStrategy: setting.matching_strategy,
           completionThreshold: setting.completion_threshold,
+          minimumSeriesCount: Number(setting.minimum_series_count || 2),
+          belowMinimumSeriesAction: setting.below_minimum_series_action || "leave_unchanged",
           pollIntervalMinutes: Number(setting.poll_interval_minutes || 15),
           lookbackHours: Number(setting.lookback_hours || 24),
           stopAfterHours: Number(setting.stop_after_hours || 72)
@@ -222,6 +231,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
         method: "PUT",
         body: JSON.stringify({
           ...draft,
+          minimumSeriesCount: Math.max(1, Number(draft.minimumSeriesCount) || 2),
           pollIntervalMinutes: Math.max(1, Number(draft.pollIntervalMinutes) || 1),
           lookbackHours: Math.max(0, Number(draft.lookbackHours) || 0),
           stopAfterHours: Math.max(1, Number(draft.stopAfterHours) || 1)
@@ -415,6 +425,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
               orthancTargetKey: "",
               matchingStrategy: "study_uid_preferred_accession_fallback" as const,
               completionThreshold: "study_exists" as const,
+              minimumSeriesCount: 2,
+              belowMinimumSeriesAction: "leave_unchanged" as const,
               pollIntervalMinutes: 15,
               lookbackHours: 24,
               stopAfterHours: 72
@@ -496,6 +508,27 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     </select>
                   </label>
                   <label className="space-y-1">
+                    <span className="block text-xs text-stone-500">{t(language, "settings.pacs.minimumSeriesCount")}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      value={draft.minimumSeriesCount}
+                      onChange={(event) => updateDraft({ minimumSeriesCount: event.target.value === "" ? "" : Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="block text-xs text-stone-500">{t(language, "settings.pacs.belowMinimumSeriesAction")}</span>
+                    <select
+                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      value={draft.belowMinimumSeriesAction}
+                      onChange={(event) => updateDraft({ belowMinimumSeriesAction: event.target.value as BelowMinimumSeriesAction })}
+                    >
+                      <option value="leave_unchanged">{t(language, "settings.pacs.leaveUnchanged")}</option>
+                      <option value="discontinue">{t(language, "settings.pacs.discontinue")}</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.pollIntervalMinutes")}</span>
                     <input
                       type="number"
@@ -571,6 +604,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     <DiagnosticValue label={t(language, "settings.pacs.matchValue")} value={diagnostics.matchValue} />
                     <DiagnosticValue label={t(language, "settings.pacs.candidateCount")} value={diagnostics.candidateCount} />
                     <DiagnosticValue label={t(language, "settings.pacs.threshold")} value={diagnostics.completionThreshold} />
+                    <DiagnosticValue label={t(language, "settings.pacs.minimumSeriesCount")} value={diagnostics.minimumSeriesCount} />
+                    <DiagnosticValue label={t(language, "settings.pacs.belowMinimumSeriesAction")} value={diagnostics.belowMinimumSeriesAction} />
                     <DiagnosticValue label={t(language, "settings.pacs.resultStatus")} value={testDetails.result.status} />
                     <DiagnosticValue label={t(language, "settings.pacs.lastError")} value={diagnostics.lastError || testDetails.result.lastError || null} />
                   </div>
