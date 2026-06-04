@@ -51,11 +51,20 @@ describe("status booking service source guards", () => {
     assert.match(source, /for \(const bookingId of markedIds\)/);
   });
 
-  it("V2 manual status update cannot set arrived/waiting without patient queue requirements", () => {
+  it("V2 manual status update cannot set arrived, waiting, or completed without patient queue requirements", () => {
     assert.match(source, /assertPatientMeetsBookingQueueRequirements/);
     assert.match(source, /patient_id,[\s\S]*status,[\s\S]*booking_date::text/);
-    assert.match(source, /targetStatus === "arrived" \|\| targetStatus === "waiting"/);
+    assert.match(source, /targetStatus === "arrived" \|\| targetStatus === "waiting" \|\| targetStatus === "completed"/);
     assert.match(source, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), userRole\)/);
+  });
+
+  it("cleans active queue bookings that no longer satisfy required patient fields", () => {
+    assert.match(source, /cleanupActiveQueuePatientRequirementViolations/);
+    assert.match(source, /setting_key in \('phone1_required', 'national_id_required'\)/);
+    assert.match(source, /b\.status in \('arrived', 'waiting'\)/);
+    assert.match(source, /set status = 'scheduled'/);
+    assert.match(source, /active_queue_patient_requirements_cleanup/);
+    assert.match(source, /scheduleBookingWorklistSync\(bookingId\)/);
   });
 
   it("manual reversal of Orthanc auto-completed bookings disables future auto-completion", () => {
@@ -71,11 +80,12 @@ describe("status booking service source guards", () => {
     assert.match(source, /!booking\.pacs_auto_completion_disabled_at/);
   });
 
-  it("manual status update to non-queue statuses keeps existing behavior", () => {
+  it("manual status update to non-queue close statuses keeps existing behavior", () => {
     assert.match(source, /MANUAL_STATUS_TARGETS/);
-    assert.match(source, /"completed"/);
     assert.match(source, /"no-show"/);
-    assert.doesNotMatch(source, /targetStatus === "completed"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
+    assert.match(source, /"cancelled"/);
+    assert.match(source, /"discontinued"/);
+    assert.doesNotMatch(source, /targetStatus === "no-show"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
   });
 
   it("V2 queue scan cannot set arrived without patient queue requirements", () => {
@@ -83,5 +93,12 @@ describe("status booking service source guards", () => {
     assert.match(readV2RoutesSource, /select id, patient_id, status[\s\S]*for update/);
     assert.match(readV2RoutesSource, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), user\?\.role\)/);
     assert.match(readV2RoutesSource, /set status = 'arrived'/);
+  });
+
+  it("V2 queue and modality worklist reads cleanup invalid active worklist entries first", () => {
+    assert.match(readV2RoutesSource, /cleanupActiveQueuePatientRequirementViolations/);
+    assert.match(readV2RoutesSource, /"\/queue"[\s\S]*cleanupActiveQueuePatientRequirementViolations\(/);
+    assert.match(readV2RoutesSource, /patient_requirement_cleanup_count/);
+    assert.match(readV2RoutesSource, /"\/modality\/worklist"[\s\S]*cleanupActiveQueuePatientRequirementViolations\(/);
   });
 });

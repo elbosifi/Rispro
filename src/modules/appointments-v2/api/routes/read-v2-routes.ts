@@ -16,6 +16,7 @@ import {
   assertPatientMeetsBookingQueueRequirements,
 } from "../../booking/services/patient-identifier-requirement.js";
 import {
+  cleanupActiveQueuePatientRequirementViolations,
   finalizeAutoNoShowsForQueue,
   getQueueNoShowSettings,
   getTripoliToday,
@@ -616,8 +617,12 @@ router.get(
 router.get(
   "/queue",
   requirePageAccess("queue"),
-  asyncRoute(async (_req: Request, res: Response) => {
+  asyncRoute(async (req: Request, res: Response) => {
     const today = getTripoliToday();
+    const patientRequirementCleanupResult = await cleanupActiveQueuePatientRequirementViolations(
+      today,
+      Number((req as AuthedRequest).user?.sub ?? 0) || null
+    );
     const noShowSettings = await getQueueNoShowSettings();
     const autoNoShowResult = await finalizeAutoNoShowsForQueue(noShowSettings, today);
 
@@ -726,6 +731,7 @@ router.get(
       no_show_confirmation_required: noShowSettings.manualConfirmationRequired,
       auto_no_show_count: autoNoShowResult.autoMarkedIds.length,
       auto_no_show_cleanup_days: noShowSettings.cleanupDays,
+      patient_requirement_cleanup_count: patientRequirementCleanupResult.cleanedIds.length,
       summary: summaryRow,
       queue_entries: entries.rows,
       no_show_candidates:
@@ -915,6 +921,11 @@ router.get(
       res.status(400).json({ error: "modalityId is required" });
       return;
     }
+
+    await cleanupActiveQueuePatientRequirementViolations(
+      date || getTripoliToday(),
+      Number((req as AuthedRequest).user?.sub ?? 0) || null
+    );
 
     const params: unknown[] = [modalityId];
     let dateClause = "";

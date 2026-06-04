@@ -37,6 +37,11 @@ interface BookingStatusRow {
   pacs_auto_completion_disabled_at?: string | null;
 }
 
+interface PatientRequirementCleanupRow extends BookingStatusRow {
+  missing_phone: boolean;
+  missing_identifier: boolean;
+}
+
 export interface QueueNoShowSettings {
   reviewTime: string;
   reviewActive: boolean;
@@ -86,6 +91,10 @@ function settingValue(rows: SettingsRow[], key: string, fallback: unknown): unkn
 function parseEnabled(value: unknown, fallback = true): boolean {
   const clean = String(value ?? (fallback ? "enabled" : "disabled")).trim().toLowerCase();
   return ["enabled", "on", "true", "yes", "1", "required"].includes(clean);
+}
+
+function parseRequiredSetting(value: unknown, fallback: "required" | "optional"): boolean {
+  return String(value ?? fallback).trim().toLowerCase() !== "optional";
 }
 
 function parseCleanupDays(value: unknown): number {
@@ -138,6 +147,117 @@ async function auditStatusChange(
     },
     client
   );
+}
+
+async function getPatientRequirementSettings(client: PoolClient): Promise<{
+  phoneRequired: boolean;
+  identifierRequired: boolean;
+}> {
+  const { rows } = await client.query<SettingsRow>(
+    `
+      select setting_key, setting_value
+      from system_settings
+      where category = 'patient_registration'
+        and setting_key in ('phone1_required', 'national_id_required')
+    `
+  );
+
+  return {
+    phoneRequired: parseRequiredSetting(settingValue(rows, "phone1_required", "required"), "required"),
+    identifierRequired: parseRequiredSetting(settingValue(rows, "national_id_required", "required"), "required"),
+  };
+}
+
+export async function cleanupActiveQueuePatientRequirementViolations(
+  today: string,
+  userId: number | null
+): Promise<{ cleanedIds: number[] }> {
+  const cleanedIds: number[] = [];
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const settings = await getPatientRequirementSettings(client);
+    if (!settings.phoneRequired && !settings.identifierRequired) {
+      await client.query("commit");
+      return { cleanedIds };
+    }
+
+    const result = await client.query<PatientRequirementCleanupRow>(
+      `
+        with invalid_bookings as (
+          select
+            b.id,
+            b.status,
+            b.booking_date::text,
+            b.patient_id,
+            ($2::boolean and nullif(trim(coalesce(p.phone_1, '')), '') is null) as missing_phone,
+            (
+              $3::boolean
+              and coalesce(
+                nullif(trim(primary_identifier.value), ''),
+                nullif(trim(p.identifier_value), ''),
+                nullif(trim(p.national_id), '')
+              ) is null
+            ) as missing_identifier
+          from appointments_v2.bookings b
+          join patients p on p.id = b.patient_id
+          left join lateral (
+            select pi.value
+            from patient_identifiers pi
+            where pi.patient_id = p.id
+              and pi.is_primary = true
+            order by pi.id asc
+            limit 1
+          ) primary_identifier on true
+          where b.booking_date = $1::date
+            and b.status in ('arrived', 'waiting')
+          for update of b
+        )
+        update appointments_v2.bookings b
+        set status = 'scheduled', updated_at = now(), updated_by_user_id = $4
+        from invalid_bookings invalid
+        where b.id = invalid.id
+          and (invalid.missing_phone or invalid.missing_identifier)
+        returning
+          b.id,
+          invalid.patient_id,
+          invalid.status,
+          invalid.booking_date,
+          invalid.missing_phone,
+          invalid.missing_identifier
+      `,
+      [today, settings.phoneRequired, settings.identifierRequired, userId]
+    );
+
+    for (const booking of result.rows) {
+      const reasonCodes = [
+        booking.missing_phone ? "patient_phone_required" : null,
+        booking.missing_identifier ? "patient_primary_identifier_required" : null,
+      ].filter(Boolean);
+      cleanedIds.push(Number(booking.id));
+      await auditStatusChange(
+        client,
+        booking,
+        "scheduled",
+        `Removed from active worklist because required patient data is missing: ${reasonCodes.join(", ")}.`,
+        userId,
+        "active_queue_patient_requirements_cleanup"
+      );
+    }
+
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  for (const bookingId of cleanedIds) {
+    scheduleBookingWorklistSync(bookingId);
+  }
+
+  return { cleanedIds };
 }
 
 export async function updateBookingStatusManual(
@@ -194,7 +314,7 @@ export async function updateBookingStatusManual(
     let autoCompletionDisabledMessage: string | undefined;
 
     if (booking.status !== targetStatus) {
-      if (targetStatus === "arrived" || targetStatus === "waiting") {
+      if (targetStatus === "arrived" || targetStatus === "waiting" || targetStatus === "completed") {
         await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), userRole);
       }
 
