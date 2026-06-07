@@ -45,6 +45,7 @@ type ExamTypeForm = {
 
 type StatusFilter = "active" | "inactive" | "all";
 type PreparationFilter = "all" | "missing_arabic" | "missing_english" | "missing_both";
+type CopyMode = "arabic" | "english" | "both";
 
 const emptyForm: ExamTypeForm = {
   modalityId: "",
@@ -105,6 +106,10 @@ function preparationStatus(row: ExamTypeRow) {
   if (!hasArabic && !hasEnglish) return "Missing both";
   if (!hasArabic) return "Missing Arabic";
   return "Missing English";
+}
+
+function instructionValue(row: ExamTypeRow, mode: "arabic" | "english") {
+  return mode === "arabic" ? String(row.specific_instruction_ar ?? "") : String(row.specific_instruction_en ?? "");
 }
 
 function matchesPreparationFilter(row: ExamTypeRow, filter: PreparationFilter) {
@@ -298,6 +303,8 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       {showCreate && (
         <ExamTypeFormCard
           form={createForm}
+          examTypes={examTypes}
+          modalityById={modalityById}
           modalityOptions={modalityOptions}
           onChange={setCreateForm}
           onCancel={() => setShowCreate(false)}
@@ -328,6 +335,8 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
                   <td colSpan={8} className="p-3">
                     <ExamTypeFormCard
                       form={editForm}
+                      examTypes={examTypes}
+                      modalityById={modalityById}
                       modalityOptions={modalityOptions}
                       onChange={setEditForm}
                       onCancel={() => { setEditingId(null); setMutationError(null); }}
@@ -399,7 +408,9 @@ function modalityLabel(row: ExamTypeRow, modalityById: Map<string, ModalityRow>,
 function ExamTypeFormCard({
   editMode = false,
   form,
+  examTypes,
   modalityOptions,
+  modalityById,
   onCancel,
   onChange,
   onSubmit,
@@ -408,7 +419,9 @@ function ExamTypeFormCard({
 }: {
   editMode?: boolean;
   form: ExamTypeForm;
+  examTypes: ExamTypeRow[];
   modalityOptions: Array<{ value: string; label: string }>;
+  modalityById: Map<string, ModalityRow>;
   onCancel: () => void;
   onChange: (form: ExamTypeForm) => void;
   onSubmit: () => void;
@@ -417,6 +430,24 @@ function ExamTypeFormCard({
 }) {
   const prefix = editMode ? "Edit " : "";
   const canSubmit = hasText(form.name_en) && hasText(form.name_ar) && hasText(form.code) && hasText(form.modalityId);
+  const [copyOpen, setCopyOpen] = useState(false);
+
+  const copyInstructions = (source: ExamTypeRow, mode: CopyMode, append: boolean) => {
+    const nextForm = { ...form };
+    const applyLanguage = (language: "arabic" | "english") => {
+      const field = language === "arabic" ? "specific_instruction_ar" : "specific_instruction_en";
+      const sourceValue = instructionValue(source, language);
+      if (!sourceValue) return true;
+      if (!append && hasText(nextForm[field]) && !window.confirm(`Replace existing ${language} instruction text?`)) return false;
+      nextForm[field] = append && hasText(nextForm[field]) ? `${nextForm[field]}\n${sourceValue}` : sourceValue;
+      return true;
+    };
+
+    if ((mode === "arabic" || mode === "both") && !applyLanguage("arabic")) return;
+    if ((mode === "english" || mode === "both") && !applyLanguage("english")) return;
+    onChange(nextForm);
+    setCopyOpen(false);
+  };
 
   return (
     <Card className="p-4 space-y-3">
@@ -448,17 +479,146 @@ function ExamTypeFormCard({
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-xs font-medium">
           Preparation Arabic
-          <textarea value={form.specific_instruction_ar} onChange={(event) => onChange({ ...form, specific_instruction_ar: event.target.value })} rows={2} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-rtl" />
+          <textarea aria-label="Preparation Arabic" value={form.specific_instruction_ar} onChange={(event) => onChange({ ...form, specific_instruction_ar: event.target.value })} rows={2} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-rtl" />
         </label>
         <label className="text-xs font-medium">
           Preparation English
-          <textarea value={form.specific_instruction_en} onChange={(event) => onChange({ ...form, specific_instruction_en: event.target.value })} rows={2} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" />
+          <textarea aria-label="Preparation English" value={form.specific_instruction_en} onChange={(event) => onChange({ ...form, specific_instruction_en: event.target.value })} rows={2} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" />
         </label>
       </div>
       <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" onClick={() => setCopyOpen(true)} className="text-sm">Copy instructions from existing exam</Button>
         <Button onClick={onSubmit} disabled={pending || !canSubmit} className="text-sm">{submitLabel}</Button>
         <Button variant="secondary" onClick={onCancel} className="text-sm">Cancel</Button>
       </div>
+      {copyOpen && (
+        <InstructionCopyDialog
+          currentModalityId={form.modalityId}
+          examTypes={examTypes}
+          modalityById={modalityById}
+          onClose={() => setCopyOpen(false)}
+          onCopy={copyInstructions}
+        />
+      )}
     </Card>
+  );
+}
+
+function InstructionCopyDialog({
+  currentModalityId,
+  examTypes,
+  modalityById,
+  onClose,
+  onCopy,
+}: {
+  currentModalityId: string;
+  examTypes: ExamTypeRow[];
+  modalityById: Map<string, ModalityRow>;
+  onClose: () => void;
+  onCopy: (source: ExamTypeRow, mode: CopyMode, append: boolean) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<"same" | "all">(currentModalityId ? "same" : "all");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [append, setAppend] = useState(false);
+  const selected = examTypes.find((row) => row.id === selectedId) ?? null;
+  const cleanSearch = search.trim().toLowerCase();
+  const visibleRows = examTypes
+    .filter((row) => {
+      if (scope === "same" && currentModalityId && String(row.modality_id ?? "") !== currentModalityId) return false;
+      if (!cleanSearch) return true;
+      const modality = modalityLabel(row, modalityById, "en").toLowerCase();
+      return [row.code, row.name_en, row.name_ar, modality].some((value) => String(value ?? "").toLowerCase().includes(cleanSearch));
+    })
+    .sort((left, right) => {
+      const leftSame = currentModalityId && String(left.modality_id ?? "") === currentModalityId;
+      const rightSame = currentModalityId && String(right.modality_id ?? "") === currentModalityId;
+      if (leftSame !== rightSame) return leftSame ? -1 : 1;
+      if ((left.is_active !== false) !== (right.is_active !== false)) return left.is_active !== false ? -1 : 1;
+      if ((hasText(left.specific_instruction_ar) || hasText(left.specific_instruction_en)) !== (hasText(right.specific_instruction_ar) || hasText(right.specific_instruction_en))) {
+        return hasText(left.specific_instruction_ar) || hasText(left.specific_instruction_en) ? -1 : 1;
+      }
+      return String(left.name_en ?? left.code ?? "").localeCompare(String(right.name_en ?? right.code ?? ""));
+    });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div role="dialog" aria-modal="true" aria-label="Copy instructions from existing exam" className="w-full max-w-5xl rounded-lg bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 p-4 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="font-semibold text-stone-900 dark:text-white">Copy instructions from existing exam</h4>
+          <Button variant="secondary" onClick={onClose} className="text-xs">Close</Button>
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          <label className="text-xs font-medium md:col-span-2">
+            Search
+            <input aria-label="Search source exams" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" placeholder="Code, name, modality" />
+          </label>
+          <label className="text-xs font-medium">
+            Source modality scope
+            <select aria-label="Source modality scope" value={scope} onChange={(event) => setScope(event.target.value as "same" | "all")} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm">
+              <option value="same" disabled={!currentModalityId}>Same modality</option>
+              <option value="all">All modalities</option>
+            </select>
+          </label>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="max-h-80 overflow-auto rounded border border-stone-200 dark:border-stone-700">
+            <table className="min-w-full text-xs">
+              <thead className="bg-stone-50 dark:bg-stone-800">
+                <tr className="text-left">
+                  <th className="p-2">Code</th>
+                  <th className="p-2">English</th>
+                  <th className="p-2">Arabic</th>
+                  <th className="p-2">Modality</th>
+                  <th className="p-2">Preparation</th>
+                  <th className="p-2">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.id} className="border-t border-stone-100 dark:border-stone-800">
+                    <td className="p-2 font-mono">{row.code || "-"}</td>
+                    <td className="p-2">{row.name_en || "-"}</td>
+                    <td className="p-2 input-rtl">{row.name_ar || "-"}</td>
+                    <td className="p-2">{modalityLabel(row, modalityById, "en")}</td>
+                    <td className="p-2">{preparationStatus(row)}</td>
+                    <td className="p-2"><Button variant="secondary" onClick={() => setSelectedId(row.id)} className="text-xs">Select</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="rounded border border-stone-200 dark:border-stone-700 p-3 space-y-3 text-sm">
+            {selected ? (
+              <>
+                <div>
+                  <p className="font-semibold">{selected.code || "-"} - {selected.name_en || selected.name_ar || "Unnamed exam"}</p>
+                  <p className="description-center text-xs">{modalityLabel(selected, modalityById, "en")}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium">Arabic instruction</p>
+                  <p className="mt-1 min-h-10 rounded bg-stone-50 dark:bg-stone-800 p-2 input-rtl whitespace-pre-wrap">{selected.specific_instruction_ar || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium">English instruction</p>
+                  <p className="mt-1 min-h-10 rounded bg-stone-50 dark:bg-stone-800 p-2 input-ltr whitespace-pre-wrap">{selected.specific_instruction_en || "-"}</p>
+                </div>
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={append} onChange={(event) => setAppend(event.target.checked)} />
+                  Append instead of replace
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={() => onCopy(selected, "arabic", append)} className="text-xs">Copy Arabic only</Button>
+                  <Button variant="secondary" onClick={() => onCopy(selected, "english", append)} className="text-xs">Copy English only</Button>
+                  <Button onClick={() => onCopy(selected, "both", append)} className="text-xs">Copy both</Button>
+                </div>
+              </>
+            ) : (
+              <p className="description-center">Select an exam to preview its preparation instructions.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

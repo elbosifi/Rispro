@@ -84,6 +84,18 @@ function rowFor(text: string) {
   return screen.getByText(text).closest("tr") as HTMLTableRowElement;
 }
 
+function dialog() {
+  return screen.getByRole("dialog", { name: "Copy instructions from existing exam" });
+}
+
+function dialogRowFor(text: string) {
+  return within(dialog()).getByText(text).closest("tr") as HTMLTableRowElement;
+}
+
+function fieldValue(label: string) {
+  return (screen.getByLabelText(label) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
+}
+
 describe("ExamTypesSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -201,5 +213,88 @@ describe("ExamTypesSection", () => {
     await waitFor(() => expect(updateExamType).toHaveBeenCalledWith(12, expect.objectContaining({ isActive: true })));
     await userEvent.click(within(inactiveRow).getByRole("button", { name: "Hard Delete" }));
     await waitFor(() => expect(hardDeleteExamType).toHaveBeenCalledWith(12));
+  });
+
+  it("create form can copy Arabic and English instructions without changing other fields", async () => {
+    renderSection();
+
+    await screen.findByText("CT-BRAIN");
+    await userEvent.click(screen.getByRole("button", { name: "Add exam type" }));
+    await userEvent.type(screen.getByLabelText("Code"), "XR-CHEST");
+    await userEvent.type(screen.getByLabelText("English name"), "Chest X-ray");
+    await userEvent.type(screen.getByLabelText("Arabic name"), "صدر");
+    await userEvent.selectOptions(screen.getByLabelText("Exam modality"), "1");
+    await userEvent.type(screen.getByLabelText("Duration minutes"), "15");
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy instructions from existing exam" }));
+    expect(within(dialog()).getByText("CT-BRAIN")).toBeTruthy();
+    await userEvent.click(within(dialogRowFor("CT-BRAIN")).getByRole("button", { name: "Select" }));
+    expect(within(dialog()).getByText("Fasting")).toBeTruthy();
+    expect(within(dialog()).getByText("صيام")).toBeTruthy();
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Copy both" }));
+
+    expect(fieldValue("Code")).toBe("XR-CHEST");
+    expect(fieldValue("English name")).toBe("Chest X-ray");
+    expect(fieldValue("Arabic name")).toBe("صدر");
+    expect(fieldValue("Exam modality")).toBe("1");
+    expect(fieldValue("Duration minutes")).toBe("15");
+    expect(fieldValue("Preparation Arabic")).toBe("صيام");
+    expect(fieldValue("Preparation English")).toBe("Fasting");
+  });
+
+  it("edit form can copy individual instruction languages without changing catalog fields", async () => {
+    renderSection();
+
+    await screen.findByText("CT-BRAIN");
+    await userEvent.click(within(rowFor("CT-BRAIN")).getByRole("button", { name: "Edit" }));
+    const codeBefore = (screen.getByLabelText("Edit code") as HTMLInputElement).value;
+    const durationBefore = (screen.getByLabelText("Edit duration minutes") as HTMLInputElement).value;
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy instructions from existing exam" }));
+    await userEvent.selectOptions(within(dialog()).getByLabelText("Source modality scope"), "all");
+    await userEvent.click(within(dialogRowFor("MR-SPINE")).getByRole("button", { name: "Select" }));
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Copy English only" }));
+
+    expect(fieldValue("Edit code")).toBe(codeBefore);
+    expect(fieldValue("Edit English name")).toBe("Brain CT");
+    expect(fieldValue("Edit Arabic name")).toBe("دماغ");
+    expect(fieldValue("Edit modality")).toBe("1");
+    expect(fieldValue("Edit duration minutes")).toBe(durationBefore);
+    expect(fieldValue("Preparation Arabic")).toBe("صيام");
+    expect(fieldValue("Preparation English")).toBe("Remove metal");
+  });
+
+  it("does not overwrite existing instruction text without confirmation", async () => {
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderSection();
+
+    await screen.findByText("CT-BRAIN");
+    await userEvent.click(within(rowFor("CT-BRAIN")).getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Copy instructions from existing exam" }));
+    await userEvent.selectOptions(within(dialog()).getByLabelText("Source modality scope"), "all");
+    await userEvent.click(within(dialogRowFor("MR-SPINE")).getByRole("button", { name: "Select" }));
+    await userEvent.click(within(dialog()).getByRole("button", { name: "Copy English only" }));
+
+    expect(confirmMock).toHaveBeenCalled();
+    expect(fieldValue("Preparation English")).toBe("Fasting");
+  });
+
+  it("prioritizes same-modality source exams while still allowing all modalities", async () => {
+    renderSection();
+
+    await screen.findByText("CT-BRAIN");
+    await userEvent.click(screen.getByRole("button", { name: "Add exam type" }));
+    await userEvent.selectOptions(screen.getByLabelText("Exam modality"), "1");
+    await userEvent.click(screen.getByRole("button", { name: "Copy instructions from existing exam" }));
+
+    const sameModalityRows = within(dialog()).getAllByRole("row");
+    expect(within(sameModalityRows[1]!).getByText("CT-BRAIN")).toBeTruthy();
+    expect(within(sameModalityRows[2]!).getByText("CT-OLD")).toBeTruthy();
+
+    await userEvent.selectOptions(within(dialog()).getByLabelText("Source modality scope"), "all");
+    expect(within(dialog()).getByText("MR-SPINE")).toBeTruthy();
+    await userEvent.type(within(dialog()).getByLabelText("Search source exams"), "MRI");
+    expect(within(dialog()).getByText("MR-SPINE")).toBeTruthy();
+    expect(within(dialog()).queryByText("CT-BRAIN")).toBeNull();
   });
 });
