@@ -143,6 +143,10 @@ export async function createExamType(
   const specificInstructionAr = String(payload.specificInstructionAr || "").trim();
   const specificInstructionEn = String(payload.specificInstructionEn || "").trim();
   const durationMinutes = normalizeDurationMinutes(payload.durationMinutes);
+  const nextIsActive =
+    payload.isActive === undefined && payload.is_active === undefined
+      ? undefined
+      : Boolean(payload.isActive ?? payload.is_active);
 
   if (!nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr and nameEn are required.");
@@ -247,12 +251,12 @@ export async function updateExamType(
           specific_instruction_ar = nullif($6, ''),
           specific_instruction_en = nullif($7, ''),
           duration_minutes = $8,
-          is_active = true,
+          is_active = $9,
           updated_at = now()
         where id = $1
         returning id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
       `,
-      [cleanExamTypeId, modalityId, code, nameAr, nameEn, specificInstructionAr, specificInstructionEn, durationMinutes]
+      [cleanExamTypeId, modalityId, code, nameAr, nameEn, specificInstructionAr, specificInstructionEn, durationMinutes, nextIsActive ?? existing.is_active]
     );
     const updatedExamType = requireRow<ExamTypeRow>(
       rows[0] as ExamTypeRow | undefined,

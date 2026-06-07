@@ -158,7 +158,7 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
   }
 });
 
-test("catalog exam type update reactivates an inactive exam type and keeps 404 for missing rows", async (t) => {
+test("catalog exam type update preserves inactive status by default and keeps 404 for missing rows", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
 
   const suffix = uniqueSuffix();
@@ -185,7 +185,7 @@ test("catalog exam type update reactivates an inactive exam type and keeps 404 f
     const deactivated = await deleteExamType(created.id, userId);
     assert.equal(deactivated.is_active, false);
 
-    const reactivated = await updateExamType(
+    const editedInactive = await updateExamType(
       created.id,
       {
         modalityId,
@@ -199,16 +199,16 @@ test("catalog exam type update reactivates an inactive exam type and keeps 404 f
       userId
     );
 
-    assert.equal(reactivated.id, created.id);
-    assert.equal(reactivated.is_active, true);
-    assert.equal(reactivated.name_en, `${prefix} exam en updated`);
-    assert.equal(reactivated.duration_minutes, 45);
+    assert.equal(editedInactive.id, created.id);
+    assert.equal(editedInactive.is_active, false);
+    assert.equal(editedInactive.name_en, `${prefix} exam en updated`);
+    assert.equal(editedInactive.duration_minutes, 45);
 
     const persisted = await pool.query<{ is_active: boolean }>(
       `select is_active from exam_types where id = $1 limit 1`,
       [created.id]
     );
-    assert.equal(persisted.rows[0]?.is_active, true);
+    assert.equal(persisted.rows[0]?.is_active, false);
 
     const audit = await pool.query<{ action_type: string; old_values: { is_active?: boolean } | null; new_values: { is_active?: boolean } | null }>(
       `
@@ -224,7 +224,21 @@ test("catalog exam type update reactivates an inactive exam type and keeps 404 f
     );
     assert.equal(audit.rows[0]?.action_type, "update");
     assert.equal(audit.rows[0]?.old_values?.is_active, false);
-    assert.equal(audit.rows[0]?.new_values?.is_active, true);
+    assert.equal(audit.rows[0]?.new_values?.is_active, false);
+
+    const reactivated = await updateExamType(
+      created.id,
+      {
+        modalityId,
+        code: `${prefix}_EXAM`,
+        nameAr: `${prefix} exam ar updated`,
+        nameEn: `${prefix} exam en updated`,
+        durationMinutes: 45,
+        isActive: true
+      },
+      userId
+    );
+    assert.equal(reactivated.is_active, true);
 
     await assert.rejects(
       () =>
