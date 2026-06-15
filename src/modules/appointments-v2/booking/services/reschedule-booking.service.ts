@@ -491,7 +491,14 @@ export async function rescheduleBookingInternal(
   // 7. Check if reschedule is allowed or requires override
   let wasOverride = false;
   let supervisorUserId: number | null = null;
-  const requiredOverrideTypes = resolveRequiredOverrideTypes(decision, effectiveCapacityResolutionMode);
+  const capacityModePreserved = capacityResolutionMode === undefined;
+  const existingCapacityOverrideAlreadyResolved = capacityModePreserved && dateUnchanged && timeUnchanged;
+  let requiredOverrideTypes = resolveRequiredOverrideTypes(decision, effectiveCapacityResolutionMode);
+  if (existingCapacityOverrideAlreadyResolved) {
+    requiredOverrideTypes = requiredOverrideTypes.filter(
+      (type) => type !== "category_override" && type !== "total_capacity_override"
+    );
+  }
   if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
     requiredOverrideTypes.push("exam_mix_override");
   }

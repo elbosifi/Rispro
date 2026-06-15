@@ -91,6 +91,9 @@ export function RescheduleDialog({
       ? examTypeChangePolicy
       : "allowed_without_supervisor";
   const examTypeChanged = Number(selectedExamTypeId ?? -1) !== Number(examTypeId ?? -1);
+  const detailsOnlyEdit = !newDate && examTypeChanged;
+  const effectiveDate = newDate || booking.bookingDate;
+  const capacityChanged = capacityResolutionMode !== "standard";
   const examTypeChangeRequiresSupervisorAuth =
     examTypeChanged &&
     normalizedExamTypeChangePolicy === "supervisor_required" &&
@@ -118,9 +121,9 @@ export function RescheduleDialog({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onCancel]);
 
-  // Pre-evaluate when date changes
+  // Pre-evaluate when date changes or an exam-type-only edit uses the current date.
   useEffect(() => {
-    if (!newDate) {
+    if (!newDate && !detailsOnlyEdit) {
       setDecision(null);
       setEvaluationError(null);
       return;
@@ -131,7 +134,7 @@ export function RescheduleDialog({
     setEvaluationError(null);
     setShowOverride(false);
 
-    const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
+    const selectedAvailabilityItem = availabilityItems.find((item) => item.date === effectiveDate);
     const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
     const hasAnySpecialQuotaAvailable = availabilityItems.some((item) => (item.specialQuotaSummary?.remaining ?? 0) > 0);
     const canUseSpecialQuotaMode =
@@ -147,7 +150,7 @@ export function RescheduleDialog({
       patientId: booking.patientId,
       modalityId: booking.modalityId,
       examTypeId: selectedExamTypeId,
-      scheduledDate: newDate,
+      scheduledDate: effectiveDate,
       caseCategory,
       capacityResolutionMode: effectiveCapacityResolutionMode,
       useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
@@ -171,9 +174,9 @@ export function RescheduleDialog({
       .finally(() => {
         setEvaluating(false);
       });
-  }, [newDate, booking, selectedExamTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language, availabilityItems, currentUserRole, examTypeChangeRequiresSupervisorAuth]);
+  }, [newDate, detailsOnlyEdit, effectiveDate, booking, selectedExamTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language, availabilityItems, currentUserRole, examTypeChangeRequiresSupervisorAuth]);
 
-  const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
+  const selectedAvailabilityItem = availabilityItems.find((item) => item.date === effectiveDate);
   const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
   const hasAnySpecialQuotaAvailable = availabilityItems.some((item) => (item.specialQuotaSummary?.remaining ?? 0) > 0);
   const isSuperAdmin = currentUserRole === "super_admin";
@@ -218,7 +221,7 @@ export function RescheduleDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!newDate) return;
+    if (!newDate && !detailsOnlyEdit) return;
     if (specialQuotaNeedsDetails && (!specialReasonCode || !specialReasonConfirmed)) {
       return;
     }
@@ -241,12 +244,14 @@ export function RescheduleDialog({
           }
         : undefined;
 
-      await onReschedule(newDate, null, selectedExamTypeId, override, {
+      const capacityPayload = detailsOnlyEdit && !capacityChanged ? undefined : {
         capacityResolutionMode: effectiveCapacityResolutionMode,
         useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
         specialReasonCode: effectiveCapacityResolutionMode === "special_quota_extra" ? specialReasonCode || null : null,
         specialReasonNote: effectiveCapacityResolutionMode === "special_quota_extra" ? specialReasonNote.trim() || null : null,
-      });
+      };
+
+      await onReschedule(effectiveDate, null, selectedExamTypeId, override, capacityPayload);
     } catch (err) {
       const message = err instanceof Error ? err.message : t(language, "appointments.v2.unknownError");
       setSubmitError(`${language === "ar" ? "تعذر إعادة جدولة الحجز:" : "Could not reschedule booking:"} ${message}`);
@@ -593,7 +598,7 @@ export function RescheduleDialog({
                <Button
                  type="submit"
                  disabled={
-                   !newDate ||
+                   (!newDate && !detailsOnlyEdit) ||
                    isBlocked ||
                    !!evaluationError ||
                    evaluating ||
@@ -603,7 +608,7 @@ export function RescheduleDialog({
                      (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()))
                  }
                  style={{
-                   backgroundColor: isBlocked || !newDate ? "var(--border)" : "var(--blue)",
+                   backgroundColor: isBlocked || (!newDate && !detailsOnlyEdit) ? "var(--border)" : "var(--blue)",
                    color: "#fff",
                  }}
                >

@@ -30,10 +30,10 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
 
     const { pool } = await import("../../../../db/pool.js");
     const exam2 = await pool.query<{ id: number }>(
-      `insert into exam_types (modality_id, name_ar, name_en, is_active)
-       values ($1, $2, $3, true)
+      `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+       values ($1, $2, $3, $4, true)
        returning id`,
-      [testData.modalityId, `${TEST_PREFIX}نوع2`, `${TEST_PREFIX} Exam Type 2`]
+      [testData.modalityId, `${TEST_PREFIX}نوع2`, `${TEST_PREFIX} Exam Type 2`, `${TEST_PREFIX}EXAM2${Date.now()}`]
     );
     secondExamTypeId = Number(exam2.rows[0].id);
 
@@ -73,10 +73,10 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     const { pool } = await import("../../../../db/pool.js");
     const nationalId = `8${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
     const row = await pool.query<{ id: number }>(
-      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
-       values ($1, $2, $3, $4, 'M', 40, 'national_id', $5)
+      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+       values ($1, $2, $3, $4, 'M', 40, $5, 'national_id', $6)
        returning id`,
-      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, nationalId]
+      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, "0912345678", nationalId]
     );
     return Number(row.rows[0].id);
   }
@@ -191,7 +191,7 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       await pool.query(
         `
           insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
-          values ('scheduling_and_capacity', 'exam_type_change_policy', jsonb_build_object('value', $1), $2)
+          values ('scheduling_and_capacity', 'exam_type_change_policy', jsonb_build_object('value', $1::text), $2)
           on conflict (category, setting_key)
           do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
         `,
@@ -309,5 +309,116 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
         );
       }
     }
+  });
+
+  it("rejects same-date exam type change to an exam type from another modality", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    const otherModality = await pool.query<{ id: number }>(
+      `insert into modalities (name_ar, name_en, code, daily_capacity, is_active)
+       values ($1, $2, $3, 10, true)
+       returning id`,
+      [`${TEST_PREFIX}مودالية اخرى`, `${TEST_PREFIX} Other Modality`, `${TEST_PREFIX}OTHER${Date.now()}`]
+    );
+    const otherExamType = await pool.query<{ id: number }>(
+      `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+       values ($1, $2, $3, $4, true)
+       returning id`,
+      [Number(otherModality.rows[0].id), `${TEST_PREFIX}فحص اخر`, `${TEST_PREFIX} Other Exam`, `${TEST_PREFIX}OTHEREXAM${Date.now()}`]
+    );
+    const patient = await createPatient();
+    const bookingDate = "2042-01-14";
+    const booking = await fetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: patient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate,
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+    assert.equal(booking.status, 201);
+
+    const attempt = await fetch(`/api/v2/appointments/${Number((booking.data as any).booking.id)}`, {
+      method: "PUT",
+      body: {
+        bookingDate,
+        examTypeId: Number(otherExamType.rows[0].id),
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.equal(attempt.status, 400);
+    assert.ok(String((attempt.data as any).error ?? "").includes("does not belong to modality"));
+  });
+
+  it("preserves overbooked super-admin booking capacity mode when omitted on exam-type-only edit", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    const superAdminUsername = `${TEST_PREFIX.toLowerCase()}superadmin_${Date.now()}`;
+    const superAdmin = await pool.query<{ id: number }>(
+      `insert into users (username, password_hash, full_name, role, is_active)
+       values ($1, $2, $3, 'super_admin', true)
+       returning id`,
+      [superAdminUsername, "$2a$10$ztv9Kx3klEC1wiHttYuwUeCN9KMI3yHuGjvRVEGFFVnbRu7YSfTyS", `${TEST_PREFIX}Super Admin`]
+    );
+    const superAdminCookie = createTestAuthCookie(Number(superAdmin.rows[0].id), "super_admin");
+    const superAdminFetch = (path: string, opts: Record<string, unknown> = {}) =>
+      fetchJson(app.baseUrl, path, { cookie: superAdminCookie, ...opts });
+
+    const bookingDate = "2042-01-20";
+    for (let index = 0; index < 10; index += 1) {
+      const patient = await createPatient();
+      const standardBooking = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: patient,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate,
+          caseCategory: "oncology",
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(standardBooking.status, 201);
+    }
+
+    const overbookedPatient = await createPatient();
+    const overbooked = await superAdminFetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: overbookedPatient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "total_capacity_override",
+        override: {
+          supervisorUsername: superAdminUsername,
+          supervisorPassword: "test_password",
+          reason: "Super-admin overbooking",
+          overrideType: "total_capacity_override",
+        },
+        policySetKey: testData.policySetKey,
+      },
+    });
+    assert.equal(overbooked.status, 201);
+    const bookingId = Number((overbooked.data as any).booking.id);
+    assert.equal((overbooked.data as any).booking.capacityResolutionMode, "total_capacity_override");
+
+    const changed = await superAdminFetch(`/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        bookingDate,
+        examTypeId: secondExamTypeId,
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.equal(changed.status, 200);
+    assert.equal(Number((changed.data as any).booking.examTypeId), secondExamTypeId);
+    assert.equal((changed.data as any).booking.capacityResolutionMode, "total_capacity_override");
   });
 });

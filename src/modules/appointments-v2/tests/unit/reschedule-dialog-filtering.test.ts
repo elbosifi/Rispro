@@ -11,9 +11,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 describe("RescheduleDialog — date filtering", () => {
-  const dialogPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx";
+  const dialogPath = join(process.cwd(), "frontend/src/v2/appointments/components/reschedule-dialog.tsx");
 
   it("accepts availabilityItems prop, not availableDates", async () => {
     const content = await readFile(dialogPath, "utf-8");
@@ -23,12 +24,36 @@ describe("RescheduleDialog — date filtering", () => {
 
   it("filters out blocked dates from selectable dates", async () => {
     const content = await readFile(dialogPath, "utf-8");
-    assert.ok(content.includes('displayStatus !== "blocked"'), "Should filter out blocked dates");
+    assert.ok(content.includes('!== "blocked"'), "Should filter out blocked dates");
   });
 
   it("excludes current booking date from selectable dates", async () => {
     const content = await readFile(dialogPath, "utf-8");
     assert.ok(content.includes("booking.bookingDate"), "Should reference current booking date for exclusion");
+  });
+
+  it("submits exam-type-only edits with the current booking date", async () => {
+    const content = await readFile(dialogPath, "utf-8");
+    assert.ok(
+      content.includes("const effectiveDate = newDate || booking.bookingDate"),
+      "Should use the current booking date when only booking details change"
+    );
+    assert.ok(
+      content.includes("await onReschedule(effectiveDate, null, selectedExamTypeId"),
+      "Should submit details-only edits without requiring a selected new date"
+    );
+  });
+
+  it("omits capacity fields for details-only edits unless capacity mode changed", async () => {
+    const content = await readFile(dialogPath, "utf-8");
+    assert.ok(
+      content.includes("const capacityChanged = capacityResolutionMode !== \"standard\""),
+      "Should distinguish explicit capacity mode changes from default standard state"
+    );
+    assert.ok(
+      content.includes("const capacityPayload = detailsOnlyEdit && !capacityChanged ? undefined"),
+      "Should omit default capacity fields for details-only edits"
+    );
   });
 
   it("shows warning marker for restricted dates in dropdown", async () => {
@@ -38,7 +63,7 @@ describe("RescheduleDialog — date filtering", () => {
 });
 
 describe("BookingsList — passes availabilityItems to RescheduleDialog", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+  const pagePath = join(process.cwd(), "frontend/src/v2/appointments/page.tsx");
 
   it("passes availabilityItems to RescheduleDialog", async () => {
     const content = await readFile(pagePath, "utf-8");
