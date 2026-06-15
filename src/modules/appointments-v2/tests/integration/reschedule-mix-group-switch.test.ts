@@ -421,4 +421,65 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     assert.equal(Number((changed.data as any).booking.examTypeId), secondExamTypeId);
     assert.equal((changed.data as any).booking.capacityResolutionMode, "total_capacity_override");
   });
+
+  it("allows approved-overbooked standard-mode booking to change exam type without re-failing total capacity", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    const receptionist = await pool.query<{ id: number }>(
+      `insert into users (username, password_hash, full_name, role, is_active)
+       values ($1, $2, $3, 'receptionist', true)
+       returning id`,
+      [`${TEST_PREFIX.toLowerCase()}capacity_reception_${Date.now()}`, "test_hash", `${TEST_PREFIX}Capacity Receptionist`]
+    );
+    const receptionistId = Number(receptionist.rows[0].id);
+    const receptionistFetch = (path: string, opts: Record<string, unknown> = {}) =>
+      fetchJson(app.baseUrl, path, { cookie: createTestAuthCookie(receptionistId, "receptionist"), ...opts });
+
+    const bookingDate = "2042-01-21";
+    for (let index = 0; index < 10; index += 1) {
+      const patient = await createPatient();
+      const standardBooking = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: patient,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate,
+          caseCategory: "oncology",
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(standardBooking.status, 201);
+    }
+
+    const overbookedPatient = await createPatient();
+    const inserted = await pool.query<{ id: number }>(
+      `insert into appointments_v2.bookings
+        (patient_id, modality_id, exam_type_id, booking_date, booking_time, case_category, requires_report,
+         status, policy_version_id, capacity_resolution_mode, uses_special_quota, is_walk_in, created_by_user_id)
+       values ($1, $2, $3, $4, null, 'non_oncology', true, 'scheduled', $5, 'standard', false, false, $6)
+       returning id`,
+      [overbookedPatient, testData.modalityId, testData.examTypeId, bookingDate, testData.policyVersionId, receptionistId]
+    );
+    const bookingId = Number(inserted.rows[0].id);
+    await pool.query(
+      `insert into appointments_v2.override_audit_events
+        (booking_id, patient_id, modality_id, exam_type_id, booking_date, requesting_user_id, supervisor_user_id, override_reason, override_type, decision_snapshot, outcome)
+       values ($1, $2, $3, $4, $5, $6, $7, 'Previously approved total capacity override', 'total_capacity_override', '{}'::jsonb, 'approved_and_booked')`,
+      [bookingId, overbookedPatient, testData.modalityId, testData.examTypeId, bookingDate, receptionistId, testData.userId]
+    );
+
+    const changed = await receptionistFetch(`/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        bookingDate,
+        examTypeId: secondExamTypeId,
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.equal(changed.status, 200);
+    assert.equal(Number((changed.data as any).booking.examTypeId), secondExamTypeId);
+    assert.equal((changed.data as any).booking.capacityResolutionMode, "standard");
+  });
 });

@@ -64,6 +64,10 @@ export interface RescheduleBookingResult {
 }
 
 type ExamTypeChangePolicy = "allowed_without_supervisor" | "supervisor_required" | "disabled";
+const RESOLVED_CAPACITY_REASON_CODES = new Set([
+  "category_capacity_exhausted",
+  "modality_daily_capacity_exhausted",
+]);
 
 async function getExamTypeChangePolicy(client: PoolClient): Promise<ExamTypeChangePolicy> {
   const result = await client.query<{ setting_value: { value?: string } | null }>(
@@ -253,10 +257,11 @@ export async function rescheduleBookingInternal(
   const timeUnchanged = String(previousTime ?? "") === String(effectiveTime ?? "");
   const examTypeUnchanged = Number(booking.examTypeId ?? -1) === Number(effectiveExamTypeId ?? -1);
   const examTypeChanged = !examTypeUnchanged;
+  const hasPrivilegedOrigin = examTypeChanged ? await bookingHasPrivilegedOrigin(client, booking) : false;
   const examTypeChangeBypassesSupervisorAuth =
     examTypeChanged &&
     examTypeChangePolicy === "supervisor_required" &&
-    await bookingHasPrivilegedOrigin(client, booking);
+    hasPrivilegedOrigin;
   const examTypeChangeRequiresSupervisorAuth =
     examTypeChanged && examTypeChangePolicy === "supervisor_required" && !examTypeChangeBypassesSupervisorAuth;
   const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged;
@@ -486,14 +491,25 @@ export async function rescheduleBookingInternal(
     reasonCodes: decision.reasons.map((r) => r.code),
   }));
 
-  validateDecisionAuthority(decision, userRole, effectiveCapacityResolutionMode);
+  const capacityModePreserved = capacityResolutionMode === undefined;
+  const existingCapacityOverrideAlreadyResolved =
+    capacityModePreserved &&
+    dateUnchanged &&
+    timeUnchanged &&
+    (effectiveCapacityResolutionMode !== "standard" || hasPrivilegedOrigin);
+  const authorityDecision = existingCapacityOverrideAlreadyResolved
+    ? {
+        ...decision,
+        reasons: decision.reasons.filter((reason) => !RESOLVED_CAPACITY_REASON_CODES.has(reason.code)),
+      }
+    : decision;
+
+  validateDecisionAuthority(authorityDecision, userRole, effectiveCapacityResolutionMode);
 
   // 7. Check if reschedule is allowed or requires override
   let wasOverride = false;
   let supervisorUserId: number | null = null;
-  const capacityModePreserved = capacityResolutionMode === undefined;
-  const existingCapacityOverrideAlreadyResolved = capacityModePreserved && dateUnchanged && timeUnchanged;
-  let requiredOverrideTypes = resolveRequiredOverrideTypes(decision, effectiveCapacityResolutionMode);
+  let requiredOverrideTypes = resolveRequiredOverrideTypes(authorityDecision, effectiveCapacityResolutionMode);
   if (existingCapacityOverrideAlreadyResolved) {
     requiredOverrideTypes = requiredOverrideTypes.filter(
       (type) => type !== "category_override" && type !== "total_capacity_override"
@@ -503,7 +519,15 @@ export async function rescheduleBookingInternal(
     requiredOverrideTypes.push("exam_mix_override");
   }
 
-  if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
+  if (
+    decision.displayStatus === "blocked" &&
+    !decision.requiresSupervisorOverride &&
+    !(
+      existingCapacityOverrideAlreadyResolved &&
+      decision.reasons.length > 0 &&
+      decision.reasons.every((reason) => RESOLVED_CAPACITY_REASON_CODES.has(reason.code))
+    )
+  ) {
     throw new SchedulingError(
       409,
       "Reschedule is not allowed for the new date/category.",
