@@ -81,6 +81,24 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     return Number(row.rows[0].id);
   }
 
+  async function fillModalityDailyCapacity(bookingDate: string): Promise<void> {
+    for (let index = 0; index < 10; index += 1) {
+      const patient = await createPatient();
+      const standardBooking = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: patient,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate,
+          caseCategory: "oncology",
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(standardBooking.status, 201);
+    }
+  }
+
   it("switches same-date exam type between groups and enforces target full failure", async () => {
     if (!testData) return;
     const date = "2042-01-10";
@@ -354,6 +372,92 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     assert.ok(String((attempt.data as any).error ?? "").includes("does not belong to modality"));
   });
 
+  it("allows appointment-editor-style details payload on a full date without override origin", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    const receptionist = await pool.query<{ id: number }>(
+      `insert into users (username, password_hash, full_name, role, is_active)
+       values ($1, $2, $3, 'receptionist', true)
+       returning id`,
+      [`${TEST_PREFIX.toLowerCase()}details_reception_${Date.now()}`, "test_hash", `${TEST_PREFIX}Details Receptionist`]
+    );
+    const receptionistId = Number(receptionist.rows[0].id);
+    const receptionistFetch = (path: string, opts: Record<string, unknown> = {}) =>
+      fetchJson(app.baseUrl, path, { cookie: createTestAuthCookie(receptionistId, "receptionist"), ...opts });
+
+    const bookingDate = "2042-01-19";
+    await fillModalityDailyCapacity(bookingDate);
+
+    const patient = await createPatient();
+    const inserted = await pool.query<{ id: number }>(
+      `insert into appointments_v2.bookings
+        (patient_id, modality_id, exam_type_id, booking_date, booking_time, case_category, requires_report,
+         status, policy_version_id, capacity_resolution_mode, uses_special_quota, is_walk_in, created_by_user_id)
+       values ($1, $2, $3, $4, null, 'non_oncology', true, 'scheduled', $5, 'standard', false, false, $6)
+       returning id`,
+      [patient, testData.modalityId, testData.examTypeId, bookingDate, testData.policyVersionId, receptionistId]
+    );
+
+    const changed = await receptionistFetch(`/api/v2/appointments/${Number(inserted.rows[0].id)}`, {
+      method: "PUT",
+      body: {
+        examTypeId: secondExamTypeId,
+        reportingPriorityId: null,
+        requiresReport: false,
+        notes: "Corrected from registration details",
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.equal(changed.status, 200);
+    assert.equal(Number((changed.data as any).booking.examTypeId), secondExamTypeId);
+    assert.equal((changed.data as any).booking.notes, "Corrected from registration details");
+    assert.equal((changed.data as any).booking.requiresReport, false);
+  });
+
+  it("still rejects same-date exam type change into a hard exam-type restriction", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    const bookingDate = "2042-01-18";
+    const patient = await createPatient();
+    const booking = await fetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: patient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate,
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+    assert.equal(booking.status, 201);
+
+    const rule = await pool.query<{ id: number }>(
+      `insert into appointments_v2.exam_type_rules
+        (policy_version_id, modality_id, rule_type, effect_mode, specific_date, title, is_active)
+       values ($1, $2, 'specific_date', 'hard_restriction', $3, 'Blocked target exam type', true)
+       returning id`,
+      [testData.policyVersionId, testData.modalityId, bookingDate]
+    );
+    await pool.query(
+      `insert into appointments_v2.exam_type_rule_items (rule_id, exam_type_id) values ($1, $2)`,
+      [Number(rule.rows[0].id), secondExamTypeId]
+    );
+
+    const changed = await fetch(`/api/v2/appointments/${Number((booking.data as any).booking.id)}`, {
+      method: "PUT",
+      body: {
+        bookingDate,
+        examTypeId: secondExamTypeId,
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.equal(changed.status, 409);
+    assert.ok(String((changed.data as any).error ?? "").includes("not allowed"));
+  });
+
   it("preserves overbooked super-admin booking capacity mode when omitted on exam-type-only edit", async () => {
     if (!testData) return;
     const { pool } = await import("../../../../db/pool.js");
@@ -369,21 +473,7 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       fetchJson(app.baseUrl, path, { cookie: superAdminCookie, ...opts });
 
     const bookingDate = "2042-01-20";
-    for (let index = 0; index < 10; index += 1) {
-      const patient = await createPatient();
-      const standardBooking = await fetch("/api/v2/appointments", {
-        method: "POST",
-        body: {
-          patientId: patient,
-          modalityId: testData.modalityId,
-          examTypeId: testData.examTypeId,
-          bookingDate,
-          caseCategory: "oncology",
-          policySetKey: testData.policySetKey,
-        },
-      });
-      assert.equal(standardBooking.status, 201);
-    }
+    await fillModalityDailyCapacity(bookingDate);
 
     const overbookedPatient = await createPatient();
     const overbooked = await superAdminFetch("/api/v2/appointments", {
@@ -436,21 +526,7 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       fetchJson(app.baseUrl, path, { cookie: createTestAuthCookie(receptionistId, "receptionist"), ...opts });
 
     const bookingDate = "2042-01-21";
-    for (let index = 0; index < 10; index += 1) {
-      const patient = await createPatient();
-      const standardBooking = await fetch("/api/v2/appointments", {
-        method: "POST",
-        body: {
-          patientId: patient,
-          modalityId: testData.modalityId,
-          examTypeId: testData.examTypeId,
-          bookingDate,
-          caseCategory: "oncology",
-          policySetKey: testData.policySetKey,
-        },
-      });
-      assert.equal(standardBooking.status, 201);
-    }
+    await fillModalityDailyCapacity(bookingDate);
 
     const overbookedPatient = await createPatient();
     const inserted = await pool.query<{ id: number }>(
@@ -481,5 +557,59 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     assert.equal(changed.status, 200);
     assert.equal(Number((changed.data as any).booking.examTypeId), secondExamTypeId);
     assert.equal((changed.data as any).booking.capacityResolutionMode, "standard");
+  });
+
+  it("still rejects true reschedule to a different full date", async () => {
+    if (!testData) return;
+    const sourceDate = "2042-01-23";
+    const fullDate = "2042-01-24";
+    await fillModalityDailyCapacity(fullDate);
+    const patient = await createPatient();
+    const booking = await fetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: patient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: sourceDate,
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+    assert.equal(booking.status, 201);
+
+    const changed = await fetch(`/api/v2/appointments/${Number((booking.data as any).booking.id)}`, {
+      method: "PUT",
+      body: {
+        bookingDate: fullDate,
+        examTypeId: testData.examTypeId,
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.notEqual(changed.status, 200);
+    assert.ok(String((changed.data as any).error ?? "").includes("Modality daily capacity is exhausted"));
+  });
+
+  it("still rejects new booking on a full date", async () => {
+    if (!testData) return;
+    const fullDate = "2042-01-25";
+    await fillModalityDailyCapacity(fullDate);
+    const patient = await createPatient();
+
+    const booking = await fetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: patient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: fullDate,
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.notEqual(booking.status, 201);
+    assert.ok(String((booking.data as any).error ?? "").includes("Modality daily capacity is exhausted"));
   });
 });

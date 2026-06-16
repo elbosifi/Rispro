@@ -492,12 +492,8 @@ export async function rescheduleBookingInternal(
   }));
 
   const capacityModePreserved = capacityResolutionMode === undefined;
-  const existingCapacityOverrideAlreadyResolved =
-    capacityModePreserved &&
-    dateUnchanged &&
-    timeUnchanged &&
-    (effectiveCapacityResolutionMode !== "standard" || hasPrivilegedOrigin);
-  const authorityDecision = existingCapacityOverrideAlreadyResolved
+  const existingBookingCapacityAlreadyAccountedFor = capacityModePreserved && dateUnchanged && timeUnchanged;
+  const authorityDecision = existingBookingCapacityAlreadyAccountedFor
     ? {
         ...decision,
         reasons: decision.reasons.filter((reason) => !RESOLVED_CAPACITY_REASON_CODES.has(reason.code)),
@@ -510,7 +506,7 @@ export async function rescheduleBookingInternal(
   let wasOverride = false;
   let supervisorUserId: number | null = null;
   let requiredOverrideTypes = resolveRequiredOverrideTypes(authorityDecision, effectiveCapacityResolutionMode);
-  if (existingCapacityOverrideAlreadyResolved) {
+  if (existingBookingCapacityAlreadyAccountedFor) {
     requiredOverrideTypes = requiredOverrideTypes.filter(
       (type) => type !== "category_override" && type !== "total_capacity_override"
     );
@@ -523,7 +519,7 @@ export async function rescheduleBookingInternal(
     decision.displayStatus === "blocked" &&
     !decision.requiresSupervisorOverride &&
     !(
-      existingCapacityOverrideAlreadyResolved &&
+      existingBookingCapacityAlreadyAccountedFor &&
       decision.reasons.length > 0 &&
       decision.reasons.every((reason) => RESOLVED_CAPACITY_REASON_CODES.has(reason.code))
     )
