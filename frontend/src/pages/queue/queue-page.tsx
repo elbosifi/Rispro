@@ -7,12 +7,44 @@ import type { QueueEntry, QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
-import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
+import { getPatientRequirementReasonCodes, getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { pushToast } from "@/lib/toast";
 import { Button, Card, Input, Badge, SectionLabel } from "@/components/shared";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 
 type QueueView = "all" | "entered" | "not_entered" | "walk_in";
+
+interface PatientRequirementAlert {
+  message: string;
+  patientId: number | null;
+  appointmentId: number | null;
+}
+
+const PATIENT_REQUIREMENT_CODES = new Set([
+  "patient_phone_required",
+  "patient_primary_identifier_required",
+]);
+
+function isPatientRequirementError(error: unknown): boolean {
+  return getPatientRequirementReasonCodes(error).some((code) => PATIENT_REQUIREMENT_CODES.has(code));
+}
+
+function getPatientRequirementDetails(error: unknown): { patientId: number | null; appointmentId: number | null } {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!details || typeof details !== "object") {
+    return { patientId: null, appointmentId: null };
+  }
+
+  const record = details as Record<string, unknown>;
+  return {
+    patientId: typeof record.patientId === "number" ? record.patientId : null,
+    appointmentId: typeof record.appointmentId === "number" ? record.appointmentId : null,
+  };
+}
+
+function getErrorMessage(error: unknown): string | null {
+  return error instanceof Error ? error.message : null;
+}
 
 export default function QueuePage() {
   const { language, t } = useLanguage();
@@ -26,7 +58,9 @@ export default function QueuePage() {
   const [queueView, setQueueView] = useState<QueueView>("all");
   const [queueModalityId, setQueueModalityId] = useState("");
   const [showOldNoShows, setShowOldNoShows] = useState(false);
+  const [patientRequirementAlert, setPatientRequirementAlert] = useState<PatientRequirementAlert | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingScanEntryRef = useRef<QueueEntry | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -93,6 +127,8 @@ export default function QueuePage() {
     },
     onSuccess: () => {
       setScanValue("");
+      pendingScanEntryRef.current = null;
+      setPatientRequirementAlert(null);
       queryClient.invalidateQueries({ queryKey: ["queue"] });
       pushToast({
         type: "success",
@@ -101,10 +137,21 @@ export default function QueuePage() {
       });
     },
     onError: (err) => {
+      const requirementMessage = getPatientRequirementStaffMessage(err, t);
+      if (requirementMessage && isPatientRequirementError(err)) {
+        const details = getPatientRequirementDetails(err);
+        const entry = pendingScanEntryRef.current;
+        setPatientRequirementAlert({
+          message: requirementMessage,
+          patientId: details.patientId ?? entry?.patientId ?? null,
+          appointmentId: details.appointmentId ?? entry?.appointmentId ?? null,
+        });
+      }
+
       pushToast({
         type: "error",
         title: t("queue.scanFailed"),
-        message: getPatientRequirementStaffMessage(err, t) || err.message || t("queue.scanFailed")
+        message: requirementMessage || getErrorMessage(err) || t("queue.scanFailed")
       });
     }
   });
@@ -179,8 +226,14 @@ export default function QueuePage() {
   const handleScan = (e: FormEvent) => {
     e.preventDefault();
     if (scanValue.trim()) {
+      pendingScanEntryRef.current = null;
       scanMutation.mutate(scanValue.trim());
     }
+  };
+
+  const handleEnterQueue = (entry: QueueEntry) => {
+    pendingScanEntryRef.current = entry;
+    scanMutation.mutate(entry.accessionNumber);
   };
 
   const handleWalkInSubmit = (e: FormEvent) => {
@@ -250,6 +303,15 @@ export default function QueuePage() {
   const openRegistration = (entry: QueueEntry) => {
     navigate(`/registrations?appointmentId=${entry.appointmentId}&patientId=${entry.patientId}`);
   };
+  const openPatientRequirementRegistration = () => {
+    if (!patientRequirementAlert?.patientId) return;
+    const params = new URLSearchParams();
+    if (patientRequirementAlert.appointmentId) {
+      params.set("appointmentId", String(patientRequirementAlert.appointmentId));
+    }
+    params.set("patientId", String(patientRequirementAlert.patientId));
+    navigate(`/registrations?${params.toString()}`);
+  };
   const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => (
     <li key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -299,7 +361,7 @@ export default function QueuePage() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => scanMutation.mutate(entry.accessionNumber)}
+              onClick={() => handleEnterQueue(entry)}
               disabled={scanMutation.isPending}
             >
               {scanMutation.isPending ? t("common.loading") : t("queue.enterToQueue")}
@@ -388,6 +450,29 @@ export default function QueuePage() {
         <QueueStat label={notEnteredQueueLabel} value={notEnteredCount} />
         <QueueStat label={walkInLabel} value={walkInCount} tone="sky" />
       </div>
+
+      {patientRequirementAlert ? (
+        <Card className="border-red-300 bg-red-50 p-4 text-red-900 shadow-sm sm:p-5" role="alert">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-2">
+              <h2 className="text-lg font-semibold">{t("common.validationError")}</h2>
+              <p className="text-sm font-medium">{patientRequirementAlert.message}</p>
+              <p className="text-sm">{t("queue.requirements.completeMissingData")}</p>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              {patientRequirementAlert.patientId ? (
+                <Button type="button" variant="secondary" onClick={openPatientRequirementRegistration}>
+                  <ExternalLink size={14} />
+                  {t("queue.manageRegistration")}
+                </Button>
+              ) : null}
+              <Button type="button" variant="ghost" onClick={() => setPatientRequirementAlert(null)}>
+                {t("common.dismiss")}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
          <div className="space-y-4">

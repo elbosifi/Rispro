@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import {
+  BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE,
+  BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE,
   BOOKING_PATIENT_PHONE_REQUIRED_MESSAGE,
+  assertPatientIdentifierAllowsBooking,
   assertPatientMeetsBookingQueueRequirements,
 } from "../../booking/services/patient-identifier-requirement.js";
 
@@ -32,9 +35,10 @@ describe("patient booking and queue requirements", () => {
       () => assertPatientMeetsBookingQueueRequirements(client as never, 1, "receptionist"),
       (error: unknown) => {
         assert.ok(error instanceof SchedulingError);
-        assert.equal(error.statusCode, 400);
+        assert.equal(error.statusCode, 422);
         assert.equal(error.message, BOOKING_PATIENT_PHONE_REQUIRED_MESSAGE);
         assert.deepEqual(error.reasonCodes, ["patient_phone_required"]);
+        assert.deepEqual(error.details, { patientId: 1, missingPhone: true, missingIdentifier: false });
         return true;
       }
     );
@@ -77,7 +81,38 @@ describe("patient booking and queue requirements", () => {
       () => assertPatientMeetsBookingQueueRequirements(client as never, 1, "receptionist"),
       (error: unknown) => {
         assert.ok(error instanceof SchedulingError);
+        assert.equal(error.statusCode, 422);
+        assert.equal(error.message, BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE);
         assert.deepEqual(error.reasonCodes, ["patient_phone_required", "patient_primary_identifier_required"]);
+        assert.deepEqual(error.details, { patientId: 1, missingPhone: true, missingIdentifier: true });
+        return true;
+      }
+    );
+  });
+
+  it("reports missing identifier only with status and details", async () => {
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes("system_settings")) {
+          return {
+            rows: [
+              { setting_key: "phone1_required", value: "required" },
+              { setting_key: "national_id_required", value: "required" },
+            ],
+          };
+        }
+        return { rows: [{ phone_1: "0912345678", primary_identifier: "" }] };
+      },
+    };
+
+    await assert.rejects(
+      () => assertPatientMeetsBookingQueueRequirements(client as never, 1, "receptionist"),
+      (error: unknown) => {
+        assert.ok(error instanceof SchedulingError);
+        assert.equal(error.statusCode, 422);
+        assert.equal(error.message, BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
+        assert.deepEqual(error.reasonCodes, ["patient_primary_identifier_required"]);
+        assert.deepEqual(error.details, { patientId: 1, missingPhone: false, missingIdentifier: true });
         return true;
       }
     );
@@ -102,7 +137,9 @@ describe("patient booking and queue requirements", () => {
       () => assertPatientMeetsBookingQueueRequirements(client as never, 1, "super_admin"),
       (error: unknown) => {
         assert.ok(error instanceof SchedulingError);
+        assert.equal(error.statusCode, 422);
         assert.deepEqual(error.reasonCodes, ["patient_phone_required", "patient_primary_identifier_required"]);
+        assert.deepEqual(error.details, { patientId: 1, missingPhone: true, missingIdentifier: true });
         return true;
       }
     );
@@ -127,7 +164,36 @@ describe("patient booking and queue requirements", () => {
       () => assertPatientMeetsBookingQueueRequirements(client as never, 1, "super_admin"),
       (error: unknown) => {
         assert.ok(error instanceof SchedulingError);
+        assert.equal(error.statusCode, 422);
         assert.deepEqual(error.reasonCodes, ["patient_primary_identifier_required"]);
+        assert.deepEqual(error.details, { patientId: 1, missingPhone: false, missingIdentifier: true });
+        return true;
+      }
+    );
+  });
+
+  it("identifier-only booking check includes status and patient details", async () => {
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes("system_settings")) {
+          return {
+            rows: [
+              { setting_key: "phone1_required", value: "optional" },
+              { setting_key: "national_id_required", value: "required" },
+            ],
+          };
+        }
+        return { rows: [{ phone_1: "", primary_identifier: "" }] };
+      },
+    };
+
+    await assert.rejects(
+      () => assertPatientIdentifierAllowsBooking(client as never, 7, "receptionist"),
+      (error: unknown) => {
+        assert.ok(error instanceof SchedulingError);
+        assert.equal(error.statusCode, 422);
+        assert.deepEqual(error.reasonCodes, ["patient_primary_identifier_required"]);
+        assert.deepEqual(error.details, { patientId: 7, missingPhone: false, missingIdentifier: true });
         return true;
       }
     );

@@ -78,19 +78,24 @@ async function loadPatientRequirements(client: PoolClient, patientId: number): P
   return row;
 }
 
-function throwPatientRequirementError(reasonCodes: string[]): never {
+function throwPatientRequirementError(patientId: number, reasonCodes: string[]): never {
   const hasPhone = reasonCodes.includes("patient_phone_required");
   const hasIdentifier = reasonCodes.includes("patient_primary_identifier_required");
+  const details = {
+    patientId,
+    missingPhone: hasPhone,
+    missingIdentifier: hasIdentifier,
+  };
 
   if (hasPhone && hasIdentifier) {
-    throw new SchedulingError(400, BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes);
+    throw new SchedulingError(422, BOOKING_PATIENT_PHONE_AND_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes, details);
   }
 
   if (hasPhone) {
-    throw new SchedulingError(400, BOOKING_PATIENT_PHONE_REQUIRED_MESSAGE, reasonCodes);
+    throw new SchedulingError(422, BOOKING_PATIENT_PHONE_REQUIRED_MESSAGE, reasonCodes, details);
   }
 
-  throw new SchedulingError(400, BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes);
+  throw new SchedulingError(422, BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE, reasonCodes, details);
 }
 
 export async function assertPatientMeetsBookingQueueRequirements(
@@ -121,7 +126,7 @@ export async function assertPatientMeetsBookingQueueRequirements(
     return;
   }
 
-  throwPatientRequirementError(reasonCodes);
+  throwPatientRequirementError(patientId, reasonCodes);
 }
 
 export async function assertPatientIdentifierAllowsBooking(
@@ -139,5 +144,5 @@ export async function assertPatientIdentifierAllowsBooking(
     return;
   }
 
-  throwPatientRequirementError(["patient_primary_identifier_required"]);
+  throwPatientRequirementError(patientId, ["patient_primary_identifier_required"]);
 }
