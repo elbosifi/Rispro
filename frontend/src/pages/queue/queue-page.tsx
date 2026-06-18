@@ -9,7 +9,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
 import { getPatientRequirementReasonCodes, getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { pushToast } from "@/lib/toast";
-import { Button, Card, Input, Badge, SectionLabel } from "@/components/shared";
+import { Button, Card, Input, Badge, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 
 type QueueView = "all" | "entered" | "not_entered" | "walk_in";
@@ -451,29 +451,6 @@ export default function QueuePage() {
         <QueueStat label={walkInLabel} value={walkInCount} tone="sky" />
       </div>
 
-      {patientRequirementAlert ? (
-        <Card className="border-red-300 bg-red-50 p-4 text-red-900 shadow-sm sm:p-5" role="alert">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-2">
-              <h2 className="text-lg font-semibold">{t("common.validationError")}</h2>
-              <p className="text-sm font-medium">{patientRequirementAlert.message}</p>
-              <p className="text-sm">{t("queue.requirements.completeMissingData")}</p>
-            </div>
-            <div className="flex flex-wrap gap-2 sm:justify-end">
-              {patientRequirementAlert.patientId ? (
-                <Button type="button" variant="secondary" onClick={openPatientRequirementRegistration}>
-                  <ExternalLink size={14} />
-                  {t("queue.manageRegistration")}
-                </Button>
-              ) : null}
-              <Button type="button" variant="ghost" onClick={() => setPatientRequirementAlert(null)}>
-                {t("common.dismiss")}
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
          <div className="space-y-4">
            <Card className="p-4 sm:p-5">
@@ -739,6 +716,40 @@ export default function QueuePage() {
       {selectedPatientId ? (
         <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
       ) : null}
+      <Dialog open={!!patientRequirementAlert} onClose={() => setPatientRequirementAlert(null)}>
+        <DialogContent
+          maxWidth="560px"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="queue-patient-requirement-title"
+          className="border-red-300 bg-red-50 text-red-950"
+        >
+          {patientRequirementAlert ? (
+            <>
+              <DialogHeader>
+                <DialogTitle id="queue-patient-requirement-title" className="text-lg text-red-950">
+                  {t("common.validationError")}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm font-semibold leading-6">{patientRequirementAlert.message}</p>
+                <p className="text-sm leading-6">{t("queue.requirements.completeMissingData")}</p>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setPatientRequirementAlert(null)}>
+                  {t("common.dismiss")}
+                </Button>
+                {patientRequirementAlert.patientId ? (
+                  <Button type="button" variant="secondary" onClick={openPatientRequirementRegistration}>
+                    <ExternalLink size={14} />
+                    {t("queue.requirements.editPatientInformation")}
+                  </Button>
+                ) : null}
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
      </div>
   );
 }

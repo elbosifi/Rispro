@@ -122,11 +122,11 @@ describe("QueuePage patient requirement errors", () => {
 
     await user.click(await screen.findByRole("button", { name: /Enter to Queue/i }));
 
-    const alert = await screen.findByRole("alert");
-    expect(within(alert).getByRole("heading", { name: /Validation Error/i })).toBeTruthy();
-    expect(within(alert).getByText(/Phone 1 and primary identifier are missing/i)).toBeTruthy();
-    expect(within(alert).getByText(/Complete the missing patient data before entering the patient into the queue/i)).toBeTruthy();
-    expect(within(alert).getByRole("button", { name: /Manage registration/i })).toBeTruthy();
+    const dialog = await screen.findByRole("dialog", { name: /Validation Error/i });
+    expect(within(dialog).getByRole("heading", { name: /Validation Error/i })).toBeTruthy();
+    expect(within(dialog).getByText(/Phone 1 and primary identifier are missing/i)).toBeTruthy();
+    expect(within(dialog).getByText(/Complete the missing patient data before entering the patient into the queue/i)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: /Edit patient information/i })).toBeTruthy();
 
     await waitFor(() => {
       expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -135,10 +135,10 @@ describe("QueuePage patient requirement errors", () => {
       }));
     });
 
-    await user.click(within(alert).getByRole("button", { name: /Manage registration/i }));
+    await user.click(within(dialog).getByRole("button", { name: /Edit patient information/i }));
     expect(navigateMock).toHaveBeenCalledWith("/registrations?appointmentId=44&patientId=22");
 
-    await user.click(within(alert).getByRole("button", { name: /Dismiss/i }));
+    await user.click(within(dialog).getByRole("button", { name: /Dismiss/i }));
     expect(screen.queryByRole("heading", { name: /Validation Error/i })).toBeNull();
   });
 });
