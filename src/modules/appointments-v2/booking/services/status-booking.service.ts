@@ -309,6 +309,9 @@ export async function updateBookingStatusManual(
     if (booking.status === "voided" || targetStatus === "voided") {
       throw new SchedulingError(409, "Voided bookings cannot be changed from manual status management.", ["manual_status_voided_rejected"]);
     }
+    if (booking.status === "completed" && targetStatus === "arrived" && !cleanReason) {
+      throw new SchedulingError(400, "A reason is required to reopen a completed booking.", ["completed_reopen_reason_required"]);
+    }
 
     let autoCompletionDisabled = false;
     let autoCompletionDisabledMessage: string | undefined;

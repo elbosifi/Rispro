@@ -25,6 +25,11 @@ describe("status booking service source guards", () => {
     assert.match(source, /status_reason_required/);
   });
 
+  it("requires a reason when reopening completed bookings as arrived", () => {
+    assert.match(source, /booking\.status === "completed" && targetStatus === "arrived" && !cleanReason/);
+    assert.match(source, /completed_reopen_reason_required/);
+  });
+
   it("auto no-show only updates scheduled bookings", () => {
     assert.match(source, /status = 'scheduled'/);
     assert.doesNotMatch(source, /status in \('scheduled', 'arrived', 'waiting'\)/);
@@ -73,6 +78,24 @@ describe("status booking service source guards", () => {
     assert.match(source, /pacs_auto_completion_disabled_at = case when \$4 then now\(\)/);
     assert.match(source, /orthanc_auto_completion_disabled/);
     assert.match(source, /autoCompletionDisabledMessage/);
+  });
+
+  it("manual status changes still audit through the existing status path", () => {
+    assert.match(source, /await auditStatusChange\(client, booking, targetStatus, cleanReason \|\| null, userId, "manual_status_change"\)/);
+    assert.match(source, /await client\.query\("commit"\)/);
+  });
+
+  it("V2 modality worklist derives arrival and completion timestamps from audit history", () => {
+    assert.match(readV2RoutesSource, /left join lateral \(/);
+    assert.match(readV2RoutesSource, /min\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'arrived'\)/);
+    assert.match(readV2RoutesSource, /min\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'waiting'\)/);
+    assert.match(readV2RoutesSource, /max\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'completed'\)/);
+    assert.doesNotMatch(readV2RoutesSource, /as arrived_at,[\s\S]{0,80}b\.updated_at/);
+  });
+
+  it("V2 modality worklist includes operational and review statuses but excludes voided", () => {
+    assert.match(readV2RoutesSource, /b\.status in \('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued'\)/);
+    assert.doesNotMatch(readV2RoutesSource, /modality\/worklist[\s\S]*b\.status in \([^)]*'voided'/);
   });
 
   it("manual reversal does not disable future auto-completion for non-Orthanc completed bookings", () => {

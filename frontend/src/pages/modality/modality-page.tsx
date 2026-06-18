@@ -7,6 +7,7 @@ import {
   Clock3,
   Printer,
   RefreshCw,
+  RotateCcw,
   ScanLine,
   TimerReset,
   XCircle,
@@ -37,6 +38,14 @@ import { useLanguage } from "@/providers/language-provider";
 
 const ACTIVE_STATUSES = new Set<AppointmentStatus>(["waiting", "arrived", "in-progress"]);
 const LIVE_BOARD_STATUSES = new Set<AppointmentStatus>(["in-progress", "arrived", "waiting", "scheduled"]);
+const PROBLEM_STATUSES = new Set<AppointmentStatus>(["no-show", "cancelled", "discontinued"]);
+
+type BoardFilter = "operational" | "ready" | "not-arrived" | "completed" | "problem" | "all";
+type BoardStatusAction = {
+  appointment: AppointmentWithDetails;
+  status: "arrived" | "waiting" | "cancelled" | "discontinued";
+  reasonRequired: boolean;
+};
 
 function isActiveStatus(status: AppointmentStatus): boolean {
   return ACTIVE_STATUSES.has(status);
@@ -141,7 +150,30 @@ function compareBoardAppointments(a: AppointmentWithDetails, b: AppointmentWithD
     if (completedOrder !== 0) return completedOrder;
   }
 
-  return getSequenceNumber(a) - getSequenceNumber(b) || a.accessionNumber.localeCompare(b.accessionNumber);
+  return getSequenceNumber(a) - getSequenceNumber(b) || a.id - b.id || a.accessionNumber.localeCompare(b.accessionNumber);
+}
+
+function compareArrivalOrder(a: AppointmentWithDetails, b: AppointmentWithDetails): number {
+  const arrivalOrder = compareNullableAsc(timestampValue(a.arrivedAt), timestampValue(b.arrivedAt));
+  if (arrivalOrder !== 0) return arrivalOrder;
+  return getSequenceNumber(a) - getSequenceNumber(b) || a.id - b.id;
+}
+
+function matchesBoardFilter(appointment: AppointmentWithDetails, filter: BoardFilter): boolean {
+  switch (filter) {
+    case "operational":
+      return LIVE_BOARD_STATUSES.has(appointment.status);
+    case "ready":
+      return appointment.status === "arrived" || appointment.status === "waiting" || appointment.status === "in-progress";
+    case "not-arrived":
+      return appointment.status === "scheduled";
+    case "completed":
+      return appointment.status === "completed";
+    case "problem":
+      return PROBLEM_STATUSES.has(appointment.status);
+    case "all":
+      return true;
+  }
 }
 
 function formatClockValue(language: Language, value: string | null | undefined): string {
@@ -199,10 +231,11 @@ export default function ModalityPage() {
   const [modalityId, setModalityId] = useState("");
   const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
+  const [boardFilter, setBoardFilter] = useState<BoardFilter>("operational");
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [confirmTargetId, setConfirmTargetId] = useState<number | null>(null);
   const [confirmVerified, setConfirmVerified] = useState(false);
-  const [statusAction, setStatusAction] = useState<null | { appointment: AppointmentWithDetails; status: "cancelled" | "discontinued" }>(null);
+  const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
   const [statusReason, setStatusReason] = useState("");
 
   const { data: lookups } = useQuery<AppointmentLookups>({
@@ -263,7 +296,7 @@ export default function ModalityPage() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ appointmentId, status, reason }: { appointmentId: number; status: "cancelled" | "discontinued"; reason: string }) =>
+    mutationFn: ({ appointmentId, status, reason }: { appointmentId: number; status: "arrived" | "waiting" | "cancelled" | "discontinued"; reason?: string | null }) =>
       updateAppointmentStatus(appointmentId, status, reason),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
@@ -280,6 +313,17 @@ export default function ModalityPage() {
     () => appointments.slice().sort(compareBoardAppointments),
     [appointments]
   );
+  const visibleBoardAppointments = useMemo(
+    () => boardAppointments.filter((appointment) => matchesBoardFilter(appointment, boardFilter)),
+    [boardAppointments, boardFilter]
+  );
+  const arrivalNumberById = useMemo(() => {
+    const entries = boardAppointments
+      .filter((appointment) => appointment.status === "arrived" || appointment.status === "waiting")
+      .slice()
+      .sort(compareArrivalOrder);
+    return new Map(entries.map((appointment, index) => [appointment.id, index + 1]));
+  }, [boardAppointments]);
 
   const statusCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -324,12 +368,27 @@ export default function ModalityPage() {
   };
 
   const handleConfirmStatusAction = () => {
-    if (!statusAction || !statusReason.trim() || statusMutation.isPending) return;
+    if (!statusAction || statusMutation.isPending) return;
+    const reason = statusReason.trim();
+    if (statusAction.reasonRequired && !reason) return;
     statusMutation.mutate({
       appointmentId: statusAction.appointment.id,
       status: statusAction.status,
-      reason: statusReason.trim(),
+      reason: reason || null,
     });
+  };
+
+  const handleRequestStatusChange = (
+    appointment: AppointmentWithDetails,
+    status: "arrived" | "waiting" | "cancelled" | "discontinued",
+    reasonRequired = false
+  ) => {
+    if (reasonRequired) {
+      setStatusAction({ appointment, status, reasonRequired });
+      setStatusReason("");
+      return;
+    }
+    statusMutation.mutate({ appointmentId: appointment.id, status, reason: null });
   };
 
   const modalities = lookups?.modalities ?? [];
@@ -373,7 +432,7 @@ export default function ModalityPage() {
           </div>
         </header>
 
-        <main className="grid flex-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <main className="flex flex-1 flex-col gap-5">
           <section className="flex min-h-0 flex-col gap-5">
             <Card className="rounded-[1.25rem] border border-slate-200/80 bg-white/92 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
               <div className={`grid items-end gap-3 md:grid-cols-[minmax(220px,1fr)_180px_220px] ${isArabic ? "md:[direction:rtl]" : ""}`}>
@@ -468,7 +527,26 @@ export default function ModalityPage() {
                     {chooseLocalized(language, "الحالات الحية أولاً، السجل في الأسفل", "Live cases first, history below")}
                   </h2>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {([
+                    ["operational", chooseLocalized(language, "تشغيلي", "Operational")],
+                    ["ready", chooseLocalized(language, "جاهز", "Arrived/Ready")],
+                    ["not-arrived", chooseLocalized(language, "لم يصل", "Not arrived")],
+                    ["completed", chooseLocalized(language, "مكتمل", "Completed")],
+                    ["problem", chooseLocalized(language, "مشكلة", "Problem")],
+                    ["all", chooseLocalized(language, "الكل", "All")],
+                  ] as const).map(([filter, label]) => (
+                    <Button
+                      key={filter}
+                      type="button"
+                      variant={boardFilter === filter ? "primary" : "secondary"}
+                      size="sm"
+                      onClick={() => setBoardFilter(filter)}
+                      className="h-8 px-2.5 text-xs"
+                    >
+                      {label}
+                    </Button>
+                  ))}
                   <Badge variant="selected" size="sm">
                     {chooseLocalized(language, "حي", "Live")} {liveCount}
                   </Badge>
@@ -491,29 +569,34 @@ export default function ModalityPage() {
                   <div className="m-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-muted-foreground">
                     {t(language, "modality.empty")}
                   </div>
+                ) : visibleBoardAppointments.length === 0 ? (
+                  <div className="m-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-muted-foreground">
+                    {chooseLocalized(language, "لا توجد حالات لهذا الفلتر.", "No cases match this filter.")}
+                  </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table data-testid="modality-board" className="min-w-[1180px] table-fixed text-left text-sm">
-                      <thead className="bg-slate-100/80 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                  <div className="max-h-[calc(100vh-360px)] overflow-auto">
+                    <table data-testid="modality-board" className="min-w-[1120px] table-fixed text-left text-xs">
+                      <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
-                          <th className="w-[72px] px-3 py-2 font-semibold">{chooseLocalized(language, "الدور", "Seq")}</th>
-                          <th className="w-[140px] px-3 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
-                          <th className="w-[120px] px-3 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
-                          <th className="w-[190px] px-3 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
-                          <th className="w-[160px] px-3 py-2 font-semibold">{chooseLocalized(language, "MRN / الرقم الوطني", "MRN / national ID")}</th>
-                          <th className="w-[120px] px-3 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
-                          <th className="w-[180px] px-3 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
-                          <th className="w-[120px] px-3 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
-                          <th className="w-[140px] px-3 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
-                          <th className="w-[90px] px-3 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
-                          <th className="w-[260px] px-3 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
+                          <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
+                          <th className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
+                          <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
+                          <th className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
+                          <th className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "MRN / الرقم الوطني", "MRN / national ID")}</th>
+                          <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
+                          <th className="w-[170px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
+                          <th className="w-[110px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
+                          <th className="w-[130px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
+                          <th className="w-[80px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
+                          <th className="w-[160px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {boardAppointments.map((appointment) => {
+                        {visibleBoardAppointments.map((appointment) => {
                       const selected = appointment.id === selectedAppointmentId;
                       const edited = Boolean(appointment.createdAt && appointment.updatedAt && appointment.createdAt !== appointment.updatedAt);
                       const canAct = isActiveStatus(appointment.status);
+                      const arrivalNumber = arrivalNumberById.get(appointment.id);
                       return (
                             <tr
                               key={appointment.id}
@@ -529,10 +612,10 @@ export default function ModalityPage() {
                               }}
                               className={`cursor-pointer align-top transition-colors ${rowStatusClass(appointment.status, selected)}`}
                             >
-                              <td className="px-3 py-2 font-mono text-sm font-semibold text-foreground">
-                                #{appointment.modalitySlotNumber ?? appointment.dailySequence ?? "—"}
+                              <td className="px-2 py-1.5 font-mono text-sm font-semibold text-foreground">
+                                {arrivalNumber ? `#${arrivalNumber}` : "—"}
                               </td>
-                              <td className="px-3 py-2">
+                              <td className="px-2 py-1.5">
                                 <div className="flex flex-col items-start gap-1">
                                   <Badge variant={statusVariant(appointment.status)} size="sm">
                                     {normalizeStatusLabel(language, appointment.status)}
@@ -547,24 +630,24 @@ export default function ModalityPage() {
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-3 py-2 font-mono text-xs text-slate-700">{formatArrivalColumn(language, appointment)}</td>
-                              <td className="px-3 py-2">
+                              <td className="px-2 py-1.5 font-mono text-xs text-slate-700">{formatArrivalColumn(language, appointment)}</td>
+                              <td className="px-2 py-1.5">
                                 <p className="font-semibold text-foreground">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
                               </td>
-                              <td className="px-3 py-2 text-xs text-slate-700">
+                              <td className="px-2 py-1.5 text-xs text-slate-700">
                                 <p>{appointment.mrn || t(language, "common.na")}</p>
                                 <p className="mt-1 text-muted-foreground">{appointment.nationalId || t(language, "common.na")}</p>
                               </td>
-                              <td className="px-3 py-2 text-xs text-slate-700">{formatAgeSex(language, appointment)}</td>
-                              <td className="px-3 py-2 text-xs text-slate-700">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || t(language, "common.na")}</td>
-                              <td className="px-3 py-2 text-xs text-slate-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || t(language, "common.na")}</td>
-                              <td className="px-3 py-2">
+                              <td className="px-2 py-1.5 text-xs text-slate-700">{formatAgeSex(language, appointment)}</td>
+                              <td className="px-2 py-1.5 text-xs text-slate-700">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || t(language, "common.na")}</td>
+                              <td className="px-2 py-1.5 text-xs text-slate-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || t(language, "common.na")}</td>
+                              <td className="px-2 py-1.5">
                                 <code data-testid="modality-board-accession" className="font-mono text-xs text-foreground">
                                   {appointment.accessionNumber}
                                 </code>
                               </td>
-                              <td className="px-3 py-2">
+                              <td className="px-2 py-1.5">
                                 {appointment.notes?.trim() || appointment.specialReasonNote?.trim() ? (
                                   <Badge variant="info" size="sm" title={appointment.notes ?? appointment.specialReasonNote ?? undefined}>
                                     {notesIndicator(language, appointment)}
@@ -573,24 +656,26 @@ export default function ModalityPage() {
                                   <span className="text-xs text-muted-foreground">{t(language, "common.na")}</span>
                                 )}
                               </td>
-                              <td className="px-3 py-2">
-                                <div className="flex flex-wrap gap-1.5">
+                              <td className="px-2 py-1.5">
+                                <div className="flex items-center gap-1">
                                   <Button
                                     type="button"
                                     variant="secondary"
-                                    size="sm"
+                                    size="icon"
+                                    aria-label={t(language, "common.print")}
+                                    title={t(language, "common.print")}
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       handlePrint(appointment.id);
                                     }}
                                   >
                                     <Printer size={14} />
-                                    <span>{t(language, "common.print")}</span>
                                   </Button>
                                   <Button
                                     type="button"
                                     variant="primary"
                                     size="sm"
+                                    className="h-9 px-2 text-xs"
                                     disabled={!canAct || completeMutation.isPending}
                                     onClick={(event) => {
                                       event.stopPropagation();
@@ -603,31 +688,81 @@ export default function ModalityPage() {
                                   <Button
                                     type="button"
                                     variant="secondary"
-                                    size="sm"
+                                    size="icon"
+                                    aria-label={chooseLocalized(language, "إيقاف", "Discontinue")}
+                                    title={chooseLocalized(language, "إيقاف", "Discontinue")}
                                     disabled={!canAct || statusMutation.isPending}
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      setStatusAction({ appointment, status: "discontinued" });
+                                      setStatusAction({ appointment, status: "discontinued", reasonRequired: true });
                                       setStatusReason("");
                                     }}
                                   >
                                     <Ban size={14} />
-                                    <span>{chooseLocalized(language, "إيقاف", "Discontinue")}</span>
                                   </Button>
                                   <Button
                                     type="button"
                                     variant="secondary"
-                                    size="sm"
+                                    size="icon"
+                                    aria-label={chooseLocalized(language, "إلغاء", "Cancel")}
+                                    title={chooseLocalized(language, "إلغاء", "Cancel")}
                                     disabled={!canAct || statusMutation.isPending}
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      setStatusAction({ appointment, status: "cancelled" });
+                                      setStatusAction({ appointment, status: "cancelled", reasonRequired: true });
                                       setStatusReason("");
                                     }}
                                   >
                                     <XCircle size={14} />
-                                    <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
                                   </Button>
+                                  {appointment.status === "scheduled" || appointment.status === "waiting" ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="icon"
+                                      aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
+                                      title={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
+                                      disabled={statusMutation.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleRequestStatusChange(appointment, "arrived");
+                                      }}
+                                    >
+                                      <BadgeCheck size={14} />
+                                    </Button>
+                                  ) : null}
+                                  {appointment.status === "arrived" ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="icon"
+                                      aria-label={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
+                                      title={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
+                                      disabled={statusMutation.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleRequestStatusChange(appointment, "waiting");
+                                      }}
+                                    >
+                                      <TimerReset size={14} />
+                                    </Button>
+                                  ) : null}
+                                  {appointment.status === "completed" ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="icon"
+                                      aria-label={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
+                                      title={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
+                                      disabled={statusMutation.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleRequestStatusChange(appointment, "arrived", true);
+                                      }}
+                                    >
+                                      <RotateCcw size={14} />
+                                    </Button>
+                                  ) : null}
                                 </div>
                               </td>
                             </tr>
@@ -641,9 +776,9 @@ export default function ModalityPage() {
             </Card>
           </section>
 
-          <aside className="flex min-h-0 flex-col gap-5">
+          <aside className="hidden">
             <Card
-              data-testid={selectedAppointment ? "selected-appointment-drawer" : undefined}
+              data-testid={undefined}
               className="sticky top-4 rounded-[1.25rem] border border-slate-200/80 bg-white/94 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]"
             >
               {selectedAppointment ? (
@@ -707,7 +842,7 @@ export default function ModalityPage() {
                         size="sm"
                         disabled={!canCloseAsProblem || statusMutation.isPending}
                         onClick={() => {
-                          setStatusAction({ appointment: selectedAppointment, status: "discontinued" });
+                          setStatusAction({ appointment: selectedAppointment, status: "discontinued", reasonRequired: true });
                           setStatusReason("");
                         }}
                       >
@@ -720,7 +855,7 @@ export default function ModalityPage() {
                         size="sm"
                         disabled={!canCloseAsProblem || statusMutation.isPending}
                         onClick={() => {
-                          setStatusAction({ appointment: selectedAppointment, status: "cancelled" });
+                          setStatusAction({ appointment: selectedAppointment, status: "cancelled", reasonRequired: true });
                           setStatusReason("");
                         }}
                       >
@@ -771,6 +906,117 @@ export default function ModalityPage() {
         </main>
       </div>
 
+      <Dialog open={Boolean(selectedAppointment)} onClose={() => setSelectedAppointmentId(null)}>
+        <DialogContent maxWidth="760px">
+          {selectedAppointment ? (
+            <div data-testid="selected-appointment-drawer">
+              <DialogHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "الموعد المختار", "Selected appointment")}</p>
+                    <DialogTitle>{selectedName}</DialogTitle>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
+                      {selectedEdited ? (
+                        <Badge variant="warning" size="sm">
+                          {t(language, "appointmentEditor.edited")}
+                        </Badge>
+                      ) : null}
+                      <Badge variant={statusVariant(selectedAppointment.status)} size="sm">
+                        {normalizeStatusLabel(language, selectedAppointment.status)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}>
+                    <Printer size={16} />
+                  </Button>
+                </div>
+              </DialogHeader>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <DetailField label={t(language, "settings.fieldMRN")} value={selectedAppointment.mrn ?? null} />
+                <DetailField label={t(language, "settings.fieldNationalId")} value={selectedAppointment.nationalId ?? null} />
+                <DetailField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
+                <DetailField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
+                <DetailField label={t(language, "modality.fieldModality")} value={selectedModality} />
+                <DetailField label={t(language, "modality.fieldExam")} value={selectedExam} />
+                <DetailField label={t(language, "modality.fieldPriority")} value={selectedPriority} />
+                <DetailField label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes?.trim() || selectedAppointment.specialReasonNote?.trim() || null} />
+              </div>
+
+              <DialogFooter>
+                {selectedAppointment.status === "scheduled" || selectedAppointment.status === "waiting" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={statusMutation.isPending}
+                    onClick={() => handleRequestStatusChange(selectedAppointment, "arrived")}
+                  >
+                    <BadgeCheck size={16} />
+                    <span>{chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}</span>
+                  </Button>
+                ) : null}
+                {selectedAppointment.status === "arrived" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={statusMutation.isPending}
+                    onClick={() => handleRequestStatusChange(selectedAppointment, "waiting")}
+                  >
+                    <TimerReset size={16} />
+                    <span>{chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}</span>
+                  </Button>
+                ) : null}
+                {selectedAppointment.status === "completed" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={statusMutation.isPending}
+                    onClick={() => handleRequestStatusChange(selectedAppointment, "arrived", true)}
+                  >
+                    <RotateCcw size={16} />
+                    <span>{chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}</span>
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={!canComplete || completeMutation.isPending}
+                  onClick={() => handleRequestCompletion(selectedAppointment)}
+                >
+                  {completeMutation.isPending ? <RefreshCw size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                  <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!canCloseAsProblem || statusMutation.isPending}
+                  onClick={() => {
+                    setStatusAction({ appointment: selectedAppointment, status: "discontinued", reasonRequired: true });
+                    setStatusReason("");
+                  }}
+                >
+                  <Ban size={16} />
+                  <span>{chooseLocalized(language, "إيقاف", "Discontinue")}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!canCloseAsProblem || statusMutation.isPending}
+                  onClick={() => {
+                    setStatusAction({ appointment: selectedAppointment, status: "cancelled", reasonRequired: true });
+                    setStatusReason("");
+                  }}
+                >
+                  <XCircle size={16} />
+                  <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={Boolean(statusAction)}
         onClose={() => {
@@ -785,6 +1031,10 @@ export default function ModalityPage() {
                 <DialogTitle>
                   {statusAction.status === "discontinued"
                     ? chooseLocalized(language, "تأكيد إيقاف الفحص", "Confirm discontinuation")
+                    : statusAction.status === "arrived"
+                      ? chooseLocalized(language, "إعادة فتح الموعد", "Reopen as arrived")
+                      : statusAction.status === "waiting"
+                        ? chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")
                     : chooseLocalized(language, "تأكيد إلغاء الموعد", "Confirm cancellation")}
                 </DialogTitle>
                 <DialogDescription>
@@ -815,7 +1065,7 @@ export default function ModalityPage() {
                 <Button
                   type="button"
                   variant="primary"
-                  disabled={!statusReason.trim() || statusMutation.isPending}
+                  disabled={(statusAction.reasonRequired && !statusReason.trim()) || statusMutation.isPending}
                   onClick={handleConfirmStatusAction}
                 >
                   {statusMutation.isPending ? <RefreshCw size={18} className="animate-spin" /> : null}

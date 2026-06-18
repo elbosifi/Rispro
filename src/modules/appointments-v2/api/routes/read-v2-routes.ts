@@ -950,6 +950,8 @@ router.get(
         b.status,
         b.is_walk_in,
         b.notes,
+        status_times.arrived_at,
+        status_times.completed_at,
         b.created_at,
         b.updated_at,
         p.arabic_full_name,
@@ -975,10 +977,34 @@ router.get(
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join lateral (
+        select
+          coalesce(
+            min(audit_log.created_at) filter (where audit_log.new_values->>'status' = 'arrived'),
+            min(audit_log.created_at) filter (where audit_log.new_values->>'status' = 'waiting')
+          ) as arrived_at,
+          max(audit_log.created_at) filter (where audit_log.new_values->>'status' = 'completed') as completed_at
+        from audit_log
+        where audit_log.entity_type = 'appointment_v2_booking'
+          and audit_log.entity_id = b.id
+          and audit_log.new_values->>'status' in ('arrived', 'waiting', 'completed')
+      ) status_times on true
       where b.modality_id = $1
-        and b.status in ('scheduled', 'arrived', 'waiting')
+        and b.status in ('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued')
       ${dateClause}
-      order by b.booking_date desc, modality_slot_number asc
+      order by
+        b.booking_date desc,
+        case
+          when b.status in ('arrived', 'waiting') then 1
+          when b.status = 'scheduled' then 2
+          when b.status = 'completed' then 3
+          else 4
+        end asc,
+        status_times.arrived_at asc nulls last,
+        b.booking_time asc nulls last,
+        status_times.completed_at desc nulls last,
+        modality_slot_number asc,
+        b.id asc
       limit 300
     `;
 
