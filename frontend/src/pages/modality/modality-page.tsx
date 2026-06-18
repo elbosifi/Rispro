@@ -39,6 +39,7 @@ import { useLanguage } from "@/providers/language-provider";
 const ACTIVE_STATUSES = new Set<AppointmentStatus>(["waiting", "arrived", "in-progress"]);
 const LIVE_BOARD_STATUSES = new Set<AppointmentStatus>(["in-progress", "arrived", "waiting", "scheduled"]);
 const PROBLEM_STATUSES = new Set<AppointmentStatus>(["no-show", "cancelled", "discontinued"]);
+const EMPTY_VALUE = "—";
 
 type BoardFilter = "operational" | "ready" | "not-arrived" | "completed" | "problem" | "all";
 type BoardStatusAction = {
@@ -164,7 +165,7 @@ function matchesBoardFilter(appointment: AppointmentWithDetails, filter: BoardFi
     case "operational":
       return LIVE_BOARD_STATUSES.has(appointment.status);
     case "ready":
-      return appointment.status === "arrived" || appointment.status === "waiting" || appointment.status === "in-progress";
+      return appointment.status === "arrived" || appointment.status === "waiting";
     case "not-arrived":
       return appointment.status === "scheduled";
     case "completed":
@@ -190,7 +191,7 @@ function formatArrivalColumn(language: Language, appointment: AppointmentWithDet
   if (appointment.status === "scheduled" && appointment.bookingTime) {
     return `${chooseLocalized(language, "محجوز", "Booked")} ${formatClockValue(language, appointment.bookingTime)}`;
   }
-  return t(language, "common.na");
+  return EMPTY_VALUE;
 }
 
 function notesIndicator(language: Language, appointment: AppointmentWithDetails): string {
@@ -400,31 +401,30 @@ export default function ModalityPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 p-4 sm:p-6 lg:p-8">
-        <header className="rounded-[2rem] border border-slate-200/80 bg-white/90 px-4 py-4 shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur-md sm:px-6">
-          <div className={`flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
-            <div className={`flex items-center gap-4 ${isArabic ? "flex-row-reverse" : ""}`}>
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white shadow-md">
-                <span className="text-lg font-bold tracking-[0.24em]">NCCB</span>
+      <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-3 p-3 sm:p-4 lg:p-5">
+        <header className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-md">
+          <div className={`flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
+            <div className={`flex items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white shadow-sm">
+                <span className="text-xs font-bold tracking-[0.18em]">NCCB</span>
               </div>
 
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">{chooseLocalized(language, "الموعد المختار", "Selected appointment")}</p>
-                <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{t(language, "brand.hospitalName")}</h1>
-                <p className="text-sm text-muted-foreground sm:text-base">{headerTitle}</p>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "قائمة عمل الماسح", "Scanner Worklist")}</p>
+                <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">{headerTitle}</h1>
               </div>
             </div>
 
-            <div className={`flex flex-wrap items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            <div className={`flex flex-wrap items-center gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                   <Clock3 size={14} />
                   <span>{chooseLocalized(language, "الوقت الحالي", "Current time")}</span>
                 </div>
-                <p className="mt-1 text-lg font-semibold text-foreground">{new Date().toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}</p>
+                <p className="mt-0.5 text-base font-semibold text-foreground">{new Date().toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}</p>
               </div>
 
-              <Button variant="ghost" size="sm" onClick={handleRefresh} className="rounded-2xl px-4">
+              <Button variant="ghost" size="sm" onClick={handleRefresh} className="rounded-xl px-3">
                 <RefreshCw size={16} />
                 <span>{t(language, "modality.refresh")}</span>
               </Button>
@@ -432,9 +432,9 @@ export default function ModalityPage() {
           </div>
         </header>
 
-        <main className="flex flex-1 flex-col gap-5">
-          <section className="flex min-h-0 flex-col gap-5">
-            <Card className="rounded-[1.25rem] border border-slate-200/80 bg-white/92 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+        <main className="flex flex-1 flex-col gap-3">
+          <section className="flex min-h-0 flex-col gap-3">
+            <Card className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
               <div className={`grid items-end gap-3 md:grid-cols-[minmax(220px,1fr)_180px_220px] ${isArabic ? "md:[direction:rtl]" : ""}`}>
                 <Select
                   label={t(language, "modality.selectModality")}
@@ -492,7 +492,7 @@ export default function ModalityPage() {
               </div>
             </Card>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard
                 label={t(language, "status.waiting")}
                 value={waitingStatisticsCount}
@@ -519,15 +519,15 @@ export default function ModalityPage() {
               />
             </div>
 
-            <Card className="overflow-hidden rounded-[1.25rem] border border-slate-200/80 bg-white/94 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
-              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <Card className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/94 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{chooseLocalized(language, "لوحة الموداليتي", "Modality board")}</p>
-                  <h2 className="mt-1 text-lg font-semibold text-foreground">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{chooseLocalized(language, "لوحة الموداليتي", "Modality board")}</p>
+                  <h2 className="text-sm font-semibold text-foreground">
                     {chooseLocalized(language, "الحالات الحية أولاً، السجل في الأسفل", "Live cases first, history below")}
                   </h2>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {([
                     ["operational", chooseLocalized(language, "تشغيلي", "Operational")],
                     ["ready", chooseLocalized(language, "جاهز", "Arrived/Ready")],
@@ -542,7 +542,7 @@ export default function ModalityPage() {
                       variant={boardFilter === filter ? "primary" : "secondary"}
                       size="sm"
                       onClick={() => setBoardFilter(filter)}
-                      className="h-8 px-2.5 text-xs"
+                      className="h-7 px-2 text-[11px]"
                     >
                       {label}
                     </Button>
@@ -574,8 +574,8 @@ export default function ModalityPage() {
                     {chooseLocalized(language, "لا توجد حالات لهذا الفلتر.", "No cases match this filter.")}
                   </div>
                 ) : (
-                  <div className="max-h-[calc(100vh-360px)] overflow-auto">
-                    <table data-testid="modality-board" className="min-w-[1120px] table-fixed text-left text-xs">
+                  <div className="max-h-[calc(100vh-290px)] overflow-auto">
+                    <table data-testid="modality-board" className="min-w-[1120px] table-fixed text-left text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
                           <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
@@ -596,6 +596,8 @@ export default function ModalityPage() {
                       const selected = appointment.id === selectedAppointmentId;
                       const edited = Boolean(appointment.createdAt && appointment.updatedAt && appointment.createdAt !== appointment.updatedAt);
                       const canAct = isActiveStatus(appointment.status);
+                      const canCompleteRow = canAct && appointment.status !== "scheduled";
+                      const canMarkArrived = appointment.status === "scheduled" || appointment.status === "waiting";
                       const arrivalNumber = arrivalNumberById.get(appointment.id);
                       return (
                             <tr
@@ -612,51 +614,48 @@ export default function ModalityPage() {
                               }}
                               className={`cursor-pointer align-top transition-colors ${rowStatusClass(appointment.status, selected)}`}
                             >
-                              <td className="px-2 py-1.5 font-mono text-sm font-semibold text-foreground">
+                              <td className="px-2 py-1 font-mono text-xs font-semibold text-foreground">
                                 {arrivalNumber ? `#${arrivalNumber}` : "—"}
                               </td>
-                              <td className="px-2 py-1.5">
-                                <div className="flex flex-col items-start gap-1">
+                              <td className="px-2 py-1">
+                                <div className="flex flex-wrap items-center gap-1">
                                   <Badge variant={statusVariant(appointment.status)} size="sm">
                                     {normalizeStatusLabel(language, appointment.status)}
                                   </Badge>
-                                  <div className="flex flex-wrap gap-1">
-                                    <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
-                                    {edited ? (
-                                      <Badge variant="warning" size="sm">
-                                        {t(language, "appointmentEditor.edited")}
-                                      </Badge>
-                                    ) : null}
-                                  </div>
+                                  <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
                                 </div>
                               </td>
-                              <td className="px-2 py-1.5 font-mono text-xs text-slate-700">{formatArrivalColumn(language, appointment)}</td>
-                              <td className="px-2 py-1.5">
+                              <td className="px-2 py-1 font-mono text-[11px] text-slate-700">{formatArrivalColumn(language, appointment)}</td>
+                              <td className="px-2 py-1">
                                 <p className="font-semibold text-foreground">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
-                                <p className="mt-1 text-xs text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
+                                <p className="text-[10px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
                               </td>
-                              <td className="px-2 py-1.5 text-xs text-slate-700">
-                                <p>{appointment.mrn || t(language, "common.na")}</p>
-                                <p className="mt-1 text-muted-foreground">{appointment.nationalId || t(language, "common.na")}</p>
+                              <td className="px-2 py-1 text-[11px] text-slate-700">
+                                <p>{appointment.mrn || EMPTY_VALUE}</p>
+                                <p className="text-muted-foreground">{appointment.nationalId || EMPTY_VALUE}</p>
                               </td>
-                              <td className="px-2 py-1.5 text-xs text-slate-700">{formatAgeSex(language, appointment)}</td>
-                              <td className="px-2 py-1.5 text-xs text-slate-700">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || t(language, "common.na")}</td>
-                              <td className="px-2 py-1.5 text-xs text-slate-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || t(language, "common.na")}</td>
-                              <td className="px-2 py-1.5">
-                                <code data-testid="modality-board-accession" className="font-mono text-xs text-foreground">
+                              <td className="px-2 py-1 text-[11px] text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), EMPTY_VALUE)}</td>
+                              <td className="px-2 py-1 text-[11px] text-slate-700">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || EMPTY_VALUE}</td>
+                              <td className="px-2 py-1 text-[11px] text-slate-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || EMPTY_VALUE}</td>
+                              <td className="px-2 py-1">
+                                <code data-testid="modality-board-accession" className="font-mono text-[11px] text-foreground">
                                   {appointment.accessionNumber}
                                 </code>
                               </td>
-                              <td className="px-2 py-1.5">
+                              <td className="px-2 py-1">
                                 {appointment.notes?.trim() || appointment.specialReasonNote?.trim() ? (
                                   <Badge variant="info" size="sm" title={appointment.notes ?? appointment.specialReasonNote ?? undefined}>
                                     {notesIndicator(language, appointment)}
                                   </Badge>
+                                ) : edited ? (
+                                  <Badge variant="warning" size="sm">
+                                    {t(language, "appointmentEditor.edited")}
+                                  </Badge>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">{t(language, "common.na")}</span>
+                                  <span className="text-xs text-muted-foreground">{EMPTY_VALUE}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1.5">
+                              <td className="px-2 py-1">
                                 <div className="flex items-center gap-1">
                                   <Button
                                     type="button"
@@ -664,6 +663,7 @@ export default function ModalityPage() {
                                     size="icon"
                                     aria-label={t(language, "common.print")}
                                     title={t(language, "common.print")}
+                                    className="h-8 w-8 border border-slate-300 bg-white text-slate-700"
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       handlePrint(appointment.id);
@@ -671,26 +671,47 @@ export default function ModalityPage() {
                                   >
                                     <Printer size={14} />
                                   </Button>
-                                  <Button
-                                    type="button"
-                                    variant="primary"
-                                    size="sm"
-                                    className="h-9 px-2 text-xs"
-                                    disabled={!canAct || completeMutation.isPending}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleRequestCompletion(appointment);
-                                    }}
-                                  >
-                                    {completeMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                                    <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
-                                  </Button>
+                                  {canMarkArrived ? (
+                                    <Button
+                                      type="button"
+                                      variant={appointment.status === "scheduled" ? "primary" : "secondary"}
+                                      size="sm"
+                                      className="h-8 px-2 text-[11px]"
+                                      aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
+                                      title={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
+                                      disabled={statusMutation.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleRequestStatusChange(appointment, "arrived");
+                                      }}
+                                    >
+                                      <BadgeCheck size={14} />
+                                      <span>{chooseLocalized(language, "وصول", "Arrived")}</span>
+                                    </Button>
+                                  ) : null}
+                                  {canCompleteRow ? (
+                                    <Button
+                                      type="button"
+                                      variant="primary"
+                                      size="sm"
+                                      className="h-8 px-2 text-[11px]"
+                                      disabled={completeMutation.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleRequestCompletion(appointment);
+                                      }}
+                                    >
+                                      {completeMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                                      <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
+                                    </Button>
+                                  ) : null}
                                   <Button
                                     type="button"
                                     variant="secondary"
                                     size="icon"
                                     aria-label={chooseLocalized(language, "إيقاف", "Discontinue")}
                                     title={chooseLocalized(language, "إيقاف", "Discontinue")}
+                                    className="h-8 w-8 border border-amber-300 bg-amber-50 text-amber-800"
                                     disabled={!canAct || statusMutation.isPending}
                                     onClick={(event) => {
                                       event.stopPropagation();
@@ -706,6 +727,7 @@ export default function ModalityPage() {
                                     size="icon"
                                     aria-label={chooseLocalized(language, "إلغاء", "Cancel")}
                                     title={chooseLocalized(language, "إلغاء", "Cancel")}
+                                    className="h-8 w-8 border border-rose-300 bg-rose-50 text-rose-800"
                                     disabled={!canAct || statusMutation.isPending}
                                     onClick={(event) => {
                                       event.stopPropagation();
@@ -715,22 +737,6 @@ export default function ModalityPage() {
                                   >
                                     <XCircle size={14} />
                                   </Button>
-                                  {appointment.status === "scheduled" || appointment.status === "waiting" ? (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="icon"
-                                      aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
-                                      title={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
-                                      disabled={statusMutation.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleRequestStatusChange(appointment, "arrived");
-                                      }}
-                                    >
-                                      <BadgeCheck size={14} />
-                                    </Button>
-                                  ) : null}
                                   {appointment.status === "arrived" ? (
                                     <Button
                                       type="button"
@@ -738,6 +744,7 @@ export default function ModalityPage() {
                                       size="icon"
                                       aria-label={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
                                       title={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
+                                      className="h-8 w-8 border border-slate-300 bg-white text-slate-700"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -754,6 +761,7 @@ export default function ModalityPage() {
                                       size="icon"
                                       aria-label={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
                                       title={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
+                                      className="h-8 w-8 border border-slate-300 bg-white text-slate-700"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -776,7 +784,7 @@ export default function ModalityPage() {
             </Card>
           </section>
 
-          <aside className="hidden">
+          <aside className="hidden" hidden aria-hidden="true">
             <Card
               data-testid={undefined}
               className="sticky top-4 rounded-[1.25rem] border border-slate-200/80 bg-white/94 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]"
@@ -1182,12 +1190,12 @@ function MetricCard({
   };
 
   return (
-    <div className={`rounded-[1.5rem] border p-4 shadow-sm ${toneClasses[tone]}`}>
+    <div className={`rounded-xl border px-3 py-2 shadow-sm ${toneClasses[tone]}`}>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs uppercase tracking-[0.2em] opacity-80">{label}</p>
+        <p className="text-[10px] uppercase tracking-[0.14em] opacity-80">{label}</p>
         {icon}
       </div>
-      <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-1 text-xl font-semibold tracking-tight">{value}</p>
     </div>
   );
 }

@@ -170,7 +170,7 @@ describe("ModalityPage modality board", () => {
 
     expect(within(screen.getByTestId("modality-board-row-3")).getByText("#1")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-1")).getByText("#2")).toBeTruthy();
-    expect(within(screen.getByTestId("modality-board-row-2")).getByText("—")).toBeTruthy();
+    expect(screen.getByTestId("modality-board-row-2").querySelector("td")?.textContent?.trim()).toBe("—");
   });
 
   it("keeps scheduled not-arrived patients visible in the board", async () => {
@@ -182,6 +182,20 @@ describe("ModalityPage modality board", () => {
     const scheduledRow = screen.getByTestId("modality-board-row-2");
     expect(within(scheduledRow).getByText("Scheduled Patient")).toBeTruthy();
     expect(within(scheduledRow).getByText("Scheduled")).toBeTruthy();
+  });
+
+  it("shows Mark Arrived instead of Complete as the scheduled row action", async () => {
+    const user = await openBoard([
+      appointment({ id: 12, accessionNumber: "ACC-SCHEDULED", status: "scheduled", bookingTime: "10:00", englishFullName: "Scheduled Patient" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-12");
+    expect(within(row).queryByRole("button", { name: /Complete/i })).toBeNull();
+
+    await user.click(within(row).getByRole("button", { name: /Mark arrived/i }));
+    await waitFor(() => {
+      expect(updateAppointmentStatusMock).toHaveBeenCalledWith(12, "arrived", null);
+    });
   });
 
   it("shows completed rows under the completed filter", async () => {
@@ -247,6 +261,19 @@ describe("ModalityPage modality board", () => {
     });
 
     expect(within(row).getByRole("button", { name: /Discontinue/i })).toBeTruthy();
+  });
+
+  it("keeps compact row action buttons accessible", async () => {
+    await openBoard([
+      appointment({ id: 8, accessionNumber: "ACC-LABELS", status: "arrived", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Label Patient" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-8");
+    expect(within(row).getByRole("button", { name: /Print/i })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /Complete/i })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /Discontinue/i })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /Cancel/i })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /Back to waiting/i })).toBeTruthy();
   });
 
   it("reopens completed rows only after a required reason is entered", async () => {
