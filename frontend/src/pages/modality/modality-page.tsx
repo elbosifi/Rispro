@@ -656,20 +656,21 @@ export default function ModalityPage() {
                                 )}
                               </td>
                               <td className="px-2 py-1">
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1 whitespace-nowrap">
                                   <Button
                                     type="button"
                                     variant="secondary"
-                                    size="icon"
+                                    size="sm"
                                     aria-label={t(language, "common.print")}
                                     title={t(language, "common.print")}
-                                    className="h-8 w-8 border border-slate-300 bg-white text-slate-700"
+                                    className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       handlePrint(appointment.id);
                                     }}
                                   >
                                     <Printer size={14} />
+                                    <span>{t(language, "common.print")}</span>
                                   </Button>
                                   {canMarkArrived ? (
                                     <Button
@@ -705,46 +706,52 @@ export default function ModalityPage() {
                                       <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
                                     </Button>
                                   ) : null}
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="icon"
-                                    aria-label={chooseLocalized(language, "إيقاف", "Discontinue")}
-                                    title={chooseLocalized(language, "إيقاف", "Discontinue")}
-                                    className="h-8 w-8 border border-amber-300 bg-amber-50 text-amber-800"
-                                    disabled={!canAct || statusMutation.isPending}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setStatusAction({ appointment, status: "discontinued", reasonRequired: true });
-                                      setStatusReason("");
-                                    }}
-                                  >
-                                    <Ban size={14} />
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="icon"
-                                    aria-label={chooseLocalized(language, "إلغاء", "Cancel")}
-                                    title={chooseLocalized(language, "إلغاء", "Cancel")}
-                                    className="h-8 w-8 border border-rose-300 bg-rose-50 text-rose-800"
-                                    disabled={!canAct || statusMutation.isPending}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setStatusAction({ appointment, status: "cancelled", reasonRequired: true });
-                                      setStatusReason("");
-                                    }}
-                                  >
-                                    <XCircle size={14} />
-                                  </Button>
+                                  {canAct ? (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        aria-label={chooseLocalized(language, "إيقاف", "Discontinue")}
+                                        title={chooseLocalized(language, "إيقاف", "Discontinue")}
+                                        className="h-8 border border-amber-300 bg-amber-50 px-2 text-[11px] text-amber-900"
+                                        disabled={statusMutation.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setStatusAction({ appointment, status: "discontinued", reasonRequired: true });
+                                          setStatusReason("");
+                                        }}
+                                      >
+                                        <Ban size={14} />
+                                        <span>{chooseLocalized(language, "إيقاف", "Stop")}</span>
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        aria-label={chooseLocalized(language, "إلغاء", "Cancel")}
+                                        title={chooseLocalized(language, "إلغاء", "Cancel")}
+                                        className="h-8 border border-rose-300 bg-rose-50 px-2 text-[11px] text-rose-900"
+                                        disabled={statusMutation.isPending}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setStatusAction({ appointment, status: "cancelled", reasonRequired: true });
+                                          setStatusReason("");
+                                        }}
+                                      >
+                                        <XCircle size={14} />
+                                        <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+                                      </Button>
+                                    </>
+                                  ) : null}
                                   {appointment.status === "arrived" ? (
                                     <Button
                                       type="button"
                                       variant="secondary"
-                                      size="icon"
+                                      size="sm"
                                       aria-label={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
                                       title={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
-                                      className="h-8 w-8 border border-slate-300 bg-white text-slate-700"
+                                      className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -752,16 +759,17 @@ export default function ModalityPage() {
                                       }}
                                     >
                                       <TimerReset size={14} />
+                                      <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
                                     </Button>
                                   ) : null}
                                   {appointment.status === "completed" ? (
                                     <Button
                                       type="button"
                                       variant="secondary"
-                                      size="icon"
+                                      size="sm"
                                       aria-label={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
                                       title={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
-                                      className="h-8 w-8 border border-slate-300 bg-white text-slate-700"
+                                      className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -769,6 +777,7 @@ export default function ModalityPage() {
                                       }}
                                     >
                                       <RotateCcw size={14} />
+                                      <span>{chooseLocalized(language, "إعادة فتح", "Reopen")}</span>
                                     </Button>
                                   ) : null}
                                 </div>
