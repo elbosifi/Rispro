@@ -24,6 +24,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { Button, Card, Input } from "@/components/shared";
 
 const RESET_DELAY_MS = 4500;
+const FLASH_DURATION_MS = 900;
 const FALLBACK_MODALITY_LIMIT = 6;
 
 type CheckInState =
@@ -31,6 +32,7 @@ type CheckInState =
   | { mode: "loading" }
   | { mode: "success"; entry: QueueEntry | null }
   | { mode: "error"; message: string };
+type ScanFlashMode = "success" | "error" | null;
 
 type ModalityRow = {
   key: string;
@@ -82,10 +84,12 @@ export default function QueueCheckInPage() {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scanValue, setScanValue] = useState("");
   const [logoFailed, setLogoFailed] = useState(false);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [state, setState] = useState<CheckInState>({ mode: "idle" });
+  const [scanFlash, setScanFlash] = useState<ScanFlashMode>(null);
   const today = useMemo(() => todayIsoDateLy(), []);
 
   const queueQuery = useQuery({
@@ -115,6 +119,9 @@ export default function QueueCheckInPage() {
       if (resetTimerRef.current !== null) {
         clearTimeout(resetTimerRef.current);
       }
+      if (flashTimerRef.current !== null) {
+        clearTimeout(flashTimerRef.current);
+      }
     };
   }, []);
 
@@ -128,6 +135,17 @@ export default function QueueCheckInPage() {
     setScanValue("");
     setState({ mode: "idle" });
     inputRef.current?.focus();
+  };
+
+  const flashScanResult = (mode: Exclude<ScanFlashMode, null>) => {
+    if (flashTimerRef.current !== null) {
+      clearTimeout(flashTimerRef.current);
+    }
+    setScanFlash(mode);
+    flashTimerRef.current = setTimeout(() => {
+      setScanFlash(null);
+      flashTimerRef.current = null;
+    }, FLASH_DURATION_MS);
   };
 
   const queue = queueQuery.data;
@@ -219,6 +237,7 @@ export default function QueueCheckInPage() {
           null;
 
         setState({ mode: "success", entry: matchedEntry });
+        flashScanResult("success");
         setScanValue("");
         if (resetTimerRef.current !== null) {
           clearTimeout(resetTimerRef.current);
@@ -228,6 +247,7 @@ export default function QueueCheckInPage() {
         }, RESET_DELAY_MS);
       } catch {
         setState({ mode: "success", entry: null });
+        flashScanResult("success");
         setScanValue("");
         resetTimerRef.current = setTimeout(() => {
           resetToIdle();
@@ -236,6 +256,7 @@ export default function QueueCheckInPage() {
     },
     onError: (err) => {
       setState({ mode: "error", message: getLocalizedScanError(t, err) });
+      flashScanResult("error");
       setScanValue("");
       if (resetTimerRef.current !== null) {
         clearTimeout(resetTimerRef.current);
@@ -311,6 +332,22 @@ export default function QueueCheckInPage() {
           "radial-gradient(circle at top left, rgba(0, 82, 255, 0.15), transparent 35%), radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,252,1))"
       }}
     >
+      <style>{`
+        @keyframes queue-check-in-flash {
+          0% { opacity: 0; }
+          16% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `}</style>
+      {scanFlash ? (
+        <div
+          data-testid="queue-check-in-flash"
+          className={`pointer-events-none fixed inset-0 z-[80] ${
+            scanFlash === "success" ? "bg-emerald-500/45" : "bg-rose-600/45"
+          }`}
+          style={{ animation: `queue-check-in-flash ${FLASH_DURATION_MS}ms ease-out forwards` }}
+        />
+      ) : null}
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 p-4 sm:p-6 lg:p-8">
         <header className="rounded-[1.75rem] border border-border/70 bg-white/85 px-4 py-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-md sm:px-5">
           <div className={`flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
