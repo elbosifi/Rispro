@@ -66,8 +66,23 @@ export interface RescheduleBookingResult {
 type ExamTypeChangePolicy = "allowed_without_supervisor" | "supervisor_required" | "disabled";
 const RESOLVED_CAPACITY_REASON_CODES = new Set([
   "category_capacity_exhausted",
+  "category_override_forbidden",
+  "category_override_required",
   "modality_daily_capacity_exhausted",
+  "total_capacity_override_forbidden",
+  "total_capacity_override_required",
 ]);
+
+function sameSlotDetailsEditCapacityReasonsAreResolved(
+  reasons: Array<{ code: string }>,
+  existingBookingCapacityAlreadyAccountedFor: boolean
+): boolean {
+  return (
+    existingBookingCapacityAlreadyAccountedFor &&
+    reasons.length > 0 &&
+    reasons.every((reason) => RESOLVED_CAPACITY_REASON_CODES.has(reason.code))
+  );
+}
 
 async function getExamTypeChangePolicy(client: PoolClient): Promise<ExamTypeChangePolicy> {
   const result = await client.query<{ setting_value: { value?: string } | null }>(
@@ -518,11 +533,7 @@ export async function rescheduleBookingInternal(
   if (
     decision.displayStatus === "blocked" &&
     !decision.requiresSupervisorOverride &&
-    !(
-      existingBookingCapacityAlreadyAccountedFor &&
-      decision.reasons.length > 0 &&
-      decision.reasons.every((reason) => RESOLVED_CAPACITY_REASON_CODES.has(reason.code))
-    )
+    !sameSlotDetailsEditCapacityReasonsAreResolved(decision.reasons, existingBookingCapacityAlreadyAccountedFor)
   ) {
     throw new SchedulingError(
       409,
