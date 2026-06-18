@@ -104,6 +104,7 @@ function request(overrides: Partial<SchedulingOverrideRequestDto> = {}): Schedul
     requesterUsername: "reception",
     approverDisplayName: null,
     approverUsername: null,
+    decisionContext: null,
     ...overrides,
   };
 }
@@ -177,15 +178,81 @@ describe("SchedulingOverrideApprovalCenter", () => {
   });
 
   it("does not allow supervisor to approve total capacity but superadmin can", async () => {
-    mockRequests = [request({ id: 12, overrideType: "total_capacity_override" })];
+    mockRequests = [request({
+      id: 12,
+      overrideType: "total_capacity_override",
+      decisionContext: {
+        violatedRuleLabel: "Total MRI capacity exceeded",
+        violatedRuleType: "total_capacity_override",
+        currentCapacity: 10,
+        totalCapacity: 10,
+        remainingCapacity: 0,
+        afterApprovalCapacity: 11,
+        overbookAmount: 1,
+        modalityCapacityBreakdown: { modalityId: 2, modalityName: "MRI", modalityCode: "MR", bookedTotal: 10, totalCapacity: 10 },
+        categoryBreakdown: null,
+        specialQuotaBreakdown: null,
+        sameDayAppointmentCount: 10,
+        sameDayAppointmentSummary: [],
+        patientPreviousNoShowCount: 0,
+        patientPreviousCancelledCount: 0,
+        patientFutureAppointmentCount: 0,
+        duplicateFutureAppointmentWarning: null,
+        requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+        submittedAt: "2042-02-01T08:00:00Z",
+        requestAgeMinutes: 4,
+        approvalNoteRequired: true,
+        approvalConsequenceText: "Approving this request will create this appointment even though MRI daily capacity is already full. This will overbook MRI by 1 case.",
+      },
+    })];
 
     const { rerender } = renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+    expect(screen.getByText("Total MRI capacity exceeded")).toBeTruthy();
+    expect(screen.getByText("10 / 10")).toBeTruthy();
+    expect(screen.getByText("11 / 10")).toBeTruthy();
+    expect(screen.getByText("+1 case")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.getByText("Supervisor cannot approve total capacity overrides. Superadmin approval is required.")).toBeTruthy();
 
     rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("super_admin")} /></LanguageProvider>);
-    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Approval note for request 12"), { target: { value: "Total capacity approved" } });
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("renders patient history fallback safely", async () => {
+    mockRequests = [request({
+      id: 15,
+      decisionContext: {
+        violatedRuleLabel: "Category capacity exceeded",
+        violatedRuleType: "category_override",
+        currentCapacity: null,
+        totalCapacity: null,
+        remainingCapacity: null,
+        afterApprovalCapacity: null,
+        overbookAmount: null,
+        modalityCapacityBreakdown: null,
+        categoryBreakdown: null,
+        specialQuotaBreakdown: null,
+        sameDayAppointmentCount: null,
+        sameDayAppointmentSummary: null,
+        patientPreviousNoShowCount: null,
+        patientPreviousCancelledCount: null,
+        patientFutureAppointmentCount: null,
+        duplicateFutureAppointmentWarning: null,
+        requester: { userId: 5, name: "Reception User", username: "reception", role: "receptionist" },
+        submittedAt: "2042-02-01T08:00:00Z",
+        requestAgeMinutes: null,
+        approvalNoteRequired: false,
+        approvalConsequenceText: null,
+      },
+    })];
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
+
+    expect(screen.getAllByText("Not available").length).toBeGreaterThan(0);
   });
 
   it("lets receptionist cancel own pending request and shows failed-state message", async () => {

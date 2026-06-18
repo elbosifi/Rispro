@@ -60,6 +60,10 @@ export function canRoleApproveSchedulingOverride(role: Role | undefined, overrid
   return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override";
 }
 
+export function approvalNoteRequiredForOverride(type: SchedulingOverrideType | string | null | undefined): boolean {
+  return type === "total_capacity_override" || type === "closed_weekday_override";
+}
+
 export function isSupportedOverrideType(value: string | null | undefined): value is SchedulingOverrideType {
   return SUPPORTED_OVERRIDE_TYPES.has(value as SchedulingOverrideType);
 }

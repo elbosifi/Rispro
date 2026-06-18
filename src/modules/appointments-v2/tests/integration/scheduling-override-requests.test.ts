@@ -316,6 +316,13 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       });
       assert.equal(requested.status, 201);
       assert.equal((requested.data as any).request.overrideType, "closed_weekday_override");
+      assert.equal((requested.data as any).request.decisionContext.approvalNoteRequired, true);
+
+      const missingNoteApproval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
+        method: "POST",
+        body: { approverReason: "" },
+      });
+      assert.equal(missingNoteApproval.status, 400);
 
       const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
         method: "POST",
@@ -496,6 +503,12 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const total = await requestCategoryOverride(date);
     assert.equal(total.status, 201);
     assert.equal((total.data as any).request.overrideType, "total_capacity_override");
+    assert.match(String((total.data as any).request.decisionContext.violatedRuleLabel), /capacity exceeded/i);
+    assert.equal((total.data as any).request.decisionContext.currentCapacity, 1);
+    assert.equal((total.data as any).request.decisionContext.totalCapacity, 1);
+    assert.equal((total.data as any).request.decisionContext.afterApprovalCapacity, 2);
+    assert.equal((total.data as any).request.decisionContext.overbookAmount, 1);
+    assert.equal((total.data as any).request.decisionContext.approvalNoteRequired, true);
     const targetPatientId = Number((total.data as any).request.patientId);
     const beforeTotalApprovalCount = await countBookings(date, targetPatientId);
 
@@ -504,6 +517,13 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       body: { approverReason: "not enough permission" },
     });
     assert.equal(supervisorApproval.status, 403);
+    assert.equal(await countBookings(date, targetPatientId), beforeTotalApprovalCount);
+
+    const missingNoteApproval = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${Number((total.data as any).request.id)}/approve`, {
+      method: "POST",
+      body: { approverReason: "" },
+    });
+    assert.equal(missingNoteApproval.status, 400);
     assert.equal(await countBookings(date, targetPatientId), beforeTotalApprovalCount);
 
     const superAdminApproval = await fetchAs(superAdminCookie, `/api/v2/scheduling-override-requests/${Number((total.data as any).request.id)}/approve`, {

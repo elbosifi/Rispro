@@ -18,6 +18,7 @@ import {
 } from "../api";
 import type { SchedulingOverrideRequestDto, SchedulingOverrideRequestStatus, SchedulingOverrideType } from "../types";
 import {
+  approvalNoteRequiredForOverride,
   canRoleApproveSchedulingOverride,
   formatOverrideType,
   formatRequestType,
@@ -283,6 +284,11 @@ export function SchedulingOverrideRequestsWorkspace({
   }
 
   function approve(request: SchedulingOverrideRequestDto) {
+    const approvalNoteRequired = request.decisionContext?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType);
+    if (approvalNoteRequired && !approveReasonById[String(request.id)]?.trim()) {
+      setActionError("Approval note is required for this override type.");
+      return;
+    }
     setPendingReauthAction(() => () => void approveAfterReauth(request));
   }
 
@@ -422,6 +428,13 @@ function RequestCard({
   const isOwn = Number(request.requesterUserId) === Number(user.id);
   const canCancel = isPending && (isOwn || user.role === "supervisor" || user.role === "super_admin");
   const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && request.overrideType === "total_capacity_override";
+  const context = request.decisionContext ?? null;
+  const approvalNoteRequired = context?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType);
+  const requesterMeta = [
+    request.requesterRole || context?.requester.role || null,
+    request.requesterUsername || context?.requester.username || null,
+    t(language, "overrideRequests.idMeta", { id: request.requesterUserId }),
+  ].filter(Boolean).join(" · ");
 
   return (
     <article className="rounded-2xl border border-border bg-card p-3 shadow-sm">
@@ -435,6 +448,7 @@ function RequestCard({
         <span className="text-[11px] text-muted-foreground">{new Date(request.createdAt).toLocaleString()}</span>
       </div>
 
+      <SectionTitle>Request summary</SectionTitle>
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Info
           label={t(language, "overrideRequests.patient")}
@@ -453,10 +467,11 @@ function RequestCard({
         />
         <Info label={t(language, "overrideRequests.dateTime")} value={`${request.requestedBookingDate}${request.requestedBookingTime ? ` ${request.requestedBookingTime}` : ""}`} />
         <Info label={t(language, "overrideRequests.requestType")} value={formatRequestType(request.requestType)} />
+        <Info label="Submitted" value={new Date(context?.submittedAt ?? request.createdAt).toLocaleString()} meta={context?.requestAgeMinutes == null ? undefined : `${context.requestAgeMinutes} min old`} />
         <Info
           label={t(language, "overrideRequests.requester")}
           value={request.requesterDisplayName || request.requesterUsername || t(language, "overrideRequests.userFallback", { id: request.requesterUserId })}
-          meta={request.requesterUsername ? `${request.requesterUsername} · ${t(language, "overrideRequests.idMeta", { id: request.requesterUserId })}` : t(language, "overrideRequests.idMeta", { id: request.requesterUserId })}
+          meta={requesterMeta}
         />
         {request.approverUserId ? (
           <Info
@@ -465,6 +480,57 @@ function RequestCard({
             meta={request.approverUsername ? `${request.approverUsername} · ${t(language, "overrideRequests.idMeta", { id: request.approverUserId })}` : t(language, "overrideRequests.idMeta", { id: request.approverUserId })}
           />
         ) : null}
+      </div>
+
+      <SectionTitle>Why approval is required</SectionTitle>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <p><span className="font-semibold">Rule:</span> {context?.violatedRuleLabel || formatOverrideType(request.overrideType)}</p>
+        {context?.violatedRuleType ? <p className="mt-1 text-amber-800"><span className="font-semibold">Rule type:</span> {context.violatedRuleType}</p> : null}
+        {context?.currentCapacity != null || context?.totalCapacity != null ? (
+          <div className="mt-2 grid gap-1">
+            <p><span className="font-semibold">Current capacity:</span> {formatCapacity(context?.currentCapacity, context?.totalCapacity)}</p>
+            <p><span className="font-semibold">After approval:</span> {formatCapacity(context?.afterApprovalCapacity, context?.totalCapacity)}</p>
+            <p><span className="font-semibold">Overbook:</span> {context?.overbookAmount == null ? "Not available" : `+${context.overbookAmount} case${context.overbookAmount === 1 ? "" : "s"}`}</p>
+          </div>
+        ) : (
+          <p className="mt-2 text-amber-800">Capacity impact is not available for this request.</p>
+        )}
+        {context?.categoryBreakdown?.length ? (
+          <div className="mt-2 text-amber-800">
+            {context.categoryBreakdown.map((item) => (
+              <p key={item.caseCategory}>{`${formatCategory(item.caseCategory)}: ${item.booked}${item.limit == null ? "" : ` / ${item.limit}`}`}</p>
+            ))}
+          </div>
+        ) : null}
+        {context?.specialQuotaBreakdown ? (
+          <p className="mt-2 text-amber-800">{`Special quota: ${context.specialQuotaBreakdown.consumed} / ${context.specialQuotaBreakdown.configured}`}</p>
+        ) : null}
+      </div>
+
+      <SectionTitle>Decision support</SectionTitle>
+      <div className="grid gap-2 text-xs">
+        <div className="grid grid-cols-3 gap-2">
+          <Info label="No-shows" value={formatNullableCount(context?.patientPreviousNoShowCount)} />
+          <Info label="Cancellations" value={formatNullableCount(context?.patientPreviousCancelledCount)} />
+          <Info label="Future appts" value={formatNullableCount(context?.patientFutureAppointmentCount)} />
+        </div>
+        {context?.duplicateFutureAppointmentWarning ? (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{context.duplicateFutureAppointmentWarning}</p>
+        ) : null}
+        <div className="rounded-xl border border-border bg-muted/30 p-2">
+          <p className="text-xs font-semibold text-foreground">Same-day {request.modalityName || request.modalityCode || "modality"} bookings: {formatNullableCount(context?.sameDayAppointmentCount)}</p>
+          {context?.sameDayAppointmentSummary?.length ? (
+            <ul className="mt-1 space-y-1 text-[11px] text-muted-foreground">
+              {context.sameDayAppointmentSummary.map((booking) => (
+                <li key={booking.id}>
+                  {`${booking.bookingTime || "No time"} · ${booking.patientDisplayName || `Booking ${booking.id}`} · ${booking.examTypeName || "Exam not set"} · ${booking.status}`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted-foreground">Same-day booking list is not available.</p>
+          )}
+        </div>
       </div>
 
       <p className="mt-3 text-sm text-foreground">{request.requesterReason}</p>
@@ -479,15 +545,21 @@ function RequestCard({
 
       {canApprove ? (
         <div className="mt-3 space-y-2">
+          <SectionTitle>Actions</SectionTitle>
+          {context?.approvalConsequenceText ? (
+            <p className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-foreground">{context.approvalConsequenceText}</p>
+          ) : null}
           <input
             aria-label={t(language, "overrideRequests.approvalNoteForRequest", { id: request.id })}
             className="input-premium h-9 text-xs"
             value={approveReason}
             onChange={(event) => onChangeApproveReason(event.target.value)}
-            placeholder={t(language, "overrideRequests.optionalApprovalNote")}
+            placeholder={approvalNoteRequired ? "Approval note required" : t(language, "overrideRequests.optionalApprovalNote")}
+            required={approvalNoteRequired}
           />
+          {approvalNoteRequired ? <p className="text-[11px] text-muted-foreground">Approval note required for this high-risk override.</p> : null}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" onClick={onApprove} disabled={busy}>{t(language, "overrideRequests.approve")}</Button>
+            <Button type="button" size="sm" onClick={onApprove} disabled={busy || (approvalNoteRequired && !approveReason.trim())}>{t(language, "overrideRequests.approve")}</Button>
             <Button type="button" size="sm" variant="secondary" onClick={onStartReject} disabled={busy}>{t(language, "overrideRequests.reject")}</Button>
           </div>
         </div>
@@ -519,6 +591,10 @@ function RequestCard({
   );
 }
 
+function SectionTitle({ children }: { children: string }) {
+  return <h3 className="mb-2 mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>;
+}
+
 function Info({ label, value, meta }: { label: string; value: string; meta?: string }) {
   return (
     <div className="rounded-lg bg-muted/40 p-2">
@@ -527,4 +603,17 @@ function Info({ label, value, meta }: { label: string; value: string; meta?: str
       {meta ? <p className="truncate text-[10px] text-muted-foreground">{meta}</p> : null}
     </div>
   );
+}
+
+function formatCapacity(value: number | null | undefined, total: number | null | undefined): string {
+  const left = value == null ? "Not available" : String(value);
+  return total == null ? left : `${left} / ${total}`;
+}
+
+function formatNullableCount(value: number | null | undefined): string {
+  return value == null ? "Not available" : String(value);
+}
+
+function formatCategory(value: string): string {
+  return value === "non_oncology" ? "Non-oncology" : "Oncology";
 }

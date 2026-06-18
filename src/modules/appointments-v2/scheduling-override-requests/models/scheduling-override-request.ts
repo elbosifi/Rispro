@@ -43,8 +43,62 @@ export interface SchedulingOverrideRequestRow {
   examTypeName?: string | null;
   requesterDisplayName?: string | null;
   requesterUsername?: string | null;
+  requesterRole?: string | null;
   approverDisplayName?: string | null;
   approverUsername?: string | null;
+  decisionContext?: SchedulingOverrideDecisionContext | null;
+}
+
+export interface SchedulingOverrideDecisionContext {
+  violatedRuleLabel: string | null;
+  violatedRuleType: string | null;
+  currentCapacity: number | null;
+  totalCapacity: number | null;
+  remainingCapacity: number | null;
+  afterApprovalCapacity: number | null;
+  overbookAmount: number | null;
+  modalityCapacityBreakdown: {
+    modalityId: number;
+    modalityName: string | null;
+    modalityCode: string | null;
+    bookedTotal: number;
+    totalCapacity: number | null;
+  } | null;
+  categoryBreakdown: Array<{
+    caseCategory: "oncology" | "non_oncology";
+    booked: number;
+    limit: number | null;
+    remaining: number | null;
+  }> | null;
+  specialQuotaBreakdown: {
+    examTypeId: number;
+    configured: number;
+    consumed: number;
+    remaining: number;
+  } | null;
+  sameDayAppointmentCount: number | null;
+  sameDayAppointmentSummary: Array<{
+    id: number;
+    patientDisplayName: string | null;
+    examTypeName: string | null;
+    bookingTime: string | null;
+    status: string;
+    caseCategory: string | null;
+  }> | null;
+  patientPreviousNoShowCount: number | null;
+  patientPreviousCancelledCount: number | null;
+  patientFutureAppointmentCount: number | null;
+  duplicateFutureAppointmentWarning: string | null;
+  requester: {
+    userId: number;
+    name: string | null;
+    username: string | null;
+    role: string | null;
+  };
+  submittedAt: string;
+  requestAgeMinutes: number | null;
+  approvalNoteRequired: boolean;
+  approvalConsequenceText: string | null;
 }
 
 export interface SchedulingOverrideStoredPayload {

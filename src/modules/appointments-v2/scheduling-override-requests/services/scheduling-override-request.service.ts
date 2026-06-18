@@ -33,8 +33,14 @@ import {
   markSchedulingOverrideRequestFailed,
   markSchedulingOverrideRequestRejected,
 } from "../repositories/scheduling-override-request.repo.js";
+import {
+  getBookedCountsByCategoryForDate,
+  getSpecialQuotaBookedCount,
+} from "../../scheduler/repositories/capacity.repo.js";
+import { loadCategoryDailyLimits, loadExamTypeSpecialQuotas } from "../../rules/repositories/policy-rules.repo.js";
 import type {
   CreateSchedulingOverrideRequestInput,
+  SchedulingOverrideDecisionContext,
   SchedulingOverrideRequestFilters,
   SchedulingOverrideRequestRow,
   SchedulingOverrideRequestType,
@@ -42,6 +48,10 @@ import type {
 } from "../models/scheduling-override-request.js";
 
 const DEFAULT_EXPIRY_HOURS = 72;
+const HIGH_RISK_APPROVAL_NOTE_TYPES = new Set<SchedulingOverrideType>([
+  "total_capacity_override",
+  "closed_weekday_override",
+]);
 
 interface RescheduleNotificationInfo {
   previousDate: string;
@@ -98,9 +108,9 @@ async function hydrateRequestDisplayNames(
         )
       : Promise.resolve({ rows: [] }),
     userIds.length
-      ? client.query<{ id: number; displayName: string | null; username: string | null }>(
+      ? client.query<{ id: number; displayName: string | null; username: string | null; role: string | null }>(
           `
-            select id, nullif(full_name, '') as "displayName", username
+            select id, nullif(full_name, '') as "displayName", username, role
             from users
             where id = any($1::bigint[])
           `,
@@ -131,8 +141,248 @@ async function hydrateRequestDisplayNames(
       requesterUsername: requester?.username ?? null,
       approverDisplayName: approver?.displayName ?? null,
       approverUsername: approver?.username ?? null,
+      requesterRole: requester?.role ?? null,
     };
   });
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function decisionReasons(decision: unknown): Array<{ code: string; message?: string; ruleRef?: { type?: string; id?: number } }> {
+  if (!isObject(decision) || !Array.isArray(decision.reasons)) return [];
+  return decision.reasons.filter((reason): reason is { code: string; message?: string; ruleRef?: { type?: string; id?: number } } => {
+    return isObject(reason) && typeof reason.code === "string";
+  });
+}
+
+function policyVersionIdFromSnapshot(decision: unknown): number | null {
+  if (!isObject(decision) || !isObject(decision.policyVersionRef)) return null;
+  const id = Number(decision.policyVersionRef.versionId);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function formatOverrideRuleLabel(request: SchedulingOverrideRequestRow, reasonMessage: string | null): string | null {
+  const modality = request.modalityName || request.modalityCode || "modality";
+  if (request.overrideType === "total_capacity_override") return `Total ${modality} capacity exceeded`;
+  if (request.overrideType === "category_override") return `${modality} category capacity exceeded`;
+  if (request.overrideType === "closed_weekday_override") return `${modality} is closed or disabled for this day`;
+  if (request.overrideType === "exam_mix_override") return reasonMessage || "Exam mix quota exceeded";
+  return reasonMessage;
+}
+
+function firstViolatedRule(request: SchedulingOverrideRequestRow): { label: string | null; type: string | null } {
+  const reasons = decisionReasons(request.originalDecisionSnapshotJson);
+  const reason = reasons.find((item) => {
+    if (request.overrideType === "total_capacity_override") return item.code.includes("total_capacity") || item.code === "modality_daily_capacity_exhausted";
+    if (request.overrideType === "category_override") return item.code.includes("category");
+    if (request.overrideType === "closed_weekday_override") return item.code.includes("closed_weekday");
+    if (request.overrideType === "exam_mix_override") return item.code.includes("exam_mix");
+    return false;
+  }) ?? reasons[0];
+  return {
+    label: formatOverrideRuleLabel(request, reason?.message ?? null),
+    type: reason?.ruleRef?.type ?? request.overrideType,
+  };
+}
+
+function approvalNoteRequiredFor(overrideType: SchedulingOverrideType): boolean {
+  return HIGH_RISK_APPROVAL_NOTE_TYPES.has(overrideType);
+}
+
+function buildApprovalConsequenceText(
+  request: SchedulingOverrideRequestRow,
+  context: Pick<SchedulingOverrideDecisionContext, "totalCapacity" | "afterApprovalCapacity" | "overbookAmount">
+): string | null {
+  const modality = request.modalityName || request.modalityCode || "this modality";
+  if (request.overrideType === "total_capacity_override") {
+    const overbook = context.overbookAmount == null ? null : Math.max(0, context.overbookAmount);
+    if (overbook != null && overbook > 0) {
+      return `Approving this request will create this appointment even though ${modality} daily capacity is already full. This will overbook ${modality} by ${overbook} case${overbook === 1 ? "" : "s"}.`;
+    }
+    return `Approving this request will create this appointment using a total capacity override for ${modality}.`;
+  }
+  if (request.overrideType === "category_override") {
+    return `Approving this request will create this appointment even though the requested category capacity is already full.`;
+  }
+  if (request.overrideType === "closed_weekday_override") {
+    return `Approving this request will create this appointment on a disabled or closed scheduling day.`;
+  }
+  if (request.overrideType === "exam_mix_override") {
+    return `Approving this request will create this appointment even though an exam mix quota is already full.`;
+  }
+  return null;
+}
+
+async function buildDecisionContext(
+  client: PoolClient,
+  request: SchedulingOverrideRequestRow
+): Promise<SchedulingOverrideDecisionContext> {
+  const policyVersionId = request.requestedPolicyVersionId ?? policyVersionIdFromSnapshot(request.originalDecisionSnapshotJson);
+  const excludeBookingId = request.requestType === "reschedule_booking" ? Number(request.bookingId ?? 0) || null : null;
+  const [counts, modality, patientCounts, sameDayRows] = await Promise.all([
+    getBookedCountsByCategoryForDate(client, Number(request.modalityId), request.requestedBookingDate, excludeBookingId),
+    client.query<{ dailyCapacity: number | null }>(
+      `select daily_capacity as "dailyCapacity" from modalities where id = $1 limit 1`,
+      [request.modalityId]
+    ),
+    client.query<{
+      previousNoShowCount: number;
+      previousCancelledCount: number;
+      futureAppointmentCount: number;
+    }>(
+      `
+        select
+          greatest(coalesce(max(p.no_show_count), 0), count(b.id) filter (where b.status = 'no-show'))::int as "previousNoShowCount",
+          count(b.id) filter (where b.status = 'cancelled')::int as "previousCancelledCount",
+          count(b.id) filter (
+            where b.status in ('scheduled', 'arrived', 'waiting')
+              and (b.booking_date > current_date or (b.booking_date = current_date and coalesce(b.booking_time, '23:59'::time) >= current_time))
+          )::int as "futureAppointmentCount"
+        from patients p
+        left join appointments_v2.bookings b on b.patient_id = p.id
+        where p.id = $1
+      `,
+      [request.patientId]
+    ),
+    client.query<{
+      id: number;
+      patientDisplayName: string | null;
+      examTypeName: string | null;
+      bookingTime: string | null;
+      status: string;
+      caseCategory: string | null;
+    }>(
+      `
+        select
+          b.id,
+          coalesce(nullif(p.english_full_name, ''), nullif(p.arabic_full_name, '')) as "patientDisplayName",
+          coalesce(nullif(et.name_en, ''), nullif(et.name_ar, '')) as "examTypeName",
+          b.booking_time::text as "bookingTime",
+          b.status,
+          b.case_category as "caseCategory"
+        from appointments_v2.bookings b
+        left join patients p on p.id = b.patient_id
+        left join exam_types et on et.id = b.exam_type_id
+        where b.modality_id = $1
+          and b.booking_date = $2::date
+          and b.status not in ('cancelled', 'discontinued', 'voided')
+          and ($3::bigint is null or b.id <> $3::bigint)
+        order by b.booking_time nulls last, b.id
+        limit 5
+      `,
+      [request.modalityId, request.requestedBookingDate, excludeBookingId]
+    ),
+  ]);
+
+  const totalCapacity = modality.rows[0]?.dailyCapacity == null ? null : Number(modality.rows[0].dailyCapacity);
+  const afterApprovalCapacity = counts.total + 1;
+  const overbookAmount = totalCapacity == null ? null : Math.max(0, afterApprovalCapacity - totalCapacity);
+  const categoryLimits = policyVersionId
+    ? await loadCategoryDailyLimits(client, policyVersionId, Number(request.modalityId))
+    : [];
+  const categoryBreakdown: SchedulingOverrideDecisionContext["categoryBreakdown"] = [
+    {
+      caseCategory: "oncology" as const,
+      booked: counts.oncology,
+      limit: categoryLimits.find((limit) => limit.caseCategory === "oncology")?.dailyLimit ?? null,
+      remaining: null,
+    },
+    {
+      caseCategory: "non_oncology" as const,
+      booked: counts.nonOncology,
+      limit: categoryLimits.find((limit) => limit.caseCategory === "non_oncology")?.dailyLimit ?? null,
+      remaining: null,
+    },
+  ].map((item) => ({
+    ...item,
+    remaining: item.limit == null ? null : Math.max(0, item.limit - item.booked),
+  }));
+
+  let specialQuotaBreakdown: SchedulingOverrideDecisionContext["specialQuotaBreakdown"] = null;
+  if (policyVersionId && request.examTypeId != null) {
+    const specialQuotas = await loadExamTypeSpecialQuotas(client, policyVersionId);
+    const quota = specialQuotas.find((row) => Number(row.examTypeId) === Number(request.examTypeId) && row.isActive);
+    if (quota) {
+      const consumed = await getSpecialQuotaBookedCount(client, {
+        modalityId: Number(request.modalityId),
+        bookingDate: request.requestedBookingDate,
+        examTypeId: Number(request.examTypeId),
+        excludeBookingId,
+      });
+      specialQuotaBreakdown = {
+        examTypeId: Number(request.examTypeId),
+        configured: Number(quota.dailyExtraSlots),
+        consumed,
+        remaining: Math.max(0, Number(quota.dailyExtraSlots) - consumed),
+      };
+    }
+  }
+
+  const violated = firstViolatedRule(request);
+  const patientRow = patientCounts.rows[0];
+  const contextBase = {
+    totalCapacity,
+    afterApprovalCapacity,
+    overbookAmount,
+  };
+
+  return {
+    violatedRuleLabel: violated.label,
+    violatedRuleType: violated.type,
+    currentCapacity: counts.total,
+    totalCapacity,
+    remainingCapacity: totalCapacity == null ? null : Math.max(0, totalCapacity - counts.total),
+    afterApprovalCapacity,
+    overbookAmount,
+    modalityCapacityBreakdown: {
+      modalityId: Number(request.modalityId),
+      modalityName: request.modalityName ?? null,
+      modalityCode: request.modalityCode ?? null,
+      bookedTotal: counts.total,
+      totalCapacity,
+    },
+    categoryBreakdown,
+    specialQuotaBreakdown,
+    sameDayAppointmentCount: counts.total,
+    sameDayAppointmentSummary: sameDayRows.rows.map((row) => ({
+      id: Number(row.id),
+      patientDisplayName: row.patientDisplayName,
+      examTypeName: row.examTypeName,
+      bookingTime: row.bookingTime,
+      status: row.status,
+      caseCategory: row.caseCategory,
+    })),
+    patientPreviousNoShowCount: Number(patientRow?.previousNoShowCount ?? 0),
+    patientPreviousCancelledCount: Number(patientRow?.previousCancelledCount ?? 0),
+    patientFutureAppointmentCount: Number(patientRow?.futureAppointmentCount ?? 0),
+    duplicateFutureAppointmentWarning: Number(patientRow?.futureAppointmentCount ?? 0) > 0
+      ? "Patient already has future appointments. Review before approving a duplicate or unnecessary booking."
+      : null,
+    requester: {
+      userId: Number(request.requesterUserId),
+      name: request.requesterDisplayName ?? null,
+      username: request.requesterUsername ?? null,
+      role: request.requesterRole ?? null,
+    },
+    submittedAt: request.createdAt,
+    requestAgeMinutes: Number.isFinite(new Date(request.createdAt).getTime())
+      ? Math.max(0, Math.floor((Date.now() - new Date(request.createdAt).getTime()) / 60000))
+      : null,
+    approvalNoteRequired: approvalNoteRequiredFor(request.overrideType),
+    approvalConsequenceText: buildApprovalConsequenceText(request, contextBase),
+  };
+}
+
+async function hydrateRequestDecisionContexts(
+  client: PoolClient,
+  requests: SchedulingOverrideRequestRow[]
+): Promise<SchedulingOverrideRequestRow[]> {
+  return Promise.all(requests.map(async (request) => ({
+    ...request,
+    decisionContext: await buildDecisionContext(client, request),
+  })));
 }
 
 async function hydrateRequestDisplayName(
@@ -140,6 +390,13 @@ async function hydrateRequestDisplayName(
   request: SchedulingOverrideRequestRow
 ): Promise<SchedulingOverrideRequestRow> {
   return (await hydrateRequestDisplayNames(client, [request]))[0] ?? request;
+}
+
+async function hydrateRequestForResponse(
+  client: PoolClient,
+  request: SchedulingOverrideRequestRow
+): Promise<SchedulingOverrideRequestRow> {
+  return (await hydrateRequestDecisionContexts(client, [await hydrateRequestDisplayName(client, request)]))[0];
 }
 
 function assertKnownRole(role: Role | undefined): Role {
@@ -451,7 +708,7 @@ export async function createSchedulingOverrideRequest(
       expiresAt,
       createdFromContext: input.createdFromContext ?? null,
     });
-    return hydrateRequestDisplayName(client, request);
+    return hydrateRequestForResponse(client, request);
   }, { isolationLevel: "serializable", operationName: "create_scheduling_override_request" });
   safeNotifySchedulingOverrideCreated(created);
   return created;
@@ -467,7 +724,7 @@ export async function listSchedulingOverrideRequestsForUser(
     const requests = await listSchedulingOverrideRequests(client, filters, {
       requesterUserId: canSeeAll(role) ? null : userId,
     });
-    return hydrateRequestDisplayNames(client, requests);
+    return hydrateRequestDecisionContexts(client, await hydrateRequestDisplayNames(client, requests));
   } finally {
     client.release();
   }
@@ -483,7 +740,7 @@ export async function getSchedulingOverrideRequestForUser(
     const request = await findSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertVisible(request, userId, role);
-    return hydrateRequestDisplayName(client, request);
+    return (await hydrateRequestDecisionContexts(client, [await hydrateRequestDisplayName(client, request)]))[0];
   } finally {
     client.release();
   }
@@ -519,6 +776,9 @@ export async function approveSchedulingOverrideRequest(
     }
     if (!canApproveOverride(role, request.overrideType)) {
       throw new SchedulingError(403, "You do not have permission to approve this override type.", ["override_approval_forbidden"]);
+    }
+    if (approvalNoteRequiredFor(request.overrideType) && !approverReason?.trim()) {
+      throw new SchedulingError(400, "Approval note is required for this override type.", ["approval_note_required"]);
     }
 
     const payload = request.requestPayloadJson;
