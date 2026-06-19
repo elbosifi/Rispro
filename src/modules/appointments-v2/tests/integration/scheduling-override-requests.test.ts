@@ -92,11 +92,12 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   async function createPatient() {
     const { pool } = await import("../../../../db/pool.js");
     const nationalId = `7${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
+    const phone = `09${Math.random().toString().slice(2, 10).padEnd(8, "0").slice(0, 8)}`;
     const row = await pool.query<{ id: number }>(
-      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
-       values ($1, $2, $3, $4, 'M', 40, 'national_id', $5)
+      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+       values ($1, $2, $3, $4, 'M', 40, $5, 'national_id', $6)
        returning id`,
-      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, nationalId]
+      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, phone, nationalId]
     );
     return Number(row.rows[0].id);
   }
@@ -147,7 +148,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(requested.status, 201);
     assert.equal((requested.data as any).request.overrideType, "category_override");
 
-    await setCapacityLimits(1, 5);
+    await setCapacityLimits(1, 1);
     await fillNonOncologyCategory(changedDate, 1);
 
     return {
@@ -467,7 +468,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(approved.status, 200);
     assert.equal((approved.data as any).request.status, "approved");
     assert.equal((approved.data as any).booking.bookingDate, changedDate);
-    assert.equal((approved.data as any).booking.bookingTime, "10:30");
+    assert.equal((approved.data as any).booking.bookingTime, "10:30:00");
     assert.equal(await countBookings(requestedDate, targetPatientId), 0);
     assert.equal(await countBookings(changedDate, targetPatientId), 1);
 
@@ -586,7 +587,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(approved.status, 200);
     assert.equal((approved.data as any).request.status, "approved");
     assert.equal((approved.data as any).booking.bookingDate, changedDate);
-    assert.equal((approved.data as any).booking.bookingTime, changedTime);
+    assert.equal((approved.data as any).booking.bookingTime, `${changedTime}:00`);
     assert.equal(await countBookings(changedDate, patientId), beforeChangedDateCount + 1);
 
     const stored = await getRequestFromDb(requestId);
@@ -720,7 +721,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal((approved.data as any).request.status, "approved");
     assert.equal(Number((approved.data as any).booking.id), bookingId);
     assert.equal((approved.data as any).booking.bookingDate, changedDate);
-    assert.equal((approved.data as any).booking.bookingTime, changedTime);
+    assert.equal((approved.data as any).booking.bookingTime, `${changedTime}:00`);
 
     const { pool } = await import("../../../../db/pool.js");
     const after = await pool.query<{ booking_date: string; booking_time: string | null }>(
