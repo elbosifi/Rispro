@@ -16,7 +16,12 @@ import {
   useUnsubscribeUserPush,
   useUserPushConfig,
 } from "../api";
-import type { SchedulingOverrideRequestDto, SchedulingOverrideRequestStatus, SchedulingOverrideType } from "../types";
+import type {
+  SchedulingOverrideApprovalMode,
+  SchedulingOverrideRequestDto,
+  SchedulingOverrideRequestStatus,
+  SchedulingOverrideType,
+} from "../types";
 import {
   approvalNoteRequiredForOverride,
   canRoleApproveSchedulingOverride,
@@ -261,6 +266,11 @@ export function SchedulingOverrideRequestsWorkspace({
   const [rejectingId, setRejectingId] = useState<number | string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [approveReasonById, setApproveReasonById] = useState<Record<string, string>>({});
+  const [approvalDraftById, setApprovalDraftById] = useState<Record<string, {
+    approvalMode: SchedulingOverrideApprovalMode;
+    changedBookingDate: string;
+    changedBookingTime: string;
+  }>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingReauthAction, setPendingReauthAction] = useState<null | (() => void)>(null);
 
@@ -270,10 +280,18 @@ export function SchedulingOverrideRequestsWorkspace({
 
   async function approveAfterReauth(request: SchedulingOverrideRequestDto) {
     setActionError(null);
+    const draft = approvalDraftById[String(request.id)] ?? {
+      approvalMode: "as_requested" as const,
+      changedBookingDate: "",
+      changedBookingTime: "",
+    };
     try {
       await approveMutation.mutateAsync({
         id: request.id,
         approverReason: approveReasonById[String(request.id)] || null,
+        approvalMode: draft.approvalMode,
+        changedBookingDate: draft.approvalMode === "changed_date" ? draft.changedBookingDate : null,
+        changedBookingTime: draft.approvalMode === "changed_date" ? draft.changedBookingTime : null,
       });
       pushToast({ type: "success", title: t(language, "overrideRequests.approvedTitle"), message: t(language, "overrideRequests.approvedMessage") });
     } catch (error) {
@@ -284,8 +302,17 @@ export function SchedulingOverrideRequestsWorkspace({
   }
 
   function approve(request: SchedulingOverrideRequestDto) {
+    const draft = approvalDraftById[String(request.id)] ?? {
+      approvalMode: "as_requested" as const,
+      changedBookingDate: "",
+      changedBookingTime: "",
+    };
     const approvalNoteRequired = request.decisionContext?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType);
-    if (approvalNoteRequired && !approveReasonById[String(request.id)]?.trim()) {
+    if (draft.approvalMode === "changed_date" && !draft.changedBookingDate) {
+      setActionError("New booking date is required when approving with a changed date.");
+      return;
+    }
+    if ((approvalNoteRequired || draft.approvalMode === "changed_date") && !approveReasonById[String(request.id)]?.trim()) {
       setActionError("Approval note is required for this override type.");
       return;
     }
@@ -360,7 +387,12 @@ export function SchedulingOverrideRequestsWorkspace({
                 request={request}
                 user={user}
                 approveReason={approveReasonById[String(request.id)] ?? ""}
+                approvalDraft={approvalDraftById[String(request.id)] ?? { approvalMode: "as_requested", changedBookingDate: "", changedBookingTime: "" }}
                 onChangeApproveReason={(value) => setApproveReasonById((current) => ({ ...current, [String(request.id)]: value }))}
+                onChangeApprovalDraft={(next) => setApprovalDraftById((current) => ({
+                  ...current,
+                  [String(request.id)]: { ...(current[String(request.id)] ?? { approvalMode: "as_requested", changedBookingDate: "", changedBookingTime: "" }), ...next },
+                }))}
                 rejecting={rejectingId === request.id}
                 rejectReason={rejectReason}
                 onStartReject={() => {
@@ -397,7 +429,9 @@ function RequestCard({
   request,
   user,
   approveReason,
+  approvalDraft,
   onChangeApproveReason,
+  onChangeApprovalDraft,
   rejecting,
   rejectReason,
   onStartReject,
@@ -411,7 +445,17 @@ function RequestCard({
   request: SchedulingOverrideRequestDto;
   user: User;
   approveReason: string;
+  approvalDraft: {
+    approvalMode: SchedulingOverrideApprovalMode;
+    changedBookingDate: string;
+    changedBookingTime: string;
+  };
   onChangeApproveReason: (value: string) => void;
+  onChangeApprovalDraft: (next: Partial<{
+    approvalMode: SchedulingOverrideApprovalMode;
+    changedBookingDate: string;
+    changedBookingTime: string;
+  }>) => void;
   rejecting: boolean;
   rejectReason: string;
   onStartReject: () => void;
@@ -429,7 +473,10 @@ function RequestCard({
   const canCancel = isPending && (isOwn || user.role === "supervisor" || user.role === "super_admin");
   const isSupervisorBlockedTotal = isPending && user.role === "supervisor" && request.overrideType === "total_capacity_override";
   const context = request.decisionContext ?? null;
-  const approvalNoteRequired = context?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType);
+  const changedDateMode = approvalDraft.approvalMode === "changed_date";
+  const approvalNoteRequired = (context?.approvalNoteRequired ?? approvalNoteRequiredForOverride(request.overrideType)) || changedDateMode;
+  const approveDisabled = busy || (changedDateMode && !approvalDraft.changedBookingDate) || (approvalNoteRequired && !approveReason.trim());
+  const changedDateApproval = getChangedDateApproval(request);
   const requesterMeta = [
     request.requesterRole || context?.requester.role || null,
     request.requesterUsername || context?.requester.username || null,
@@ -466,6 +513,9 @@ function RequestCard({
           meta={request.examTypeId ? t(language, "overrideRequests.idMeta", { id: request.examTypeId }) : undefined}
         />
         <Info label={t(language, "overrideRequests.dateTime")} value={`${request.requestedBookingDate}${request.requestedBookingTime ? ` ${request.requestedBookingTime}` : ""}`} />
+        {changedDateApproval ? (
+          <Info label="Approved date/time" value={`${changedDateApproval.finalBookingDate}${changedDateApproval.finalBookingTime ? ` ${changedDateApproval.finalBookingTime}` : ""}`} meta="Changed during approval" />
+        ) : null}
         <Info label={t(language, "overrideRequests.requestType")} value={formatRequestType(request.requestType)} />
         <Info label="Submitted" value={new Date(context?.submittedAt ?? request.createdAt).toLocaleString()} meta={context?.requestAgeMinutes == null ? undefined : `${context.requestAgeMinutes} min old`} />
         <Info
@@ -549,6 +599,45 @@ function RequestCard({
           {context?.approvalConsequenceText ? (
             <p className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-foreground">{context.approvalConsequenceText}</p>
           ) : null}
+          <div className="grid gap-2 rounded-lg border border-border bg-muted/20 p-2 text-xs">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name={`approval-mode-${request.id}`}
+                checked={approvalDraft.approvalMode === "as_requested"}
+                onChange={() => onChangeApprovalDraft({ approvalMode: "as_requested" })}
+              />
+              <span>Approve as requested</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name={`approval-mode-${request.id}`}
+                checked={changedDateMode}
+                onChange={() => onChangeApprovalDraft({ approvalMode: "changed_date" })}
+              />
+              <span>Approve with changed date</span>
+            </label>
+            {changedDateMode ? (
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  aria-label={`New booking date for request ${request.id}`}
+                  type="date"
+                  className="input-premium h-9 text-xs"
+                  value={approvalDraft.changedBookingDate}
+                  onChange={(event) => onChangeApprovalDraft({ changedBookingDate: event.target.value })}
+                />
+                <input
+                  aria-label={`New booking time for request ${request.id}`}
+                  type="time"
+                  className="input-premium h-9 text-xs"
+                  value={approvalDraft.changedBookingTime}
+                  onChange={(event) => onChangeApprovalDraft({ changedBookingTime: event.target.value })}
+                />
+                <p className="col-span-2 text-[11px] text-muted-foreground">Capacity and scheduling rules will be re-checked before approval.</p>
+              </div>
+            ) : null}
+          </div>
           <input
             aria-label={t(language, "overrideRequests.approvalNoteForRequest", { id: request.id })}
             className="input-premium h-9 text-xs"
@@ -557,9 +646,9 @@ function RequestCard({
             placeholder={approvalNoteRequired ? "Approval note required" : t(language, "overrideRequests.optionalApprovalNote")}
             required={approvalNoteRequired}
           />
-          {approvalNoteRequired ? <p className="text-[11px] text-muted-foreground">Approval note required for this high-risk override.</p> : null}
+          {approvalNoteRequired ? <p className="text-[11px] text-muted-foreground">{changedDateMode ? "Approval note required when changing the booking date." : "Approval note required for this high-risk override."}</p> : null}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" onClick={onApprove} disabled={busy || (approvalNoteRequired && !approveReason.trim())}>{t(language, "overrideRequests.approve")}</Button>
+            <Button type="button" size="sm" onClick={onApprove} disabled={approveDisabled}>{t(language, "overrideRequests.approve")}</Button>
             <Button type="button" size="sm" variant="secondary" onClick={onStartReject} disabled={busy}>{t(language, "overrideRequests.reject")}</Button>
           </div>
         </div>
@@ -616,4 +705,17 @@ function formatNullableCount(value: number | null | undefined): string {
 
 function formatCategory(value: string): string {
   return value === "non_oncology" ? "Non-oncology" : "Oncology";
+}
+
+function getChangedDateApproval(request: SchedulingOverrideRequestDto): { finalBookingDate: string; finalBookingTime: string | null } | null {
+  const snapshot = request.approvalDecisionSnapshotJson;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const details = (snapshot as { changedDateApproval?: unknown }).changedDateApproval;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const record = details as Record<string, unknown>;
+  if (record.usedChangedDate !== true || typeof record.finalBookingDate !== "string") return null;
+  return {
+    finalBookingDate: record.finalBookingDate,
+    finalBookingTime: typeof record.finalBookingTime === "string" ? record.finalBookingTime : null,
+  };
 }

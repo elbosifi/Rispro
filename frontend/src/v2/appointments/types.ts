@@ -422,6 +422,15 @@ export interface SchedulingOverrideRequestDto {
   } | null;
 }
 
+export type SchedulingOverrideApprovalMode = "as_requested" | "changed_date";
+
+export interface ApproveSchedulingOverrideRequestInput {
+  approverReason?: string | null;
+  approvalMode?: SchedulingOverrideApprovalMode;
+  changedBookingDate?: string | null;
+  changedBookingTime?: string | null;
+}
+
 export interface CreateSchedulingOverrideRequestInput {
   requestType: SchedulingOverrideRequestType;
   bookingId?: number | null;

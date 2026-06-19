@@ -159,7 +159,13 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   async function getRequestFromDb(id: number) {
     const { pool } = await import("../../../../db/pool.js");
     const result = await pool.query(
-      `select status, failure_code, failure_message, approval_decision_snapshot_json
+      `select status,
+              failure_code,
+              failure_message,
+              requested_booking_date::text,
+              requested_booking_time::text,
+              request_payload_json,
+              approval_decision_snapshot_json
        from appointments_v2.scheduling_override_requests
        where id = $1`,
       [id]
@@ -168,6 +174,9 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       status: string;
       failure_code: string | null;
       failure_message: string | null;
+      requested_booking_date: string;
+      requested_booking_time: string | null;
+      request_payload_json: any;
       approval_decision_snapshot_json: unknown | null;
     };
   }
@@ -416,6 +425,84 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(duplicate.status, 409);
     assert.equal(await countBookings(date, Number((requested.data as any).request.patientId)), 1);
     assert.ok(createdBookingId > 0);
+  });
+
+  it("approves a create override with a changed available date without mutating the original request", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const requestedDate = "2042-02-17";
+    const changedDate = "2042-02-18";
+    await fillNonOncologyCategory(requestedDate);
+    const requested = await requestCategoryOverride(requestedDate);
+    assert.equal(requested.status, 201);
+    const requestId = Number((requested.data as any).request.id);
+    const targetPatientId = Number((requested.data as any).request.patientId);
+
+    const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: {
+        approverReason: "Move to an open date",
+        approvalMode: "changed_date",
+        changedBookingDate: changedDate,
+        changedBookingTime: "10:30",
+      },
+    });
+
+    assert.equal(approved.status, 200);
+    assert.equal((approved.data as any).request.status, "approved");
+    assert.equal((approved.data as any).booking.bookingDate, changedDate);
+    assert.equal((approved.data as any).booking.bookingTime, "10:30");
+    assert.equal(await countBookings(requestedDate, targetPatientId), 0);
+    assert.equal(await countBookings(changedDate, targetPatientId), 1);
+
+    const stored = await getRequestFromDb(requestId);
+    assert.equal(stored.requested_booking_date, requestedDate);
+    assert.equal(stored.request_payload_json.createPayload.bookingDate, requestedDate);
+    const snapshot = stored.approval_decision_snapshot_json as any;
+    assert.equal(snapshot.approvalMode, "changed_date");
+    assert.equal(snapshot.changedDateApproval.usedChangedDate, true);
+    assert.equal(snapshot.changedDateApproval.originalBookingDate, requestedDate);
+    assert.equal(snapshot.changedDateApproval.finalBookingDate, changedDate);
+    assert.equal(snapshot.changedDateApproval.finalBookingTime, "10:30");
+    assert.equal(snapshot.changedDateApproval.originalOverrideType, "category_override");
+    assert.equal(snapshot.changedDateApproval.finalRequiredOverrideType, null);
+  });
+
+  it("validates changed-date approval input", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const requestedDate = "2042-02-19";
+    await fillNonOncologyCategory(requestedDate);
+    const requested = await requestCategoryOverride(requestedDate);
+    assert.equal(requested.status, 201);
+    const requestId = Number((requested.data as any).request.id);
+
+    const missingDate = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Move date", approvalMode: "changed_date" },
+    });
+    assert.equal(missingDate.status, 400);
+
+    const invalidDate = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Move date", approvalMode: "changed_date", changedBookingDate: "2042-99-99" },
+    });
+    assert.equal(invalidDate.status, 400);
+
+    const invalidTime = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Move date", approvalMode: "changed_date", changedBookingDate: "2042-02-20", changedBookingTime: "25:61" },
+    });
+    assert.equal(invalidTime.status, 400);
+
+    const missingNote = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "", approvalMode: "changed_date", changedBookingDate: "2042-02-20" },
+    });
+    assert.equal(missingNote.status, 400);
+
+    const stored = await getRequestFromDb(requestId);
+    assert.equal(stored.status, "pending");
   });
 
   it("supervisor approves a pending reschedule request and audit is written", async () => {

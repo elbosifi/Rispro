@@ -11,6 +11,7 @@ import {
   parseSchedulingOverrideRequestFilters,
   rejectSchedulingOverrideRequest,
 } from "../../scheduling-override-requests/services/scheduling-override-request.service.js";
+import type { SchedulingOverrideApprovalMode } from "../../scheduling-override-requests/models/scheduling-override-request.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 
 interface AuthenticatedRequest extends Request {
@@ -79,7 +80,12 @@ schedulingOverrideRequestRouter.post(
       id,
       userId(req),
       req.user?.role,
-      body.approverReason == null ? null : String(body.approverReason)
+      {
+        approverReason: body.approverReason == null ? null : String(body.approverReason),
+        approvalMode: body.approvalMode == null ? null : String(body.approvalMode) as SchedulingOverrideApprovalMode,
+        changedBookingDate: body.changedBookingDate == null ? null : String(body.changedBookingDate),
+        changedBookingTime: body.changedBookingTime == null ? null : String(body.changedBookingTime),
+      }
     );
     res.json(result);
   })

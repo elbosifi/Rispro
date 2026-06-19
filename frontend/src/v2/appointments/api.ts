@@ -23,6 +23,7 @@ import type {
   SchedulingOverrideRequestDto,
   SchedulingOverrideRequestFilters,
   CreateSchedulingOverrideRequestInput,
+  ApproveSchedulingOverrideRequestInput,
   PolicyStatusDto,
   PolicySnapshotDto,
   PolicyPreviewDto,
@@ -227,11 +228,17 @@ export async function getSchedulingOverrideRequest(id: number | string): Promise
 
 export async function approveSchedulingOverrideRequest(
   id: number | string,
-  approverReason?: string | null
+  input: ApproveSchedulingOverrideRequestInput = {}
 ): Promise<{ request: SchedulingOverrideRequestDto; booking?: unknown }> {
+  const approverReason = input.approverReason?.trim() || null;
   return api<{ request: SchedulingOverrideRequestDto; booking?: unknown }>(`/v2/scheduling-override-requests/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ approverReason: approverReason?.trim() || null }),
+    body: JSON.stringify({
+      approverReason,
+      approvalMode: input.approvalMode ?? "as_requested",
+      changedBookingDate: input.changedBookingDate || null,
+      changedBookingTime: input.changedBookingTime || null,
+    }),
   });
 }
 
@@ -494,8 +501,8 @@ export function useSchedulingOverrideRequests(params?: SchedulingOverrideRequest
 export function useApproveSchedulingOverrideRequest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, approverReason }: { id: number | string; approverReason?: string | null }) =>
-      approveSchedulingOverrideRequest(id, approverReason),
+    mutationFn: ({ id, ...input }: { id: number | string } & ApproveSchedulingOverrideRequestInput) =>
+      approveSchedulingOverrideRequest(id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
       queryClient.invalidateQueries({ queryKey: ["v2-availability"] });

@@ -154,7 +154,13 @@ describe("SchedulingOverrideApprovalCenter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(mockApprove).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Mock re-auth" }));
-    expect(mockApprove).toHaveBeenCalledWith({ id: 11, approverReason: "Approved note" });
+    expect(mockApprove).toHaveBeenCalledWith({
+      id: 11,
+      approverReason: "Approved note",
+      approvalMode: "as_requested",
+      changedBookingDate: null,
+      changedBookingTime: null,
+    });
 
     await userEvent.click(screen.getByRole("button", { name: "Reject" }));
     await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
@@ -174,7 +180,41 @@ describe("SchedulingOverrideApprovalCenter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     await userEvent.click(screen.getByRole("button", { name: "Mock re-auth" }));
 
-    expect(mockApprove).toHaveBeenCalledWith({ id: 11, approverReason: "Page approval" });
+    expect(mockApprove).toHaveBeenCalledWith({
+      id: 11,
+      approverReason: "Page approval",
+      approvalMode: "as_requested",
+      changedBookingDate: null,
+      changedBookingTime: null,
+    });
+  });
+
+  it("supports changed-date approval after supervisor re-auth", async () => {
+    renderWithLanguage(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
+
+    expect(screen.getByLabelText("Approval note for request 11")).toBeTruthy();
+    expect(screen.getByText("Approve as requested")).toBeTruthy();
+    await userEvent.click(screen.getByLabelText("Approve with changed date"));
+    expect(screen.getByLabelText("New booking date for request 11")).toBeTruthy();
+    expect(screen.getByLabelText("New booking time for request 11")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("New booking date for request 11"), { target: { value: "2042-02-03" } });
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Approval note for request 11"), { target: { value: "Move to safer date" } });
+    fireEvent.change(screen.getByLabelText("New booking time for request 11"), { target: { value: "10:30" } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(mockApprove).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Mock re-auth" }));
+
+    expect(mockApprove).toHaveBeenCalledWith({
+      id: 11,
+      approverReason: "Move to safer date",
+      approvalMode: "changed_date",
+      changedBookingDate: "2042-02-03",
+      changedBookingTime: "10:30",
+    });
   });
 
   it("does not allow supervisor to approve total capacity but superadmin can", async () => {

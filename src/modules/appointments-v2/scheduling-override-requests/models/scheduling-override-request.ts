@@ -118,6 +118,15 @@ export interface CreateSchedulingOverrideRequestInput {
   createdFromContext?: string | null;
 }
 
+export type SchedulingOverrideApprovalMode = "as_requested" | "changed_date";
+
+export interface ApproveSchedulingOverrideRequestInput {
+  approverReason: string | null;
+  approvalMode?: SchedulingOverrideApprovalMode | null;
+  changedBookingDate?: string | null;
+  changedBookingTime?: string | null;
+}
+
 export interface SchedulingOverrideRequestFilters {
   status?: SchedulingOverrideRequestStatus;
   requestType?: SchedulingOverrideRequestType;
