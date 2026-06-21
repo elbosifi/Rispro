@@ -16,6 +16,7 @@ import {
   findAssignableDoctorForReporting,
   findSavedViewById,
   findSavedViewByToken,
+  listReportingBoardCasesByAppointmentIds,
   listReportingBoardCaseCandidates,
   listReportingBoardNotifications,
   listSavedViews,
@@ -31,6 +32,8 @@ import {
 import type {
   BrowserPushSubscriptionInput,
   BulkAssignNextCasesInput,
+  BulkAssignNextCasesResult,
+  BulkReassignSelectedCasesInput,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
@@ -43,6 +46,7 @@ interface Actor {
 
 const MAX_CASE_LIST_LIMIT = 100;
 const MAX_BULK_ASSIGN_COUNT = 100;
+const MAX_SELECTED_REASSIGN_COUNT = 100;
 const REPORTING_BOARD_SORT_BY = new Set([
   "priority_study_date",
   "study_date",
@@ -467,6 +471,81 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     requestedCount: input.count,
     skippedCount: result.skippedCount + preSkipped.length,
     skipped: [...result.skipped, ...preSkipped],
+  };
+}
+
+function uniquePositiveAppointmentIds(appointmentIds: number[]): number[] {
+  if (!Array.isArray(appointmentIds) || appointmentIds.length === 0) {
+    throw new HttpError(400, "appointmentIds must be a non-empty array.");
+  }
+  const uniqueIds: number[] = [];
+  const seen = new Set<number>();
+  for (const appointmentId of appointmentIds) {
+    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
+      throw new HttpError(400, "appointmentIds must contain only positive integers.");
+    }
+    if (!seen.has(appointmentId)) {
+      seen.add(appointmentId);
+      uniqueIds.push(appointmentId);
+    }
+  }
+  if (uniqueIds.length > MAX_SELECTED_REASSIGN_COUNT) {
+    throw new HttpError(400, `appointmentIds must contain ${MAX_SELECTED_REASSIGN_COUNT} or fewer cases.`);
+  }
+  return uniqueIds;
+}
+
+export async function bulkReassignSelectedReportingBoardCases(actor: Actor, input: BulkReassignSelectedCasesInput): Promise<BulkAssignNextCasesResult> {
+  const me = await requireRosterManager(actor);
+  const appointmentIds = uniquePositiveAppointmentIds(input.appointmentIds);
+  const doctor = await findAssignableDoctorForReporting(input.doctorId);
+  if (!doctor) throw new HttpError(404, "Active doctor profile not found.");
+  if (!doctor.canFinalizeReports) throw new HttpError(400, "Doctor must be allowed to finalize reports.");
+
+  const rows = await applyReportStatuses(await listReportingBoardCasesByAppointmentIds(appointmentIds), "all");
+  const rowsById = new Map(rows.map((row) => [row.appointmentId, row]));
+  const selectedModalities = [...new Set(rows.map((row) => row.modalityId))];
+  const hasModalityPermission = await doctorCanReportAllModalities(input.doctorId, selectedModalities);
+  if (!hasModalityPermission) throw new HttpError(400, "Doctor does not have report permission for the selected modalities.");
+
+  const skipped: Array<{ appointmentId: number; reason: string }> = [];
+  const eligibleIds: number[] = [];
+  for (const appointmentId of appointmentIds) {
+    const row = rowsById.get(appointmentId);
+    if (!row) {
+      skipped.push({ appointmentId, reason: "appointment_not_found" });
+      continue;
+    }
+    if (!row.requiresReport || row.appointmentStatus !== "completed") {
+      skipped.push({ appointmentId, reason: row.exclusionReason ?? "case_not_assignable" });
+      continue;
+    }
+    if (row.reportStatus === "final" && input.allowFinal !== true) {
+      skipped.push({ appointmentId, reason: "report_final" });
+      continue;
+    }
+    eligibleIds.push(appointmentId);
+  }
+
+  const result = await bulkAssignReportingCases({
+    doctorId: input.doctorId,
+    candidateAppointmentIds: eligibleIds,
+    reason: input.reason?.trim() || null,
+    unassignedOnly: false,
+    actor: { userId: actor.userId, doctorId: me.profile!.id },
+    caseAuditEventType: "reporting_board_bulk_selected_case_reassigned",
+    summaryAuditEventType: "reporting_board_bulk_selected_reassign_completed",
+  });
+  await createAssignedToMeNotifications({
+    doctorId: input.doctorId,
+    appointmentIds: result.assignedAppointmentIds,
+  });
+  return {
+    requestedCount: appointmentIds.length,
+    assignedCount: result.assignedCount,
+    skippedCount: skipped.length + result.skippedCount,
+    assignedAppointmentIds: result.assignedAppointmentIds,
+    skipped: [...skipped, ...result.skipped],
   };
 }
 

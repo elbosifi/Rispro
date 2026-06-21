@@ -113,6 +113,13 @@ export interface BulkAssignNextCasesInput {
   reason?: string | null;
 }
 
+export interface BulkReassignSelectedCasesInput {
+  appointmentIds: number[];
+  doctorId: number;
+  reason?: string | null;
+  allowFinal?: boolean | null;
+}
+
 export interface BulkAssignNextCasesResult {
   requestedCount: number;
   assignedCount: number;

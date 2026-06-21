@@ -8,6 +8,7 @@ import type { ReportingBoardFilters, ReportingBoardNotificationSettings } from "
 import {
   assignReportingBoardCaseToDoctor,
   bulkAssignNextReportingBoardCases,
+  bulkReassignSelectedReportingBoardCases,
   createReportingBoardSavedView,
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
@@ -64,6 +65,11 @@ function optionalNonNegativeInteger(value: unknown, field: string): number | nul
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) throw new HttpError(400, `${field} must be zero or a positive integer.`);
   return parsed;
+}
+
+function positiveIntegerArray(value: unknown, field: string): number[] {
+  if (!Array.isArray(value) || value.length === 0) throw new HttpError(400, `${field} must be a non-empty array.`);
+  return value.map((item) => requiredPositiveInteger(item, field));
 }
 
 function booleanFromQuery(value: unknown): boolean | null {
@@ -275,6 +281,20 @@ router.post(
       token: asOptionalString(body.token) ?? null,
       unassignedOnly: asOptionalBoolean(body.unassignedOnly) ?? true,
       reason: asOptionalString(body.reason) ?? null,
+    });
+    res.json(result);
+  })
+);
+
+router.post(
+  "/bulk-reassign-selected",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await bulkReassignSelectedReportingBoardCases(actor(req), {
+      appointmentIds: positiveIntegerArray(body.appointmentIds, "appointmentIds"),
+      doctorId: requiredPositiveInteger(body.doctorId, "doctorId"),
+      reason: asOptionalString(body.reason) ?? null,
+      allowFinal: asOptionalBoolean(body.allowFinal) ?? false,
     });
     res.json(result);
   })

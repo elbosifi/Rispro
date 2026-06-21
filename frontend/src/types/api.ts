@@ -476,6 +476,13 @@ export interface ReportingBoardBulkAssignResult {
   skipped: Array<{ appointmentId: number; reason: string }>;
 }
 
+export interface ReportingBoardBulkReassignSelectedPayload {
+  appointmentIds: number[];
+  doctorId: number;
+  reason?: string | null;
+  allowFinal?: boolean;
+}
+
 export interface ReportingBoardNotificationEvent {
   id: number;
   eventType: "reporting_case_assigned_to_me";

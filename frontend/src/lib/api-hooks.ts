@@ -54,6 +54,7 @@ import type {
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
   ReportingBoardBulkAssignResult,
+  ReportingBoardBulkReassignSelectedPayload,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
@@ -831,6 +832,13 @@ export async function bulkAssignNextReportingCases(payload: {
   reason?: string | null;
 }): Promise<ReportingBoardBulkAssignResult> {
   return api<ReportingBoardBulkAssignResult>("/doctor/reporting-board/bulk-assign-next", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function bulkReassignSelectedReportingCases(payload: ReportingBoardBulkReassignSelectedPayload): Promise<ReportingBoardBulkAssignResult> {
+  return api<ReportingBoardBulkAssignResult>("/doctor/reporting-board/bulk-reassign-selected", {
     method: "POST",
     body: JSON.stringify(payload),
   });

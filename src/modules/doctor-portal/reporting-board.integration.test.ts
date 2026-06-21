@@ -591,6 +591,53 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(audit.rowCount, 1);
   });
 
+  it("bulk reassigns selected visible cases, deduplicates ids, skips final cases, and audits", async () => {
+    guard();
+    const date = addDays(60);
+    const first = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Selected Reassign First" });
+    const alreadyAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Selected Reassign Existing" });
+    const finalCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Selected Reassign Final" });
+    const noReport = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, requiresReport: false, patientName: "Selected Reassign No Report" });
+    [first, alreadyAssigned, noReport].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    statusByAppointmentId.set(finalCase, "final");
+    await assignDirectly(alreadyAssigned, otherDoctor.doctorId);
+    await createSavedView(targetDoctor, true, { assignedDoctorId: targetDoctor.doctorId });
+
+    const response = await api<{ assignedCount: number; requestedCount: number; assignedAppointmentIds: number[]; skipped: Array<{ appointmentId: number; reason: string }> }>(
+      supervisor.cookie,
+      "/api/doctor/reporting-board/bulk-reassign-selected",
+      {
+        method: "POST",
+        body: {
+          appointmentIds: [first, alreadyAssigned, first, finalCase, noReport],
+          doctorId: targetDoctor.doctorId,
+          reason: "selected cases reassignment",
+        },
+      }
+    );
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal(response.data.requestedCount, 4);
+    assert.equal(response.data.assignedCount, 2);
+    assert.deepEqual(response.data.assignedAppointmentIds, [first, alreadyAssigned]);
+    assert.deepEqual(
+      response.data.skipped.map((row) => [row.appointmentId, row.reason]),
+      [[finalCase, "report_final"], [noReport, "report_not_required"]]
+    );
+    const assignedRows = await pool.query<{ appointment_id: string; assigned_doctor_id: string; status: string }>(
+      `select appointment_id::text, assigned_doctor_id::text, status from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[]) order by appointment_id, status`,
+      [[first, alreadyAssigned, finalCase, noReport]]
+    );
+    const activeAssignments = assignedRows.rows.filter((row) => row.status === "active");
+    assert.deepEqual(activeAssignments.map((row) => [Number(row.appointment_id), Number(row.assigned_doctor_id)]), [[first, targetDoctor.doctorId], [alreadyAssigned, targetDoctor.doctorId]]);
+    assert.equal(assignedRows.rows.some((row) => Number(row.appointment_id) === alreadyAssigned && row.status === "corrected"), true);
+    assert.equal(assignedRows.rows.some((row) => Number(row.appointment_id) === finalCase), false);
+    assert.equal(assignedRows.rows.some((row) => Number(row.appointment_id) === noReport), false);
+    assert.equal((await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_bulk_selected_case_reassigned' and reason = $1`, ["selected cases reassignment"])).rowCount, 2);
+    assert.equal((await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_bulk_selected_reassign_completed' and reason = $1`, ["selected cases reassignment"])).rowCount, 1);
+    assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where recipient_doctor_id = $1 and appointment_id = any($2::bigint[])`, [targetDoctor.doctorId, [first, alreadyAssigned]])).rowCount, 2);
+  });
+
   it("sorts board cases with STAT/urgent pinned by default", async () => {
     guard();
     const date = addDays(61);

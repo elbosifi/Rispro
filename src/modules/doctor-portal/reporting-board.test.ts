@@ -25,6 +25,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /"\/saved-views"/);
     assert.match(routes, /"\/saved-views\/token\/:token"/);
     assert.match(routes, /"\/bulk-assign-next"/);
+    assert.match(routes, /"\/bulk-reassign-selected"/);
   });
 
   it("keeps saved view token loading authenticated and owner-scoped", () => {
@@ -82,6 +83,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /result\.rows\.length === uniqueModalityIds\.length/);
     assert.match(repo, /reporting_board_bulk_case_assigned/);
     assert.match(repo, /reporting_board_bulk_assign_completed/);
+    assert.match(repo, /caseAuditEventType/);
+    assert.match(repo, /summaryAuditEventType/);
   });
 
   it("saved view tokens are active-only and owner scoped unless loaded by a manager", () => {

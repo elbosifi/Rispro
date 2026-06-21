@@ -517,7 +517,11 @@ export async function listReportingBoardCaseCandidates(
     `,
     values
   );
-  return result.rows.map((row) => ({
+  return result.rows.map(reportingBoardCaseRow);
+}
+
+function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
+  return {
     ...row,
     appointmentId: Number(row.appointmentId),
     patientId: Number(row.patientId),
@@ -526,7 +530,59 @@ export async function listReportingBoardCaseCandidates(
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
-  }));
+  };
+}
+
+export async function listReportingBoardCasesByAppointmentIds(appointmentIds: number[]): Promise<ReportingBoardCaseRow[]> {
+  if (appointmentIds.length === 0) return [];
+  const result = await pool.query<ReportingBoardCaseRow>(
+    `
+      select
+        b.id as "appointmentId",
+        b.patient_id as "patientId",
+        p.mrn as "patientMrn",
+        p.english_full_name as "patientEnglishName",
+        p.arabic_full_name as "patientArabicName",
+        ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber",
+        b.study_instance_uid as "studyInstanceUid",
+        b.booking_date::text as "bookingDate",
+        b.booking_time::text as "bookingTime",
+        b.modality_id as "modalityId",
+        m.code as "modalityCode",
+        m.name_en as "modalityName",
+        b.exam_type_id as "examTypeId",
+        et.name_en as "examTypeName",
+        b.case_category as "caseCategory",
+        b.status as "appointmentStatus",
+        b.requires_report as "requiresReport",
+        b.reporting_priority_id as "reportingPriorityId",
+        rp.code as "reportingPriorityCode",
+        rp.name_en as "reportingPriorityName",
+        rp.sort_order as "reportingPrioritySortOrder",
+        cta.assigned_doctor_id as "assignedDoctorId",
+        assigned_doctor.display_name as "assignedDoctorName",
+        case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
+        'unavailable'::text as "reportStatus",
+        null::text as "reportStatusCheckedAt",
+        (b.requires_report = true and b.status = 'completed') as "canAssign",
+        case
+          when b.requires_report = false then 'report_not_required'
+          when b.status <> 'completed' then 'study_not_completed'
+          else null
+        end as "exclusionReason"
+      from appointments_v2.bookings b
+      join patients p on p.id = b.patient_id
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
+      left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      where b.id = any($1::bigint[])
+      order by array_position($1::bigint[], b.id)
+    `,
+    [appointmentIds]
+  );
+  return result.rows.map(reportingBoardCaseRow);
 }
 
 export async function findAssignableDoctorForReporting(doctorId: number) {
@@ -565,6 +621,8 @@ export async function bulkAssignReportingCases(input: {
   reason: string | null;
   unassignedOnly: boolean;
   actor: AssignmentActor;
+  caseAuditEventType?: string;
+  summaryAuditEventType?: string;
 }): Promise<BulkAssignNextCasesResult> {
   const client = await pool.connect();
   const assignedAppointmentIds: number[] = [];
@@ -624,7 +682,7 @@ export async function bulkAssignReportingCases(input: {
       await insertDoctorAuditEvent(client, {
         actorUserId: input.actor.userId,
         actorDoctorId: input.actor.doctorId,
-        eventType: "reporting_board_bulk_case_assigned",
+        eventType: input.caseAuditEventType ?? "reporting_board_bulk_case_assigned",
         targetType: "case_team_assignment",
         targetId: assignmentId,
         metadata: { appointmentId, doctorId: input.doctorId, noteForDoctor: input.reason },
@@ -634,7 +692,7 @@ export async function bulkAssignReportingCases(input: {
     await insertDoctorAuditEvent(client, {
       actorUserId: input.actor.userId,
       actorDoctorId: input.actor.doctorId,
-      eventType: "reporting_board_bulk_assign_completed",
+      eventType: input.summaryAuditEventType ?? "reporting_board_bulk_assign_completed",
       targetType: "case_team_assignment",
       targetId: null,
         metadata: {

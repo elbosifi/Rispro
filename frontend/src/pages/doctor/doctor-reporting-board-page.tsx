@@ -6,6 +6,7 @@ import { Bell, ChevronLeft, ChevronRight, Copy, Printer, QrCode, RefreshCw, Save
 import {
   assignReportingBoardCase,
   bulkAssignNextReportingCases,
+  bulkReassignSelectedReportingCases,
   createReportingBoardSavedView,
   fetchAppointmentLookups,
   fetchReportingBoardCases,
@@ -355,6 +356,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [notifications, setNotifications] = useState<ReportingBoardNotificationSettings>(EMPTY_NOTIFICATIONS);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | null>(null);
+  const [selectedReassignDoctorId, setSelectedReassignDoctorId] = useState("");
+  const [selectedReassignReason, setSelectedReassignReason] = useState("");
+  const [selectedReassignConfirmOpen, setSelectedReassignConfirmOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
   const [savedViewsOpen, setSavedViewsOpen] = useState(true);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -454,6 +458,19 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     mutationFn: (payload: { appointmentId: number; doctorId: number; reason: string }) => assignReportingBoardCase(payload.appointmentId, { doctorId: payload.doctorId, reason: payload.reason }),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
   });
+  const selectedReassignMutation = useMutation({
+    mutationFn: () => bulkReassignSelectedReportingCases({
+      appointmentIds: selectedIds,
+      doctorId: Number(selectedReassignDoctorId),
+      reason: selectedReassignReason.trim() || null,
+    }),
+    onSuccess: async (result) => {
+      setBulkResult(result);
+      setSelectedIds([]);
+      setSelectedReassignConfirmOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
+    },
+  });
 
   const cases = casesQuery.data?.cases ?? [];
   const effectiveFilters = casesQuery.data?.filters ?? filters;
@@ -471,6 +488,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
   const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
   const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/mobile/reporting-view/${loadedSavedView.token}` : "";
+  const visibleAppointmentIds = cases.map((row) => row.appointmentId);
+  const allVisibleSelected = visibleAppointmentIds.length > 0 && visibleAppointmentIds.every((id) => selectedIds.includes(id));
+  const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
+  const selectedReassignDisabled = !canManage || selectedIds.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
@@ -586,12 +607,53 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
 
       <div className={savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"}>
         <section className="space-y-3">
+          <div className="rounded-lg border p-3" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <div className="flex flex-wrap items-end gap-3">
+              <p className="min-w-24 text-sm font-semibold text-foreground">{selectedIds.length} selected</p>
+              <Field label="Reassign to">
+                <select value={selectedReassignDoctorId} onChange={(event) => setSelectedReassignDoctorId(event.target.value)} disabled={!canManage} className={inputClass()}>
+                  <option value="">Select doctor</option>
+                  {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                </select>
+              </Field>
+              <Field label="Reason/note">
+                <input value={selectedReassignReason} onChange={(event) => setSelectedReassignReason(event.target.value)} disabled={!canManage} className={inputClass()} />
+              </Field>
+              <button
+                type="button"
+                disabled={selectedReassignDisabled}
+                onClick={() => setSelectedReassignConfirmOpen(true)}
+                className="h-10 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white disabled:bg-teal-300"
+              >
+                Reassign selected
+              </button>
+              <button type="button" onClick={() => setSelectedIds([])} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                Clear
+              </button>
+            </div>
+            {!canManage && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Only supervisors/admins can reassign selected cases.</p>}
+            {selectedReassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedReassignMutation.error instanceof Error ? selectedReassignMutation.error.message : "Selected reassignment failed."}</p>}
+          </div>
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
                 <thead style={{ backgroundColor: "var(--card)" }}>
                   <tr>
-                    {["", "Priority", "Patient", "MRN", "Accession", "Date/time", "Modality", "Exam", "Category", "Assigned doctor", "Report", "Appointment", "Action"].map((header) => (
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all visible cases"
+                        checked={allVisibleSelected}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setSelectedIds((current) => {
+                            if (checked) return [...new Set([...current, ...visibleAppointmentIds])];
+                            return current.filter((id) => !visibleAppointmentIds.includes(id));
+                          });
+                        }}
+                      />
+                    </th>
+                    {["Priority", "Patient", "MRN", "Accession", "Date/time", "Modality", "Exam", "Category", "Assigned doctor", "Report", "Appointment", "Action"].map((header) => (
                       <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>
                     ))}
                   </tr>
@@ -599,7 +661,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
                   {cases.map((row) => (
                     <tr key={row.appointmentId} className={rowPriorityClass(row.reportingPriorityCode)}>
-                      <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.includes(row.appointmentId)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, row.appointmentId] : current.filter((id) => id !== row.appointmentId))} /></td>
+                      <td className="px-3 py-2"><input
+                        type="checkbox"
+                        aria-label={`Select case ${row.accessionNumber}`}
+                        checked={selectedIds.includes(row.appointmentId)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setSelectedIds((current) => checked ? [...new Set([...current, row.appointmentId])] : current.filter((id) => id !== row.appointmentId));
+                        }}
+                      /></td>
                       <td className="px-3 py-2"><PriorityChip row={row} /></td>
                       <td className="px-3 py-2 font-semibold text-foreground">{patientName(row)}</td>
                       <td className="px-3 py-2">{row.patientMrn ?? "-"}</td>
@@ -772,6 +842,22 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
         }}
       />
+      {selectedReassignConfirmOpen && selectedReassignDoctor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <h3 className="text-lg font-semibold text-foreground">Confirm selected reassignment</h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+              Reassign {selectedIds.length} selected cases to {selectedReassignDoctor.displayName}. Already-assigned cases will be reassigned.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setSelectedReassignConfirmOpen(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+              <button type="button" disabled={selectedReassignMutation.isPending} onClick={() => selectedReassignMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-300">
+                Confirm reassignment
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

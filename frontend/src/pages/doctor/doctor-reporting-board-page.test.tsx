@@ -16,6 +16,7 @@ const fetchReportingBoardPushConfigMock = vi.fn();
 const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const sendReportingBoardSavedViewTestPushMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
+const bulkReassignSelectedReportingCasesMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const assignReportingBoardCaseMock = vi.fn();
@@ -32,6 +33,7 @@ vi.mock("@/lib/api-hooks", () => ({
   subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
   sendReportingBoardSavedViewTestPush: (...args: unknown[]) => sendReportingBoardSavedViewTestPushMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
+  bulkReassignSelectedReportingCases: (...args: unknown[]) => bulkReassignSelectedReportingCasesMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   assignReportingBoardCase: (...args: unknown[]) => assignReportingBoardCaseMock(...args),
@@ -126,6 +128,7 @@ describe("DoctorReportingBoardPage", () => {
     subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     sendReportingBoardSavedViewTestPushMock.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
+    bulkReassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, assignedCount: 1, skippedCount: 0, assignedAppointmentIds: [42], skipped: [] });
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
     fetchAppointmentLookupsMock.mockResolvedValue({
       modalities: [{ id: 1, code: "CT", nameEn: "CT", nameAr: "CT" }],
@@ -213,6 +216,18 @@ describe("DoctorReportingBoardPage", () => {
       pinUrgentToTop: false,
       offset: 0,
     })));
+  });
+
+  it("renders selected-case reassignment controls separately from bulk-next", async () => {
+    renderPage();
+
+    expect(await screen.findByLabelText("Select all visible cases")).toBeTruthy();
+    expect(await screen.findByLabelText("Select case V2-000042")).toBeTruthy();
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    expect(screen.getByLabelText("Reassign to")).toBeTruthy();
+    expect(screen.getByLabelText("Reason/note")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reassign selected" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Bulk assign next cases/i })).toBeTruthy();
   });
 
   it("does not expose editable settings for non-superadmin managers", async () => {
