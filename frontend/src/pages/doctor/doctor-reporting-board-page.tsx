@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { Bell, ChevronLeft, ChevronRight, Copy, Printer, QrCode, RefreshCw, Save, Settings, Users } from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, Copy, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import {
   assignReportingBoardCase,
   bulkAssignNextReportingCases,
@@ -179,17 +179,43 @@ function assignmentOrderText(filters: ReportingBoardFilters): string {
   return `Assignment order: ${filters.pinUrgentToTop === false ? selectedOrder : `STAT/urgent first, then ${selectedOrder}`}.`;
 }
 
-function StatsTile({ label, value, onClick, title }: { label: string; value: number | string; onClick?: () => void; title?: string }) {
+function hasValue(value: number | string): boolean {
+  return typeof value === "number" && value > 0;
+}
+
+function StatsTile({
+  label,
+  value,
+  onClick,
+  title,
+  emphasis = "neutral",
+  size = "primary",
+}: {
+  label: string;
+  value: number | string;
+  onClick?: () => void;
+  title?: string;
+  emphasis?: "neutral" | "danger" | "warning" | "success" | "muted";
+  size?: "primary" | "secondary";
+}) {
+  const emphasisClass = {
+    neutral: "",
+    danger: "border-red-300 bg-red-50 text-red-700",
+    warning: "border-amber-300 bg-amber-50 text-amber-800",
+    success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    muted: "bg-zinc-50 text-zinc-500",
+  }[emphasis];
   const content = (
     <>
-      <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{label}</span>
-      <span className="mt-1 text-xl font-semibold text-foreground">{value}</span>
+      <span className="text-xs font-semibold uppercase" style={{ color: emphasis === "neutral" ? "var(--text-muted)" : undefined }}>{label}</span>
+      <span className={size === "primary" ? "mt-1 text-2xl font-semibold" : "mt-1 text-lg font-semibold"}>{value}</span>
     </>
   );
-  const className = "min-h-20 rounded-lg border px-3 py-2 text-left";
+  const className = `${size === "primary" ? "min-h-20" : "min-h-16"} rounded-lg border px-3 py-2 text-left ${emphasisClass}`;
   const style = { backgroundColor: "var(--card)", borderColor: "var(--border)" };
-  if (!onClick) return <div className={className} style={style} title={title}>{content}</div>;
-  return <button type="button" onClick={onClick} className={`${className} transition hover:border-teal-500`} style={style} title={title}>{content}</button>;
+  const mergedStyle = emphasis === "neutral" ? style : undefined;
+  if (!onClick) return <div className={className} style={mergedStyle} title={title}>{content}</div>;
+  return <button type="button" onClick={onClick} className={`${className} transition hover:border-teal-500 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500`} style={mergedStyle} title={title}>{content}</button>;
 }
 
 function DoctorWorkloadPanel({
@@ -203,10 +229,17 @@ function DoctorWorkloadPanel({
   loading: boolean;
   onToggle: () => void;
 }) {
+  const unassigned = rows.find((row) => row.doctorId === null)?.total ?? 0;
+  const highestAssigned = useMemo(
+    () => rows.filter((row) => row.doctorId !== null).sort((left, right) => right.total - left.total)[0] ?? null,
+    [rows]
+  );
   return (
     <section className="rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <button type="button" onClick={onToggle} className="flex w-full items-center justify-between px-4 py-3 text-left font-semibold text-foreground">
-        <span>Doctor workload</span>
+        <span>
+          Doctor workload: Unassigned {unassigned} | Highest assigned: {highestAssigned ? `${highestAssigned.doctorName} ${highestAssigned.total}` : "-"}
+        </span>
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>{open ? "Hide" : "Show"}</span>
       </button>
       {open && (
@@ -264,9 +297,9 @@ function ReportStatusChip({ status }: { status: ReportingBoardCaseRow["reportSta
 
 function rowPriorityClass(code: string | null): string {
   const tone = priorityTone(code);
-  if (tone === "danger") return "bg-red-50";
-  if (tone === "warning") return "bg-orange-50";
-  return "";
+  if (tone === "danger") return "border-l-4 border-red-500 bg-red-50";
+  if (tone === "warning") return "border-l-4 border-amber-500 bg-orange-50";
+  return "border-l-4 border-transparent";
 }
 
 function AssignmentEditor({
@@ -367,9 +400,9 @@ function BulkAssignModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
       <section className="w-full max-w-lg rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <h3 className="text-lg font-semibold text-foreground">Bulk assign next cases</h3>
+        <h3 className="text-lg font-semibold text-foreground">Auto-assign next cases</h3>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-          Backend will choose the next cases using {savedView ? `saved view "${savedView.name}"` : "current filters"}.
+          The system will choose the next eligible cases using the current filters and assignment order{savedView ? ` from saved view "${savedView.name}"` : ""}.
         </p>
         <p className="mt-2 text-sm font-medium text-foreground">{assignmentOrderText(filters)}</p>
         <div className="mt-4 grid gap-3">
@@ -408,6 +441,65 @@ function BulkAssignModal({
   );
 }
 
+function BoardSettingsModal({
+  open,
+  settingsDraft,
+  canEditSettings,
+  saving,
+  onClose,
+  onChange,
+  onSave,
+}: {
+  open: boolean;
+  settingsDraft: ReportingBoardSettings | null;
+  canEditSettings: boolean;
+  saving: boolean;
+  onClose: () => void;
+  onChange: (settings: ReportingBoardSettings) => void;
+  onSave: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+      <section className="w-full max-w-lg rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="inline-flex items-center gap-2 text-lg font-semibold text-foreground"><Settings size={18} /> Board settings</h3>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Default cutoff and reporting filters for this board.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border p-2" style={{ borderColor: "var(--border)" }} aria-label="Close board settings">
+            <X size={16} />
+          </button>
+        </div>
+        {settingsDraft && (
+          <div className="mt-4 grid gap-3 text-sm">
+            <Field label="Cutoff mode">
+              <select disabled={!canEditSettings} value={settingsDraft.cutoffMode} onChange={(event) => onChange({ ...settingsDraft, cutoffMode: event.target.value as ReportingBoardSettings["cutoffMode"] })} className={inputClass()}>
+                <option value="days_back">Days back</option>
+                <option value="fixed_date">Fixed date</option>
+              </select>
+            </Field>
+            <Field label="Default cutoff date"><input disabled={!canEditSettings} type="date" value={settingsDraft.defaultCutoffDate ?? ""} onChange={(event) => onChange({ ...settingsDraft, defaultCutoffDate: event.target.value || null })} className={inputClass()} /></Field>
+            <Field label="Days back"><input disabled={!canEditSettings} type="number" value={settingsDraft.daysBack} onChange={(event) => onChange({ ...settingsDraft, daysBack: Number(event.target.value) || 0 })} className={inputClass()} /></Field>
+            <Field label="Enabled modality codes"><input disabled={!canEditSettings} value={settingsDraft.enabledModalityCodes.join(",")} onChange={(event) => onChange({ ...settingsDraft, enabledModalityCodes: event.target.value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) })} className={inputClass()} /></Field>
+            <Field label="Default report status">
+              <select disabled={!canEditSettings} value={settingsDraft.defaultReportStatusFilter} onChange={(event) => onChange({ ...settingsDraft, defaultReportStatusFilter: event.target.value as ReportingBoardReportStatus })} className={inputClass()}>
+                {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </Field>
+            {!canEditSettings && <p style={{ color: "var(--text-muted)" }}>Read-only. Only superadmin can update cutoff settings.</p>}
+            <div className="mt-2 flex justify-end gap-2">
+              <button type="button" onClick={onClose} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Close</button>
+              {canEditSettings && <button type="button" disabled={saving} onClick={onSave} className="h-9 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white disabled:bg-teal-300">Save settings</button>}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -424,8 +516,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [selectedReassignReason, setSelectedReassignReason] = useState("");
   const [selectedReassignConfirmOpen, setSelectedReassignConfirmOpen] = useState(false);
   const [priorityShortcutOpen, setPriorityShortcutOpen] = useState(false);
-  const [doctorStatsOpen, setDoctorStatsOpen] = useState(true);
+  const [doctorStatsOpen, setDoctorStatsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
   const [savedViewsOpen, setSavedViewsOpen] = useState(true);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
@@ -463,6 +558,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     setFilters({ ...defaultFilters(settingsQuery.data), ...tokenQuery.data.filters });
     setNotifications({ ...EMPTY_NOTIFICATIONS, ...tokenQuery.data.notificationSettings });
   }, [settingsQuery.data, tokenQuery.data]);
+
+  useEffect(() => {
+    setSearchText(filters.q ?? "");
+  }, [filters.q]);
 
   const saveViewMutation = useMutation({
     mutationFn: () => createReportingBoardSavedView({ name: saveName, filters: compactFilters(filters), notificationSettings: notifications }),
@@ -573,6 +672,13 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const allVisibleSelected = visibleAppointmentIds.length > 0 && visibleAppointmentIds.every((id) => selectedIds.includes(id));
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
   const selectedReassignDisabled = !canManage || selectedIds.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
+  const advancedFilterCount = [
+    Boolean(filters.caseCategory),
+    Boolean(filters.priorityCode),
+    (filters.sortDirection ?? "asc") !== "asc",
+    filters.pinUrgentToTop === false,
+    (filters.limit ?? 50) !== 50,
+  ].filter(Boolean).length;
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
@@ -589,6 +695,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const setPriorityShortcut = (priorityCode: string) => {
     setPriorityShortcutOpen(false);
     setFilter("priorityCode", priorityCode);
+  };
+
+  const applySearch = () => {
+    setFilter("q", searchText.trim() || null);
+  };
+
+  const clearSearch = () => {
+    setSearchText("");
+    setFilter("q", null);
   };
 
   const copySavedViewLink = async () => {
@@ -623,84 +738,115 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={printUrl} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-            <Printer size={16} /> Print handoff
+            <Printer size={16} /> {selectedIds.length > 0 ? `Print handoff (${selectedIds.length} selected)` : "Print handoff"}
           </Link>
           <button type="button" onClick={() => casesQuery.refetch()} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} /> Refresh
           </button>
+          <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+            <Settings size={16} /> Board settings
+          </button>
           {canManage && (
             <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">
-              <Users size={16} /> Bulk assign next cases
+              <Users size={16} /> Auto-assign next cases
             </button>
           )}
         </div>
       </div>
 
-      <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 xl:grid-cols-11" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <Field label="Date from"><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
-        <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
-        <Field label="Modality">
-          <select
-            value={filters.modalityId ?? ""}
-            onChange={(event) => setFilters((current) => ({ ...current, modalityId: event.target.value ? Number(event.target.value) : null, modalityCode: null, offset: 0 }))}
-            className={inputClass()}
-          >
-            <option value="">Configured CT/MR</option>
-            {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
-          </select>
-        </Field>
-        <Field label="Assigned doctor">
-          <select
-            value={assignmentFilterValue}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value === "unassigned") setFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null }));
-              else if (value.startsWith("doctor:")) setFilters((current) => ({ ...current, assignmentStatus: "assigned", assignedDoctorId: Number(value.slice(7)) }));
-              else setFilters((current) => ({ ...current, assignmentStatus: "all", assignedDoctorId: null }));
-            }}
-            className={inputClass()}
-          >
-            <option value="all">All</option>
-            <option value="unassigned">Unassigned</option>
-            {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={`doctor:${doctor.id}`}>{doctor.displayName}</option>)}
-          </select>
-        </Field>
-        <Field label="Category">
-          <select value={filters.caseCategory ?? ""} onChange={(event) => setFilter("caseCategory", event.target.value || null)} className={inputClass()}>
-            <option value="">All</option>
-            <option value="oncology">Oncology</option>
-            <option value="non_oncology">Non-oncology</option>
-          </select>
-        </Field>
-        <Field label="Report status">
-          <select value={filters.reportStatus ?? "required_not_final"} onChange={(event) => setFilter("reportStatus", event.target.value as ReportingBoardReportStatus)} className={inputClass()}>
-            {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </Field>
-        <Field label="Priority">
-          <select value={filters.priorityCode ?? ""} onChange={(event) => setFilter("priorityCode", event.target.value || null)} className={inputClass()}>
-            <option value="">All</option>
-            {(lookupsQuery.data?.priorities ?? []).map((priority) => <option key={priority.id} value={priority.code}>{priority.nameEn}</option>)}
-          </select>
-        </Field>
-        <Field label="Sort by">
-          <select value={filters.sortBy ?? "priority_study_date"} onChange={(event) => setFilter("sortBy", event.target.value as ReportingBoardSortBy)} className={inputClass()}>
-            {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </Field>
-        <Field label="Direction">
-          <select value={filters.sortDirection ?? "asc"} onChange={(event) => setFilter("sortDirection", event.target.value as ReportingBoardSortDirection)} className={inputClass()}>
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
-          </select>
-        </Field>
-        <label className="flex h-full items-end text-sm font-medium">
-          <span className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3" style={{ borderColor: "var(--border)" }}>
-            <input type="checkbox" checked={filters.pinUrgentToTop !== false} onChange={(event) => setFilter("pinUrgentToTop", event.target.checked)} />
-            Keep STAT/urgent on top
-          </span>
-        </label>
-        <Field label="Limit"><input type="number" min={1} max={100} value={filters.limit ?? 50} onChange={(event) => setFilter("limit", Number(event.target.value) || 50)} className={inputClass()} /></Field>
+      <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+          <Field label="Search">
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-3" style={{ color: "var(--text-muted)" }} />
+              <input
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") applySearch();
+                }}
+                placeholder="Search MRN / accession / patient / exam"
+                className={`${inputClass()} pl-9 pr-9`}
+              />
+              {filters.q && (
+                <button type="button" onClick={clearSearch} className="absolute right-2 top-2 rounded p-1" aria-label="Clear search">
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          </Field>
+          <Field label="Date from"><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
+          <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
+          <Field label="Modality">
+            <select
+              value={filters.modalityId ?? ""}
+              onChange={(event) => setFilters((current) => ({ ...current, modalityId: event.target.value ? Number(event.target.value) : null, modalityCode: null, offset: 0 }))}
+              className={inputClass()}
+            >
+              <option value="">Configured CT/MR</option>
+              {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
+            </select>
+          </Field>
+          <Field label="Assigned doctor">
+            <select
+              value={assignmentFilterValue}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === "unassigned") setFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, offset: 0 }));
+                else if (value.startsWith("doctor:")) setFilters((current) => ({ ...current, assignmentStatus: "assigned", assignedDoctorId: Number(value.slice(7)), offset: 0 }));
+                else setFilters((current) => ({ ...current, assignmentStatus: "all", assignedDoctorId: null, offset: 0 }));
+              }}
+              className={inputClass()}
+            >
+              <option value="all">All</option>
+              <option value="unassigned">Unassigned</option>
+              {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={`doctor:${doctor.id}`}>{doctor.displayName}</option>)}
+            </select>
+          </Field>
+          <Field label="Report status">
+            <select value={filters.reportStatus ?? "required_not_final"} onChange={(event) => setFilter("reportStatus", event.target.value as ReportingBoardReportStatus)} className={inputClass()}>
+              {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Sort by">
+            <select value={filters.sortBy ?? "priority_study_date"} onChange={(event) => setFilter("sortBy", event.target.value as ReportingBoardSortBy)} className={inputClass()}>
+              {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
+        </div>
+        <button type="button" onClick={() => setAdvancedFiltersOpen((current) => !current)} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          <SlidersHorizontal size={16} /> Advanced filters {advancedFilterCount > 0 && <span className="rounded-full bg-teal-600 px-2 py-0.5 text-xs text-white">{advancedFilterCount}</span>}
+        </button>
+        {advancedFiltersOpen && (
+          <div className="grid gap-3 border-t pt-3 md:grid-cols-3 xl:grid-cols-5" style={{ borderColor: "var(--border)" }}>
+            <Field label="Category">
+              <select value={filters.caseCategory ?? ""} onChange={(event) => setFilter("caseCategory", event.target.value || null)} className={inputClass()}>
+                <option value="">All</option>
+                <option value="oncology">Oncology</option>
+                <option value="non_oncology">Non-oncology</option>
+              </select>
+            </Field>
+            <Field label="Priority">
+              <select value={filters.priorityCode ?? ""} onChange={(event) => setFilter("priorityCode", event.target.value || null)} className={inputClass()}>
+                <option value="">All</option>
+                {(lookupsQuery.data?.priorities ?? []).map((priority) => <option key={priority.id} value={priority.code}>{priority.nameEn}</option>)}
+              </select>
+            </Field>
+            <Field label="Direction">
+              <select value={filters.sortDirection ?? "asc"} onChange={(event) => setFilter("sortDirection", event.target.value as ReportingBoardSortDirection)} className={inputClass()}>
+                <option value="asc">Asc</option>
+                <option value="desc">Desc</option>
+              </select>
+            </Field>
+            <label className="flex h-full items-end text-sm font-medium">
+              <span className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3" style={{ borderColor: "var(--border)" }}>
+                <input type="checkbox" checked={filters.pinUrgentToTop !== false} onChange={(event) => setFilter("pinUrgentToTop", event.target.checked)} />
+                Keep STAT/urgent on top
+              </span>
+            </label>
+            <Field label="Limit"><input type="number" min={1} max={100} value={filters.limit ?? 50} onChange={(event) => setFilter("limit", Number(event.target.value) || 50)} className={inputClass()} /></Field>
+          </div>
+        )}
       </section>
 
       <section className="space-y-3">
@@ -710,12 +856,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {statsQuery.error instanceof Error ? statsQuery.error.message : "Could not load board statistics."}
           </p>
         )}
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-10">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12">
           <StatsTile label="Total" value={statsSummary?.total ?? "-"} />
           <StatsTile label="Unassigned" value={statsSummary?.unassigned ?? "-"} onClick={() => setAssignmentShortcut("unassigned")} />
           <StatsTile label="Assigned" value={statsSummary?.assigned ?? "-"} onClick={() => setAssignmentShortcut("assigned")} />
           <div className="relative">
-            <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} onClick={() => setPriorityShortcutOpen((current) => !current)} />
+            <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} emphasis={hasValue(statsSummary?.statOrUrgent ?? "-") ? "danger" : "neutral"} onClick={() => setPriorityShortcutOpen((current) => !current)} />
             {priorityShortcutOpen && (
               <div className="absolute left-0 top-full z-20 mt-1 flex gap-1 rounded-lg border p-2 shadow-lg" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
                 <button type="button" onClick={() => setPriorityShortcut("stat")} className="rounded-lg border px-3 py-1.5 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>STAT</button>
@@ -724,11 +870,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             )}
           </div>
           <StatsTile label="Required not final" value={statsSummary?.requiredNotFinal ?? "-"} />
-          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} />
-          <StatsTile label="Final" value={statsSummary?.final ?? "-"} />
-          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} title="Informational. Overdue filtering is not part of the current board filter contract." />
-          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} />
-          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} />
+          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "danger" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." />
+          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} size="secondary" />
+          <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} size="secondary" />
+          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} size="secondary" />
+          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} size="secondary" />
         </div>
         <DoctorWorkloadPanel
           open={doctorStatsOpen}
@@ -740,7 +886,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
 
       <div className={savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"}>
         <section className="space-y-3">
-          <div className="rounded-lg border p-3" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          {selectedIds.length === 0 && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Select cases to reassign.</p>}
+          {selectedIds.length > 0 && (
+          <div className="sticky top-0 z-30 rounded-lg border p-3 shadow-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <div className="flex flex-wrap items-end gap-3">
               <p className="min-w-24 text-sm font-semibold text-foreground">{selectedIds.length} selected</p>
               <Field label="Reassign to">
@@ -767,10 +915,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {!canManage && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Only supervisors/admins can reassign selected cases.</p>}
             {selectedReassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedReassignMutation.error instanceof Error ? selectedReassignMutation.error.message : "Selected reassignment failed."}</p>}
           </div>
+          )}
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
-            <div className="overflow-x-auto">
+            <div className="max-h-[70vh] overflow-auto">
               <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-                <thead style={{ backgroundColor: "var(--card)" }}>
+                <thead className="sticky top-0 z-20 shadow-sm" style={{ backgroundColor: "var(--card)" }}>
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>
                       <input
@@ -793,7 +942,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
                   {cases.map((row) => (
-                    <tr key={row.appointmentId} className={rowPriorityClass(row.reportingPriorityCode)}>
+                    <tr key={row.appointmentId} className={`${rowPriorityClass(row.reportingPriorityCode)} ${selectedIds.includes(row.appointmentId) ? "ring-2 ring-inset ring-teal-500" : ""} transition hover:bg-teal-50/60`}>
                       <td className="px-3 py-2"><input
                         type="checkbox"
                         aria-label={`Select case ${row.accessionNumber}`}
@@ -935,29 +1084,6 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </div>
               </section>
 
-              <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-                <h3 className="inline-flex items-center gap-2 font-semibold text-foreground"><Settings size={16} /> Board settings</h3>
-                {settingsDraft && (
-                  <div className="mt-3 grid gap-2 text-sm">
-                    <Field label="Cutoff mode">
-                      <select disabled={!canEditSettings} value={settingsDraft.cutoffMode} onChange={(event) => setSettingsDraft({ ...settingsDraft, cutoffMode: event.target.value as ReportingBoardSettings["cutoffMode"] })} className={inputClass()}>
-                        <option value="days_back">Days back</option>
-                        <option value="fixed_date">Fixed date</option>
-                      </select>
-                    </Field>
-                    <Field label="Default cutoff date"><input disabled={!canEditSettings} type="date" value={settingsDraft.defaultCutoffDate ?? ""} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultCutoffDate: event.target.value || null })} className={inputClass()} /></Field>
-                    <Field label="Days back"><input disabled={!canEditSettings} type="number" value={settingsDraft.daysBack} onChange={(event) => setSettingsDraft({ ...settingsDraft, daysBack: Number(event.target.value) || 0 })} className={inputClass()} /></Field>
-                    <Field label="Enabled modality codes"><input disabled={!canEditSettings} value={settingsDraft.enabledModalityCodes.join(",")} onChange={(event) => setSettingsDraft({ ...settingsDraft, enabledModalityCodes: event.target.value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) })} className={inputClass()} /></Field>
-                    <Field label="Default report status">
-                      <select disabled={!canEditSettings} value={settingsDraft.defaultReportStatusFilter} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultReportStatusFilter: event.target.value as ReportingBoardReportStatus })} className={inputClass()}>
-                        {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                      </select>
-                    </Field>
-                    {!canEditSettings && <p style={{ color: "var(--text-muted)" }}>Read-only. Only superadmin can update cutoff settings.</p>}
-                    {canEditSettings && <button type="button" onClick={() => updateSettingsMutation.mutate()} className="h-9 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">Save settings</button>}
-                  </div>
-                )}
-              </section>
             </>
           )}
         </aside>
@@ -977,6 +1103,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
           ]);
         }}
+      />
+      <BoardSettingsModal
+        open={settingsOpen}
+        settingsDraft={settingsDraft}
+        canEditSettings={canEditSettings}
+        saving={updateSettingsMutation.isPending}
+        onClose={() => setSettingsOpen(false)}
+        onChange={setSettingsDraft}
+        onSave={() => updateSettingsMutation.mutate()}
       />
       {selectedReassignConfirmOpen && selectedReassignDoctor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">

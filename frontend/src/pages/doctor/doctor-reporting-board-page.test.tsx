@@ -214,8 +214,10 @@ describe("DoctorReportingBoardPage", () => {
   it("validates and submits the bulk assignment modal", async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Bulk assign next cases/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Auto-assign next cases/i }));
     expect(await screen.findByText("Assignment order: STAT/urgent first, then priority + oldest study.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Auto-assign next cases" })).toBeTruthy();
+    expect(screen.getByText(/The system will choose the next eligible cases using the current filters and assignment order/i)).toBeTruthy();
     const submit = screen.getByRole("button", { name: "Assign next cases" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
 
@@ -236,11 +238,37 @@ describe("DoctorReportingBoardPage", () => {
     expect(await screen.findByText(/2\/2 assigned/)).toBeTruthy();
   });
 
+  it("applies search to reporting board filters on Enter and clears it", async () => {
+    renderPage();
+
+    const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
+    fireEvent.change(search, { target: { value: "MRN-7" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: "MRN-7", offset: 0 })));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ q: "MRN-7", offset: 0 })));
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: null, offset: 0 })));
+  });
+
+  it("keeps advanced filters collapsed until opened", async () => {
+    renderPage();
+
+    await screen.findByText("Reporting Assignment Board");
+    expect(screen.queryByLabelText("Priority")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    expect(screen.getByLabelText("Priority")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
+    expect(screen.getByRole("button", { name: /Advanced filters 1/i })).toBeTruthy();
+  });
+
   it("sends sort controls to the reporting board API", async () => {
     renderPage();
 
     await screen.findByText("Reporting Assignment Board");
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "accession" } });
+    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
     fireEvent.click(screen.getByLabelText("Keep STAT/urgent on top"));
 
@@ -258,8 +286,6 @@ describe("DoctorReportingBoardPage", () => {
     expect((await screen.findAllByText("Total")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("12")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("STAT/Urgent")).length).toBeGreaterThan(0);
-    expect(await screen.findByText("Doctor workload")).toBeTruthy();
-    expect((await screen.findAllByText("Dr Target")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /STAT\/Urgent/i }));
     fireEvent.click(await screen.findByRole("button", { name: "STAT" }));
@@ -267,23 +293,52 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "stat", offset: 0 })));
   });
 
-  it("renders selected-case reassignment controls separately from bulk-next", async () => {
+  it("collapses doctor workload by default and expands it", async () => {
+    renderPage();
+
+    expect(await screen.findByText(/Doctor workload: Unassigned 5 \| Highest assigned: Dr Target 7/)).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "Oldest study" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Doctor workload/i }));
+    expect(await screen.findByRole("columnheader", { name: "Oldest study" })).toBeTruthy();
+  });
+
+  it("shows selected-case reassignment controls only after selection", async () => {
     renderPage();
 
     expect(await screen.findByLabelText("Select all visible cases")).toBeTruthy();
-    expect(await screen.findByLabelText("Select case V2-000042")).toBeTruthy();
-    expect(screen.getByText("0 selected")).toBeTruthy();
+    const selectAll = await screen.findByLabelText("Select all visible cases");
+    await screen.findByLabelText("Select case V2-000042");
+    expect(screen.getByText("Select cases to reassign.")).toBeTruthy();
+    expect(screen.queryByText("0 selected")).toBeNull();
+    expect(screen.queryByLabelText("Reassign to")).toBeNull();
+    expect(screen.getByRole("link", { name: "Print handoff" })).toBeTruthy();
+
+    fireEvent.click(selectAll);
+    expect(await screen.findByText("1 selected")).toBeTruthy();
     expect(screen.getByLabelText("Reassign to")).toBeTruthy();
     expect(screen.getByLabelText("Reason/note")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reassign selected" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Bulk assign next cases/i })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Reassign selected" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Auto-assign next cases/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Print handoff (1 selected)" })).toBeTruthy();
   });
 
   it("does not expose editable settings for non-superadmin managers", async () => {
     renderPage();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Board settings" }));
     expect(await screen.findByText("Read-only. Only superadmin can update cutoff settings.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save settings" })).toBeNull();
+  });
+
+  it("opens board settings modal with existing controls", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Board settings" }));
+    expect(await screen.findByRole("heading", { name: /Board settings/i })).toBeTruthy();
+    expect(screen.getByLabelText("Cutoff mode")).toBeTruthy();
+    expect(screen.getByLabelText("Default report status")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("heading", { name: /Board settings/i })).toBeNull();
   });
 
   it("builds print URLs with reporting board parameters", () => {
