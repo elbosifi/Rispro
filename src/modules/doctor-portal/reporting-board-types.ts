@@ -103,6 +103,68 @@ export interface ReportingBoardCaseRow {
   exclusionReason: string | null;
 }
 
+export interface ReportingBoardStatsBaseRow {
+  appointmentId: number;
+  bookingDate: string;
+  modalityCode: string;
+  requiresReport: boolean;
+  reportingPriorityCode: string | null;
+  reportingPriorityName: string | null;
+  assignedDoctorId: number | null;
+  assignedDoctorName: string | null;
+  assignmentStatus: "assigned" | "unassigned";
+}
+
+export interface ReportingBoardStatsSummary {
+  total: number;
+  unassigned: number;
+  assigned: number;
+  stat: number;
+  urgent: number;
+  statOrUrgent: number;
+  requiredNotFinal: number;
+  final: number;
+  draft: number;
+  noReport: number;
+  studyNotFound: number;
+  unavailable: number;
+  overdue: number;
+  ct: number;
+  mr: number;
+}
+
+export interface ReportingBoardDoctorStatsRow {
+  doctorId: number | null;
+  doctorName: string;
+  total: number;
+  requiredNotFinal: number;
+  statOrUrgent: number;
+  oldestStudyDate: string | null;
+  ct: number;
+  mr: number;
+}
+
+export interface ReportingBoardModalityStatsRow {
+  modalityCode: string;
+  total: number;
+  requiredNotFinal: number;
+  statOrUrgent: number;
+}
+
+export interface ReportingBoardPriorityStatsRow {
+  priorityCode: string | null;
+  priorityName: string | null;
+  total: number;
+}
+
+export interface ReportingBoardStatsResponse {
+  filters: ReportingBoardFilters;
+  summary: ReportingBoardStatsSummary;
+  byDoctor: ReportingBoardDoctorStatsRow[];
+  byModality: ReportingBoardModalityStatsRow[];
+  byPriority: ReportingBoardPriorityStatsRow[];
+}
+
 export interface BulkAssignNextCasesInput {
   doctorId: number;
   count: number;

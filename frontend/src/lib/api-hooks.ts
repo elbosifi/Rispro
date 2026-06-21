@@ -63,6 +63,7 @@ import type {
   ReportingBoardPushConfig,
   ReportingBoardSavedView,
   ReportingBoardSettings,
+  ReportingBoardStatsResponse,
   RosterDutyTypeConfig,
   RosterShiftImportMapping,
   RosterXmlImportPreview,
@@ -744,6 +745,10 @@ export async function updateReportingBoardSettings(payload: ReportingBoardSettin
 
 export async function fetchReportingBoardCases(filters: ReportingBoardFilters): Promise<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }> {
   return api<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }>(`/doctor/reporting-board/cases?${reportingBoardParams(filters).toString()}`);
+}
+
+export async function fetchReportingBoardStats(filters: ReportingBoardFilters): Promise<ReportingBoardStatsResponse> {
+  return api<ReportingBoardStatsResponse>(`/doctor/reporting-board/stats?${reportingBoardParams(filters).toString()}`);
 }
 
 export async function fetchReportingBoardMobileView(token: string, filters: ReportingBoardFilters = {}): Promise<ReportingBoardMobileResponse> {

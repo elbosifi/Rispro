@@ -14,6 +14,7 @@ import {
   fetchReportingBoardSavedViewByToken,
   fetchReportingBoardSavedViews,
   fetchReportingBoardSettings,
+  fetchReportingBoardStats,
   fetchRosterDoctors,
   sendReportingBoardSavedViewTestPush,
   subscribeReportingBoardSavedViewPush,
@@ -25,6 +26,7 @@ import type {
   DoctorProfile,
   ReportingBoardBulkAssignResult,
   ReportingBoardCaseRow,
+  ReportingBoardDoctorStatsRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
   ReportingBoardReportStatus,
@@ -175,6 +177,68 @@ function assignmentOrderText(filters: ReportingBoardFilters): string {
   };
   const selectedOrder = descriptions[sortBy]?.[direction] ?? descriptions.priority_study_date.asc;
   return `Assignment order: ${filters.pinUrgentToTop === false ? selectedOrder : `STAT/urgent first, then ${selectedOrder}`}.`;
+}
+
+function StatsTile({ label, value, onClick, title }: { label: string; value: number | string; onClick?: () => void; title?: string }) {
+  const content = (
+    <>
+      <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{label}</span>
+      <span className="mt-1 text-xl font-semibold text-foreground">{value}</span>
+    </>
+  );
+  const className = "min-h-20 rounded-lg border px-3 py-2 text-left";
+  const style = { backgroundColor: "var(--card)", borderColor: "var(--border)" };
+  if (!onClick) return <div className={className} style={style} title={title}>{content}</div>;
+  return <button type="button" onClick={onClick} className={`${className} transition hover:border-teal-500`} style={style} title={title}>{content}</button>;
+}
+
+function DoctorWorkloadPanel({
+  open,
+  rows,
+  loading,
+  onToggle,
+}: {
+  open: boolean;
+  rows: ReportingBoardDoctorStatsRow[];
+  loading: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <section className="rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between px-4 py-3 text-left font-semibold text-foreground">
+        <span>Doctor workload</span>
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <div className="overflow-x-auto border-t" style={{ borderColor: "var(--border)" }}>
+          <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+            <thead>
+              <tr>
+                {["Doctor", "Total", "Required not final", "STAT/Urgent", "Oldest study", "CT", "MR"].map((header) => (
+                  <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+              {rows.map((row) => (
+                <tr key={row.doctorId ?? "unassigned"}>
+                  <td className="px-3 py-2 font-semibold text-foreground">{row.doctorName}</td>
+                  <td className="px-3 py-2">{row.total}</td>
+                  <td className="px-3 py-2">{row.requiredNotFinal}</td>
+                  <td className="px-3 py-2">{row.statOrUrgent}</td>
+                  <td className="px-3 py-2">{row.oldestStudyDate ?? "-"}</td>
+                  <td className="px-3 py-2">{row.ct}</td>
+                  <td className="px-3 py-2">{row.mr}</td>
+                </tr>
+              ))}
+              {loading && <tr><td className="px-3 py-3 text-sm" colSpan={7} style={{ color: "var(--text-muted)" }}>Loading workload...</td></tr>}
+              {!loading && rows.length === 0 && <tr><td className="px-3 py-3 text-sm" colSpan={7} style={{ color: "var(--text-muted)" }}>No workload rows match these filters.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -359,6 +423,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [selectedReassignDoctorId, setSelectedReassignDoctorId] = useState("");
   const [selectedReassignReason, setSelectedReassignReason] = useState("");
   const [selectedReassignConfirmOpen, setSelectedReassignConfirmOpen] = useState(false);
+  const [priorityShortcutOpen, setPriorityShortcutOpen] = useState(false);
+  const [doctorStatsOpen, setDoctorStatsOpen] = useState(true);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
   const [savedViewsOpen, setSavedViewsOpen] = useState(true);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -368,6 +434,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const casesQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "cases", filters],
     queryFn: () => fetchReportingBoardCases(filters),
+    refetchInterval: 30000,
+  });
+  const statsQuery = useQuery({
+    queryKey: ["doctor", "reporting-board", "stats", filters],
+    queryFn: () => fetchReportingBoardStats(filters),
     refetchInterval: 30000,
   });
   const pushConfigQuery = useQuery({ queryKey: ["doctor", "reporting-board", "push-config"], queryFn: fetchReportingBoardPushConfig });
@@ -456,7 +527,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
   const assignMutation = useMutation({
     mutationFn: (payload: { appointmentId: number; doctorId: number; reason: string }) => assignReportingBoardCase(payload.appointmentId, { doctorId: payload.doctorId, reason: payload.reason }),
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
   });
   const selectedReassignMutation = useMutation({
     mutationFn: () => bulkReassignSelectedReportingCases({
@@ -468,12 +544,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       setBulkResult(result);
       setSelectedIds([]);
       setSelectedReassignConfirmOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
     },
   });
 
   const cases = casesQuery.data?.cases ?? [];
   const effectiveFilters = casesQuery.data?.filters ?? filters;
+  const statsSummary = statsQuery.data?.summary;
+  const doctorStats = statsQuery.data?.byDoctor ?? [];
   const canEditSettings = Boolean(me.isSuperAdmin);
   const canManage = isManager(me);
   const assignmentFilterValue = filters.assignedDoctorId ? `doctor:${filters.assignedDoctorId}` : filters.assignmentStatus === "unassigned" ? "unassigned" : "all";
@@ -495,6 +576,19 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
+  };
+
+  const setAssignmentShortcut = (assignmentStatus: ReportingBoardFilters["assignmentStatus"]) => {
+    setFilters((current) => ({ ...current, assignmentStatus, assignedDoctorId: null, offset: 0 }));
+  };
+
+  const setModalityShortcut = (modalityCode: string) => {
+    setFilters((current) => ({ ...current, modalityCode, modalityId: null, offset: 0 }));
+  };
+
+  const setPriorityShortcut = (priorityCode: string) => {
+    setPriorityShortcutOpen(false);
+    setFilter("priorityCode", priorityCode);
   };
 
   const copySavedViewLink = async () => {
@@ -546,7 +640,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         <Field label="Date from"><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
         <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
         <Field label="Modality">
-          <select value={filters.modalityId ?? ""} onChange={(event) => setFilter("modalityId", event.target.value ? Number(event.target.value) : null)} className={inputClass()}>
+          <select
+            value={filters.modalityId ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, modalityId: event.target.value ? Number(event.target.value) : null, modalityCode: null, offset: 0 }))}
+            className={inputClass()}
+          >
             <option value="">Configured CT/MR</option>
             {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
           </select>
@@ -603,6 +701,41 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           </span>
         </label>
         <Field label="Limit"><input type="number" min={1} max={100} value={filters.limit ?? 50} onChange={(event) => setFilter("limit", Number(event.target.value) || 50)} className={inputClass()} /></Field>
+      </section>
+
+      <section className="space-y-3">
+        {statsQuery.isLoading && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Loading board statistics...</p>}
+        {statsQuery.isError && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {statsQuery.error instanceof Error ? statsQuery.error.message : "Could not load board statistics."}
+          </p>
+        )}
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-10">
+          <StatsTile label="Total" value={statsSummary?.total ?? "-"} />
+          <StatsTile label="Unassigned" value={statsSummary?.unassigned ?? "-"} onClick={() => setAssignmentShortcut("unassigned")} />
+          <StatsTile label="Assigned" value={statsSummary?.assigned ?? "-"} onClick={() => setAssignmentShortcut("assigned")} />
+          <div className="relative">
+            <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} onClick={() => setPriorityShortcutOpen((current) => !current)} />
+            {priorityShortcutOpen && (
+              <div className="absolute left-0 top-full z-20 mt-1 flex gap-1 rounded-lg border p-2 shadow-lg" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+                <button type="button" onClick={() => setPriorityShortcut("stat")} className="rounded-lg border px-3 py-1.5 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>STAT</button>
+                <button type="button" onClick={() => setPriorityShortcut("urgent")} className="rounded-lg border px-3 py-1.5 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Urgent</button>
+              </div>
+            )}
+          </div>
+          <StatsTile label="Required not final" value={statsSummary?.requiredNotFinal ?? "-"} />
+          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} />
+          <StatsTile label="Final" value={statsSummary?.final ?? "-"} />
+          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} title="Informational. Overdue filtering is not part of the current board filter contract." />
+          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} />
+          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} />
+        </div>
+        <DoctorWorkloadPanel
+          open={doctorStatsOpen}
+          rows={doctorStats}
+          loading={statsQuery.isLoading}
+          onToggle={() => setDoctorStatsOpen((current) => !current)}
+        />
       </section>
 
       <div className={savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"}>
@@ -839,7 +972,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         onClose={() => setBulkOpen(false)}
         onResult={async (result) => {
           setBulkResult(result);
-          await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+            queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+          ]);
         }}
       />
       {selectedReassignConfirmOpen && selectedReassignDoctor && (

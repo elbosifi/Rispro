@@ -22,6 +22,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(index, /router\.use\("\/reporting-board", doctorReportingBoardRouter\)/);
     assert.match(routes, /"\/settings"/);
     assert.match(routes, /"\/cases"/);
+    assert.match(routes, /"\/stats"/);
     assert.match(routes, /"\/saved-views"/);
     assert.match(routes, /"\/saved-views\/token\/:token"/);
     assert.match(routes, /"\/bulk-assign-next"/);
@@ -57,6 +58,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /rp\.name_en as "reportingPriorityName"/);
     assert.match(repo, /rp\.sort_order as "reportingPrioritySortOrder"/);
     assert.match(repo, /caseSortOrder/);
+    assert.match(repo, /listReportingBoardStatsRows/);
     assert.match(repo, /priority_study_date/);
     assert.match(repo, /case lower\(coalesce\(rp\.code, ''\)\) when 'stat' then 0 when 'urgent' then 1 else 2 end asc/);
     assert.match(repo, /order by \$\{orderBy\}/);

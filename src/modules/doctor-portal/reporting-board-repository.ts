@@ -11,6 +11,7 @@ import type {
   BulkAssignNextCasesResult,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
+  ReportingBoardStatsBaseRow,
   ReportingBoardNotificationSettings,
   ReportingBoardNotificationEvent,
   ReportingBoardPushConfig,
@@ -531,6 +532,46 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
   };
+}
+
+function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoardStatsBaseRow {
+  return {
+    ...row,
+    appointmentId: Number(row.appointmentId),
+    assignedDoctorId: nullableNumber(row.assignedDoctorId),
+  };
+}
+
+export async function listReportingBoardStatsRows(
+  filters: Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters
+): Promise<ReportingBoardStatsBaseRow[]> {
+  const values: unknown[] = [];
+  const where = addCaseFilters(filters, values);
+  const result = await pool.query<ReportingBoardStatsBaseRow>(
+    `
+      select
+        b.id as "appointmentId",
+        b.booking_date::text as "bookingDate",
+        m.code as "modalityCode",
+        b.requires_report as "requiresReport",
+        rp.code as "reportingPriorityCode",
+        rp.name_en as "reportingPriorityName",
+        cta.assigned_doctor_id as "assignedDoctorId",
+        assigned_doctor.display_name as "assignedDoctorName",
+        case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus"
+      from appointments_v2.bookings b
+      join patients p on p.id = b.patient_id
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
+      left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
+      order by b.id asc
+    `,
+    values
+  );
+  return result.rows.map(reportingBoardStatsRow);
 }
 
 export async function listReportingBoardCasesByAppointmentIds(appointmentIds: number[]): Promise<ReportingBoardCaseRow[]> {

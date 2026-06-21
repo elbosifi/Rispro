@@ -8,6 +8,7 @@ import type { DoctorMe, ReportingBoardCaseRow } from "@/types/api";
 const fetchReportingBoardSettingsMock = vi.fn();
 const updateReportingBoardSettingsMock = vi.fn();
 const fetchReportingBoardCasesMock = vi.fn();
+const fetchReportingBoardStatsMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
@@ -25,6 +26,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
   updateReportingBoardSettings: (...args: unknown[]) => updateReportingBoardSettingsMock(...args),
   fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
+  fetchReportingBoardStats: (...args: unknown[]) => fetchReportingBoardStatsMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
@@ -118,6 +120,38 @@ describe("DoctorReportingBoardPage", () => {
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
     fetchReportingBoardCasesMock.mockResolvedValue({ cases: [caseRow], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
+    fetchReportingBoardStatsMock.mockResolvedValue({
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+      summary: {
+        total: 12,
+        unassigned: 5,
+        assigned: 7,
+        stat: 2,
+        urgent: 3,
+        statOrUrgent: 5,
+        requiredNotFinal: 9,
+        final: 1,
+        draft: 4,
+        noReport: 1,
+        studyNotFound: 0,
+        unavailable: 6,
+        overdue: 2,
+        ct: 8,
+        mr: 4,
+      },
+      byDoctor: [
+        { doctorId: null, doctorName: "Unassigned", total: 5, requiredNotFinal: 5, statOrUrgent: 3, oldestStudyDate: "2026-05-20", ct: 4, mr: 1 },
+        { doctorId: 5, doctorName: "Dr Target", total: 7, requiredNotFinal: 4, statOrUrgent: 2, oldestStudyDate: "2026-05-18", ct: 4, mr: 3 },
+      ],
+      byModality: [
+        { modalityCode: "CT", total: 8, requiredNotFinal: 6, statOrUrgent: 3 },
+        { modalityCode: "MR", total: 4, requiredNotFinal: 3, statOrUrgent: 2 },
+      ],
+      byPriority: [
+        { priorityCode: "stat", priorityName: "STAT", total: 2 },
+        { priorityCode: "urgent", priorityName: "Urgent", total: 3 },
+      ],
+    });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([
       { id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent" }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" },
     ]);
@@ -216,6 +250,21 @@ describe("DoctorReportingBoardPage", () => {
       pinUrgentToTop: false,
       offset: 0,
     })));
+  });
+
+  it("renders reporting statistics and applies stat filter shortcuts", async () => {
+    renderPage();
+
+    expect((await screen.findAllByText("Total")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("12")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("STAT/Urgent")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Doctor workload")).toBeTruthy();
+    expect((await screen.findAllByText("Dr Target")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /STAT\/Urgent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "STAT" }));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "stat", offset: 0 })));
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "stat", offset: 0 })));
   });
 
   it("renders selected-case reassignment controls separately from bulk-next", async () => {

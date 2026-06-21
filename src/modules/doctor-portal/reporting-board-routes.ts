@@ -14,6 +14,7 @@ import {
   getReportingBoardCases,
   getReportingBoardPushConfig,
   getReportingBoardSettings,
+  getReportingBoardStats,
   getMyReportingBoardNotifications,
   listMyReportingBoardSavedViews,
   loadReportingBoardSavedViewByToken,
@@ -104,6 +105,7 @@ function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
     requiresReport: booleanFromQuery(query.requiresReport),
     reportStatus: (asOptionalString(query.reportStatus) as ReportingBoardFilters["reportStatus"]) ?? null,
     priorityCode: asOptionalString(query.priorityCode) ?? null,
+    q: asOptionalString(query.q) ?? null,
     sortBy: optionalSortBy(query.sortBy),
     sortDirection: optionalSortDirection(query.sortDirection),
     pinUrgentToTop: booleanFromQuery(query.pinUrgentToTop),
@@ -157,6 +159,13 @@ router.get(
   "/cases",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json(await getReportingBoardCases(actor(req), filtersFromQuery(req.query)));
+  })
+);
+
+router.get(
+  "/stats",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json(await getReportingBoardStats(actor(req), filtersFromQuery(req.query)));
   })
 );
 

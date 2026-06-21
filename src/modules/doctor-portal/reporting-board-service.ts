@@ -19,6 +19,7 @@ import {
   listReportingBoardCasesByAppointmentIds,
   listReportingBoardCaseCandidates,
   listReportingBoardNotifications,
+  listReportingBoardStatsRows,
   listSavedViews,
   markAllReportingBoardNotificationsRead,
   markReportingBoardNotificationRead,
@@ -36,7 +37,13 @@ import type {
   BulkReassignSelectedCasesInput,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
+  ReportingBoardDoctorStatsRow,
+  ReportingBoardModalityStatsRow,
   ReportingBoardNotificationSettings,
+  ReportingBoardPriorityStatsRow,
+  ReportingBoardStatsBaseRow,
+  ReportingBoardStatsResponse,
+  ReportingBoardStatsSummary,
 } from "./reporting-board-types.js";
 
 interface Actor {
@@ -59,9 +66,11 @@ const REPORTING_BOARD_SORT_BY = new Set([
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 let reportStatusChecker = checkSonicDicomReportStatus;
+const reportStatusSnapshot = new Map<number, ReportingBoardCaseRow["reportStatus"]>();
 
 export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
   reportStatusChecker = checker ?? checkSonicDicomReportStatus;
+  reportStatusSnapshot.clear();
 }
 
 function todayIso(): string {
@@ -184,6 +193,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
     } catch {
       status = "unavailable";
     }
+    reportStatusSnapshot.set(row.appointmentId, status);
     const canAssign = row.canAssign && status !== "final";
     resolved.push({
       ...row,
@@ -199,6 +209,121 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
     return resolved.filter((row) => row.requiresReport && row.reportStatus !== "final");
   }
   return resolved.filter((row) => row.reportStatus === reportStatus);
+}
+
+function statsReportStatus(row: ReportingBoardStatsBaseRow): ReportingBoardCaseRow["reportStatus"] {
+  if (!row.requiresReport) return "no_report";
+  // Report status is not persisted locally. Statistics use statuses recently
+  // resolved by case listing; uncached required cases stay unavailable to avoid
+  // a SonicDICOM status check loop on every stats request.
+  return reportStatusSnapshot.get(row.appointmentId) ?? "unavailable";
+}
+
+function statsRequiredNotFinal(row: ReportingBoardStatsBaseRow): boolean {
+  return row.requiresReport && statsReportStatus(row) !== "final";
+}
+
+function matchesStatsReportStatus(row: ReportingBoardStatsBaseRow, reportStatus: ReportingBoardFilters["reportStatus"]): boolean {
+  if (!reportStatus || reportStatus === "all") return true;
+  if (reportStatus === "required_not_final") return statsRequiredNotFinal(row);
+  return statsReportStatus(row) === reportStatus;
+}
+
+function emptyStatsSummary(): ReportingBoardStatsSummary {
+  return {
+    total: 0,
+    unassigned: 0,
+    assigned: 0,
+    stat: 0,
+    urgent: 0,
+    statOrUrgent: 0,
+    requiredNotFinal: 0,
+    final: 0,
+    draft: 0,
+    noReport: 0,
+    studyNotFound: 0,
+    unavailable: 0,
+    overdue: 0,
+    ct: 0,
+    mr: 0,
+  };
+}
+
+function doctorStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoardDoctorStatsRow {
+  return {
+    doctorId: row.assignedDoctorId,
+    doctorName: row.assignedDoctorName ?? "Unassigned",
+    total: 0,
+    requiredNotFinal: 0,
+    statOrUrgent: 0,
+    oldestStudyDate: null,
+    ct: 0,
+    mr: 0,
+  };
+}
+
+function aggregateReportingBoardStats(rows: ReportingBoardStatsBaseRow[]): Omit<ReportingBoardStatsResponse, "filters"> {
+  const today = todayIso();
+  const summary = emptyStatsSummary();
+  const byDoctor = new Map<string, ReportingBoardDoctorStatsRow>();
+  const byModality = new Map<string, ReportingBoardModalityStatsRow>();
+  const byPriority = new Map<string, ReportingBoardPriorityStatsRow>();
+
+  for (const row of rows) {
+    const priorityCode = row.reportingPriorityCode?.toLowerCase() ?? null;
+    const modalityCode = String(row.modalityCode || "").toUpperCase();
+    const status = statsReportStatus(row);
+    const requiredNotFinal = row.requiresReport && status !== "final";
+    const statOrUrgent = priorityCode === "stat" || priorityCode === "urgent";
+
+    summary.total += 1;
+    if (row.assignmentStatus === "assigned") summary.assigned += 1;
+    else summary.unassigned += 1;
+    if (priorityCode === "stat") summary.stat += 1;
+    if (priorityCode === "urgent") summary.urgent += 1;
+    if (statOrUrgent) summary.statOrUrgent += 1;
+    if (requiredNotFinal) summary.requiredNotFinal += 1;
+    if (requiredNotFinal && row.bookingDate < today) summary.overdue += 1;
+    if (modalityCode === "CT") summary.ct += 1;
+    if (modalityCode === "MR") summary.mr += 1;
+    if (status === "final") summary.final += 1;
+    else if (status === "draft") summary.draft += 1;
+    else if (status === "no_report") summary.noReport += 1;
+    else if (status === "study_not_found") summary.studyNotFound += 1;
+    else if (status === "unavailable") summary.unavailable += 1;
+
+    const doctorKey = row.assignedDoctorId === null ? "unassigned" : String(row.assignedDoctorId);
+    const doctor = byDoctor.get(doctorKey) ?? doctorStatsRow(row);
+    doctor.total += 1;
+    if (requiredNotFinal) doctor.requiredNotFinal += 1;
+    if (statOrUrgent) doctor.statOrUrgent += 1;
+    if (!doctor.oldestStudyDate || row.bookingDate < doctor.oldestStudyDate) doctor.oldestStudyDate = row.bookingDate;
+    if (modalityCode === "CT") doctor.ct += 1;
+    if (modalityCode === "MR") doctor.mr += 1;
+    byDoctor.set(doctorKey, doctor);
+
+    const modality = byModality.get(modalityCode) ?? { modalityCode, total: 0, requiredNotFinal: 0, statOrUrgent: 0 };
+    modality.total += 1;
+    if (requiredNotFinal) modality.requiredNotFinal += 1;
+    if (statOrUrgent) modality.statOrUrgent += 1;
+    byModality.set(modalityCode, modality);
+
+    const priorityKey = priorityCode ?? "none";
+    const priority = byPriority.get(priorityKey) ?? { priorityCode, priorityName: row.reportingPriorityName, total: 0 };
+    priority.total += 1;
+    byPriority.set(priorityKey, priority);
+  }
+
+  return {
+    summary,
+    byDoctor: [...byDoctor.values()].sort((a, b) => {
+      if (a.doctorId === null) return -1;
+      if (b.doctorId === null) return 1;
+      return b.requiredNotFinal - a.requiredNotFinal || b.total - a.total || a.doctorName.localeCompare(b.doctorName);
+    }),
+    byModality: [...byModality.values()].sort((a, b) => a.modalityCode.localeCompare(b.modalityCode)),
+    byPriority: [...byPriority.values()].sort((a, b) => (a.priorityCode ?? "\uffff").localeCompare(b.priorityCode ?? "\uffff")),
+  };
 }
 
 export async function getReportingBoardSettings(actor: Actor) {
@@ -225,6 +350,19 @@ export async function getReportingBoardCases(actor: Actor, input: ReportingBoard
   const rows = await listReportingBoardCaseCandidates(scopedFilters);
   const cases = await applyReportStatuses(rows, filters.reportStatus);
   return { cases, filters };
+}
+
+export async function getReportingBoardStats(actor: Actor, input: ReportingBoardFilters): Promise<ReportingBoardStatsResponse> {
+  const me = await requireRosterDoctor(actor);
+  const canManage =
+    me.moduleCapabilities.includes("doctor_supervisor") ||
+    me.moduleCapabilities.includes("doctor_admin");
+  const filters = await effectiveFilters(canManage ? input : { ...input, assignedDoctorId: me.profile!.id, assignmentStatus: "assigned" });
+  const settings = await readReportingBoardSettings();
+  const scopedFilters =
+    filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
+  const rows = (await listReportingBoardStatsRows(scopedFilters)).filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
+  return { filters, ...aggregateReportingBoardStats(rows) };
 }
 
 function mobileCase(row: ReportingBoardCaseRow) {

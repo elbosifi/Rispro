@@ -638,6 +638,54 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where recipient_doctor_id = $1 and appointment_id = any($2::bigint[])`, [targetDoctor.doctorId, [first, alreadyAssigned]])).rowCount, 2);
   });
 
+  it("returns reporting board statistics with manager scope, doctor scope, and filters", async () => {
+    guard();
+    const date = addDays(66);
+    const stat = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, patientName: "Stats Stat" });
+    const urgent = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, priorityId: urgentPriorityId, date, patientName: "Stats Urgent" });
+    const routine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date, patientName: "Stats Routine" });
+    [stat, urgent, routine].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await assignDirectly(urgent, targetDoctor.doctorId);
+
+    const stats = await api<{
+      summary: { total: number; unassigned: number; assigned: number; stat: number; urgent: number; statOrUrgent: number; requiredNotFinal: number; ct: number; mr: number };
+      byDoctor: Array<{ doctorId: number | null; doctorName: string; total: number; requiredNotFinal: number; statOrUrgent: number; ct: number; mr: number }>;
+      byModality: Array<{ modalityCode: string; total: number; statOrUrgent: number }>;
+      byPriority: Array<{ priorityCode: string | null; total: number }>;
+    }>(supervisor.cookie, `/api/doctor/reporting-board/stats?dateFrom=${date}&dateTo=${date}`);
+
+    assert.equal(stats.status, 200, JSON.stringify(stats.data));
+    assert.deepEqual(
+      {
+        total: stats.data.summary.total,
+        unassigned: stats.data.summary.unassigned,
+        assigned: stats.data.summary.assigned,
+        stat: stats.data.summary.stat,
+        urgent: stats.data.summary.urgent,
+        statOrUrgent: stats.data.summary.statOrUrgent,
+        requiredNotFinal: stats.data.summary.requiredNotFinal,
+        ct: stats.data.summary.ct,
+        mr: stats.data.summary.mr,
+      },
+      { total: 3, unassigned: 2, assigned: 1, stat: 1, urgent: 1, statOrUrgent: 2, requiredNotFinal: 3, ct: 2, mr: 1 }
+    );
+    const byDoctor = new Map(stats.data.byDoctor.map((row) => [row.doctorId, row]));
+    assert.equal(byDoctor.get(null)?.total, 2);
+    assert.equal(byDoctor.get(targetDoctor.doctorId)?.total, 1);
+    assert.equal(byDoctor.get(targetDoctor.doctorId)?.statOrUrgent, 1);
+    assert.deepEqual(stats.data.byModality.map((row) => [row.modalityCode, row.total]), [["CT", 2], ["MR", 1]]);
+    assert.deepEqual(stats.data.byPriority.map((row) => [row.priorityCode, row.total]).sort(), [["routine", 1], ["stat", 1], ["urgent", 1]]);
+
+    const doctorScoped = await api<{ summary: { total: number; assigned: number } }>(targetDoctor.cookie, `/api/doctor/reporting-board/stats?dateFrom=${date}&dateTo=${date}`);
+    assert.equal(doctorScoped.status, 200, JSON.stringify(doctorScoped.data));
+    assert.deepEqual(doctorScoped.data.summary, { ...doctorScoped.data.summary, total: 1, assigned: 1 });
+
+    const urgentOnly = await api<{ summary: { total: number; urgent: number } }>(supervisor.cookie, `/api/doctor/reporting-board/stats?dateFrom=${date}&dateTo=${date}&priorityCode=urgent`);
+    assert.equal(urgentOnly.status, 200, JSON.stringify(urgentOnly.data));
+    assert.equal(urgentOnly.data.summary.total, 1);
+    assert.equal(urgentOnly.data.summary.urgent, 1);
+  });
+
   it("sorts board cases with STAT/urgent pinned by default", async () => {
     guard();
     const date = addDays(61);
