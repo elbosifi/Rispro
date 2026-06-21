@@ -43,6 +43,17 @@ interface Actor {
 
 const MAX_CASE_LIST_LIMIT = 100;
 const MAX_BULK_ASSIGN_COUNT = 100;
+const REPORTING_BOARD_SORT_BY = new Set([
+  "priority_study_date",
+  "study_date",
+  "accession",
+  "patient_name",
+  "mrn",
+  "exam_type",
+  "modality",
+  "assigned_doctor",
+]);
+const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 let reportStatusChecker = checkSonicDicomReportStatus;
 
 export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
@@ -79,6 +90,18 @@ function normalizeOffset(offset?: number | null): number {
   return value;
 }
 
+function normalizeSortBy(sortBy?: ReportingBoardFilters["sortBy"] | null): NonNullable<ReportingBoardFilters["sortBy"]> {
+  const value = sortBy ?? "priority_study_date";
+  if (!REPORTING_BOARD_SORT_BY.has(value)) throw new HttpError(400, "sortBy is not supported.");
+  return value;
+}
+
+function normalizeSortDirection(sortDirection?: ReportingBoardFilters["sortDirection"] | null): NonNullable<ReportingBoardFilters["sortDirection"]> {
+  const value = sortDirection ?? "asc";
+  if (!REPORTING_BOARD_SORT_DIRECTIONS.has(value)) throw new HttpError(400, "sortDirection must be asc or desc.");
+  return value;
+}
+
 async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters> {
   const settings = await readReportingBoardSettings();
   const cutoffDate =
@@ -103,6 +126,9 @@ async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Requ
     assignedDoctorId: input.assignedDoctorId ?? null,
     modalityId: input.modalityId ?? null,
     modalityCodes: input.modalityCodes ?? null,
+    sortBy: normalizeSortBy(input.sortBy),
+    sortDirection: normalizeSortDirection(input.sortDirection),
+    pinUrgentToTop: input.pinUrgentToTop ?? true,
   };
 }
 
@@ -116,6 +142,9 @@ export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, 
     "modalityId",
     "modalityCode",
     "assignmentStatus",
+    "sortBy",
+    "sortDirection",
+    "pinUrgentToTop",
   ];
   for (const key of keys) {
     if (savedViewFilters[key] === null || savedViewFilters[key] === undefined || savedViewFilters[key] === "") {

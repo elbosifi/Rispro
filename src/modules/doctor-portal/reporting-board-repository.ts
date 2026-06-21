@@ -403,6 +403,56 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
   return where;
 }
 
+function caseSortDirection(direction: ReportingBoardFilters["sortDirection"] | undefined | null): "asc" | "desc" {
+  if (!direction || direction === "asc") return "asc";
+  if (direction === "desc") return "desc";
+  throw new HttpError(400, "sortDirection must be asc or desc.");
+}
+
+function caseSortOrder(filters: ReportingBoardFilters): string {
+  const direction = caseSortDirection(filters.sortDirection);
+  const timeNulls = direction === "asc" ? "nulls first" : "nulls last";
+  const priorityPin = "case lower(coalesce(rp.code, '')) when 'stat' then 0 when 'urgent' then 1 else 2 end asc";
+  const sortBy = filters.sortBy ?? "priority_study_date";
+  let selectedOrder: string[];
+
+  switch (sortBy) {
+    case "priority_study_date":
+      selectedOrder = [
+        "rp.sort_order asc nulls last",
+        `b.booking_date ${direction}`,
+        `b.booking_time ${direction} ${timeNulls}`,
+        `b.id ${direction}`,
+      ];
+      break;
+    case "study_date":
+      selectedOrder = [`b.booking_date ${direction}`, `b.booking_time ${direction} ${timeNulls}`, `b.id ${direction}`];
+      break;
+    case "accession":
+      selectedOrder = [`b.id ${direction}`];
+      break;
+    case "patient_name":
+      selectedOrder = [`lower(coalesce(p.english_full_name, p.arabic_full_name, p.mrn, '')) ${direction}`, "b.id asc"];
+      break;
+    case "mrn":
+      selectedOrder = [`lower(coalesce(p.mrn, '')) ${direction}`, "b.id asc"];
+      break;
+    case "exam_type":
+      selectedOrder = [`lower(coalesce(et.name_en, '')) ${direction}`, "b.id asc"];
+      break;
+    case "modality":
+      selectedOrder = [`upper(coalesce(m.code, '')) ${direction}`, "b.id asc"];
+      break;
+    case "assigned_doctor":
+      selectedOrder = [`lower(coalesce(assigned_doctor.display_name, '')) ${direction}`, "b.id asc"];
+      break;
+    default:
+      throw new HttpError(400, "sortBy is not supported.");
+  }
+
+  return [filters.pinUrgentToTop === false ? null : priorityPin, ...selectedOrder].filter(Boolean).join(", ");
+}
+
 export async function listReportingBoardCaseCandidates(
   filters: Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters,
   options: CaseQueryOptions = {}
@@ -410,6 +460,7 @@ export async function listReportingBoardCaseCandidates(
   const db = options.db ?? pool;
   const values: unknown[] = [];
   const where = addCaseFilters(filters, values);
+  const orderBy = caseSortOrder(filters);
   const limit = options.limitOverride ?? filters.limit ?? 50;
   const offset = options.offsetOverride ?? filters.offset ?? 0;
   values.push(limit);
@@ -460,7 +511,7 @@ export async function listReportingBoardCaseCandidates(
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-      order by rp.sort_order asc nulls last, b.booking_date asc, b.booking_time asc nulls first, b.id asc
+      order by ${orderBy}
       limit $${limitParam} offset $${offsetParam}
       ${options.forUpdate ? "for update of b skip locked" : ""}
     `,

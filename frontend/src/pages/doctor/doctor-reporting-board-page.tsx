@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
@@ -28,6 +28,8 @@ import type {
   ReportingBoardNotificationSettings,
   ReportingBoardReportStatus,
   ReportingBoardSavedView,
+  ReportingBoardSortBy,
+  ReportingBoardSortDirection,
   ReportingBoardSettings,
 } from "@/types/api";
 
@@ -39,6 +41,17 @@ const REPORT_STATUS_OPTIONS: Array<{ value: ReportingBoardReportStatus; label: s
   { value: "study_not_found", label: "Study not found" },
   { value: "unavailable", label: "Unavailable" },
   { value: "all", label: "All" },
+];
+
+const SORT_OPTIONS: Array<{ value: ReportingBoardSortBy; label: string }> = [
+  { value: "priority_study_date", label: "Priority + oldest study" },
+  { value: "study_date", label: "Study date" },
+  { value: "accession", label: "Accession number" },
+  { value: "patient_name", label: "Patient name" },
+  { value: "mrn", label: "MRN" },
+  { value: "exam_type", label: "Exam type" },
+  { value: "modality", label: "Modality" },
+  { value: "assigned_doctor", label: "Assigned doctor" },
 ];
 
 const EMPTY_NOTIFICATIONS: ReportingBoardNotificationSettings = {
@@ -138,9 +151,29 @@ function defaultFilters(settings?: ReportingBoardSettings): ReportingBoardFilter
     assignmentStatus: "all",
     reportStatus: settings?.defaultReportStatusFilter ?? "required_not_final",
     requiresReport: settings?.defaultRequiresReport ?? true,
+    sortBy: "priority_study_date",
+    sortDirection: "asc",
+    pinUrgentToTop: true,
     limit: 50,
     offset: 0,
   };
+}
+
+function assignmentOrderText(filters: ReportingBoardFilters): string {
+  const sortBy = filters.sortBy ?? "priority_study_date";
+  const direction = filters.sortDirection ?? "asc";
+  const descriptions: Record<ReportingBoardSortBy, Record<ReportingBoardSortDirection, string>> = {
+    priority_study_date: { asc: "priority + oldest study", desc: "priority + newest study" },
+    study_date: { asc: "study date oldest first", desc: "study date newest first" },
+    accession: { asc: "accession number low to high", desc: "accession number high to low" },
+    patient_name: { asc: "patient name A to Z", desc: "patient name Z to A" },
+    mrn: { asc: "MRN low to high", desc: "MRN high to low" },
+    exam_type: { asc: "exam type A to Z", desc: "exam type Z to A" },
+    modality: { asc: "modality A to Z", desc: "modality Z to A" },
+    assigned_doctor: { asc: "assigned doctor A to Z", desc: "assigned doctor Z to A" },
+  };
+  const selectedOrder = descriptions[sortBy]?.[direction] ?? descriptions.priority_study_date.asc;
+  return `Assignment order: ${filters.pinUrgentToTop === false ? selectedOrder : `STAT/urgent first, then ${selectedOrder}`}.`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -273,6 +306,7 @@ function BulkAssignModal({
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
           Backend will choose the next cases using {savedView ? `saved view "${savedView.name}"` : "current filters"}.
         </p>
+        <p className="mt-2 text-sm font-medium text-foreground">{assignmentOrderText(filters)}</p>
         <div className="mt-4 grid gap-3">
           <Field label="Doctor">
             <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className={inputClass()}>
@@ -314,7 +348,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams();
   const savedViewToken = params.token ?? searchParams.get("savedViewToken");
-  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, limit: 50, offset: 0 });
+  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 50, offset: 0 });
   const [loadedSavedView, setLoadedSavedView] = useState<ReportingBoardSavedView | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [saveName, setSaveName] = useState("");
@@ -487,7 +521,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         </div>
       </div>
 
-      <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 xl:grid-cols-8" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 xl:grid-cols-11" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <Field label="Date from"><input type="date" value={filters.dateFrom ?? ""} onChange={(event) => setFilter("dateFrom", event.target.value || null)} className={inputClass()} /></Field>
         <Field label="Date to"><input type="date" value={filters.dateTo ?? ""} onChange={(event) => setFilter("dateTo", event.target.value || null)} className={inputClass()} /></Field>
         <Field label="Modality">
@@ -530,6 +564,23 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {(lookupsQuery.data?.priorities ?? []).map((priority) => <option key={priority.id} value={priority.code}>{priority.nameEn}</option>)}
           </select>
         </Field>
+        <Field label="Sort by">
+          <select value={filters.sortBy ?? "priority_study_date"} onChange={(event) => setFilter("sortBy", event.target.value as ReportingBoardSortBy)} className={inputClass()}>
+            {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Direction">
+          <select value={filters.sortDirection ?? "asc"} onChange={(event) => setFilter("sortDirection", event.target.value as ReportingBoardSortDirection)} className={inputClass()}>
+            <option value="asc">Asc</option>
+            <option value="desc">Desc</option>
+          </select>
+        </Field>
+        <label className="flex h-full items-end text-sm font-medium">
+          <span className="inline-flex min-h-10 items-center gap-2 rounded-lg border px-3" style={{ borderColor: "var(--border)" }}>
+            <input type="checkbox" checked={filters.pinUrgentToTop !== false} onChange={(event) => setFilter("pinUrgentToTop", event.target.checked)} />
+            Keep STAT/urgent on top
+          </span>
+        </label>
         <Field label="Limit"><input type="number" min={1} max={100} value={filters.limit ?? 50} onChange={(event) => setFilter("limit", Number(event.target.value) || 50)} className={inputClass()} /></Field>
       </section>
 

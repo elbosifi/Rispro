@@ -25,6 +25,17 @@ import {
 } from "./reporting-board-service.js";
 
 const router = Router();
+const REPORTING_BOARD_SORT_BY = new Set([
+  "priority_study_date",
+  "study_date",
+  "accession",
+  "patient_name",
+  "mrn",
+  "exam_type",
+  "modality",
+  "assigned_doctor",
+]);
+const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 
 interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;
@@ -60,6 +71,20 @@ function booleanFromQuery(value: unknown): boolean | null {
   return parsed ?? null;
 }
 
+function optionalSortBy(value: unknown): ReportingBoardFilters["sortBy"] | null {
+  const parsed = asOptionalString(value);
+  if (!parsed) return null;
+  if (!REPORTING_BOARD_SORT_BY.has(parsed)) throw new HttpError(400, "sortBy is not supported.");
+  return parsed as ReportingBoardFilters["sortBy"];
+}
+
+function optionalSortDirection(value: unknown): ReportingBoardFilters["sortDirection"] | null {
+  const parsed = asOptionalString(value);
+  if (!parsed) return null;
+  if (!REPORTING_BOARD_SORT_DIRECTIONS.has(parsed)) throw new HttpError(400, "sortDirection must be asc or desc.");
+  return parsed as ReportingBoardFilters["sortDirection"];
+}
+
 function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
   return {
     dateFrom: asOptionalString(query.dateFrom) ?? null,
@@ -73,6 +98,9 @@ function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
     requiresReport: booleanFromQuery(query.requiresReport),
     reportStatus: (asOptionalString(query.reportStatus) as ReportingBoardFilters["reportStatus"]) ?? null,
     priorityCode: asOptionalString(query.priorityCode) ?? null,
+    sortBy: optionalSortBy(query.sortBy),
+    sortDirection: optionalSortDirection(query.sortDirection),
+    pinUrgentToTop: booleanFromQuery(query.pinUrgentToTop),
     limit: optionalPositiveInteger(query.limit, "limit"),
     offset: optionalNonNegativeInteger(query.offset, "offset"),
   };
@@ -85,6 +113,9 @@ function filtersFromBody(value: unknown): ReportingBoardFilters {
     modalityId: optionalPositiveInteger(body.modalityId, "modalityId"),
     assignedDoctorId: optionalPositiveInteger(body.assignedDoctorId, "assignedDoctorId"),
     requiresReport: asOptionalBoolean(body.requiresReport) ?? null,
+    sortBy: optionalSortBy(body.sortBy),
+    sortDirection: optionalSortDirection(body.sortDirection),
+    pinUrgentToTop: asOptionalBoolean(body.pinUrgentToTop) ?? null,
     limit: body.limit === undefined ? null : optionalPositiveInteger(body.limit, "limit"),
     offset: body.offset === undefined ? null : optionalNonNegativeInteger(body.offset, "offset"),
   } as ReportingBoardFilters;

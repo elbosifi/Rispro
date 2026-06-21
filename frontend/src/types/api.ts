@@ -389,9 +389,23 @@ export interface ReportingBoardFilters {
   priorityCode?: string | null;
   q?: string | null;
   appointmentId?: number | null;
+  sortBy?: ReportingBoardSortBy | null;
+  sortDirection?: ReportingBoardSortDirection | null;
+  pinUrgentToTop?: boolean | null;
   limit?: number | null;
   offset?: number | null;
 }
+
+export type ReportingBoardSortBy =
+  | "priority_study_date"
+  | "study_date"
+  | "accession"
+  | "patient_name"
+  | "mrn"
+  | "exam_type"
+  | "modality"
+  | "assigned_doctor";
+export type ReportingBoardSortDirection = "asc" | "desc";
 
 export interface ReportingBoardNotificationSettings {
   notifyNewMatchingCases?: boolean;

@@ -178,6 +178,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: /Bulk assign next cases/i }));
+    expect(await screen.findByText("Assignment order: STAT/urgent first, then priority + oldest study.")).toBeTruthy();
     const submit = screen.getByRole("button", { name: "Assign next cases" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
 
@@ -196,6 +197,22 @@ describe("DoctorReportingBoardPage", () => {
       filters: expect.objectContaining({ modalityId: 1 }),
     })));
     expect(await screen.findByText(/2\/2 assigned/)).toBeTruthy();
+  });
+
+  it("sends sort controls to the reporting board API", async () => {
+    renderPage();
+
+    await screen.findByText("Reporting Assignment Board");
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "accession" } });
+    fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "desc" } });
+    fireEvent.click(screen.getByLabelText("Keep STAT/urgent on top"));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({
+      sortBy: "accession",
+      sortDirection: "desc",
+      pinUrgentToTop: false,
+      offset: 0,
+    })));
   });
 
   it("does not expose editable settings for non-superadmin managers", async () => {

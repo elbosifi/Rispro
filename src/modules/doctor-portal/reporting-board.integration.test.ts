@@ -591,6 +591,104 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(audit.rowCount, 1);
   });
 
+  it("sorts board cases with STAT/urgent pinned by default", async () => {
+    guard();
+    const date = addDays(61);
+    const routine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date: addDays(59), time: "07:00", patientName: "Sort Routine" });
+    const noPriority = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: null, date: addDays(58), time: "06:00", patientName: "Sort No Priority" });
+    const urgent = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: urgentPriorityId, date, time: "10:00", patientName: "Sort Urgent" });
+    const stat = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, time: "11:00", patientName: "Sort Stat" });
+    [routine, noPriority, urgent, stat].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const response = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${addDays(58)}&dateTo=${date}&limit=20`
+    );
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.deepEqual(
+      response.data.cases.map((row) => row.appointmentId).filter((id) => [routine, noPriority, urgent, stat].includes(id)),
+      [stat, urgent, routine, noPriority]
+    );
+  });
+
+  it("sorts board cases by accession ascending and descending", async () => {
+    guard();
+    const date = addDays(62);
+    const first = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Sort Accession First" });
+    const second = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Sort Accession Second" });
+    [first, second].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const asc = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&sortBy=accession&sortDirection=asc&pinUrgentToTop=false`
+    );
+    const desc = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&sortBy=accession&sortDirection=desc&pinUrgentToTop=false`
+    );
+
+    assert.equal(asc.status, 200, JSON.stringify(asc.data));
+    assert.equal(desc.status, 200, JSON.stringify(desc.data));
+    assert.deepEqual(asc.data.cases.map((row) => row.appointmentId), [first, second]);
+    assert.deepEqual(desc.data.cases.map((row) => row.appointmentId), [second, first]);
+  });
+
+  it("sorts board cases by study date ascending and descending", async () => {
+    guard();
+    const earlierDate = addDays(63);
+    const laterDate = addDays(64);
+    const later = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: laterDate, patientName: "Sort Study Later" });
+    const earlier = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: earlierDate, patientName: "Sort Study Earlier" });
+    [later, earlier].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const asc = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${earlierDate}&dateTo=${laterDate}&sortBy=study_date&sortDirection=asc&pinUrgentToTop=false`
+    );
+    const desc = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${earlierDate}&dateTo=${laterDate}&sortBy=study_date&sortDirection=desc&pinUrgentToTop=false`
+    );
+
+    assert.equal(asc.status, 200, JSON.stringify(asc.data));
+    assert.equal(desc.status, 200, JSON.stringify(desc.data));
+    assert.deepEqual(asc.data.cases.map((row) => row.appointmentId), [earlier, later]);
+    assert.deepEqual(desc.data.cases.map((row) => row.appointmentId), [later, earlier]);
+  });
+
+  it("keeps STAT/urgent pinned for selected sorts unless pinning is disabled", async () => {
+    guard();
+    const date = addDays(65);
+    const routine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date, patientName: "Sort Pin Routine" });
+    const urgent = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: urgentPriorityId, date, patientName: "Sort Pin Urgent" });
+    const stat = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, patientName: "Sort Pin Stat" });
+    [routine, urgent, stat].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const pinned = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&sortBy=accession&sortDirection=asc`
+    );
+    const unpinned = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&sortBy=accession&sortDirection=asc&pinUrgentToTop=false`
+    );
+
+    assert.equal(pinned.status, 200, JSON.stringify(pinned.data));
+    assert.equal(unpinned.status, 200, JSON.stringify(unpinned.data));
+    assert.deepEqual(pinned.data.cases.map((row) => row.appointmentId), [stat, urgent, routine]);
+    assert.deepEqual(unpinned.data.cases.map((row) => row.appointmentId), [routine, urgent, stat]);
+  });
+
+  it("rejects invalid reporting-board sort parameters", async () => {
+    guard();
+    const invalidSort = await api(supervisor.cookie, "/api/doctor/reporting-board/cases?sortBy=booking_id;drop");
+    const invalidDirection = await api(supervisor.cookie, "/api/doctor/reporting-board/cases?sortDirection=sideways");
+
+    assert.equal(invalidSort.status, 400);
+    assert.equal(invalidDirection.status, 400);
+  });
+
   it("single-row Reporting Board assignment writes audit and creates notifyAssignedToMe events only when enabled", async () => {
     guard();
     const notifyView = await createSavedView(targetDoctor, true, { assignedDoctorId: targetDoctor.doctorId });

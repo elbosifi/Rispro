@@ -55,7 +55,10 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /rp\.code as "reportingPriorityCode"/);
     assert.match(repo, /rp\.name_en as "reportingPriorityName"/);
     assert.match(repo, /rp\.sort_order as "reportingPrioritySortOrder"/);
-    assert.match(repo, /order by rp\.sort_order asc nulls last, b\.booking_date asc, b\.booking_time asc nulls first, b\.id asc/);
+    assert.match(repo, /caseSortOrder/);
+    assert.match(repo, /priority_study_date/);
+    assert.match(repo, /case lower\(coalesce\(rp\.code, ''\)\) when 'stat' then 0 when 'urgent' then 1 else 2 end asc/);
+    assert.match(repo, /order by \$\{orderBy\}/);
   });
 
   it("uses SonicDICOM status without crashing board case listing", () => {
