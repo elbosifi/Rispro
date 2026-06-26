@@ -200,6 +200,27 @@ function notesIndicator(language: Language, appointment: AppointmentWithDetails)
     : t(language, "common.na");
 }
 
+function relatedAppointmentBadgeText(
+  language: Language,
+  appointment: NonNullable<AppointmentWithDetails["relatedAppointments"]>[number]
+): string {
+  return chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn) || appointment.accessionNumber;
+}
+
+function relatedAppointmentTitle(
+  language: Language,
+  appointment: NonNullable<AppointmentWithDetails["relatedAppointments"]>[number]
+): string {
+  const modality = chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn);
+  const exam = chooseLocalized(language, appointment.examNameAr, appointment.examNameEn);
+  return [
+    modality,
+    exam,
+    appointment.accessionNumber,
+    normalizeStatusLabel(language, appointment.appointmentStatus),
+  ].filter(Boolean).join(" - ");
+}
+
 function rowStatusClass(status: AppointmentStatus, selected: boolean): string {
   const selectedClass = selected ? "ring-1 ring-accent/40" : "";
   switch (status) {
@@ -599,6 +620,7 @@ export default function ModalityPage() {
                       const canCompleteRow = canAct && appointment.status !== "scheduled";
                       const canMarkArrived = appointment.status === "scheduled" || appointment.status === "waiting";
                       const arrivalNumber = arrivalNumberById.get(appointment.id);
+                      const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
                       return (
                             <tr
                               key={appointment.id}
@@ -629,6 +651,22 @@ export default function ModalityPage() {
                               <td className="px-2 py-1">
                                 <p className="font-semibold text-foreground">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
                                 <p className="text-[10px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
+                                {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? (
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {relatedAppointments.slice(0, 3).map((related) => (
+                                      <Badge
+                                        key={related.appointmentId}
+                                        variant="info"
+                                        size="sm"
+                                        title={relatedAppointmentTitle(language, related)}
+                                        aria-label={relatedAppointmentTitle(language, related)}
+                                        className="text-[10px]"
+                                      >
+                                        {relatedAppointmentBadgeText(language, related)}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </td>
                               <td className="px-2 py-1 text-[11px] text-slate-700">
                                 <p>{appointment.mrn || EMPTY_VALUE}</p>

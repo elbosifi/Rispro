@@ -1023,6 +1023,9 @@ export interface Appointment {
   completedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  sameDayAppointmentCount?: number;
+  hasMultipleAppointments?: boolean;
+  relatedAppointments?: QueueRelatedAppointment[];
 }
 
 export interface AppointmentLookups {

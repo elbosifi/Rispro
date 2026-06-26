@@ -937,12 +937,51 @@ router.get(
 
     const params: unknown[] = [modalityId];
     let dateClause = "";
+    let worklistDateClause = "";
     if (scope !== "all") {
       params.push(date);
-      dateClause = `and b.booking_date = $${params.length}::date`;
+      const dateParam = `$${params.length}`;
+      dateClause = `and b.booking_date = ${dateParam}::date`;
+      worklistDateClause = `and wb.booking_date = ${dateParam}::date`;
     }
 
     const sql = `
+      with worklist_rows as (
+        select wb.id, wb.patient_id, wb.booking_date
+        from appointments_v2.bookings wb
+        where wb.modality_id = $1
+          and wb.status in ('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued')
+          ${worklistDateClause}
+      ),
+      active_same_day as (
+        select
+          rb.patient_id,
+          rb.booking_date,
+          count(*)::int as same_day_appointment_count,
+          jsonb_agg(
+            jsonb_build_object(
+              'appointment_id', rb.id,
+              'accession_number', ('V2-' || lpad(rb.id::text, 6, '0')),
+              'appointment_status', rb.status,
+              'modality_name_ar', rm.name_ar,
+              'modality_name_en', rm.name_en,
+              'exam_name_ar', ret.name_ar,
+              'exam_name_en', ret.name_en
+            )
+            order by rb.created_at asc, rb.id asc
+          ) as related_appointments
+        from appointments_v2.bookings rb
+        join modalities rm on rm.id = rb.modality_id
+        left join exam_types ret on ret.id = rb.exam_type_id
+        where rb.status in ('scheduled', 'arrived', 'waiting')
+          and exists (
+            select 1
+            from worklist_rows wr
+            where wr.patient_id = rb.patient_id
+              and wr.booking_date = rb.booking_date
+          )
+        group by rb.patient_id, rb.booking_date
+      )
       select
         b.id,
         b.patient_id,
@@ -979,12 +1018,16 @@ router.get(
         et.name_en as exam_name_en,
         rp.name_ar as priority_name_ar,
         rp.name_en as priority_name_en,
-        row_number() over (partition by b.booking_date, b.modality_id order by b.created_at asc, b.id asc)::int as modality_slot_number
+        row_number() over (partition by b.booking_date, b.modality_id order by b.created_at asc, b.id asc)::int as modality_slot_number,
+        coalesce(asd.same_day_appointment_count, case when b.status in ('scheduled', 'arrived', 'waiting') then 1 else 0 end)::int as same_day_appointment_count,
+        (coalesce(asd.same_day_appointment_count, 0) > 1) as has_multiple_appointments,
+        coalesce(asd.related_appointments, '[]'::jsonb) as related_appointments
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join active_same_day asd on asd.patient_id = b.patient_id and asd.booking_date = b.booking_date
       left join lateral (
         select
           coalesce(

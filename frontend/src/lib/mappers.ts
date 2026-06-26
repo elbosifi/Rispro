@@ -313,7 +313,12 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     isWalkIn: bool(raw, 'is_walk_in', bool(raw, 'isWalkIn', false)),
     isOverbooked: bool(raw, 'is_overbooked', bool(raw, 'isOverbooked', false)),
     overbookingReason: strOrNull(raw, 'overbooking_reason') ?? strOrNull(raw, 'overbookingReason'),
-    notes: strOrNull(raw, 'notes')
+    notes: strOrNull(raw, 'notes'),
+    sameDayAppointmentCount: num(raw, 'same_day_appointment_count') || num(raw, 'sameDayAppointmentCount'),
+    hasMultipleAppointments: bool(raw, 'has_multiple_appointments', bool(raw, 'hasMultipleAppointments', false)),
+    relatedAppointments: rawArray(raw, 'related_appointments').length > 0
+      ? rawArray(raw, 'related_appointments').map(mapQueueRelatedAppointment)
+      : rawArray(raw, 'relatedAppointments').map(mapQueueRelatedAppointment)
   };
 }
 

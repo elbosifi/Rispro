@@ -98,6 +98,15 @@ describe("status booking service source guards", () => {
     assert.doesNotMatch(readV2RoutesSource, /modality\/worklist[\s\S]*b\.status in \([^)]*'voided'/);
   });
 
+  it("V2 modality worklist derives same-day multiple appointment details", () => {
+    assert.match(readV2RoutesSource, /"\/modality\/worklist"/);
+    assert.match(readV2RoutesSource, /with worklist_rows as/);
+    assert.match(readV2RoutesSource, /active_same_day as/);
+    assert.match(readV2RoutesSource, /same_day_appointment_count/);
+    assert.match(readV2RoutesSource, /has_multiple_appointments/);
+    assert.match(readV2RoutesSource, /related_appointments/);
+  });
+
   it("manual reversal does not disable future auto-completion for non-Orthanc completed bookings", () => {
     assert.match(source, /booking\.auto_completed_by === "orthanc_pacs_auto_completion"/);
     assert.match(source, /!booking\.pacs_auto_completion_disabled_at/);

@@ -184,6 +184,46 @@ describe("ModalityPage modality board", () => {
     expect(within(scheduledRow).getByText("Scheduled")).toBeTruthy();
   });
 
+  it("shows same-day sibling appointment modality badges with hover details", async () => {
+    await openBoard([
+      appointment({
+        id: 1,
+        accessionNumber: "ACC-CT",
+        status: "waiting",
+        englishFullName: "Multi Patient",
+        sameDayAppointmentCount: 2,
+        hasMultipleAppointments: true,
+        relatedAppointments: [
+          {
+            appointmentId: 1,
+            accessionNumber: "ACC-CT",
+            appointmentStatus: "waiting",
+            modalityNameAr: "CT",
+            modalityNameEn: "CT",
+            examNameAr: "CT Brain",
+            examNameEn: "CT Brain",
+          },
+          {
+            appointmentId: 2,
+            accessionNumber: "ACC-MRI",
+            appointmentStatus: "scheduled",
+            modalityNameAr: "MRI",
+            modalityNameEn: "MRI",
+            examNameAr: "MRI Brain",
+            examNameEn: "MRI Brain",
+          },
+        ],
+      }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-1");
+    const badge = within(row).getByText("MRI");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("title")).toContain("MRI Brain");
+    expect(badge.getAttribute("title")).toContain("ACC-MRI");
+    expect(badge.getAttribute("title")).toContain("Scheduled");
+  });
+
   it("shows Mark Arrived instead of Complete as the scheduled row action", async () => {
     const user = await openBoard([
       appointment({ id: 12, accessionNumber: "ACC-SCHEDULED", status: "scheduled", bookingTime: "10:00", englishFullName: "Scheduled Patient" }),
