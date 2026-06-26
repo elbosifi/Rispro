@@ -187,6 +187,46 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.getAllByText(/draft/i).length).toBeGreaterThan(1);
   });
 
+  it("uses a default board limit of 100", async () => {
+    renderPage();
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
+  });
+
+  it("allows a reporting board limit up to 300", async () => {
+    renderPage();
+
+    await screen.findByText("Reporting Assignment Board");
+    fireEvent.click(screen.getByRole("button", { name: /Advanced filters/i }));
+    await screen.findByLabelText("Priority");
+    const limitLabel = screen.getByText("Limit").closest("label");
+    expect(limitLabel).toBeTruthy();
+    const limit = limitLabel!.querySelector("input") as HTMLInputElement;
+    expect(limit.max).toBe("300");
+    expect(screen.getByText("Shows up to 300 cases. Use filters for larger lists.")).toBeTruthy();
+
+    fireEvent.change(limit, { target: { value: "300" } });
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 300, offset: 0 })));
+  });
+
+  it("shows case query errors instead of the empty state", async () => {
+    fetchReportingBoardCasesMock.mockRejectedValue(new Error("Could not load reporting cases."));
+    renderPage();
+
+    expect(await screen.findByText("Could not load reporting cases.")).toBeTruthy();
+    expect(screen.queryByText("No cases match these filters.")).toBeNull();
+  });
+
+  it("shows the empty state for a successful empty case result", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({ cases: [], filters: { reportStatus: "required_not_final", limit: 100, offset: 0 } });
+    renderPage();
+
+    expect(await screen.findByText("No cases match these filters.")).toBeTruthy();
+    expect(screen.queryByText("Could not load reporting cases.")).toBeNull();
+  });
+
   it("opens and applies a saved view token", async () => {
     renderPage("/doctor/reporting-board?savedViewToken=tok-9");
 

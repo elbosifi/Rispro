@@ -55,7 +55,7 @@ interface Actor {
   appRole: Role;
 }
 
-const MAX_CASE_LIST_LIMIT = 100;
+const MAX_CASE_LIST_LIMIT = 300;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
 const REPORTING_BOARD_SORT_BY = new Set([
@@ -95,7 +95,7 @@ function normalizeReportState(state: SonicDicomReportState): ReportingBoardCaseR
 }
 
 function normalizeLimit(limit?: number | null): number {
-  const value = limit ?? 50;
+  const value = limit ?? 100;
   if (!Number.isInteger(value) || value <= 0) throw new HttpError(400, "limit must be a positive integer.");
   if (value > MAX_CASE_LIST_LIMIT) throw new HttpError(400, `limit must be ${MAX_CASE_LIST_LIMIT} or less.`);
   return value;
@@ -215,7 +215,10 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
 
-function statsReportStatus(row: ReportingBoardStatsBaseRow): ReportingBoardCaseRow["reportStatus"] {
+type ReportingBoardStatsInputRow = ReportingBoardStatsBaseRow & Partial<Pick<ReportingBoardCaseRow, "reportStatus">>;
+
+function statsReportStatus(row: ReportingBoardStatsInputRow): ReportingBoardCaseRow["reportStatus"] {
+  if (row.reportStatus) return row.reportStatus;
   if (!row.requiresReport) return "no_report";
   // Report status is not persisted locally. Statistics use statuses recently
   // resolved by case listing; uncached required cases stay unavailable to avoid
@@ -223,11 +226,11 @@ function statsReportStatus(row: ReportingBoardStatsBaseRow): ReportingBoardCaseR
   return reportStatusSnapshot.get(row.appointmentId) ?? "unavailable";
 }
 
-function statsRequiredNotFinal(row: ReportingBoardStatsBaseRow): boolean {
+function statsRequiredNotFinal(row: ReportingBoardStatsInputRow): boolean {
   return row.requiresReport && statsReportStatus(row) !== "final";
 }
 
-function matchesStatsReportStatus(row: ReportingBoardStatsBaseRow, reportStatus: ReportingBoardFilters["reportStatus"]): boolean {
+function matchesStatsReportStatus(row: ReportingBoardStatsInputRow, reportStatus: ReportingBoardFilters["reportStatus"]): boolean {
   if (!reportStatus || reportStatus === "all") return true;
   if (reportStatus === "required_not_final") return statsRequiredNotFinal(row);
   return statsReportStatus(row) === reportStatus;
@@ -266,7 +269,7 @@ function doctorStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoardDoctorSt
   };
 }
 
-function aggregateReportingBoardStats(rows: ReportingBoardStatsBaseRow[]): Omit<ReportingBoardStatsResponse, "filters"> {
+function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit<ReportingBoardStatsResponse, "filters"> {
   const today = todayIso();
   const summary = emptyStatsSummary();
   const byDoctor = new Map<string, ReportingBoardDoctorStatsRow>();
@@ -365,6 +368,11 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
+  if (filters.reportStatus && filters.reportStatus !== "all") {
+    const rows = await listReportingBoardCaseCandidates(scopedFilters);
+    const cases = await applyReportStatuses(rows, filters.reportStatus);
+    return { filters, ...aggregateReportingBoardStats(cases) };
+  }
   const rows = (await listReportingBoardStatsRows(scopedFilters)).filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
   return { filters, ...aggregateReportingBoardStats(rows) };
 }

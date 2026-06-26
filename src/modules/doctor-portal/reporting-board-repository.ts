@@ -463,7 +463,7 @@ export async function listReportingBoardCaseCandidates(
   const values: unknown[] = [];
   const where = addCaseFilters(filters, values);
   const orderBy = caseSortOrder(filters);
-  const limit = options.limitOverride ?? filters.limit ?? 50;
+  const limit = options.limitOverride ?? filters.limit ?? 100;
   const offset = options.offsetOverride ?? filters.offset ?? 0;
   values.push(limit);
   const limitParam = values.length;

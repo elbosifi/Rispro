@@ -162,7 +162,7 @@ function defaultFilters(settings?: ReportingBoardSettings): ReportingBoardFilter
     sortBy: "priority_study_date",
     sortDirection: "asc",
     pinUrgentToTop: true,
-    limit: 50,
+    limit: 100,
     offset: 0,
   };
 }
@@ -527,7 +527,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams();
   const savedViewToken = params.token ?? searchParams.get("savedViewToken");
-  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 50, offset: 0 });
+  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 100, offset: 0 });
   const [loadedSavedView, setLoadedSavedView] = useState<ReportingBoardSavedView | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [saveName, setSaveName] = useState("");
@@ -728,7 +728,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     Boolean(filters.priorityCode),
     (filters.sortDirection ?? "asc") !== "asc",
     filters.pinUrgentToTop === false,
-    (filters.limit ?? 50) !== 50,
+    (filters.limit ?? 100) !== 100,
   ].filter(Boolean).length;
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
@@ -907,7 +907,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 Keep STAT/urgent on top
               </span>
             </label>
-            <Field label="Limit"><input type="number" min={1} max={100} value={filters.limit ?? 50} onChange={(event) => setFilter("limit", Number(event.target.value) || 50)} className={inputClass()} /></Field>
+            <Field label="Limit">
+              <input type="number" min={1} max={300} value={filters.limit ?? 100} onChange={(event) => setFilter("limit", Number(event.target.value) || 100)} className={inputClass()} />
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>Shows up to 300 cases. Use filters for larger lists.</span>
+            </Field>
           </div>
         )}
       </section>
@@ -1054,7 +1057,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               </table>
             </div>
             {casesQuery.isLoading && <p className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>Loading reporting cases...</p>}
-            {!casesQuery.isLoading && cases.length === 0 && <p className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>No cases match these filters.</p>}
+            {casesQuery.isError && (
+              <p className="m-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {casesQuery.error instanceof Error ? casesQuery.error.message : "Could not load reporting cases."}
+              </p>
+            )}
+            {!casesQuery.isLoading && !casesQuery.isError && cases.length === 0 && <p className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>No cases match these filters.</p>}
           </div>
           {bulkResult && (
             <div className="rounded-lg border p-4 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>

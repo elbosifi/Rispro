@@ -540,6 +540,30 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(byId.get(unavailableId), "unavailable");
   });
 
+  it("keeps report-status-filtered stats consistent with table rows", async () => {
+    guard();
+    const date = addDays(35);
+    const finalId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Stats Final" });
+    const draftId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Stats Draft" });
+    statusByAppointmentId.set(finalId, "final");
+    statusByAppointmentId.set(draftId, "draft");
+
+    for (const reportStatus of ["required_not_final", "draft", "final"] as const) {
+      const stats = await api<{ summary: { total: number; requiredNotFinal: number; draft: number; final: number } }>(
+        supervisor.cookie,
+        `/api/doctor/reporting-board/stats?dateFrom=${date}&dateTo=${date}&reportStatus=${reportStatus}`
+      );
+      const cases = await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
+        supervisor.cookie,
+        `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=${reportStatus}`
+      );
+
+      assert.equal(stats.status, 200, JSON.stringify(stats.data));
+      assert.equal(cases.status, 200, JSON.stringify(cases.data));
+      assert.equal(stats.data.summary.total, cases.data.cases.length, reportStatus);
+    }
+  });
+
   it("bulk assigns next eligible cases in priority/date/time order and enforces assignment rules", async () => {
     guard();
     const date = addDays(40);
@@ -875,13 +899,15 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(unpinned.data.cases.map((row) => row.appointmentId), [routine, urgent, stat]);
   });
 
-  it("rejects invalid reporting-board sort parameters", async () => {
+  it("rejects invalid reporting-board sort parameters and excessive limits", async () => {
     guard();
     const invalidSort = await api(supervisor.cookie, "/api/doctor/reporting-board/cases?sortBy=booking_id;drop");
     const invalidDirection = await api(supervisor.cookie, "/api/doctor/reporting-board/cases?sortDirection=sideways");
+    const excessiveLimit = await api(supervisor.cookie, "/api/doctor/reporting-board/cases?limit=301");
 
     assert.equal(invalidSort.status, 400);
     assert.equal(invalidDirection.status, 400);
+    assert.equal(excessiveLimit.status, 400);
   });
 
   it("single-row Reporting Board assignment writes audit and creates notifyAssignedToMe events only when enabled", async () => {
