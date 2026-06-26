@@ -76,8 +76,7 @@ function validateDatabaseName(name: string, fallback: string): string {
 
 async function loadSqlModule(): Promise<SqlModule | null> {
   try {
-    const importer = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>;
-    const imported = await importer("mssql");
+    const imported = await import("mssql");
     const sql = ((imported as { default?: unknown })?.default ?? imported) as Partial<SqlModule>;
     if (typeof sql.ConnectionPool !== "function") {
       throw new Error("mssql module loaded but ConnectionPool constructor was not found");

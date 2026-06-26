@@ -3,6 +3,7 @@ import { requireAnyRole, requireAuth } from "../middleware/auth.js";
 import { requireActionPin } from "../middleware/action-pin.js";
 import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { HttpError } from "../utils/http-error.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { pool } from "../db/pool.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
@@ -33,6 +34,13 @@ export const patientsRouter: Router = express.Router();
 patientsRouter.use(requireAuth);
 patientsRouter.use(requirePageAccess("patients"));
 
+function parseOptionalDirectoryEnum<T extends string>(value: unknown, fieldName: string, allowed: readonly T[]): T | undefined {
+  if (value == null || value === "") return undefined;
+  const stringValue = String(value);
+  if ((allowed as readonly string[]).includes(stringValue)) return stringValue as T;
+  throw new HttpError(400, `${fieldName} is invalid.`);
+}
+
 patientsRouter.get(
   "/identifier-types",
   asyncRoute(async (_req: Request, res: Response) => {
@@ -46,15 +54,14 @@ patientsRouter.get(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const query = request.query as UnknownRecord;
-    console.log("Directory query params:", query);
     const result = await getPatientDirectory({
       search: String(query.q ?? ""),
-      category: (query.category as "oncology" | "non_oncology") || undefined,
-      appointmentFilter: (query.appointmentFilter as "has_future" | "today" | "no_future") || undefined,
-      sex: (query.sex as "male" | "female") || undefined,
+      category: parseOptionalDirectoryEnum(query.category, "category", ["oncology", "non_oncology"]),
+      appointmentFilter: parseOptionalDirectoryEnum(query.appointmentFilter, "appointmentFilter", ["has_future", "today", "no_future"]),
+      sex: parseOptionalDirectoryEnum(query.sex, "sex", ["male", "female"]),
       ageMin: query.ageMin ? Number(query.ageMin) : undefined,
       ageMax: query.ageMax ? Number(query.ageMax) : undefined,
-      sortBy: (query.sortBy as "name" | "recent" | "mrn") || undefined,
+      sortBy: parseOptionalDirectoryEnum(query.sortBy, "sortBy", ["name", "recent", "mrn"]),
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 25
     });

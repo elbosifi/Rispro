@@ -23,6 +23,47 @@ const router = Router();
 
 router.use(requireAuth);
 
+function readSingleQueryValue(value: unknown): string | null {
+  if (Array.isArray(value)) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function parsePositiveIntQuery(value: unknown, fieldName: string): number | null {
+  const raw = readSingleQueryValue(value);
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new SchedulingError(400, `${fieldName} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function parseBoundedIntQuery(value: unknown, fieldName: string, defaultValue: number, min: number, max: number): number {
+  const raw = readSingleQueryValue(value);
+  if (!raw) return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new SchedulingError(400, `${fieldName} must be an integer`);
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function parseCaseCategoryQuery(value: unknown): "oncology" | "non_oncology" {
+  const raw = readSingleQueryValue(value);
+  if (!raw) return "non_oncology";
+  if (raw === "oncology" || raw === "non_oncology") return raw;
+  throw new SchedulingError(400, "caseCategory must be oncology or non_oncology");
+}
+
+function parseCapacityResolutionModeQuery(value: unknown, useSpecialQuota: boolean): CapacityResolutionMode {
+  const raw = readSingleQueryValue(value);
+  if (!raw) return useSpecialQuota ? "special_quota_extra" : "standard";
+  if (raw === "standard" || raw === "category_override" || raw === "total_capacity_override" || raw === "special_quota_extra") return raw;
+  throw new SchedulingError(400, "capacityResolutionMode is invalid");
+}
+
 /**
  * POST /api/v2/scheduling/evaluate
  * Evaluate a booking candidate and return a structured decision.
@@ -57,14 +98,13 @@ router.post(
 router.get(
   "/availability",
   asyncRoute(async (req: Request, res: Response) => {
-    const modalityId = req.query.modalityId ? Number(req.query.modalityId) : null;
-    const days = req.query.days ? Number(req.query.days) : 14;
-    const offset = req.query.offset ? Number(req.query.offset) : 0;
-    const examTypeId = req.query.examTypeId ? Number(req.query.examTypeId) : null;
-    const caseCategory = (req.query.caseCategory as "oncology" | "non_oncology") ?? "non_oncology";
-    const capacityResolutionMode =
-      (req.query.capacityResolutionMode as CapacityResolutionMode | undefined) ??
-      (req.query.useSpecialQuota === "true" ? "special_quota_extra" : "standard");
+    const modalityId = parsePositiveIntQuery(req.query.modalityId, "modalityId");
+    const days = parseBoundedIntQuery(req.query.days, "days", 14, 0, 60);
+    const offset = parseBoundedIntQuery(req.query.offset, "offset", 0, 0, 365);
+    const examTypeId = parsePositiveIntQuery(req.query.examTypeId, "examTypeId");
+    const caseCategory = parseCaseCategoryQuery(req.query.caseCategory);
+    const useSpecialQuota = req.query.useSpecialQuota === "true";
+    const capacityResolutionMode = parseCapacityResolutionModeQuery(req.query.capacityResolutionMode, useSpecialQuota);
 
     if (!modalityId) {
       throw new SchedulingError(400, "modalityId is required");
@@ -77,7 +117,7 @@ router.get(
       examTypeId,
       caseCategory,
       capacityResolutionMode,
-      useSpecialQuota: req.query.useSpecialQuota === "true",
+      useSpecialQuota,
       specialReasonCode: req.query.specialReasonCode ? String(req.query.specialReasonCode) : null,
       includeOverrideCandidates: req.query.includeOverrideCandidates === "true",
       requesterRole: req.user?.role,
@@ -112,10 +152,10 @@ router.get(
 router.get(
   "/suggestions",
   asyncRoute(async (req: Request, res: Response) => {
-    const modalityId = req.query.modalityId ? Number(req.query.modalityId) : null;
-    const days = req.query.days ? Number(req.query.days) : 14;
-    const examTypeId = req.query.examTypeId ? Number(req.query.examTypeId) : null;
-    const caseCategory = req.query.caseCategory as "oncology" | "non_oncology" | undefined;
+    const modalityId = parsePositiveIntQuery(req.query.modalityId, "modalityId");
+    const days = parseBoundedIntQuery(req.query.days, "days", 14, 0, 60);
+    const examTypeId = parsePositiveIntQuery(req.query.examTypeId, "examTypeId");
+    const caseCategory = parseCaseCategoryQuery(req.query.caseCategory);
     const includeOverrideCandidates = req.query.includeOverrideCandidates === "true";
 
     if (!modalityId) {

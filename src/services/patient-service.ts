@@ -1481,6 +1481,82 @@ interface PatientDirectoryResult {
   };
 }
 
+function addSqlParam(values: unknown[], value: unknown): string {
+  values.push(value);
+  return `$${values.length}`;
+}
+
+function buildPatientDirectoryWhere(params: {
+  term: string;
+  normalizedTerm: string;
+  normalizedArabicTerm: string;
+  normalizedArabicCompactTerm: string;
+  normalizedPattern: string;
+  normalizedCompactPattern: string;
+  normalizedIdentifierPattern: string;
+  sex?: "male" | "female";
+  ageMin?: number;
+  ageMax?: number;
+  category?: "oncology" | "non_oncology";
+  appointmentFilter?: "has_future" | "today" | "no_future";
+}): { where: string; values: unknown[] } {
+  const values: unknown[] = [];
+  const clauses: string[] = [];
+
+  if (params.term) {
+    const normalizedTermParam = addSqlParam(values, params.normalizedTerm);
+    const normalizedPatternParam = addSqlParam(values, params.normalizedPattern);
+    const compactTermParam = addSqlParam(values, params.normalizedArabicCompactTerm);
+    const compactPatternParam = addSqlParam(values, params.normalizedCompactPattern);
+    const identifierPatternParam = addSqlParam(values, params.normalizedIdentifierPattern);
+    clauses.push(`(
+      p.mrn ilike ${normalizedTermParam}
+      or p.national_id ilike ${normalizedTermParam}
+      or p.identifier_value ilike ${normalizedTermParam}
+      or p.phone_1 ilike ${normalizedTermParam}
+      or p.phone_2 ilike ${normalizedTermParam}
+      or p.arabic_full_name ilike ${normalizedTermParam}
+      or p.normalized_arabic_name ilike ${normalizedPatternParam}
+      or (
+        ${compactTermParam} <> ''
+        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
+        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) ilike ${compactPatternParam}
+      )
+      or p.english_full_name ilike ${normalizedTermParam}
+      or exists (
+        select 1 from patient_identifiers pi
+        where pi.patient_id = p.id and (pi.value ilike ${normalizedTermParam} or pi.normalized_value ilike ${identifierPatternParam})
+      )
+    )`);
+  }
+
+  const normalizedSex = String(params.sex || "").trim().toLowerCase();
+  if (normalizedSex === "male" || normalizedSex === "m") {
+    clauses.push("lower(coalesce(p.sex, '')) in ('m', 'male')");
+  } else if (normalizedSex === "female" || normalizedSex === "f") {
+    clauses.push("lower(coalesce(p.sex, '')) in ('f', 'female')");
+  }
+
+  if (params.ageMin || params.ageMax) {
+    clauses.push(`p.age_years >= ${addSqlParam(values, params.ageMin || 0)}`);
+    clauses.push(`p.age_years <= ${addSqlParam(values, params.ageMax || 200)}`);
+  }
+
+  if (params.category === "oncology" || params.category === "non_oncology") {
+    clauses.push(`p.category = ${addSqlParam(values, params.category)}`);
+  }
+
+  const appointmentFilterClause = getAppointmentFilterClause(params.appointmentFilter).trim();
+  if (appointmentFilterClause) {
+    clauses.push(appointmentFilterClause.replace(/^and\s+/i, ""));
+  }
+
+  return {
+    where: clauses.length > 0 ? clauses.join("\n      and ") : "1=1",
+    values,
+  };
+}
+
 export async function getPatientDirectory(params: PatientDirectoryParams): Promise<PatientDirectoryResult> {
   const term = (params.search || "").trim();
   const category = params.category;
@@ -1505,41 +1581,24 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
   const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
 
-  const normalizedSex = String(sex || "").trim().toLowerCase();
-  const sexFilter = normalizedSex
-    ? normalizedSex === "male" || normalizedSex === "m"
-      ? ` and lower(coalesce(p.sex, '')) in ('m', 'male')`
-      : ` and lower(coalesce(p.sex, '')) in ('f', 'female')`
-    : "";
-  const ageFilter = (ageMin || ageMax) ? ` and p.age_years >= ${ageMin || 0} and p.age_years <= ${ageMax || 200}` : "";
-  const categoryFilter = category ? ` and p.category = '${category}'` : "";
-  const appointmentFilterClause = getAppointmentFilterClause(appointmentFilter);
+  const directoryWhere = buildPatientDirectoryWhere({
+    term,
+    normalizedTerm,
+    normalizedArabicTerm,
+    normalizedArabicCompactTerm,
+    normalizedPattern,
+    normalizedCompactPattern,
+    normalizedIdentifierPattern,
+    sex,
+    ageMin,
+    ageMax,
+    category,
+    appointmentFilter,
+  });
 
-  const searchWhere = term ? `(
-      p.mrn ilike '${normalizedTerm}'
-      or p.national_id ilike '${normalizedTerm}'
-      or p.identifier_value ilike '${normalizedTerm}'
-      or p.phone_1 ilike '${normalizedTerm}'
-      or p.phone_2 ilike '${normalizedTerm}'
-      or p.arabic_full_name ilike '${normalizedTerm}'
-      or p.normalized_arabic_name ilike '${normalizedPattern}'
-      or (
-        '${normalizedArabicCompactTerm}' <> ''
-        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
-        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) ilike '${normalizedCompactPattern}'
-      )
-      or p.english_full_name ilike '${normalizedTerm}'
-      or exists (
-        select 1 from patient_identifiers pi
-        where pi.patient_id = p.id and (pi.value ilike '${normalizedTerm}' or pi.normalized_value ilike '${normalizedIdentifierPattern}')
-      )
-    )` : "1=1";
+  const countQuery = `select count(*)::bigint as total from patients p where ${directoryWhere.where}`;
 
-  const filtersApplied = sexFilter || ageFilter || categoryFilter;
-
-  const countQuery = `select count(*)::bigint as total from patients p where ${searchWhere}${sexFilter}${ageFilter}${categoryFilter}${appointmentFilterClause}`;
-
-  const countResult = await pool.query<{ total: string }>(countQuery);
+  const countResult = await pool.query<{ total: string }>(countQuery, directoryWhere.values);
   const total = Number(countResult.rows[0]?.total || 0);
   const totalPages = Math.ceil(total / pageSize);
 
@@ -1559,6 +1618,19 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
     }
   }
 
+  const queryParams = [...directoryWhere.values];
+  const termParam = addSqlParam(queryParams, term);
+  const rankTermParam = addSqlParam(queryParams, normalizedTerm);
+  const exactArabicParam = addSqlParam(queryParams, normalizedArabicTerm);
+  const compactTermParam = addSqlParam(queryParams, normalizedArabicCompactTerm);
+  const exactEnglishParam = addSqlParam(queryParams, normalizedEnglishTerm);
+  const arabicPrefixParam = addSqlParam(queryParams, normalizedArabicPrefixPattern);
+  const englishPrefixParam = addSqlParam(queryParams, normalizedEnglishPrefixPattern);
+  const arabicLaterTokenParam = addSqlParam(queryParams, normalizedArabicLaterTokenPattern);
+  const englishLaterTokenParam = addSqlParam(queryParams, normalizedEnglishLaterTokenPattern);
+  const pageSizeParam = addSqlParam(queryParams, pageSize);
+  const offsetParam = addSqlParam(queryParams, offset);
+
   const query = `
     with filtered_patients as (
       select
@@ -1574,33 +1646,29 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         p.normalized_arabic_name,
         p.estimated_date_of_birth,
         case
-          when '${term}' = '' then 99
-          when p.mrn ilike '${normalizedTerm}'
-            or p.national_id ilike '${normalizedTerm}'
-            or p.identifier_value ilike '${normalizedTerm}'
-            or p.phone_1 ilike '${normalizedTerm}'
-            or p.phone_2 ilike '${normalizedTerm}' then 1
-          when p.normalized_arabic_name = '${normalizedArabicTerm}' then 2
-          when '${normalizedArabicCompactTerm}' <> ''
+          when ${termParam} = '' then 99
+          when p.mrn ilike ${rankTermParam}
+            or p.national_id ilike ${rankTermParam}
+            or p.identifier_value ilike ${rankTermParam}
+            or p.phone_1 ilike ${rankTermParam}
+            or p.phone_2 ilike ${rankTermParam} then 1
+          when p.normalized_arabic_name = ${exactArabicParam} then 2
+          when ${compactTermParam} <> ''
             and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
-            and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) = '${normalizedArabicCompactTerm}' then 2
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = '${normalizedEnglishTerm}' then 2
-          when split_part(p.normalized_arabic_name, ' ', 1) = '${normalizedArabicTerm}' then 3
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = '${normalizedEnglishTerm}' then 3
-          when split_part(p.normalized_arabic_name, ' ', 1) like '${normalizedArabicPrefixPattern}' then 4
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like '${normalizedEnglishPrefixPattern}' then 4
-          when p.normalized_arabic_name like '${normalizedArabicPrefixPattern}' then 6
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishPrefixPattern}' then 6
-          when p.normalized_arabic_name like '${normalizedArabicLaterTokenPattern}' then 7
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishLaterTokenPattern}' then 7
+            and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) = ${compactTermParam} then 2
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = ${exactEnglishParam} then 2
+          when split_part(p.normalized_arabic_name, ' ', 1) = ${exactArabicParam} then 3
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = ${exactEnglishParam} then 3
+          when split_part(p.normalized_arabic_name, ' ', 1) like ${arabicPrefixParam} then 4
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like ${englishPrefixParam} then 4
+          when p.normalized_arabic_name like ${arabicPrefixParam} then 6
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like ${englishPrefixParam} then 6
+          when p.normalized_arabic_name like ${arabicLaterTokenParam} then 7
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like ${englishLaterTokenParam} then 7
           else 8
         end as rank
       from patients p
-      where ${searchWhere}
-      ${sexFilter}
-      ${ageFilter}
-      ${categoryFilter}
-      ${appointmentFilterClause}
+      where ${directoryWhere.where}
     )
     select
       fp.id,
@@ -1642,10 +1710,10 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
       ) as warnings
     from filtered_patients fp
     order by ${orderBy}
-    limit ${pageSize} offset ${offset}
+    limit ${pageSizeParam} offset ${offsetParam}
   `;
 
-  const { rows } = await pool.query<Record<string, unknown>>(query);
+  const { rows } = await pool.query<Record<string, unknown>>(query, queryParams);
 
   return {
     patients: rows.map(row => {

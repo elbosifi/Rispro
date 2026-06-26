@@ -80,7 +80,7 @@ adminRouter.post(
 adminRouter.get(
   "/backup/v3",
   asyncRoute(async (req: Request, res: Response) => {
-    const passphrase = req.header("x-backup-passphrase") || req.query.passphrase;
+    const passphrase = req.header("x-backup-passphrase");
     const createdAt = new Date().toISOString();
     const backupName = `rispro-backup-${createdAt.replace(/[:.]/g, "-")}.rispro.zip`;
     setBackupV3DownloadHeaders(res, backupName);
@@ -91,7 +91,7 @@ adminRouter.get(
 adminRouter.get(
   "/backup",
   asyncRoute(async (req: Request, res: Response) => {
-    const passphrase = req.header("x-backup-passphrase") || req.query.passphrase;
+    const passphrase = req.header("x-backup-passphrase");
     const result = await buildBackupSnapshot(req.user!.sub, passphrase);
     res.setHeader("Content-Disposition", `attachment; filename="${result.backupName}"`);
     res.json(result.backup);
