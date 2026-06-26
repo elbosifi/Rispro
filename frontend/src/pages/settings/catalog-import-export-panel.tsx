@@ -16,11 +16,34 @@ type ImportSummary = {
   errors: Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>;
 };
 
+type CatalogImportError = {
+  sheet: string;
+  rowNumber: number;
+  column: string | null;
+  message: string;
+  errorType?: string;
+  severity?: string;
+};
+
+type DraftRow = Record<string, unknown> & {
+  id?: unknown;
+  action?: unknown;
+  selected?: unknown;
+  rowNumber?: unknown;
+  modalityCode?: unknown;
+  code?: unknown;
+  nameEn?: unknown;
+  nameAr?: unknown;
+  dailyCapacity?: unknown;
+  durationMinutes?: unknown;
+  errors?: CatalogImportError[];
+};
+
 type Draft = {
   canApply: boolean;
   summary: { modalitiesTotal: number; examTypesTotal: number; selectedModalities: number; selectedExamTypes: number; errors: number; warnings: number };
-  modalities: Array<Record<string, unknown>>;
-  examTypes: Array<Record<string, unknown>>;
+  modalities: DraftRow[];
+  examTypes: DraftRow[];
 };
 
 type RowFilter = "all" | "selected" | "errors" | "create" | "update" | "skip";
@@ -32,7 +55,7 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<string | null>(null);
   const [progressNotes, setProgressNotes] = useState<string[]>([]);
-  const [errorRows, setErrorRows] = useState<Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>>([]);
+  const [errorRows, setErrorRows] = useState<CatalogImportError[]>([]);
   const [modalityFilter, setModalityFilter] = useState<RowFilter>("all");
   const [examTypeFilter, setExamTypeFilter] = useState<RowFilter>("all");
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -81,11 +104,11 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
       setDraft({
         canApply: response.preview.canApply,
         summary: response.preview.summary,
-        modalities: response.preview.modalities,
-        examTypes: response.preview.examTypes,
+        modalities: response.preview.modalities as DraftRow[],
+        examTypes: response.preview.examTypes as DraftRow[],
       });
       setProgressNotes(response.preview.progressNotes || []);
-      setErrorRows((response.preview.errors || []) as Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>);
+      setErrorRows((response.preview.errors || []) as CatalogImportError[]);
       if (!response.preview.canApply) {
         setErrorMessage("Preview found validation issues. Review and fix the rows before applying.");
         setErrorType("validation_failed");
@@ -93,7 +116,7 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
     } catch (error) {
       if (error instanceof ApiError) {
         const details = (error.details ?? {}) as {
-          errors?: Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>;
+          errors?: CatalogImportError[];
           errorType?: string;
           progressNotes?: string[];
         };
@@ -163,7 +186,7 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
     } catch (error) {
       if (error instanceof ApiError) {
         const details = (error.details ?? {}) as {
-          errors?: Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>;
+          errors?: CatalogImportError[];
           errorType?: string;
         };
         setErrorRows(Array.isArray(details.errors) ? details.errors : []);
@@ -215,7 +238,7 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
               </td>
               <td className="py-2 pr-2">
                 {Array.isArray(row.errors) && row.errors.length > 0 ? (
-                  <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map((item: any) => item.errorType || item.message).join(", ")}</div>
+                  <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map((item) => item.errorType || item.message).join(", ")}</div>
                 ) : (
                   <div className="text-stone-500">Ready</div>
                 )}

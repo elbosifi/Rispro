@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api-client";
@@ -202,13 +202,13 @@ function DirectAppointmentPrintPage() {
     setDate(tomorrow.toISOString().slice(0, 10));
   }
 
-  function Field({ label, value }: { label: string; value: any }) {
+  function Field({ label, value }: { label: string; value: ReactNode }) {
     return (
       <div className="p-3 rounded-xl border border-border bg-muted/30">
         <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-1">
           {label}
         </p>
-        <p className="font-medium">{value ?? "—"}</p>
+        <p className="font-medium">{value == null ? "—" : value}</p>
       </div>
     );
   }
@@ -402,9 +402,9 @@ function DirectAppointmentPrintPage() {
             onChange={setModalityId}
             options={[
               { value: "", label: t(language, "print.all") },
-              ...modalities.map((m: any) => ({
+              ...modalities.map((m) => ({
                 value: m.id.toString(),
-                label: m.nameEn,
+                label: m.nameEn ?? m.nameAr ?? m.code ?? `#${m.id}`,
               })),
             ]}
           />

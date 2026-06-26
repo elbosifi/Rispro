@@ -2,9 +2,43 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useLanguage } from "@/providers/language-provider";
 import { fetchDicomDevices, createDicomDevice, updateDicomDevice, deleteDicomDevice } from "@/lib/api-hooks";
+import type { DicomDevice } from "@/types/api";
 
 interface DicomDevicesSectionProps {
   onReAuthRequired: (key: string[]) => void;
+}
+
+interface DicomDeviceForm {
+  modality_id: string;
+  device_name: string;
+  modality_ae_title: string;
+  scheduled_station_ae_title: string;
+  station_name: string;
+  station_location: string;
+  source_ip: string;
+  mwl_enabled: boolean;
+  is_active: boolean;
+}
+
+const EMPTY_DICOM_DEVICE_FORM: DicomDeviceForm = {
+  modality_id: "",
+  device_name: "",
+  modality_ae_title: "",
+  scheduled_station_ae_title: "",
+  station_name: "",
+  station_location: "",
+  source_ip: "",
+  mwl_enabled: true,
+  is_active: true,
+};
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
 }
 
 export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSectionProps) {
@@ -13,19 +47,19 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
   const { data, isLoading, error } = useQuery({ queryKey: ["dicom-devices"], queryFn: fetchDicomDevices });
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<any>({});
+  const [editForm, setEditForm] = useState<DicomDeviceForm>(EMPTY_DICOM_DEVICE_FORM);
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ modality_id: "", device_name: "", modality_ae_title: "", scheduled_station_ae_title: "", station_name: "", station_location: "", source_ip: "", mwl_enabled: true, is_active: true });
+  const [createForm, setCreateForm] = useState<DicomDeviceForm>({ ...EMPTY_DICOM_DEVICE_FORM });
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteDicomDevice(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || (language === "ar" ? "فشل الحذف" : "Delete failed")); }
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, language === "ar" ? "فشل الحذف" : "Delete failed")); }
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: any }) => updateDicomDevice(id, {
+    mutationFn: ({ id, data }: { id: number; data: DicomDeviceForm }) => updateDicomDevice(id, {
       deviceName: data.device_name,
       modalityAeTitle: data.modality_ae_title,
       scheduledStationAeTitle: data.scheduled_station_ae_title || data.modality_ae_title,
@@ -36,11 +70,11 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       isActive: data.is_active ? "enabled" : "disabled"
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setEditingId(null); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || (language === "ar" ? "فشل التحديث" : "Update failed")); }
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, language === "ar" ? "فشل التحديث" : "Update failed")); }
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => createDicomDevice({
+    mutationFn: (data: DicomDeviceForm) => createDicomDevice({
       modalityId: parseInt(data.modality_id, 10),
       deviceName: data.device_name,
       modalityAeTitle: data.modality_ae_title,
@@ -52,7 +86,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       isActive: data.is_active ? "enabled" : "disabled"
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setShowCreate(false); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || (language === "ar" ? "فشل الإنشاء" : "Create failed")); }
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, language === "ar" ? "فشل الإنشاء" : "Create failed")); }
   });
 
   if (error) {
@@ -63,9 +97,10 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
 
   if (isLoading) return <p className="text-sm text-stone-500 dark:text-stone-400">{t("settings.loading")}</p>;
 
-  const startEdit = (d: any) => {
+  const startEdit = (d: DicomDevice) => {
     setEditingId(d.id);
     setEditForm({
+      modality_id: String(d.modalityId),
       device_name: d.deviceName,
       modality_ae_title: d.modalityAeTitle,
       scheduled_station_ae_title: d.scheduledStationAeTitle,
@@ -111,7 +146,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       )}
 
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-        {data?.devices?.map((d: any) => (
+        {data?.devices?.map((d) => (
           <li key={d.id} className="py-3">
             {editingId === d.id ? (
               <div className="space-y-2 text-sm">

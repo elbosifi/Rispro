@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-hooks";
 import { Button } from "@/components/shared/Button";
 import { Card } from "@/components/shared/Card";
-import { chooseLocalized } from "@/lib/i18n";
+import { chooseLocalized, type Language } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import CatalogImportExportPanel from "./catalog-import-export-panel";
 
@@ -99,6 +99,15 @@ function hasText(value: string | null | undefined) {
   return String(value ?? "").trim().length > 0;
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 function preparationStatus(row: ExamTypeRow) {
   const hasArabic = hasText(row.specific_instruction_ar);
   const hasEnglish = hasText(row.specific_instruction_en);
@@ -153,7 +162,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       invalidateExamTypeQueries();
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); },
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, "Delete failed")); },
   });
 
   const hardDeleteMutation = useMutation({
@@ -162,7 +171,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       invalidateExamTypeQueries();
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Hard delete failed"); },
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, "Hard delete failed")); },
   });
 
   const updateMutation = useMutation({
@@ -172,7 +181,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       setEditingId(null);
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Update failed"); },
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, "Update failed")); },
   });
 
   const activateMutation = useMutation({
@@ -181,7 +190,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       invalidateExamTypeQueries();
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Activate failed"); },
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, "Activate failed")); },
   });
 
   const createMutation = useMutation({
@@ -192,7 +201,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       setCreateForm(emptyForm);
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Create failed"); },
+    onError: (err: unknown) => { setMutationError(getErrorMessage(err, "Create failed")); },
   });
 
   const modalities = ((data?.modalities ?? []) as ModalityRow[]);
@@ -398,10 +407,10 @@ function formFromRow(row: ExamTypeRow): ExamTypeForm {
   };
 }
 
-function modalityLabel(row: ExamTypeRow, modalityById: Map<string, ModalityRow>, language: string) {
+function modalityLabel(row: ExamTypeRow, modalityById: Map<string, ModalityRow>, language: Language) {
   const modality = modalityById.get(String(row.modality_id));
   if (!modality) return "Not assigned";
-  const baseLabel = chooseLocalized(language as any, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`;
+  const baseLabel = chooseLocalized(language, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`;
   return modality.is_active === false ? `${baseLabel} (Inactive)` : baseLabel;
 }
 

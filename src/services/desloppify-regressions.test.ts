@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const patientServiceSource = readFileSync(new URL("./patient-service.ts", import.meta.url), "utf8");
+const patientDirectoryServiceSource = readFileSync(new URL("./patient-directory-service.ts", import.meta.url), "utf8");
 const adminRouteSource = readFileSync(new URL("../routes/admin.ts", import.meta.url), "utf8");
 const patientsRouteSource = readFileSync(new URL("../routes/patients.ts", import.meta.url), "utf8");
 const sonicDicomReportSource = readFileSync(new URL("./sonicdicom-report-service.ts", import.meta.url), "utf8");
@@ -12,11 +12,11 @@ const schedulingRouteSource = readFileSync(
 );
 
 test("patient directory queries use parameter arrays instead of interpolating request values", () => {
-  assert.match(patientServiceSource, /pool\.query<\{ total: string \}>\(countQuery,\s*directoryWhere\.values\)/);
-  assert.match(patientServiceSource, /pool\.query<Record<string, unknown>>\(query,\s*queryParams\)/);
-  assert.doesNotMatch(patientServiceSource, /p\.category = '\$\{category\}'/);
-  assert.doesNotMatch(patientServiceSource, /p\.age_years >= \$\{ageMin/);
-  assert.doesNotMatch(patientServiceSource, /ilike '\$\{normalizedTerm\}'/);
+  assert.match(patientDirectoryServiceSource, /pool\.query<\{ total: string \}>\(countQuery,\s*directoryWhere\.values\)/);
+  assert.match(patientDirectoryServiceSource, /pool\.query<Record<string, unknown>>\(query,\s*queryParams\)/);
+  assert.doesNotMatch(patientDirectoryServiceSource, /p\.category = '\$\{category\}'/);
+  assert.doesNotMatch(patientDirectoryServiceSource, /p\.age_years >= \$\{ageMin/);
+  assert.doesNotMatch(patientDirectoryServiceSource, /ilike '\$\{normalizedTerm\}'/);
 });
 
 test("backup downloads accept passphrases through headers only", () => {

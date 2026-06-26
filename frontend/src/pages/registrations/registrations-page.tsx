@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Bell, ExternalLink, Eye, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
@@ -138,6 +138,15 @@ function publicAppointmentToken(appointment: AppointmentWithDetails): string {
   } catch {
     return new URLSearchParams(rawUrl.split("?")[1] || "").get("t")?.trim() || "";
   }
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
 }
 
 export default function RegistrationsPage() {
@@ -316,11 +325,11 @@ export default function RegistrationsPage() {
       });
       setSelectedAppointment(null);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: t("registrations.cancelFailedTitle"),
-        message: err?.message || t("registrations.cancelFailedMessage"),
+        message: getErrorMessage(err, t("registrations.cancelFailedMessage")),
       });
     },
   });
@@ -346,11 +355,11 @@ export default function RegistrationsPage() {
         message: statusLabel(language, updated.status),
       });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed"),
-        message: err?.message || chooseLocalized(language, "حاول مرة أخرى.", "Please try again."),
+        message: getErrorMessage(err, chooseLocalized(language, "حاول مرة أخرى.", "Please try again.")),
       });
     },
   });
@@ -389,11 +398,11 @@ export default function RegistrationsPage() {
         message: `${formatDateLy(variables.appointment.appointmentDate)} → ${formatDateLy(variables.newDate)}`,
       });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: t("registrations.rescheduleFailedTitle"),
-        message: getPatientRequirementStaffMessage(err, t) || err?.message || t("registrations.rescheduleFailedMessage"),
+        message: getPatientRequirementStaffMessage(err, t) || getErrorMessage(err, t("registrations.rescheduleFailedMessage")),
       });
     },
   });
@@ -417,11 +426,11 @@ export default function RegistrationsPage() {
       setNotificationTitle("");
       setNotificationMessage("");
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: t("registrations.webPushSendFailedTitle"),
-        message: err?.message || t("registrations.webPushSendFailedMessage"),
+        message: getErrorMessage(err, t("registrations.webPushSendFailedMessage")),
       });
     },
   });
@@ -927,13 +936,13 @@ export default function RegistrationsPage() {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [selectedAppointment, language]);
 
-  function Field({ label, value }: { label: string; value: any }) {
+  function Field({ label, value }: { label: string; value: ReactNode }) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 p-2">
         <p className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
           {label}
         </p>
-        <p className="text-[13px] font-medium leading-snug">{value ?? "—"}</p>
+        <p className="text-[13px] font-medium leading-snug">{value == null ? "—" : value}</p>
       </div>
     );
   }
@@ -1207,9 +1216,9 @@ export default function RegistrationsPage() {
                   className="input-premium input-ltr w-full min-h-10"
                 >
                   <option value="">{t("registrations.all")}</option>
-                  {modalities.map((modality: any) => (
+                  {modalities.map((modality) => (
                     <option key={modality.id} value={String(modality.id)}>
-                      {modality.nameEn ?? modality.name ?? modality.code ?? `#${modality.id}`}
+                      {modality.nameEn ?? modality.nameAr ?? modality.code ?? `#${modality.id}`}
                     </option>
                   ))}
                 </select>

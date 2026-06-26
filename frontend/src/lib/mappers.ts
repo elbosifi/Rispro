@@ -507,6 +507,9 @@ export function mapDicomDevice(raw: RawRecord): DicomDevice {
   return {
     id: num(raw, 'id'),
     modalityId: num(raw, 'modality_id') || num(raw, 'modalityId'),
+    modalityCode: str(raw, 'modality_code') || str(raw, 'modalityCode'),
+    modalityNameAr: str(raw, 'modality_name_ar') || str(raw, 'modalityNameAr'),
+    modalityNameEn: str(raw, 'modality_name_en') || str(raw, 'modalityNameEn'),
     deviceName: str(raw, 'device_name') || str(raw, 'deviceName'),
     modalityAeTitle: str(raw, 'modality_ae_title') || str(raw, 'modalityAeTitle'),
     scheduledStationAeTitle: str(raw, 'scheduled_station_ae_title') || str(raw, 'scheduledStationAeTitle'),

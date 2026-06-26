@@ -1166,6 +1166,9 @@ export interface AuditEntry {
 export interface DicomDevice {
   id: number;
   modalityId: number;
+  modalityCode: string;
+  modalityNameAr: string;
+  modalityNameEn: string;
   deviceName: string;
   modalityAeTitle: string;
   scheduledStationAeTitle: string;

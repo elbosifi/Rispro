@@ -12,11 +12,76 @@ interface DicomMonitoringSectionProps {
 
 interface ServiceEntry {
   status: "stopped" | "starting" | "running" | "stopping" | "error";
-  process: any | null;
-  server: any | null;
+  process: unknown | null;
+  server: unknown | null;
   pid: number | null;
   startedAt: string | null;
   lastError: string | null;
+}
+
+interface DicomToolStatus {
+  detected?: boolean;
+  path?: string | null;
+  error?: string | null;
+}
+
+interface DicomOverviewResponse {
+  settings?: {
+    enabled?: boolean;
+    bindHost?: string;
+    mwlAeTitle?: string;
+    mwlPort?: number;
+    rebuildBehavior?: string;
+  };
+  status?: {
+    gatewayEnabled?: boolean;
+    gatewayStatus?: string;
+    gatewayPid?: number | null;
+    gatewayLastError?: string | null;
+    directoriesReady?: boolean;
+    toolsDetected?: boolean;
+    deviceCount?: number;
+    mwlEnabledDeviceCount?: number;
+  };
+  services?: Partial<Record<"mwl" | "worklistBuilder", ServiceEntry>>;
+  tools?: {
+    dump2dcm?: DicomToolStatus;
+    dcmdump?: DicomToolStatus;
+  };
+  fileHealth?: {
+    sourceDir?: { exists?: boolean; fileCount?: number; path?: string };
+    outputDir?: { exists?: boolean; fileCount?: number; path?: string };
+    orphanedSourceFiles?: unknown[];
+    orphanedOutputFiles?: unknown[];
+  };
+  logSummary?: {
+    processed_count?: number | string;
+    failed_count?: number | string;
+    total_count?: number | string;
+  };
+  deviceSummary?: {
+    total?: number;
+    mwlEnabled?: number;
+  };
+}
+
+interface DicomLogEntry {
+  id: number | string;
+  event_type?: string | null;
+  device_name?: string | null;
+  accession_number?: string | null;
+  error_message?: string | null;
+  processing_status?: string | null;
+  created_at: string;
+}
+
+interface DicomLogsResponse {
+  logs?: DicomLogEntry[];
+  limit?: number;
+}
+
+interface DicomServiceStatusResponse {
+  services?: Partial<Record<"mwl" | "worklistBuilder", ServiceEntry>>;
 }
 
 interface ServiceControlResponse {
@@ -38,7 +103,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
 
   const { data: overviewData, isLoading: overviewLoading, error: overviewError, refetch: refetchOverview } = useQuery({
     queryKey: ["dicom", "overview"],
-    queryFn: () => api("/dicom/overview", {}, MONITORING_LOAD_TIMEOUT_MS)
+    queryFn: () => api<DicomOverviewResponse>("/dicom/overview", {}, MONITORING_LOAD_TIMEOUT_MS)
   });
 
   const { data: logsData, isLoading: logsLoading, error: logsError } = useQuery({
@@ -49,14 +114,14 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
       if (logFilter.accession) params.set("accession", logFilter.accession);
       params.set("limit", logFilter.limit);
 
-      return api(`/dicom/logs?${params.toString()}`, {}, MONITORING_LOAD_TIMEOUT_MS);
+      return api<DicomLogsResponse>(`/dicom/logs?${params.toString()}`, {}, MONITORING_LOAD_TIMEOUT_MS);
     },
     enabled: activeTab === "logs"
   });
 
   const { data: serviceStatusData, refetch: refetchServiceStatus, error: serviceStatusError } = useQuery({
     queryKey: ["dicom", "service-status"],
-    queryFn: () => api("/dicom/service-status", {}, MONITORING_LOAD_TIMEOUT_MS),
+    queryFn: () => api<DicomServiceStatusResponse>("/dicom/service-status", {}, MONITORING_LOAD_TIMEOUT_MS),
     refetchInterval: 10000 // Poll every 10 seconds
   });
 
@@ -92,9 +157,9 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
     }
   });
 
-  const overview = overviewData as any;
-  const logs = logsData as any;
-  const services = (serviceStatusData as any)?.services || {};
+  const overview = overviewData;
+  const logs = logsData;
+  const services = serviceStatusData?.services || {};
   const loadError = [overviewError, logsError, serviceStatusError].find(Boolean);
 
   if (overviewLoading) {
@@ -119,8 +184,8 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   const toolSummary = summarizeDicomTools(tools);
   const sourceDir = fileHealth.sourceDir;
   const outputDir = fileHealth.outputDir;
-  const gatewayStatusLabel = formatGatewayStatus(mwlService?.status || status.gatewayStatus, status.gatewayEnabled);
-  const gatewayStatusType = statusToType(mwlService?.status || status.gatewayStatus, status.gatewayEnabled);
+  const gatewayStatusLabel = formatGatewayStatus(mwlService?.status || status.gatewayStatus, Boolean(status.gatewayEnabled));
+  const gatewayStatusType = statusToType(mwlService?.status || status.gatewayStatus, Boolean(status.gatewayEnabled));
   const gatewayDetails = buildGatewayDetails({
     gatewayEnabled: Boolean(status.gatewayEnabled),
     bindHost: settings.bindHost,
@@ -198,7 +263,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
             <StatusCard
               title="Devices"
               status={`${deviceSummary.mwlEnabled || 0} Active`}
-              statusType={deviceSummary.mwlEnabled > 0 ? "success" : "warning"}
+              statusType={(deviceSummary.mwlEnabled || 0) > 0 ? "success" : "warning"}
               details={[
                 `Total: ${deviceSummary.total || 0}`,
                 `MWL Enabled: ${deviceSummary.mwlEnabled || 0}`
@@ -212,13 +277,13 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <ServiceStatusCard
                 serviceName="MWL SCP Server"
-                service={services.mwl}
+                service={services.mwl || null}
                 gatewayEnabled={Boolean(status.gatewayEnabled)}
                 showControls={false}
               />
               <ServiceStatusCard
                 serviceName="Worklist Builder"
-                service={services.worklistBuilder}
+                service={services.worklistBuilder || null}
                 gatewayEnabled={Boolean(status.gatewayEnabled)}
                 inactiveReason={tools.dump2dcm?.detected ? undefined : "Waiting for dump2dcm to be installed"}
                 showControls={false}
@@ -243,7 +308,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
                 path={outputDir?.path}
               />
             </div>
-            {(fileHealth.orphanedSourceFiles?.length > 0 || fileHealth.orphanedOutputFiles?.length > 0) && (
+            {((fileHealth.orphanedSourceFiles?.length || 0) > 0 || (fileHealth.orphanedOutputFiles?.length || 0) > 0) && (
               <div className="mt-3 text-xs text-amber-700 dark:text-amber-400">
                 ⚠️ {fileHealth.orphanedSourceFiles?.length || 0} orphaned source files, {fileHealth.orphanedOutputFiles?.length || 0} orphaned output files
               </div>
@@ -317,7 +382,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
               {logs?.logs?.length === 0 ? (
                 <p className="text-sm text-stone-500 dark:text-stone-400 text-center py-8">No logs found</p>
               ) : (
-                logs?.logs?.map((log: any) => (
+                logs?.logs?.map((log) => (
                   <div
                     key={log.id}
                     className={`p-3 rounded-lg border text-sm ${
@@ -597,21 +662,21 @@ function statusToType(status: string | undefined, enabled: boolean): "success" |
   return "warning";
 }
 
-function summarizeDicomTools(tools: any): {
+function summarizeDicomTools(tools: DicomOverviewResponse["tools"]): {
   status: string;
   type: "success" | "warning" | "error";
   details: string[];
 } {
-  const dump2dcmDetected = Boolean(tools.dump2dcm?.detected);
-  const dcmdumpDetected = Boolean(tools.dcmdump?.detected);
+  const dump2dcmDetected = Boolean(tools?.dump2dcm?.detected);
+  const dcmdumpDetected = Boolean(tools?.dcmdump?.detected);
 
   if (dump2dcmDetected && dcmdumpDetected) {
     return {
       status: "Installed",
       type: "success",
       details: [
-        `dump2dcm: ${tools.dump2dcm.path || "Detected"}`,
-        `dcmdump: ${tools.dcmdump.path || "Detected"}`
+        `dump2dcm: ${tools?.dump2dcm?.path || "Detected"}`,
+        `dcmdump: ${tools?.dcmdump?.path || "Detected"}`
       ]
     };
   }
@@ -623,13 +688,13 @@ function summarizeDicomTools(tools: any): {
 
   return {
     status: missingTools.length === 2 ? "DCMTK tools missing" : "Tool setup incomplete",
-    type: "warning",
-    details: [
-      `dump2dcm: ${dump2dcmDetected ? tools.dump2dcm.path || "Detected" : "Not installed on server"}`,
-      `dcmdump: ${dcmdumpDetected ? tools.dcmdump.path || "Detected" : "Not installed on server"}`
-    ]
-  };
-}
+      type: "warning",
+      details: [
+      `dump2dcm: ${dump2dcmDetected ? tools?.dump2dcm?.path || "Detected" : "Not installed on server"}`,
+      `dcmdump: ${dcmdumpDetected ? tools?.dcmdump?.path || "Detected" : "Not installed on server"}`
+      ]
+    };
+  }
 
 function buildGatewayDetails({
   gatewayEnabled,
