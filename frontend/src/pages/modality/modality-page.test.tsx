@@ -11,6 +11,7 @@ const fetchStatisticsMock = vi.fn();
 const completeAppointmentMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
+const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -25,7 +26,7 @@ vi.mock("@/lib/appointment-printing", () => ({
 }));
 
 vi.mock("@/providers/language-provider", () => ({
-  useLanguage: () => ({ language: "en", isArabic: false }),
+  useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar" }),
 }));
 
 vi.mock("@/lib/date-format", async () => {
@@ -149,6 +150,7 @@ function boardAccessions() {
 describe("ModalityPage modality board", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    languageState.language = "en";
   });
 
   it("sorts arrived rows by arrivedAt ascending after in-progress rows", async () => {
@@ -285,7 +287,9 @@ describe("ModalityPage modality board", () => {
       appointment({ id: 4, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
     ]);
 
-    await user.click(screen.getByRole("button", { name: /^Waiting\s+1$/i }));
+    const waitingCard = screen.getByRole("button", { name: /^Waiting\s+1$/i });
+    await user.click(waitingCard);
+    expect(waitingCard.getAttribute("aria-pressed")).toBe("true");
     expect(boardAccessions()).toEqual(["ACC-WAIT"]);
 
     await user.click(screen.getByRole("button", { name: /^Arrived\s+1$/i }));
@@ -314,7 +318,7 @@ describe("ModalityPage modality board", () => {
     await waitFor(() => expect(completeAppointmentMock.mock.calls[0]?.[0]).toBe(7));
 
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
-    await user.click(within(row).getByRole("menuitem", { name: /Cancel/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Cancel/i }));
     await screen.findByRole("heading", { name: /Confirm cancellation/i });
     await user.type(screen.getByPlaceholderText(/Enter a reason/i), "Patient left");
     await user.click(screen.getByRole("button", { name: /^Confirm$/i }));
@@ -323,7 +327,7 @@ describe("ModalityPage modality board", () => {
     });
 
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
-    expect(within(row).getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
   });
 
   it("keeps primary row actions visible and secondary actions in More", async () => {
@@ -346,12 +350,58 @@ describe("ModalityPage modality board", () => {
 
     const row = screen.getByTestId("modality-board-row-8");
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
-    expect(within(row).getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
-    expect(within(row).getByRole("menuitem", { name: /Cancel/i })).toBeTruthy();
-    expect(within(row).getByRole("menuitem", { name: /Wait/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Cancel/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Wait/i })).toBeTruthy();
 
-    await user.click(within(row).getByRole("menuitem", { name: /Stop/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Stop/i }));
     await screen.findByRole("heading", { name: /Confirm discontinuation/i });
+  });
+
+  it("closes the More menu on outside click and Escape", async () => {
+    const user = await openBoard([
+      appointment({ id: 8, accessionNumber: "ACC-LABELS", status: "arrived", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Label Patient" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-8");
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+
+    await user.click(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("uses RTL alignment for the More menu in Arabic", async () => {
+    languageState.language = "ar";
+    const user = userEvent.setup();
+    renderPage([
+      appointment({ id: 8, accessionNumber: "ACC-LABELS", status: "arrived", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Label Patient" }),
+    ]);
+    await screen.findByRole("option", { name: "CT" });
+    await user.selectOptions(screen.getByRole("combobox"), "1");
+    const row = await screen.findByTestId("modality-board-row-8");
+
+    await user.click(within(row).getByRole("button", { name: /إجراءات|More actions/i }));
+
+    const menu = screen.getByRole("menu");
+    expect(menu.getAttribute("dir")).toBe("rtl");
+    expect(menu.className).toContain("text-right");
+  });
+
+  it("shows elapsed waiting duration from arrivedAt and fallback when missing", async () => {
+    const arrivedAt = new Date(Date.now() - 70 * 60_000).toISOString();
+    await openBoard([
+      appointment({ id: 10, accessionNumber: "ACC-ELAPSED", status: "arrived", arrivedAt, englishFullName: "Elapsed Patient" }),
+      appointment({ id: 11, accessionNumber: "ACC-MISSING", status: "waiting", arrivedAt: null, englishFullName: "Missing Timestamp" }),
+    ]);
+
+    expect(within(screen.getByTestId("modality-board-row-10")).getByText(/1h (9|10)m/)).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-11")).getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("reopens completed rows only after a required reason is entered", async () => {
@@ -362,7 +412,7 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-9");
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
-    await user.click(within(row).getByRole("menuitem", { name: /Reopen/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Reopen/i }));
     await screen.findByRole("heading", { name: /Reopen as arrived/i });
     expect((screen.getByRole("button", { name: /^Confirm$/i }) as HTMLButtonElement).disabled).toBe(true);
 

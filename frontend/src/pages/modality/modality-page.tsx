@@ -48,6 +48,11 @@ type BoardStatusAction = {
   status: "arrived" | "waiting" | "cancelled" | "discontinued";
   reasonRequired: boolean;
 };
+type MoreMenuState = {
+  appointmentId: number;
+  top: number;
+  left: number;
+};
 
 function isActiveStatus(status: AppointmentStatus): boolean {
   return ACTIVE_STATUSES.has(status);
@@ -283,7 +288,7 @@ export default function ModalityPage() {
   const [confirmVerified, setConfirmVerified] = useState(false);
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
   const [statusReason, setStatusReason] = useState("");
-  const [openMoreForId, setOpenMoreForId] = useState<number | null>(null);
+  const [openMoreMenu, setOpenMoreMenu] = useState<MoreMenuState | null>(null);
   const [elapsedNow, setElapsedNow] = useState(() => new Date());
 
   const { data: lookups } = useQuery<AppointmentLookups>({
@@ -335,6 +340,22 @@ export default function ModalityPage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!openMoreMenu) return;
+
+    const closeMenu = () => setOpenMoreMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+
+    document.addEventListener("click", closeMenu);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("click", closeMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMoreMenu]);
+
   const completeMutation = useMutation({
     mutationFn: completeAppointment,
     onSuccess: async () => {
@@ -359,7 +380,7 @@ export default function ModalityPage() {
       await queryClient.invalidateQueries({ queryKey: ["registrations"] });
       setStatusAction(null);
       setStatusReason("");
-      setOpenMoreForId(null);
+      setOpenMoreMenu(null);
     },
   });
 
@@ -445,12 +466,31 @@ export default function ModalityPage() {
     statusMutation.mutate({ appointmentId: appointment.id, status, reason: null });
   };
 
+  const handleOpenMoreMenu = (event: React.MouseEvent<HTMLButtonElement>, appointment: AppointmentWithDetails) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 176;
+    const viewportPadding = 8;
+    const preferredLeft = isArabic ? rect.left : rect.right - menuWidth;
+    const maxLeft = window.innerWidth - menuWidth - viewportPadding;
+    setOpenMoreMenu((current) => current?.appointmentId === appointment.id
+      ? null
+      : {
+          appointmentId: appointment.id,
+          top: rect.bottom + 6,
+          left: Math.max(viewportPadding, Math.min(preferredLeft, maxLeft)),
+        });
+  };
+
   const modalities = lookups?.modalities ?? [];
   const headerTitle = t(language, "modality.title");
   const selectedName = selectedAppointment ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName) : "";
   const selectedModality = selectedAppointment ? chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn) : "";
   const selectedExam = selectedAppointment ? chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || t(language, "common.na") : "";
   const selectedPriority = selectedAppointment ? chooseLocalized(language, selectedAppointment.priorityNameAr, selectedAppointment.priorityNameEn) || t(language, "common.na") : "";
+  const moreMenuAppointment = openMoreMenu
+    ? boardAppointments.find((appointment) => appointment.id === openMoreMenu.appointmentId) ?? null
+    : null;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
@@ -463,7 +503,7 @@ export default function ModalityPage() {
               </div>
 
               <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "قائمة عمل الماسح", "Scanner Worklist")}</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "لوحة العمل", "Worklist board")}</p>
                 <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">{headerTitle}</h1>
               </div>
             </div>
@@ -583,14 +623,14 @@ export default function ModalityPage() {
             <Card className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/94 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{chooseLocalized(language, "لوحة الموداليتي", "Modality board")}</p>
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{chooseLocalized(language, "لوحة الأجهزة", "Modality board")}</p>
                   <h2 className="text-sm font-semibold text-foreground">
                     {chooseLocalized(language, "الحالات الحية أولاً، السجل في الأسفل", "Live cases first, history below")}
                   </h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {([
-                    ["operational", chooseLocalized(language, "تشغيلي", "Operational")],
+                    ["operational", chooseLocalized(language, "نشط", "Operational")],
                     ["ready", chooseLocalized(language, "جاهز", "Arrived/Ready")],
                     ["not-arrived", chooseLocalized(language, "لم يصل", "Not arrived")],
                     ["completed", chooseLocalized(language, "مكتمل", "Completed")],
@@ -636,12 +676,13 @@ export default function ModalityPage() {
                   </div>
                 ) : (
                   <div className="max-h-[calc(100vh-290px)] overflow-auto">
-                    <table data-testid="modality-board" className="min-w-[1120px] table-fixed text-left text-[11px]">
+                    <table data-testid="modality-board" className="min-w-[1220px] table-fixed text-left text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
                           <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
                           <th className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
-                          <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival / elapsed")}</th>
+                          <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
+                          <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "مدة الانتظار", "Waiting duration")}</th>
                           <th className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
                           <th className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "MRN / الرقم الوطني", "MRN / national ID")}</th>
                           <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
@@ -668,7 +709,7 @@ export default function ModalityPage() {
                               data-testid={`modality-board-row-${appointment.id}`}
                               tabIndex={0}
                               onClick={() => {
-                                setOpenMoreForId(null);
+                                setOpenMoreMenu(null);
                                 setSelectedAppointmentId(appointment.id);
                               }}
                               onKeyDown={(event) => {
@@ -692,9 +733,9 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
                                 <p>{formatArrivalColumn(language, appointment)}</p>
-                                {ACTIVE_STATUSES.has(appointment.status) ? (
-                                  <p className="text-[10px] text-muted-foreground">{elapsedLabel(language, appointment, elapsedNow)}</p>
-                                ) : null}
+                              </td>
+                              <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
+                                {elapsedLabel(language, appointment, elapsedNow)}
                               </td>
                               <td className="px-2 py-1">
                                 <p className="font-semibold text-foreground">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
@@ -801,84 +842,11 @@ export default function ModalityPage() {
                                       title={chooseLocalized(language, "إجراءات إضافية", "More actions")}
                                       className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
                                       disabled={statusMutation.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setOpenMoreForId((current) => current === appointment.id ? null : appointment.id);
-                                      }}
+                                      onClick={(event) => handleOpenMoreMenu(event, appointment)}
                                     >
                                       <MoreHorizontal size={14} />
                                       <span>{chooseLocalized(language, "المزيد", "More")}</span>
                                     </Button>
-                                  ) : null}
-                                  {openMoreForId === appointment.id ? (
-                                    <div
-                                      role="menu"
-                                      className="absolute right-0 top-9 z-20 min-w-40 rounded-xl border border-slate-200 bg-white p-1 shadow-lg"
-                                      onClick={(event) => event.stopPropagation()}
-                                    >
-                                      {canAct ? (
-                                        <>
-                                          <button
-                                            type="button"
-                                            role="menuitem"
-                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
-                                            disabled={statusMutation.isPending}
-                                            onClick={() => {
-                                              setStatusAction({ appointment, status: "discontinued", reasonRequired: true });
-                                              setStatusReason("");
-                                              setOpenMoreForId(null);
-                                            }}
-                                          >
-                                            <Ban size={14} />
-                                            <span>{chooseLocalized(language, "إيقاف", "Stop")}</span>
-                                          </button>
-                                          <button
-                                            type="button"
-                                            role="menuitem"
-                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-rose-800 hover:bg-rose-50"
-                                            disabled={statusMutation.isPending}
-                                            onClick={() => {
-                                              setStatusAction({ appointment, status: "cancelled", reasonRequired: true });
-                                              setStatusReason("");
-                                              setOpenMoreForId(null);
-                                            }}
-                                          >
-                                            <XCircle size={14} />
-                                            <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
-                                          </button>
-                                        </>
-                                      ) : null}
-                                      {appointment.status === "arrived" ? (
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
-                                          disabled={statusMutation.isPending}
-                                          onClick={() => {
-                                            setOpenMoreForId(null);
-                                            handleRequestStatusChange(appointment, "waiting");
-                                          }}
-                                        >
-                                          <TimerReset size={14} />
-                                          <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
-                                        </button>
-                                      ) : null}
-                                      {appointment.status === "completed" ? (
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
-                                          disabled={statusMutation.isPending}
-                                          onClick={() => {
-                                            setOpenMoreForId(null);
-                                            handleRequestStatusChange(appointment, "arrived", true);
-                                          }}
-                                        >
-                                          <RotateCcw size={14} />
-                                          <span>{chooseLocalized(language, "إعادة فتح", "Reopen")}</span>
-                                        </button>
-                                      ) : null}
-                                    </div>
                                   ) : null}
                                 </div>
                               </td>
@@ -1022,6 +990,79 @@ export default function ModalityPage() {
           </aside>
         </main>
       </div>
+
+      {openMoreMenu && moreMenuAppointment ? (
+        <div
+          role="menu"
+          dir={isArabic ? "rtl" : "ltr"}
+          className={`fixed z-[80] min-w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-2xl ${isArabic ? "text-right" : "text-left"}`}
+          style={{ top: openMoreMenu.top, left: openMoreMenu.left }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {isActiveStatus(moreMenuAppointment.status) ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-amber-900 hover:bg-amber-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+                disabled={statusMutation.isPending}
+                onClick={() => {
+                  setStatusAction({ appointment: moreMenuAppointment, status: "discontinued", reasonRequired: true });
+                  setStatusReason("");
+                  setOpenMoreMenu(null);
+                }}
+              >
+                <Ban size={14} />
+                <span>{chooseLocalized(language, "إيقاف", "Stop")}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-rose-800 hover:bg-rose-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+                disabled={statusMutation.isPending}
+                onClick={() => {
+                  setStatusAction({ appointment: moreMenuAppointment, status: "cancelled", reasonRequired: true });
+                  setStatusReason("");
+                  setOpenMoreMenu(null);
+                }}
+              >
+                <XCircle size={14} />
+                <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+              </button>
+            </>
+          ) : null}
+          {moreMenuAppointment.status === "arrived" ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+              disabled={statusMutation.isPending}
+              onClick={() => {
+                setOpenMoreMenu(null);
+                handleRequestStatusChange(moreMenuAppointment, "waiting");
+              }}
+            >
+              <TimerReset size={14} />
+              <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
+            </button>
+          ) : null}
+          {moreMenuAppointment.status === "completed" ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+              disabled={statusMutation.isPending}
+              onClick={() => {
+                setOpenMoreMenu(null);
+                handleRequestStatusChange(moreMenuAppointment, "arrived", true);
+              }}
+            >
+              <RotateCcw size={14} />
+              <span>{chooseLocalized(language, "إعادة فتح", "Reopen")}</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <Dialog open={Boolean(selectedAppointment)} onClose={() => setSelectedAppointmentId(null)}>
         <DialogContent maxWidth="760px">
@@ -1302,7 +1343,7 @@ function MetricCard({
     emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
   };
 
-  const className = `rounded-xl border px-3 py-2 text-left shadow-sm transition-all ${toneClasses[tone]} ${active ? "ring-2 ring-offset-1 ring-[var(--accent)]" : ""}`;
+  const className = `rounded-xl border px-3 py-2 text-left shadow-sm transition-all ${onClick ? "cursor-pointer hover:shadow-md" : ""} ${toneClasses[tone]} ${active ? "ring-2 ring-offset-1 ring-[var(--accent)]" : ""}`;
 
   if (onClick) {
     return (
