@@ -32,13 +32,21 @@
    - Changed: Replaced with direct dynamic `import("mssql")`.
    - Status: Fixed now.
 
-## Critical Issues
-
-1. Tracked generated artifacts and validation logs
+6. Tracked generated artifacts and validation logs
    - Where: `dist-frontend/`, `restore-v3-validation-20260527-173335/`, `tools/rispro-scanner-app/artifacts/`, `app.js`, `styles.css`, `tsconfig.tsbuildinfo`
    - Why it matters: Build outputs, logs, zips, and binaries make diffs noisy and may retain operational data.
-   - Recommend: Decide which artifacts are truly source, untrack the rest, and expand `.gitignore`.
-   - Safe now: Wait until deploy/runtime expectations for root `app.js`, `styles.css`, and scanner artifacts are confirmed.
+   - Changed: Untracked generated frontend build output, restore-validation output, TypeScript build info, and scanner `bin`/`obj`/`artifacts` output; added `.gitignore` rules. Kept root `app.js`, `styles.css`, and `index.html` tracked because Docker copies them and the app serves them under `/legacy`.
+   - Status: Fixed now.
+
+7. Database-backed verification setup and cleanup
+   - Where: `src/services/patient-service.directory.test.ts`, `src/modules/appointments-v2/tests/integration/helpers.ts`
+   - Why it mattered: Local DB tests were blocked by a stale fixture national ID length and cleanup order for `special_reason_codes` user references.
+   - Changed: Kept generated test national IDs within the 12-character schema and cleared test-user references from both `public.special_reason_codes` and `appointments_v2.special_reason_codes` before deleting users.
+   - Status: Fixed now.
+
+## Critical Issues
+
+None currently selected.
 
 ## Medium Cleanup Items
 
@@ -59,11 +67,11 @@
 2. `.gitignore` is too sparse
    - Where: `.gitignore`
    - Why it matters: It ignores only a few paths while generated build/test artifacts are tracked.
-   - Recommend: Add build outputs, tsbuildinfo, validation logs, local scratch dirs, and generated scanner binaries after deciding what stays tracked.
-   - Safe now: Pair with artifact cleanup.
+   - Recommend: Keep extending as new generated outputs appear.
+   - Safe now: Already paired with artifact cleanup; revisit only if new noisy outputs appear.
 
 3. Root legacy frontend files need an ownership decision
    - Where: `app.js`, `styles.css`, root `index.html`
    - Why it matters: They look like legacy UI beside the Vite frontend and can confuse future changes.
-   - Recommend: Document as legacy/runtime-required or remove after confirming no server/deploy path serves them.
-   - Safe now: Wait.
+   - Recommend: Leave tracked while `/legacy` remains supported; remove only with a deliberate legacy-route removal.
+   - Safe now: Decision made for now: keep tracked.

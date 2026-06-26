@@ -35,6 +35,7 @@ test("patient directory sex filter matches both male/female and stored sex codes
   const userId = Number(user.rows[0]?.id);
 
   const insertPatient = async (sex: "M" | "F", seed: string) => {
+    const nationalId = `${sex}${String(Math.floor(Math.random() * 10_000_000_000)).padStart(10, "0")}${seed}`;
     const result = await pool.query<{ id: number }>(
       `
         insert into patients (
@@ -47,7 +48,7 @@ test("patient directory sex filter matches both male/female and stored sex codes
         returning id
       `,
       [
-        `${sex}${suffix}${seed}`,
+        nationalId,
         `${sex === "M" ? "Male" : "Female"} Arabic ${seed}`,
         `${sex === "M" ? "Male" : "Female"} English ${seed}`,
         `${sex === "M" ? "Male" : "Female"} Arabic ${seed}`,

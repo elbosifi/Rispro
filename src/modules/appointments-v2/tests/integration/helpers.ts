@@ -280,6 +280,26 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
     `update system_settings set updated_by_user_id = null where updated_by_user_id = any($1::bigint[])`,
     [userIds]
   );
+  await pool.query(
+    `
+      update public.special_reason_codes
+      set created_by_user_id = case when created_by_user_id = any($1::bigint[]) then null else created_by_user_id end,
+          updated_by_user_id = case when updated_by_user_id = any($1::bigint[]) then null else updated_by_user_id end
+      where created_by_user_id = any($1::bigint[])
+         or updated_by_user_id = any($1::bigint[])
+    `,
+    [userIds]
+  );
+  await pool.query(
+    `
+      update appointments_v2.special_reason_codes
+      set created_by_user_id = case when created_by_user_id = any($1::bigint[]) then null else created_by_user_id end,
+          updated_by_user_id = case when updated_by_user_id = any($1::bigint[]) then null else updated_by_user_id end
+      where created_by_user_id = any($1::bigint[])
+         or updated_by_user_id = any($1::bigint[])
+    `,
+    [userIds]
+  );
   await pool.query(`delete from users where id = any($1::bigint[])`, [userIds]);
   await pool.query(`delete from exam_types where id = any($1::bigint[])`, [examTypeIds]);
   await pool.query(`delete from modalities where id = any($1::bigint[])`, [modalityIds]);

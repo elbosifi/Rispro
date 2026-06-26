@@ -3,3 +3,15 @@ node_modules/
 .env
 .env.local
 docker/orthanc/generated/
+
+# Build outputs and local validation artifacts
+dist-frontend/
+restore-v3-validation-*/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+typecheck_*.txt
+
+# .NET scanner companion build outputs
+tools/rispro-scanner-app/**/bin/
+tools/rispro-scanner-app/**/obj/
+tools/rispro-scanner-app/artifacts/
