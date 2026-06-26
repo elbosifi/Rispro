@@ -93,6 +93,16 @@ Skip validation for low-risk changes and say so plainly.
 Use the cheapest useful check for risky changes.
 Do not run full test suites or full builds unless risk justifies it or the user asks.
 
+For DB-backed tests:
+
+- Always run `npm run db:test:check` first.
+- Always use `codex-db-test.env` for local test DB parameters.
+- Never guess database credentials.
+- Never ask the user for local DB test credentials.
+- Never use production `DATABASE_URL`.
+- If `db:test:check` fails, report the exact classified cause and the suggested fix.
+- Only run DB tests after `db:test:check` passes.
+
 ## Subagents
 
 Use subagents only when they save context, save time, or materially improve output quality.
