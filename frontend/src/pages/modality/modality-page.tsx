@@ -236,6 +236,21 @@ function elapsedLabel(language: Language, appointment: AppointmentWithDetails, n
   return formatElapsedSince(language, now, appointment.arrivedAt);
 }
 
+function statusActionLabel(language: Language, action: BoardStatusAction): string {
+  switch (action.status) {
+    case "discontinued":
+      return chooseLocalized(language, "تأكيد إيقاف الحالة", "Confirm discontinuation");
+    case "cancelled":
+      return chooseLocalized(language, "تأكيد إلغاء الموعد", "Confirm cancellation");
+    case "arrived":
+      return chooseLocalized(language, "تأكيد إعادة فتح الموعد", "Confirm reopen");
+    case "waiting":
+      return chooseLocalized(language, "تأكيد الرجوع للانتظار", "Confirm return to waiting");
+    default:
+      return chooseLocalized(language, "تأكيد", "Confirm");
+  }
+}
+
 function relatedAppointmentTitle(
   language: Language,
   appointment: NonNullable<AppointmentWithDetails["relatedAppointments"]>[number]
@@ -932,7 +947,7 @@ export default function ModalityPage() {
                         }}
                       >
                         <Ban size={16} />
-                        <span>{chooseLocalized(language, "إيقاف", "Discontinue")}</span>
+                        <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
                       </Button>
                       <Button
                         type="button"
@@ -945,7 +960,7 @@ export default function ModalityPage() {
                         }}
                       >
                         <XCircle size={16} />
-                        <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+                        <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
                       </Button>
                     </div>
                   </div>
@@ -1013,7 +1028,7 @@ export default function ModalityPage() {
                 }}
               >
                 <Ban size={14} />
-                <span>{chooseLocalized(language, "إيقاف", "Stop")}</span>
+                <span>{chooseLocalized(language, "إيقاف الحالة", "Stop")}</span>
               </button>
               <button
                 type="button"
@@ -1027,7 +1042,7 @@ export default function ModalityPage() {
                 }}
               >
                 <XCircle size={14} />
-                <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+                <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
               </button>
             </>
           ) : null}
@@ -1103,6 +1118,13 @@ export default function ModalityPage() {
               </div>
 
               <DialogFooter>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setSelectedAppointmentId(null)}
+                >
+                  <span>{chooseLocalized(language, "إغلاق", "Close")}</span>
+                </Button>
                 {selectedAppointment.status === "scheduled" || selectedAppointment.status === "waiting" ? (
                   <Button
                     type="button"
@@ -1153,9 +1175,10 @@ export default function ModalityPage() {
                     setStatusAction({ appointment: selectedAppointment, status: "discontinued", reasonRequired: true });
                     setStatusReason("");
                   }}
+                  className="border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
                 >
                   <Ban size={16} />
-                  <span>{chooseLocalized(language, "إيقاف", "Discontinue")}</span>
+                  <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
                 </Button>
                 <Button
                   type="button"
@@ -1165,9 +1188,10 @@ export default function ModalityPage() {
                     setStatusAction({ appointment: selectedAppointment, status: "cancelled", reasonRequired: true });
                     setStatusReason("");
                   }}
+                  className="border border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100"
                 >
                   <XCircle size={16} />
-                  <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+                  <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
                 </Button>
               </DialogFooter>
             </div>
@@ -1187,13 +1211,7 @@ export default function ModalityPage() {
             <>
               <DialogHeader>
                 <DialogTitle>
-                  {statusAction.status === "discontinued"
-                    ? chooseLocalized(language, "تأكيد إيقاف الفحص", "Confirm discontinuation")
-                    : statusAction.status === "arrived"
-                      ? chooseLocalized(language, "إعادة فتح الموعد", "Reopen as arrived")
-                      : statusAction.status === "waiting"
-                        ? chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")
-                    : chooseLocalized(language, "تأكيد إلغاء الموعد", "Confirm cancellation")}
+                  {statusActionLabel(language, statusAction)}
                 </DialogTitle>
                 <DialogDescription>
                   {chooseLocalized(language, statusAction.appointment.arabicFullName, statusAction.appointment.englishFullName)} • {statusAction.appointment.accessionNumber}
@@ -1218,7 +1236,7 @@ export default function ModalityPage() {
                     setStatusReason("");
                   }}
                 >
-                  {t(language, "common.cancel")}
+                  {chooseLocalized(language, "إغلاق", "Close")}
                 </Button>
                 <Button
                   type="button"
@@ -1227,7 +1245,7 @@ export default function ModalityPage() {
                   onClick={handleConfirmStatusAction}
                 >
                   {statusMutation.isPending ? <RefreshCw size={18} className="animate-spin" /> : null}
-                  <span>{chooseLocalized(language, "تأكيد", "Confirm")}</span>
+                  <span>{statusActionLabel(language, statusAction)}</span>
                 </Button>
               </DialogFooter>
             </>

@@ -321,7 +321,7 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByRole("menuitem", { name: /Cancel/i }));
     await screen.findByRole("heading", { name: /Confirm cancellation/i });
     await user.type(screen.getByPlaceholderText(/Enter a reason/i), "Patient left");
-    await user.click(screen.getByRole("button", { name: /^Confirm$/i }));
+    await user.click(screen.getByRole("button", { name: /Confirm cancellation/i }));
     await waitFor(() => {
       expect(updateAppointmentStatusMock).toHaveBeenCalledWith(7, "cancelled", "Patient left");
     });
@@ -413,11 +413,11 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-9");
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
     await user.click(screen.getByRole("menuitem", { name: /Reopen/i }));
-    await screen.findByRole("heading", { name: /Reopen as arrived/i });
-    expect((screen.getByRole("button", { name: /^Confirm$/i }) as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByRole("heading", { name: /Confirm reopen/i });
+    expect((screen.getByRole("button", { name: /Confirm reopen/i }) as HTMLButtonElement).disabled).toBe(true);
 
     await user.type(screen.getByPlaceholderText(/Enter a reason/i), "Scanner workflow correction");
-    await user.click(screen.getByRole("button", { name: /^Confirm$/i }));
+    await user.click(screen.getByRole("button", { name: /Confirm reopen/i }));
     await waitFor(() => {
       expect(updateAppointmentStatusMock).toHaveBeenCalledWith(9, "arrived", "Scanner workflow correction");
     });
@@ -452,5 +452,33 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("MRI Abdomen")).toBeTruthy();
     expect(within(drawer).getByText("Urgent")).toBeTruthy();
     expect(within(drawer).getByText("Needs interpreter")).toBeTruthy();
+  });
+
+  it("uses specific Arabic destructive labels and a neutral close action in the selected drawer", async () => {
+    languageState.language = "ar";
+    const user = userEvent.setup();
+    renderPage([
+      appointment({ id: 12, accessionNumber: "ACC-AR", status: "arrived", englishFullName: "Arabic Action Patient" }),
+    ]);
+    await screen.findByRole("option", { name: "CT" });
+    await user.selectOptions(screen.getByRole("combobox"), "1");
+
+    await user.click(await screen.findByTestId("modality-board-row-12"));
+
+    const drawer = screen.getByTestId("selected-appointment-drawer");
+    expect(within(drawer).getByRole("button", { name: "إغلاق" })).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "إلغاء الموعد" })).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "إيقاف الحالة" })).toBeTruthy();
+    expect(within(drawer).queryByRole("button", { name: /^إلغاء$/ })).toBeNull();
+    expect(within(drawer).queryByRole("button", { name: /^إيقاف$/ })).toBeNull();
+
+    await user.click(within(drawer).getByRole("button", { name: "إغلاق" }));
+    expect(screen.queryByTestId("selected-appointment-drawer")).toBeNull();
+    expect(updateAppointmentStatusMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId("modality-board-row-12"));
+    await user.click(within(screen.getByTestId("selected-appointment-drawer")).getByRole("button", { name: "إلغاء الموعد" }));
+    await screen.findByRole("heading", { name: "تأكيد إلغاء الموعد" });
+    expect(screen.getByRole("button", { name: "تأكيد إلغاء الموعد" })).toBeTruthy();
   });
 });
