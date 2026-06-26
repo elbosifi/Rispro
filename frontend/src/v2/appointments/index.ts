@@ -74,7 +74,7 @@ export {
 // Pages
 export { AppointmentsV2Page } from "./page";
 export { SchedulingAdminV2Page } from "./scheduling-admin-page";
-export { AppointmentsV3CreatePage } from "./create-appointment-v3-page";
+export { AppointmentCreatePage } from "./appointment-create-page";
 
 // Components
 export { StatusBadge } from "./components/status-badge";

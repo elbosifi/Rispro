@@ -9,6 +9,7 @@ import {
   type PageVisibilityMatrix
 } from "@/lib/page-visibility";
 import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { APP_NAV_ITEMS, type AppNavIcon, type AppNavItem } from "@/lib/route-registry";
 import {
   LayoutGrid,
   Users,
@@ -32,79 +33,9 @@ import {
   LogOut
 } from "lucide-react";
 
-type NavIcon =
-  | "dashboard"
-  | "patients"
-  | "patientMerge"
-  | "nameDictionary"
-  | "appointments"
-  | "overrideRequests"
-  | "appointmentsV2Admin"
-  | "calendar"
-  | "registrations"
-  | "queue"
-  | "queueCheckIn"
-  | "modality"
-  | "doctor"
-  | "print"
-  | "statistics"
-  | "pacs"
-  | "pacsRemap"
-  | "worklistMonitor"
-  | "settings"
-  | "legacy";
+export const NAV_ITEMS = APP_NAV_ITEMS;
 
-interface NavItemConfig {
-  route: string;
-  labelKey:
-    | "nav.dashboard"
-    | "nav.patients"
-    | "nav.patientMerge"
-    | "nav.nameDictionary"
-    | "nav.appointments"
-    | "nav.schedulingOverrideRequests"
-    | "nav.appointmentsV2Admin"
-    | "nav.calendar"
-    | "nav.registrations"
-    | "nav.queue"
-    | "nav.queueCheckIn"
-    | "nav.modality"
-    | "nav.doctor"
-    | "nav.print"
-    | "nav.statistics"
-    | "nav.pacs"
-    | "nav.pacsRemap"
-    | "nav.worklistMonitor"
-    | "nav.settings"
-    | "nav.legacyReception";
-  icon: NavIcon;
-  roles?: string[];
-}
-
-export const NAV_ITEMS: NavItemConfig[] = [
-  { route: "dashboard", labelKey: "nav.dashboard", icon: "dashboard" },
-  { route: "patients", labelKey: "nav.patients", icon: "patients" },
-  { route: "patients.merge", labelKey: "nav.patientMerge", icon: "patientMerge" },
-  { route: "name.dictionary", labelKey: "nav.nameDictionary", icon: "nameDictionary" },
-  { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
-  { route: "scheduling.override.requests", labelKey: "nav.schedulingOverrideRequests", icon: "overrideRequests" },
-  { route: "v2.appointments.admin", labelKey: "nav.appointmentsV2Admin", icon: "appointmentsV2Admin", roles: ["supervisor", "super_admin"] },
-  { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
-  { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },
-  { route: "queue", labelKey: "nav.queue", icon: "queue" },
-  { route: "queue.checkin", labelKey: "nav.queueCheckIn", icon: "queueCheckIn" },
-  { route: "modality", labelKey: "nav.modality", icon: "modality" },
-  { route: "doctor", labelKey: "nav.doctor", icon: "doctor" },
-  { route: "print", labelKey: "nav.print", icon: "print" },
-  { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
-  { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
-  { route: "pacs.remap", labelKey: "nav.pacsRemap", icon: "pacsRemap" },
-  { route: "worklist.monitor", labelKey: "nav.worklistMonitor", icon: "worklistMonitor" },
-  { route: "legacy", labelKey: "nav.legacyReception", icon: "legacy" },
-  { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["super_admin"] }
-];
-
-function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilityMatrix): boolean {
+function canAccess(item: AppNavItem, user: User | null, matrix: PageVisibilityMatrix): boolean {
   if (!user) return false;
 
   if (item.route === "settings" && user.role === "super_admin") {
@@ -114,7 +45,7 @@ function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilit
   return canRoleAccessRoute(matrix, item.route, user.role);
 }
 
-const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
+const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
   dashboard: LayoutGrid,
   patients: Users,
   patientMerge: GitMerge,
@@ -137,7 +68,7 @@ const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
   legacy: History
 };
 
-function NavIconGlyph({ icon, size = 20 }: { icon: NavIcon; size?: number }) {
+function NavIconGlyph({ icon, size = 20 }: { icon: AppNavIcon; size?: number }) {
   const LucideIcon = ICON_MAP[icon];
   return <LucideIcon size={size} strokeWidth={1.5} />;
 }
@@ -237,7 +168,7 @@ function NavButton({
   index,
   onClick
 }: {
-  item: NavItemConfig;
+  item: AppNavItem;
   isActive: boolean;
   label: string;
   isRtl: boolean;

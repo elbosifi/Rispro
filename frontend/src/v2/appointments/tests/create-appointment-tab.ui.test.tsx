@@ -19,6 +19,23 @@ type MockNoShowAppointment = {
 const mockFetchAppointments = vi.fn<
   (params: unknown) => Promise<MockNoShowAppointment[]>
 >(async () => []);
+const mockFetchPatientNoShowHistory = vi.fn<(patientId: number) => Promise<{
+  noShowCount: number;
+  bookingRestricted: boolean;
+  lastNoShowAppointment: null;
+  lastAuthorizationUser: null;
+  lastAuthorizationReason: null;
+  lastAuthorizationAt: null;
+  lastNoShowDate: null;
+}>>(async () => ({
+    noShowCount: 0,
+    bookingRestricted: false,
+    lastNoShowAppointment: null,
+    lastAuthorizationUser: null,
+    lastAuthorizationReason: null,
+    lastAuthorizationAt: null,
+    lastNoShowDate: null,
+  }));
 const mockFetchPatientQrSettings = vi.fn(async () => ({
   defaultReportRequiredForOncology: true,
   defaultReportRequiredForNonOncology: false,
@@ -47,6 +64,7 @@ const mockCreateSchedulingOverrideRequest = vi.fn<
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
+  fetchPatientNoShowHistory: (patientId: number) => mockFetchPatientNoShowHistory(patientId),
   fetchPatientQrSettings: () => mockFetchPatientQrSettings(),
   fetchPublicSchedulingCapacitySettings: () => Promise.resolve({
     allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
@@ -422,9 +440,9 @@ function setup(
 
   render(
     <LanguageProvider>
-      <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+      <MemoryRouter initialEntries={["/appointments"]}>
         <Routes>
-          <Route path="/v3/appointments/create" element={
+          <Route path="/appointments" element={
             <CreateAppointmentTab
               patientLookups={{}}
               modalityOptions={[
@@ -461,6 +479,16 @@ describe("CreateAppointmentTab UI interactions", () => {
     localStorage.setItem("rispro:create-appointment:entity-display-mode", "en");
     mockFetchAppointments.mockReset();
     mockFetchAppointments.mockResolvedValue([]);
+    mockFetchPatientNoShowHistory.mockReset();
+    mockFetchPatientNoShowHistory.mockResolvedValue({
+      noShowCount: 0,
+      bookingRestricted: false,
+      lastNoShowAppointment: null,
+      lastAuthorizationUser: null,
+      lastAuthorizationReason: null,
+      lastAuthorizationAt: null,
+      lastNoShowDate: null,
+    });
     mockGetAppointmentById.mockReset();
     mockGetAppointmentById.mockImplementation(async (id: number) => ({
       id,
@@ -707,18 +735,23 @@ describe("CreateAppointmentTab UI interactions", () => {
   });
 
   it("shows previous no-shows list with date and exam type", async () => {
-    mockFetchAppointments.mockResolvedValueOnce([
-      {
-        id: 91,
-        appointmentDate: "2026-03-01",
-        examNameEn: "MRI Spine",
-        examNameAr: null,
-        status: "no-show",
-      },
-    ]);
+    mockFetchAppointments.mockImplementation(async (params: unknown) => {
+      const status = (params as { status?: string[] }).status;
+      return Array.isArray(status) && status.includes("no-show")
+        ? [
+            {
+              id: 91,
+              appointmentDate: "2026-03-01",
+              examNameEn: "MRI Spine",
+              examNameAr: null,
+              status: "no-show",
+            },
+          ]
+        : [];
+    });
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-    expect(await screen.findByText("Previous No-Shows / Cancelled")).toBeTruthy();
+    expect(await screen.findByText("Previous No-Shows")).toBeTruthy();
     expect(await screen.findByText("2026-03-01 — MRI Spine (no-show)")).toBeTruthy();
   });
 
@@ -1109,9 +1142,9 @@ describe("CreateAppointmentTab UI interactions", () => {
 
       render(
         <LanguageProvider>
-          <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+          <MemoryRouter initialEntries={["/appointments"]}>
             <Routes>
-              <Route path="/v3/appointments/create" element={
+              <Route path="/appointments" element={
                 <CreateAppointmentTab
                   patientLookups={{}}
                   modalityOptions={[
@@ -1306,9 +1339,9 @@ describe("safety modal interactions", () => {
 
       render(
         <LanguageProvider>
-          <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+          <MemoryRouter initialEntries={["/appointments"]}>
             <Routes>
-              <Route path="/v3/appointments/create" element={
+              <Route path="/appointments" element={
                 <CreateAppointmentTab
                   patientLookups={{}}
                   modalityOptions={[

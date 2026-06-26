@@ -8,7 +8,7 @@ import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
 
-export function AppointmentsV3CreatePage() {
+export function AppointmentCreatePage() {
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
   const { user } = useAuth();

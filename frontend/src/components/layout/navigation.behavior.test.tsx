@@ -11,6 +11,8 @@ vi.mock("lucide-react", () => {
   return {
     LayoutGrid: Icon,
     Users: Icon,
+    GitMerge: Icon,
+    BookOpenText: Icon,
     CalendarDays: Icon,
     ClipboardList: Icon,
     ListOrdered: Icon,
@@ -42,7 +44,7 @@ vi.mock("@tanstack/react-query", async () => {
 
 describe("Navigation governance", () => {
   it("does not include V3 create route in NAV_ITEMS", () => {
-    expect(NAV_ITEMS.some((item) => item.route === "v3.appointments.create")).toBe(false);
+    expect(NAV_ITEMS.map((item) => item.route)).not.toContain("v3.appointments.create");
   });
 
   it("does not render V3 create nav entry for receptionist users", () => {

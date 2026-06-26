@@ -1,4 +1,5 @@
 import type { Role } from "@/types/api";
+import { PAGE_VISIBILITY_REGISTRY_ENTRIES, type PageAccessRouteKey } from "@/lib/route-registry";
 
 export const PAGE_VISIBILITY_ROLES: Role[] = [
   "receptionist",
@@ -9,54 +10,14 @@ export const PAGE_VISIBILITY_ROLES: Role[] = [
   "super_admin",
 ];
 
-export const PAGE_VISIBILITY_ROUTE_KEYS = [
-  "dashboard",
-  "patients",
-  "patients.merge",
-  "name.dictionary",
-  "appointments",
-  "scheduling.override.requests",
-  "v2.appointments.admin",
-  "calendar",
-  "registrations",
-  "queue",
-  "queue.checkin",
-  "modality",
-  "doctor",
-  "print",
-  "statistics",
-  "pacs",
-  "pacs.remap",
-  "worklist.monitor",
-  "legacy",
-  "settings",
-] as const;
+export const PAGE_VISIBILITY_ROUTE_KEYS = PAGE_VISIBILITY_REGISTRY_ENTRIES.map((entry) => entry.accessKey);
 
-export type PageVisibilityRouteKey = (typeof PAGE_VISIBILITY_ROUTE_KEYS)[number];
+export type PageVisibilityRouteKey = PageAccessRouteKey;
 export type PageVisibilityMatrix = Record<PageVisibilityRouteKey, Role[]>;
 
-export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = {
-  dashboard: ["receptionist", "supervisor", "administrative", "super_admin"],
-  patients: ["receptionist", "supervisor", "doctor", "super_admin"],
-  "patients.merge": ["supervisor", "super_admin"],
-  "name.dictionary": ["supervisor", "super_admin"],
-  appointments: ["receptionist", "supervisor", "super_admin"],
-  "scheduling.override.requests": ["receptionist", "supervisor", "super_admin"],
-  "v2.appointments.admin": ["supervisor", "super_admin"],
-  calendar: ["receptionist", "supervisor", "super_admin"],
-  registrations: ["receptionist", "supervisor", "super_admin"],
-  queue: ["receptionist", "supervisor", "modality_staff", "super_admin"],
-  "queue.checkin": ["receptionist", "supervisor", "super_admin"],
-  modality: ["modality_staff", "supervisor", "super_admin"],
-  doctor: ["doctor", "supervisor", "super_admin"],
-  print: ["receptionist", "supervisor", "doctor", "super_admin"],
-  statistics: ["administrative", "supervisor", "super_admin"],
-  pacs: ["supervisor", "doctor", "super_admin"],
-  "pacs.remap": ["supervisor", "doctor", "super_admin"],
-  "worklist.monitor": ["supervisor", "super_admin"],
-  legacy: ["supervisor", "super_admin"],
-  settings: ["super_admin"],
-};
+export const DEFAULT_PAGE_VISIBILITY_MATRIX: PageVisibilityMatrix = Object.fromEntries(
+  PAGE_VISIBILITY_REGISTRY_ENTRIES.map((entry) => [entry.accessKey, [...entry.defaultRoles]])
+) as PageVisibilityMatrix;
 
 function isRole(value: unknown): value is Role {
   return typeof value === "string" && PAGE_VISIBILITY_ROLES.includes(value as Role);

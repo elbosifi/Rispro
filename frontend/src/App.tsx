@@ -32,13 +32,14 @@ import WorklistMonitorPage from "@/pages/worklist-monitor/worklist-monitor-page"
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
-import { AppointmentsV3CreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
+import { AppointmentCreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
 import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { APP_PATH_TO_ROUTE, APP_ROUTE_PATHS, APP_ROUTE_TITLE_KEYS } from "@/lib/route-registry";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,
   getDefaultLandingRouteForRole,
@@ -46,40 +47,11 @@ import {
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
 
-const ROUTE_PATHS: Record<string, string> = {
-  dashboard: "/",
-  patients: "/patients",
-  "patients.merge": "/patients/merge",
-  "name.dictionary": "/name-dictionary",
-  "patients.new": "/patients/new",
-  appointments: "/appointments",
-  "scheduling.override.requests": "/scheduling/override-requests",
-  calendar: "/calendar",
-  registrations: "/registrations",
-  queue: "/queue",
-  "queue.checkin": "/queue/check-in",
-  modality: "/modality",
-  doctor: "/doctor",
-  print: "/print",
-  statistics: "/statistics",
-  search: "/search",
-  pacs: "/pacs",
-  "pacs.remap": "/pacs/remap",
-  "worklist.monitor": "/worklist-monitor",
-  settings: "/settings",
-  legacy: "/legacy-access-viewer",
-  "v2.appointments.admin": "/v2/appointments/admin",
-};
-
-const PATH_TO_ROUTE = Object.fromEntries(
-  Object.entries(ROUTE_PATHS).map(([k, v]) => [v === "/" ? "/" : v.slice(1), k])
-);
-
 function getLandingPath(route: PageVisibilityRouteKey): string {
   if (route === "dashboard") {
     return "/dashboard";
   }
-  return ROUTE_PATHS[route] || "/dashboard";
+  return APP_ROUTE_PATHS[route] || "/dashboard";
 }
 
 function LoadingScreen() {
@@ -145,7 +117,7 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
-  const { language, toggleLanguage } = useLanguage();
+  const { language, toggleLanguage, t } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { data: pageVisibilityMatrix, isLoading: isPageVisibilityLoading } = useQuery({
@@ -168,7 +140,7 @@ function AppContent() {
 
   const handleNavigate = useCallback(
     (route: string) => {
-      const path = ROUTE_PATHS[route];
+      const path = APP_ROUTE_PATHS[route as keyof typeof APP_ROUTE_PATHS];
       if (path) {
         localStorage.setItem("rispro-route", route);
         navigate(path);
@@ -188,60 +160,20 @@ function AppContent() {
     if (pathname.startsWith("/name-dictionary")) {
       return "name.dictionary";
     }
-    return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
+    return APP_PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
   const isPatientCreate = location.pathname === "/patients/new";
   const isPatientEdit = /^\/patients\/\d+\/edit$/.test(location.pathname);
+  const routePageTitleKey = APP_ROUTE_TITLE_KEYS[currentRoute as keyof typeof APP_ROUTE_TITLE_KEYS];
 
   const pageTitle = isPatientCreate
-    ? (language === "ar" ? "تسجيل مريض" : "Register Patient")
+    ? t("patients.registerTitle")
     : isPatientEdit
-      ? (language === "ar" ? "تعديل مريض" : "Edit Patient")
-      : (() => {
-      switch (currentRoute) {
-        case "dashboard":
-          return language === "ar" ? "لوحة التحكم" : "Dashboard";
-        case "patients":
-          return language === "ar" ? "المرضى" : "Patients";
-        case "patients.merge":
-          return language === "ar" ? "Ø¯Ù…Ø¬ Ø§Ù„Ù…Ø±Ø¶Ù‰" : "Patient Merge";
-        case "name.dictionary":
-          return language === "ar" ? "Ù‚Ø§Ù…ÙˆØ³ Ø§Ù„Ø£Ø³Ù…Ø§Ø¡" : "Name Dictionary";
-      case "appointments":
-        return language === "ar" ? "إنشاء موعد" : "Create Appointment";
-      case "scheduling.override.requests":
-        return language === "ar" ? "طلبات التجاوز" : "Override Requests";
-      case "calendar":
-        return language === "ar" ? "التقويم" : "Calendar";
-      case "registrations":
-        return language === "ar" ? "التسجيلات" : "Registrations";
-      case "queue":
-        return language === "ar" ? "قائمة الانتظار" : "Queue";
-      case "modality":
-        return language === "ar" ? "الأجهزة" : "Modality";
-      case "doctor":
-        return language === "ar" ? "واجهة الطبيب" : "Doctor";
-      case "print":
-        return language === "ar" ? "الطباعة والتقارير" : "Print & Reports Center";
-      case "statistics":
-        return language === "ar" ? "الإحصاءات" : "Statistics";
-      case "search":
-        return language === "ar" ? "البحث" : "Search";
-      case "pacs":
-        return language === "ar" ? "PACS" : "PACS";
-      case "pacs.remap":
-        return language === "ar" ? "إعادة ربط PACS" : "PACS Remap";
-      case "settings":
-        return language === "ar" ? "الإعدادات" : "Settings";
-      case "legacy":
-        return language === "ar" ? "واجهة الاستقبال القديمة" : "Legacy Reception";
-      case "v2.appointments.admin":
-        return language === "ar" ? "إدارة المواعيد" : "Appointment Admin";
-      default:
-        return null;
-      }
-    })();
+      ? t("patients.editTitle")
+      : routePageTitleKey
+        ? t(routePageTitleKey)
+        : null;
 
   if (isLoading || isPageVisibilityLoading || (location.pathname === "/" && isDoctorMeLoading)) {
     return <LoadingScreen />;
@@ -316,7 +248,7 @@ function AppContent() {
             <Route path="/name-dictionary" element={guardedPage("name.dictionary", <NameDictionaryPage />)} />
             <Route path="/patients/new" element={guardedPage("patients", <PatientsPage />)} />
             <Route path="/patients/:id/edit" element={guardedPage("patients", <EditPatientPage />)} />
-            <Route path="/appointments" element={guardedPage("appointments", <AppointmentsV3CreatePage />)} />
+            <Route path="/appointments" element={guardedPage("appointments", <AppointmentCreatePage />)} />
             <Route path="/scheduling/override-requests" element={guardedPage("scheduling.override.requests", <SchedulingOverrideRequestsPage />)} />
             <Route path="/appointments/legacy" element={<Navigate to="/appointments" replace />} />
             <Route path="/calendar" element={guardedPage("calendar", <CalendarPage />)} />
