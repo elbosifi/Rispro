@@ -196,6 +196,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       const { status, data } = await fetch("/api/v2/scheduling/evaluate", {
         method: "POST",
         body: {
+          patientId: testData.patientId,
           modalityId: testData.modalityId,
           examTypeId: testData.examTypeId,
           scheduledDate: "2026-05-05",
@@ -208,6 +209,73 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       assert.ok(typeof decision.displayStatus === "string");
       assert.ok(Array.isArray(decision.reasons));
       assert.ok(typeof decision.policyVersionRef === "object");
+    });
+
+    it("rejects invalid evaluate request body values before evaluation", async () => {
+      const validBody = {
+        patientId: testData.patientId,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        scheduledDate: "2026-05-05",
+        caseCategory: "non_oncology",
+      };
+      const cases: Array<{ name: string; body: Record<string, unknown>; message: string }> = [
+        {
+          name: "missing patientId",
+          body: { ...validBody, patientId: undefined },
+          message: "patientId",
+        },
+        {
+          name: "invalid patientId",
+          body: { ...validBody, patientId: 0 },
+          message: "patientId",
+        },
+        {
+          name: "invalid modalityId",
+          body: { ...validBody, modalityId: "abc" },
+          message: "modalityId",
+        },
+        {
+          name: "invalid examTypeId",
+          body: { ...validBody, examTypeId: 0 },
+          message: "examTypeId",
+        },
+        {
+          name: "invalid scheduledDate",
+          body: { ...validBody, scheduledDate: "2026-02-30" },
+          message: "scheduledDate",
+        },
+        {
+          name: "invalid caseCategory",
+          body: { ...validBody, caseCategory: "urgent" },
+          message: "caseCategory",
+        },
+        {
+          name: "invalid capacityResolutionMode",
+          body: { ...validBody, capacityResolutionMode: "bad_mode" },
+          message: "capacityResolutionMode",
+        },
+        {
+          name: "non-boolean useSpecialQuota",
+          body: { ...validBody, useSpecialQuota: "true" },
+          message: "useSpecialQuota",
+        },
+        {
+          name: "non-boolean includeOverrideEvaluation",
+          body: { ...validBody, includeOverrideEvaluation: "false" },
+          message: "includeOverrideEvaluation",
+        },
+      ];
+
+      for (const testCase of cases) {
+        const { status, data } = await fetch("/api/v2/scheduling/evaluate", {
+          method: "POST",
+          body: testCase.body,
+        });
+        assert.equal(status, 400, testCase.name);
+        const response = data as Record<string, unknown>;
+        assert.match(String(response.error ?? ""), new RegExp(testCase.message), testCase.name);
+      }
     });
   });
 

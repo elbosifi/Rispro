@@ -95,13 +95,14 @@ function patientToForm(p: Patient): PatientFormState {
 
   const rawSex = p.sex || "";
   const sex = rawSex === "male" ? "M" : rawSex === "female" ? "F" : rawSex;
+  const patientIdentifiers = p.identifiers ?? [];
 
   const identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }> =
-    Array.isArray((p as any).identifiers) && (p as any).identifiers.length > 0
-      ? (p as any).identifiers.map((entry: Record<string, unknown>) => ({
-          typeCode: ((entry.typeCode ?? entry.type_code ?? p.identifierType ?? "national_id") as IdentifierType),
-          value: String(entry.value ?? ""),
-          isPrimary: Boolean(entry.isPrimary ?? entry.is_primary)
+    patientIdentifiers.length > 0
+      ? patientIdentifiers.map((entry) => ({
+          typeCode: ((entry.typeCode ?? p.identifierType ?? "national_id") as IdentifierType),
+          value: entry.value,
+          isPrimary: entry.isPrimary
         }))
       : [
           {
@@ -131,6 +132,15 @@ function patientToForm(p: Patient): PatientFormState {
   };
 }
 
+function getUnknownErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === "string" ? message : "";
+  }
+  return "";
+}
+
 interface PatientFormProps {
   mode: PatientFormMode;
   patientId?: number;
@@ -156,7 +166,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     setTimeout(() => setToast(null), 4500);
   };
   const localizedPatientError = (error: unknown, fallbackKey: "patients.registerFailed" | "patients.updateFailed" | "patients.deleteFailed") => {
-    const message = error instanceof Error ? error.message : String((error as any)?.message || "");
+    const message = getUnknownErrorMessage(error);
     if (message.startsWith("Primary identifier is required.")) return t("patients.primaryIdentifierRequired");
     const blockedWordMatch = message.match(/^Arabic name contains a not-allowed word:\s*(.+)$/i);
     if (blockedWordMatch) return t("patients.arabicNameNotAllowedWord", { word: blockedWordMatch[1] || "" });

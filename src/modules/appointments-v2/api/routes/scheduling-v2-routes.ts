@@ -17,6 +17,7 @@ import { getSuggestions } from "../../scheduler/services/suggestion.service.js";
 import { runAvailabilityWithShadow } from "../../observability/shadow-availability.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { pool } from "../../../../db/pool.js";
+import { parseEvaluateBookingDecisionRequestBody } from "./scheduling-evaluate-parser.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 const router = Router();
@@ -71,22 +72,20 @@ function parseCapacityResolutionModeQuery(value: unknown, useSpecialQuota: boole
 router.post(
   "/evaluate",
   asyncRoute(async (req: Request<unknown, unknown, unknown>, res: Response) => {
-    const body = req.body as Record<string, unknown>;
-    const capacityResolutionMode = (body.capacityResolutionMode as CapacityResolutionMode | undefined) ??
-      (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
+    const body = parseEvaluateBookingDecisionRequestBody(req.body);
     const decision = await evaluateBookingDecision({
-      patientId: Number(body.patientId),
-      modalityId: Number(body.modalityId),
-      examTypeId: body.examTypeId ? Number(body.examTypeId) : null,
-      scheduledDate: String(body.scheduledDate),
-      caseCategory: String(body.caseCategory) as "oncology" | "non_oncology",
-      capacityResolutionMode,
-      useSpecialQuota: body.useSpecialQuota === true,
+      patientId: body.patientId,
+      modalityId: body.modalityId,
+      examTypeId: body.examTypeId,
+      scheduledDate: body.scheduledDate,
+      caseCategory: body.caseCategory,
+      capacityResolutionMode: body.capacityResolutionMode,
+      useSpecialQuota: body.useSpecialQuota,
       specialReasonCode: body.specialReasonCode ? String(body.specialReasonCode) : null,
-      includeOverrideEvaluation: body.includeOverrideEvaluation === true,
+      includeOverrideEvaluation: body.includeOverrideEvaluation,
       requesterRole: req.user?.role,
       requesterUserId: Number(req.user?.sub ?? 0) || null,
-    }, body.policySetKey as string | undefined);
+    }, body.policySetKey);
     res.json(decision);
   })
 );
