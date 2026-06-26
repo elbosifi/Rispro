@@ -312,17 +312,37 @@ export default function QueuePage() {
     params.set("patientId", String(patientRequirementAlert.patientId));
     navigate(`/registrations?${params.toString()}`);
   };
-  const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => (
+  const relatedAppointmentLabel = (appointment: NonNullable<QueueEntry["relatedAppointments"]>[number]) => {
+    const modality = chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn);
+    const exam = chooseLocalized(language, appointment.examNameAr, appointment.examNameEn);
+    return [modality, exam].filter(Boolean).join(" ") || appointment.accessionNumber || t("queue.relatedAppointmentFallback", { id: appointment.appointmentId });
+  };
+  const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => {
+    const relatedAppointmentHint = (entry.relatedAppointments ?? [])
+      .filter((appointment) => appointment.appointmentId !== entry.appointmentId)
+      .map(relatedAppointmentLabel)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(", ");
+
+    return (
     <li key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
         <div>
-          <button
-            type="button"
-            className="text-start font-medium text-lg underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
-            onClick={() => setSelectedPatientId(entry.patientId)}
-          >
-            {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="text-start font-medium text-lg underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
+              onClick={() => setSelectedPatientId(entry.patientId)}
+            >
+              {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
+            </button>
+            {entry.hasMultipleAppointments && (
+              <Badge variant="info" size="sm">
+                {t("queue.multipleAppointments", { count: entry.sameDayAppointmentCount ?? entry.relatedAppointments?.length ?? 0 })}
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
           <p className="text-sm text-muted-foreground">
             {chooseLocalized(language, entry.modalityNameAr, entry.modalityNameEn)}
@@ -331,6 +351,11 @@ export default function QueuePage() {
           <p className="text-sm text-muted-foreground">
             {entry.phone1 || t("queue.noId")} • {entry.nationalId || t("queue.noId")}
           </p>
+          {entry.hasMultipleAppointments && relatedAppointmentHint && (
+            <p className="text-sm text-muted-foreground">
+              {t("queue.alsoToday", { items: relatedAppointmentHint })}
+            </p>
+          )}
           {entry.notes && <p className="text-sm text-muted-foreground">{entry.notes}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -389,7 +414,8 @@ export default function QueuePage() {
         </div>
       </div>
     </li>
-  );
+    );
+  };
   const renderNoShowCandidate = (candidate: QueueSnapshot["noShowCandidates"][number], oldCandidate = false) => (
     <li key={`${oldCandidate ? "old" : "today"}-${candidate.appointmentId}`} className="p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div>

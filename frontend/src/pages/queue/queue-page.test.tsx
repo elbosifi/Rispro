@@ -79,6 +79,51 @@ const queueSnapshot: QueueSnapshot = {
   oldNoShowCandidates: [],
 };
 
+const multiAppointmentSnapshot: QueueSnapshot = {
+  ...queueSnapshot,
+  summary: {
+    ...queueSnapshot.summary,
+    total_appointments: 3,
+    scheduled_count: 3,
+  },
+  queueEntries: [
+    {
+      ...queueSnapshot.queueEntries[0],
+      sameDayAppointmentCount: 3,
+      hasMultipleAppointments: true,
+      relatedAppointments: [
+        {
+          appointmentId: 44,
+          accessionNumber: "ACC-44",
+          appointmentStatus: "scheduled",
+          modalityNameAr: "CT",
+          modalityNameEn: "CT",
+          examNameAr: "Head",
+          examNameEn: "Head",
+        },
+        {
+          appointmentId: 45,
+          accessionNumber: "ACC-45",
+          appointmentStatus: "scheduled",
+          modalityNameAr: "MRI",
+          modalityNameEn: "MRI",
+          examNameAr: "Brain",
+          examNameEn: "Brain",
+        },
+        {
+          appointmentId: 46,
+          accessionNumber: "ACC-46",
+          appointmentStatus: "waiting",
+          modalityNameAr: "US",
+          modalityNameEn: "US",
+          examNameAr: "Abdomen",
+          examNameEn: "Abdomen",
+        },
+      ],
+    },
+  ],
+};
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -140,5 +185,33 @@ describe("QueuePage patient requirement errors", () => {
 
     await user.click(within(dialog).getByRole("button", { name: /Dismiss/i }));
     expect(screen.queryByRole("heading", { name: /Validation Error/i })).toBeNull();
+  });
+});
+
+describe("QueuePage multiple appointment marker", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.setItem("rispro-language", "en");
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
+    fetchSettingsMock.mockResolvedValue({ walk_in_queue: "disabled" });
+  });
+
+  it("shows a text badge and related appointment hint when count is greater than one", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue(multiAppointmentSnapshot);
+
+    renderPage();
+
+    expect(await screen.findByText("Multiple appointments · 3")).toBeTruthy();
+    expect(screen.getByText(/Also today: MRI Brain, US Abdomen/i)).toBeTruthy();
+  });
+
+  it("hides the multiple appointment badge when count is one or missing", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue(queueSnapshot);
+
+    renderPage();
+
+    await screen.findByText("Patient Name");
+    expect(screen.queryByText(/Multiple appointments/i)).toBeNull();
+    expect(screen.queryByText(/Also today:/i)).toBeNull();
   });
 });

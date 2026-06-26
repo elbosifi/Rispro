@@ -371,7 +371,24 @@ function mapQueueEntry(raw: RawRecord): QueueEntry {
     modalityNameAr: str(raw, 'modality_name_ar') || str(raw, 'modalityNameAr'),
     modalityNameEn: str(raw, 'modality_name_en') || str(raw, 'modalityNameEn'),
     examNameAr: strOrNull(raw, 'exam_name_ar') ?? strOrNull(raw, 'examNameAr'),
-    examNameEn: strOrNull(raw, 'exam_name_en') ?? strOrNull(raw, 'examNameEn')
+    examNameEn: strOrNull(raw, 'exam_name_en') ?? strOrNull(raw, 'examNameEn'),
+    sameDayAppointmentCount: num(raw, 'same_day_appointment_count') || num(raw, 'sameDayAppointmentCount'),
+    hasMultipleAppointments: bool(raw, 'has_multiple_appointments', bool(raw, 'hasMultipleAppointments', false)),
+    relatedAppointments: rawArray(raw, 'related_appointments').length > 0
+      ? rawArray(raw, 'related_appointments').map(mapQueueRelatedAppointment)
+      : rawArray(raw, 'relatedAppointments').map(mapQueueRelatedAppointment)
+  };
+}
+
+function mapQueueRelatedAppointment(raw: RawRecord): NonNullable<QueueEntry["relatedAppointments"]>[number] {
+  return {
+    appointmentId: num(raw, 'appointment_id') || num(raw, 'appointmentId'),
+    accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
+    appointmentStatus: fallback(raw.appointment_status ?? raw.appointmentStatus, "scheduled") as QueueEntry["appointmentStatus"],
+    modalityNameAr: str(raw, 'modality_name_ar') || str(raw, 'modalityNameAr'),
+    modalityNameEn: str(raw, 'modality_name_en') || str(raw, 'modalityNameEn'),
+    examNameAr: strOrNull(raw, 'exam_name_ar') ?? strOrNull(raw, 'examNameAr'),
+    examNameEn: strOrNull(raw, 'exam_name_en') ?? strOrNull(raw, 'examNameEn'),
   };
 }
 

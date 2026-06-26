@@ -1040,6 +1040,28 @@ export interface QueueSummary {
   arrived_count: number;
 }
 
+export interface QueueRelatedAppointment {
+  appointmentId: number;
+  accessionNumber: string;
+  appointmentStatus: AppointmentStatus;
+  modalityNameAr: string;
+  modalityNameEn: string;
+  examNameAr?: string | null;
+  examNameEn?: string | null;
+}
+
+export interface QueueScanResponse {
+  ok: true;
+  bookingId: number;
+  patientId: number;
+  bookingDate: string;
+  updatedBookingIds: number[];
+  alreadyArrivedBookingIds: number[];
+  relatedBookingIds: number[];
+  sameDayAppointmentCount: number;
+  hasMultipleAppointments: boolean;
+}
+
 export interface QueueEntry {
   id: number;
   queueDate: string;
@@ -1060,6 +1082,9 @@ export interface QueueEntry {
   modalityNameEn: string;
   examNameAr?: string | null;
   examNameEn?: string | null;
+  sameDayAppointmentCount?: number;
+  hasMultipleAppointments?: boolean;
+  relatedAppointments?: QueueRelatedAppointment[];
 }
 
 export interface QueueSnapshot {

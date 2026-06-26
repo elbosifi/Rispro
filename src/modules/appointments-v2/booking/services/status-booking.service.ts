@@ -11,6 +11,8 @@ import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
+const SAME_DAY_QUEUE_ACTIVE_STATUSES = new Set<BookingStatus>(["scheduled", "arrived", "waiting"]);
+const SAME_DAY_QUEUE_ARRIVAL_STATUSES = new Set<BookingStatus>(["scheduled", "waiting"]);
 const MANUAL_STATUS_TARGETS = new Set<BookingStatus>([
   "scheduled",
   "arrived",
@@ -42,12 +44,27 @@ interface PatientRequirementCleanupRow extends BookingStatusRow {
   missing_identifier: boolean;
 }
 
+interface SameDayQueueBookingRow extends BookingStatusRow {
+  booking_date: string;
+}
+
 export interface QueueNoShowSettings {
   reviewTime: string;
   reviewActive: boolean;
   autoNoShowEnabled: boolean;
   manualConfirmationRequired: boolean;
   cleanupDays: number;
+}
+
+export interface SameDayQueueArrivalResult {
+  bookingId: number;
+  patientId: number;
+  bookingDate: string;
+  updatedBookingIds: number[];
+  alreadyArrivedBookingIds: number[];
+  relatedBookingIds: number[];
+  sameDayAppointmentCount: number;
+  hasMultipleAppointments: boolean;
 }
 
 function getTripoliParts(): Record<string, string> {
@@ -67,6 +84,88 @@ function getTripoliParts(): Record<string, string> {
 export function getTripoliToday(): string {
   const parts = getTripoliParts();
   return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export async function arriveSameDayQueueBookings(
+  client: PoolClient,
+  bookingId: number,
+  today: string,
+  userId: number,
+  userRole?: Role
+): Promise<SameDayQueueArrivalResult> {
+  const selectedResult = await client.query<SameDayQueueBookingRow>(
+    `
+      select id, patient_id, booking_date::text, status
+      from appointments_v2.bookings
+      where id = $1
+      limit 1
+    `,
+    [bookingId]
+  );
+  const selected = selectedResult.rows[0];
+  if (
+    !selected ||
+    selected.booking_date !== today ||
+    !SAME_DAY_QUEUE_ACTIVE_STATUSES.has(selected.status)
+  ) {
+    throw new SchedulingError(409, "Booking is not eligible for scan/arrival.", ["queue_scan_booking_not_eligible"]);
+  }
+
+  await assertPatientMeetsBookingQueueRequirements(client, Number(selected.patient_id), userRole);
+
+  const lockedResult = await client.query<SameDayQueueBookingRow>(
+    `
+      select id, patient_id, booking_date::text, status
+      from appointments_v2.bookings
+      where patient_id = $1
+        and booking_date = $2::date
+      order by id asc
+      for update
+    `,
+    [selected.patient_id, selected.booking_date]
+  );
+
+  const lockedRows = lockedResult.rows;
+  const lockedSelected = lockedRows.find((row) => Number(row.id) === bookingId);
+  if (
+    !lockedSelected ||
+    lockedSelected.booking_date !== today ||
+    !SAME_DAY_QUEUE_ACTIVE_STATUSES.has(lockedSelected.status)
+  ) {
+    throw new SchedulingError(409, "Booking is not eligible for scan/arrival.", ["queue_scan_booking_not_eligible"]);
+  }
+
+  const activeRows = lockedRows.filter((row) => SAME_DAY_QUEUE_ACTIVE_STATUSES.has(row.status));
+  const updatedBookingIds = activeRows
+    .filter((row) => SAME_DAY_QUEUE_ARRIVAL_STATUSES.has(row.status))
+    .map((row) => Number(row.id));
+  const alreadyArrivedBookingIds = activeRows
+    .filter((row) => row.status === "arrived")
+    .map((row) => Number(row.id));
+  const relatedBookingIds = activeRows.map((row) => Number(row.id));
+
+  if (updatedBookingIds.length > 0) {
+    await client.query(
+      `
+        update appointments_v2.bookings
+        set status = 'arrived', updated_at = now(), updated_by_user_id = $2
+        where id = any($1::bigint[])
+          and status in ('scheduled', 'waiting')
+      `,
+      [updatedBookingIds, userId]
+    );
+  }
+
+  return {
+    bookingId,
+    patientId: Number(selected.patient_id),
+    bookingDate: selected.booking_date,
+    updatedBookingIds,
+    alreadyArrivedBookingIds,
+    relatedBookingIds,
+    sameDayAppointmentCount: relatedBookingIds.length,
+    hasMultipleAppointments: relatedBookingIds.length > 1,
+  };
 }
 
 function getTripoliMinutesSinceMidnight(): number {

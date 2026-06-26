@@ -13,9 +13,7 @@ import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.j
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public-appointment-url-core.js";
 import {
-  assertPatientMeetsBookingQueueRequirements,
-} from "../../booking/services/patient-identifier-requirement.js";
-import {
+  arriveSameDayQueueBookings,
   cleanupActiveQueuePatientRequirementViolations,
   finalizeAutoNoShowsForQueue,
   getQueueNoShowSettings,
@@ -656,6 +654,30 @@ router.get(
     const [entries, summary, oldNoShowCandidates] = await Promise.all([
       pool.query(
         `
+          with active_same_day as (
+            select
+              rb.patient_id,
+              rb.booking_date,
+              count(*)::int as same_day_appointment_count,
+              jsonb_agg(
+                jsonb_build_object(
+                  'appointment_id', rb.id,
+                  'accession_number', ('V2-' || lpad(rb.id::text, 6, '0')),
+                  'appointment_status', rb.status,
+                  'modality_name_ar', rm.name_ar,
+                  'modality_name_en', rm.name_en,
+                  'exam_name_ar', ret.name_ar,
+                  'exam_name_en', ret.name_en
+                )
+                order by rb.created_at asc, rb.id asc
+              ) as related_appointments
+            from appointments_v2.bookings rb
+            join modalities rm on rm.id = rb.modality_id
+            left join exam_types ret on ret.id = rb.exam_type_id
+            where rb.booking_date = $1::date
+              and rb.status in ('scheduled', 'arrived', 'waiting')
+            group by rb.patient_id, rb.booking_date
+          )
           select
             row_number() over (order by b.created_at asc, b.id asc)::int as queue_number,
             b.id,
@@ -685,13 +707,17 @@ router.get(
             ap.special_preparation,
             ap.technologist_notes,
             dp.display_name as protocol_assigned_by_doctor_name,
-            ap.assigned_at as protocol_assigned_at
+            ap.assigned_at as protocol_assigned_at,
+            coalesce(asd.same_day_appointment_count, 1)::int as same_day_appointment_count,
+            (coalesce(asd.same_day_appointment_count, 1) > 1) as has_multiple_appointments,
+            coalesce(asd.related_appointments, '[]'::jsonb) as related_appointments
           from appointments_v2.bookings b
           join patients p on p.id = b.patient_id
           join modalities m on m.id = b.modality_id
           left join exam_types et on et.id = b.exam_type_id
           left join doctor_portal.appointment_protocols ap on ap.appointment_id = b.id and ap.protocol_status = 'assigned'
           left join doctor_portal.doctor_profiles dp on dp.id = ap.assigned_by_doctor_id
+          left join active_same_day asd on asd.patient_id = b.patient_id and asd.booking_date = b.booking_date
           where b.booking_date = $1::date
             and b.status in ('scheduled', 'arrived', 'waiting')
           order by b.created_at asc, b.id asc
@@ -781,33 +807,10 @@ router.post(
     const user = (req as AuthedRequest).user;
     const userId = Number(user?.sub ?? 0);
     const client = await pool.connect();
+    let result: Awaited<ReturnType<typeof arriveSameDayQueueBookings>> | null = null;
     try {
       await client.query("begin");
-      const bookingResult = await client.query<{ id: number; patient_id: number; status: string }>(
-        `
-          select id, patient_id, status
-          from appointments_v2.bookings
-          where id = $1
-          for update
-        `,
-        [bookingId]
-      );
-      const booking = bookingResult.rows[0];
-      if (!booking || !["scheduled", "waiting"].includes(booking.status)) {
-        await client.query("rollback");
-        res.status(409).json({ error: "Booking is not eligible for scan/arrival." });
-        return;
-      }
-
-      await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), user?.role);
-      await client.query(
-        `
-          update appointments_v2.bookings
-          set status = 'arrived', updated_at = now(), updated_by_user_id = $2
-          where id = $1
-        `,
-        [bookingId, userId]
-      );
+      result = await arriveSameDayQueueBookings(client, bookingId, getTripoliToday(), userId, user?.role);
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");
@@ -816,8 +819,13 @@ router.post(
       client.release();
     }
 
-    scheduleBookingWorklistSync(bookingId);
-    res.json({ ok: true, bookingId });
+    if (!result) {
+      throw new Error("Queue scan did not return an arrival result.");
+    }
+    for (const updatedBookingId of result.updatedBookingIds) {
+      scheduleBookingWorklistSync(updatedBookingId);
+    }
+    res.json({ ok: true, ...result });
   })
 );
 

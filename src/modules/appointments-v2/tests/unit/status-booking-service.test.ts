@@ -113,9 +113,10 @@ describe("status booking service source guards", () => {
 
   it("V2 queue scan cannot set arrived without patient queue requirements", () => {
     assert.match(readV2RoutesSource, /"\/queue\/scan"/);
-    assert.match(readV2RoutesSource, /select id, patient_id, status[\s\S]*for update/);
-    assert.match(readV2RoutesSource, /assertPatientMeetsBookingQueueRequirements\(client, Number\(booking\.patient_id\), user\?\.role\)/);
-    assert.match(readV2RoutesSource, /set status = 'arrived'/);
+    assert.match(readV2RoutesSource, /arriveSameDayQueueBookings\(client, bookingId, getTripoliToday\(\), userId, user\?\.role\)/);
+    assert.match(source, /assertPatientMeetsBookingQueueRequirements\(client, Number\(selected\.patient_id\), userRole\)/);
+    assert.match(source, /where patient_id = \$1[\s\S]*and booking_date = \$2::date[\s\S]*order by id asc[\s\S]*for update/);
+    assert.match(source, /set status = 'arrived'/);
   });
 
   it("V2 queue and modality worklist reads cleanup invalid active worklist entries first", () => {
