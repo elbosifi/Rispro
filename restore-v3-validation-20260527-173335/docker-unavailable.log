@@ -1,2 +1,0 @@
-docker : The term 'docker' is not recognized as the name of a cmdlet, function, script file, or operable program.
-Result: NO-GO. Docker is required for disposable staging validation and pg_dump-in-container verification.

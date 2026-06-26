@@ -1,9 +1,0 @@
-{
-    "formatVersion":  3,
-    "schemas":  "public,appointments_v2,doctor_portal",
-    "archiveEntryCount":  85,
-    "fileCount":  3,
-    "storageEntries":  2,
-    "documentEntries":  null,
-    "orthancEntries":  0
-}

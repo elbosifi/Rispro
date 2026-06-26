@@ -1,9 +1,0 @@
-Invoke-WebRequest : Unable to connect to the remote server
-At line:6 char:8
-+ try { (Invoke-WebRequest -UseBasicParsing http://localhost:3100/api/h ...
-+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (System.Net.HttpWebRequest:HttpWebRequest) [Invoke-WebRequest], WebExc 
-   eption
-    + FullyQualifiedErrorId : WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeWebRequestCommand
- 
-

@@ -1,9 +1,0 @@
-Docker/WSL setup progress:
-- Docker Desktop installed; docker.exe available at C:\Program Files\Docker\Docker\resources\bin\docker.exe
-- Docker Compose available: v5.1.3
-- Current user added to docker-users group
-- Windows optional features enabled: Microsoft-Windows-Subsystem-Linux, VirtualMachinePlatform
-- Enable-WindowsOptionalFeature reported RestartNeeded: True
-- Current session still cannot access Docker engine pipe
-- wsl --status still reports WSL not installed until restart/install completes
-Conclusion: reboot/sign-out boundary reached. Resume validation after Windows restart and Docker Desktop startup.
