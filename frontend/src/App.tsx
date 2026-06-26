@@ -166,6 +166,27 @@ function AppContent() {
   const isPatientCreate = location.pathname === "/patients/new";
   const isPatientEdit = /^\/patients\/\d+\/edit$/.test(location.pathname);
   const routePageTitleKey = APP_ROUTE_TITLE_KEYS[currentRoute as keyof typeof APP_ROUTE_TITLE_KEYS];
+  const sidebarPreferenceKey = "rispro-sidebar-collapsed";
+  const hasSavedSidebarPreference = localStorage.getItem(sidebarPreferenceKey) != null;
+  const [desktopNavCollapsed, setDesktopNavCollapsed] = useState(() => {
+    const saved = localStorage.getItem(sidebarPreferenceKey);
+    if (saved != null) return saved === "true";
+    return currentRoute === "modality";
+  });
+
+  useEffect(() => {
+    if (!hasSavedSidebarPreference) {
+      setDesktopNavCollapsed(currentRoute === "modality");
+    }
+  }, [currentRoute, hasSavedSidebarPreference]);
+
+  const toggleDesktopNavCollapsed = useCallback(() => {
+    setDesktopNavCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem(sidebarPreferenceKey, String(next));
+      return next;
+    });
+  }, []);
 
   const pageTitle = isPatientCreate
     ? t("patients.registerTitle")
@@ -236,6 +257,8 @@ function AppContent() {
           user={user}
           language={language}
           isRtl={isArabic}
+          collapsed={desktopNavCollapsed}
+          onToggleCollapsed={toggleDesktopNavCollapsed}
           onNavigate={handleNavigate}
         />
 

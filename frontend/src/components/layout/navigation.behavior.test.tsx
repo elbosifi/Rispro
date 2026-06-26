@@ -218,6 +218,40 @@ describe("Navigation governance", () => {
     expect(screen.queryByText("Modality board")).not.toBeNull();
   });
 
+  it("renders a desktop sidebar collapse toggle", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    const onToggleCollapsed = vi.fn();
+    const { rerender } = render(
+      <SideNav
+        currentRoute="modality"
+        user={{ id: 3, username: "tech", fullName: "Tech", role: "modality_staff" }}
+        language="en"
+        isRtl={false}
+        collapsed={false}
+        onToggleCollapsed={onToggleCollapsed}
+        onNavigate={() => {}}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Toggle navigation/i }));
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <SideNav
+        currentRoute="modality"
+        user={{ id: 3, username: "tech", fullName: "Tech", role: "modality_staff" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onToggleCollapsed={onToggleCollapsed}
+        onNavigate={() => {}}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Toggle navigation/i }));
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(2);
+  });
+
   it("shows Patients when the fetched matrix grants modality_staff access", () => {
     matrixState.value = {
       ...DEFAULT_PAGE_VISIBILITY_MATRIX,

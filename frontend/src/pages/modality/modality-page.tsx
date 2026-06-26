@@ -5,6 +5,7 @@ import {
   Ban,
   CheckCircle2,
   Clock3,
+  MoreHorizontal,
   Printer,
   RefreshCw,
   RotateCcw,
@@ -41,7 +42,7 @@ const LIVE_BOARD_STATUSES = new Set<AppointmentStatus>(["in-progress", "arrived"
 const PROBLEM_STATUSES = new Set<AppointmentStatus>(["no-show", "cancelled", "discontinued"]);
 const EMPTY_VALUE = "—";
 
-type BoardFilter = "operational" | "ready" | "not-arrived" | "completed" | "problem" | "all";
+type BoardFilter = "operational" | "ready" | "waiting" | "arrived" | "in-progress" | "not-arrived" | "completed" | "problem" | "all";
 type BoardStatusAction = {
   appointment: AppointmentWithDetails;
   status: "arrived" | "waiting" | "cancelled" | "discontinued";
@@ -166,6 +167,12 @@ function matchesBoardFilter(appointment: AppointmentWithDetails, filter: BoardFi
       return LIVE_BOARD_STATUSES.has(appointment.status);
     case "ready":
       return appointment.status === "arrived" || appointment.status === "waiting";
+    case "waiting":
+      return appointment.status === "waiting";
+    case "arrived":
+      return appointment.status === "arrived";
+    case "in-progress":
+      return appointment.status === "in-progress";
     case "not-arrived":
       return appointment.status === "scheduled";
     case "completed":
@@ -205,6 +212,23 @@ function relatedAppointmentBadgeText(
   appointment: NonNullable<AppointmentWithDetails["relatedAppointments"]>[number]
 ): string {
   return chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn) || appointment.accessionNumber;
+}
+
+function formatElapsedSince(language: Language, now: Date, value: string | null | undefined): string {
+  const start = timestampValue(value);
+  if (start == null) return EMPTY_VALUE;
+  const elapsedMinutes = Math.max(0, Math.floor((now.getTime() - start) / 60_000));
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  if (hours > 0) {
+    return language === "ar" ? `${hours}س ${minutes}د` : `${hours}h ${minutes}m`;
+  }
+  return language === "ar" ? `${minutes}د` : `${minutes}m`;
+}
+
+function elapsedLabel(language: Language, appointment: AppointmentWithDetails, now: Date): string {
+  if (!ACTIVE_STATUSES.has(appointment.status)) return EMPTY_VALUE;
+  return formatElapsedSince(language, now, appointment.arrivedAt);
 }
 
 function relatedAppointmentTitle(
@@ -259,6 +283,8 @@ export default function ModalityPage() {
   const [confirmVerified, setConfirmVerified] = useState(false);
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
   const [statusReason, setStatusReason] = useState("");
+  const [openMoreForId, setOpenMoreForId] = useState<number | null>(null);
+  const [elapsedNow, setElapsedNow] = useState(() => new Date());
 
   const { data: lookups } = useQuery<AppointmentLookups>({
     queryKey: ["lookups"],
@@ -304,6 +330,11 @@ export default function ModalityPage() {
     }
   }, [appointments, confirmTargetId]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsedNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const completeMutation = useMutation({
     mutationFn: completeAppointment,
     onSuccess: async () => {
@@ -328,6 +359,7 @@ export default function ModalityPage() {
       await queryClient.invalidateQueries({ queryKey: ["registrations"] });
       setStatusAction(null);
       setStatusReason("");
+      setOpenMoreForId(null);
     },
   });
 
@@ -519,24 +551,32 @@ export default function ModalityPage() {
                 value={waitingStatisticsCount}
                 tone="amber"
                 icon={<Clock3 size={20} />}
+                active={boardFilter === "waiting"}
+                onClick={() => setBoardFilter("waiting")}
               />
               <MetricCard
                 label={t(language, "status.arrived")}
                 value={arrivedStatisticsCount}
                 tone="sky"
                 icon={<BadgeCheck size={20} />}
+                active={boardFilter === "arrived"}
+                onClick={() => setBoardFilter("arrived")}
               />
               <MetricCard
                 label={t(language, "status.in-progress")}
                 value={inProgressStatisticsCount}
                 tone="indigo"
                 icon={<TimerReset size={20} />}
+                active={boardFilter === "in-progress"}
+                onClick={() => setBoardFilter("in-progress")}
               />
               <MetricCard
                 label={t(language, "status.completed")}
                 value={completedCount}
                 tone="emerald"
                 icon={<CheckCircle2 size={20} />}
+                active={boardFilter === "completed"}
+                onClick={() => setBoardFilter("completed")}
               />
             </div>
 
@@ -601,7 +641,7 @@ export default function ModalityPage() {
                         <tr>
                           <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
                           <th className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
-                          <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
+                          <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival / elapsed")}</th>
                           <th className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
                           <th className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "MRN / الرقم الوطني", "MRN / national ID")}</th>
                           <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
@@ -627,7 +667,10 @@ export default function ModalityPage() {
                               ref={selected ? selectedRef : undefined}
                               data-testid={`modality-board-row-${appointment.id}`}
                               tabIndex={0}
-                              onClick={() => setSelectedAppointmentId(appointment.id)}
+                              onClick={() => {
+                                setOpenMoreForId(null);
+                                setSelectedAppointmentId(appointment.id);
+                              }}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
                                   event.preventDefault();
@@ -647,7 +690,12 @@ export default function ModalityPage() {
                                   <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
                                 </div>
                               </td>
-                              <td className="px-2 py-1 font-mono text-[11px] text-slate-700">{formatArrivalColumn(language, appointment)}</td>
+                              <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
+                                <p>{formatArrivalColumn(language, appointment)}</p>
+                                {ACTIVE_STATUSES.has(appointment.status) ? (
+                                  <p className="text-[10px] text-muted-foreground">{elapsedLabel(language, appointment, elapsedNow)}</p>
+                                ) : null}
+                              </td>
                               <td className="px-2 py-1">
                                 <p className="font-semibold text-foreground">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
                                 <p className="text-[10px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
@@ -694,7 +742,7 @@ export default function ModalityPage() {
                                 )}
                               </td>
                               <td className="px-2 py-1">
-                                <div className="flex items-center gap-1 whitespace-nowrap">
+                                <div className="relative flex items-center gap-1 whitespace-nowrap">
                                   <Button
                                     type="button"
                                     variant="secondary"
@@ -744,79 +792,93 @@ export default function ModalityPage() {
                                       <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
                                     </Button>
                                   ) : null}
-                                  {canAct ? (
-                                    <>
-                                      <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        aria-label={chooseLocalized(language, "إيقاف", "Discontinue")}
-                                        title={chooseLocalized(language, "إيقاف", "Discontinue")}
-                                        className="h-8 border border-amber-300 bg-amber-50 px-2 text-[11px] text-amber-900"
-                                        disabled={statusMutation.isPending}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setStatusAction({ appointment, status: "discontinued", reasonRequired: true });
-                                          setStatusReason("");
-                                        }}
-                                      >
-                                        <Ban size={14} />
-                                        <span>{chooseLocalized(language, "إيقاف", "Stop")}</span>
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        aria-label={chooseLocalized(language, "إلغاء", "Cancel")}
-                                        title={chooseLocalized(language, "إلغاء", "Cancel")}
-                                        className="h-8 border border-rose-300 bg-rose-50 px-2 text-[11px] text-rose-900"
-                                        disabled={statusMutation.isPending}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setStatusAction({ appointment, status: "cancelled", reasonRequired: true });
-                                          setStatusReason("");
-                                        }}
-                                      >
-                                        <XCircle size={14} />
-                                        <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
-                                      </Button>
-                                    </>
-                                  ) : null}
-                                  {appointment.status === "arrived" ? (
+                                  {canAct || appointment.status === "completed" ? (
                                     <Button
                                       type="button"
                                       variant="secondary"
                                       size="sm"
-                                      aria-label={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
-                                      title={chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}
+                                      aria-label={chooseLocalized(language, "إجراءات إضافية", "More actions")}
+                                      title={chooseLocalized(language, "إجراءات إضافية", "More actions")}
                                       className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
-                                        handleRequestStatusChange(appointment, "waiting");
+                                        setOpenMoreForId((current) => current === appointment.id ? null : appointment.id);
                                       }}
                                     >
-                                      <TimerReset size={14} />
-                                      <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
+                                      <MoreHorizontal size={14} />
+                                      <span>{chooseLocalized(language, "المزيد", "More")}</span>
                                     </Button>
                                   ) : null}
-                                  {appointment.status === "completed" ? (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="sm"
-                                      aria-label={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
-                                      title={chooseLocalized(language, "إعادة فتح", "Reopen as arrived")}
-                                      className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
-                                      disabled={statusMutation.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleRequestStatusChange(appointment, "arrived", true);
-                                      }}
+                                  {openMoreForId === appointment.id ? (
+                                    <div
+                                      role="menu"
+                                      className="absolute right-0 top-9 z-20 min-w-40 rounded-xl border border-slate-200 bg-white p-1 shadow-lg"
+                                      onClick={(event) => event.stopPropagation()}
                                     >
-                                      <RotateCcw size={14} />
-                                      <span>{chooseLocalized(language, "إعادة فتح", "Reopen")}</span>
-                                    </Button>
+                                      {canAct ? (
+                                        <>
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
+                                            disabled={statusMutation.isPending}
+                                            onClick={() => {
+                                              setStatusAction({ appointment, status: "discontinued", reasonRequired: true });
+                                              setStatusReason("");
+                                              setOpenMoreForId(null);
+                                            }}
+                                          >
+                                            <Ban size={14} />
+                                            <span>{chooseLocalized(language, "إيقاف", "Stop")}</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-rose-800 hover:bg-rose-50"
+                                            disabled={statusMutation.isPending}
+                                            onClick={() => {
+                                              setStatusAction({ appointment, status: "cancelled", reasonRequired: true });
+                                              setStatusReason("");
+                                              setOpenMoreForId(null);
+                                            }}
+                                          >
+                                            <XCircle size={14} />
+                                            <span>{chooseLocalized(language, "إلغاء", "Cancel")}</span>
+                                          </button>
+                                        </>
+                                      ) : null}
+                                      {appointment.status === "arrived" ? (
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
+                                          disabled={statusMutation.isPending}
+                                          onClick={() => {
+                                            setOpenMoreForId(null);
+                                            handleRequestStatusChange(appointment, "waiting");
+                                          }}
+                                        >
+                                          <TimerReset size={14} />
+                                          <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
+                                        </button>
+                                      ) : null}
+                                      {appointment.status === "completed" ? (
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
+                                          disabled={statusMutation.isPending}
+                                          onClick={() => {
+                                            setOpenMoreForId(null);
+                                            handleRequestStatusChange(appointment, "arrived", true);
+                                          }}
+                                        >
+                                          <RotateCcw size={14} />
+                                          <span>{chooseLocalized(language, "إعادة فتح", "Reopen")}</span>
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   ) : null}
                                 </div>
                               </td>
@@ -1223,11 +1285,15 @@ function MetricCard({
   value,
   tone,
   icon,
+  active = false,
+  onClick,
 }: {
   label: string;
   value: number;
   tone: "amber" | "sky" | "indigo" | "emerald";
   icon: React.ReactNode;
+  active?: boolean;
+  onClick?: () => void;
 }) {
   const toneClasses: Record<"amber" | "sky" | "indigo" | "emerald", string> = {
     amber: "border-amber-200 bg-amber-50 text-amber-700",
@@ -1236,8 +1302,22 @@ function MetricCard({
     emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
   };
 
+  const className = `rounded-xl border px-3 py-2 text-left shadow-sm transition-all ${toneClasses[tone]} ${active ? "ring-2 ring-offset-1 ring-[var(--accent)]" : ""}`;
+
+  if (onClick) {
+    return (
+      <button type="button" className={className} onClick={onClick} aria-pressed={active}>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[10px] uppercase tracking-[0.14em] opacity-80">{label}</p>
+          {icon}
+        </div>
+        <p className="mt-1 text-xl font-semibold tracking-tight">{value}</p>
+      </button>
+    );
+  }
+
   return (
-    <div className={`rounded-xl border px-3 py-2 shadow-sm ${toneClasses[tone]}`}>
+    <div className={className}>
       <div className="flex items-center justify-between gap-3">
         <p className="text-[10px] uppercase tracking-[0.14em] opacity-80">{label}</p>
         {icon}

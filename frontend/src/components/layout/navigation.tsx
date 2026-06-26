@@ -165,6 +165,7 @@ function NavButton({
   isActive,
   label,
   isRtl,
+  collapsed = false,
   index,
   onClick
 }: {
@@ -172,6 +173,7 @@ function NavButton({
   isActive: boolean;
   label: string;
   isRtl: boolean;
+  collapsed?: boolean;
   index: number;
   onClick: () => void;
 }) {
@@ -191,6 +193,8 @@ function NavButton({
       style={buttonStyle}
       data-active={isActive ? "true" : "false"}
       onClick={onClick}
+      aria-label={label}
+      title={collapsed ? label : undefined}
     >
       <span
         className="flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-[1.04]"
@@ -202,7 +206,7 @@ function NavButton({
       >
         <NavIconGlyph icon={item.icon} size={16} />
       </span>
-      <span className="flex-1 text-center leading-tight text-[0.72rem] uppercase tracking-[0.08em]">
+      <span className={`${collapsed ? "sr-only" : "flex-1 text-center"} leading-tight text-[0.72rem] uppercase tracking-[0.08em]`}>
         {label}
       </span>
       {isActive && (
@@ -386,12 +390,16 @@ export function SideNav({
   user,
   language,
   isRtl,
+  collapsed = false,
+  onToggleCollapsed,
   onNavigate
 }: {
   currentRoute: string;
   user: User | null;
   language: Language;
   isRtl: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onNavigate: (route: string) => void;
 }) {
   const { data: pageVisibilityMatrix } = useQuery({
@@ -405,7 +413,7 @@ export function SideNav({
 
   return (
     <nav
-      className="nav-shell hidden lg:flex flex-col w-60 min-h-full overflow-y-auto"
+      className={`nav-shell hidden lg:flex flex-col min-h-full overflow-y-auto transition-[width] duration-200 ${collapsed ? "w-16" : "w-60"}`}
       style={{
         backgroundImage: "linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--background)) 0%, var(--background) 18%, var(--background) 100%)",
         backgroundColor: "var(--background)",
@@ -416,7 +424,33 @@ export function SideNav({
     >
       {/* Header panel */}
       <div className="p-2.5" style={{ borderBottom: "1px solid var(--border)" }}>
-        <PanelHeader language={language} isRtl={isRtl} />
+        {collapsed ? (
+          <button
+            type="button"
+            className="flex h-10 w-full items-center justify-center rounded-xl border transition-all"
+            style={{ borderColor: "var(--border)", color: "var(--accent)" }}
+            onClick={onToggleCollapsed}
+            aria-label={t(language, "shell.toggleNav")}
+            title={t(language, "shell.toggleNav")}
+          >
+            <Menu size={18} />
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <PanelHeader language={language} isRtl={isRtl} />
+            {onToggleCollapsed ? (
+              <button
+                type="button"
+                className="flex h-8 w-full items-center justify-center gap-2 rounded-xl border text-xs font-medium transition-all"
+                style={{ borderColor: "var(--border)", color: "var(--accent)" }}
+                onClick={onToggleCollapsed}
+              >
+                <Menu size={14} />
+                <span>{t(language, "shell.toggleNav")}</span>
+              </button>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {/* Navigation items */}
@@ -428,6 +462,7 @@ export function SideNav({
             isActive={currentRoute === item.route}
             label={t(language, item.labelKey)}
             isRtl={isRtl}
+            collapsed={collapsed}
             index={index}
             onClick={() => onNavigate(item.route)}
           />
@@ -435,7 +470,7 @@ export function SideNav({
       </div>
 
       {/* Footer status */}
-      <div
+      {!collapsed ? <div
         className="nav-footer p-2.5 text-center border-t"
         style={{
           borderColor: "var(--border)",
@@ -443,7 +478,7 @@ export function SideNav({
         }}
       >
         <StatusFooter language={language} label={t(language, "shell.mwlActive")} />
-      </div>
+      </div> : null}
     </nav>
   );
 }

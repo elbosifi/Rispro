@@ -277,6 +277,27 @@ describe("ModalityPage modality board", () => {
     expect(boardAccessions()).toEqual(["ACC-CANCEL"]);
   });
 
+  it("summary metric cards apply exact board filters", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-ARRIVED", status: "arrived", arrivedAt: "2026-06-18T08:05:00Z", englishFullName: "Arrived Patient" }),
+      appointment({ id: 2, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+      appointment({ id: 3, accessionNumber: "ACC-PROGRESS", status: "in-progress", arrivedAt: "2026-06-18T08:15:00Z", englishFullName: "In Progress Patient" }),
+      appointment({ id: 4, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: /^Waiting\s+1$/i }));
+    expect(boardAccessions()).toEqual(["ACC-WAIT"]);
+
+    await user.click(screen.getByRole("button", { name: /^Arrived\s+1$/i }));
+    expect(boardAccessions()).toEqual(["ACC-ARRIVED"]);
+
+    await user.click(screen.getByRole("button", { name: /^In Progress\s+1$/i }));
+    expect(boardAccessions()).toEqual(["ACC-PROGRESS"]);
+
+    await user.click(screen.getByRole("button", { name: /^Completed\s+1$/i }));
+    expect(boardAccessions()).toEqual(["ACC-DONE"]);
+  });
+
   it("keeps row print, complete, and status actions wired", async () => {
     const user = await openBoard([
       appointment({ id: 7, accessionNumber: "ACC-ACTION", status: "waiting", englishFullName: "Action Patient" }),
@@ -292,7 +313,8 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByRole("button", { name: /Confirm completion/i }));
     await waitFor(() => expect(completeAppointmentMock.mock.calls[0]?.[0]).toBe(7));
 
-    await user.click(within(row).getByRole("button", { name: /Cancel/i }));
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    await user.click(within(row).getByRole("menuitem", { name: /Cancel/i }));
     await screen.findByRole("heading", { name: /Confirm cancellation/i });
     await user.type(screen.getByPlaceholderText(/Enter a reason/i), "Patient left");
     await user.click(screen.getByRole("button", { name: /^Confirm$/i }));
@@ -300,10 +322,11 @@ describe("ModalityPage modality board", () => {
       expect(updateAppointmentStatusMock).toHaveBeenCalledWith(7, "cancelled", "Patient left");
     });
 
-    expect(within(row).getByRole("button", { name: /Discontinue/i })).toBeTruthy();
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    expect(within(row).getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
   });
 
-  it("keeps compact row action buttons accessible", async () => {
+  it("keeps primary row actions visible and secondary actions in More", async () => {
     await openBoard([
       appointment({ id: 8, accessionNumber: "ACC-LABELS", status: "arrived", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Label Patient" }),
     ]);
@@ -311,9 +334,24 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-8");
     expect(within(row).getByRole("button", { name: /Print/i })).toBeTruthy();
     expect(within(row).getByRole("button", { name: /Complete/i })).toBeTruthy();
-    expect(within(row).getByRole("button", { name: /Discontinue/i })).toBeTruthy();
-    expect(within(row).getByRole("button", { name: /Cancel/i })).toBeTruthy();
-    expect(within(row).getByRole("button", { name: /Back to waiting/i })).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: /Discontinue/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /Cancel/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /Back to waiting/i })).toBeNull();
+  });
+
+  it("shows Stop Cancel and Wait in More for arrived rows", async () => {
+    const user = await openBoard([
+      appointment({ id: 8, accessionNumber: "ACC-LABELS", status: "arrived", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Label Patient" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-8");
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    expect(within(row).getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
+    expect(within(row).getByRole("menuitem", { name: /Cancel/i })).toBeTruthy();
+    expect(within(row).getByRole("menuitem", { name: /Wait/i })).toBeTruthy();
+
+    await user.click(within(row).getByRole("menuitem", { name: /Stop/i }));
+    await screen.findByRole("heading", { name: /Confirm discontinuation/i });
   });
 
   it("reopens completed rows only after a required reason is entered", async () => {
@@ -323,7 +361,8 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-9");
-    await user.click(within(row).getByRole("button", { name: /Reopen as arrived/i }));
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    await user.click(within(row).getByRole("menuitem", { name: /Reopen/i }));
     await screen.findByRole("heading", { name: /Reopen as arrived/i });
     expect((screen.getByRole("button", { name: /^Confirm$/i }) as HTMLButtonElement).disabled).toBe(true);
 
