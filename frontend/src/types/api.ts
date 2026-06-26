@@ -526,10 +526,24 @@ export interface ReportingBoardBulkAssignResult {
   skipped: Array<{ appointmentId: number; reason: string }>;
 }
 
+export interface ReportingBoardBulkUnassignResult {
+  requestedCount: number;
+  unassignedCount: number;
+  skippedCount: number;
+  unassignedAppointmentIds: number[];
+  skipped: Array<{ appointmentId: number; reason: string }>;
+}
+
 export interface ReportingBoardBulkReassignSelectedPayload {
   appointmentIds: number[];
   doctorId: number;
   reason?: string | null;
+  allowFinal?: boolean;
+}
+
+export interface ReportingBoardBulkUnassignSelectedPayload {
+  appointmentIds: number[];
+  reason: string;
   allowFinal?: boolean;
 }
 

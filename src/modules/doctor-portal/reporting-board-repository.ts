@@ -9,6 +9,7 @@ import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
   BrowserPushSubscriptionInput,
   BulkAssignNextCasesResult,
+  BulkUnassignSelectedCasesResult,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardStatsBaseRow,
@@ -758,6 +759,193 @@ export async function bulkAssignReportingCases(input: {
     assignedCount: assignedAppointmentIds.length,
     skippedCount: skipped.length,
     assignedAppointmentIds,
+    skipped,
+  };
+}
+
+interface ActiveReportingAssignment {
+  id: number;
+  appointmentId: number;
+  assignedDoctorId: number | null;
+  rosterAssignmentId: number | null;
+  assignmentType: "reporting";
+}
+
+function activeReportingAssignment(row: ActiveReportingAssignment): ActiveReportingAssignment {
+  return {
+    id: Number(row.id),
+    appointmentId: Number(row.appointmentId),
+    assignedDoctorId: nullableNumber(row.assignedDoctorId),
+    rosterAssignmentId: nullableNumber(row.rosterAssignmentId),
+    assignmentType: row.assignmentType,
+  };
+}
+
+export async function unassignReportingCase(input: {
+  appointmentId: number;
+  reason: string;
+  actor: AssignmentActor;
+}): Promise<{ unassigned: true; appointmentId: number; assignmentId: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const booking = await client.query<{ id: number }>(
+      `select id from appointments_v2.bookings where id = $1 for update`,
+      [input.appointmentId]
+    );
+    if (!booking.rows[0]) throw new Error("appointment_not_found");
+
+    const active = await client.query<ActiveReportingAssignment>(
+      `
+        select
+          id,
+          appointment_id as "appointmentId",
+          assigned_doctor_id as "assignedDoctorId",
+          roster_assignment_id as "rosterAssignmentId",
+          assignment_type as "assignmentType"
+        from doctor_portal.case_team_assignments
+        where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+        limit 1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const assignment = active.rows[0] ? activeReportingAssignment(active.rows[0]) : null;
+    if (!assignment) throw new Error("active_assignment_not_found");
+
+    await client.query(
+      `
+        update doctor_portal.case_team_assignments
+        set status = 'cancelled', updated_at = now()
+        where id = $1
+      `,
+      [assignment.id]
+    );
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_case_unassigned",
+      targetType: "case_team_assignment",
+      targetId: assignment.id,
+      metadata: {
+        appointmentId: input.appointmentId,
+        previousDoctorId: assignment.assignedDoctorId,
+        previousRosterAssignmentId: assignment.rosterAssignmentId,
+        assignmentType: assignment.assignmentType,
+      },
+      reason: input.reason,
+    });
+    await client.query("commit");
+    return { unassigned: true, appointmentId: input.appointmentId, assignmentId: assignment.id };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function bulkUnassignReportingCases(input: {
+  candidateAppointmentIds: number[];
+  reason: string;
+  actor: AssignmentActor;
+  skipped?: Array<{ appointmentId: number; reason: string }>;
+}): Promise<BulkUnassignSelectedCasesResult> {
+  const client = await pool.connect();
+  const unassignedAppointmentIds: number[] = [];
+  const skipped = [...(input.skipped ?? [])];
+  try {
+    await client.query("begin");
+    const lockedBookings = await client.query<{ appointmentId: number }>(
+      `
+        select id as "appointmentId"
+        from appointments_v2.bookings
+        where id = any($1::bigint[])
+        for update
+      `,
+      [input.candidateAppointmentIds]
+    );
+    const lockedIds = new Set(lockedBookings.rows.map((row) => Number(row.appointmentId)));
+    const activeRows = await client.query<ActiveReportingAssignment>(
+      `
+        select
+          id,
+          appointment_id as "appointmentId",
+          assigned_doctor_id as "assignedDoctorId",
+          roster_assignment_id as "rosterAssignmentId",
+          assignment_type as "assignmentType"
+        from doctor_portal.case_team_assignments
+        where appointment_id = any($1::bigint[]) and assignment_type = 'reporting' and status = 'active'
+        for update
+      `,
+      [input.candidateAppointmentIds]
+    );
+    const activeByAppointmentId = new Map(activeRows.rows.map((row) => {
+      const assignment = activeReportingAssignment(row);
+      return [assignment.appointmentId, assignment];
+    }));
+
+    for (const appointmentId of input.candidateAppointmentIds) {
+      if (!lockedIds.has(appointmentId)) {
+        skipped.push({ appointmentId, reason: "appointment_not_found" });
+        continue;
+      }
+      const assignment = activeByAppointmentId.get(appointmentId);
+      if (!assignment) {
+        skipped.push({ appointmentId, reason: "no_active_assignment" });
+        continue;
+      }
+      await client.query(
+        `
+          update doctor_portal.case_team_assignments
+          set status = 'cancelled', updated_at = now()
+          where id = $1
+        `,
+        [assignment.id]
+      );
+      unassignedAppointmentIds.push(appointmentId);
+      await insertDoctorAuditEvent(client, {
+        actorUserId: input.actor.userId,
+        actorDoctorId: input.actor.doctorId,
+        eventType: "reporting_board_bulk_selected_case_unassigned",
+        targetType: "case_team_assignment",
+        targetId: assignment.id,
+        metadata: {
+          appointmentId,
+          previousDoctorId: assignment.assignedDoctorId,
+          previousRosterAssignmentId: assignment.rosterAssignmentId,
+          assignmentType: assignment.assignmentType,
+        },
+        reason: input.reason,
+      });
+    }
+    const requestedCount = input.candidateAppointmentIds.length + (input.skipped?.length ?? 0);
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_bulk_selected_unassign_completed",
+      targetType: "case_team_assignment",
+      targetId: null,
+      metadata: {
+        requestedCount,
+        unassignedCount: unassignedAppointmentIds.length,
+        skipped,
+      },
+      reason: input.reason,
+    });
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return {
+    requestedCount: input.candidateAppointmentIds.length + (input.skipped?.length ?? 0),
+    unassignedCount: unassignedAppointmentIds.length,
+    skippedCount: skipped.length,
+    unassignedAppointmentIds,
     skipped,
   };
 }

@@ -8,6 +8,7 @@ import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import {
   bulkAssignReportingCases,
+  bulkUnassignReportingCases,
   createAssignedToMeNotifications,
   createSavedView,
   doctorCanReportAllModalities,
@@ -26,6 +27,7 @@ import {
   readReportingBoardSettings,
   readReportingBoardPushConfig,
   sendReportingBoardSavedViewTestPush,
+  unassignReportingCase,
   updateSavedView,
   updateReportingBoardSettings,
   upsertReportingBoardPushSubscription,
@@ -35,6 +37,8 @@ import type {
   BulkAssignNextCasesInput,
   BulkAssignNextCasesResult,
   BulkReassignSelectedCasesInput,
+  BulkUnassignSelectedCasesInput,
+  BulkUnassignSelectedCasesResult,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardDoctorStatsRow,
@@ -483,6 +487,12 @@ export async function reassignReportingBoardMobileCase(actor: Actor, token: stri
   return assignReportingBoardCaseToDoctor(actor, { appointmentId, doctorId, reason: reason ?? "mobile saved-view reassignment" });
 }
 
+export async function unassignReportingBoardMobileCase(actor: Actor, token: string, appointmentId: number, reason?: string | null) {
+  await requireRosterManager(actor);
+  await ensureCaseInSavedViewScope(token, appointmentId);
+  return unassignReportingBoardCase(actor, { appointmentId, reason });
+}
+
 export async function listMyReportingBoardSavedViews(actor: Actor) {
   const me = await requireRosterDoctor(actor);
   return listSavedViews(actor.userId, me.profile!.id);
@@ -685,6 +695,82 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
     assignedAppointmentIds: result.assignedAppointmentIds,
     skipped: [...skipped, ...result.skipped],
   };
+}
+
+export async function unassignReportingBoardCase(
+  actor: Actor,
+  input: { appointmentId: number; reason?: string | null }
+) {
+  const me = await requireRosterManager(actor);
+  const reason = input.reason?.trim();
+  if (!reason) throw new HttpError(400, "Reason is required.");
+
+  const rows = await applyReportStatuses(await listReportingBoardCasesByAppointmentIds([input.appointmentId]), "all");
+  const row = rows[0];
+  if (!row) throw new HttpError(404, "Appointment not found.");
+  if (!row.requiresReport) throw new HttpError(400, "Report is not required for this case.");
+  if (row.appointmentStatus !== "completed") throw new HttpError(400, "Study is not completed.");
+  if (row.reportStatus === "final") throw new HttpError(409, "Final reports cannot be returned to the waiting pool.");
+  if (row.assignmentStatus !== "assigned") throw new HttpError(409, "No active reporting assignment found.");
+
+  try {
+    return await unassignReportingCase({
+      appointmentId: input.appointmentId,
+      reason,
+      actor: { userId: actor.userId, doctorId: me.profile!.id },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "appointment_not_found") {
+      throw new HttpError(404, "Appointment not found.");
+    }
+    if (error instanceof Error && error.message === "active_assignment_not_found") {
+      throw new HttpError(409, "No active reporting assignment found.");
+    }
+    throw error;
+  }
+}
+
+export async function bulkUnassignSelectedReportingBoardCases(actor: Actor, input: BulkUnassignSelectedCasesInput): Promise<BulkUnassignSelectedCasesResult> {
+  const me = await requireRosterManager(actor);
+  const appointmentIds = uniquePositiveAppointmentIds(input.appointmentIds);
+  const reason = input.reason?.trim();
+  if (!reason) throw new HttpError(400, "Reason is required.");
+
+  const rows = await applyReportStatuses(await listReportingBoardCasesByAppointmentIds(appointmentIds), "all");
+  const rowsById = new Map(rows.map((row) => [row.appointmentId, row]));
+  const skipped: Array<{ appointmentId: number; reason: string }> = [];
+  const eligibleIds: number[] = [];
+  for (const appointmentId of appointmentIds) {
+    const row = rowsById.get(appointmentId);
+    if (!row) {
+      skipped.push({ appointmentId, reason: "appointment_not_found" });
+      continue;
+    }
+    if (row.assignmentStatus !== "assigned") {
+      skipped.push({ appointmentId, reason: "no_active_assignment" });
+      continue;
+    }
+    if (!row.requiresReport) {
+      skipped.push({ appointmentId, reason: "report_not_required" });
+      continue;
+    }
+    if (row.appointmentStatus !== "completed") {
+      skipped.push({ appointmentId, reason: row.exclusionReason ?? "study_not_completed" });
+      continue;
+    }
+    if (row.reportStatus === "final" && input.allowFinal !== true) {
+      skipped.push({ appointmentId, reason: "report_final" });
+      continue;
+    }
+    eligibleIds.push(appointmentId);
+  }
+
+  return bulkUnassignReportingCases({
+    candidateAppointmentIds: eligibleIds,
+    reason,
+    actor: { userId: actor.userId, doctorId: me.profile!.id },
+    skipped,
+  });
 }
 
 export async function assignReportingBoardCaseToDoctor(

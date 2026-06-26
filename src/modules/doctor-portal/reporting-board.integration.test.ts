@@ -638,6 +638,106 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where recipient_doctor_id = $1 and appointment_id = any($2::bigint[])`, [targetDoctor.doctorId, [first, alreadyAssigned]])).rowCount, 2);
   });
 
+  it("unassigns a single assigned reporting case, preserves history, filters as unassigned, and audits", async () => {
+    guard();
+    const date = addDays(72);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Single Unassign" });
+    statusByAppointmentId.set(appointmentId, "draft");
+    await assignDirectly(appointmentId, targetDoctor.doctorId);
+
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/${appointmentId}/unassign`, { method: "POST", body: { reason: "not manager" } })).status, 403);
+    assert.equal((await api(receptionistCookie, `/api/doctor/reporting-board/${appointmentId}/unassign`, { method: "POST", body: { reason: "not doctor portal" } })).status, 403);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/unassign`, { method: "POST", body: { reason: "" } })).status, 400);
+
+    const response = await api<{ unassigned: boolean; appointmentId: number; assignmentId: number }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/${appointmentId}/unassign`,
+      { method: "POST", body: { reason: "return to waiting pool" } }
+    );
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal(response.data.unassigned, true);
+    assert.equal(response.data.appointmentId, appointmentId);
+    const assignments = await pool.query<{ id: string; status: string }>(
+      `select id::text as id, status from doctor_portal.case_team_assignments where appointment_id = $1 order by id`,
+      [appointmentId]
+    );
+    assert.deepEqual(assignments.rows.map((row) => row.status), ["cancelled"]);
+    assert.equal(Number(assignments.rows[0].id), response.data.assignmentId);
+    assert.equal((await pool.query(`select 1 from doctor_portal.case_team_assignments where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'`, [appointmentId])).rowCount, 0);
+
+    const unassigned = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&assignmentStatus=unassigned`
+    );
+    const assigned = await api<{ cases: Array<{ appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&assignmentStatus=assigned`
+    );
+    assert.equal(unassigned.data.cases.some((row) => row.appointmentId === appointmentId), true);
+    assert.equal(assigned.data.cases.some((row) => row.appointmentId === appointmentId), false);
+    assert.equal((await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_case_unassigned' and target_id = $1 and reason = $2`, [response.data.assignmentId, "return to waiting pool"])).rowCount, 1);
+
+    assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${appointmentId}/unassign`, { method: "POST", body: { reason: "already unassigned" } })).status, 409);
+  });
+
+  it("bulk unassigns selected cases, deduplicates ids, skips ineligible cases, and audits", async () => {
+    guard();
+    const date = addDays(73);
+    const first = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Bulk Unassign First" });
+    const duplicate = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Bulk Unassign Duplicate" });
+    const alreadyUnassigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Bulk Unassign Already" });
+    const finalCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Bulk Unassign Final" });
+    const noReport = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, requiresReport: false, patientName: "Bulk Unassign No Report" });
+    const notCompleted = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, status: "scheduled", patientName: "Bulk Unassign Scheduled" });
+    [first, duplicate, alreadyUnassigned, noReport, notCompleted].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    statusByAppointmentId.set(finalCase, "final");
+    await assignDirectly(first, targetDoctor.doctorId);
+    await assignDirectly(duplicate, targetDoctor.doctorId);
+    await assignDirectly(finalCase, targetDoctor.doctorId);
+    await assignDirectly(noReport, targetDoctor.doctorId);
+    await assignDirectly(notCompleted, targetDoctor.doctorId);
+
+    assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-unassign-selected", { method: "POST", body: { appointmentIds: [first], reason: "" } })).status, 400);
+    assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/bulk-unassign-selected", { method: "POST", body: { appointmentIds: [first], reason: "not manager" } })).status, 403);
+
+    const response = await api<{
+      requestedCount: number;
+      unassignedCount: number;
+      skippedCount: number;
+      unassignedAppointmentIds: number[];
+      skipped: Array<{ appointmentId: number; reason: string }>;
+    }>(
+      supervisor.cookie,
+      "/api/doctor/reporting-board/bulk-unassign-selected",
+      {
+        method: "POST",
+        body: { appointmentIds: [first, duplicate, first, alreadyUnassigned, finalCase, noReport, notCompleted], reason: "selected return to pool" },
+      }
+    );
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal(response.data.requestedCount, 6);
+    assert.equal(response.data.unassignedCount, 2);
+    assert.deepEqual(response.data.unassignedAppointmentIds, [first, duplicate]);
+    assert.deepEqual(
+      response.data.skipped.map((row) => [row.appointmentId, row.reason]),
+      [[alreadyUnassigned, "no_active_assignment"], [finalCase, "report_final"], [noReport, "report_not_required"], [notCompleted, "study_not_completed"]]
+    );
+    const assignmentRows = await pool.query<{ appointment_id: string; status: string }>(
+      `select appointment_id::text, status from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[]) order by appointment_id, status`,
+      [[first, duplicate, finalCase, noReport, notCompleted]]
+    );
+    const statuses = new Map(assignmentRows.rows.map((row) => [Number(row.appointment_id), row.status]));
+    assert.equal(statuses.get(first), "cancelled");
+    assert.equal(statuses.get(duplicate), "cancelled");
+    assert.equal(statuses.get(finalCase), "active");
+    assert.equal(statuses.get(noReport), "active");
+    assert.equal(statuses.get(notCompleted), "active");
+    assert.equal((await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_bulk_selected_case_unassigned' and reason = $1`, ["selected return to pool"])).rowCount, 2);
+    assert.equal((await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_bulk_selected_unassign_completed' and reason = $1`, ["selected return to pool"])).rowCount, 1);
+  });
+
   it("returns reporting board statistics with manager scope, doctor scope, and filters", async () => {
     guard();
     const date = addDays(66);

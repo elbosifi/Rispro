@@ -9,6 +9,7 @@ const fetchReportingBoardMobileViewMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const assignReportingBoardMobileCaseToMeMock = vi.fn();
 const reassignReportingBoardMobileCaseMock = vi.fn();
+const unassignReportingBoardMobileCaseMock = vi.fn();
 const fetchReportingBoardMobilePushConfigMock = vi.fn();
 const subscribeReportingBoardMobilePushMock = vi.fn();
 
@@ -17,6 +18,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   assignReportingBoardMobileCaseToMe: (...args: unknown[]) => assignReportingBoardMobileCaseToMeMock(...args),
   reassignReportingBoardMobileCase: (...args: unknown[]) => reassignReportingBoardMobileCaseMock(...args),
+  unassignReportingBoardMobileCase: (...args: unknown[]) => unassignReportingBoardMobileCaseMock(...args),
   fetchReportingBoardMobilePushConfig: (...args: unknown[]) => fetchReportingBoardMobilePushConfigMock(...args),
   subscribeReportingBoardMobilePush: (...args: unknown[]) => subscribeReportingBoardMobilePushMock(...args),
 }));
@@ -90,6 +92,7 @@ describe("ReportingBoardMobilePage", () => {
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, displayName: "Dr Target" }]);
     assignReportingBoardMobileCaseToMeMock.mockResolvedValue({ assignmentId: 1 });
     reassignReportingBoardMobileCaseMock.mockResolvedValue({ assignmentId: 2 });
+    unassignReportingBoardMobileCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 2 });
     fetchReportingBoardMobilePushConfigMock.mockResolvedValue({ enabled: true, publicKey: "AAAA" });
     subscribeReportingBoardMobilePushMock.mockResolvedValue({ subscriptionId: 7 });
   });
@@ -161,6 +164,42 @@ describe("ReportingBoardMobilePage", () => {
     expect(await screen.findByRole("button", { name: /Enable notifications/i })).toBeTruthy();
     expect(screen.queryByText("Read-only via QR.")).toBeNull();
     expect(screen.getByText("Authenticated actions are available for your account.")).toBeTruthy();
+  });
+
+  it("returns an assigned mobile case to the waiting pool only for authenticated actions", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true, reassign: true },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Mohammed Bashir Meftah"));
+    expect(await screen.findByRole("button", { name: "Return to waiting pool" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Return to waiting pool" }));
+    expect(screen.getByText(/removes the assigned doctor and returns the case to the unassigned pool/i)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Confirm return to waiting pool" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("Reason for returning to waiting pool"), { target: { value: "mobile workload rebalance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm return to waiting pool" }));
+
+    await waitFor(() => expect(unassignReportingBoardMobileCaseMock).toHaveBeenCalledWith("tok-9", 42, "mobile workload rebalance"));
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not expose mobile return-to-pool action for unassigned or read-only cases", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Mohammed Bashir Meftah"));
+    expect(screen.queryByRole("button", { name: "Return to waiting pool" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true, reassign: true },
+    });
+    renderPage();
+    fireEvent.click(await screen.findByText("Abeer Farhat Salem Al-Sadeq"));
+    expect(screen.queryByRole("button", { name: "Return to waiting pool" })).toBeNull();
   });
 
   it("subscribes to saved-view notifications from the public QR page", async () => {

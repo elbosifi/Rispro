@@ -9,6 +9,7 @@ import {
   fetchRosterDoctors,
   reassignReportingBoardMobileCase,
   subscribeReportingBoardMobilePush,
+  unassignReportingBoardMobileCase,
 } from "@/lib/api-hooks";
 import type { ReportingBoardFilters, ReportingBoardMobileCase } from "@/types/api";
 
@@ -108,6 +109,8 @@ export function ReportingBoardMobilePage() {
   const [selectedCase, setSelectedCase] = useState<ReportingBoardMobileCase | null>(null);
   const [reassignDoctorId, setReassignDoctorId] = useState("");
   const [reason, setReason] = useState("");
+  const [unassignOpen, setUnassignOpen] = useState(false);
+  const [unassignReason, setUnassignReason] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
 
@@ -143,6 +146,17 @@ export function ReportingBoardMobilePage() {
       await invalidate();
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : "Reassignment failed."),
+  });
+  const unassignMutation = useMutation({
+    mutationFn: () => unassignReportingBoardMobileCase(token, selectedCase!.appointmentId, unassignReason.trim()),
+    onSuccess: async () => {
+      setMessage("Case returned to waiting pool.");
+      setSelectedCase(null);
+      setUnassignOpen(false);
+      setUnassignReason("");
+      await invalidate();
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : "Return to waiting pool failed."),
   });
   const pushSubscribeMutation = useMutation({
     mutationFn: async () => {
@@ -271,6 +285,26 @@ export function ReportingBoardMobilePage() {
               {!data.allowedActions.readOnly && (
                 <div className="mt-5 grid gap-2">
                   <button type="button" disabled={assignMutation.isPending} onClick={() => assignMutation.mutate(selectedCase.appointmentId)} className="h-11 rounded-xl bg-teal-600 text-sm font-bold text-white disabled:opacity-50">Assign to me</button>
+                  {data.allowedActions.reassign && selectedCase.assignmentStatus === "assigned" && (
+                    <div className="grid gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                      {!unassignOpen ? (
+                        <button type="button" onClick={() => setUnassignOpen(true)} className="h-10 rounded-xl border border-amber-300 bg-white text-sm font-bold text-amber-800">Return to waiting pool</button>
+                      ) : (
+                        <>
+                          <p className="text-sm font-semibold text-amber-900">This removes the assigned doctor and returns the case to the unassigned pool.</p>
+                          <input value={unassignReason} onChange={(event) => setUnassignReason(event.target.value)} placeholder="Reason for returning to waiting pool" className="h-10 rounded-xl border border-amber-200 px-3 text-sm" />
+                          <button
+                            type="button"
+                            disabled={!unassignReason.trim() || unassignMutation.isPending}
+                            onClick={() => unassignMutation.mutate()}
+                            className="h-10 rounded-xl bg-amber-700 text-sm font-bold text-white disabled:opacity-50"
+                          >
+                            Confirm return to waiting pool
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {data.allowedActions.reassign && (
                     <div className="grid gap-2 rounded-2xl border border-slate-200 p-3">
                       <select value={reassignDoctorId} onChange={(event) => setReassignDoctorId(event.target.value)} className="h-10 rounded-xl border border-slate-200 px-3 text-sm">

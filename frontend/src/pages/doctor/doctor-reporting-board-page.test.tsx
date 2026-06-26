@@ -1,6 +1,6 @@
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DoctorReportingBoardPage, buildReportingBoardPrintUrl } from "./doctor-reporting-board-page";
 import type { DoctorMe, ReportingBoardCaseRow } from "@/types/api";
@@ -18,9 +18,11 @@ const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const sendReportingBoardSavedViewTestPushMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const bulkReassignSelectedReportingCasesMock = vi.fn();
+const bulkUnassignSelectedReportingCasesMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const assignReportingBoardCaseMock = vi.fn();
+const unassignReportingBoardCaseMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -36,9 +38,11 @@ vi.mock("@/lib/api-hooks", () => ({
   sendReportingBoardSavedViewTestPush: (...args: unknown[]) => sendReportingBoardSavedViewTestPushMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   bulkReassignSelectedReportingCases: (...args: unknown[]) => bulkReassignSelectedReportingCasesMock(...args),
+  bulkUnassignSelectedReportingCases: (...args: unknown[]) => bulkUnassignSelectedReportingCasesMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   assignReportingBoardCase: (...args: unknown[]) => assignReportingBoardCaseMock(...args),
+  unassignReportingBoardCase: (...args: unknown[]) => unassignReportingBoardCaseMock(...args),
 }));
 
 const managerMe: DoctorMe = {
@@ -163,6 +167,7 @@ describe("DoctorReportingBoardPage", () => {
     sendReportingBoardSavedViewTestPushMock.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
     bulkReassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, assignedCount: 1, skippedCount: 0, assignedAppointmentIds: [42], skipped: [] });
+    bulkUnassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, unassignedCount: 1, skippedCount: 0, unassignedAppointmentIds: [42], skipped: [] });
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
     fetchAppointmentLookupsMock.mockResolvedValue({
       modalities: [{ id: 1, code: "CT", nameEn: "CT", nameAr: "CT" }],
@@ -170,6 +175,7 @@ describe("DoctorReportingBoardPage", () => {
       priorities: [{ id: 3, code: "stat", nameEn: "STAT", nameAr: "STAT", sortOrder: 0 }],
     });
     assignReportingBoardCaseMock.mockResolvedValue({ assignmentId: 100 });
+    unassignReportingBoardCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 100 });
   });
 
   it("renders priority and status chips with board rows", async () => {
@@ -252,6 +258,26 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: null, offset: 0 })));
   });
 
+  it("refreshes reporting cases and board statistics without changing filters", async () => {
+    renderPage();
+
+    const search = await screen.findByPlaceholderText("Search MRN / accession / patient / exam");
+    fireEvent.change(search, { target: { value: "MRN-7" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ q: "MRN-7", offset: 0 })));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ q: "MRN-7", offset: 0 })));
+
+    const caseCallCount = fetchReportingBoardCasesMock.mock.calls.length;
+    const statsCallCount = fetchReportingBoardStatsMock.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledTimes(caseCallCount + 1));
+    await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledTimes(statsCallCount + 1));
+    expect((screen.getByPlaceholderText("Search MRN / accession / patient / exam") as HTMLInputElement).value).toBe("MRN-7");
+  });
+
   it("keeps advanced filters collapsed until opened", async () => {
     renderPage();
 
@@ -320,6 +346,79 @@ describe("DoctorReportingBoardPage", () => {
     expect((screen.getByRole("button", { name: "Reassign selected" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: /Auto-assign next cases/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Print handoff (1 selected)" })).toBeTruthy();
+  });
+
+  it("shows return-to-pool only for assigned row editors and requires confirmation reason", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [
+        { ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" },
+        { ...caseRow, appointmentId: 43, accessionNumber: "V2-000043", assignedDoctorId: null, assignedDoctorName: null, assignmentStatus: "unassigned" },
+      ],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const assignedRow = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(assignedRow).getByRole("button", { name: "Reassign" }));
+    await waitFor(() => expect(within(screen.getByText("V2-000042").closest("tr")!).getByRole("option", { name: "Return to waiting pool" })).toBeTruthy());
+
+    const unassignedRow = screen.getByText("V2-000043").closest("tr")!;
+    fireEvent.click(within(unassignedRow).getByRole("button", { name: "Assign" }));
+    const assignedSelect = within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox");
+    const unassignedSelect = within(screen.getByText("V2-000043").closest("tr")!).getByRole("combobox");
+    expect(within(unassignedSelect).queryByRole("option", { name: "Return to waiting pool" })).toBeNull();
+
+    fireEvent.change(assignedSelect, { target: { value: "__UNASSIGN__" } });
+    expect(await screen.findByText(/removes the assigned doctor and returns the case to the unassigned pool/i)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Confirm return to waiting pool" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("Reason for returning to waiting pool"), { target: { value: "radiologist unavailable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm return to waiting pool" }));
+
+    await waitFor(() => expect(unassignReportingBoardCaseMock).toHaveBeenCalledWith(42, { reason: "radiologist unavailable" }));
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("keeps normal row reassignment behavior when selecting a doctor", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Reassign" }));
+    await waitFor(() => expect(within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox")).toBeTruthy());
+    const combobox = within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox");
+    fireEvent.change(combobox, { target: { value: "5" } });
+    fireEvent.change(screen.getByPlaceholderText("Notes for doctor"), { target: { value: "normal reassignment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
+    expect(unassignReportingBoardCaseMock).not.toHaveBeenCalled();
+  });
+
+  it("bulk returns selected cases to waiting pool only after reason confirmation", async () => {
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    await screen.findByText("1 selected");
+    const button = await screen.findByRole("button", { name: "Return selected to waiting pool" });
+    fireEvent.click(button);
+
+    expect(await screen.findByText(/removes assigned doctors and returns selected cases to the unassigned waiting pool/i)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Confirm return selected to waiting pool" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("Reason for returning selected cases"), { target: { value: "rebalance workload" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm return selected to waiting pool" }));
+
+    await waitFor(() => expect(bulkUnassignSelectedReportingCasesMock).toHaveBeenCalledWith({ appointmentIds: [42], reason: "rebalance workload" }));
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
   });
 
   it("does not expose editable settings for non-superadmin managers", async () => {

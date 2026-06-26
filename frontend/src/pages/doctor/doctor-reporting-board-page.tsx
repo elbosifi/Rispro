@@ -7,6 +7,7 @@ import {
   assignReportingBoardCase,
   bulkAssignNextReportingCases,
   bulkReassignSelectedReportingCases,
+  bulkUnassignSelectedReportingCases,
   createReportingBoardSavedView,
   fetchAppointmentLookups,
   fetchReportingBoardCases,
@@ -18,6 +19,7 @@ import {
   fetchRosterDoctors,
   sendReportingBoardSavedViewTestPush,
   subscribeReportingBoardSavedViewPush,
+  unassignReportingBoardCase,
   updateReportingBoardSavedView,
   updateReportingBoardSettings,
 } from "@/lib/api-hooks";
@@ -25,6 +27,7 @@ import type {
   DoctorMe,
   DoctorProfile,
   ReportingBoardBulkAssignResult,
+  ReportingBoardBulkUnassignResult,
   ReportingBoardCaseRow,
   ReportingBoardDoctorStatsRow,
   ReportingBoardFilters,
@@ -56,6 +59,8 @@ const SORT_OPTIONS: Array<{ value: ReportingBoardSortBy; label: string }> = [
   { value: "modality", label: "Modality" },
   { value: "assigned_doctor", label: "Assigned doctor" },
 ];
+
+const UNASSIGN_VALUE = "__UNASSIGN__";
 
 const EMPTY_NOTIFICATIONS: ReportingBoardNotificationSettings = {
   notifyNewMatchingCases: false,
@@ -306,14 +311,18 @@ function AssignmentEditor({
   row,
   doctors,
   onAssign,
+  onUnassign,
 }: {
   row: ReportingBoardCaseRow;
   doctors: DoctorProfile[];
   onAssign: (appointmentId: number, doctorId: number, reason: string) => void;
+  onUnassign: (appointmentId: number, reason: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [doctorId, setDoctorId] = useState(row.assignedDoctorId ? String(row.assignedDoctorId) : "");
   const [reason, setReason] = useState("");
+  const returningToPool = doctorId === UNASSIGN_VALUE;
+  const trimmedReason = reason.trim();
 
   if (!open) {
     return (
@@ -327,21 +336,34 @@ function AssignmentEditor({
     <div className="grid min-w-64 gap-2">
       <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
         <option value="">Doctor</option>
+        {row.assignedDoctorId && <option value={UNASSIGN_VALUE}>Return to waiting pool</option>}
+        {row.assignedDoctorId && <option disabled>────────</option>}
         {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
       </select>
-      <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Notes for doctor" className="rounded-lg border px-2 py-1 text-xs" />
+      {returningToPool && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+          This removes the assigned doctor and returns the case to the unassigned pool.
+        </p>
+      )}
+      <input
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder={returningToPool ? "Reason for returning to waiting pool" : "Notes for doctor"}
+        className="rounded-lg border px-2 py-1 text-xs"
+      />
       <div className="flex gap-2">
         <button
           type="button"
-          disabled={!doctorId}
-          onClick={() => {
-            onAssign(row.appointmentId, Number(doctorId), reason);
+          disabled={!doctorId || (returningToPool && !trimmedReason)}
+          onClick={async () => {
+            if (returningToPool) await onUnassign(row.appointmentId, trimmedReason);
+            else onAssign(row.appointmentId, Number(doctorId), reason);
             setOpen(false);
             setReason("");
           }}
           className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-teal-300"
         >
-          Save
+          {returningToPool ? "Confirm return to waiting pool" : "Save"}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="rounded border px-2 py-1 text-xs">Cancel</button>
       </div>
@@ -511,10 +533,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [saveName, setSaveName] = useState("");
   const [notifications, setNotifications] = useState<ReportingBoardNotificationSettings>(EMPTY_NOTIFICATIONS);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | null>(null);
+  const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | ReportingBoardBulkUnassignResult | null>(null);
   const [selectedReassignDoctorId, setSelectedReassignDoctorId] = useState("");
   const [selectedReassignReason, setSelectedReassignReason] = useState("");
   const [selectedReassignConfirmOpen, setSelectedReassignConfirmOpen] = useState(false);
+  const [selectedUnassignReason, setSelectedUnassignReason] = useState("");
+  const [selectedUnassignConfirmOpen, setSelectedUnassignConfirmOpen] = useState(false);
   const [priorityShortcutOpen, setPriorityShortcutOpen] = useState(false);
   const [doctorStatsOpen, setDoctorStatsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<ReportingBoardSettings | null>(null);
@@ -524,6 +548,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [savedViewsOpen, setSavedViewsOpen] = useState(true);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
+  const [boardRefreshing, setBoardRefreshing] = useState(false);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
   const casesQuery = useQuery({
@@ -633,6 +658,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
   });
+  const unassignMutation = useMutation({
+    mutationFn: (payload: { appointmentId: number; reason: string }) => unassignReportingBoardCase(payload.appointmentId, { reason: payload.reason }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+  });
   const selectedReassignMutation = useMutation({
     mutationFn: () => bulkReassignSelectedReportingCases({
       appointmentIds: selectedIds,
@@ -643,6 +677,22 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       setBulkResult(result);
       setSelectedIds([]);
       setSelectedReassignConfirmOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+  });
+  const selectedUnassignMutation = useMutation({
+    mutationFn: () => bulkUnassignSelectedReportingCases({
+      appointmentIds: selectedIds,
+      reason: selectedUnassignReason.trim(),
+    }),
+    onSuccess: async (result) => {
+      setBulkResult(result);
+      if (result.unassignedCount > 0) setSelectedIds([]);
+      setSelectedUnassignReason("");
+      setSelectedUnassignConfirmOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
@@ -672,6 +722,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const allVisibleSelected = visibleAppointmentIds.length > 0 && visibleAppointmentIds.every((id) => selectedIds.includes(id));
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
   const selectedReassignDisabled = !canManage || selectedIds.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
+  const selectedUnassignDisabled = !canManage || selectedIds.length === 0 || selectedUnassignMutation.isPending;
   const advancedFilterCount = [
     Boolean(filters.caseCategory),
     Boolean(filters.priorityCode),
@@ -704,6 +755,18 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const clearSearch = () => {
     setSearchText("");
     setFilter("q", null);
+  };
+
+  const refreshBoard = async () => {
+    setBoardRefreshing(true);
+    try {
+      await Promise.all([
+        casesQuery.refetch(),
+        statsQuery.refetch(),
+      ]);
+    } finally {
+      setBoardRefreshing(false);
+    }
   };
 
   const copySavedViewLink = async () => {
@@ -740,8 +803,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <Link to={printUrl} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             <Printer size={16} /> {selectedIds.length > 0 ? `Print handoff (${selectedIds.length} selected)` : "Print handoff"}
           </Link>
-          <button type="button" onClick={() => casesQuery.refetch()} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-            <RefreshCw size={16} /> Refresh
+          <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
+            <RefreshCw size={16} className={boardRefreshing ? "animate-spin" : undefined} /> {boardRefreshing ? "Refreshing..." : "Refresh"}
           </button>
           <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             <Settings size={16} /> Board settings
@@ -908,12 +971,22 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               >
                 Reassign selected
               </button>
+              <button
+                type="button"
+                disabled={selectedUnassignDisabled}
+                onClick={() => setSelectedUnassignConfirmOpen(true)}
+                className="h-10 rounded-lg border px-3 text-sm font-semibold text-red-700 disabled:opacity-50"
+                style={{ borderColor: "var(--border)" }}
+              >
+                Return selected to waiting pool
+              </button>
               <button type="button" onClick={() => setSelectedIds([])} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                 Clear
               </button>
             </div>
             {!canManage && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Only supervisors/admins can reassign selected cases.</p>}
             {selectedReassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedReassignMutation.error instanceof Error ? selectedReassignMutation.error.message : "Selected reassignment failed."}</p>}
+            {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
           </div>
           )}
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
@@ -965,7 +1038,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                       <td className="px-3 py-2">{row.appointmentStatus}</td>
                       <td className="px-3 py-2">
                         {canManage && row.canAssign ? (
-                          <AssignmentEditor row={row} doctors={doctorsQuery.data ?? []} onAssign={(appointmentId, doctorId, reason) => assignMutation.mutate({ appointmentId, doctorId, reason })} />
+                          <AssignmentEditor
+                            row={row}
+                            doctors={doctorsQuery.data ?? []}
+                            onAssign={(appointmentId, doctorId, reason) => assignMutation.mutate({ appointmentId, doctorId, reason })}
+                            onUnassign={async (appointmentId, reason) => {
+                              await unassignMutation.mutateAsync({ appointmentId, reason });
+                            }}
+                          />
                         ) : row.exclusionReason ?? "-"}
                       </td>
                     </tr>
@@ -978,8 +1058,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           </div>
           {bulkResult && (
             <div className="rounded-lg border p-4 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-              <p className="font-semibold">Bulk assignment result: {bulkResult.assignedCount}/{bulkResult.requestedCount} assigned, {bulkResult.skippedCount} skipped.</p>
-              <p className="mt-1">Assigned appointment IDs: {bulkResult.assignedAppointmentIds.join(", ") || "-"}</p>
+              {"unassignedCount" in bulkResult ? (
+                <>
+                  <p className="font-semibold">Bulk return result: {bulkResult.unassignedCount}/{bulkResult.requestedCount} returned, {bulkResult.skippedCount} skipped.</p>
+                  <p className="mt-1">Returned appointment IDs: {bulkResult.unassignedAppointmentIds.join(", ") || "-"}</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold">Bulk assignment result: {bulkResult.assignedCount}/{bulkResult.requestedCount} assigned, {bulkResult.skippedCount} skipped.</p>
+                  <p className="mt-1">Assigned appointment IDs: {bulkResult.assignedAppointmentIds.join(", ") || "-"}</p>
+                </>
+              )}
               {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => `${item.appointmentId} ${item.reason}`).join("; ")}</p>}
             </div>
           )}
@@ -1124,6 +1213,36 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               <button type="button" onClick={() => setSelectedReassignConfirmOpen(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
               <button type="button" disabled={selectedReassignMutation.isPending} onClick={() => selectedReassignMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-300">
                 Confirm reassignment
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {selectedUnassignConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <h3 className="text-lg font-semibold text-foreground">Return selected to waiting pool</h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+              This removes assigned doctors and returns selected cases to the unassigned waiting pool. Final reports will remain protected.
+            </p>
+            <label className="mt-4 block text-sm font-semibold text-foreground">
+              Reason
+              <input
+                value={selectedUnassignReason}
+                onChange={(event) => setSelectedUnassignReason(event.target.value)}
+                placeholder="Reason for returning selected cases"
+                className={`${inputClass()} mt-1`}
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setSelectedUnassignConfirmOpen(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+              <button
+                type="button"
+                disabled={selectedUnassignMutation.isPending || !selectedUnassignReason.trim()}
+                onClick={() => selectedUnassignMutation.mutate()}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-red-300"
+              >
+                Confirm return selected to waiting pool
               </button>
             </div>
           </section>

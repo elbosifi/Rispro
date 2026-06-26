@@ -14,6 +14,7 @@ import {
   getPublicReportingBoardMobileView,
   reassignReportingBoardMobileCase,
   subscribePublicReportingBoardMobilePush,
+  unassignReportingBoardMobileCase,
 } from "./reporting-board-service.js";
 
 const router = Router();
@@ -132,6 +133,20 @@ router.post(
       String(req.params.token || ""),
       requiredPositiveInteger(body.appointmentId, "appointmentId"),
       requiredPositiveInteger(body.doctorId, "doctorId"),
+      asOptionalString(body.reason) ?? null
+    ));
+  })
+);
+
+router.post(
+  "/saved-views/public/:token/mobile/unassign",
+  requireAuth,
+  asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    res.json(await unassignReportingBoardMobileCase(
+      actor(req)!,
+      String(req.params.token || ""),
+      requiredPositiveInteger(body.appointmentId, "appointmentId"),
       asOptionalString(body.reason) ?? null
     ));
   })

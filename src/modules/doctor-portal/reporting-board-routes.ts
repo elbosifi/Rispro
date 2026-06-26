@@ -9,6 +9,7 @@ import {
   assignReportingBoardCaseToDoctor,
   bulkAssignNextReportingBoardCases,
   bulkReassignSelectedReportingBoardCases,
+  bulkUnassignSelectedReportingBoardCases,
   createReportingBoardSavedView,
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
@@ -23,6 +24,7 @@ import {
   readMyReportingBoardNotification,
   sendReportingBoardSavedViewTestNotification,
   subscribeReportingBoardSavedViewPush,
+  unassignReportingBoardCase,
   updateReportingBoardSavedView,
 } from "./reporting-board-service.js";
 
@@ -250,6 +252,18 @@ router.post(
   })
 );
 
+router.post(
+  "/:appointmentId/unassign",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await unassignReportingBoardCase(actor(req), {
+      appointmentId: requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      reason: asOptionalString(body.reason) ?? null,
+    });
+    res.json(result);
+  })
+);
+
 router.get(
   "/notifications",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
@@ -302,6 +316,19 @@ router.post(
     const result = await bulkReassignSelectedReportingBoardCases(actor(req), {
       appointmentIds: positiveIntegerArray(body.appointmentIds, "appointmentIds"),
       doctorId: requiredPositiveInteger(body.doctorId, "doctorId"),
+      reason: asOptionalString(body.reason) ?? null,
+      allowFinal: asOptionalBoolean(body.allowFinal) ?? false,
+    });
+    res.json(result);
+  })
+);
+
+router.post(
+  "/bulk-unassign-selected",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await bulkUnassignSelectedReportingBoardCases(actor(req), {
+      appointmentIds: positiveIntegerArray(body.appointmentIds, "appointmentIds"),
       reason: asOptionalString(body.reason) ?? null,
       allowFinal: asOptionalBoolean(body.allowFinal) ?? false,
     });

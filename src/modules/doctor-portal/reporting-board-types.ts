@@ -190,6 +190,20 @@ export interface BulkAssignNextCasesResult {
   skipped: Array<{ appointmentId: number; reason: string }>;
 }
 
+export interface BulkUnassignSelectedCasesInput {
+  appointmentIds: number[];
+  reason?: string | null;
+  allowFinal?: boolean | null;
+}
+
+export interface BulkUnassignSelectedCasesResult {
+  requestedCount: number;
+  unassignedCount: number;
+  skippedCount: number;
+  unassignedAppointmentIds: number[];
+  skipped: Array<{ appointmentId: number; reason: string }>;
+}
+
 export interface ReportingBoardNotificationEvent {
   id: number;
   eventType: "reporting_case_assigned_to_me";

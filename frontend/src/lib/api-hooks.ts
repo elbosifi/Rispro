@@ -55,6 +55,8 @@ import type {
   DoctorCaseFilters,
   ReportingBoardBulkAssignResult,
   ReportingBoardBulkReassignSelectedPayload,
+  ReportingBoardBulkUnassignResult,
+  ReportingBoardBulkUnassignSelectedPayload,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
@@ -789,6 +791,13 @@ export async function reassignReportingBoardMobileCase(token: string, appointmen
   });
 }
 
+export async function unassignReportingBoardMobileCase(token: string, appointmentId: number, reason: string): Promise<{ unassigned: true; appointmentId: number; assignmentId: number }> {
+  return api<{ unassigned: true; appointmentId: number; assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/unassign`, {
+    method: "POST",
+    body: JSON.stringify({ appointmentId, reason }),
+  });
+}
+
 export async function fetchReportingBoardSavedViews(): Promise<ReportingBoardSavedView[]> {
   const raw = await api<{ savedViews: ReportingBoardSavedView[] }>("/doctor/reporting-board/saved-views");
   return raw.savedViews;
@@ -849,11 +858,28 @@ export async function bulkReassignSelectedReportingCases(payload: ReportingBoard
   });
 }
 
+export async function bulkUnassignSelectedReportingCases(payload: ReportingBoardBulkUnassignSelectedPayload): Promise<ReportingBoardBulkUnassignResult> {
+  return api<ReportingBoardBulkUnassignResult>("/doctor/reporting-board/bulk-unassign-selected", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function assignReportingBoardCase(
   appointmentId: number,
   payload: { doctorId: number; reason?: string | null }
 ): Promise<{ assignmentId: number }> {
   return api<{ assignmentId: number }>(`/doctor/reporting-board/${appointmentId}/assign-doctor`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function unassignReportingBoardCase(
+  appointmentId: number,
+  payload: { reason: string }
+): Promise<{ unassigned: true; appointmentId: number; assignmentId: number }> {
+  return api<{ unassigned: true; appointmentId: number; assignmentId: number }>(`/doctor/reporting-board/${appointmentId}/unassign`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
