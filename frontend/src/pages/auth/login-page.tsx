@@ -28,7 +28,12 @@ export function LoginPage() {
         return;
       }
       const doctorMe = await fetchDoctorMe().catch(() => null);
-      if (doctorMe?.doctorPortalAutoRedirect !== false && doctorMe?.hasActiveDoctorProfile) {
+      if (
+        doctorMe?.doctorPortalAutoRedirect !== false &&
+        doctorMe?.hasActiveDoctorProfile &&
+        !doctorMe.canAccessCoreWorkspace &&
+        (from === "/" || from === "/login")
+      ) {
         navigate("/doctor/dashboard", { replace: true });
         return;
       }

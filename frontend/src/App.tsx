@@ -136,7 +136,8 @@ function AppContent() {
   const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
   const defaultLandingRoute = getDefaultLandingRouteForRole(normalizedMatrix, user?.role ?? "receptionist");
   const defaultLandingPath = getLandingPath(defaultLandingRoute);
-  const effectiveDefaultLandingPath = doctorMe?.hasActiveDoctorProfile ? "/doctor/dashboard" : defaultLandingPath;
+  const effectiveDefaultLandingPath =
+    doctorMe?.hasActiveDoctorProfile && !doctorMe.canAccessCoreWorkspace ? "/doctor/dashboard" : defaultLandingPath;
 
   const handleNavigate = useCallback(
     (route: string) => {

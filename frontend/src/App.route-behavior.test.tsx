@@ -152,8 +152,12 @@ vi.mock("@/v2/appointments", () => ({
   SchedulingAdminV2Page: () => <TestPage testId="scheduling-admin-page" label="Scheduling Admin Page" />,
 }));
 
-function renderAppAt(path: string, matrix: PageVisibilityMatrix = DEFAULT_PAGE_VISIBILITY_MATRIX) {
-  testState.fetchDoctorMe.mockResolvedValue({ hasActiveDoctorProfile: false });
+function renderAppAt(
+  path: string,
+  matrix: PageVisibilityMatrix = DEFAULT_PAGE_VISIBILITY_MATRIX,
+  doctorMe: unknown = { hasActiveDoctorProfile: false }
+) {
+  testState.fetchDoctorMe.mockResolvedValue(doctorMe);
   testState.fetchPageVisibilityMatrix.mockResolvedValue(matrix);
   window.history.pushState({}, "", path);
   return render(<App />);
@@ -197,6 +201,36 @@ describe("App route behavior", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/appointments"));
     expect(await screen.findByTestId("appointment-create-page")).toBeTruthy();
+  });
+
+  it("uses Doctor Portal as the root landing for doctor-only users", async () => {
+    renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: false,
+    });
+
+    await waitFor(() => expect(window.location.pathname).toBe("/doctor/dashboard"));
+    expect(await screen.findByTestId("doctor-page")).toBeTruthy();
+  });
+
+  it("uses the core default root landing for dual-access users", async () => {
+    renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: true,
+    });
+
+    await waitFor(() => expect(window.location.pathname).toBe("/queue"));
+    expect(await screen.findByTestId("queue-page")).toBeTruthy();
+  });
+
+  it("keeps Doctor Portal manually accessible for dual-access users", async () => {
+    renderAppAt("/doctor/dashboard", DEFAULT_PAGE_VISIBILITY_MATRIX, {
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: true,
+    });
+
+    expect(await screen.findByTestId("doctor-page")).toBeTruthy();
+    expect(window.location.pathname).toBe("/doctor/dashboard");
   });
 
   it("renders navigation labels from APP_NAV_ITEMS", async () => {
