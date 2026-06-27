@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,6 +14,7 @@ const completeAppointmentMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
+const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -323,16 +326,14 @@ describe("ModalityPage modality board", () => {
     await waitFor(() => expect(completeAppointmentMock.mock.calls[0]?.[0]).toBe(7));
 
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
-    await user.click(screen.getByRole("menuitem", { name: /Cancel/i }));
-    await screen.findByRole("heading", { name: /Confirm cancellation/i });
-    await user.type(screen.getByPlaceholderText(/Enter a reason/i), "Patient left");
-    await user.click(screen.getByRole("button", { name: /Confirm cancellation/i }));
+    expect(screen.queryByRole("menuitem", { name: /Cancel/i })).toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: /Stop/i }));
+    await screen.findByRole("heading", { name: /Confirm discontinuation/i });
+    await user.type(screen.getByPlaceholderText(/Enter a reason/i), "Scanner problem");
+    await user.click(screen.getByRole("button", { name: /Confirm discontinuation/i }));
     await waitFor(() => {
-      expect(updateAppointmentStatusMock).toHaveBeenCalledWith(7, "cancelled", "Patient left");
+      expect(updateAppointmentStatusMock).toHaveBeenCalledWith(7, "discontinued", "Scanner problem");
     });
-
-    await user.click(within(row).getByRole("button", { name: /More actions/i }));
-    expect(screen.getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
   });
 
   it("keeps primary row actions visible and secondary actions in More", async () => {
@@ -348,7 +349,7 @@ describe("ModalityPage modality board", () => {
     expect(within(row).queryByRole("button", { name: /Back to waiting/i })).toBeNull();
   });
 
-  it("shows Stop Cancel and Wait in More for arrived rows", async () => {
+  it("shows operational Stop and Wait in More for arrived rows without Cancel", async () => {
     const user = await openBoard([
       appointment({ id: 8, accessionNumber: "ACC-LABELS", status: "arrived", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Label Patient" }),
     ]);
@@ -356,7 +357,7 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-8");
     await user.click(within(row).getByRole("button", { name: /More actions/i }));
     expect(screen.getByRole("menuitem", { name: /Stop/i })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: /Cancel/i })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Cancel/i })).toBeNull();
     expect(screen.getByRole("menuitem", { name: /Wait/i })).toBeTruthy();
 
     await user.click(screen.getByRole("menuitem", { name: /Stop/i }));
@@ -459,7 +460,7 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("Needs interpreter")).toBeTruthy();
   });
 
-  it("uses specific Arabic destructive labels and a neutral close action in the selected drawer", async () => {
+  it("uses a neutral Arabic close action and no cancellation action in the selected drawer", async () => {
     languageState.language = "ar";
     const user = userEvent.setup();
     renderPage([
@@ -472,8 +473,8 @@ describe("ModalityPage modality board", () => {
 
     const drawer = screen.getByTestId("selected-appointment-drawer");
     expect(within(drawer).getByRole("button", { name: "إغلاق" })).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: "إلغاء الموعد" })).toBeTruthy();
     expect(within(drawer).getByRole("button", { name: "إيقاف الحالة" })).toBeTruthy();
+    expect(within(drawer).queryByRole("button", { name: "إلغاء الموعد" })).toBeNull();
     expect(within(drawer).queryByRole("button", { name: /^إلغاء$/ })).toBeNull();
     expect(within(drawer).queryByRole("button", { name: /^إيقاف$/ })).toBeNull();
 
@@ -482,8 +483,15 @@ describe("ModalityPage modality board", () => {
     expect(updateAppointmentStatusMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByTestId("modality-board-row-12"));
-    await user.click(within(screen.getByTestId("selected-appointment-drawer")).getByRole("button", { name: "إلغاء الموعد" }));
-    await screen.findByRole("heading", { name: "تأكيد إلغاء الموعد" });
-    expect(screen.getByRole("button", { name: "تأكيد إلغاء الموعد" })).toBeTruthy();
+    await user.click(within(screen.getByTestId("selected-appointment-drawer")).getByRole("button", { name: "إيقاف الحالة" }));
+    await screen.findByRole("heading", { name: "تأكيد إيقاف الحالة" });
+    expect(screen.getByRole("button", { name: "تأكيد إيقاف الحالة" })).toBeTruthy();
+  });
+
+  it("does not leave modality-board cancellation action wiring in legacy or menu surfaces", () => {
+    expect(modalityPageSource).not.toContain('status: "cancelled" | "discontinued"');
+    expect(modalityPageSource).not.toContain('status: "cancelled", reasonRequired: true');
+    expect(modalityPageSource).not.toContain("Confirm cancellation");
+    expect(modalityPageSource).not.toContain("إلغاء الموعد");
   });
 });

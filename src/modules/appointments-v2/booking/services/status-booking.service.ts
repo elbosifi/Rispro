@@ -2,7 +2,6 @@ import type { PoolClient } from "pg";
 import { pool } from "../../../../db/pool.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
-import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import type { BookingStatus } from "../../shared/types/common.js";
 import { activateNoShowRestrictionForBooking } from "../../../../services/patient-no-show-restriction-service.js";
@@ -22,7 +21,8 @@ const MANUAL_STATUS_TARGETS = new Set<BookingStatus>([
   "cancelled",
   "discontinued",
 ]);
-const REASON_REQUIRED_STATUSES = new Set<BookingStatus>(["no-show", "cancelled", "discontinued"]);
+const REASON_REQUIRED_STATUSES = new Set<BookingStatus>(["no-show", "discontinued"]);
+const DEDICATED_CANCELLATION_MESSAGE = "Appointment cancellation must use the dedicated cancellation workflow.";
 
 interface SettingsRow {
   setting_key: string;
@@ -378,6 +378,9 @@ export async function updateBookingStatusManual(
 
   const cleanReason = String(reason || "").trim();
   const targetStatus = nextStatus as BookingStatus;
+  if (targetStatus === "cancelled") {
+    throw new SchedulingError(403, DEDICATED_CANCELLATION_MESSAGE, ["appointment_cancel_dedicated_workflow_required"]);
+  }
   if (REASON_REQUIRED_STATUSES.has(targetStatus) && !cleanReason) {
     throw new SchedulingError(400, "A reason is required for this status change.", ["status_reason_required"]);
   }
@@ -486,9 +489,6 @@ export async function updateBookingStatusManual(
 
     await client.query("commit");
     scheduleBookingWorklistSync(bookingId);
-    if (targetStatus === "cancelled") {
-      void safeEnqueuePatientNotificationEvent({ bookingId, eventType: "appointment_cancelled" });
-    }
     return {
       id: bookingId,
       previousStatus: booking.status,

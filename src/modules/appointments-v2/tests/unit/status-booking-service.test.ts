@@ -10,6 +10,14 @@ const readV2RoutesSource = readFileSync(
   new URL("../../api/routes/read-v2-routes.ts", import.meta.url),
   "utf8"
 );
+const cancelBookingSource = readFileSync(
+  new URL("../../booking/services/cancel-booking.service.ts", import.meta.url),
+  "utf8"
+);
+const appointmentsV2RoutesSource = readFileSync(
+  new URL("../../api/routes/appointments-v2-routes.ts", import.meta.url),
+  "utf8"
+);
 const workflowTimestampMigration = readFileSync(
   new URL("../../../../db/migrations/098_v2_booking_workflow_timestamps.sql", import.meta.url),
   "utf8"
@@ -23,10 +31,24 @@ describe("status booking service source guards", () => {
     assert.match(source, /targetStatus === "voided"/);
   });
 
-  it("requires reasons for no-show, cancelled, and discontinued", () => {
+  it("requires reasons for no-show and discontinued manual status changes", () => {
     assert.match(source, /REASON_REQUIRED_STATUSES/);
-    assert.match(source, /"no-show", "cancelled", "discontinued"/);
+    assert.match(source, /"no-show"/);
+    assert.match(source, /"discontinued"/);
     assert.match(source, /status_reason_required/);
+  });
+
+  it("rejects cancellation through the generic manual status path", () => {
+    assert.match(source, /targetStatus === "cancelled"/);
+    assert.match(source, /Appointment cancellation must use the dedicated cancellation workflow\./);
+    assert.match(source, /appointment_cancel_dedicated_workflow_required/);
+    assert.match(source, /SchedulingError\(403/);
+  });
+
+  it("keeps cancellation notifications on the dedicated cancellation workflow", () => {
+    assert.doesNotMatch(source, /safeEnqueuePatientNotificationEvent[\s\S]*appointment_cancelled/);
+    assert.match(cancelBookingSource, /safeEnqueuePatientNotificationEvent\(\{ bookingId, eventType: "appointment_cancelled" \}\)/);
+    assert.match(appointmentsV2RoutesSource, /"\/:id\/cancel"[\s\S]*requireActionPin\("appointment_cancel"\)[\s\S]*cancelBooking\(bookingId, userId\)/);
   });
 
   it("requires a reason when reopening completed bookings as arrived", () => {
@@ -155,12 +177,12 @@ describe("status booking service source guards", () => {
     assert.match(source, /!booking\.pacs_auto_completion_disabled_at/);
   });
 
-  it("manual status update to non-queue close statuses keeps existing behavior", () => {
+  it("manual status update to non-cancellation close statuses keeps existing behavior", () => {
     assert.match(source, /MANUAL_STATUS_TARGETS/);
     assert.match(source, /"no-show"/);
-    assert.match(source, /"cancelled"/);
     assert.match(source, /"discontinued"/);
     assert.doesNotMatch(source, /targetStatus === "no-show"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
+    assert.doesNotMatch(source, /targetStatus === "discontinued"[\s\S]*assertPatientMeetsBookingQueueRequirements/);
   });
 
   it("V2 queue scan cannot set arrived without patient queue requirements", () => {

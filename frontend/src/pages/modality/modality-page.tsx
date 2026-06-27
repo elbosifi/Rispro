@@ -11,7 +11,6 @@ import {
   RotateCcw,
   ScanLine,
   TimerReset,
-  XCircle,
 } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
@@ -45,7 +44,7 @@ const EMPTY_VALUE = "—";
 type BoardFilter = "operational" | "ready" | "waiting" | "arrived" | "in-progress" | "not-arrived" | "completed" | "problem" | "all";
 type BoardStatusAction = {
   appointment: AppointmentWithDetails;
-  status: "arrived" | "waiting" | "cancelled" | "discontinued";
+  status: "arrived" | "waiting" | "discontinued";
   reasonRequired: boolean;
 };
 type MoreMenuState = {
@@ -240,8 +239,6 @@ function statusActionLabel(language: Language, action: BoardStatusAction): strin
   switch (action.status) {
     case "discontinued":
       return chooseLocalized(language, "تأكيد إيقاف الحالة", "Confirm discontinuation");
-    case "cancelled":
-      return chooseLocalized(language, "تأكيد إلغاء الموعد", "Confirm cancellation");
     case "arrived":
       return chooseLocalized(language, "تأكيد إعادة فتح الموعد", "Confirm reopen");
     case "waiting":
@@ -385,7 +382,7 @@ export default function ModalityPage() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ appointmentId, status, reason }: { appointmentId: number; status: "arrived" | "waiting" | "cancelled" | "discontinued"; reason?: string | null }) =>
+    mutationFn: ({ appointmentId, status, reason }: { appointmentId: number; status: "arrived" | "waiting" | "discontinued"; reason?: string | null }) =>
       updateAppointmentStatus(appointmentId, status, reason),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
@@ -470,7 +467,7 @@ export default function ModalityPage() {
 
   const handleRequestStatusChange = (
     appointment: AppointmentWithDetails,
-    status: "arrived" | "waiting" | "cancelled" | "discontinued",
+    status: "arrived" | "waiting" | "discontinued",
     reasonRequired = false
   ) => {
     if (reasonRequired) {
@@ -949,19 +946,6 @@ export default function ModalityPage() {
                         <Ban size={16} />
                         <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
                       </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={!canCloseAsProblem || statusMutation.isPending}
-                        onClick={() => {
-                          setStatusAction({ appointment: selectedAppointment, status: "cancelled", reasonRequired: true });
-                          setStatusReason("");
-                        }}
-                      >
-                        <XCircle size={16} />
-                        <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
-                      </Button>
                     </div>
                   </div>
                 </>
@@ -1029,20 +1013,6 @@ export default function ModalityPage() {
               >
                 <Ban size={14} />
                 <span>{chooseLocalized(language, "إيقاف الحالة", "Stop")}</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-rose-800 hover:bg-rose-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
-                disabled={statusMutation.isPending}
-                onClick={() => {
-                  setStatusAction({ appointment: moreMenuAppointment, status: "cancelled", reasonRequired: true });
-                  setStatusReason("");
-                  setOpenMoreMenu(null);
-                }}
-              >
-                <XCircle size={14} />
-                <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
               </button>
             </>
           ) : null}
@@ -1179,19 +1149,6 @@ export default function ModalityPage() {
                 >
                   <Ban size={16} />
                   <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!canCloseAsProblem || statusMutation.isPending}
-                  onClick={() => {
-                    setStatusAction({ appointment: selectedAppointment, status: "cancelled", reasonRequired: true });
-                    setStatusReason("");
-                  }}
-                  className="border border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100"
-                >
-                  <XCircle size={16} />
-                  <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
                 </Button>
               </DialogFooter>
             </div>

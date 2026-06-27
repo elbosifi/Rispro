@@ -9,19 +9,24 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
+async function readSource(relativePath: string): Promise<string> {
+  const fs = await import("node:fs/promises");
+  return fs.readFile(new URL(relativePath, import.meta.url), "utf-8");
+}
+
 // ---------------------------------------------------------------------------
 // Tests: function structure and exports
 // ---------------------------------------------------------------------------
 
 describe("cancelBooking — function structure", () => {
   it("exports cancelBooking", async () => {
-    const { cancelBooking } = await import("../../booking/services/cancel-booking.service.js");
-    assert.ok(typeof cancelBooking === "function");
+    const source = await readSource("../../booking/services/cancel-booking.service.ts");
+    assert.match(source, /export async function cancelBooking\(/);
   });
 
   it("cancelBooking is async", async () => {
-    const { cancelBooking } = await import("../../booking/services/cancel-booking.service.js");
-    assert.ok(cancelBooking.constructor.name === "AsyncFunction" || typeof cancelBooking === "function");
+    const source = await readSource("../../booking/services/cancel-booking.service.ts");
+    assert.match(source, /export async function cancelBooking/);
   });
 
   it("CancelBookingResult has correct shape", () => {
@@ -60,11 +65,7 @@ describe("cancelBooking — source verification", () => {
   let source: string;
 
   before(async () => {
-    const fs = await import("node:fs/promises");
-    source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+    source = await readSource("../../booking/services/cancel-booking.service.ts");
   });
 
   it("finds booking by ID", () => {
@@ -86,6 +87,11 @@ describe("cancelBooking — source verification", () => {
   it("updates status to cancelled", () => {
     assert.ok(source.includes("updateBookingStatus"), "Should call updateBookingStatus");
     assert.ok(source.includes("\"cancelled\"") || source.includes("'cancelled'"), "Should set status to cancelled");
+  });
+
+  it("sends cancellation notification from the dedicated cancellation workflow", () => {
+    assert.ok(source.includes("safeEnqueuePatientNotificationEvent"), "Should enqueue patient notification");
+    assert.ok(source.includes('eventType: "appointment_cancelled"'), "Should use cancellation notification event");
   });
 
   it("uses withTransaction for atomic operation", () => {
@@ -110,11 +116,7 @@ describe("cancelBooking — source verification", () => {
 
 describe("cancelBooking — import wiring", () => {
   it("imports booking repo from correct path", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../booking/services/cancel-booking.service.ts");
     assert.ok(
       source.includes('from "../repositories/booking.repo.js"'),
       "Should import booking.repo from relative path"
@@ -122,11 +124,7 @@ describe("cancelBooking — import wiring", () => {
   });
 
   it("imports transaction util from correct path", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../booking/services/cancel-booking.service.ts");
     assert.ok(
       source.includes('from "../../shared/utils/transactions.js"'),
       "Should import transactions from relative path"
@@ -134,11 +132,7 @@ describe("cancelBooking — import wiring", () => {
   });
 
   it("imports SchedulingError from correct path", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../booking/services/cancel-booking.service.ts");
     assert.ok(
       source.includes('from "../../shared/errors/scheduling-error.js"'),
       "Should import SchedulingError from relative path"
@@ -146,11 +140,7 @@ describe("cancelBooking — import wiring", () => {
   });
 
   it("imports CANCELLABLE_STATUSES from shared types", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../booking/services/cancel-booking.service.ts");
     assert.ok(
       source.includes('from "../../shared/types/common.js"'),
       "Should import CANCELLABLE_STATUSES from shared types"
@@ -166,11 +156,7 @@ describe("cancelBooking — error codes", () => {
   let source: string;
 
   before(async () => {
-    const fs = await import("node:fs/promises");
-    source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/cancel-booking.service.ts",
-      "utf-8"
-    );
+    source = await readSource("../../booking/services/cancel-booking.service.ts");
   });
 
   it("uses 404 for booking not found", () => {
@@ -196,11 +182,7 @@ describe("cancelBooking — error codes", () => {
 
 describe("POST /:id/cancel — route wiring", () => {
   it("imports cancelBooking from service", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../api/routes/appointments-v2-routes.ts");
     assert.ok(
       source.includes('from "../../booking/services/cancel-booking.service.js"'),
       "Should import cancelBooking"
@@ -208,30 +190,18 @@ describe("POST /:id/cancel — route wiring", () => {
   });
 
   it("parses bookingId from route param", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../api/routes/appointments-v2-routes.ts");
     assert.ok(source.includes("parseInt(String(req.params.id)"), "Should parse bookingId from params");
     assert.ok(source.includes("Invalid booking ID"), "Should validate booking ID");
   });
 
   it("extracts userId from request user context", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../api/routes/appointments-v2-routes.ts");
     assert.ok(source.includes("req.user?.sub"), "Should extract userId from user context");
   });
 
   it("returns booking and previousStatus in response", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
-      "utf-8"
-    );
+    const source = await readSource("../../api/routes/appointments-v2-routes.ts");
     assert.ok(source.includes("booking: result.booking"), "Should return booking");
     assert.ok(source.includes("previousStatus: result.previousStatus"), "Should return previousStatus");
   });

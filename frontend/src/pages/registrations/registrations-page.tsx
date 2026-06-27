@@ -72,8 +72,8 @@ const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MANAGE_TABS = ["details", "documents", "report", "reschedule", "status", "cancel"] as const;
 type ManageTab = (typeof MANAGE_TABS)[number];
-const MANUAL_STATUS_OPTIONS = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued"] as const;
-const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "cancelled", "discontinued"]);
+const MANUAL_STATUS_OPTIONS = ["scheduled", "arrived", "waiting", "completed", "no-show", "discontinued"] as const;
+const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "discontinued"]);
 
 function RegistrationStat({
   label,
