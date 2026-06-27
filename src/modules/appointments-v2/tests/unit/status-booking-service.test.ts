@@ -117,7 +117,15 @@ describe("status booking service source guards", () => {
     assert.match(workflowTimestampMigration, /add column if not exists completed_at timestamptz/);
     assert.match(workflowTimestampMigration, /new_values->>'status' in \('arrived', 'waiting'\)/);
     assert.match(workflowTimestampMigration, /new_values->>'status' = 'completed'/);
+    assert.match(workflowTimestampMigration, /min\(audit_log\.created_at\) as arrived_at/);
+    assert.match(workflowTimestampMigration, /max\(audit_log\.created_at\) as completed_at/);
+    assert.match(workflowTimestampMigration, /latest completed audit event/);
     assert.match(workflowTimestampMigration, /completed_at is null/);
+    assert.doesNotMatch(workflowTimestampMigration, /set arrived_at = b\.updated_at/);
+    assert.doesNotMatch(workflowTimestampMigration, /set completed_at = b\.updated_at/);
+    assert.match(workflowTimestampMigration, /raise notice 'appointments_v2 booking workflow timestamps backfill: arrived_at from audit_log=%/);
+    assert.match(workflowTimestampMigration, /raise notice 'appointments_v2 booking workflow timestamps still missing: arrived\/waiting without arrived_at=%/);
+    assert.match(workflowTimestampMigration, /completed without completed_at=%/);
   });
 
   it("V2 modality worklist includes operational and review statuses but excludes voided", () => {
