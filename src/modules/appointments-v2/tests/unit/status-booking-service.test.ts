@@ -10,6 +10,10 @@ const readV2RoutesSource = readFileSync(
   new URL("../../api/routes/read-v2-routes.ts", import.meta.url),
   "utf8"
 );
+const workflowTimestampMigration = readFileSync(
+  new URL("../../../../db/migrations/098_v2_booking_workflow_timestamps.sql", import.meta.url),
+  "utf8"
+);
 
 describe("status booking service source guards", () => {
   it("allows manual status targets but rejects voided", () => {
@@ -85,12 +89,35 @@ describe("status booking service source guards", () => {
     assert.match(source, /await client\.query\("commit"\)/);
   });
 
-  it("V2 modality worklist derives arrival and completion timestamps from audit history", () => {
+  it("V2 modality worklist prefers durable workflow timestamps with audit fallback", () => {
     assert.match(readV2RoutesSource, /left join lateral \(/);
+    assert.match(readV2RoutesSource, /coalesce\(b\.arrived_at, status_times\.arrived_at\) as arrived_at/);
+    assert.match(readV2RoutesSource, /coalesce\(b\.completed_at, status_times\.completed_at\) as completed_at/);
     assert.match(readV2RoutesSource, /min\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'arrived'\)/);
     assert.match(readV2RoutesSource, /min\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'waiting'\)/);
     assert.match(readV2RoutesSource, /max\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'completed'\)/);
     assert.doesNotMatch(readV2RoutesSource, /as arrived_at,[\s\S]{0,80}b\.updated_at/);
+  });
+
+  it("manual status changes persist durable workflow timestamps without clearing history", () => {
+    assert.match(source, /arrived_at = case[\s\S]*when \$2 in \('arrived', 'waiting'\) then coalesce\(arrived_at, now\(\)\)/);
+    assert.match(source, /waiting_started_at = case[\s\S]*when \$2 = 'waiting' then coalesce\(waiting_started_at, now\(\)\)/);
+    assert.match(source, /completed_at = case[\s\S]*when \$2 = 'completed' then coalesce\(completed_at, now\(\)\)/);
+    assert.doesNotMatch(source, /set[\s\S]{0,500}arrived_at = null/);
+    assert.doesNotMatch(source, /set[\s\S]{0,500}completed_at = null/);
+  });
+
+  it("same-day queue scan stores arrived_at for updated bookings", () => {
+    assert.match(source, /set status = 'arrived', arrived_at = coalesce\(arrived_at, now\(\)\), updated_at = now\(\), updated_by_user_id = \$2/);
+  });
+
+  it("migration adds and backfills V2 booking workflow timestamps", () => {
+    assert.match(workflowTimestampMigration, /add column if not exists arrived_at timestamptz/);
+    assert.match(workflowTimestampMigration, /add column if not exists waiting_started_at timestamptz/);
+    assert.match(workflowTimestampMigration, /add column if not exists completed_at timestamptz/);
+    assert.match(workflowTimestampMigration, /new_values->>'status' in \('arrived', 'waiting'\)/);
+    assert.match(workflowTimestampMigration, /new_values->>'status' = 'completed'/);
+    assert.match(workflowTimestampMigration, /completed_at is null/);
   });
 
   it("V2 modality worklist includes operational and review statuses but excludes voided", () => {

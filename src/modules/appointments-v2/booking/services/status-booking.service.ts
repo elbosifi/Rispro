@@ -148,7 +148,7 @@ export async function arriveSameDayQueueBookings(
     await client.query(
       `
         update appointments_v2.bookings
-        set status = 'arrived', updated_at = now(), updated_by_user_id = $2
+        set status = 'arrived', arrived_at = coalesce(arrived_at, now()), updated_at = now(), updated_by_user_id = $2
         where id = any($1::bigint[])
           and status in ('scheduled', 'waiting')
       `,
@@ -434,6 +434,18 @@ export async function updateBookingStatusManual(
           update appointments_v2.bookings
           set
             status = $2,
+            arrived_at = case
+              when $2 in ('arrived', 'waiting') then coalesce(arrived_at, now())
+              else arrived_at
+            end,
+            waiting_started_at = case
+              when $2 = 'waiting' then coalesce(waiting_started_at, now())
+              else waiting_started_at
+            end,
+            completed_at = case
+              when $2 = 'completed' then coalesce(completed_at, now())
+              else completed_at
+            end,
             updated_at = now(),
             updated_by_user_id = $3,
             pacs_auto_completion_disabled_at = case when $4 then now() else pacs_auto_completion_disabled_at end,

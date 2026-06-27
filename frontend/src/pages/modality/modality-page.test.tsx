@@ -163,15 +163,17 @@ describe("ModalityPage modality board", () => {
     expect(boardAccessions()).toEqual(["ACC-PROGRESS", "ACC-EARLY", "ACC-LATE"]);
   });
 
-  it("numbers arrived rows by arrivedAt order and leaves scheduled rows unnumbered", async () => {
+  it("numbers arrived and waiting rows by arrivedAt order and leaves scheduled rows unnumbered", async () => {
     await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-LATE", dailySequence: 2, modalitySlotNumber: 2, status: "arrived", arrivedAt: "2026-06-18T08:30:00Z", englishFullName: "Late Arrival" }),
       appointment({ id: 2, accessionNumber: "ACC-SCHEDULED", dailySequence: 1, modalitySlotNumber: 1, status: "scheduled", bookingTime: "09:00", englishFullName: "Scheduled Patient" }),
       appointment({ id: 3, accessionNumber: "ACC-EARLY", dailySequence: 3, modalitySlotNumber: 3, status: "arrived", arrivedAt: "2026-06-18T08:05:00Z", englishFullName: "Early Arrival" }),
+      appointment({ id: 4, accessionNumber: "ACC-WAIT", dailySequence: 4, modalitySlotNumber: 4, status: "waiting", arrivedAt: "2026-06-18T08:20:00Z", englishFullName: "Waiting Arrival" }),
     ]);
 
     expect(within(screen.getByTestId("modality-board-row-3")).getByText("#1")).toBeTruthy();
-    expect(within(screen.getByTestId("modality-board-row-1")).getByText("#2")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-4")).getByText("#2")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-1")).getByText("#3")).toBeTruthy();
     expect(screen.getByTestId("modality-board-row-2").querySelector("td")?.textContent?.trim()).toBe("—");
   });
 

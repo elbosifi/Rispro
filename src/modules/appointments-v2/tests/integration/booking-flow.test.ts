@@ -14,6 +14,7 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { pool } from "../../../../db/pool.js";
 import {
   isDatabaseAvailable,
   canReachDatabase,
@@ -70,6 +71,42 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   /** Skip the remaining body of the test if setup failed */
   function guard() {
     if (!testData) throw new Error("Test setup failed — database unreachable");
+  }
+
+  async function createBookingForStatusTest(date: string): Promise<number> {
+    const createResult = await fetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: testData.patientId,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        bookingTime: null,
+        caseCategory: "non_oncology",
+        notes: "Status timestamp integration test",
+      },
+    });
+    assert.equal(createResult.status, 201);
+    return Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+  }
+
+  async function readWorkflowTimestamps(bookingId: number) {
+    const result = await pool.query<{
+      status: string;
+      arrived_at: Date | null;
+      waiting_started_at: Date | null;
+      completed_at: Date | null;
+    }>(
+      `
+        select status, arrived_at, waiting_started_at, completed_at
+        from appointments_v2.bookings
+        where id = $1
+      `,
+      [bookingId]
+    );
+    const row = result.rows[0];
+    assert.ok(row, `booking ${bookingId} should exist`);
+    return row;
   }
 
   describe("Create booking", () => {
@@ -161,6 +198,128 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(Number(appointment.modality_id), testData.modalityId);
       assert.equal(Number(appointment.exam_type_id), testData.examTypeId);
       assert.equal(appointment.status, "scheduled");
+    });
+  });
+
+  describe("Workflow timestamps", () => {
+    it("manual scheduled to arrived stores arrived_at", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-13");
+
+      const statusRes = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST",
+        body: { status: "arrived" },
+      });
+
+      assert.equal(statusRes.status, 200);
+      const row = await readWorkflowTimestamps(bookingId);
+      assert.equal(row.status, "arrived");
+      assert.ok(row.arrived_at, "arrived_at should be stored");
+      assert.equal(row.waiting_started_at, null);
+      assert.equal(row.completed_at, null);
+    });
+
+    it("manual scheduled to waiting stores arrived_at and waiting_started_at", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-14");
+
+      const statusRes = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST",
+        body: { status: "waiting" },
+      });
+
+      assert.equal(statusRes.status, 200);
+      const row = await readWorkflowTimestamps(bookingId);
+      assert.equal(row.status, "waiting");
+      assert.ok(row.arrived_at, "arrived_at should be stored");
+      assert.ok(row.waiting_started_at, "waiting_started_at should be stored");
+      assert.equal(row.completed_at, null);
+    });
+
+    it("manual waiting to completed stores completed_at", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-15");
+      assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST",
+        body: { status: "waiting" },
+      })).status, 200);
+
+      const statusRes = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST",
+        body: { status: "completed" },
+      });
+
+      assert.equal(statusRes.status, 200);
+      const row = await readWorkflowTimestamps(bookingId);
+      assert.equal(row.status, "completed");
+      assert.ok(row.arrived_at, "existing arrived_at should remain available");
+      assert.ok(row.waiting_started_at, "existing waiting_started_at should remain available");
+      assert.ok(row.completed_at, "completed_at should be stored");
+    });
+  });
+
+  describe("Modality worklist workflow timestamps", () => {
+    it("prefers bookings.arrived_at over audit-derived arrival time", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-16");
+      await pool.query(
+        `
+          update appointments_v2.bookings
+          set status = 'arrived', arrived_at = '2026-06-16T09:00:00Z'::timestamptz
+          where id = $1
+        `,
+        [bookingId]
+      );
+      await pool.query(
+        `
+          insert into audit_log (entity_type, entity_id, action_type, old_values, new_values, changed_by_user_id, created_at)
+          values ('appointment_v2_booking', $1, 'manual_status_change', '{"status":"scheduled"}'::jsonb, '{"status":"arrived"}'::jsonb, $2, '2026-06-16T08:00:00Z'::timestamptz)
+        `,
+        [bookingId, testData.userId]
+      );
+
+      const modalityRes = await fetch(`/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`);
+
+      assert.equal(modalityRes.status, 200);
+      const rows = (modalityRes.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      const row = rows.find((entry) => Number(entry.id) === bookingId);
+      assert.equal(row?.arrived_at, "2026-06-16T09:00:00.000Z");
+    });
+
+    it("falls back to audit-derived arrived_at only when bookings.arrived_at is null", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-17");
+      await pool.query(
+        `update appointments_v2.bookings set status = 'arrived', arrived_at = null where id = $1`,
+        [bookingId]
+      );
+      await pool.query(
+        `
+          insert into audit_log (entity_type, entity_id, action_type, old_values, new_values, changed_by_user_id, created_at)
+          values ('appointment_v2_booking', $1, 'manual_status_change', '{"status":"scheduled"}'::jsonb, '{"status":"arrived"}'::jsonb, $2, '2026-06-17T08:15:00Z'::timestamptz)
+        `,
+        [bookingId, testData.userId]
+      );
+
+      const modalityRes = await fetch(`/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`);
+
+      assert.equal(modalityRes.status, 200);
+      const rows = (modalityRes.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      const row = rows.find((entry) => Number(entry.id) === bookingId);
+      assert.equal(row?.arrived_at, "2026-06-17T08:15:00.000Z");
+    });
+
+    it("keeps scheduled rows without arrival at null", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-18");
+
+      const modalityRes = await fetch(`/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`);
+
+      assert.equal(modalityRes.status, 200);
+      const rows = (modalityRes.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      const row = rows.find((entry) => Number(entry.id) === bookingId);
+      assert.equal(row?.status, "scheduled");
+      assert.equal(row?.arrived_at, null);
     });
   });
 

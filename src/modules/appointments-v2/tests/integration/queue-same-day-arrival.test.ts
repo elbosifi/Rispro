@@ -110,6 +110,14 @@ describe("V2 queue same-day arrival", { skip: skipEnv }, () => {
     return Object.fromEntries(result.rows.map((row) => [Number(row.id), row.status]));
   }
 
+  async function arrivedTimestamps(ids: number[]): Promise<Record<number, boolean>> {
+    const result = await pool.query<{ id: string; has_arrived_at: boolean }>(
+      `select id::text, (arrived_at is not null) as has_arrived_at from appointments_v2.bookings where id = any($1::bigint[])`,
+      [ids]
+    );
+    return Object.fromEntries(result.rows.map((row) => [Number(row.id), row.has_arrived_at]));
+  }
+
   async function withPatientRegistrationRequirements(run: () => Promise<void>) {
     const existing = await pool.query<{ setting_key: string; setting_value: unknown }>(
       `
@@ -170,6 +178,7 @@ describe("V2 queue same-day arrival", { skip: skipEnv }, () => {
     assert.equal(status, 200);
     assert.deepEqual((data.updatedBookingIds as number[]).sort((a, b) => a - b), [firstId, secondId].sort((a, b) => a - b));
     assert.deepEqual(await statuses([firstId, secondId]), { [firstId]: "arrived", [secondId]: "arrived" });
+    assert.deepEqual(await arrivedTimestamps([firstId, secondId]), { [firstId]: true, [secondId]: true });
     assert.equal(data.sameDayAppointmentCount, 2);
     assert.equal(data.hasMultipleAppointments, true);
   });

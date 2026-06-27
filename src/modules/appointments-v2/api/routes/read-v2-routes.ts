@@ -997,8 +997,8 @@ router.get(
         b.status,
         b.is_walk_in,
         b.notes,
-        status_times.arrived_at,
-        status_times.completed_at,
+        coalesce(b.arrived_at, status_times.arrived_at) as arrived_at,
+        coalesce(b.completed_at, status_times.completed_at) as completed_at,
         b.created_at,
         b.updated_at,
         p.arabic_full_name,
@@ -1051,9 +1051,9 @@ router.get(
           when b.status = 'completed' then 3
           else 4
         end asc,
-        status_times.arrived_at asc nulls last,
+        coalesce(b.arrived_at, status_times.arrived_at) asc nulls last,
         b.booking_time asc nulls last,
-        status_times.completed_at desc nulls last,
+        coalesce(b.completed_at, status_times.completed_at) desc nulls last,
         modality_slot_number asc,
         b.id asc
       limit 300
