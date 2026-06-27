@@ -247,6 +247,7 @@ export function mapAppointment(raw: RawRecord): Appointment {
     noShowReason: strOrNull(raw, 'no_show_reason') ?? strOrNull(raw, 'noShowReason'),
     cancelReason: strOrNull(raw, 'cancel_reason') ?? strOrNull(raw, 'cancelReason'),
     arrivedAt: strOrNull(raw, 'arrived_at') ?? strOrNull(raw, 'arrivedAt'),
+    waitingStartedAt: strOrNull(raw, 'waiting_started_at') ?? strOrNull(raw, 'waitingStartedAt'),
     completedAt: strOrNull(raw, 'completed_at') ?? strOrNull(raw, 'completedAt'),
     createdAt: strOrUndefined(raw, 'created_at') ?? strOrUndefined(raw, 'createdAt'),
     updatedAt: strOrUndefined(raw, 'updated_at') ?? strOrUndefined(raw, 'updatedAt')
@@ -363,6 +364,9 @@ function mapQueueEntry(raw: RawRecord): QueueEntry {
     queueNumber: num(raw, 'queue_number') || num(raw, 'queueNumber'),
     queueStatus: fallback(raw.queue_status ?? raw.queueStatus, "waiting") as QueueEntry["queueStatus"],
     scannedAt: strOrNull(raw, 'scanned_at') ?? strOrNull(raw, 'scannedAt'),
+    arrivedAt: strOrNull(raw, 'arrived_at') ?? strOrNull(raw, 'arrivedAt'),
+    waitingStartedAt: strOrNull(raw, 'waiting_started_at') ?? strOrNull(raw, 'waitingStartedAt'),
+    completedAt: strOrNull(raw, 'completed_at') ?? strOrNull(raw, 'completedAt'),
     appointmentId: num(raw, 'appointment_id') || num(raw, 'appointmentId'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentStatus: fallback(raw.appointment_status ?? raw.appointmentStatus, "scheduled") as QueueEntry["appointmentStatus"],

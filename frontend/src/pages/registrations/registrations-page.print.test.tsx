@@ -418,6 +418,53 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("shows selected appointment workflow timestamps in the manage drawer", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      {
+        id: 7,
+        modalityId: 1,
+        examTypeId: 3,
+        accessionNumber: "ACC-7",
+        dailySequence: 1,
+        patientId: 1,
+        caseCategory: "non_oncology",
+        arabicFullName: "Test Patient",
+        englishFullName: "Test Patient",
+        modalityNameAr: "أشعة مقطعية",
+        modalityNameEn: "CT",
+        examNameAr: "CT Head",
+        examNameEn: "CT Head",
+        priorityNameAr: null,
+        priorityNameEn: null,
+        appointmentDate: "2027-01-03",
+        status: "waiting",
+        isWalkIn: false,
+        notes: null,
+        arrivedAt: "2027-01-03T08:15:00Z",
+        waitingStartedAt: "2027-01-03T08:20:00Z",
+        completedAt: "2027-01-03T09:30:00Z",
+        phone1: "0912345678",
+        patientWebPushSubscribed: true,
+        publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
+      },
+    ]);
+
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(getAppointmentRow("ACC-7"));
+    const dialog = await screen.findByRole("dialog", { name: "Manage" });
+
+    expect(within(dialog).getByText("Arrival time")).toBeTruthy();
+    expect(within(dialog).getByText("Waiting duration")).toBeTruthy();
+    expect(within(dialog).getByText("Completed at")).toBeTruthy();
+    expect(within(dialog).getByText(/10:15/)).toBeTruthy();
+    expect(within(dialog).getByText(/11:30/)).toBeTruthy();
+  });
+
   it("clears the patient scope when switching to today", async () => {
     renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
 

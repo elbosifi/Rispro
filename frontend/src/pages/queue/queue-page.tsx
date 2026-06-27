@@ -46,6 +46,29 @@ function getErrorMessage(error: unknown): string | null {
   return error instanceof Error ? error.message : null;
 }
 
+function formatClockValue(language: string, value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", {
+    timeZone: "Africa/Tripoli",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatElapsedSince(language: string, value: string | null | undefined): string {
+  if (!value) return "—";
+  const startedAt = new Date(value).getTime();
+  if (!Number.isFinite(startedAt)) return "—";
+  const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return language === "ar" ? `${hours}س ${remainingMinutes}د` : `${hours}h ${remainingMinutes}m`;
+}
+
 export default function QueuePage() {
   const { language, t } = useLanguage();
   const [scanValue, setScanValue] = useState("");
@@ -318,6 +341,7 @@ export default function QueuePage() {
     return [modality, exam].filter(Boolean).join(" ") || appointment.accessionNumber || t("queue.relatedAppointmentFallback", { id: appointment.appointmentId });
   };
   const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => {
+    const arrivedAt = entry.arrivedAt ?? entry.scannedAt ?? null;
     const relatedAppointmentHint = (entry.relatedAppointments ?? [])
       .filter((appointment) => appointment.appointmentId !== entry.appointmentId)
       .map(relatedAppointmentLabel)
@@ -344,6 +368,17 @@ export default function QueuePage() {
             )}
           </div>
           <p className="text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
+          {inQueue && arrivedAt ? (
+            <p className="text-xs text-muted-foreground">
+              {chooseLocalized(language, "دخل: ", "Entered: ")}
+              {" "}
+              {formatClockValue(language, arrivedAt)}
+              <span className="px-1">•</span>
+              {chooseLocalized(language, "الانتظار: ", "Waiting: ")}
+              {" "}
+              {formatElapsedSince(language, arrivedAt)}
+            </p>
+          ) : null}
           <p className="text-sm text-muted-foreground">
             {chooseLocalized(language, entry.modalityNameAr, entry.modalityNameEn)}
             {entry.examNameEn || entry.examNameAr ? ` • ${chooseLocalized(language, entry.examNameAr, entry.examNameEn)}` : ""}

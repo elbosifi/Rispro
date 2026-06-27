@@ -446,6 +446,8 @@ export async function updateBookingStatusManual(
               when $2 = 'completed' then coalesce(completed_at, now())
               else completed_at
             end,
+            -- A direct completion does not prove the patient entered the queue.
+            -- Preserve arrived_at unless the workflow already recorded arrival/waiting.
             updated_at = now(),
             updated_by_user_id = $3,
             pacs_auto_completion_disabled_at = case when $4 then now() else pacs_auto_completion_disabled_at end,

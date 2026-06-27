@@ -84,6 +84,7 @@ export interface Appointment {
   specialReasonNote?: string | null;
   notes?: string | null;
   arrivedAt?: string | null;
+  waitingStartedAt?: string | null;
   completedAt?: string | null;
 }
 
@@ -94,6 +95,9 @@ export interface QueueItem {
   queueNumber: number;
   queueStatus: QueueStatus;
   scannedAt?: string | null;
+  arrivedAt?: string | null;
+  waitingStartedAt?: string | null;
+  completedAt?: string | null;
 }
 
 export interface AuditEvent {

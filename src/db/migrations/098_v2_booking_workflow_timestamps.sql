@@ -49,12 +49,12 @@ begin
   )
   select count(*) into waiting_started_backfilled from updated;
 
-  -- Use the latest completed audit event to preserve the modality worklist's existing
-  -- behavior when a completed booking was reopened and completed again.
+  -- Use the first completed audit event as the operational completed_at.
+  -- Later reopen/re-complete cycles are status history, not the first completion time.
   with status_times as (
     select
       audit_log.entity_id as booking_id,
-      max(audit_log.created_at) as completed_at
+      min(audit_log.created_at) as completed_at
     from audit_log
     where audit_log.entity_type = 'appointment_v2_booking'
       and audit_log.new_values->>'status' = 'completed'

@@ -140,6 +140,17 @@ function publicAppointmentToken(appointment: AppointmentWithDetails): string {
   }
 }
 
+function formatElapsedSince(language: string, value: string | null | undefined): string {
+  if (!value) return "—";
+  const startedAt = new Date(value).getTime();
+  if (!Number.isFinite(startedAt)) return "—";
+  const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return language === "ar" ? `${hours}س ${remainingMinutes}د` : `${hours}h ${remainingMinutes}m`;
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -1753,6 +1764,24 @@ export default function RegistrationsPage() {
                   label={t("registrations.createdBy")}
                   value={selectedAppointmentCreatedBy}
                 />
+                {selectedAppointment.arrivedAt ? (
+                  <Field
+                    label={chooseLocalized(language, "وقت الوصول", "Arrival time")}
+                    value={formatDateTimeLy(selectedAppointment.arrivedAt)}
+                  />
+                ) : null}
+                {(selectedAppointment.status === "arrived" || selectedAppointment.status === "waiting") && selectedAppointment.arrivedAt ? (
+                  <Field
+                    label={chooseLocalized(language, "مدة الانتظار", "Waiting duration")}
+                    value={formatElapsedSince(language, selectedAppointment.arrivedAt)}
+                  />
+                ) : null}
+                {selectedAppointment.completedAt ? (
+                  <Field
+                    label={chooseLocalized(language, "وقت الإكمال", "Completed at")}
+                    value={formatDateTimeLy(selectedAppointment.completedAt)}
+                  />
+                ) : null}
               </div>
               <div className="mt-2">
                 <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">

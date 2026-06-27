@@ -172,8 +172,11 @@ describe("ModalityPage modality board", () => {
     ]);
 
     expect(within(screen.getByTestId("modality-board-row-3")).getByText("#1")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-3")).getByText("10:05")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-4")).getByText("#2")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-4")).getByText("10:20")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-1")).getByText("#3")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-1")).getByText("10:30")).toBeTruthy();
     expect(screen.getByTestId("modality-board-row-2").querySelector("td")?.textContent?.trim()).toBe("—");
   });
 

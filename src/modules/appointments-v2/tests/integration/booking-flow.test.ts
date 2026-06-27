@@ -256,6 +256,33 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.ok(row.waiting_started_at, "existing waiting_started_at should remain available");
       assert.ok(row.completed_at, "completed_at should be stored");
     });
+
+    it("manual close statuses preserve existing workflow timestamps", async () => {
+      guard();
+      for (const targetStatus of ["cancelled", "no-show", "discontinued"] as const) {
+        const bookingId = await createBookingForStatusTest(`2026-06-${targetStatus === "cancelled" ? "19" : targetStatus === "no-show" ? "20" : "21"}`);
+        assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+          method: "POST",
+          body: { status: "waiting" },
+        })).status, 200);
+        const before = await readWorkflowTimestamps(bookingId);
+
+        const statusRes = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+          method: "POST",
+          body: {
+            status: targetStatus,
+            reason: "Workflow timestamp preservation test",
+          },
+        });
+
+        assert.equal(statusRes.status, 200);
+        const after = await readWorkflowTimestamps(bookingId);
+        assert.equal(after.status, targetStatus);
+        assert.deepEqual(after.arrived_at, before.arrived_at);
+        assert.deepEqual(after.waiting_started_at, before.waiting_started_at);
+        assert.deepEqual(after.completed_at, before.completed_at);
+      }
+    });
   });
 
   describe("Modality worklist workflow timestamps", () => {

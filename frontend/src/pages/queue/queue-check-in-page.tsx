@@ -78,6 +78,18 @@ function countModalityEntries(
   return queue?.queueEntries.filter(predicate).length ?? 0;
 }
 
+function formatClockValue(language: string, value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", {
+    timeZone: "Africa/Tripoli",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
 export default function QueueCheckInPage() {
   const { t, language, isArabic, toggleLanguage } = useLanguage();
   const { logout } = useAuth();
@@ -322,6 +334,8 @@ export default function QueueCheckInPage() {
         : state.mode === "error"
           ? state.message
           : subtitle;
+  const checkedInAt =
+    state.mode === "success" && state.entry ? state.entry.arrivedAt ?? state.entry.scannedAt ?? null : null;
 
   return (
     <div
@@ -498,6 +512,13 @@ export default function QueueCheckInPage() {
                             : t("queue.checkInSuccessMessage"))
                         : t("queue.checkInIdleHint")}
                   </p>
+                  {checkedInAt ? (
+                    <p className="mt-1 text-sm font-semibold text-white" data-testid="queue-check-in-time">
+                      {chooseLocalized(language, "تم الدخول الساعة ", "Checked in at ")}
+                      {" "}
+                      {formatClockValue(language, checkedInAt)}
+                    </p>
+                  ) : null}
                 </div>
 
                 <form onSubmit={handleSubmit} className="sr-only">

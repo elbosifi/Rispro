@@ -214,4 +214,45 @@ describe("QueuePage multiple appointment marker", () => {
     expect(screen.queryByText(/Multiple appointments/i)).toBeNull();
     expect(screen.queryByText(/Also today:/i)).toBeNull();
   });
+
+  it("shows entered time and waiting duration only for entered queue rows", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue({
+      ...queueSnapshot,
+      summary: {
+        ...queueSnapshot.summary,
+        scheduled_count: 1,
+        waiting_count: 1,
+      },
+      queueEntries: [
+        {
+          ...queueSnapshot.queueEntries[0],
+          id: 1,
+          appointmentId: 44,
+          accessionNumber: "ACC-44",
+          appointmentStatus: "waiting",
+          arrivedAt: new Date(Date.now() - 70 * 60_000).toISOString(),
+        },
+        {
+          ...queueSnapshot.queueEntries[0],
+          id: 2,
+          appointmentId: 45,
+          accessionNumber: "ACC-45",
+          appointmentStatus: "scheduled",
+          arrivedAt: null,
+        },
+      ],
+    });
+
+    renderPage();
+
+    const enteredRow = await screen.findByText(/ACC-44/);
+    const enteredCard = enteredRow.closest("li")!;
+    expect(within(enteredCard).getByText(/Entered:/i)).toBeTruthy();
+    expect(enteredCard.textContent).toMatch(/Waiting: 1h (9|10)m/i);
+
+    const scheduledRow = screen.getByText(/ACC-45/);
+    const scheduledCard = scheduledRow.closest("li")!;
+    expect(within(scheduledCard).queryByText(/Entered:/i)).toBeNull();
+    expect(within(scheduledCard).queryByText(/Waiting:/i)).toBeNull();
+  });
 });

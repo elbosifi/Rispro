@@ -1020,6 +1020,7 @@ export interface Appointment {
   noShowReason?: string | null;
   cancelReason?: string | null;
   arrivedAt?: string | null;
+  waitingStartedAt?: string | null;
   completedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -1071,6 +1072,9 @@ export interface QueueEntry {
   queueNumber: number;
   queueStatus: QueueStatus;
   scannedAt?: string | null;
+  arrivedAt?: string | null;
+  waitingStartedAt?: string | null;
+  completedAt?: string | null;
   appointmentId: number;
   accessionNumber: string;
   appointmentStatus: AppointmentStatus;

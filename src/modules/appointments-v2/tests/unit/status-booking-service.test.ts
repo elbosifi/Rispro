@@ -92,6 +92,7 @@ describe("status booking service source guards", () => {
   it("V2 modality worklist prefers durable workflow timestamps with audit fallback", () => {
     assert.match(readV2RoutesSource, /left join lateral \(/);
     assert.match(readV2RoutesSource, /coalesce\(b\.arrived_at, status_times\.arrived_at\) as arrived_at/);
+    assert.match(readV2RoutesSource, /b\.waiting_started_at/);
     assert.match(readV2RoutesSource, /coalesce\(b\.completed_at, status_times\.completed_at\) as completed_at/);
     assert.match(readV2RoutesSource, /min\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'arrived'\)/);
     assert.match(readV2RoutesSource, /min\(audit_log\.created_at\) filter \(where audit_log\.new_values->>'status' = 'waiting'\)/);
@@ -118,14 +119,21 @@ describe("status booking service source guards", () => {
     assert.match(workflowTimestampMigration, /new_values->>'status' in \('arrived', 'waiting'\)/);
     assert.match(workflowTimestampMigration, /new_values->>'status' = 'completed'/);
     assert.match(workflowTimestampMigration, /min\(audit_log\.created_at\) as arrived_at/);
-    assert.match(workflowTimestampMigration, /max\(audit_log\.created_at\) as completed_at/);
-    assert.match(workflowTimestampMigration, /latest completed audit event/);
+    assert.match(workflowTimestampMigration, /min\(audit_log\.created_at\) as completed_at/);
+    assert.match(workflowTimestampMigration, /first completed audit event/);
     assert.match(workflowTimestampMigration, /completed_at is null/);
     assert.doesNotMatch(workflowTimestampMigration, /set arrived_at = b\.updated_at/);
     assert.doesNotMatch(workflowTimestampMigration, /set completed_at = b\.updated_at/);
     assert.match(workflowTimestampMigration, /raise notice 'appointments_v2 booking workflow timestamps backfill: arrived_at from audit_log=%/);
     assert.match(workflowTimestampMigration, /raise notice 'appointments_v2 booking workflow timestamps still missing: arrived\/waiting without arrived_at=%/);
     assert.match(workflowTimestampMigration, /completed without completed_at=%/);
+  });
+
+  it("V2 read appointments and queue APIs expose workflow timestamps", () => {
+    assert.match(readV2RoutesSource, /b\.arrived_at/);
+    assert.match(readV2RoutesSource, /b\.waiting_started_at/);
+    assert.match(readV2RoutesSource, /b\.completed_at/);
+    assert.match(readV2RoutesSource, /case when b\.status in \('arrived', 'waiting'\) then b\.arrived_at else null end as scanned_at/);
   });
 
   it("V2 modality worklist includes operational and review statuses but excludes voided", () => {
