@@ -81,6 +81,7 @@ export default function QueuePage() {
   const [queueView, setQueueView] = useState<QueueView>("all");
   const [queueModalityId, setQueueModalityId] = useState("");
   const [showOldNoShows, setShowOldNoShows] = useState(false);
+  const [scanWarning, setScanWarning] = useState<string | null>(null);
   const [patientRequirementAlert, setPatientRequirementAlert] = useState<PatientRequirementAlert | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingScanEntryRef = useRef<QueueEntry | null>(null);
@@ -248,9 +249,28 @@ export default function QueuePage() {
 
   const handleScan = (e: FormEvent) => {
     e.preventDefault();
-    if (scanValue.trim()) {
+    const cleanScanValue = scanValue.trim();
+    if (cleanScanValue) {
+      const existingEntry = (queue?.queueEntries ?? []).find(
+        (entry) => normalizeText(entry.accessionNumber) === normalizeText(cleanScanValue)
+      );
+      if (existingEntry && ["arrived", "waiting"].includes(existingEntry.appointmentStatus)) {
+        const warning = chooseLocalized(
+          language,
+          "تم تسجيل حضور هذا الموعد بالفعل.",
+          "This accession is already checked in."
+        );
+        setScanWarning(warning);
+        pushToast({
+          type: "info",
+          title: chooseLocalized(language, "تم تسجيل الحضور بالفعل", "Already checked in"),
+          message: warning
+        });
+        return;
+      }
+      setScanWarning(null);
       pendingScanEntryRef.current = null;
-      scanMutation.mutate(scanValue.trim());
+      scanMutation.mutate(cleanScanValue);
     }
   };
 
@@ -316,6 +336,7 @@ export default function QueuePage() {
   const notEnteredCount = queueEntries.filter((entry) => entry.appointmentStatus === "scheduled").length;
   const walkInCount = queueEntries.filter((entry) => entry.isWalkIn).length;
   const oldNoShowCandidates = queue?.oldNoShowCandidates ?? [];
+  const hasActiveFilters = !!queueSearch || queueView !== "all" || !!queueModalityId;
   const lastUpdatedLabel = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en", { hour: "2-digit", minute: "2-digit" })
     : t("queue.lastUpdatedUnknown");
@@ -323,6 +344,27 @@ export default function QueuePage() {
   const notEnteredQueueLabel = language === "ar" ? "المريض لم يصل بعد" : "Not Entered Yet";
   const scheduledLabel = language === "ar" ? "مجدول" : "Scheduled";
   const walkInLabel = language === "ar" ? "دخول مباشر" : "Walk-in";
+  const clearQueueFilters = () => {
+    setQueueSearch("");
+    setQueueView("all");
+    setQueueModalityId("");
+  };
+  const filteredEmptyMessage = chooseLocalized(
+    language,
+    "لا يوجد مرضى يطابقون عوامل التصفية الحالية.",
+    "No patients match the current filters."
+  );
+  const filteredClearLabel = chooseLocalized(language, "مسح عوامل التصفية", "Clear filters");
+  const checkedInEmptyMessage = chooseLocalized(
+    language,
+    "لا يوجد مرضى مسجلو الحضور بعد. امسح رقم الوصول أو أدخل مريضاً مجدولاً.",
+    "No checked-in patients yet. Scan an accession or check in a scheduled patient."
+  );
+  const notCheckedInEmptyMessage = chooseLocalized(
+    language,
+    "لا يوجد مرضى مجدولون بانتظار تسجيل الحضور.",
+    "No scheduled patients are waiting for check-in."
+  );
   const openRegistration = (entry: QueueEntry) => {
     navigate(`/registrations?appointmentId=${entry.appointmentId}&patientId=${entry.patientId}`);
   };
@@ -339,6 +381,16 @@ export default function QueuePage() {
     const modality = chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn);
     const exam = chooseLocalized(language, appointment.examNameAr, appointment.examNameEn);
     return [modality, exam].filter(Boolean).join(" ") || appointment.accessionNumber || t("queue.relatedAppointmentFallback", { id: appointment.appointmentId });
+  };
+  const getStatusLabel = (entry: QueueEntry, inQueue: boolean) => {
+    if (!inQueue) return scheduledLabel;
+    if (entry.appointmentStatus === "arrived") return chooseLocalized(language, "تم النداء", "Called");
+    if (entry.appointmentStatus === "waiting") return chooseLocalized(language, "في الانتظار", "Waiting");
+    if (entry.appointmentStatus === "in-progress") return chooseLocalized(language, "قيد التنفيذ", "In progress");
+    if (entry.appointmentStatus === "completed") return chooseLocalized(language, "مكتمل", "Completed");
+    if (entry.appointmentStatus === "no-show") return chooseLocalized(language, "غياب", "No-show");
+    if (entry.appointmentStatus === "cancelled") return chooseLocalized(language, "ملغي", "Cancelled");
+    return entry.queueStatus;
   };
   const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => {
     const arrivedAt = entry.arrivedAt ?? entry.scannedAt ?? null;
@@ -398,7 +450,7 @@ export default function QueuePage() {
             variant={inQueue ? "warning" : "neutral"}
             size="sm"
           >
-            {inQueue ? entry.queueStatus : scheduledLabel}
+            {getStatusLabel(entry, inQueue)}
           </Badge>
           {entry.isWalkIn && <Badge size="sm">{walkInLabel}</Badge>}
           <Button
@@ -488,19 +540,28 @@ export default function QueuePage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="space-y-3 sm:space-y-4 lg:hidden">
-        <div className="flex items-center gap-4">
-          <SectionLabel pulsing>{t("queue.managementLabel")}</SectionLabel>
-        </div>
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+      <div className="space-y-3 sm:space-y-4">
+        <SectionLabel pulsing>{t("queue.managementLabel")}</SectionLabel>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
               <span className="gradient-text">{t("queue.pageTitle")}</span>
             </h1>
-            <p className="mt-2 text-muted-foreground">
-              {t("queue.pageSubtitle")}
-            </p>
+            <p className="mt-2 text-muted-foreground">{t("queue.pageSubtitle")}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <span>{queue?.queueDate ?? todayIsoDateLy()}</span>
+            <span>{t("queue.lastUpdated")}: {lastUpdatedLabel}</span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void queryClient.invalidateQueries({ queryKey: ["queue"] })}
+              disabled={isFetching}
+            >
+              <RefreshCw size={14} className={isFetching ? "animate-spin" : undefined} />
+              {t("queue.refresh")}
+            </Button>
           </div>
         </div>
       </div>
@@ -512,86 +573,90 @@ export default function QueuePage() {
         <QueueStat label={walkInLabel} value={walkInCount} tone="sky" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-         <div className="space-y-4">
-           <Card className="p-4 sm:p-5">
-             <h3 className="text-lg font-semibold mb-4">{t("queue.scanAccession")}</h3>
-             <div className="mb-3">
-               <Button
-                 type="button"
-                 variant="secondary"
-                 size="sm"
-                 onClick={() => window.open("/queue/check-in", "_blank", "noopener,noreferrer")}
-               >
-                 {t("queue.openFullScreenCheckIn")}
-               </Button>
-             </div>
-             <form onSubmit={handleScan} className="flex gap-2">
-               <Input
-                 type="text"
-                 value={scanValue}
-                 onChange={(e) => setScanValue(e.target.value)}
-                 placeholder={t("queue.scanPlaceholder")}
-                 dir="ltr"
-                 className="flex-1"
-               />
-               <Button type="submit" disabled={scanMutation.isPending || !scanValue.trim()}>
-                 {t("queue.scan")}
-               </Button>
-             </form>
-           </Card>
+      <Card className="p-4 sm:p-5" role="region" aria-label={t("queue.scanAccession")}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold">{t("queue.scanAccession")}</h3>
+            <form onSubmit={handleScan} className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <Input
+                type="text"
+                value={scanValue}
+                onChange={(e) => {
+                  setScanValue(e.target.value);
+                  if (scanWarning) setScanWarning(null);
+                }}
+                placeholder={t("queue.scanPlaceholder")}
+                dir="ltr"
+                className="h-11 flex-1"
+              />
+              <Button type="submit" disabled={scanMutation.isPending || !scanValue.trim()} className="h-11">
+                {scanMutation.isPending ? t("common.loading") : t("queue.scan")}
+              </Button>
+            </form>
+            {scanWarning ? (
+              <p className="mt-2 text-sm font-medium text-amber-700">{scanWarning}</p>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => window.open("/queue/check-in", "_blank", "noopener,noreferrer")}
+          >
+            {t("queue.openFullScreenCheckIn")}
+          </Button>
+        </div>
+      </Card>
 
-           {isWalkInEnabled && (
-           <Card className="p-4 sm:p-5">
-             <h3 className="text-lg font-semibold mb-4">{t("queue.walkInPatient")}</h3>
-            <div className="relative mb-4">
-               <Input
-                 type="text"
-                 value={walkInSearch}
-                 onChange={(e) => handleWalkInSearch(e.target.value)}
-                 placeholder={t("queue.walkInSearch")}
-                 className="w-full"
-               />
-              {walkInResults.length > 0 && (
-                <ul className="absolute z-10 w-full mt-1 bg-card border border-border rounded-xl shadow-lg max-h-40 overflow-y-auto">
-                  {walkInResults.map((p) => (
-                    <li key={p.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedWalkIn(p);
-                          setWalkInResults([]);
-                          setWalkInSearch(chooseLocalized(language, p.arabicFullName, p.englishFullName));
-                        }}
-                        className="w-full text-start p-3 hover:bg-muted/50 transition-colors"
-                      >
-                        <p className="font-medium">
-                          {chooseLocalized(language, p.arabicFullName, p.englishFullName)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{p.nationalId || t("queue.noId")}</p>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {selectedWalkIn && (
-              <div className="mb-4 p-4 border-accent/30 rounded-xl" style={{ background: "rgba(0, 82, 255, 0.05)" }}>
-                <p className="text-sm font-medium text-accent">
+      {isWalkInEnabled && (
+        <Card className="p-4 sm:p-5">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-end">
+            <div>
+              <h3 className="text-lg font-semibold">{t("queue.walkInPatient")}</h3>
+              <div className="relative mt-3">
+                <Input
+                  type="text"
+                  value={walkInSearch}
+                  onChange={(e) => handleWalkInSearch(e.target.value)}
+                  placeholder={t("queue.walkInSearch")}
+                  className="w-full"
+                />
+                {walkInResults.length > 0 && (
+                  <ul className="absolute z-10 w-full mt-1 bg-card border border-border rounded-xl shadow-lg max-h-40 overflow-y-auto">
+                    {walkInResults.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedWalkIn(p);
+                            setWalkInResults([]);
+                            setWalkInSearch(chooseLocalized(language, p.arabicFullName, p.englishFullName));
+                          }}
+                          className="w-full text-start p-3 hover:bg-muted/50 transition-colors"
+                        >
+                          <p className="font-medium">
+                            {chooseLocalized(language, p.arabicFullName, p.englishFullName)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{p.nationalId || t("queue.noId")}</p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {selectedWalkIn && (
+                <p className="mt-2 text-sm font-medium text-accent">
                   {t("queue.selected", { name: chooseLocalized(language, selectedWalkIn.arabicFullName, selectedWalkIn.englishFullName) })}
                 </p>
-              </div>
-            )}
-            
-            {/* Modality Selector */}
-            <div className="mb-4">
-              <label className="block text-sm font-semibold mb-2 text-foreground">
+              )}
+            </div>
+            <label className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
                 {t("queue.selectModality")}
-              </label>
+              </span>
               <select
                 value={selectedModalityId}
                 onChange={(e) => setSelectedModalityId(e.target.value)}
-                className="input-premium w-full"
+                className="input-premium h-10 w-full"
               >
                 <option value="">{t("queue.chooseModality")}</option>
                 {modalities.map((modality) => (
@@ -600,180 +665,180 @@ export default function QueuePage() {
                   </option>
                 ))}
               </select>
+            </label>
+            <Button variant="secondary" onClick={handleWalkInSubmit} disabled={walkInMutation.isPending || !selectedWalkIn || !selectedModalityId}>
+              {walkInMutation.isPending ? t("queue.adding") : t("queue.addToQueue")}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      <Card className="p-3 sm:p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-3">
+            <label className="space-y-1">
+              <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                <Search size={12} />
+                {t("queue.searchQueue")}
+              </span>
+              <Input
+                value={queueSearch}
+                onChange={(event) => setQueueSearch(event.target.value)}
+                placeholder={t("queue.searchQueuePlaceholder")}
+                className="h-10"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                {t("queue.view")}
+              </span>
+              <select
+                value={queueView}
+                onChange={(event) => setQueueView(event.target.value as QueueView)}
+                className="input-premium h-10 w-full"
+              >
+                <option value="all">{t("queue.viewAll")}</option>
+                <option value="entered">{enteredQueueLabel}</option>
+                <option value="not_entered">{notEnteredQueueLabel}</option>
+                <option value="walk_in">{walkInLabel}</option>
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                {t("queue.modality")}
+              </span>
+              <select
+                value={queueModalityId}
+                onChange={(event) => setQueueModalityId(event.target.value)}
+                className="input-premium h-10 w-full"
+              >
+                <option value="">{t("registrations.all")}</option>
+                {modalities.map((modality) => (
+                  <option key={modality.id} value={modalityKey(modality.nameAr, modality.nameEn)}>
+                    {chooseLocalized(language, modality.nameAr, modality.nameEn)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {t("queue.lastUpdated")}: {lastUpdatedLabel}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void queryClient.invalidateQueries({ queryKey: ["queue"] })}
+              disabled={isFetching}
+            >
+              <RefreshCw size={14} className={isFetching ? "animate-spin" : undefined} />
+              {t("queue.refresh")}
+            </Button>
+            {hasActiveFilters && (
+              <Button type="button" variant="ghost" size="sm" onClick={clearQueueFilters}>
+                {t("calendar.clearFilters")}
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {oldNoShowCandidates.length > 0 && (
+        <Card className="p-3 sm:p-4 border-amber-200 bg-amber-50/70" role="region" aria-label={chooseLocalized(language, "تنظيف الغياب القديم", "Old no-show cleanup")}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-900">
+                {chooseLocalized(language, "تنظيف الغياب القديم", "Old no-show cleanup")}
+              </h3>
+              <p className="text-sm text-amber-800">
+                {chooseLocalized(
+                  language,
+                  `${oldNoShowCandidates.length} موعد قديم مجدول يحتاج مراجعة`,
+                  `${oldNoShowCandidates.length} old scheduled appointment${oldNoShowCandidates.length === 1 ? " needs" : "s need"} review`
+                )}
+              </p>
             </div>
-            
-             <Button variant="secondary" onClick={handleWalkInSubmit} disabled={walkInMutation.isPending || !selectedWalkIn || !selectedModalityId} className="w-full">
-               {walkInMutation.isPending ? t("queue.adding") : t("queue.addToQueue")}
-             </Button>
-           </Card>
-           )}
-         </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowOldNoShows((current) => !current)}>
+                {showOldNoShows ? chooseLocalized(language, "إخفاء", "Hide") : chooseLocalized(language, "مراجعة", "Review")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={oldNoShowBulkMutation.isPending}
+                onClick={() => {
+                  if (!window.confirm(chooseLocalized(language, "تأكيد كل المواعيد القديمة كغياب؟", "Mark all old candidates as no-show?"))) return;
+                  oldNoShowBulkMutation.mutate(chooseLocalized(language, "تأكيد جماعي للغياب القديم", "Bulk old no-show cleanup confirmation"));
+                }}
+                style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
+              >
+                {chooseLocalized(language, "تأكيد الكل كغياب", "Mark all no-show")}
+              </Button>
+            </div>
+          </div>
+          {showOldNoShows ? (
+            <ul className="mt-3 divide-y divide-amber-200 rounded-lg border border-amber-200 bg-card max-h-[300px] overflow-y-auto">
+              {oldNoShowCandidates.map((candidate) => renderNoShowCandidate(candidate, true))}
+            </ul>
+          ) : null}
+        </Card>
+      )}
 
-         <div className="lg:col-span-2">
-           <Card className="mb-4 p-3 sm:p-4">
-             <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-               <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-3">
-                 <label className="space-y-1">
-                   <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
-                     <Search size={12} />
-                     {t("queue.searchQueue")}
-                   </span>
-                   <Input
-                     value={queueSearch}
-                     onChange={(event) => setQueueSearch(event.target.value)}
-                     placeholder={t("queue.searchQueuePlaceholder")}
-                     className="h-10"
-                   />
-                 </label>
-                 <label className="space-y-1">
-                   <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
-                     {t("queue.view")}
-                   </span>
-                   <select
-                     value={queueView}
-                     onChange={(event) => setQueueView(event.target.value as QueueView)}
-                     className="input-premium h-10 w-full"
-                   >
-                     <option value="all">{t("queue.viewAll")}</option>
-                     <option value="entered">{enteredQueueLabel}</option>
-                     <option value="not_entered">{notEnteredQueueLabel}</option>
-                     <option value="walk_in">{walkInLabel}</option>
-                   </select>
-                 </label>
-                 <label className="space-y-1">
-                   <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
-                     {t("queue.modality")}
-                   </span>
-                   <select
-                     value={queueModalityId}
-                     onChange={(event) => setQueueModalityId(event.target.value)}
-                     className="input-premium h-10 w-full"
-                   >
-                     <option value="">{t("registrations.all")}</option>
-                     {modalities.map((modality) => (
-                       <option key={modality.id} value={modalityKey(modality.nameAr, modality.nameEn)}>
-                         {chooseLocalized(language, modality.nameAr, modality.nameEn)}
-                       </option>
-                     ))}
-                   </select>
-                 </label>
-               </div>
-               <div className="flex flex-wrap items-center gap-2">
-                 <span className="text-xs text-muted-foreground">
-                   {t("queue.lastUpdated")}: {lastUpdatedLabel}
-                 </span>
-                 <Button
-                   type="button"
-                   variant="secondary"
-                   size="sm"
-                   onClick={() => void queryClient.invalidateQueries({ queryKey: ["queue"] })}
-                   disabled={isFetching}
-                 >
-                   <RefreshCw size={14} className={isFetching ? "animate-spin" : undefined} />
-                   {t("queue.refresh")}
-                 </Button>
-                 {(queueSearch || queueView !== "all" || queueModalityId) && (
-                   <Button
-                     type="button"
-                     variant="ghost"
-                     size="sm"
-                     onClick={() => {
-                       setQueueSearch("");
-                       setQueueView("all");
-                       setQueueModalityId("");
-                     }}
-                   >
-                     {t("calendar.clearFilters")}
-                   </Button>
-                 )}
-               </div>
-             </div>
-           </Card>
-           <Card className="overflow-hidden mb-4">
-             <div className="p-4 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-               <div>
-                 <h3 className="text-lg sm:text-xl font-semibold">
-                   {chooseLocalized(language, "تنظيف الغياب القديم", "Old no-show cleanup")}
-                 </h3>
-                 <p className="text-sm text-muted-foreground">
-                   {chooseLocalized(
-                     language,
-                     `مواعيد مجدولة أقدم من ${queue?.autoNoShowCleanupDays ?? 1} يوم`,
-                     `Scheduled appointments older than ${queue?.autoNoShowCleanupDays ?? 1} day(s)`
-                   )}
-                 </p>
-               </div>
-               <div className="flex flex-wrap gap-2">
-                 <Button
-                   type="button"
-                   variant="secondary"
-                   size="sm"
-                   onClick={() => setShowOldNoShows((current) => !current)}
-                 >
-                   {showOldNoShows
-                     ? chooseLocalized(language, "إخفاء", "Hide")
-                     : chooseLocalized(language, `عرض (${oldNoShowCandidates.length})`, `Show (${oldNoShowCandidates.length})`)}
-                 </Button>
-                 {oldNoShowCandidates.length > 0 && (
-                   <Button
-                     type="button"
-                     variant="secondary"
-                     size="sm"
-                     disabled={oldNoShowBulkMutation.isPending}
-                     onClick={() => {
-                       if (!window.confirm(chooseLocalized(language, "تأكيد كل المواعيد القديمة كغياب؟", "Mark all old candidates as no-show?"))) return;
-                       oldNoShowBulkMutation.mutate(chooseLocalized(language, "تأكيد جماعي للغياب القديم", "Bulk old no-show cleanup confirmation"));
-                     }}
-                     style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
-                   >
-                     {chooseLocalized(language, "تأكيد الكل كغياب", "Mark all no-show")}
-                   </Button>
-                 )}
-               </div>
-             </div>
-             {showOldNoShows ? (
-               oldNoShowCandidates.length === 0 ? (
-                 <div className="p-8 text-center text-muted-foreground">{t("queue.empty")}</div>
-               ) : (
-                 <ul className="divide-y divide-border max-h-[360px] overflow-y-auto">
-                   {oldNoShowCandidates.map((candidate) => renderNoShowCandidate(candidate, true))}
-                 </ul>
-               )
-             ) : null}
-           </Card>
-           <Card className="overflow-hidden mb-4">
-             <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-               <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")} - {enteredQueueLabel}</h3>
-               {queue && (
-                 <div className="flex gap-4 text-sm text-muted-foreground">
-                   <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>
-                   <span>{t("queue.noShows", { count: queue.summary.no_show_count })}</span>
-                 </div>
-               )}
-             </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card className="overflow-hidden" role="region" aria-label={chooseLocalized(language, "المواعيد المجدولة بدون حضور", "Scheduled but not checked in")}>
+          <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">{chooseLocalized(language, "المواعيد المجدولة بدون حضور", "Scheduled but not checked in")}</h3>
+              <p className="text-sm text-muted-foreground">{notEnteredQueueEntries.length} / {notEnteredCount}</p>
+            </div>
+          </div>
+          {notEnteredQueueEntries.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              <p>{hasActiveFilters ? filteredEmptyMessage : notCheckedInEmptyMessage}</p>
+              {hasActiveFilters ? (
+                <Button type="button" variant="ghost" size="sm" onClick={clearQueueFilters} className="mt-3">
+                  {filteredClearLabel}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border max-h-[620px] overflow-y-auto">
+              {notEnteredQueueEntries.map((entry) => renderQueueEntry(entry, false))}
+            </ul>
+          )}
+        </Card>
 
-             {enteredQueueEntries.length === 0 ? (
-               <div className="p-12 text-center text-muted-foreground">{t("queue.empty")}</div>
-             ) : (
-               <ul className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                 {enteredQueueEntries.map((entry) => renderQueueEntry(entry, true))}
-               </ul>
-             )}
-           </Card>
-           <Card className="overflow-hidden">
-             <div className="p-4 border-b border-border">
-               <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")} - {notEnteredQueueLabel}</h3>
-             </div>
-             {notEnteredQueueEntries.length === 0 ? (
-               <div className="p-8 text-center text-muted-foreground">{t("queue.empty")}</div>
-             ) : (
-               <ul className="divide-y divide-border max-h-[450px] overflow-y-auto">
-                 {notEnteredQueueEntries.map((entry) => renderQueueEntry(entry, false))}
-               </ul>
-             )}
-           </Card>
-         </div>
-       </div>
+        <Card className="overflow-hidden" role="region" aria-label={chooseLocalized(language, "مسجلو الحضور / في الانتظار", "Checked in / waiting")}>
+          <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">{chooseLocalized(language, "مسجلو الحضور / في الانتظار", "Checked in / waiting")}</h3>
+              <p className="text-sm text-muted-foreground">{enteredQueueEntries.length} / {enteredCount}</p>
+            </div>
+            {queue ? (
+              <div className="flex gap-3 text-xs text-muted-foreground">
+                <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>
+                <span>{t("queue.noShows", { count: queue.summary.no_show_count })}</span>
+              </div>
+            ) : null}
+          </div>
+          {enteredQueueEntries.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              <p>{hasActiveFilters ? filteredEmptyMessage : checkedInEmptyMessage}</p>
+              {hasActiveFilters ? (
+                <Button type="button" variant="ghost" size="sm" onClick={clearQueueFilters} className="mt-3">
+                  {filteredClearLabel}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border max-h-[620px] overflow-y-auto">
+              {enteredQueueEntries.map((entry) => renderQueueEntry(entry, true))}
+            </ul>
+          )}
+        </Card>
+      </div>
       {selectedPatientId ? (
         <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
       ) : null}

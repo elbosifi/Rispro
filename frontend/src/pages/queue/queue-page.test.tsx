@@ -124,6 +124,41 @@ const multiAppointmentSnapshot: QueueSnapshot = {
   ],
 };
 
+const enteredQueueSnapshot: QueueSnapshot = {
+  ...queueSnapshot,
+  summary: {
+    ...queueSnapshot.summary,
+    total_appointments: 2,
+    scheduled_count: 1,
+    waiting_count: 1,
+  },
+  queueEntries: [
+    {
+      ...queueSnapshot.queueEntries[0],
+      id: 1,
+      appointmentId: 44,
+      accessionNumber: "ACC-44",
+      appointmentStatus: "scheduled",
+      queueStatus: "waiting",
+      modalityNameAr: "CT",
+      modalityNameEn: "CT",
+    },
+    {
+      ...queueSnapshot.queueEntries[0],
+      id: 2,
+      appointmentId: 45,
+      accessionNumber: "ACC-45",
+      appointmentStatus: "waiting",
+      queueStatus: "waiting",
+      arrivedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+      modalityNameAr: "MRI",
+      modalityNameEn: "MRI",
+      examNameAr: "Brain",
+      examNameEn: "Brain",
+    },
+  ],
+};
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -254,5 +289,125 @@ describe("QueuePage multiple appointment marker", () => {
     const scheduledCard = scheduledRow.closest("li")!;
     expect(within(scheduledCard).queryByText(/Entered:/i)).toBeNull();
     expect(within(scheduledCard).queryByText(/Waiting:/i)).toBeNull();
+  });
+});
+
+describe("QueuePage command center layout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.setItem("rispro-language", "en");
+    fetchAppointmentLookupsMock.mockResolvedValue({
+      modalities: [
+        { id: 1, nameAr: "CT", nameEn: "CT" },
+        { id: 2, nameAr: "MRI", nameEn: "MRI" },
+      ],
+    });
+    fetchSettingsMock.mockResolvedValue({ walk_in_queue: "disabled" });
+  });
+
+  it("renders a primary scan bar and submits scans with Enter", async () => {
+    const user = userEvent.setup();
+    fetchQueueSnapshotMock.mockResolvedValue(queueSnapshot);
+    scanIntoQueueMock.mockResolvedValue({ ok: true });
+
+    renderPage();
+
+    const scanRegion = await screen.findByRole("region", { name: /Scan Accession/i });
+    const input = within(scanRegion).getByPlaceholderText(/Scan barcode or type accession/i);
+
+    await user.type(input, "ACC-44{Enter}");
+
+    expect(scanIntoQueueMock.mock.calls[0]?.[0]).toBe("ACC-44");
+    expect(within(scanRegion).getByRole("button", { name: /full-screen|ملء الشاشة/i })).toBeTruthy();
+  });
+
+  it("renders scheduled and checked-in queue sections", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue(enteredQueueSnapshot);
+
+    renderPage();
+
+    await screen.findByText(/ACC-44/);
+    const scheduledColumn = screen.getByRole("region", { name: /Scheduled but not checked in/i });
+    const checkedInColumn = screen.getByRole("region", { name: /Checked in \/ waiting/i });
+
+    expect(within(scheduledColumn).getByText(/ACC-44/)).toBeTruthy();
+    expect(within(checkedInColumn).getByText(/ACC-45/)).toBeTruthy();
+  });
+
+  it("shows specific empty states", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue({ ...queueSnapshot, queueEntries: [] });
+
+    renderPage();
+
+    expect(await screen.findByText(/No checked-in patients yet/i)).toBeTruthy();
+    expect(screen.getByText(/No scheduled patients are waiting for check-in/i)).toBeTruthy();
+  });
+
+  it("keeps old no-show cleanup quiet when empty and visible when candidates exist", async () => {
+    fetchQueueSnapshotMock.mockResolvedValue(queueSnapshot);
+    const { unmount } = renderPage();
+
+    await screen.findByText("Patient Name");
+    expect(screen.queryByRole("region", { name: /Old no-show cleanup/i })).toBeNull();
+    unmount();
+
+    fetchQueueSnapshotMock.mockResolvedValue({
+      ...queueSnapshot,
+      oldNoShowCandidates: [
+        {
+          appointmentId: 55,
+          accessionNumber: "V2-000055",
+          appointmentDate: "2026-06-17",
+          patientId: 77,
+          arabicFullName: "Old Patient",
+          englishFullName: "Old Patient",
+          phone1: "0910000000",
+          modalityNameAr: "CT",
+          modalityNameEn: "CT",
+        },
+      ],
+    });
+
+    renderPage();
+
+    const cleanupRegion = await screen.findByRole("region", { name: /Old no-show cleanup/i });
+    expect(within(cleanupRegion).getByText(/1 old scheduled appointment/i)).toBeTruthy();
+    expect(within(cleanupRegion).getByRole("button", { name: /Review/i })).toBeTruthy();
+  });
+
+  it("filters queue rows and shows a filtered empty state", async () => {
+    const user = userEvent.setup();
+    fetchQueueSnapshotMock.mockResolvedValue(enteredQueueSnapshot);
+
+    renderPage();
+
+    await screen.findByText(/ACC-44/);
+    const searchInput = screen.getByPlaceholderText(/Name, accession, phone/i);
+    await user.type(searchInput, "MRI");
+
+    expect(screen.queryByText(/ACC-44/)).toBeNull();
+    expect(screen.getByText(/ACC-45/)).toBeTruthy();
+
+    await user.clear(searchInput);
+    await user.type(searchInput, "No Match");
+
+    expect(await screen.findAllByText(/No patients match the current filters/i)).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /Clear filters/i }).length).toBeGreaterThan(0);
+  });
+
+  it("warns without submitting when accession is already checked in", async () => {
+    const user = userEvent.setup();
+    fetchQueueSnapshotMock.mockResolvedValue(enteredQueueSnapshot);
+
+    renderPage();
+
+    const scanRegion = await screen.findByRole("region", { name: /Scan Accession/i });
+    await user.type(within(scanRegion).getByPlaceholderText(/Scan barcode or type accession/i), "ACC-45{Enter}");
+
+    expect(scanIntoQueueMock).not.toHaveBeenCalled();
+    expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: "info",
+      title: "Already checked in",
+    }));
   });
 });
