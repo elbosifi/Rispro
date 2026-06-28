@@ -4,6 +4,7 @@ import type { UserId } from "../../types/http.js";
 import { pool } from "../../db/pool.js";
 import { buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
+import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
@@ -488,11 +489,11 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientMrn = String(row.patientMrn || "").trim();
   if (scope === "study" && !accessionNumber) throw new HttpError(400, "Accession number is required to open the SonicDICOM study.");
-  if (scope === "patient" && !patientMrn) throw new HttpError(400, "Patient ID/MRN is required to open patient studies in SonicDICOM.");
+  if (scope === "patient" && !patientMrn) throw new HttpError(400, "Patient ID/MRN is required to open the patient list in SonicDICOM.");
   const sonicSettings = await readSonicDicomReportSettings();
   const redirectUrl = buildSonicDicomStaffViewerUrl({
     settings: sonicSettings,
-    queryKey: scope === "study" ? "accessionnumber" : "patientid",
+    target: scope === "study" ? "studyViewer" : "patientList",
     value: scope === "study" ? accessionNumber : patientMrn,
   });
 
@@ -517,6 +518,40 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
   });
 
   return { redirectUrl };
+}
+
+export async function markReportingBoardCaseDiscontinued(actor: Actor, appointmentId: number, reasonInput: string): Promise<{ ok: true; status: string; autoCompletionDisabledMessage?: string }> {
+  await requireRosterManager(actor);
+  const reason = String(reasonInput || "").trim();
+  if (!reason) throw new HttpError(400, "A reason is required to mark a study as discontinued.");
+
+  const settings = await readReportingBoardSettings();
+  const filters = await effectiveFilters({ appointmentId, reportStatus: "all", limit: 1, offset: 0 });
+  const scopedFilters =
+    filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
+  const rows = await listReportingBoardCaseCandidates(scopedFilters);
+  const row = rows[0] ?? null;
+  if (!row) {
+    const existing = await listReportingBoardCasesByAppointmentIds([appointmentId]);
+    if (existing.length === 0) throw new HttpError(404, "Case not found.");
+    throw new HttpError(403, "This case is not visible on the Reporting Board.");
+  }
+  if (row.appointmentStatus !== "completed") {
+    throw new HttpError(409, "Only completed Reporting Board cases can be marked discontinued.");
+  }
+
+  const result = await updateBookingStatusManual(
+    appointmentId,
+    "discontinued",
+    reason,
+    Number(actor.userId),
+    actor.appRole
+  );
+  return {
+    ok: true,
+    status: result.status,
+    autoCompletionDisabledMessage: result.autoCompletionDisabledMessage,
+  };
 }
 
 function mobileCase(row: ReportingBoardCaseRow) {

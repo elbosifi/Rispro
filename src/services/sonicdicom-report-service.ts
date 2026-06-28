@@ -97,14 +97,16 @@ function encodeStaffViewerValue(value: string | null | undefined): string {
 
 export function buildSonicDicomStaffViewerUrl(input: {
   settings: SonicDicomReportSettings;
-  queryKey: "accessionnumber" | "patientid";
+  target: "studyViewer" | "patientList";
   value: string;
 }): string {
   if (!input.settings.sonicDicomReportsEnabled) throw new HttpError(503, "SonicDICOM integration is disabled.");
   const value = String(input.value || "").trim();
   if (!value) throw new HttpError(400, "SonicDICOM viewer identifier is required.");
   const baseUrl = validatedBaseUrl(input.settings.sonicDicomPublicBaseUrl, "SonicDICOM public base URL");
-  const rendered = `${baseUrl}/#/viewer?${input.queryKey}=${encodeStaffViewerValue(value)}`;
+  const route = input.target === "studyViewer" ? "viewer" : "list";
+  const queryKey = input.target === "studyViewer" ? "accessionnumber" : "patientid";
+  const rendered = `${baseUrl}/#/${route}?${queryKey}=${encodeStaffViewerValue(value)}`;
 
   try {
     const parsed = new URL(rendered);

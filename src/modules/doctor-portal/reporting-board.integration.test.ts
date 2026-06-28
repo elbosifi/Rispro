@@ -557,7 +557,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
       const patientOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=patient`);
       assert.equal(patientOpen.status, 302);
-      assert.equal(patientOpen.headers.get("location"), "https://sonic.example/viewer/#/viewer?patientid=MRN-OPEN-SONIC");
+      assert.equal(patientOpen.headers.get("location"), "https://sonic.example/viewer/#/list?patientid=MRN-OPEN-SONIC");
 
       const ownOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
       assert.equal(ownOpen.status, 302);

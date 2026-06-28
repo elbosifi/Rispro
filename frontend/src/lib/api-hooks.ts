@@ -886,6 +886,16 @@ export async function unassignReportingBoardCase(
   });
 }
 
+export async function markReportingBoardCaseDiscontinued(
+  appointmentId: number,
+  payload: { reason: string }
+): Promise<{ ok: true; status: string; autoCompletionDisabledMessage?: string }> {
+  return api<{ ok: true; status: string; autoCompletionDisabledMessage?: string }>(`/doctor/reporting-board/cases/${appointmentId}/discontinue`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchReportingBoardNotifications(): Promise<ReportingBoardNotificationEvent[]> {
   const raw = await api<{ notifications: ReportingBoardNotificationEvent[] }>("/doctor/reporting-board/notifications");
   return raw.notifications;

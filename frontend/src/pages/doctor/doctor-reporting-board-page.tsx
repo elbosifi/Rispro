@@ -17,6 +17,7 @@ import {
   fetchReportingBoardSettings,
   fetchReportingBoardStats,
   fetchRosterDoctors,
+  markReportingBoardCaseDiscontinued,
   sendReportingBoardSavedViewTestPush,
   subscribeReportingBoardSavedViewPush,
   unassignReportingBoardCase,
@@ -533,12 +534,14 @@ function RowActionMenu({
   canManage,
   onAssign,
   onUnassign,
+  onDiscontinue,
 }: {
   row: ReportingBoardCaseRow;
   doctors: DoctorProfile[];
   canManage: boolean;
   onAssign: (appointmentId: number, doctorId: number, reason: string) => void;
   onUnassign: (appointmentId: number, reason: string) => Promise<void>;
+  onDiscontinue: (row: ReportingBoardCaseRow) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
@@ -599,11 +602,11 @@ function RowActionMenu({
               rel="noopener noreferrer"
               className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
             >
-              Open patient studies in SonicDICOM
+              Open patient list in SonicDICOM
             </a>
           ) : (
             <button type="button" role="menuitem" disabled title="Patient ID/MRN missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
-              Open patient studies in SonicDICOM
+              Open patient list in SonicDICOM
             </button>
           )}
           {showRadiantActions && accessionNumber && (
@@ -644,6 +647,19 @@ function RowActionMenu({
           >
             View appointment
           </Link>
+          {canManage && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onDiscontinue(row);
+              }}
+              className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50"
+            >
+              Mark study as discontinued
+            </button>
+          )}
           <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
             {canManage && row.canAssign ? (
               <AssignmentEditor
@@ -838,8 +854,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [searchText, setSearchText] = useState("");
   const [savedViewsOpen, setSavedViewsOpen] = useState(true);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [boardActionMessage, setBoardActionMessage] = useState<{ tone: "success" | "error"; text: string; detail?: string | null } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
   const [boardRefreshing, setBoardRefreshing] = useState(false);
+  const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
+  const [discontinueReason, setDiscontinueReason] = useState("");
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
   const casesQuery = useQuery({
@@ -957,6 +976,25 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
       ]);
     },
+  });
+  const discontinueMutation = useMutation({
+    mutationFn: () => markReportingBoardCaseDiscontinued(discontinueTarget!.appointmentId, { reason: discontinueReason.trim() }),
+    onSuccess: async (result) => {
+      const discontinuedId = discontinueTarget?.appointmentId ?? null;
+      setDiscontinueTarget(null);
+      setDiscontinueReason("");
+      if (discontinuedId !== null) setSelectedIds((current) => current.filter((id) => id !== discontinuedId));
+      setBoardActionMessage({
+        tone: "success",
+        text: "Study marked as discontinued and removed from reporting pool.",
+        detail: result.autoCompletionDisabledMessage ?? null,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not mark study as discontinued." }),
   });
   const selectedReassignMutation = useMutation({
     mutationFn: () => bulkReassignSelectedReportingCases({
@@ -1111,6 +1149,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           )}
         </div>
       </div>
+      {boardActionMessage && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${boardActionMessage.tone === "error" ? "text-red-700" : "text-emerald-700"}`}
+          style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}
+        >
+          <p className="font-semibold">{boardActionMessage.text}</p>
+          {boardActionMessage.detail && <p className="mt-1 text-xs">{boardActionMessage.detail}</p>}
+        </div>
+      )}
 
       <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
@@ -1360,6 +1407,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                             onUnassign={async (appointmentId, reason) => {
                               await unassignMutation.mutateAsync({ appointmentId, reason });
                             }}
+                            onDiscontinue={(target) => {
+                              setBoardActionMessage(null);
+                              setDiscontinueReason("");
+                              setDiscontinueTarget(target);
+                            }}
                           />
                         </td>
                       </tr>
@@ -1522,6 +1574,46 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         onChange={setSettingsDraft}
         onSave={() => updateSettingsMutation.mutate()}
       />
+      {discontinueTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <h3 className="text-lg font-semibold text-foreground">Mark study as discontinued?</h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+              This will change the appointment status from completed to discontinued and remove it from the reporting pool. Use this only when the study was completed by mistake or should not be reported.
+            </p>
+            <label className="mt-4 block text-sm font-semibold text-foreground">
+              Reason
+              <textarea
+                value={discontinueReason}
+                onChange={(event) => setDiscontinueReason(event.target.value)}
+                placeholder="Reason for discontinuing this study"
+                className={`${inputClass()} mt-1 min-h-24`}
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDiscontinueTarget(null);
+                  setDiscontinueReason("");
+                }}
+                className="rounded-lg border px-3 py-2 text-sm font-semibold"
+                style={{ borderColor: "var(--border)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={discontinueMutation.isPending || !discontinueReason.trim()}
+                onClick={() => discontinueMutation.mutate()}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-red-300"
+              >
+                Mark discontinued
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {selectedReassignConfirmOpen && selectedReassignDoctor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>

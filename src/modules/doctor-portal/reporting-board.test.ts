@@ -85,10 +85,23 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /reporting_board_sonicdicom_study_opened/);
     assert.match(service, /assignedDoctorId: me\.profile!\.id/);
     assert.match(service, /Accession number is required to open the SonicDICOM study/);
-    assert.match(service, /Patient ID\/MRN is required to open patient studies in SonicDICOM/);
+    assert.match(service, /Patient ID\/MRN is required to open the patient list in SonicDICOM/);
     assert.match(sonic, /buildSonicDicomStaffViewerUrl/);
-    assert.match(sonic, /\$\{baseUrl\}\/#\/viewer\?\$\{input\.queryKey\}=/);
+    assert.match(sonic, /target: "studyViewer" \| "patientList"/);
+    assert.match(sonic, /input\.target === "studyViewer" \? "viewer" : "list"/);
     assert.doesNotMatch(sonic, /sonicDicomStaffImageViewerUrlTemplate/);
+  });
+
+  it("marks Reporting Board cases discontinued through the existing manual status path", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+
+    assert.match(routes, /"\/cases\/:appointmentId\/discontinue"/);
+    assert.match(routes, /markReportingBoardCaseDiscontinued/);
+    assert.match(service, /requireRosterManager\(actor\)/);
+    assert.match(service, /A reason is required to mark a study as discontinued/);
+    assert.match(service, /row\.appointmentStatus !== "completed"/);
+    assert.match(service, /updateBookingStatusManual\([\s\S]*"discontinued"/);
   });
 
   it("bulk assign chooses next backend cases, accepts optional notes, skips assigned by default, and audits", () => {

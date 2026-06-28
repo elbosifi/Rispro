@@ -5,7 +5,7 @@ process.env.DATABASE_URL ||= "postgres://user:password@localhost:5432/rispro_tes
 process.env.JWT_SECRET ||= "test-secret";
 
 describe("SonicDICOM staff image viewer URL", () => {
-  it("renders a no-credential staff viewer URL with encoded accession number", async () => {
+  it("renders a no-credential staff study viewer URL with encoded accession number", async () => {
     const { buildSonicDicomStaffViewerUrl } = await import("./sonicdicom-report-service.js");
     const { DEFAULT_SONICDICOM_REPORT_SETTINGS } = await import("./sonicdicom-report-settings.js");
     const url = buildSonicDicomStaffViewerUrl({
@@ -14,7 +14,7 @@ describe("SonicDICOM staff image viewer URL", () => {
         sonicDicomReportsEnabled: true,
         sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
       },
-      queryKey: "accessionnumber",
+      target: "studyViewer",
       value: "ACC 1/2",
     });
 
@@ -22,7 +22,7 @@ describe("SonicDICOM staff image viewer URL", () => {
     assert.doesNotMatch(url, /username|password/i);
   });
 
-  it("renders a no-credential patient studies URL with encoded MRN", async () => {
+  it("renders a no-credential patient list URL with encoded MRN", async () => {
     const { buildSonicDicomStaffViewerUrl } = await import("./sonicdicom-report-service.js");
     const { DEFAULT_SONICDICOM_REPORT_SETTINGS } = await import("./sonicdicom-report-settings.js");
     const url = buildSonicDicomStaffViewerUrl({
@@ -31,11 +31,11 @@ describe("SonicDICOM staff image viewer URL", () => {
         sonicDicomReportsEnabled: true,
         sonicDicomPublicBaseUrl: "https://sonic.example/viewer",
       },
-      queryKey: "patientid",
+      target: "patientList",
       value: "MRN 7",
     });
 
-    assert.equal(url, "https://sonic.example/viewer/#/viewer?patientid=MRN%207");
-    assert.doesNotMatch(url, /id=.*patient|username|password/i);
+    assert.equal(url, "https://sonic.example/viewer/#/list?patientid=MRN%207");
+    assert.doesNotMatch(url, /#\/viewer|username|password/i);
   });
 });

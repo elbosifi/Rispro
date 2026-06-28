@@ -23,6 +23,7 @@ const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const assignReportingBoardCaseMock = vi.fn();
 const unassignReportingBoardCaseMock = vi.fn();
+const markReportingBoardCaseDiscontinuedMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -43,6 +44,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   assignReportingBoardCase: (...args: unknown[]) => assignReportingBoardCaseMock(...args),
   unassignReportingBoardCase: (...args: unknown[]) => unassignReportingBoardCaseMock(...args),
+  markReportingBoardCaseDiscontinued: (...args: unknown[]) => markReportingBoardCaseDiscontinuedMock(...args),
 }));
 
 const managerMe: DoctorMe = {
@@ -65,6 +67,13 @@ const managerMe: DoctorMe = {
   allowedModalities: [],
   moduleCapabilities: ["doctor", "doctor_supervisor"],
   canAccessCoreWorkspace: true,
+};
+
+const ordinaryDoctorMe: DoctorMe = {
+  ...managerMe,
+  profile: { ...managerMe.profile!, canSupervise: false },
+  canSupervise: false,
+  moduleCapabilities: ["doctor"],
 };
 
 const caseRow: ReportingBoardCaseRow = {
@@ -108,13 +117,13 @@ const caseRow: ReportingBoardCaseRow = {
   exclusionReason: null,
 };
 
-function renderPage(path = "/doctor/reporting-board") {
+function renderPage(path = "/doctor/reporting-board", me: DoctorMe = managerMe) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/doctor/reporting-board" element={<DoctorReportingBoardPage me={managerMe} />} />
+          <Route path="/doctor/reporting-board" element={<DoctorReportingBoardPage me={me} />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -197,6 +206,7 @@ describe("DoctorReportingBoardPage", () => {
     });
     assignReportingBoardCaseMock.mockResolvedValue({ assignmentId: 100 });
     unassignReportingBoardCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 100 });
+    markReportingBoardCaseDiscontinuedMock.mockResolvedValue({ ok: true, status: "discontinued" });
   });
 
   it("renders compact board columns and row status without a visible priority column", async () => {
@@ -318,7 +328,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
   });
 
-  it("shows SonicDICOM study and patient actions as backend redirect links and copies accession", async () => {
+  it("shows SonicDICOM study and patient list actions as backend redirect links and copies accession", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -335,9 +345,10 @@ describe("DoctorReportingBoardPage", () => {
     expect(openStudy.getAttribute("target")).toBe("_blank");
     expect(openStudy.getAttribute("rel")).toBe("noopener noreferrer");
     expect(openStudy.getAttribute("href")).not.toMatch(/username|password|https?:/i);
-    const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in SonicDICOM" }) as HTMLAnchorElement;
+    const openPatient = within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }) as HTMLAnchorElement;
     expect(openPatient.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom?scope=patient");
     expect(openPatient.getAttribute("href")).not.toMatch(/username|password|MRN-7|7$/i);
+    expect(within(row).queryByRole("menuitem", { name: "Open patient studies in SonicDICOM" })).toBeNull();
     expect(within(row).queryByRole("menuitem", { name: "Open this study in RadiAnt" })).toBeNull();
 
     fireEvent.click(within(row).getByRole("menuitem", { name: "Copy accession number" }));
@@ -374,10 +385,43 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.click(within(row).getByRole("button", { name: /Open actions for/ }));
 
     expect(within(row).getByRole("menuitem", { name: "Open this study in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
-    expect(within(row).getByRole("menuitem", { name: "Open patient studies in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
     expect(within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }).hasAttribute("disabled")).toBe(true);
     expect(within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
     expect(within(row).getByRole("menuitem", { name: "Copy accession number" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows discontinued action only to managers and requires a reason before submitting", async () => {
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(within(row).getByRole("menuitem", { name: "Mark study as discontinued" }));
+
+    expect(screen.getByRole("heading", { name: "Mark study as discontinued?" })).toBeTruthy();
+    const submit = screen.getByRole("button", { name: "Mark discontinued" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("Reason for discontinuing this study"), { target: { value: "Completed by mistake" } });
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(markReportingBoardCaseDiscontinuedMock).toHaveBeenCalledWith(42, { reason: "Completed by mistake" }));
+    expect(await screen.findByText("Study marked as discontinued and removed from reporting pool.")).toBeTruthy();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(2));
+    await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("does not show discontinued action to ordinary doctors", async () => {
+    renderPage("/doctor/reporting-board", ordinaryDoctorMe);
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+
+    expect(within(row).queryByRole("menuitem", { name: "Mark study as discontinued" })).toBeNull();
+    expect(within(row).getByText("View appointment")).toBeTruthy();
   });
 
   it("uses a default board limit of 100", async () => {

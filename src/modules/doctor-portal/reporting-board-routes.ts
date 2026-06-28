@@ -20,6 +20,7 @@ import {
   getMyReportingBoardNotifications,
   listMyReportingBoardSavedViews,
   loadReportingBoardSavedViewByToken,
+  markReportingBoardCaseDiscontinued,
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
@@ -177,6 +178,18 @@ router.get(
       asOptionalString(req.query.scope)
     );
     res.redirect(302, result.redirectUrl);
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/discontinue",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await markReportingBoardCaseDiscontinued(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      asString(body.reason)
+    ));
   })
 );
 
