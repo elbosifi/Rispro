@@ -312,6 +312,30 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
   });
 
+  it("shows SonicDICOM study action as backend redirect link and copies accession", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+
+    const openStudy = within(row).getByRole("menuitem", { name: "Open study in SonicDICOM" }) as HTMLAnchorElement;
+    expect(openStudy.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom");
+    expect(openStudy.getAttribute("target")).toBe("_blank");
+    expect(openStudy.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(openStudy.getAttribute("href")).not.toMatch(/username|password|https?:/i);
+
+    fireEvent.click(within(row).getByRole("menuitem", { name: "Copy accession number" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("V2-000042"));
+    expect(await within(row).findByText("Accession copied.")).toBeTruthy();
+    expect(within(row).getByText("View appointment")).toBeTruthy();
+  });
+
   it("uses a default board limit of 100", async () => {
     renderPage();
 

@@ -526,7 +526,19 @@ function RowActionMenu({
   onUnassign: (appointmentId: number, reason: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [copyMessage, setCopyMessage] = useState("");
   const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
+  const accessionNumber = String(row.accessionNumber || "").trim();
+  const sonicDicomPath = `/api/doctor/reporting-board/cases/${row.appointmentId}/open-sonicdicom`;
+  const copyAccession = async () => {
+    if (!accessionNumber) return;
+    try {
+      await navigator.clipboard?.writeText(accessionNumber);
+      setCopyMessage("Accession copied.");
+    } catch {
+      setCopyMessage("Could not copy accession.");
+    }
+  };
 
   return (
     <div className="relative flex justify-end">
@@ -555,6 +567,29 @@ function RowActionMenu({
           >
             View appointment
           </Link>
+          {accessionNumber ? (
+            <a
+              role="menuitem"
+              href={sonicDicomPath}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
+            >
+              Open study in SonicDICOM
+            </a>
+          ) : (
+            <p className="mt-1 px-2 py-1.5 text-xs" style={{ color: "var(--text-muted)" }}>SonicDICOM study unavailable: missing accession number.</p>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!accessionNumber}
+            onClick={copyAccession}
+            className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Copy accession number
+          </button>
+          {copyMessage && <p className="px-2 pt-1 text-[11px]" style={{ color: "var(--text-muted)" }}>{copyMessage}</p>}
           <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
             {canManage && row.canAssign ? (
               <AssignmentEditor

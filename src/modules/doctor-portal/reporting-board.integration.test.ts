@@ -352,6 +352,45 @@ async function cleanup() {
 const api = <T = unknown>(cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
   fetchJson<T>(app.baseUrl, path, { cookie, ...options });
 
+const rawApi = (cookie: string, path: string) =>
+  fetch(`${app.baseUrl}${path}`, {
+    headers: { Cookie: cookie },
+    redirect: "manual",
+  });
+
+async function withSonicDicomConfig(config: Record<string, unknown>, work: () => Promise<void>) {
+  const stored = await pool.query<{ setting_value: unknown }>(
+    `select setting_value from system_settings where category = 'sonicdicom_reports' and setting_key = 'config' limit 1`
+  );
+  const original = stored.rows[0]?.setting_value ?? null;
+  await pool.query(
+    `
+      insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+      values ('sonicdicom_reports', 'config', $1::jsonb, $2)
+      on conflict (category, setting_key)
+      do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
+    `,
+    [JSON.stringify({ value: config }), admin.id]
+  );
+  try {
+    await work();
+  } finally {
+    if (original === null) {
+      await pool.query(`delete from system_settings where category = 'sonicdicom_reports' and setting_key = 'config'`);
+    } else {
+      await pool.query(
+        `
+          insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+          values ('sonicdicom_reports', 'config', $1::jsonb, $2)
+          on conflict (category, setting_key)
+          do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
+        `,
+        [JSON.stringify(original), admin.id]
+      );
+    }
+  }
+}
+
 describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, () => {
   before(async () => {
     const helpers = await import("../appointments-v2/tests/integration/helpers.js");
@@ -496,6 +535,65 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const ids = response.data.cases.map((row) => row.appointmentId);
     assert.deepEqual(ids.sort((a, b) => a - b), [ctDraft, mrNoReport].sort((a, b) => a - b));
     assert.ok(response.data.cases.every((row) => ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(row.reportStatus)));
+  });
+
+  it("opens visible Reporting Board studies in SonicDICOM without credentials and audits access", async () => {
+    guard();
+    const date = addDays(11);
+    const ownCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Own" });
+    const otherCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Other" });
+    await assignDirectly(ownCase, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
+    await assignDirectly(otherCase, otherDoctor.doctorId, "2026-05-01T09:00:00.000Z");
+    await withSonicDicomConfig({
+      sonicDicomReportsEnabled: true,
+      sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
+      sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?accessionnumber={{accessionNumber}}",
+    }, async () => {
+      const supervisorOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
+      assert.equal(supervisorOpen.status, 302);
+      const supervisorLocation = supervisorOpen.headers.get("location") ?? "";
+      assert.match(supervisorLocation, /^https:\/\/sonic\.example\/viewer\/#\/viewer\?accessionnumber=V2-0/);
+      assert.doesNotMatch(supervisorLocation, /username|password|patient/i);
+
+      const ownOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
+      assert.equal(ownOpen.status, 302);
+      assert.match(ownOpen.headers.get("location") ?? "", /accessionnumber=V2-0/);
+
+      const forbidden = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${otherCase}/open-sonicdicom`);
+      assert.equal(forbidden.status, 403);
+
+      const missing = await rawApi(supervisor.cookie, "/api/doctor/reporting-board/cases/999999999/open-sonicdicom");
+      assert.equal(missing.status, 404);
+
+      const audit = await pool.query(
+        `
+          select 1
+          from doctor_portal.doctor_module_audit_events
+          where event_type = 'reporting_board_sonicdicom_study_opened'
+            and target_id = $1
+            and metadata_json->>'accessionNumber' like 'V2-%'
+            and metadata_json->>'source' = 'reporting_board'
+        `,
+        [ownCase]
+      );
+      assert.ok((audit.rowCount ?? 0) >= 2);
+    });
+  });
+
+  it("rejects malformed or credentialed SonicDICOM staff viewer templates", async () => {
+    guard();
+    const date = addDays(13);
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Bad Template" });
+    await withSonicDicomConfig({
+      sonicDicomReportsEnabled: true,
+      sonicDicomPublicBaseUrl: "https://sonic.example/viewer",
+      sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
+    }, async () => {
+      const response = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/open-sonicdicom`);
+      assert.equal(response.status, 503);
+      const body = await response.text();
+      assert.match(body, /must not include username or password/i);
+    });
   });
 
   it("exposes Reporting Board timeline fields and derives aging/TAT metrics", async () => {

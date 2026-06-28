@@ -14,6 +14,7 @@ import {
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
   getReportingBoardPushConfig,
+  getReportingBoardSonicDicomStudyRedirect,
   getReportingBoardSettings,
   getReportingBoardStats,
   getMyReportingBoardNotifications,
@@ -164,6 +165,14 @@ router.get(
   "/cases",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json(await getReportingBoardCases(actor(req), filtersFromQuery(req.query)));
+  })
+);
+
+router.get(
+  "/cases/:appointmentId/open-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const result = await getReportingBoardSonicDicomStudyRedirect(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId"));
+    res.redirect(302, result.redirectUrl);
   })
 );
 

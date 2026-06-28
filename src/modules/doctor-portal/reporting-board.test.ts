@@ -73,6 +73,25 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /row\.reportStatus !== "final"/);
   });
 
+  it("adds authenticated no-credential SonicDICOM study redirect for Reporting Board cases", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const sonic = readFileSync(`${root}/src/services/sonicdicom-report-service.ts`, "utf8");
+    const settings = readFileSync(`${root}/src/services/sonicdicom-report-settings.ts`, "utf8");
+
+    assert.match(routes, /"\/cases\/:appointmentId\/open-sonicdicom"/);
+    assert.match(routes, /res\.redirect\(302, result\.redirectUrl\)/);
+    assert.match(service, /getReportingBoardSonicDicomStudyRedirect/);
+    assert.match(service, /reporting_board_sonicdicom_study_opened/);
+    assert.match(service, /assignedDoctorId: me\.profile!\.id/);
+    assert.match(service, /Accession number is required to open the SonicDICOM study/);
+    assert.match(sonic, /buildSonicDicomStaffImageViewerUrl/);
+    assert.match(sonic, /STAFF_VIEWER_CREDENTIAL_PLACEHOLDERS/);
+    assert.match(sonic, /must not include username or password placeholders/);
+    assert.match(settings, /sonicDicomStaffImageViewerUrlTemplate/);
+    assert.match(settings, /\{\{publicBaseUrl\}\}\/#\/viewer\?accessionnumber=\{\{accessionNumber\}\}/);
+  });
+
   it("bulk assign chooses next backend cases, accepts optional notes, skips assigned by default, and audits", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");

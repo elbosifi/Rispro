@@ -2,7 +2,8 @@ import { HttpError } from "../../utils/http-error.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { pool } from "../../db/pool.js";
-import { checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
+import { buildSonicDicomStaffImageViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
+import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
@@ -452,6 +453,57 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   }
   const rows = (await listReportingBoardStatsRows(scopedFilters)).filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
   return { filters, ...aggregateReportingBoardStats(rows) };
+}
+
+export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number): Promise<{ redirectUrl: string }> {
+  const me = await requireRosterDoctor(actor);
+  const canManage =
+    me.moduleCapabilities.includes("doctor_supervisor") ||
+    me.moduleCapabilities.includes("doctor_admin");
+  const filters = await effectiveFilters(
+    canManage
+      ? { appointmentId, reportStatus: "all", limit: 1, offset: 0 }
+      : { appointmentId, assignedDoctorId: me.profile!.id, assignmentStatus: "assigned", reportStatus: "all", limit: 1, offset: 0 }
+  );
+  const settings = await readReportingBoardSettings();
+  const scopedFilters =
+    filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
+  const rows = await listReportingBoardCaseCandidates(scopedFilters);
+  const row = rows[0] ?? null;
+  if (!row) {
+    const existing = await listReportingBoardCasesByAppointmentIds([appointmentId]);
+    if (existing.length === 0) throw new HttpError(404, "Case not found.");
+    throw new HttpError(403, "You are not allowed to open this Reporting Board case in SonicDICOM.");
+  }
+
+  const accessionNumber = String(row.accessionNumber || "").trim();
+  if (!accessionNumber) throw new HttpError(400, "Accession number is required to open the SonicDICOM study.");
+  const sonicSettings = await readSonicDicomReportSettings();
+  const redirectUrl = buildSonicDicomStaffImageViewerUrl({
+    settings: sonicSettings,
+    accessionNumber,
+    studyInstanceUid: row.studyInstanceUid,
+  });
+
+  await insertDoctorAuditEvent(pool, {
+    actorUserId: actor.userId,
+    actorDoctorId: me.profile?.id ?? null,
+    eventType: "reporting_board_sonicdicom_study_opened",
+    targetType: "appointment",
+    targetId: appointmentId,
+    metadata: {
+      appointmentId,
+      accessionNumber,
+      patientId: row.patientId,
+      studyInstanceUid: row.studyInstanceUid,
+      actorUserId: actor.userId,
+      actorDoctorId: me.profile?.id ?? null,
+      source: "reporting_board",
+    },
+    reason: null,
+  });
+
+  return { redirectUrl };
 }
 
 function mobileCase(row: ReportingBoardCaseRow) {

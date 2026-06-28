@@ -22,6 +22,7 @@ const DEFAULTS: SonicSettings = {
   sonicDicomPublicReportViewerUrlTemplate: "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicPdfUrlTemplate: "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
+  sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?accessionnumber={{accessionNumber}}",
   sonicDicomInternalBaseUrl: "",
   sonicDicomReportViewerUsername: "patient",
   sonicDicomReportViewerPassword: "patient",
@@ -167,6 +168,10 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
         <Textarea label="Public report viewer URL template" value={String(form.sonicDicomPublicReportViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicReportViewerUrlTemplate", value)} />
         <Textarea label="Public PDF URL template" value={String(form.sonicDicomPublicPdfUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicPdfUrlTemplate", value)} />
         <Textarea label="Public image viewer URL template" value={String(form.sonicDicomPublicImageViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicImageViewerUrlTemplate", value)} />
+        <Textarea label="Staff image viewer URL template" value={String(form.sonicDicomStaffImageViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomStaffImageViewerUrlTemplate", value)} />
+        <p className="text-xs text-slate-600">
+          Used by staff actions such as Reporting Board → Open study in SonicDICOM. This template should not include username or password.
+        </p>
         <button type="button" onClick={testPublicTemplate} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test public report URL template</button>
       </FieldCard>
 
