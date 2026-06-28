@@ -26,6 +26,7 @@ interface BookingInput {
   time?: string | null;
   requiresReport?: boolean;
   status?: string;
+  completedAt?: string | null;
   category?: string;
   patientName?: string;
 }
@@ -59,6 +60,7 @@ let noMrPermissionDoctor: TestUser;
 let inactiveDoctor: TestUser;
 let receptionistCookie = "";
 const statusByAppointmentId = new Map<number, ReportState | "throw">();
+const finalAtByAppointmentId = new Map<number, string>();
 
 function uniq(label: string) {
   return `${TEST_PREFIX}${label}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
@@ -218,11 +220,12 @@ async function createBooking(input: BookingInput): Promise<number> {
       insert into appointments_v2.bookings (
         patient_id, modality_id, exam_type_id, reporting_priority_id,
         booking_date, booking_time, case_category, requires_report, study_instance_uid, status, notes,
+        completed_at,
         policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code, special_reason_note,
         is_walk_in, created_by_user_id, updated_by_user_id
       )
       values ($1, $2, $3, $4, $5::date, $6::time, $7, $8, null, $9, null,
-        $10, 'standard', false, null, null, false, $11, $11)
+        $10::timestamptz, $11, 'standard', false, null, null, false, $12, $12)
       returning id::text as id
     `,
     [
@@ -235,6 +238,7 @@ async function createBooking(input: BookingInput): Promise<number> {
       input.category ?? "oncology",
       input.requiresReport ?? true,
       input.status ?? "completed",
+      input.completedAt === undefined ? "2026-05-01T08:00:00.000Z" : input.completedAt,
       policyVersionId,
       admin.id,
     ]
@@ -264,17 +268,17 @@ async function createSavedView(
   return response.data.savedView;
 }
 
-async function assignDirectly(appointmentId: number, doctorId: number) {
+async function assignDirectly(appointmentId: number, doctorId: number, assignedAt?: string) {
   await pool.query(
     `
       insert into doctor_portal.case_team_assignments (
-        appointment_id, roster_assignment_id, assigned_doctor_id, modality_id, assignment_type, expected_reporting_date, status
+        appointment_id, roster_assignment_id, assigned_doctor_id, modality_id, assignment_type, expected_reporting_date, assigned_at, status
       )
-      select id, null, $2, modality_id, 'reporting', booking_date, 'active'
+      select id, null, $2, modality_id, 'reporting', booking_date, coalesce($3::timestamptz, now()), 'active'
       from appointments_v2.bookings
       where id = $1
     `,
-    [appointmentId, doctorId]
+    [appointmentId, doctorId, assignedAt ?? null]
   );
 }
 
@@ -377,7 +381,12 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     reportingBoardService.__setReportingBoardReportStatusCheckerForTest(async (context) => {
       const state = statusByAppointmentId.get(context.bookingId) ?? "draft";
       if (state === "throw") throw new Error("SonicDICOM unavailable");
-      return { state, canViewReport: state === "final", source: "sonicdicom" };
+      return {
+        state,
+        canViewReport: state === "final",
+        source: "sonicdicom",
+        reportFinalAt: state === "final" ? finalAtByAppointmentId.get(context.bookingId) ?? null : null,
+      };
     });
     await cleanup();
     ctModalityId = await getOrCreateModality("CT", "CT");
@@ -487,6 +496,105 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const ids = response.data.cases.map((row) => row.appointmentId);
     assert.deepEqual(ids.sort((a, b) => a - b), [ctDraft, mrNoReport].sort((a, b) => a - b));
     assert.ok(response.data.cases.every((row) => ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(row.reportStatus)));
+  });
+
+  it("exposes Reporting Board timeline fields and derives aging/TAT metrics", async () => {
+    guard();
+    const date = addDays(12);
+    const unassignedId = await createBooking({
+      modalityId: ctModalityId,
+      examTypeId: ctExamTypeId,
+      date,
+      patientName: "Timeline Unassigned",
+      completedAt: "2026-05-01T08:00:00.000Z",
+    });
+    const reassignedId = await createBooking({
+      modalityId: ctModalityId,
+      examTypeId: ctExamTypeId,
+      date,
+      patientName: "Timeline Reassigned",
+      completedAt: "2026-05-01T08:00:00.000Z",
+    });
+    const finalId = await createBooking({
+      modalityId: ctModalityId,
+      examTypeId: ctExamTypeId,
+      date,
+      patientName: "Timeline Final",
+      completedAt: "2026-05-01T08:00:00.000Z",
+    });
+    await pool.query(
+      `
+        insert into doctor_portal.case_team_assignments (
+          appointment_id, roster_assignment_id, assigned_doctor_id, modality_id, assignment_type, expected_reporting_date, assigned_at, status
+        )
+        select id, null, $2, modality_id, 'reporting', booking_date, '2026-05-01T09:00:00.000Z'::timestamptz, 'corrected'
+        from appointments_v2.bookings
+        where id = $1
+      `,
+      [reassignedId, otherDoctor.doctorId]
+    );
+    await assignDirectly(reassignedId, targetDoctor.doctorId, "2026-05-01T10:00:00.000Z");
+    await assignDirectly(finalId, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
+    statusByAppointmentId.set(unassignedId, "draft");
+    statusByAppointmentId.set(reassignedId, "draft");
+    statusByAppointmentId.set(finalId, "final");
+    finalAtByAppointmentId.set(finalId, "2026-05-02T09:00:00.000Z");
+
+    const response = await api<{
+      cases: Array<{
+        appointmentId: number;
+        completedAt: string | null;
+        currentAssignedAt: string | null;
+        firstAssignedAt: string | null;
+        reportFinalAt: string | null;
+        dueAt: string | null;
+        completedToAssignedMinutes: number | null;
+        assignedToFinalMinutes: number | null;
+        completedToFinalMinutes: number | null;
+        currentAssignmentAgeMinutes: number | null;
+        completedUnassignedAgeMinutes: number | null;
+      }>;
+    }>(supervisor.cookie, `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all&limit=20`);
+    assert.equal(response.status, 200);
+    const byId = new Map(response.data.cases.map((row) => [row.appointmentId, row]));
+
+    const unassigned = byId.get(unassignedId);
+    assert.equal(unassigned?.completedAt, "2026-05-01T08:00:00.000Z");
+    assert.equal(unassigned?.currentAssignedAt, null);
+    assert.equal(unassigned?.firstAssignedAt, null);
+    assert.equal(unassigned?.dueAt, null);
+    assert.equal(unassigned?.completedToAssignedMinutes, null);
+    assert.ok((unassigned?.completedUnassignedAgeMinutes ?? 0) > 0);
+
+    const reassigned = byId.get(reassignedId);
+    assert.equal(reassigned?.currentAssignedAt, "2026-05-01T10:00:00.000Z");
+    assert.equal(reassigned?.firstAssignedAt, "2026-05-01T09:00:00.000Z");
+    assert.equal(reassigned?.completedToAssignedMinutes, 60);
+    assert.ok((reassigned?.currentAssignmentAgeMinutes ?? 0) > 0);
+    assert.equal(reassigned?.reportFinalAt, null);
+    assert.equal(reassigned?.assignedToFinalMinutes, null);
+
+    const finalCase = byId.get(finalId);
+    assert.equal(finalCase?.reportFinalAt, "2026-05-02T09:00:00.000Z");
+    assert.equal(finalCase?.assignedToFinalMinutes, 1440);
+    assert.equal(finalCase?.completedToFinalMinutes, 1500);
+    assert.equal(finalCase?.currentAssignmentAgeMinutes, null);
+
+    const stats = await api<{
+      summary: {
+        medianCompletedToAssignedMinutes: number | null;
+        medianAssignedToFinalMinutes: number | null;
+        p90AssignedToFinalMinutes: number | null;
+        longestActiveAssignmentAgeMinutes: number | null;
+        completedUnassigned: number;
+      };
+    }>(supervisor.cookie, `/api/doctor/reporting-board/stats?dateFrom=${date}&dateTo=${date}&reportStatus=final`);
+    assert.equal(stats.status, 200);
+    assert.equal(stats.data.summary.medianCompletedToAssignedMinutes, 60);
+    assert.equal(stats.data.summary.medianAssignedToFinalMinutes, 1440);
+    assert.equal(stats.data.summary.p90AssignedToFinalMinutes, 1440);
+    assert.equal(stats.data.summary.completedUnassigned, 0);
+    assert.equal(stats.data.summary.longestActiveAssignmentAgeMinutes, null);
   });
 
   it("orders cases by priority sort order, booking date, booking time nulls first, and appointment id", async () => {

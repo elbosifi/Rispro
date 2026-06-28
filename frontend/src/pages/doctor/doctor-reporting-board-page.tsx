@@ -58,6 +58,9 @@ const SORT_OPTIONS: Array<{ value: ReportingBoardSortBy; label: string }> = [
   { value: "exam_type", label: "Exam type" },
   { value: "modality", label: "Modality" },
   { value: "assigned_doctor", label: "Assigned doctor" },
+  { value: "longest_unassigned", label: "Longest unassigned" },
+  { value: "longest_assigned_not_final", label: "Longest assigned" },
+  { value: "oldest_completed", label: "Oldest completed" },
 ];
 
 const UNASSIGN_VALUE = "__UNASSIGN__";
@@ -152,6 +155,9 @@ function assignmentOrderText(filters: ReportingBoardFilters): string {
     exam_type: { asc: "exam type A to Z", desc: "exam type Z to A" },
     modality: { asc: "modality A to Z", desc: "modality Z to A" },
     assigned_doctor: { asc: "assigned doctor A to Z", desc: "assigned doctor Z to A" },
+    longest_unassigned: { asc: "longest unassigned first", desc: "newest unassigned first" },
+    longest_assigned_not_final: { asc: "longest assigned first", desc: "newest assigned first" },
+    oldest_completed: { asc: "oldest completed first", desc: "newest completed first" },
   };
   const selectedOrder = descriptions[sortBy]?.[direction] ?? descriptions.priority_study_date.asc;
   return `Assignment order: ${filters.pinUrgentToTop === false ? selectedOrder : `STAT/urgent first, then ${selectedOrder}`}.`;
@@ -159,6 +165,20 @@ function assignmentOrderText(filters: ReportingBoardFilters): string {
 
 function hasValue(value: number | string): boolean {
   return typeof value === "number" && value > 0;
+}
+
+function formatDuration(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined) return "-";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function StatsTile({
@@ -326,6 +346,11 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
     `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
     `Report: ${reportStatusView(row.reportStatus).label}`,
     `Appointment: ${labelStatus(row.appointmentStatus)}`,
+    `Completed at: ${formatTimestamp(row.completedAt)}`,
+    `Current assigned at: ${formatTimestamp(row.currentAssignedAt)}`,
+    `First assigned at: ${formatTimestamp(row.firstAssignedAt)}`,
+    `Report final at: ${formatTimestamp(row.reportFinalAt)}`,
+    `Report status checked at: ${formatTimestamp(row.reportStatusCheckedAt)}`,
   ].join("\n");
 }
 
@@ -385,6 +410,41 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
         </span>
       )}
     </div>
+  );
+}
+
+function agingTatLabel(row: ReportingBoardCaseRow): string {
+  if (row.dueAt && requiredReportNotFinal(row) && new Date(row.dueAt).getTime() < Date.now()) {
+    const overdueMinutes = Math.floor((Date.now() - new Date(row.dueAt).getTime()) / 60000);
+    return `Overdue ${formatDuration(overdueMinutes)}`;
+  }
+  if (row.assignedToFinalMinutes !== null) return `A→F ${formatDuration(row.assignedToFinalMinutes)}`;
+  if (row.currentAssignmentAgeMinutes !== null) return `Assigned ${formatDuration(row.currentAssignmentAgeMinutes)}`;
+  if (row.completedUnassignedAgeMinutes !== null) return `Unassigned ${formatDuration(row.completedUnassignedAgeMinutes)}`;
+  if (row.completedToAssignedMinutes !== null) return `C→A ${formatDuration(row.completedToAssignedMinutes)}`;
+  return "-";
+}
+
+function agingTatTitle(row: ReportingBoardCaseRow): string {
+  return [
+    `Completed: ${formatTimestamp(row.completedAt)}`,
+    `Current assigned: ${formatTimestamp(row.currentAssignedAt)}`,
+    `First assigned: ${formatTimestamp(row.firstAssignedAt)}`,
+    `Final report: ${formatTimestamp(row.reportFinalAt)}`,
+    `Status checked: ${formatTimestamp(row.reportStatusCheckedAt)}`,
+    `C to A: ${formatDuration(row.completedToAssignedMinutes)}`,
+    `A to F: ${formatDuration(row.assignedToFinalMinutes)}`,
+    `C to F: ${formatDuration(row.completedToFinalMinutes)}`,
+  ].join("\n");
+}
+
+function AgingTatCell({ row }: { row: ReportingBoardCaseRow }) {
+  const label = agingTatLabel(row);
+  const muted = label === "-";
+  return (
+    <span className={`whitespace-nowrap text-xs font-semibold ${muted ? "text-slate-400" : "text-slate-700"}`} title={agingTatTitle(row)}>
+      {label}
+    </span>
   );
 }
 
@@ -1083,6 +1143,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           </div>
           <StatsTile label="Required not final" value={statsSummary?.requiredNotFinal ?? "-"} />
           <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "danger" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." />
+          <StatsTile label="Median C→A" value={formatDuration(statsSummary?.medianCompletedToAssignedMinutes)} size="secondary" />
+          <StatsTile label="Longest assigned" value={formatDuration(statsSummary?.longestActiveAssignmentAgeMinutes)} size="secondary" />
+          <StatsTile label="Completed unassigned" value={statsSummary?.completedUnassigned ?? "-"} emphasis={hasValue(statsSummary?.completedUnassigned ?? "-") ? "warning" : "neutral"} size="secondary" />
+          {statsSummary?.medianAssignedToFinalMinutes !== null && statsSummary?.medianAssignedToFinalMinutes !== undefined && (
+            <StatsTile label="Median A→F" value={formatDuration(statsSummary.medianAssignedToFinalMinutes)} size="secondary" />
+          )}
+          {statsSummary?.p90AssignedToFinalMinutes !== null && statsSummary?.p90AssignedToFinalMinutes !== undefined && (
+            <StatsTile label="P90 A→F" value={formatDuration(statsSummary.p90AssignedToFinalMinutes)} size="secondary" />
+          )}
           <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} size="secondary" />
           <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} size="secondary" />
           <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} size="secondary" />
@@ -1162,6 +1231,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                     <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Date/time</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Study</th>
                     {showAssignedDoctorColumn && <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Assigned doctor</th>}
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Aging/TAT</th>
                     <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Status</th>
                     <th className="w-10 px-2 py-2 text-right text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Actions</th>
                   </tr>
@@ -1190,6 +1260,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         <td className="px-3 py-2">{row.bookingDate} {row.bookingTime ?? ""}</td>
                         <td className="px-3 py-2"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
                         {showAssignedDoctorColumn && <td className="px-3 py-2">{row.assignedDoctorName ?? "Unassigned"}</td>}
+                        <td className="px-3 py-2"><AgingTatCell row={row} /></td>
                         <td className="px-3 py-2"><CompactStatusCell row={row} /></td>
                         <td className="px-2 py-2 text-right">
                           <RowActionMenu

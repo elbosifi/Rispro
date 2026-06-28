@@ -24,6 +24,7 @@ export interface ReportStatusResult {
   state: SonicDicomReportState;
   canViewReport: boolean;
   source: "sonicdicom" | "rispro";
+  reportFinalAt: string | null;
 }
 
 export interface SonicDicomSqlTestResult {
@@ -32,6 +33,7 @@ export interface SonicDicomSqlTestResult {
   normalizedState: SonicDicomReportState;
   canViewReport: boolean;
   statusCode: number | null;
+  reportFinalAt: string | null;
   diagnostic: string;
 }
 
@@ -48,6 +50,7 @@ interface SqlReadinessRow {
   FoundStudy?: number;
   FoundReport?: number;
   Status?: number | null;
+  UpdatedAt?: Date | string | null;
 }
 
 interface SqlRequest {
@@ -141,7 +144,7 @@ async function querySqlReportReadinessByAccession(
   dicomDb: string,
   reportDb: string,
   accessionNumber: string
-): Promise<{ foundStudy: boolean; foundReport: boolean; statusCode: number | null }> {
+): Promise<{ foundStudy: boolean; foundReport: boolean; statusCode: number | null; documentUpdatedAt: string | null }> {
   const request = pool.request();
   request.input("accessionNumber", sql.NVarChar(128), accessionNumber);
   const result = await request.query<SqlReadinessRow>(
@@ -168,7 +171,8 @@ async function querySqlReportReadinessByAccession(
      select
        case when exists (select 1 from StudyMatch) then 1 else 0 end as FoundStudy,
        case when exists (select 1 from ReportMatch) then 1 else 0 end as FoundReport,
-       (select top 1 Status from LatestDocument) as Status`
+      (select top 1 Status from LatestDocument) as Status,
+      (select top 1 UpdatedAt from LatestDocument) as UpdatedAt`
   );
 
   const row = result.recordset?.[0] ?? {};
@@ -176,7 +180,8 @@ async function querySqlReportReadinessByAccession(
   const foundReport = Number(row.FoundReport || 0) === 1;
   const numericStatus = Number(row.Status);
   const statusCode = row.Status == null ? null : Number.isFinite(numericStatus) ? Math.trunc(numericStatus) : null;
-  return { foundStudy, foundReport, statusCode };
+  const documentUpdatedAt = row.UpdatedAt instanceof Date ? row.UpdatedAt.toISOString() : row.UpdatedAt ? String(row.UpdatedAt) : null;
+  return { foundStudy, foundReport, statusCode, documentUpdatedAt };
 }
 
 async function queryReportStatusByReportNo(
@@ -184,26 +189,34 @@ async function queryReportStatusByReportNo(
   sql: SqlModule,
   reportDb: string,
   reportNo: string
-): Promise<{ statusCode: number | null; foundRow: boolean }> {
+): Promise<{ statusCode: number | null; foundRow: boolean; documentUpdatedAt: string | null }> {
   const request = pool.request();
   request.input("reportNo", sql.NVarChar(128), reportNo);
-  const result = await request.query<{ Status?: number }>(
-    `select top 1 d.Status
+  const result = await request.query<{ Status?: number; UpdatedAt?: Date | string | null }>(
+    `select top 1 d.Status, d.UpdatedAt
      from [${reportDb}].[dbo].[Documents] d
      where d.Report = @reportNo
      order by d.UpdatedAt desc`
   );
   const row = result.recordset?.[0];
-  if (!row) return { statusCode: null, foundRow: false };
+  if (!row) return { statusCode: null, foundRow: false, documentUpdatedAt: null };
   const numeric = Number(row.Status);
-  return { statusCode: Number.isFinite(numeric) ? Math.trunc(numeric) : null, foundRow: true };
+  return {
+    statusCode: Number.isFinite(numeric) ? Math.trunc(numeric) : null,
+    foundRow: true,
+    documentUpdatedAt: row.UpdatedAt instanceof Date ? row.UpdatedAt.toISOString() : row.UpdatedAt ? String(row.UpdatedAt) : null,
+  };
 }
 
-function mapStatusCode(settings: SonicDicomReportSettings, statusCode: number | null): ReportStatusResult {
-  if (statusCode == null) return { state: "no_report", canViewReport: false, source: "sonicdicom" };
-  if (settings.sonicDicomSqlFinalStatusCodes.includes(statusCode)) return { state: "final", canViewReport: true, source: "sonicdicom" };
-  if (settings.sonicDicomSqlDraftStatusCodes.includes(statusCode)) return { state: "draft", canViewReport: false, source: "sonicdicom" };
-  return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+function mapStatusCode(settings: SonicDicomReportSettings, statusCode: number | null, documentUpdatedAt: string | null = null): ReportStatusResult {
+  if (statusCode == null) return { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
+  if (settings.sonicDicomSqlFinalStatusCodes.includes(statusCode)) {
+    return { state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: documentUpdatedAt };
+  }
+  if (settings.sonicDicomSqlDraftStatusCodes.includes(statusCode)) {
+    return { state: "draft", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
+  }
+  return { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
 }
 
 async function resolveSqlReadiness(
@@ -219,7 +232,7 @@ async function resolveSqlReadiness(
         foundStudy: false,
         foundReport: false,
         statusCode: null,
-        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null },
         diagnostic: "No accession number was provided for SQL readiness lookup.",
       };
     }
@@ -230,7 +243,7 @@ async function resolveSqlReadiness(
         foundStudy: false,
         foundReport: false,
         statusCode: null,
-        result: { state: "study_not_found", canViewReport: false, source: "sonicdicom" },
+        result: { state: "study_not_found", canViewReport: false, source: "sonicdicom", reportFinalAt: null },
         diagnostic: "No matching StudyInstanceUID was found in dicom.dbo.Studies.",
       };
     }
@@ -239,7 +252,7 @@ async function resolveSqlReadiness(
         foundStudy: true,
         foundReport: false,
         statusCode: null,
-        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null },
         diagnostic: "No report mapping was found in report.dbo.Reports for the study.",
       };
     }
@@ -248,12 +261,12 @@ async function resolveSqlReadiness(
         foundStudy: true,
         foundReport: true,
         statusCode: null,
-        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null },
         diagnostic: "No matching document status row was found in report.dbo.Documents.",
       };
     }
 
-    const mapped = mapStatusCode(settings, readiness.statusCode);
+    const mapped = mapStatusCode(settings, readiness.statusCode, readiness.documentUpdatedAt);
     return {
       foundStudy: true,
       foundReport: true,
@@ -293,20 +306,20 @@ export async function checkSonicDicomReportStatus(
   options: { useCache?: boolean } = {}
 ): Promise<ReportStatusResult> {
   const settings = await readSonicDicomReportSettings();
-  if (!settings.sonicDicomReportsEnabled) return { state: "disabled", canViewReport: false, source: "rispro" };
-  if (settings.sonicDicomReadinessMode !== "sql_server") return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+  if (!settings.sonicDicomReportsEnabled) return { state: "disabled", canViewReport: false, source: "rispro", reportFinalAt: null };
+  if (settings.sonicDicomReadinessMode !== "sql_server") return { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
 
   if (options.useCache !== false) {
     const cached = statusCache.get(context.bookingId);
     if (cached && cached.expiresAt > Date.now()) return cached.result;
   }
 
-  let result: ReportStatusResult = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+  let result: ReportStatusResult = { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
   try {
     const resolved = await resolveSqlReadiness(settings, { accessionNumber: context.accessionNumber });
     result = resolved.result;
   } catch {
-    result = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+    result = { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null };
   }
 
   const ttlMs = Math.max(0, settings.sonicDicomStatusCacheTtlSeconds) * 1000;
@@ -339,6 +352,7 @@ export async function testSonicDicomSqlReadiness(input: {
       normalizedState: "disabled",
       canViewReport: false,
       statusCode: null,
+      reportFinalAt: null,
       diagnostic: "SonicDICOM integration is disabled.",
     };
   }
@@ -350,6 +364,7 @@ export async function testSonicDicomSqlReadiness(input: {
       normalizedState: "unavailable",
       canViewReport: false,
       statusCode: null,
+      reportFinalAt: null,
       diagnostic: "Readiness mode is not SQL Server. Set sonicDicomReadinessMode to sql_server.",
     };
   }
@@ -368,6 +383,7 @@ export async function testSonicDicomSqlReadiness(input: {
         normalizedState: "no_report",
         canViewReport: false,
         statusCode: null,
+        reportFinalAt: null,
         diagnostic: "SQL connection succeeded.",
       };
     }
@@ -381,6 +397,7 @@ export async function testSonicDicomSqlReadiness(input: {
           normalizedState: "no_report",
           canViewReport: false,
           statusCode: null,
+          reportFinalAt: null,
           diagnostic: "Accession number is required for accession-to-study test.",
         };
       }
@@ -394,6 +411,7 @@ export async function testSonicDicomSqlReadiness(input: {
         normalizedState: "no_report",
         canViewReport: false,
         statusCode: null,
+        reportFinalAt: null,
         diagnostic: foundStudy ? "StudyInstanceUID was resolved from accession." : "No StudyInstanceUID found for accession.",
       };
     }
@@ -406,22 +424,24 @@ export async function testSonicDicomSqlReadiness(input: {
           foundReport: false,
           normalizedState: "no_report",
           canViewReport: false,
-          statusCode: null,
-          diagnostic: "Report number is required for report-status test.",
+        statusCode: null,
+        reportFinalAt: null,
+        diagnostic: "Report number is required for report-status test.",
         };
       }
       const statusLookup = await withSqlConnection(settings, async ({ sql, pool }) =>
         queryReportStatusByReportNo(pool, sql, reportDb, reportNo)
       );
       const mapped: ReportStatusResult = statusLookup.foundRow
-        ? mapStatusCode(settings, statusLookup.statusCode)
-        : { state: "no_report", canViewReport: false, source: "sonicdicom" as const };
+        ? mapStatusCode(settings, statusLookup.statusCode, statusLookup.documentUpdatedAt)
+        : { state: "no_report", canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null };
       return {
         foundStudy: false,
         foundReport: statusLookup.foundRow,
         normalizedState: mapped.state,
         canViewReport: mapped.canViewReport,
         statusCode: statusLookup.statusCode,
+        reportFinalAt: mapped.reportFinalAt,
         diagnostic: statusLookup.foundRow ? "Report status lookup completed." : "No report document row found for report number.",
       };
     }
@@ -434,6 +454,7 @@ export async function testSonicDicomSqlReadiness(input: {
         normalizedState: "no_report",
         canViewReport: false,
         statusCode: null,
+        reportFinalAt: null,
         diagnostic: "Accession number is required for full readiness test.",
       };
     }
@@ -444,6 +465,7 @@ export async function testSonicDicomSqlReadiness(input: {
       normalizedState: full.result.state,
       canViewReport: full.result.canViewReport,
       statusCode: full.statusCode,
+      reportFinalAt: full.result.reportFinalAt,
       diagnostic: full.diagnostic,
     };
   } catch (error) {
@@ -453,6 +475,7 @@ export async function testSonicDicomSqlReadiness(input: {
       normalizedState: "unavailable",
       canViewReport: false,
       statusCode: null,
+      reportFinalAt: null,
       diagnostic: error instanceof Error ? error.message : "SQL readiness test failed.",
     };
   }

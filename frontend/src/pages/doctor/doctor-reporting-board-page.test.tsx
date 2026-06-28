@@ -92,8 +92,18 @@ const caseRow: ReportingBoardCaseRow = {
   assignedDoctorId: null,
   assignedDoctorName: null,
   assignmentStatus: "unassigned",
+  completedAt: "2026-05-29T08:00:00.000Z",
+  currentAssignedAt: null,
+  firstAssignedAt: null,
+  reportFinalAt: null,
+  reportStatusCheckedAt: "2026-05-29T08:05:00.000Z",
+  dueAt: null,
+  completedToAssignedMinutes: null,
+  assignedToFinalMinutes: null,
+  completedToFinalMinutes: null,
+  currentAssignmentAgeMinutes: null,
+  completedUnassignedAgeMinutes: 180,
   reportStatus: "draft",
-  reportStatusCheckedAt: "2026-05-29T08:00:00.000Z",
   canAssign: true,
   exclusionReason: null,
 };
@@ -142,6 +152,11 @@ describe("DoctorReportingBoardPage", () => {
         overdue: 2,
         ct: 8,
         mr: 4,
+        medianCompletedToAssignedMinutes: 90,
+        medianAssignedToFinalMinutes: null,
+        p90AssignedToFinalMinutes: null,
+        longestActiveAssignmentAgeMinutes: 420,
+        completedUnassigned: 5,
       },
       byDoctor: [
         { doctorId: null, doctorName: "Unassigned", total: 5, requiredNotFinal: 5, statOrUrgent: 3, oldestStudyDate: "2026-05-20", ct: 4, mr: 1 },
@@ -185,6 +200,7 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.queryByRole("columnheader", { name: "Priority" })).toBeNull();
     expect(screen.getByRole("columnheader", { name: "IDs" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Study" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Aging/TAT" })).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "MRN" })).toBeNull();
     expect(screen.queryByRole("columnheader", { name: "Accession" })).toBeNull();
     expect(screen.queryByRole("columnheader", { name: "Modality" })).toBeNull();
@@ -203,6 +219,52 @@ describe("DoctorReportingBoardPage", () => {
     expect(row!.className).toContain("bg-red-50");
     expect(within(row!).getByText("STAT")).toBeTruthy();
     expect(within(row!).getByLabelText("Draft report")).toBeTruthy();
+    expect(within(row!).getByText("Unassigned 3h")).toBeTruthy();
+  });
+
+  it("renders assigned aging and final TAT without inventing missing final time", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [
+        {
+          ...caseRow,
+          appointmentId: 43,
+          accessionNumber: "V2-000043",
+          assignedDoctorId: 5,
+          assignedDoctorName: "Dr Target",
+          assignmentStatus: "assigned",
+          currentAssignedAt: "2026-05-29T09:00:00.000Z",
+          firstAssignedAt: "2026-05-29T09:00:00.000Z",
+          completedToAssignedMinutes: 60,
+          currentAssignmentAgeMinutes: 4320,
+          completedUnassignedAgeMinutes: null,
+          reportFinalAt: null,
+          assignedToFinalMinutes: null,
+          completedToFinalMinutes: null,
+        },
+        {
+          ...caseRow,
+          appointmentId: 44,
+          accessionNumber: "V2-000044",
+          assignedDoctorId: 5,
+          assignedDoctorName: "Dr Target",
+          assignmentStatus: "assigned",
+          reportStatus: "final",
+          currentAssignedAt: "2026-05-29T09:00:00.000Z",
+          firstAssignedAt: "2026-05-29T08:30:00.000Z",
+          reportFinalAt: "2026-05-31T09:00:00.000Z",
+          completedToAssignedMinutes: 30,
+          assignedToFinalMinutes: 2880,
+          completedToFinalMinutes: 2940,
+          currentAssignmentAgeMinutes: null,
+          completedUnassignedAgeMinutes: null,
+        },
+      ],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "all" },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Assigned 3d")).toBeTruthy();
+    expect(await screen.findByText("A→F 2d")).toBeTruthy();
   });
 
   it("uses a compact final report indicator without full-row green status", async () => {

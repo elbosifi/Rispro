@@ -67,6 +67,9 @@ const REPORTING_BOARD_SORT_BY = new Set([
   "exam_type",
   "modality",
   "assigned_doctor",
+  "longest_unassigned",
+  "longest_assigned_not_final",
+  "oldest_completed",
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 let reportStatusChecker = checkSonicDicomReportStatus;
@@ -117,6 +120,56 @@ function normalizeSortDirection(sortDirection?: ReportingBoardFilters["sortDirec
   const value = sortDirection ?? "asc";
   if (!REPORTING_BOARD_SORT_DIRECTIONS.has(value)) throw new HttpError(400, "sortDirection must be asc or desc.");
   return value;
+}
+
+function timestampMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function minutesBetween(start: string | null | undefined, end: string | null | undefined): number | null {
+  const startMs = timestampMs(start);
+  const endMs = timestampMs(end);
+  if (startMs === null || endMs === null || endMs < startMs) return null;
+  return Math.floor((endMs - startMs) / 60000);
+}
+
+function minutesSince(start: string | null | undefined, nowMs: number): number | null {
+  const startMs = timestampMs(start);
+  if (startMs === null || nowMs < startMs) return null;
+  return Math.floor((nowMs - startMs) / 60000);
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+function percentile(values: number[], percentileValue: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.ceil((percentileValue / 100) * sorted.length) - 1);
+  return sorted[index];
+}
+
+function withTimelineMetrics(row: ReportingBoardCaseRow, nowMs = Date.now()): ReportingBoardCaseRow {
+  const completedToAssignedMinutes = minutesBetween(row.completedAt, row.firstAssignedAt);
+  const assignedToFinalMinutes = row.reportFinalAt ? minutesBetween(row.currentAssignedAt, row.reportFinalAt) : null;
+  const completedToFinalMinutes = row.reportFinalAt ? minutesBetween(row.completedAt, row.reportFinalAt) : null;
+  const activeNonFinal = row.assignmentStatus === "assigned" && row.reportStatus !== "final";
+  const completedUnassigned = row.appointmentStatus === "completed" && row.assignmentStatus === "unassigned" && !row.reportFinalAt;
+  return {
+    ...row,
+    dueAt: null,
+    completedToAssignedMinutes,
+    assignedToFinalMinutes,
+    completedToFinalMinutes,
+    currentAssignmentAgeMinutes: activeNonFinal ? minutesSince(row.currentAssignedAt, nowMs) : null,
+    completedUnassignedAgeMinutes: completedUnassigned ? minutesSince(row.completedAt, nowMs) : null,
+  };
 }
 
 async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters> {
@@ -194,18 +247,20 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
         { useCache: true }
       );
       status = normalizeReportState(result.state);
+      row.reportFinalAt = status === "final" ? result.reportFinalAt ?? null : null;
     } catch {
       status = "unavailable";
+      row.reportFinalAt = null;
     }
     reportStatusSnapshot.set(row.appointmentId, status);
     const canAssign = row.canAssign && status !== "final";
-    resolved.push({
+    resolved.push(withTimelineMetrics({
       ...row,
       reportStatus: status,
       reportStatusCheckedAt: checkedAt,
       canAssign,
       exclusionReason: canAssign ? null : row.exclusionReason ?? (status === "final" ? "report_final" : null),
-    });
+    }));
   }
 
   if (!reportStatus || reportStatus === "all") return resolved;
@@ -253,6 +308,11 @@ function emptyStatsSummary(): ReportingBoardStatsSummary {
     overdue: 0,
     ct: 0,
     mr: 0,
+    medianCompletedToAssignedMinutes: null,
+    medianAssignedToFinalMinutes: null,
+    p90AssignedToFinalMinutes: null,
+    longestActiveAssignmentAgeMinutes: null,
+    completedUnassigned: 0,
   };
 }
 
@@ -275,6 +335,10 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
   const byDoctor = new Map<string, ReportingBoardDoctorStatsRow>();
   const byModality = new Map<string, ReportingBoardModalityStatsRow>();
   const byPriority = new Map<string, ReportingBoardPriorityStatsRow>();
+  const nowMs = Date.now();
+  const completedToAssignedValues: number[] = [];
+  const assignedToFinalValues: number[] = [];
+  const activeAssignmentAges: number[] = [];
 
   for (const row of rows) {
     const priorityCode = row.reportingPriorityCode?.toLowerCase() ?? null;
@@ -299,6 +363,14 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     else if (status === "study_not_found") summary.studyNotFound += 1;
     else if (status === "unavailable") summary.unavailable += 1;
 
+    const completedToAssignedMinutes = minutesBetween(row.completedAt, row.firstAssignedAt);
+    if (completedToAssignedMinutes !== null) completedToAssignedValues.push(completedToAssignedMinutes);
+    const assignedToFinalMinutes = row.reportFinalAt ? minutesBetween(row.currentAssignedAt, row.reportFinalAt) : null;
+    if (assignedToFinalMinutes !== null) assignedToFinalValues.push(assignedToFinalMinutes);
+    const activeAssignmentAge = row.assignmentStatus === "assigned" && status !== "final" ? minutesSince(row.currentAssignedAt, nowMs) : null;
+    if (activeAssignmentAge !== null) activeAssignmentAges.push(activeAssignmentAge);
+    if (row.appointmentStatus === "completed" && row.assignmentStatus === "unassigned" && row.completedAt) summary.completedUnassigned += 1;
+
     const doctorKey = row.assignedDoctorId === null ? "unassigned" : String(row.assignedDoctorId);
     const doctor = byDoctor.get(doctorKey) ?? doctorStatsRow(row);
     doctor.total += 1;
@@ -320,6 +392,11 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     priority.total += 1;
     byPriority.set(priorityKey, priority);
   }
+
+  summary.medianCompletedToAssignedMinutes = median(completedToAssignedValues);
+  summary.medianAssignedToFinalMinutes = median(assignedToFinalValues);
+  summary.p90AssignedToFinalMinutes = percentile(assignedToFinalValues, 90);
+  summary.longestActiveAssignmentAgeMinutes = activeAssignmentAges.length ? Math.max(...activeAssignmentAges) : null;
 
   return {
     summary,

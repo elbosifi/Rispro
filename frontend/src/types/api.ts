@@ -404,7 +404,10 @@ export type ReportingBoardSortBy =
   | "mrn"
   | "exam_type"
   | "modality"
-  | "assigned_doctor";
+  | "assigned_doctor"
+  | "longest_unassigned"
+  | "longest_assigned_not_final"
+  | "oldest_completed";
 export type ReportingBoardSortDirection = "asc" | "desc";
 
 export interface ReportingBoardNotificationSettings {
@@ -462,8 +465,18 @@ export interface ReportingBoardCaseRow {
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
   assignmentStatus: "assigned" | "unassigned";
-  reportStatus: "final" | "draft" | "no_report" | "study_not_found" | "unavailable";
+  completedAt: string | null;
+  currentAssignedAt: string | null;
+  firstAssignedAt: string | null;
+  reportFinalAt: string | null;
   reportStatusCheckedAt: string | null;
+  dueAt: string | null;
+  completedToAssignedMinutes: number | null;
+  assignedToFinalMinutes: number | null;
+  completedToFinalMinutes: number | null;
+  currentAssignmentAgeMinutes: number | null;
+  completedUnassignedAgeMinutes: number | null;
+  reportStatus: "final" | "draft" | "no_report" | "study_not_found" | "unavailable";
   canAssign: boolean;
   exclusionReason: string | null;
 }
@@ -484,6 +497,11 @@ export interface ReportingBoardStatsSummary {
   overdue: number;
   ct: number;
   mr: number;
+  medianCompletedToAssignedMinutes: number | null;
+  medianAssignedToFinalMinutes: number | null;
+  p90AssignedToFinalMinutes: number | null;
+  longestActiveAssignmentAgeMinutes: number | null;
+  completedUnassigned: number;
 }
 
 export interface ReportingBoardDoctorStatsRow {

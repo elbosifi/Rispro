@@ -68,7 +68,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
 
     assert.match(service, /checkSonicDicomReportStatus/);
-    assert.match(service, /catch \{\s*status = "unavailable";\s*\}/);
+    assert.match(service, /catch \{\s*status = "unavailable";\s*row\.reportFinalAt = null;\s*\}/);
     assert.match(service, /reportStatus === "required_not_final"/);
     assert.match(service, /row\.reportStatus !== "final"/);
   });

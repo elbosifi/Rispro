@@ -17,7 +17,10 @@ export type ReportingBoardSortBy =
   | "mrn"
   | "exam_type"
   | "modality"
-  | "assigned_doctor";
+  | "assigned_doctor"
+  | "longest_unassigned"
+  | "longest_assigned_not_final"
+  | "oldest_completed";
 export type ReportingBoardSortDirection = "asc" | "desc";
 
 export interface ReportingBoardFilters {
@@ -97,8 +100,18 @@ export interface ReportingBoardCaseRow {
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
   assignmentStatus: "assigned" | "unassigned";
-  reportStatus: Exclude<SonicDicomReportState, "not_required" | "not_completed" | "disabled">;
+  completedAt: string | null;
+  currentAssignedAt: string | null;
+  firstAssignedAt: string | null;
+  reportFinalAt: string | null;
   reportStatusCheckedAt: string | null;
+  dueAt: string | null;
+  completedToAssignedMinutes: number | null;
+  assignedToFinalMinutes: number | null;
+  completedToFinalMinutes: number | null;
+  currentAssignmentAgeMinutes: number | null;
+  completedUnassignedAgeMinutes: number | null;
+  reportStatus: Exclude<SonicDicomReportState, "not_required" | "not_completed" | "disabled">;
   canAssign: boolean;
   exclusionReason: string | null;
 }
@@ -106,6 +119,7 @@ export interface ReportingBoardCaseRow {
 export interface ReportingBoardStatsBaseRow {
   appointmentId: number;
   bookingDate: string;
+  appointmentStatus: string;
   modalityCode: string;
   requiresReport: boolean;
   reportingPriorityCode: string | null;
@@ -113,6 +127,10 @@ export interface ReportingBoardStatsBaseRow {
   assignedDoctorId: number | null;
   assignedDoctorName: string | null;
   assignmentStatus: "assigned" | "unassigned";
+  completedAt: string | null;
+  currentAssignedAt: string | null;
+  firstAssignedAt: string | null;
+  reportFinalAt?: string | null;
 }
 
 export interface ReportingBoardStatsSummary {
@@ -131,6 +149,11 @@ export interface ReportingBoardStatsSummary {
   overdue: number;
   ct: number;
   mr: number;
+  medianCompletedToAssignedMinutes: number | null;
+  medianAssignedToFinalMinutes: number | null;
+  p90AssignedToFinalMinutes: number | null;
+  longestActiveAssignmentAgeMinutes: number | null;
+  completedUnassigned: number;
 }
 
 export interface ReportingBoardDoctorStatsRow {

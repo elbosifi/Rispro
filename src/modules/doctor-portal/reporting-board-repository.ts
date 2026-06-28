@@ -75,6 +75,12 @@ function nullableNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : Number(value);
 }
 
+function nullableIsoString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 function normalizePushSubscription(input: BrowserPushSubscriptionInput): { endpoint: string; p256dh: string; auth: string } {
   const endpoint = String(input.endpoint || "").trim();
   const p256dh = String(input.keys?.p256dh || "").trim();
@@ -448,6 +454,23 @@ function caseSortOrder(filters: ReportingBoardFilters): string {
     case "assigned_doctor":
       selectedOrder = [`lower(coalesce(assigned_doctor.display_name, '')) ${direction}`, "b.id asc"];
       break;
+    case "longest_unassigned":
+      selectedOrder = [
+        `case when cta.id is null and b.completed_at is not null then 0 else 1 end asc`,
+        `b.completed_at ${direction === "asc" ? "asc" : "desc"} nulls last`,
+        "b.id asc",
+      ];
+      break;
+    case "longest_assigned_not_final":
+      selectedOrder = [
+        `case when cta.id is not null then 0 else 1 end asc`,
+        `cta.assigned_at ${direction === "asc" ? "asc" : "desc"} nulls last`,
+        "b.id asc",
+      ];
+      break;
+    case "oldest_completed":
+      selectedOrder = [`b.completed_at ${direction} nulls last`, "b.id asc"];
+      break;
     default:
       throw new HttpError(400, "sortBy is not supported.");
   }
@@ -497,6 +520,16 @@ export async function listReportingBoardCaseCandidates(
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
+        b.completed_at as "completedAt",
+        cta.assigned_at as "currentAssignedAt",
+        first_assignment.first_assigned_at as "firstAssignedAt",
+        null::text as "reportFinalAt",
+        null::text as "dueAt",
+        null::int as "completedToAssignedMinutes",
+        null::int as "assignedToFinalMinutes",
+        null::int as "completedToFinalMinutes",
+        null::int as "currentAssignmentAgeMinutes",
+        null::int as "completedUnassignedAgeMinutes",
         'unavailable'::text as "reportStatus",
         null::text as "reportStatusCheckedAt",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
@@ -512,6 +545,12 @@ export async function listReportingBoardCaseCandidates(
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join lateral (
+        select min(history.assigned_at) as first_assigned_at
+        from doctor_portal.case_team_assignments history
+        where history.appointment_id = b.id
+          and history.assignment_type = 'reporting'
+      ) first_assignment on true
       ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
       order by ${orderBy}
       limit $${limitParam} offset $${offsetParam}
@@ -532,6 +571,17 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
+    completedAt: nullableIsoString(row.completedAt),
+    currentAssignedAt: nullableIsoString(row.currentAssignedAt),
+    firstAssignedAt: nullableIsoString(row.firstAssignedAt),
+    reportFinalAt: nullableIsoString(row.reportFinalAt),
+    reportStatusCheckedAt: nullableIsoString(row.reportStatusCheckedAt),
+    dueAt: nullableIsoString(row.dueAt),
+    completedToAssignedMinutes: nullableNumber(row.completedToAssignedMinutes),
+    assignedToFinalMinutes: nullableNumber(row.assignedToFinalMinutes),
+    completedToFinalMinutes: nullableNumber(row.completedToFinalMinutes),
+    currentAssignmentAgeMinutes: nullableNumber(row.currentAssignmentAgeMinutes),
+    completedUnassignedAgeMinutes: nullableNumber(row.completedUnassignedAgeMinutes),
   };
 }
 
@@ -540,6 +590,10 @@ function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoard
     ...row,
     appointmentId: Number(row.appointmentId),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
+    completedAt: nullableIsoString(row.completedAt),
+    currentAssignedAt: nullableIsoString(row.currentAssignedAt),
+    firstAssignedAt: nullableIsoString(row.firstAssignedAt),
+    reportFinalAt: nullableIsoString(row.reportFinalAt),
   };
 }
 
@@ -553,13 +607,18 @@ export async function listReportingBoardStatsRows(
       select
         b.id as "appointmentId",
         b.booking_date::text as "bookingDate",
+        b.status as "appointmentStatus",
         m.code as "modalityCode",
         b.requires_report as "requiresReport",
         rp.code as "reportingPriorityCode",
         rp.name_en as "reportingPriorityName",
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
-        case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus"
+        case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
+        b.completed_at as "completedAt",
+        cta.assigned_at as "currentAssignedAt",
+        first_assignment.first_assigned_at as "firstAssignedAt",
+        null::text as "reportFinalAt"
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
@@ -567,6 +626,12 @@ export async function listReportingBoardStatsRows(
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join lateral (
+        select min(history.assigned_at) as first_assigned_at
+        from doctor_portal.case_team_assignments history
+        where history.appointment_id = b.id
+          and history.assignment_type = 'reporting'
+      ) first_assignment on true
       ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
       order by b.id asc
     `,
@@ -604,6 +669,16 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         cta.assigned_doctor_id as "assignedDoctorId",
         assigned_doctor.display_name as "assignedDoctorName",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
+        b.completed_at as "completedAt",
+        cta.assigned_at as "currentAssignedAt",
+        first_assignment.first_assigned_at as "firstAssignedAt",
+        null::text as "reportFinalAt",
+        null::text as "dueAt",
+        null::int as "completedToAssignedMinutes",
+        null::int as "assignedToFinalMinutes",
+        null::int as "completedToFinalMinutes",
+        null::int as "currentAssignmentAgeMinutes",
+        null::int as "completedUnassignedAgeMinutes",
         'unavailable'::text as "reportStatus",
         null::text as "reportStatusCheckedAt",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
@@ -619,6 +694,12 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join lateral (
+        select min(history.assigned_at) as first_assigned_at
+        from doctor_portal.case_team_assignments history
+        where history.appointment_id = b.id
+          and history.assignment_type = 'reporting'
+      ) first_assignment on true
       where b.id = any($1::bigint[])
       order by array_position($1::bigint[], b.id)
     `,

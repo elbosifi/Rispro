@@ -38,6 +38,9 @@ const REPORTING_BOARD_SORT_BY = new Set([
   "exam_type",
   "modality",
   "assigned_doctor",
+  "longest_unassigned",
+  "longest_assigned_not_final",
+  "oldest_completed",
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 
