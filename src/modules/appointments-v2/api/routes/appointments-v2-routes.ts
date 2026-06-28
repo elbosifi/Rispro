@@ -18,6 +18,7 @@ import { listBookingsService } from "../../booking/services/list-bookings.servic
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import { listEligibleIntendedReportingDoctors } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import {
   enqueueStaffPatientWebPushMessage,
   prepareDueNotificationDeliveries,
@@ -79,6 +80,25 @@ router.get(
     });
 
     res.json({ bookings });
+  })
+);
+
+router.get(
+  "/reporting-doctors",
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    const modalityId = parseInt(String(req.query.modalityId ?? ""), 10);
+    if (!Number.isInteger(modalityId) || modalityId <= 0) {
+      res.status(400).json({ error: "modalityId is required" });
+      return;
+    }
+    const doctors = await listEligibleIntendedReportingDoctors({
+      modalityId,
+      actor: {
+        userId: Number(req.user?.sub ?? 0),
+        role: req.user?.role,
+      },
+    });
+    res.json({ doctors });
   })
 );
 
@@ -149,6 +169,8 @@ router.post(
         bookingTime: body.bookingTime ?? null,
         caseCategory: body.caseCategory,
         requiresReport: body.requiresReport,
+        intendedReportingDoctorId: body.intendedReportingDoctorId ?? null,
+        intendedReportingDoctorReason: body.intendedReportingDoctorReason ?? null,
         studyInstanceUid: body.studyInstanceUid ?? null,
         capacityResolutionMode,
         useSpecialQuota: body.useSpecialQuota === true,

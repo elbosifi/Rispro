@@ -48,6 +48,7 @@ import {
   isNoShowBookingBlocked
 } from "../../../../services/patient-no-show-restriction-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
+import { createPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -141,6 +142,15 @@ export async function createBookingInternal(
       : caseCategory === "oncology"
         ? patientQrSettings.defaultReportRequiredForOncology
         : patientQrSettings.defaultReportRequiredForNonOncology;
+  const intendedReportingDoctorId = payload.intendedReportingDoctorId ?? null;
+  if (intendedReportingDoctorId != null) {
+    if (!Number.isInteger(intendedReportingDoctorId) || intendedReportingDoctorId <= 0) {
+      throw new HttpError(400, "intendedReportingDoctorId must be a positive integer.");
+    }
+    if (requiresReport !== true) {
+      throw new HttpError(400, "An intended reporting doctor requires requiresReport=true.");
+    }
+  }
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -415,6 +425,16 @@ export async function createBookingInternal(
     isWalkIn: payload.isWalkIn ?? false,
     userId,
   });
+
+  if (intendedReportingDoctorId != null) {
+    await createPendingReportingAssignmentIntent(client, {
+      bookingId: booking.id,
+      intendedDoctorId: intendedReportingDoctorId,
+      actor: { userId, role: userRole },
+      reason: payload.intendedReportingDoctorReason ?? null,
+      createdFromContext: "appointment_create",
+    });
+  }
 
   // 10. Record override audit if applicable
   if (wasOverride && supervisorUserId != null) {

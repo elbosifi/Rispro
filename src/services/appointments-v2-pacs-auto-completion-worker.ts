@@ -20,6 +20,12 @@ import {
 } from "./orthanc-study-verification-service.js";
 import type { UserId } from "../types/http.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
+import {
+  activatePendingReportingAssignmentIntent,
+  cancelPendingReportingAssignmentIntent,
+  type ReportingAssignmentActivationNotification,
+} from "../modules/doctor-portal/reporting-assignment-intents-service.js";
+import { createAssignedToMeNotifications } from "../modules/doctor-portal/reporting-board-repository.js";
 
 const ELIGIBLE_BOOKING_STATUSES = ["scheduled", "arrived", "waiting"] as const;
 const DEFAULT_WORKER_INTERVAL_MS = 60_000;
@@ -123,6 +129,25 @@ export interface AppointmentsV2PacsAutoCompletionWorker {
 let workerIntervalHandle: NodeJS.Timeout | null = null;
 let workerTickRunning = false;
 let workerStopped = false;
+
+async function createAssignedToMeNotificationsForReportingIntent(
+  notification: ReportingAssignmentActivationNotification | null
+): Promise<void> {
+  if (!notification) return;
+  try {
+    await createAssignedToMeNotifications({
+      doctorId: notification.doctorId,
+      appointmentIds: [notification.bookingId],
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      type: "reporting_assignment_intent_notification_failed",
+      bookingId: notification.bookingId,
+      doctorId: notification.doctorId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
 
 function normalizeBoolean(value: unknown): boolean {
   return String(value ?? "").trim().toLowerCase() === "true" ||
@@ -599,6 +624,10 @@ async function discontinueBookingForBelowMinimumSeries({
       },
       client
     );
+    await cancelPendingReportingAssignmentIntent(client, bookingId, {
+      reason: "status_discontinued",
+      actorUserId: null,
+    });
 
     await client.query("commit");
     scheduleBookingWorklistSync(bookingId);
@@ -632,6 +661,7 @@ async function completeBookingIfStillEligible({
   }
 
   const client = await pool.connect();
+  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
   try {
     await client.query("begin");
     const { rows } = await client.query<{ id: number; status: string; pacs_auto_completion_disabled_at: string | null }>(
@@ -692,8 +722,13 @@ async function completeBookingIfStillEligible({
       },
       client
     );
+    reportingIntentNotification = await activatePendingReportingAssignmentIntent(client, bookingId, {
+      actorUserId: null,
+      actionType: "orthanc_auto_complete",
+    });
 
     await client.query("commit");
+    await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
     scheduleBookingWorklistSync(bookingId);
     return true;
   } catch (error) {

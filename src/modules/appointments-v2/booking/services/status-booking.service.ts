@@ -7,6 +7,12 @@ import type { BookingStatus } from "../../shared/types/common.js";
 import { activateNoShowRestrictionForBooking } from "../../../../services/patient-no-show-restriction-service.js";
 import type { Role } from "../../../../types/domain.js";
 import { assertPatientMeetsBookingQueueRequirements } from "./patient-identifier-requirement.js";
+import {
+  activatePendingReportingAssignmentIntent,
+  cancelPendingReportingAssignmentIntent,
+  type ReportingAssignmentActivationNotification,
+} from "../../../doctor-portal/reporting-assignment-intents-service.js";
+import { createAssignedToMeNotifications } from "../../../doctor-portal/reporting-board-repository.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -23,6 +29,25 @@ const MANUAL_STATUS_TARGETS = new Set<BookingStatus>([
 ]);
 const REASON_REQUIRED_STATUSES = new Set<BookingStatus>(["no-show", "discontinued"]);
 const DEDICATED_CANCELLATION_MESSAGE = "Appointment cancellation must use the dedicated cancellation workflow.";
+
+async function createAssignedToMeNotificationsForReportingIntent(
+  notification: ReportingAssignmentActivationNotification | null
+): Promise<void> {
+  if (!notification) return;
+  try {
+    await createAssignedToMeNotifications({
+      doctorId: notification.doctorId,
+      appointmentIds: [notification.bookingId],
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      type: "reporting_assignment_intent_notification_failed",
+      bookingId: notification.bookingId,
+      doctorId: notification.doctorId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
 
 interface SettingsRow {
   setting_key: string;
@@ -386,6 +411,7 @@ export async function updateBookingStatusManual(
   }
 
   const client = await pool.connect();
+  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
   try {
     await client.query("begin");
     const { rows } = await client.query<BookingStatusRow>(
@@ -485,9 +511,21 @@ export async function updateBookingStatusManual(
       if (targetStatus === "no-show") {
         await activateNoShowRestrictionForBooking(client, bookingId, cleanReason || null, userId);
       }
+      if (targetStatus === "completed") {
+        reportingIntentNotification = await activatePendingReportingAssignmentIntent(client, bookingId, {
+          actorUserId: userId,
+          actionType: "manual_status_completion",
+        });
+      } else if (targetStatus === "discontinued") {
+        await cancelPendingReportingAssignmentIntent(client, bookingId, {
+          reason: "status_discontinued",
+          actorUserId: userId,
+        });
+      }
     }
 
     await client.query("commit");
+    await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
     scheduleBookingWorklistSync(bookingId);
     return {
       id: bookingId,

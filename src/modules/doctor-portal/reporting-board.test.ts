@@ -127,6 +127,58 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /result\.assignedAppointmentIds/);
   });
 
+  it("adds pending reporting assignment intents without changing bookings", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/099_reporting_assignment_intents.sql`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-assignment-intents-service.ts`, "utf8");
+    const createService = readFileSync(`${root}/src/modules/appointments-v2/booking/services/create-booking.service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`, "utf8");
+
+    assert.match(migration, /doctor_portal\.reporting_assignment_intents/);
+    assert.match(migration, /status text not null/);
+    assert.match(migration, /pending/);
+    assert.match(migration, /activated/);
+    assert.match(migration, /cancelled/);
+    assert.match(migration, /superseded/);
+    assert.match(migration, /failed/);
+    assert.match(migration, /unique \(appointment_id\)[\s\S]*where status = 'pending'/);
+    assert.doesNotMatch(migration, /alter table appointments_v2\.bookings[\s\S]*assigned_doctor_id/i);
+    assert.match(service, /createPendingReportingAssignmentIntent/);
+    assert.match(service, /activatePendingReportingAssignmentIntent/);
+    assert.match(service, /cancelPendingReportingAssignmentIntent/);
+    assert.match(service, /canCreateReportingAssignmentIntent/);
+    assert.match(createService, /createPendingReportingAssignmentIntent/);
+    assert.match(routes, /intendedReportingDoctorId/);
+    assert.match(routes, /intendedReportingDoctorReason/);
+  });
+
+  it("activates reporting intents after completion and notifies after commit", () => {
+    const statusService = readFileSync(`${root}/src/modules/appointments-v2/booking/services/status-booking.service.ts`, "utf8");
+    const pacsWorker = readFileSync(`${root}/src/services/appointments-v2-pacs-auto-completion-worker.ts`, "utf8");
+    const mppsService = readFileSync(`${root}/src/services/mpps-service.ts`, "utf8");
+    const intentService = readFileSync(`${root}/src/modules/doctor-portal/reporting-assignment-intents-service.ts`, "utf8");
+
+    assert.match(intentService, /select[\s\S]*from appointments_v2\.bookings[\s\S]*for update/);
+    assert.match(intentService, /from doctor_portal\.reporting_assignment_intents[\s\S]*status = 'pending'[\s\S]*for update/);
+    assert.match(intentService, /booking\.status !== "completed"/);
+    assert.match(intentService, /booking\.requiresReport !== true/);
+    assert.match(intentService, /can_finalize_reports = true/);
+    assert.match(intentService, /doctor_modality_permissions/);
+    assert.match(intentService, /can_report = true/);
+    assert.match(intentService, /insert into doctor_portal\.case_team_assignments/);
+    assert.match(intentService, /assigned_doctor_id/);
+    assert.match(intentService, /status = 'activated'/);
+    assert.match(intentService, /status = 'failed'/);
+    assert.match(statusService, /activatePendingReportingAssignmentIntent/);
+    assert.match(pacsWorker, /activatePendingReportingAssignmentIntent/);
+    assert.match(mppsService, /activatePendingReportingAssignmentIntent/);
+    assert.match(statusService, /createAssignedToMeNotifications/);
+    assert.match(pacsWorker, /createAssignedToMeNotifications/);
+    assert.match(mppsService, /createAssignedToMeNotifications/);
+    assert.match(statusService, /reporting_assignment_intent_notification_failed/);
+    assert.match(pacsWorker, /reporting_assignment_intent_notification_failed/);
+    assert.match(mppsService, /reporting_assignment_intent_notification_failed/);
+  });
+
   it("adds authenticated saved-view Web Push subscription storage", () => {
     const migration = readFileSync(`${root}/src/db/migrations/090_reporting_board_saved_view_web_push.sql`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");

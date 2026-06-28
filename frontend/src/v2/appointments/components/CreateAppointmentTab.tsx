@@ -19,7 +19,7 @@ import type {
   SchedulingOverrideType,
   SpecialReasonCodeDto,
 } from "../types";
-import { useCreateSchedulingOverrideRequest, useV2ExamTypes } from "../api";
+import { fetchIntendedReportingDoctors, useCreateSchedulingOverrideRequest, useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { isAvailabilityRowVisible } from "../hooks/availability-row-mapper";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
@@ -35,7 +35,7 @@ import { Button, Card } from "@/components/shared";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision } from "../utils/scheduling-override-requests";
-import type { Role } from "@/types/api";
+import type { DoctorModuleCapability, Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
   patientLookups: unknown;
@@ -46,6 +46,7 @@ interface CreateAppointmentTabProps {
   schedulingEngineEnabled: boolean;
   canUseNonStandardCapacityModes?: boolean;
   currentUserRole?: Role;
+  doctorModuleCapabilities?: DoctorModuleCapability[];
   initialSelectedPatient?: SelectedPatient | null;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
@@ -155,6 +156,7 @@ export function CreateAppointmentTab({
   schedulingEngineEnabled,
   canUseNonStandardCapacityModes = false,
   currentUserRole,
+  doctorModuleCapabilities = [],
   initialSelectedPatient = null,
   onCreateAppointment,
   onEvaluateAvailability,
@@ -216,6 +218,21 @@ export function CreateAppointmentTab({
   const isReceptionist = currentUserRole === "receptionist";
   const isSupervisor = currentUserRole === "supervisor";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const canSelectIntendedReportingDoctor =
+    isSuperAdmin ||
+    isSupervisor ||
+    doctorModuleCapabilities.includes("doctor_admin") ||
+    doctorModuleCapabilities.includes("doctor_supervisor");
+  const showIntendedReportingDoctor =
+    form.requiresReport === true &&
+    form.modalityId != null &&
+    canSelectIntendedReportingDoctor;
+  const intendedReportingDoctorsQuery = useQuery({
+    queryKey: ["intended-reporting-doctors", form.modalityId],
+    queryFn: () => fetchIntendedReportingDoctors(form.modalityId as number),
+    enabled: showIntendedReportingDoctor,
+    staleTime: 60_000,
+  });
   const isSelectedPatientNonOncology = form.patient?.category === "non_oncology";
   const canDirectlyAuthorizeNoShowRestriction = isSuperAdmin || (isSupervisor && !isSelectedPatientNonOncology);
   const createOverrideRequestMutation = useCreateSchedulingOverrideRequest();
@@ -517,6 +534,10 @@ export function CreateAppointmentTab({
           ? noShowAuthorizationReason.trim()
           : null,
     };
+    if (showIntendedReportingDoctor && form.intendedReportingDoctorId) {
+      request.intendedReportingDoctorId = form.intendedReportingDoctorId;
+      request.intendedReportingDoctorReason = form.intendedReportingDoctorReason.trim() || null;
+    }
 
     const response = await onCreateAppointment(request);
     const modalityRecord = modalityOptions.find((m) => m.id === form.modalityId);
@@ -960,6 +981,7 @@ export function CreateAppointmentTab({
                 <input
                   type="checkbox"
                   id="requiresReport"
+                  aria-label="Report required"
                   checked={form.requiresReport}
                   onChange={(e) => actions.setRequiresReport(e.target.checked)}
                   className="mt-0.5 w-5 h-5 cursor-pointer accent-[var(--accent)]"
@@ -971,6 +993,36 @@ export function CreateAppointmentTab({
                   </span>
                 </span>
               </label>
+
+              {showIntendedReportingDoctor && (
+                <div className="xl:col-span-2">
+                  <label className="block text-sm font-semibold mb-2 text-foreground">
+                    Intended reporting doctor
+                  </label>
+                  <select
+                    aria-label="Intended reporting doctor"
+                    value={form.intendedReportingDoctorId ?? ""}
+                    onChange={(event) => actions.setIntendedReportingDoctorId(event.target.value ? Number(event.target.value) : null)}
+                    className="input-premium"
+                    disabled={intendedReportingDoctorsQuery.isLoading}
+                  >
+                    <option value="">Normal reporting pool</option>
+                    {(intendedReportingDoctorsQuery.data ?? []).map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>
+                    ))}
+                  </select>
+                  <textarea
+                    aria-label="Intended reporting doctor reason"
+                    value={form.intendedReportingDoctorReason}
+                    onChange={(event) => actions.setIntendedReportingDoctorReason(event.target.value)}
+                    className="input-premium mt-2"
+                    rows={2}
+                  />
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    The doctor will be notified when the study is completed and becomes available for reporting. Leave empty to keep the case in the normal reporting pool.
+                  </p>
+                </div>
+              )}
 
               {!isReceptionist && (
               <div>

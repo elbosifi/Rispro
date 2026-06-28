@@ -29,6 +29,7 @@ import type {
   PolicyPreviewDto,
   PolicyUserDto,
   SpecialReasonCodeDto,
+  IntendedReportingDoctorOption,
 } from "./types";
 
 function toOptionalNumber(value: number | string | null | undefined): number | null {
@@ -157,6 +158,11 @@ export async function fetchV2Lookups(): Promise<LookupsResponse> {
 export async function fetchV2SpecialReasonCodes(): Promise<SpecialReasonCodeDto[]> {
   const response = await api<{ items: SpecialReasonCodeDto[] }>("/v2/lookups/special-reason-codes");
   return response.items;
+}
+
+export async function fetchIntendedReportingDoctors(modalityId: number): Promise<IntendedReportingDoctorOption[]> {
+  const response = await api<{ doctors: IntendedReportingDoctorOption[] }>(`/v2/appointments/reporting-doctors?modalityId=${modalityId}`);
+  return response.doctors;
 }
 
 export interface ReportingPriorityDto {

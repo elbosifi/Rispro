@@ -32,12 +32,20 @@ test("worker writes orthanc_auto_complete audit payload", () => {
   assert.match(source, /verificationCheckId: historyId/);
 });
 
+test("worker activates pending reporting assignment intents after PACS completion commit", () => {
+  assert.match(source, /activatePendingReportingAssignmentIntent/);
+  assert.match(source, /status = 'completed'[\s\S]*activatePendingReportingAssignmentIntent/);
+  assert.match(source, /await client\.query\("commit"\)[\s\S]*createAssignedToMeNotifications/);
+  assert.match(source, /reporting_assignment_intent_notification_failed/);
+});
+
 test("worker can auto-discontinue below-minimum matched studies", () => {
   assert.match(source, /below_minimum_series_action/);
   assert.match(source, /series_count_below_minimum/);
   assert.match(source, /setting\.below_minimum_series_action !== "discontinue"/);
   assert.match(source, /status = 'discontinued'/);
   assert.match(source, /orthanc_auto_discontinue_below_minimum_series/);
+  assert.match(source, /cancelPendingReportingAssignmentIntent/);
 });
 
 test("worker does not auto-discontinue unavailable series counts", () => {

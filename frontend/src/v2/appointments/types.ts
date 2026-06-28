@@ -159,6 +159,8 @@ export interface CreateBookingRequest {
   bookingTime: string | null;
   caseCategory: CaseCategory;
   requiresReport?: boolean;
+  intendedReportingDoctorId?: number | null;
+  intendedReportingDoctorReason?: string | null;
   studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
@@ -173,6 +175,12 @@ export interface CreateBookingRequest {
     reason: string;
     overrideType?: SchedulingOverrideType;
   };
+}
+
+export interface IntendedReportingDoctorOption {
+  id: number;
+  displayName: string;
+  canFinalizeReports: boolean;
 }
 
 export interface BookingResponse {

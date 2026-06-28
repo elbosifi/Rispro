@@ -13,6 +13,7 @@ import type { Booking } from "../models/booking.js";
 import { CANCELLABLE_STATUSES } from "../../shared/types/common.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
+import { cancelPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 
 export interface CancelBookingResult {
   booking: Booking;
@@ -64,6 +65,10 @@ async function cancelBookingInternal(
 
   // 2. Update status to cancelled
   await updateBookingStatus(client, bookingId, "cancelled", userId);
+  await cancelPendingReportingAssignmentIntent(client, bookingId, {
+    reason: 'status", "cancelled"',
+    actorUserId: userId,
+  });
 
   // 3. Record a cancellation audit event (not an override, just a record)
   // Note: This is a lightweight record — no override needed for cancellation.

@@ -3,7 +3,7 @@ import { CreateAppointmentTab } from "./components/CreateAppointmentTab";
 import { useAuth } from "@/providers/auth-provider";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchPatientById } from "@/lib/api-hooks";
+import { fetchDoctorMe, fetchPatientById } from "@/lib/api-hooks";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
@@ -16,6 +16,12 @@ export function AppointmentCreatePage() {
   const lookups = useV2Lookups();
   const specialReasons = useV2SpecialReasonCodes();
   const priorities = useV2Priorities();
+  const doctorMeQuery = useQuery({
+    queryKey: ["doctor-me", "appointment-create"],
+    queryFn: fetchDoctorMe,
+    enabled: Boolean(user),
+    staleTime: 60_000,
+  });
   const parsedPatientId = urlPatientId ? Number(urlPatientId) : null;
   const hasValidPatientId = Number.isInteger(parsedPatientId) && (parsedPatientId as number) > 0;
 
@@ -73,6 +79,7 @@ export function AppointmentCreatePage() {
         schedulingEngineEnabled
         canUseNonStandardCapacityModes={user?.role === "supervisor" || user?.role === "super_admin"}
         currentUserRole={user?.role}
+        doctorModuleCapabilities={doctorMeQuery.data?.moduleCapabilities ?? []}
         initialSelectedPatient={initialSelectedPatient}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}

@@ -5,6 +5,12 @@ import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleBookingWorklistSync } from "./dicom-service.js";
+import {
+  activatePendingReportingAssignmentIntent,
+  cancelPendingReportingAssignmentIntent,
+  type ReportingAssignmentActivationNotification,
+} from "../modules/doctor-portal/reporting-assignment-intents-service.js";
+import { createAssignedToMeNotifications } from "../modules/doctor-portal/reporting-board-repository.js";
 
 export type MppsEventType = "n-create" | "n-set";
 export type MppsCorrelationStatus = "matched" | "unmatched" | "ambiguous";
@@ -66,6 +72,25 @@ interface StoredMppsEventRow {
 interface BookingCandidateRow {
   id: number;
   status: BookingWorkflowStatus;
+}
+
+async function createAssignedToMeNotificationsForReportingIntent(
+  notification: ReportingAssignmentActivationNotification | null
+): Promise<void> {
+  if (!notification) return;
+  try {
+    await createAssignedToMeNotifications({
+      doctorId: notification.doctorId,
+      appointmentIds: [notification.bookingId],
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      type: "reporting_assignment_intent_notification_failed",
+      bookingId: notification.bookingId,
+      doctorId: notification.doctorId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
 }
 
 function normalizeEventType(value: unknown): MppsEventType {
@@ -510,6 +535,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
   }
 
   const client = await pool.connect();
+  let reportingIntentNotification: ReportingAssignmentActivationNotification | null = null;
   try {
     await client.query("begin");
     const storedId = Number(eventId);
@@ -635,6 +661,17 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
         },
         client
       );
+      if (targetStatus === "completed") {
+        reportingIntentNotification = await activatePendingReportingAssignmentIntent(client, booking.id, {
+          actorUserId: null,
+          actionType: "mpps_status_completion",
+        });
+      } else if (targetStatus === "discontinued") {
+        await cancelPendingReportingAssignmentIntent(client, booking.id, {
+          reason: "status_discontinued",
+          actorUserId: null,
+        });
+      }
     }
 
     await markEventProcessed(client, storedId, {
@@ -649,6 +686,7 @@ export async function ingestMppsEvent(payload: IncomingMppsEventPayload): Promis
     if (booking.status !== targetStatus) {
       scheduleBookingWorklistSync(booking.id);
     }
+    await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
 
     return {
       eventId: storedId,

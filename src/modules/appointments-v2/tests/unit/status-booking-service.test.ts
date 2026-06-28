@@ -111,6 +111,30 @@ describe("status booking service source guards", () => {
     assert.match(source, /await client\.query\("commit"\)/);
   });
 
+  it("manual status completion activates pending reporting intents inside the transaction", () => {
+    assert.match(source, /activatePendingReportingAssignmentIntent/);
+    assert.match(source, /targetStatus === "completed"[\s\S]*activatePendingReportingAssignmentIntent/);
+    assert.match(source, /await client\.query\("commit"\)[\s\S]*createAssignedToMeNotifications/);
+    assert.match(source, /reporting_assignment_intent_notification_failed/);
+  });
+
+  it("manual terminal invalidation cancels pending reporting intents", () => {
+    assert.match(source, /cancelPendingReportingAssignmentIntent/);
+    assert.match(source, /targetStatus === "discontinued"[\s\S]*cancelPendingReportingAssignmentIntent/);
+  });
+
+  it("cancel and void workflows cancel pending reporting intents", () => {
+    assert.match(cancelBookingSource, /cancelPendingReportingAssignmentIntent/);
+    assert.match(cancelBookingSource, /status", "cancelled"/);
+    assert.match(appointmentsV2RoutesSource, /voidBookingByStaff/);
+    const voidBookingSource = readFileSync(
+      new URL("../../booking/services/void-booking.service.ts", import.meta.url),
+      "utf8"
+    );
+    assert.match(voidBookingSource, /cancelPendingReportingAssignmentIntent/);
+    assert.match(voidBookingSource, /status", "voided"/);
+  });
+
   it("V2 modality worklist prefers durable workflow timestamps with audit fallback", () => {
     assert.match(readV2RoutesSource, /left join lateral \(/);
     assert.match(readV2RoutesSource, /coalesce\(b\.arrived_at, status_times\.arrived_at\) as arrived_at/);

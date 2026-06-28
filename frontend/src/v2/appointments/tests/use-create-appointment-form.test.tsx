@@ -105,4 +105,36 @@ describe("useCreateAppointmentForm", () => {
     });
     expect(result.current.form.requiresReport).toBe(false);
   });
+
+  it("clears intended reporting doctor when modality changes or report is no longer required", () => {
+    const { result } = renderHook(() => useCreateAppointmentForm({ oncology: true, nonOncology: true }));
+
+    act(() => {
+      result.current.actions.setPatient({
+        id: 6,
+        arabicFullName: "Report Patient",
+        category: "oncology",
+      });
+    });
+    act(() => {
+      result.current.actions.setModalityId(1);
+      result.current.actions.setIntendedReportingDoctorId(42);
+      result.current.actions.setIntendedReportingDoctorReason("Workload plan");
+    });
+    expect(result.current.form.intendedReportingDoctorId).toBe(42);
+
+    act(() => {
+      result.current.actions.setModalityId(2);
+    });
+    expect(result.current.form.intendedReportingDoctorId).toBeNull();
+    expect(result.current.form.intendedReportingDoctorReason).toBe("");
+
+    act(() => {
+      result.current.actions.setIntendedReportingDoctorId(43);
+      result.current.actions.setIntendedReportingDoctorReason("Specific reader");
+      result.current.actions.setRequiresReport(false);
+    });
+    expect(result.current.form.intendedReportingDoctorId).toBeNull();
+    expect(result.current.form.intendedReportingDoctorReason).toBe("");
+  });
 });

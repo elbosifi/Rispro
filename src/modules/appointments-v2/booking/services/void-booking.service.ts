@@ -4,6 +4,7 @@ import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { findBookingById, voidBooking } from "../repositories/booking.repo.js";
 import type { Booking } from "../models/booking.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import { cancelPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 
 export interface VoidBookingResult {
   booking: Booking;
@@ -43,6 +44,10 @@ async function voidBookingInternal(
 
   if (userRole === "super_admin") {
     await voidBooking(client, bookingId, reason, userId);
+    await cancelPendingReportingAssignmentIntent(client, bookingId, {
+      reason: 'status", "voided"',
+      actorUserId: userId,
+    });
     return {
       booking: {
         ...booking,
@@ -67,6 +72,10 @@ async function voidBookingInternal(
 
   if (booking.status === "scheduled") {
     await voidBooking(client, bookingId, reason, userId);
+    await cancelPendingReportingAssignmentIntent(client, bookingId, {
+      reason: 'status", "voided"',
+      actorUserId: userId,
+    });
     return {
       booking: {
         ...booking,
@@ -87,6 +96,10 @@ async function voidBookingInternal(
     }
 
     await voidBooking(client, bookingId, reason, userId);
+    await cancelPendingReportingAssignmentIntent(client, bookingId, {
+      reason: 'status", "voided"',
+      actorUserId: userId,
+    });
     return {
       booking: {
         ...booking,

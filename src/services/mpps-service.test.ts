@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { normalizeIncomingMppsEvent } from "./mpps-service.js";
+
+const source = readFileSync(new URL("./mpps-service.ts", import.meta.url), "utf8");
 
 describe("mpps-service normalization", () => {
   it("normalizes MPPS payload fields and status", () => {
@@ -39,5 +42,13 @@ describe("mpps-service normalization", () => {
       }),
       /At least one identifier is required/
     );
+  });
+
+  it("activates or cancels pending reporting intents after MPPS status updates commit", () => {
+    assert.match(source, /activatePendingReportingAssignmentIntent/);
+    assert.match(source, /targetStatus === "completed"[\s\S]*activatePendingReportingAssignmentIntent/);
+    assert.match(source, /targetStatus === "discontinued"[\s\S]*cancelPendingReportingAssignmentIntent/);
+    assert.match(source, /await client\.query\("commit"\)[\s\S]*createAssignedToMeNotifications/);
+    assert.match(source, /reporting_assignment_intent_notification_failed/);
   });
 });

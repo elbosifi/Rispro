@@ -27,6 +27,8 @@ export interface CreateAppointmentFormModel {
   appointmentDate: string;
   notes: string;
   reportingPriorityId: number | null;
+  intendedReportingDoctorId: number | null;
+  intendedReportingDoctorReason: string;
   isWalkIn: boolean;
   capacityResolutionMode: CapacityResolutionMode;
   specialReasonCode: string;
@@ -47,6 +49,8 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   appointmentDate: "",
   notes: "",
   reportingPriorityId: null,
+  intendedReportingDoctorId: null,
+  intendedReportingDoctorReason: "",
   isWalkIn: false,
   capacityResolutionMode: "standard",
   specialReasonCode: "",
@@ -82,6 +86,8 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
         specialReasonCode: "",
         specialReasonConfirmed: false,
         specialReasonNote: "",
+        intendedReportingDoctorId: null,
+        intendedReportingDoctorReason: "",
         overrideRequired: false,
         overrideReason: "",
       }));
@@ -96,6 +102,8 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
         specialReasonCode: "",
         specialReasonConfirmed: false,
         specialReasonNote: "",
+        intendedReportingDoctorId: null,
+        intendedReportingDoctorReason: "",
         overrideRequired: false,
         overrideReason: "",
       }));
@@ -118,6 +126,20 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
           : caseCategory === "oncology"
             ? reportDefaults.oncology
             : reportDefaults.nonOncology,
+        intendedReportingDoctorId: (
+          prev.reportRequiredManuallyOverridden
+            ? prev.requiresReport
+            : caseCategory === "oncology"
+              ? reportDefaults.oncology
+              : reportDefaults.nonOncology
+        ) ? prev.intendedReportingDoctorId : null,
+        intendedReportingDoctorReason: (
+          prev.reportRequiredManuallyOverridden
+            ? prev.requiresReport
+            : caseCategory === "oncology"
+              ? reportDefaults.oncology
+              : reportDefaults.nonOncology
+        ) ? prev.intendedReportingDoctorReason : "",
         appointmentDate: "",
         overrideRequired: false,
         overrideReason: "",
@@ -128,6 +150,8 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
         ...prev,
         requiresReport,
         reportRequiredManuallyOverridden: true,
+        intendedReportingDoctorId: requiresReport ? prev.intendedReportingDoctorId : null,
+        intendedReportingDoctorReason: requiresReport ? prev.intendedReportingDoctorReason : "",
       }));
     },
     setAppointmentDate(appointmentDate: string, overrideRequired: boolean) {
@@ -174,6 +198,12 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
     },
     setReportingPriorityId(reportingPriorityId: number | null) {
       setForm((prev) => ({ ...prev, reportingPriorityId }));
+    },
+    setIntendedReportingDoctorId(intendedReportingDoctorId: number | null) {
+      setForm((prev) => ({ ...prev, intendedReportingDoctorId }));
+    },
+    setIntendedReportingDoctorReason(intendedReportingDoctorReason: string) {
+      setForm((prev) => ({ ...prev, intendedReportingDoctorReason }));
     },
     setIsWalkIn(isWalkIn: boolean) {
       setForm((prev) => ({ ...prev, isWalkIn }));

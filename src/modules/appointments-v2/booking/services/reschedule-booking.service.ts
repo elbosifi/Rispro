@@ -52,6 +52,7 @@ import {
   isNoShowBookingBlocked
 } from "../../../../services/patient-no-show-restriction-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
+import { cancelPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -609,6 +610,12 @@ export async function rescheduleBookingInternal(
     effectiveRequiresReport,
     effectiveStudyInstanceUid
   );
+  if (effectiveRequiresReport === false) {
+    await cancelPendingReportingAssignmentIntent(client, bookingId, {
+      reason: "requires_report=false",
+      actorUserId: userId,
+    });
+  }
 
   if (wasOverride && supervisorUserId != null) {
     const overrideType: SchedulingOverrideType =
@@ -687,6 +694,12 @@ async function rescheduleTimeOnly(
   rescheduleReason: string | null
 ): Promise<RescheduleBookingResult> {
   await updateBookingDateTime(client, bookingId, previousDate, newTime, userId, reportingPriorityId, notes, requiresReport, studyInstanceUid);
+  if (requiresReport === false) {
+    await cancelPendingReportingAssignmentIntent(client, bookingId, {
+      reason: "requires_report=false",
+      actorUserId: userId,
+    });
+  }
 
   await recordRescheduleAudit(client, {
     bookingId,

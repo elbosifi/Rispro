@@ -13,6 +13,8 @@ export interface CreateAppointmentDto {
   bookingTime?: string | null;
   caseCategory?: CaseCategory;
   requiresReport?: boolean;
+  intendedReportingDoctorId?: number | null;
+  intendedReportingDoctorReason?: string | null;
   studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;

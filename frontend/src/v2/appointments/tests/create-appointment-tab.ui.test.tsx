@@ -7,6 +7,7 @@ import { LanguageProvider } from "@/providers/language-provider";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, CreateSchedulingOverrideRequestInput, SchedulingDecisionDto } from "../types";
 import type { ModalityDto } from "../types";
+import type { DoctorModuleCapability } from "@/types/api";
 
 type MockNoShowAppointment = {
   id: number;
@@ -61,6 +62,11 @@ const mockPrintAppointmentSlipById = vi.fn<(appointmentId: number) => Promise<vo
 const mockCreateSchedulingOverrideRequest = vi.fn<
   (input: CreateSchedulingOverrideRequestInput) => Promise<{ request: { id: number; status: "pending" } }>
 >(async () => ({ request: { id: 1, status: "pending" } }));
+const mockIntendedReportingDoctors = {
+  current: [
+    { id: 42, displayName: "Dr Target", canFinalizeReports: true },
+  ],
+};
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
@@ -104,17 +110,25 @@ vi.mock("@tanstack/react-query", () => ({
         error: null,
       };
     }
-    if (key.includes("scheduling_and_capacity")) {
-      return {
-        data: {
-          allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
-          can_request_scheduling_override: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
-        },
-        isLoading: false,
-        isError: false,
-        error: null,
-      };
-    }
+	    if (key.includes("scheduling_and_capacity")) {
+	      return {
+	        data: {
+	          allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+	          can_request_scheduling_override: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+	        },
+	        isLoading: false,
+	        isError: false,
+	        error: null,
+	      };
+	    }
+	    if (key.includes("intended-reporting-doctors")) {
+	      return {
+	        data: mockIntendedReportingDoctors.current,
+	        isLoading: false,
+	        isError: false,
+	        error: null,
+	      };
+	    }
 
     return {
       data: {
@@ -305,11 +319,12 @@ vi.mock("../hooks/useAppointmentAvailability", () => ({
 }));
 
 vi.mock("../api", () => ({
-  useCreateSchedulingOverrideRequest: () => ({
-    mutateAsync: mockCreateSchedulingOverrideRequest,
-    isPending: false,
-  }),
-  useV2ExamTypes: (modalityId: number | null) => {
+	  useCreateSchedulingOverrideRequest: () => ({
+	    mutateAsync: mockCreateSchedulingOverrideRequest,
+	    isPending: false,
+	  }),
+	  fetchIntendedReportingDoctors: () => Promise.resolve(mockIntendedReportingDoctors.current),
+	  useV2ExamTypes: (modalityId: number | null) => {
     if (modalityId === 1) {
       return {
         data: [
@@ -400,7 +415,8 @@ function setup(
     { id: 1, name: "CT", nameAr: "Ø£Ø´Ø¹Ø© Ù…Ù‚Ø·Ø¹ÙŠØ©", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
     { id: 2, name: "MRI", nameAr: "Ø±Ù†ÙŠÙ† Ù…ØºÙ†Ø§Ø·ÙŠØ³ÙŠ", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
   ],
-  currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor"
+  currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor",
+  doctorModuleCapabilities: DoctorModuleCapability[] = []
 ) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
@@ -453,9 +469,10 @@ function setup(
               specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
               priorityOptions={priorityOptions}
               schedulingEngineEnabled
-              canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
-              currentUserRole={currentUserRole}
-              onCreateAppointment={onCreateAppointment}
+	              canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
+	              currentUserRole={currentUserRole}
+	              doctorModuleCapabilities={doctorModuleCapabilities}
+	              onCreateAppointment={onCreateAppointment}
               onEvaluateAvailability={onEvaluateAvailability}
             />
           } />
@@ -508,6 +525,9 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockCreateSchedulingOverrideRequest.mockReset();
     mockCreateSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
     mockReceptionOverrideRequestsEnabled.current = true;
+    mockIntendedReportingDoctors.current = [
+      { id: 42, displayName: "Dr Target", canFinalizeReports: true },
+    ];
     mockRowsRef.current = availabilityRows;
     mockRawItemsRef.current = [
       {
@@ -603,6 +623,53 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "2" } });
     expect(examType.textContent).toContain("MRI Brain");
     expect(examType.textContent).not.toContain("CT Head");
+  });
+
+  it("shows intended reporting doctor only to privileged users and submits the selected intent", async () => {
+    const { onCreateAppointment, onEvaluateAvailability } = setup(true, [], undefined, "supervisor");
+    onEvaluateAvailability.mockResolvedValue({
+      isAllowed: true,
+      requiresSupervisorOverride: false,
+      displayStatus: "available",
+      suggestedBookingMode: "standard",
+      consumedCapacityMode: "standard",
+      remainingStandardCapacity: 1,
+      remainingSpecialQuota: null,
+      matchedRuleIds: [],
+      reasons: [],
+      policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+      decisionTrace: { evaluatedAt: "", input: {} },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    const reportRequired = screen.getByLabelText("Report required") as HTMLInputElement;
+    if (!reportRequired.checked) {
+      await userEvent.click(reportRequired);
+    }
+
+    expect(screen.getByText("The doctor will be notified when the study is completed and becomes available for reporting. Leave empty to keep the case in the normal reporting pool.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Intended reporting doctor"), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText("Intended reporting doctor reason"), { target: { value: "Subspecialty reader" } });
+    fireEvent.change(screen.getByLabelText("Appointment Date"), { target: { value: "2027-01-03" } });
+    await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+    await waitFor(() => {
+      expect(onCreateAppointment).toHaveBeenCalled();
+    });
+    const callArg = onCreateAppointment.mock.calls[0][0];
+    expect(callArg.intendedReportingDoctorId).toBe(42);
+    expect(callArg.intendedReportingDoctorReason).toBe("Subspecialty reader");
+  });
+
+  it("hides intended reporting doctor for receptionists and clears it when report is not required", async () => {
+    setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByLabelText("Report required"));
+
+    expect(screen.queryByLabelText("Intended reporting doctor")).toBeNull();
   });
 
   it("persists entity display mode in localStorage", async () => {
