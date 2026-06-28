@@ -912,17 +912,17 @@ export function CreateAppointmentTab({
 
               <div>
                 <label className="block text-sm font-semibold mb-2 text-foreground">
-                  Entity Display
+                  {t(language, "appointments.create.entityDisplay")}
                 </label>
                 <select
-                  aria-label="Entity Display"
+                  aria-label={t(language, "appointments.create.entityDisplay")}
                   value={entityDisplayMode}
                   onChange={(e) => setEntityDisplayMode(e.target.value as EntityDisplayMode)}
                   className="input-premium"
                 >
-                  <option value="ar">Arabic</option>
-                  <option value="en">English</option>
-                  <option value="both">Both</option>
+                  <option value="ar">{t(language, "appointments.create.entityDisplayArabic")}</option>
+                  <option value="en">{t(language, "appointments.create.entityDisplayEnglish")}</option>
+                  <option value="both">{t(language, "appointments.create.entityDisplayBoth")}</option>
                 </select>
               </div>
 
@@ -981,7 +981,7 @@ export function CreateAppointmentTab({
                 <input
                   type="checkbox"
                   id="requiresReport"
-                  aria-label="Report required"
+                  aria-label={t(language, "appointments.create.reportRequired")}
                   checked={form.requiresReport}
                   onChange={(e) => actions.setRequiresReport(e.target.checked)}
                   className="mt-0.5 w-5 h-5 cursor-pointer accent-[var(--accent)]"
@@ -997,29 +997,29 @@ export function CreateAppointmentTab({
               {showIntendedReportingDoctor && (
                 <div className="xl:col-span-2">
                   <label className="block text-sm font-semibold mb-2 text-foreground">
-                    Intended reporting doctor
+                    {t(language, "appointments.create.intendedReportingDoctor")}
                   </label>
                   <select
-                    aria-label="Intended reporting doctor"
+                    aria-label={t(language, "appointments.create.intendedReportingDoctor")}
                     value={form.intendedReportingDoctorId ?? ""}
                     onChange={(event) => actions.setIntendedReportingDoctorId(event.target.value ? Number(event.target.value) : null)}
                     className="input-premium"
                     disabled={intendedReportingDoctorsQuery.isLoading}
                   >
-                    <option value="">Normal reporting pool</option>
+                    <option value="">{t(language, "appointments.create.normalReportingPool")}</option>
                     {(intendedReportingDoctorsQuery.data ?? []).map((doctor) => (
                       <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>
                     ))}
                   </select>
                   <textarea
-                    aria-label="Intended reporting doctor reason"
+                    aria-label={t(language, "appointments.create.intendedReportingDoctorReason")}
                     value={form.intendedReportingDoctorReason}
                     onChange={(event) => actions.setIntendedReportingDoctorReason(event.target.value)}
                     className="input-premium mt-2"
                     rows={2}
                   />
                   <p className="mt-2 text-sm text-muted-foreground">
-                    The doctor will be notified when the study is completed and becomes available for reporting. Leave empty to keep the case in the normal reporting pool.
+                    {t(language, "appointments.create.intendedReportingDoctorHelp")}
                   </p>
                 </div>
               )}
