@@ -542,18 +542,22 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const date = addDays(11);
     const ownCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Own" });
     const otherCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Other" });
+    await pool.query(`update patients set mrn = 'MRN-OPEN-SONIC' where id = (select patient_id from appointments_v2.bookings where id = $1)`, [ownCase]);
     await assignDirectly(ownCase, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await assignDirectly(otherCase, otherDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await withSonicDicomConfig({
       sonicDicomReportsEnabled: true,
       sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
-      sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?accessionnumber={{accessionNumber}}",
     }, async () => {
-      const supervisorOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
+      const supervisorOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=study`);
       assert.equal(supervisorOpen.status, 302);
       const supervisorLocation = supervisorOpen.headers.get("location") ?? "";
       assert.match(supervisorLocation, /^https:\/\/sonic\.example\/viewer\/#\/viewer\?accessionnumber=V2-0/);
-      assert.doesNotMatch(supervisorLocation, /username|password|patient/i);
+      assert.doesNotMatch(supervisorLocation, /username|password/i);
+
+      const patientOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=patient`);
+      assert.equal(patientOpen.status, 302);
+      assert.equal(patientOpen.headers.get("location"), "https://sonic.example/viewer/#/viewer?patientid=MRN-OPEN-SONIC");
 
       const ownOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
       assert.equal(ownOpen.status, 302);
@@ -580,19 +584,18 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     });
   });
 
-  it("rejects malformed or credentialed SonicDICOM staff viewer templates", async () => {
+  it("rejects malformed SonicDICOM public base URL for staff viewer redirects", async () => {
     guard();
     const date = addDays(13);
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Bad Template" });
     await withSonicDicomConfig({
       sonicDicomReportsEnabled: true,
-      sonicDicomPublicBaseUrl: "https://sonic.example/viewer",
-      sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
+      sonicDicomPublicBaseUrl: "not a url",
     }, async () => {
       const response = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/open-sonicdicom`);
       assert.equal(response.status, 503);
       const body = await response.text();
-      assert.match(body, /must not include username or password/i);
+      assert.match(body, /public base URL is malformed/i);
     });
   });
 

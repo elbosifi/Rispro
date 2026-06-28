@@ -2,7 +2,7 @@ import { HttpError } from "../../utils/http-error.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { pool } from "../../db/pool.js";
-import { buildSonicDicomStaffImageViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
+import { buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
@@ -455,8 +455,17 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   return { filters, ...aggregateReportingBoardStats(rows) };
 }
 
-export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number): Promise<{ redirectUrl: string }> {
+type SonicDicomOpenScope = "study" | "patient";
+
+function normalizeSonicDicomOpenScope(scope?: string | null): SonicDicomOpenScope {
+  if (!scope || scope === "study") return "study";
+  if (scope === "patient") return "patient";
+  throw new HttpError(400, "SonicDICOM open scope must be study or patient.");
+}
+
+export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number, scopeInput?: string | null): Promise<{ redirectUrl: string }> {
   const me = await requireRosterDoctor(actor);
+  const scope = normalizeSonicDicomOpenScope(scopeInput);
   const canManage =
     me.moduleCapabilities.includes("doctor_supervisor") ||
     me.moduleCapabilities.includes("doctor_admin");
@@ -477,12 +486,14 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
   }
 
   const accessionNumber = String(row.accessionNumber || "").trim();
-  if (!accessionNumber) throw new HttpError(400, "Accession number is required to open the SonicDICOM study.");
+  const patientMrn = String(row.patientMrn || "").trim();
+  if (scope === "study" && !accessionNumber) throw new HttpError(400, "Accession number is required to open the SonicDICOM study.");
+  if (scope === "patient" && !patientMrn) throw new HttpError(400, "Patient ID/MRN is required to open patient studies in SonicDICOM.");
   const sonicSettings = await readSonicDicomReportSettings();
-  const redirectUrl = buildSonicDicomStaffImageViewerUrl({
+  const redirectUrl = buildSonicDicomStaffViewerUrl({
     settings: sonicSettings,
-    accessionNumber,
-    studyInstanceUid: row.studyInstanceUid,
+    queryKey: scope === "study" ? "accessionnumber" : "patientid",
+    value: scope === "study" ? accessionNumber : patientMrn,
   });
 
   await insertDoctorAuditEvent(pool, {
@@ -494,10 +505,12 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
     metadata: {
       appointmentId,
       accessionNumber,
+      patientMrn,
       patientId: row.patientId,
       studyInstanceUid: row.studyInstanceUid,
       actorUserId: actor.userId,
       actorDoctorId: me.profile?.id ?? null,
+      scope,
       source: "reporting_board",
     },
     reason: null,

@@ -121,9 +121,15 @@ function renderPage(path = "/doctor/reporting-board") {
   );
 }
 
+function setNavigatorPlatform(platform: string) {
+  Object.defineProperty(window.navigator, "platform", { configurable: true, value: platform });
+  Object.defineProperty(window.navigator, "userAgent", { configurable: true, value: platform });
+}
+
 describe("DoctorReportingBoardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setNavigatorPlatform("MacIntel");
     fetchReportingBoardSettingsMock.mockResolvedValue({
       cutoffMode: "days_back",
       defaultCutoffDate: null,
@@ -312,7 +318,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
   });
 
-  it("shows SonicDICOM study action as backend redirect link and copies accession", async () => {
+  it("shows SonicDICOM study and patient actions as backend redirect links and copies accession", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -324,16 +330,54 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
-    const openStudy = within(row).getByRole("menuitem", { name: "Open study in SonicDICOM" }) as HTMLAnchorElement;
-    expect(openStudy.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom");
+    const openStudy = within(row).getByRole("menuitem", { name: "Open this study in SonicDICOM" }) as HTMLAnchorElement;
+    expect(openStudy.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom?scope=study");
     expect(openStudy.getAttribute("target")).toBe("_blank");
     expect(openStudy.getAttribute("rel")).toBe("noopener noreferrer");
     expect(openStudy.getAttribute("href")).not.toMatch(/username|password|https?:/i);
+    const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in SonicDICOM" }) as HTMLAnchorElement;
+    expect(openPatient.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom?scope=patient");
+    expect(openPatient.getAttribute("href")).not.toMatch(/username|password|MRN-7|7$/i);
+    expect(within(row).queryByRole("menuitem", { name: "Open this study in RadiAnt" })).toBeNull();
 
     fireEvent.click(within(row).getByRole("menuitem", { name: "Copy accession number" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("V2-000042"));
     expect(await within(row).findByText("Accession copied.")).toBeTruthy();
     expect(within(row).getByText("View appointment")).toBeTruthy();
+  });
+
+  it("shows RadiAnt actions only on Windows and builds tag search URLs", async () => {
+    setNavigatorPlatform("Win32");
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+
+    const openStudy = within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
+    expect(openStudy.getAttribute("href")).toBe("radiant:///?n=pstv&v=00080050&v=%22V2-000042%22");
+    const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
+    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22MRN-7%22");
+    expect(openPatient.getAttribute("href")).not.toContain("patientId=7");
+  });
+
+  it("disables viewer actions when accession or patient MRN is missing", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, accessionNumber: "", patientMrn: null }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    setNavigatorPlatform("Win32");
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("Alpha Patient").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /Open actions for/ }));
+
+    expect(within(row).getByRole("menuitem", { name: "Open this study in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(within(row).getByRole("menuitem", { name: "Open patient studies in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }).hasAttribute("disabled")).toBe(true);
+    expect(within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
+    expect(within(row).getByRole("menuitem", { name: "Copy accession number" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("uses a default board limit of 100", async () => {

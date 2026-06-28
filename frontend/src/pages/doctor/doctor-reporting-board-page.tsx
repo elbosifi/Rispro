@@ -106,6 +106,21 @@ function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
+export function isWindowsWorkstation(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = `${nav.userAgentData?.platform ?? ""} ${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`;
+  return /\bWin/i.test(platform);
+}
+
+export function buildRadiantPacsTagUrl(tag: string, value: string): string {
+  return `radiant:///?n=pstv&v=${encodeURIComponent(tag)}&v=${encodeURIComponent(`"${value}"`)}`;
+}
+
+function buildSonicDicomRedirectPath(appointmentId: number, scope: "study" | "patient"): string {
+  return `/api/doctor/reporting-board/cases/${appointmentId}/open-sonicdicom?scope=${scope}`;
+}
+
 function compactFilters(filters: ReportingBoardFilters): ReportingBoardFilters {
   return Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined)) as ReportingBoardFilters;
 }
@@ -529,7 +544,8 @@ function RowActionMenu({
   const [copyMessage, setCopyMessage] = useState("");
   const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
-  const sonicDicomPath = `/api/doctor/reporting-board/cases/${row.appointmentId}/open-sonicdicom`;
+  const patientMrn = String(row.patientMrn || "").trim();
+  const showRadiantActions = isWindowsWorkstation();
   const copyAccession = async () => {
     if (!accessionNumber) return;
     try {
@@ -560,25 +576,55 @@ function RowActionMenu({
           className="absolute right-0 top-9 z-40 min-w-64 rounded-lg border p-2 text-left shadow-lg"
           style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
         >
-          <Link
-            role="menuitem"
-            to={`/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`}
-            className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
-          >
-            View appointment
-          </Link>
           {accessionNumber ? (
             <a
               role="menuitem"
-              href={sonicDicomPath}
+              href={buildSonicDicomRedirectPath(row.appointmentId, "study")}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
+            >
+              Open this study in SonicDICOM
+            </a>
+          ) : (
+            <button type="button" role="menuitem" disabled title="Accession number missing" className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+              Open this study in SonicDICOM
+            </button>
+          )}
+          {patientMrn ? (
+            <a
+              role="menuitem"
+              href={buildSonicDicomRedirectPath(row.appointmentId, "patient")}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
             >
-              Open study in SonicDICOM
+              Open patient studies in SonicDICOM
             </a>
           ) : (
-            <p className="mt-1 px-2 py-1.5 text-xs" style={{ color: "var(--text-muted)" }}>SonicDICOM study unavailable: missing accession number.</p>
+            <button type="button" role="menuitem" disabled title="Patient ID/MRN missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+              Open patient studies in SonicDICOM
+            </button>
+          )}
+          {showRadiantActions && accessionNumber && (
+            <a role="menuitem" href={buildRadiantPacsTagUrl("00080050", accessionNumber)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+              Open this study in RadiAnt
+            </a>
+          )}
+          {showRadiantActions && !accessionNumber && (
+            <button type="button" role="menuitem" disabled title="Accession number missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+              Open this study in RadiAnt
+            </button>
+          )}
+          {showRadiantActions && patientMrn && (
+            <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientMrn)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+              Open patient studies in RadiAnt
+            </a>
+          )}
+          {showRadiantActions && !patientMrn && (
+            <button type="button" role="menuitem" disabled title="Patient ID/MRN missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+              Open patient studies in RadiAnt
+            </button>
           )}
           <button
             type="button"
@@ -590,6 +636,14 @@ function RowActionMenu({
             Copy accession number
           </button>
           {copyMessage && <p className="px-2 pt-1 text-[11px]" style={{ color: "var(--text-muted)" }}>{copyMessage}</p>}
+          <Link
+            role="menuitem"
+            to={`/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`}
+            className="mt-2 block rounded-md border-t px-2 py-1.5 pt-2 text-xs font-semibold text-foreground hover:bg-slate-50"
+            style={{ borderColor: "var(--border)" }}
+          >
+            View appointment
+          </Link>
           <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
             {canManage && row.canAssign ? (
               <AssignmentEditor

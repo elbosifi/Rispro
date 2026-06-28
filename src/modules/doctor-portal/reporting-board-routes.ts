@@ -171,7 +171,11 @@ router.get(
 router.get(
   "/cases/:appointmentId/open-sonicdicom",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    const result = await getReportingBoardSonicDicomStudyRedirect(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId"));
+    const result = await getReportingBoardSonicDicomStudyRedirect(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      asOptionalString(req.query.scope)
+    );
     res.redirect(302, result.redirectUrl);
   })
 );

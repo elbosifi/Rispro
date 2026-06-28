@@ -70,8 +70,6 @@ type SqlModule = {
 };
 
 const statusCache = new Map<number, CacheEntry>();
-const STAFF_VIEWER_CREDENTIAL_PLACEHOLDERS = /\{\{\s*(?:username|password)\s*\}\}/i;
-const TEMPLATE_PLACEHOLDER = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g;
 
 function validateDatabaseName(name: string, fallback: string): string {
   const trimmed = String(name || "").trim() || fallback;
@@ -93,44 +91,27 @@ function validatedBaseUrl(value: string, label: string): string {
   }
 }
 
-function encodeStaffViewerTemplateValue(value: string | null | undefined): string {
+function encodeStaffViewerValue(value: string | null | undefined): string {
   return encodeURIComponent(String(value ?? ""));
 }
 
-export function buildSonicDicomStaffImageViewerUrl(input: {
+export function buildSonicDicomStaffViewerUrl(input: {
   settings: SonicDicomReportSettings;
-  accessionNumber: string;
-  studyInstanceUid?: string | null;
+  queryKey: "accessionnumber" | "patientid";
+  value: string;
 }): string {
   if (!input.settings.sonicDicomReportsEnabled) throw new HttpError(503, "SonicDICOM integration is disabled.");
-  const accessionNumber = String(input.accessionNumber || "").trim();
-  if (!accessionNumber) throw new HttpError(400, "Accession number is required to open the SonicDICOM study.");
-  const template = String(input.settings.sonicDicomStaffImageViewerUrlTemplate || "").trim();
-  if (!template) throw new HttpError(503, "SonicDICOM staff image viewer URL template is not configured.");
-  if (STAFF_VIEWER_CREDENTIAL_PLACEHOLDERS.test(template)) {
-    throw new HttpError(503, "SonicDICOM staff image viewer URL template must not include username or password placeholders.");
-  }
-
-  const replacements: Record<string, string> = {
-    publicBaseUrl: validatedBaseUrl(input.settings.sonicDicomPublicBaseUrl, "SonicDICOM public base URL"),
-    internalBaseUrl: input.settings.sonicDicomInternalBaseUrl
-      ? validatedBaseUrl(input.settings.sonicDicomInternalBaseUrl, "SonicDICOM internal base URL")
-      : "",
-    accessionNumber: encodeStaffViewerTemplateValue(accessionNumber),
-    studyInstanceUid: encodeStaffViewerTemplateValue(input.studyInstanceUid ?? ""),
-  };
-
-  const rendered = template.replace(TEMPLATE_PLACEHOLDER, (match, key: string) => {
-    if (!(key in replacements)) throw new HttpError(503, `SonicDICOM staff image viewer URL template contains unsupported placeholder ${match}.`);
-    return replacements[key];
-  });
+  const value = String(input.value || "").trim();
+  if (!value) throw new HttpError(400, "SonicDICOM viewer identifier is required.");
+  const baseUrl = validatedBaseUrl(input.settings.sonicDicomPublicBaseUrl, "SonicDICOM public base URL");
+  const rendered = `${baseUrl}/#/viewer?${input.queryKey}=${encodeStaffViewerValue(value)}`;
 
   try {
     const parsed = new URL(rendered);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported protocol");
     return parsed.toString();
   } catch {
-    throw new HttpError(503, "SonicDICOM staff image viewer URL template produced a malformed URL.");
+    throw new HttpError(503, "SonicDICOM public base URL produced a malformed viewer URL.");
   }
 }
 

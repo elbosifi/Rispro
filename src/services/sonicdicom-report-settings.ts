@@ -15,7 +15,6 @@ export interface SonicDicomReportSettings {
   sonicDicomPublicReportViewerUrlTemplate: string;
   sonicDicomPublicPdfUrlTemplate: string;
   sonicDicomPublicImageViewerUrlTemplate: string;
-  sonicDicomStaffImageViewerUrlTemplate: string;
   sonicDicomInternalBaseUrl: string;
   sonicDicomInternalSearchUrlTemplate: string;
   sonicDicomInternalReportViewerUrlTemplate: string;
@@ -57,8 +56,6 @@ export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
     "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicImageViewerUrlTemplate:
     "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
-  sonicDicomStaffImageViewerUrlTemplate:
-    "{{publicBaseUrl}}/#/viewer?accessionnumber={{accessionNumber}}",
   sonicDicomInternalBaseUrl: "",
   sonicDicomInternalSearchUrlTemplate: "",
   sonicDicomInternalReportViewerUrlTemplate:
@@ -174,7 +171,6 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
     sonicDicomPublicReportViewerUrlTemplate: asString(record.sonicDicomPublicReportViewerUrlTemplate, defaults.sonicDicomPublicReportViewerUrlTemplate),
     sonicDicomPublicPdfUrlTemplate: asString(record.sonicDicomPublicPdfUrlTemplate, defaults.sonicDicomPublicPdfUrlTemplate),
     sonicDicomPublicImageViewerUrlTemplate: asString(record.sonicDicomPublicImageViewerUrlTemplate, defaults.sonicDicomPublicImageViewerUrlTemplate),
-    sonicDicomStaffImageViewerUrlTemplate: asString(record.sonicDicomStaffImageViewerUrlTemplate, defaults.sonicDicomStaffImageViewerUrlTemplate),
     sonicDicomInternalBaseUrl: asString(record.sonicDicomInternalBaseUrl, defaults.sonicDicomInternalBaseUrl),
     sonicDicomInternalSearchUrlTemplate: asString(record.sonicDicomInternalSearchUrlTemplate, defaults.sonicDicomInternalSearchUrlTemplate),
     sonicDicomInternalReportViewerUrlTemplate: asString(record.sonicDicomInternalReportViewerUrlTemplate, defaults.sonicDicomInternalReportViewerUrlTemplate),

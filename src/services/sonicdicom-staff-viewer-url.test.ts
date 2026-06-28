@@ -6,38 +6,36 @@ process.env.JWT_SECRET ||= "test-secret";
 
 describe("SonicDICOM staff image viewer URL", () => {
   it("renders a no-credential staff viewer URL with encoded accession number", async () => {
-    const { buildSonicDicomStaffImageViewerUrl } = await import("./sonicdicom-report-service.js");
+    const { buildSonicDicomStaffViewerUrl } = await import("./sonicdicom-report-service.js");
     const { DEFAULT_SONICDICOM_REPORT_SETTINGS } = await import("./sonicdicom-report-settings.js");
-    const url = buildSonicDicomStaffImageViewerUrl({
+    const url = buildSonicDicomStaffViewerUrl({
       settings: {
         ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
         sonicDicomReportsEnabled: true,
         sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
-        sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?accessionnumber={{accessionNumber}}&study={{studyInstanceUid}}",
       },
-      accessionNumber: "ACC 1/2",
-      studyInstanceUid: "1.2.3",
+      queryKey: "accessionnumber",
+      value: "ACC 1/2",
     });
 
-    assert.equal(url, "https://sonic.example/viewer/#/viewer?accessionnumber=ACC%201%2F2&study=1.2.3");
+    assert.equal(url, "https://sonic.example/viewer/#/viewer?accessionnumber=ACC%201%2F2");
     assert.doesNotMatch(url, /username|password/i);
   });
 
-  it("rejects credential placeholders in the staff viewer template", async () => {
-    const { HttpError } = await import("../utils/http-error.js");
-    const { buildSonicDicomStaffImageViewerUrl } = await import("./sonicdicom-report-service.js");
+  it("renders a no-credential patient studies URL with encoded MRN", async () => {
+    const { buildSonicDicomStaffViewerUrl } = await import("./sonicdicom-report-service.js");
     const { DEFAULT_SONICDICOM_REPORT_SETTINGS } = await import("./sonicdicom-report-settings.js");
-    assert.throws(
-      () => buildSonicDicomStaffImageViewerUrl({
-        settings: {
-          ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
-          sonicDicomReportsEnabled: true,
-          sonicDicomPublicBaseUrl: "https://sonic.example/viewer",
-          sonicDicomStaffImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
-        },
-        accessionNumber: "ACC-1",
-      }),
-      (error) => error instanceof HttpError && error.statusCode === 503 && /username or password/.test(error.message)
-    );
+    const url = buildSonicDicomStaffViewerUrl({
+      settings: {
+        ...DEFAULT_SONICDICOM_REPORT_SETTINGS,
+        sonicDicomReportsEnabled: true,
+        sonicDicomPublicBaseUrl: "https://sonic.example/viewer",
+      },
+      queryKey: "patientid",
+      value: "MRN 7",
+    });
+
+    assert.equal(url, "https://sonic.example/viewer/#/viewer?patientid=MRN%207");
+    assert.doesNotMatch(url, /id=.*patient|username|password/i);
   });
 });
