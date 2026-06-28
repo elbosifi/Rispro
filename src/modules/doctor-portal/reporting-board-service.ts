@@ -488,13 +488,14 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
 
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientMrn = String(row.patientMrn || "").trim();
+  const patientIdentifier = String(row.patientId || patientMrn || "").trim();
   if (scope === "study" && !accessionNumber) throw new HttpError(400, "Accession number is required to open the SonicDICOM study.");
-  if (scope === "patient" && !patientMrn) throw new HttpError(400, "Patient ID/MRN is required to open the patient list in SonicDICOM.");
+  if (scope === "patient" && !patientIdentifier) throw new HttpError(400, "Patient ID/MRN is required to open the patient list in SonicDICOM.");
   const sonicSettings = await readSonicDicomReportSettings();
   const redirectUrl = buildSonicDicomStaffViewerUrl({
     settings: sonicSettings,
     target: scope === "study" ? "studyViewer" : "patientList",
-    value: scope === "study" ? accessionNumber : patientMrn,
+    value: scope === "study" ? accessionNumber : patientIdentifier,
   });
 
   await insertDoctorAuditEvent(pool, {

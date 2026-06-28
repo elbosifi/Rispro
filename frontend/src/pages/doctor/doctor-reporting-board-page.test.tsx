@@ -368,13 +368,29 @@ describe("DoctorReportingBoardPage", () => {
     const openStudy = within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
     expect(openStudy.getAttribute("href")).toBe("radiant:///?n=pstv&v=00080050&v=%22V2-000042%22");
     const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
-    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22MRN-7%22");
-    expect(openPatient.getAttribute("href")).not.toContain("patientId=7");
+    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%227%22");
+    expect(openPatient.getAttribute("href")).not.toContain("MRN-7");
   });
 
-  it("disables viewer actions when accession or patient MRN is missing", async () => {
+  it("falls back to MRN for patient links when patient ID is missing", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
-      cases: [{ ...caseRow, accessionNumber: "", patientMrn: null }],
+      cases: [{ ...caseRow, patientId: 0, patientMrn: "MRN-7" }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    setNavigatorPlatform("Win32");
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+
+    const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
+    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22MRN-7%22");
+  });
+
+  it("disables viewer actions when accession and patient identifiers are missing", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, appointmentId: 43, patientId: 0, accessionNumber: "", patientMrn: null }],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
     });
     setNavigatorPlatform("Win32");

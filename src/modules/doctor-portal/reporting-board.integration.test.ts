@@ -542,6 +542,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const date = addDays(11);
     const ownCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Own" });
     const otherCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Other" });
+    const patientResult = await pool.query<{ patient_id: string }>(`select patient_id::text from appointments_v2.bookings where id = $1`, [ownCase]);
+    const ownCasePatientId = patientResult.rows[0].patient_id;
     await pool.query(`update patients set mrn = 'MRN-OPEN-SONIC' where id = (select patient_id from appointments_v2.bookings where id = $1)`, [ownCase]);
     await assignDirectly(ownCase, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await assignDirectly(otherCase, otherDoctor.doctorId, "2026-05-01T09:00:00.000Z");
@@ -557,7 +559,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
       const patientOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=patient`);
       assert.equal(patientOpen.status, 302);
-      assert.equal(patientOpen.headers.get("location"), "https://sonic.example/viewer/#/list?patientid=MRN-OPEN-SONIC");
+      assert.equal(patientOpen.headers.get("location"), `https://sonic.example/viewer/#/list?patientid=${ownCasePatientId}`);
 
       const ownOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
       assert.equal(ownOpen.status, 302);

@@ -547,7 +547,7 @@ function RowActionMenu({
   const [copyMessage, setCopyMessage] = useState("");
   const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
-  const patientMrn = String(row.patientMrn || "").trim();
+  const patientIdentifier = String(row.patientId || row.patientMrn || "").trim();
   const showRadiantActions = isWindowsWorkstation();
   const copyAccession = async () => {
     if (!accessionNumber) return;
@@ -594,7 +594,7 @@ function RowActionMenu({
               Open this study in SonicDICOM
             </button>
           )}
-          {patientMrn ? (
+          {patientIdentifier ? (
             <a
               role="menuitem"
               href={buildSonicDicomRedirectPath(row.appointmentId, "patient")}
@@ -619,12 +619,12 @@ function RowActionMenu({
               Open this study in RadiAnt
             </button>
           )}
-          {showRadiantActions && patientMrn && (
-            <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientMrn)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+          {showRadiantActions && patientIdentifier && (
+            <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientIdentifier)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
               Open patient studies in RadiAnt
             </a>
           )}
-          {showRadiantActions && !patientMrn && (
+          {showRadiantActions && !patientIdentifier && (
             <button type="button" role="menuitem" disabled title="Patient ID/MRN missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
               Open patient studies in RadiAnt
             </button>
