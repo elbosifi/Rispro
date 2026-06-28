@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { Bell, ChevronLeft, ChevronRight, Copy, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Minus, MoreVertical, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import {
   assignReportingBoardCase,
   bulkAssignNextReportingCases,
@@ -76,33 +76,6 @@ function isManager(me: DoctorMe): boolean {
 
 function patientName(row: ReportingBoardCaseRow): string {
   return row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`;
-}
-
-function chipClass(tone: "danger" | "warning" | "success" | "neutral" | "muted"): string {
-  const tones = {
-    danger: "border-red-300 bg-red-50 text-red-700",
-    warning: "border-amber-300 bg-amber-50 text-amber-800",
-    success: "border-emerald-300 bg-emerald-50 text-emerald-700",
-    neutral: "border-slate-300 bg-slate-50 text-slate-700",
-    muted: "border-zinc-200 bg-zinc-50 text-zinc-500",
-  };
-  return `inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${tones[tone]}`;
-}
-
-export function priorityTone(code: string | null): "danger" | "warning" | "neutral" | "muted" {
-  const normalized = String(code || "").trim().toLowerCase();
-  if (!normalized) return "muted";
-  if (normalized === "stat") return "danger";
-  if (normalized === "urgent") return "warning";
-  return "neutral";
-}
-
-export function reportStatusTone(status: ReportingBoardCaseRow["reportStatus"]): "danger" | "warning" | "success" | "neutral" | "muted" {
-  if (status === "final") return "success";
-  if (status === "draft") return "warning";
-  if (status === "unavailable") return "danger";
-  if (status === "study_not_found") return "warning";
-  return "muted";
 }
 
 function labelStatus(status: string): string {
@@ -291,20 +264,128 @@ function inputClass() {
   return "h-10 w-full rounded-lg border px-3 text-sm";
 }
 
-function PriorityChip({ row }: { row: ReportingBoardCaseRow }) {
-  const label = row.reportingPriorityName || row.reportingPriorityCode || "No priority";
-  return <span className={chipClass(priorityTone(row.reportingPriorityCode))}>{label}</span>;
+function abnormalPriorityLabel(row: ReportingBoardCaseRow): string | null {
+  const normalized = String(row.reportingPriorityCode || "").trim().toLowerCase();
+  if (normalized !== "stat" && normalized !== "urgent") return null;
+  return row.reportingPriorityName || normalized.toUpperCase();
 }
 
-function ReportStatusChip({ status }: { status: ReportingBoardCaseRow["reportStatus"] }) {
-  return <span className={chipClass(reportStatusTone(status))}>{labelStatus(status)}</span>;
+function requiredReportNotFinal(row: ReportingBoardCaseRow): boolean {
+  return row.requiresReport && row.reportStatus !== "final";
 }
 
-function rowPriorityClass(code: string | null): string {
-  const tone = priorityTone(code);
-  if (tone === "danger") return "border-l-4 border-red-500 bg-red-50";
-  if (tone === "warning") return "border-l-4 border-amber-500 bg-orange-50";
-  return "border-l-4 border-transparent";
+function overdue(row: ReportingBoardCaseRow): boolean {
+  return requiredReportNotFinal(row) && row.bookingDate < new Date().toISOString().slice(0, 10);
+}
+
+function rowState(row: ReportingBoardCaseRow): "critical" | "orange" | "amber" | "normal" {
+  const priority = String(row.reportingPriorityCode || "").trim().toLowerCase();
+  if (priority === "stat" || priority === "urgent" || overdue(row)) return "critical";
+  if (row.reportStatus === "study_not_found" || row.reportStatus === "unavailable") return "orange";
+  if (requiredReportNotFinal(row)) return "amber";
+  return "normal";
+}
+
+function reportingRowClass(row: ReportingBoardCaseRow, selected: boolean): string {
+  if (selected) return "border-l-4 border-teal-600 bg-teal-50 ring-2 ring-inset ring-teal-600 transition hover:bg-teal-100";
+  const state = rowState(row);
+  if (state === "critical") return "border-l-4 border-red-400 bg-red-50 transition hover:bg-red-100/70";
+  if (state === "orange") return "border-l-4 border-orange-400 bg-orange-50 transition hover:bg-orange-100/70";
+  if (state === "amber") return "border-l-4 border-amber-400 bg-amber-50 transition hover:bg-amber-100/70";
+  return "border-l-4 border-transparent transition hover:bg-slate-50";
+}
+
+function reportStatusView(status: ReportingBoardCaseRow["reportStatus"]) {
+  const views = {
+    final: { label: "Final report", text: "", icon: CheckCircle2, className: "border-emerald-200 bg-white text-emerald-700" },
+    draft: { label: "Draft report", text: "Draft", icon: FilePenLine, className: "border-amber-300 bg-white text-amber-800" },
+    no_report: { label: "No report required", text: "-", icon: Minus, className: "border-slate-200 bg-white text-slate-500" },
+    study_not_found: { label: "Study not found in PACS", text: "Missing", icon: AlertTriangle, className: "border-orange-300 bg-white text-orange-700" },
+    unavailable: { label: "Report status unavailable", text: "PACS", icon: AlertTriangle, className: "border-orange-300 bg-white text-orange-700" },
+  };
+  return views[status];
+}
+
+function rowStatusLabel(row: ReportingBoardCaseRow): string {
+  const labels = [
+    abnormalPriorityLabel(row),
+    overdue(row) ? "Overdue" : null,
+    reportStatusView(row.reportStatus).label,
+    row.appointmentStatus !== "completed" ? `Appointment ${labelStatus(row.appointmentStatus)}` : null,
+  ].filter(Boolean);
+  return labels.join(", ");
+}
+
+function rowDetailsTitle(row: ReportingBoardCaseRow): string {
+  return [
+    `Patient: ${patientName(row)}`,
+    `MRN: ${row.patientMrn ?? "-"}`,
+    `Accession: ${row.accessionNumber}`,
+    `Study: ${row.modalityCode}${row.examTypeName ? ` - ${row.examTypeName}` : ""}`,
+    `Category: ${labelStatus(row.caseCategory)}`,
+    `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
+    `Report: ${reportStatusView(row.reportStatus).label}`,
+    `Appointment: ${labelStatus(row.appointmentStatus)}`,
+  ].join("\n");
+}
+
+function PriorityBadge({ row }: { row: ReportingBoardCaseRow }) {
+  const label = abnormalPriorityLabel(row);
+  if (!label) return null;
+  return (
+    <span className="inline-flex items-center rounded-full border border-red-300 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-red-700" title={`Priority ${label}`}>
+      {label}
+    </span>
+  );
+}
+
+function categoryLabel(category: string): string {
+  if (category === "oncology") return "Onc";
+  if (category === "non_oncology") return "Non-onc";
+  return labelStatus(category);
+}
+
+function IdsCell({ row }: { row: ReportingBoardCaseRow }) {
+  return (
+    <div className="leading-tight" title={`MRN ${row.patientMrn ?? "-"}; Accession ${row.accessionNumber}`}>
+      <div className="font-medium text-foreground">{row.patientMrn ?? "-"}</div>
+      <div className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{row.accessionNumber}</div>
+    </div>
+  );
+}
+
+function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; showCategoryMarker: boolean }) {
+  const studyLabel = `${row.modalityCode}${row.examTypeName ? ` · ${row.examTypeName}` : ""}`;
+  return (
+    <div className="leading-tight" title={`Modality ${row.modalityName || row.modalityCode}; Exam ${row.examTypeName ?? "-"}; Category ${labelStatus(row.caseCategory)}`}>
+      <div className="font-medium text-foreground">{studyLabel}</div>
+      {showCategoryMarker && (
+        <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-slate-600">
+          {categoryLabel(row.caseCategory)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
+  const view = reportStatusView(row.reportStatus);
+  const Icon = view.icon;
+  const appointmentLabel = row.appointmentStatus !== "completed" ? labelStatus(row.appointmentStatus) : null;
+  return (
+    <div className="flex max-w-40 flex-wrap items-center gap-1" title={rowStatusLabel(row)}>
+      <span aria-label={view.label} title={view.label} className={`inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full border px-1.5 text-xs font-semibold ${view.className}`}>
+        <Icon size={14} aria-hidden="true" />
+        {view.text ? <span>{view.text}</span> : <span className="sr-only">{view.label}</span>}
+      </span>
+      {appointmentLabel && (
+        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600" title={`Appointment ${appointmentLabel}`}>
+          <Clock3 size={12} aria-hidden="true" />
+          {appointmentLabel}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function AssignmentEditor({
@@ -367,6 +448,67 @@ function AssignmentEditor({
         </button>
         <button type="button" onClick={() => setOpen(false)} className="rounded border px-2 py-1 text-xs">Cancel</button>
       </div>
+    </div>
+  );
+}
+
+function RowActionMenu({
+  row,
+  doctors,
+  canManage,
+  onAssign,
+  onUnassign,
+}: {
+  row: ReportingBoardCaseRow;
+  doctors: DoctorProfile[];
+  canManage: boolean;
+  onAssign: (appointmentId: number, doctorId: number, reason: string) => void;
+  onUnassign: (appointmentId: number, reason: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
+
+  return (
+    <div className="relative flex justify-end">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border text-foreground"
+        style={{ borderColor: "var(--border)" }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Open actions for ${row.accessionNumber}`}
+        title="Actions"
+      >
+        <MoreVertical size={16} aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-9 z-40 min-w-64 rounded-lg border p-2 text-left shadow-lg"
+          style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
+        >
+          <Link
+            role="menuitem"
+            to={`/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`}
+            className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
+          >
+            View appointment
+          </Link>
+          <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
+            {canManage && row.canAssign ? (
+              <AssignmentEditor
+                row={row}
+                doctors={doctors}
+                onAssign={onAssign}
+                onUnassign={onUnassign}
+              />
+            ) : (
+              <p className="px-2 py-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{actionUnavailable}</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -730,6 +872,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     filters.pinUrgentToTop === false,
     (filters.limit ?? 100) !== 100,
   ].filter(Boolean).length;
+  const visibleCategoryCount = new Set(cases.map((row) => row.caseCategory).filter(Boolean)).size;
+  const showCategoryMarker = visibleCategoryCount > 1;
+  const activeAssignedDoctorId = filters.assignedDoctorId ?? effectiveFilters.assignedDoctorId ?? null;
+  const showAssignedDoctorColumn = !activeAssignedDoctorId;
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
@@ -1011,48 +1157,54 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         }}
                       />
                     </th>
-                    {["Priority", "Patient", "MRN", "Accession", "Date/time", "Modality", "Exam", "Category", "Assigned doctor", "Report", "Appointment", "Action"].map((header) => (
-                      <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>
-                    ))}
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Patient</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>IDs</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Date/time</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Study</th>
+                    {showAssignedDoctorColumn && <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Assigned doctor</th>}
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Status</th>
+                    <th className="w-10 px-2 py-2 text-right text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
-                  {cases.map((row) => (
-                    <tr key={row.appointmentId} className={`${rowPriorityClass(row.reportingPriorityCode)} ${selectedIds.includes(row.appointmentId) ? "ring-2 ring-inset ring-teal-500" : ""} transition hover:bg-teal-50/60`}>
-                      <td className="px-3 py-2"><input
-                        type="checkbox"
-                        aria-label={`Select case ${row.accessionNumber}`}
-                        checked={selectedIds.includes(row.appointmentId)}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
-                          setSelectedIds((current) => checked ? [...new Set([...current, row.appointmentId])] : current.filter((id) => id !== row.appointmentId));
-                        }}
-                      /></td>
-                      <td className="px-3 py-2"><PriorityChip row={row} /></td>
-                      <td className="px-3 py-2 font-semibold text-foreground">{patientName(row)}</td>
-                      <td className="px-3 py-2">{row.patientMrn ?? "-"}</td>
-                      <td className="px-3 py-2">{row.accessionNumber}</td>
-                      <td className="px-3 py-2">{row.bookingDate} {row.bookingTime ?? ""}</td>
-                      <td className="px-3 py-2">{row.modalityCode}</td>
-                      <td className="px-3 py-2">{row.examTypeName ?? "-"}</td>
-                      <td className="px-3 py-2">{row.caseCategory}</td>
-                      <td className="px-3 py-2">{row.assignedDoctorName ?? "Unassigned"}</td>
-                      <td className="px-3 py-2"><ReportStatusChip status={row.reportStatus} /></td>
-                      <td className="px-3 py-2">{row.appointmentStatus}</td>
-                      <td className="px-3 py-2">
-                        {canManage && row.canAssign ? (
-                          <AssignmentEditor
+                  {cases.map((row) => {
+                    const selected = selectedIds.includes(row.appointmentId);
+                    return (
+                      <tr key={row.appointmentId} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
+                        <td className="px-3 py-2"><input
+                          type="checkbox"
+                          aria-label={`Select case ${row.accessionNumber}`}
+                          checked={selected}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setSelectedIds((current) => checked ? [...new Set([...current, row.appointmentId])] : current.filter((id) => id !== row.appointmentId));
+                          }}
+                        /></td>
+                        <td className="px-3 py-2">
+                          <div className="flex min-w-44 flex-col gap-1">
+                            <span className="font-semibold text-foreground">{patientName(row)}</span>
+                            <PriorityBadge row={row} />
+                          </div>
+                        </td>
+                        <td className="px-3 py-2"><IdsCell row={row} /></td>
+                        <td className="px-3 py-2">{row.bookingDate} {row.bookingTime ?? ""}</td>
+                        <td className="px-3 py-2"><StudyCell row={row} showCategoryMarker={showCategoryMarker} /></td>
+                        {showAssignedDoctorColumn && <td className="px-3 py-2">{row.assignedDoctorName ?? "Unassigned"}</td>}
+                        <td className="px-3 py-2"><CompactStatusCell row={row} /></td>
+                        <td className="px-2 py-2 text-right">
+                          <RowActionMenu
                             row={row}
                             doctors={doctorsQuery.data ?? []}
+                            canManage={canManage}
                             onAssign={(appointmentId, doctorId, reason) => assignMutation.mutate({ appointmentId, doctorId, reason })}
                             onUnassign={async (appointmentId, reason) => {
                               await unassignMutation.mutateAsync({ appointmentId, reason });
                             }}
                           />
-                        ) : row.exclusionReason ?? "-"}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

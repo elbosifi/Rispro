@@ -178,13 +178,76 @@ describe("DoctorReportingBoardPage", () => {
     unassignReportingBoardCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 100 });
   });
 
-  it("renders priority and status chips with board rows", async () => {
+  it("renders compact board columns and row status without a visible priority column", async () => {
     renderPage();
 
     expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "Priority" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "IDs" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Study" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "MRN" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Accession" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Modality" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Exam" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Category" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Report" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Appointment" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeTruthy();
     expect(await screen.findByText("V2-000042")).toBeTruthy();
-    expect((await screen.findAllByText("STAT")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/draft/i).length).toBeGreaterThan(1);
+    expect(await screen.findByText("MRN-7")).toBeTruthy();
+    expect(await screen.findByText("CT · CT Brain")).toBeTruthy();
+    expect(screen.queryByText("No priority")).toBeNull();
+    const row = screen.getByText("Alpha Patient").closest("tr");
+    expect(row).toBeTruthy();
+    expect(row!.getAttribute("aria-label")).toContain("STAT");
+    expect(row!.className).toContain("bg-red-50");
+    expect(within(row!).getByText("STAT")).toBeTruthy();
+    expect(within(row!).getByLabelText("Draft report")).toBeTruthy();
+  });
+
+  it("uses a compact final report indicator without full-row green status", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportingPriorityCode: null, reportingPriorityName: null, appointmentStatus: "completed", reportStatus: "final", canAssign: false, exclusionReason: "report_final" }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "final" },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("Alpha Patient")).closest("tr");
+    expect(row).toBeTruthy();
+    expect(within(row!).getByLabelText("Final report")).toBeTruthy();
+    expect(within(row!).queryByText(/^final$/i)).toBeNull();
+    expect(row!.className).not.toContain("bg-emerald");
+  });
+
+  it("hides assigned doctor when filtered to one doctor", async () => {
+    renderPage();
+
+    await screen.findByText("Reporting Assignment Board");
+    await screen.findByRole("option", { name: "Dr Target" });
+    expect(screen.getByRole("columnheader", { name: "Assigned doctor" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Assigned doctor"), { target: { value: "doctor:5" } });
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: "assigned" })));
+    expect(screen.queryByRole("columnheader", { name: "Assigned doctor" })).toBeNull();
+  });
+
+  it("keeps row reassignment available from the compact action menu", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, assignedDoctorId: 5, assignedDoctorName: "Dr Target", assignmentStatus: "assigned" }],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Reassign" }));
+    await waitFor(() => expect(within(row).getByRole("combobox")).toBeTruthy());
+    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "5" } });
+    fireEvent.change(screen.getByPlaceholderText("Notes for doctor"), { target: { value: "normal reassignment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(assignReportingBoardCaseMock).toHaveBeenCalledWith(42, { doctorId: 5, reason: "normal reassignment" }));
   });
 
   it("uses a default board limit of 100", async () => {
@@ -400,10 +463,12 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
 
     const assignedRow = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(assignedRow).getByRole("button", { name: "Open actions for V2-000042" }));
     fireEvent.click(within(assignedRow).getByRole("button", { name: "Reassign" }));
     await waitFor(() => expect(within(screen.getByText("V2-000042").closest("tr")!).getByRole("option", { name: "Return to waiting pool" })).toBeTruthy());
 
     const unassignedRow = screen.getByText("V2-000043").closest("tr")!;
+    fireEvent.click(within(unassignedRow).getByRole("button", { name: "Open actions for V2-000043" }));
     fireEvent.click(within(unassignedRow).getByRole("button", { name: "Assign" }));
     const assignedSelect = within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox");
     const unassignedSelect = within(screen.getByText("V2-000043").closest("tr")!).getByRole("combobox");
@@ -430,6 +495,7 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
 
     const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
     fireEvent.click(within(row).getByRole("button", { name: "Reassign" }));
     await waitFor(() => expect(within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox")).toBeTruthy());
     const combobox = within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox");
