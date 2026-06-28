@@ -80,6 +80,7 @@ const caseRow: ReportingBoardCaseRow = {
   appointmentId: 42,
   patientId: 7,
   patientMrn: "MRN-7",
+  patientDicomId: "DICOM-PRIMARY-7",
   patientEnglishName: "Alpha Patient",
   patientArabicName: null,
   accessionNumber: "V2-000042",
@@ -347,7 +348,7 @@ describe("DoctorReportingBoardPage", () => {
     expect(openStudy.getAttribute("href")).not.toMatch(/username|password|https?:/i);
     const openPatient = within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }) as HTMLAnchorElement;
     expect(openPatient.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom?scope=patient");
-    expect(openPatient.getAttribute("href")).not.toMatch(/username|password|MRN-7|7$/i);
+    expect(openPatient.getAttribute("href")).not.toMatch(/username|password|DICOM-PRIMARY-7|MRN-7|7$/i);
     expect(within(row).queryByRole("menuitem", { name: "Open patient studies in SonicDICOM" })).toBeNull();
     expect(within(row).queryByRole("menuitem", { name: "Open this study in RadiAnt" })).toBeNull();
 
@@ -368,13 +369,13 @@ describe("DoctorReportingBoardPage", () => {
     const openStudy = within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
     expect(openStudy.getAttribute("href")).toBe("radiant:///?n=pstv&v=00080050&v=%22V2-000042%22");
     const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
-    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%227%22");
-    expect(openPatient.getAttribute("href")).not.toContain("MRN-7");
+    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22DICOM-PRIMARY-7%22");
+    expect(openPatient.getAttribute("href")).not.toMatch(/MRN-7|%227%22/);
   });
 
-  it("falls back to MRN for patient links when patient ID is missing", async () => {
+  it("does not fall back to MRN or internal patient ID for patient viewer links", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
-      cases: [{ ...caseRow, patientId: 0, patientMrn: "MRN-7" }],
+      cases: [{ ...caseRow, patientId: 7, patientMrn: "MRN-7", patientDicomId: null }],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
     });
     setNavigatorPlatform("Win32");
@@ -384,13 +385,13 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
-    const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
-    expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22MRN-7%22");
+    expect(within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("disables viewer actions when accession and patient identifiers are missing", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
-      cases: [{ ...caseRow, appointmentId: 43, patientId: 0, accessionNumber: "", patientMrn: null }],
+      cases: [{ ...caseRow, appointmentId: 43, accessionNumber: "", patientMrn: null, patientDicomId: null }],
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
     });
     setNavigatorPlatform("Win32");

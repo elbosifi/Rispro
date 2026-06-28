@@ -85,11 +85,24 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /reporting_board_sonicdicom_study_opened/);
     assert.match(service, /assignedDoctorId: me\.profile!\.id/);
     assert.match(service, /Accession number is required to open the SonicDICOM study/);
-    assert.match(service, /Patient ID\/MRN is required to open the patient list in SonicDICOM/);
+    assert.match(service, /DICOM Patient ID is required to open the patient list in SonicDICOM/);
+    assert.match(service, /patientDicomId/);
     assert.match(sonic, /buildSonicDicomStaffViewerUrl/);
     assert.match(sonic, /target: "studyViewer" \| "patientList"/);
     assert.match(sonic, /input\.target === "studyViewer" \? "viewer" : "list"/);
     assert.doesNotMatch(sonic, /sonicDicomStaffImageViewerUrlTemplate/);
+  });
+
+  it("selects Reporting Board patientDicomId from primary identifiers before legacy fields", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const types = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-types.ts`, "utf8");
+
+    assert.match(types, /patientDicomId: string \| null/);
+    assert.match(repo, /select pi\.value[\s\S]*from patient_identifiers pi[\s\S]*pi\.is_primary = true[\s\S]*order by pi\.id asc[\s\S]*limit 1/);
+    assert.match(repo, /coalesce\(\s*nullif\(trim\(primary_identifier\.value\), ''\),\s*nullif\(trim\(p\.identifier_value\), ''\),\s*nullif\(trim\(p\.national_id\), ''\)\s*\) as "patientDicomId"/);
+    const patientDicomAlias = repo.indexOf('as "patientDicomId"');
+    const patientDicomSelect = repo.slice(repo.lastIndexOf("coalesce(", patientDicomAlias), patientDicomAlias + 30);
+    assert.doesNotMatch(patientDicomSelect, /p\.mrn/);
   });
 
   it("marks Reporting Board cases discontinued through the existing manual status path", () => {

@@ -547,7 +547,7 @@ function RowActionMenu({
   const [copyMessage, setCopyMessage] = useState("");
   const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
-  const patientIdentifier = String(row.patientId || row.patientMrn || "").trim();
+  const patientDicomId = String(row.patientDicomId || "").trim();
   const showRadiantActions = isWindowsWorkstation();
   const copyAccession = async () => {
     if (!accessionNumber) return;
@@ -594,7 +594,7 @@ function RowActionMenu({
               Open this study in SonicDICOM
             </button>
           )}
-          {patientIdentifier ? (
+          {patientDicomId ? (
             <a
               role="menuitem"
               href={buildSonicDicomRedirectPath(row.appointmentId, "patient")}
@@ -605,7 +605,7 @@ function RowActionMenu({
               Open patient list in SonicDICOM
             </a>
           ) : (
-            <button type="button" role="menuitem" disabled title="Patient ID/MRN missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+            <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
               Open patient list in SonicDICOM
             </button>
           )}
@@ -619,13 +619,13 @@ function RowActionMenu({
               Open this study in RadiAnt
             </button>
           )}
-          {showRadiantActions && patientIdentifier && (
-            <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientIdentifier)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+          {showRadiantActions && patientDicomId && (
+            <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientDicomId)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
               Open patient studies in RadiAnt
             </a>
           )}
-          {showRadiantActions && !patientIdentifier && (
-            <button type="button" role="menuitem" disabled title="Patient ID/MRN missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+          {showRadiantActions && !patientDicomId && (
+            <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
               Open patient studies in RadiAnt
             </button>
           )}

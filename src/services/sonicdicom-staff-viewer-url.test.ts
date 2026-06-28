@@ -22,7 +22,7 @@ describe("SonicDICOM staff image viewer URL", () => {
     assert.doesNotMatch(url, /username|password/i);
   });
 
-  it("renders a no-credential patient list URL with encoded MRN", async () => {
+  it("renders a no-credential patient list URL with encoded DICOM Patient ID", async () => {
     const { buildSonicDicomStaffViewerUrl } = await import("./sonicdicom-report-service.js");
     const { DEFAULT_SONICDICOM_REPORT_SETTINGS } = await import("./sonicdicom-report-settings.js");
     const url = buildSonicDicomStaffViewerUrl({
@@ -32,10 +32,10 @@ describe("SonicDICOM staff image viewer URL", () => {
         sonicDicomPublicBaseUrl: "https://sonic.example/viewer",
       },
       target: "patientList",
-      value: "MRN 7",
+      value: "DICOM ID 7",
     });
 
-    assert.equal(url, "https://sonic.example/viewer/#/list?patientid=MRN%207");
+    assert.equal(url, "https://sonic.example/viewer/#/list?patientid=DICOM%20ID%207");
     assert.doesNotMatch(url, /#\/viewer|username|password/i);
   });
 });

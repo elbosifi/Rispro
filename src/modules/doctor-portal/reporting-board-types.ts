@@ -79,6 +79,7 @@ export interface ReportingBoardCaseRow {
   appointmentId: number;
   patientId: number;
   patientMrn: string | null;
+  patientDicomId: string | null;
   patientEnglishName: string | null;
   patientArabicName: string | null;
   accessionNumber: string;

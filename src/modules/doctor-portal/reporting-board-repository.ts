@@ -499,6 +499,11 @@ export async function listReportingBoardCaseCandidates(
         b.id as "appointmentId",
         b.patient_id as "patientId",
         p.mrn as "patientMrn",
+        coalesce(
+          nullif(trim(primary_identifier.value), ''),
+          nullif(trim(p.identifier_value), ''),
+          nullif(trim(p.national_id), '')
+        ) as "patientDicomId",
         p.english_full_name as "patientEnglishName",
         p.arabic_full_name as "patientArabicName",
         ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber",
@@ -543,6 +548,14 @@ export async function listReportingBoardCaseCandidates(
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join lateral (
+        select pi.value
+        from patient_identifiers pi
+        where pi.patient_id = p.id
+          and pi.is_primary = true
+        order by pi.id asc
+        limit 1
+      ) primary_identifier on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join lateral (
@@ -648,6 +661,11 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         b.id as "appointmentId",
         b.patient_id as "patientId",
         p.mrn as "patientMrn",
+        coalesce(
+          nullif(trim(primary_identifier.value), ''),
+          nullif(trim(p.identifier_value), ''),
+          nullif(trim(p.national_id), '')
+        ) as "patientDicomId",
         p.english_full_name as "patientEnglishName",
         p.arabic_full_name as "patientArabicName",
         ('V2-' || lpad(b.id::text, 6, '0')) as "accessionNumber",
@@ -692,6 +710,14 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join lateral (
+        select pi.value
+        from patient_identifiers pi
+        where pi.patient_id = p.id
+          and pi.is_primary = true
+        order by pi.id asc
+        limit 1
+      ) primary_identifier on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join lateral (

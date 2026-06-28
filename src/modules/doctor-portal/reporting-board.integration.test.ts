@@ -246,6 +246,40 @@ async function createBooking(input: BookingInput): Promise<number> {
   return Number(result.rows[0].id);
 }
 
+async function patientIdForBooking(bookingId: number): Promise<number> {
+  const result = await pool.query<{ patient_id: string }>(`select patient_id::text from appointments_v2.bookings where id = $1`, [bookingId]);
+  return Number(result.rows[0].patient_id);
+}
+
+async function setPatientIdentifierFields(bookingId: number, input: { mrn?: string | null; identifierValue?: string | null; nationalId?: string | null }) {
+  await pool.query(
+    `
+      update patients
+      set mrn = $2,
+          identifier_value = $3,
+          national_id = $4
+      where id = (select patient_id from appointments_v2.bookings where id = $1)
+    `,
+    [bookingId, input.mrn ?? null, input.identifierValue ?? null, input.nationalId ?? null]
+  );
+}
+
+async function insertPrimaryPatientIdentifier(bookingId: number, value: string) {
+  const patientId = await patientIdForBooking(bookingId);
+  const typeResult = await pool.query<{ id: string }>(
+    `select id::text from patient_identifier_types where code = 'other' limit 1`
+  );
+  await pool.query(
+    `
+      insert into patient_identifiers (
+        patient_id, identifier_type_id, value, normalized_value, is_primary, created_by_user_id, updated_by_user_id
+      )
+      values ($1, $2, $3, lower($3), true, $4, $4)
+    `,
+    [patientId, Number(typeResult.rows[0].id), value, admin.id]
+  );
+}
+
 async function createSavedView(
   owner: TestUser,
   notifyAssignedToMe: boolean,
@@ -537,14 +571,40 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.ok(response.data.cases.every((row) => ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(row.reportStatus)));
   });
 
+  it("exposes patientDicomId from primary patient identifier with legacy fallbacks but never MRN", async () => {
+    guard();
+    const date = addDays(10);
+    const primaryCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "DICOM Primary" });
+    const identifierValueCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "DICOM Identifier Value" });
+    const nationalIdCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "DICOM National ID" });
+    const mrnOnlyCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "DICOM MRN Not Used" });
+
+    await setPatientIdentifierFields(primaryCase, { mrn: "MRN-NOT-DICOM-1", identifierValue: "LEGACY-DICOM-1", nationalId: "NAT-DICOM-1" });
+    await insertPrimaryPatientIdentifier(primaryCase, "PRIMARY-DICOM-1");
+    await setPatientIdentifierFields(identifierValueCase, { mrn: "MRN-NOT-DICOM-2", identifierValue: "LEGACY-DICOM-2", nationalId: "NAT-DICOM-2" });
+    await setPatientIdentifierFields(nationalIdCase, { mrn: "MRN-NOT-DICOM-3", identifierValue: null, nationalId: "NAT-DICOM-3" });
+    await setPatientIdentifierFields(mrnOnlyCase, { mrn: "MRN-NOT-DICOM-4", identifierValue: null, nationalId: null });
+
+    const response = await api<{ cases: Array<{ appointmentId: number; patientDicomId: string | null; patientMrn: string | null }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&reportStatus=all&sortBy=accession&sortDirection=asc`
+    );
+    assert.equal(response.status, 200);
+    const byId = new Map(response.data.cases.map((row) => [row.appointmentId, row]));
+
+    assert.equal(byId.get(primaryCase)?.patientDicomId, "PRIMARY-DICOM-1");
+    assert.equal(byId.get(identifierValueCase)?.patientDicomId, "LEGACY-DICOM-2");
+    assert.equal(byId.get(nationalIdCase)?.patientDicomId, "NAT-DICOM-3");
+    assert.equal(byId.get(mrnOnlyCase)?.patientDicomId, null);
+    assert.equal(byId.get(mrnOnlyCase)?.patientMrn, "MRN-NOT-DICOM-4");
+  });
+
   it("opens visible Reporting Board studies in SonicDICOM without credentials and audits access", async () => {
     guard();
     const date = addDays(11);
     const ownCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Own" });
     const otherCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Other" });
-    const patientResult = await pool.query<{ patient_id: string }>(`select patient_id::text from appointments_v2.bookings where id = $1`, [ownCase]);
-    const ownCasePatientId = patientResult.rows[0].patient_id;
-    await pool.query(`update patients set mrn = 'MRN-OPEN-SONIC' where id = (select patient_id from appointments_v2.bookings where id = $1)`, [ownCase]);
+    await setPatientIdentifierFields(ownCase, { mrn: "MRN-OPEN-SONIC", identifierValue: "OPEN-SONIC-DICOM-ID", nationalId: "NAT-OPEN-SONIC" });
     await assignDirectly(ownCase, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await assignDirectly(otherCase, otherDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await withSonicDicomConfig({
@@ -559,7 +619,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
       const patientOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=patient`);
       assert.equal(patientOpen.status, 302);
-      assert.equal(patientOpen.headers.get("location"), `https://sonic.example/viewer/#/list?patientid=${ownCasePatientId}`);
+      assert.equal(patientOpen.headers.get("location"), "https://sonic.example/viewer/#/list?patientid=OPEN-SONIC-DICOM-ID");
 
       const ownOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
       assert.equal(ownOpen.status, 302);
