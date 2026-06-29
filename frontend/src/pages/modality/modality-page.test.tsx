@@ -6,9 +6,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModalityPage from "./modality-page";
 import type { AppointmentWithDetails } from "@/lib/mappers";
+import type { ModalityProtocolAssignment } from "@/types/api";
 
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchModalityWorklistMock = vi.fn();
+const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
 const completeAppointmentMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
@@ -19,6 +21,7 @@ const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchModalityWorklist: (...args: unknown[]) => fetchModalityWorklistMock(...args),
+  fetchModalityProtocolAssignment: (...args: unknown[]) => fetchModalityProtocolAssignmentMock(...args),
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
   completeAppointment: (...args: unknown[]) => completeAppointmentMock(...args),
   updateAppointmentStatus: (...args: unknown[]) => updateAppointmentStatusMock(...args),
@@ -102,6 +105,78 @@ function appointment(overrides: Partial<AppointmentWithDetails> = {}): Appointme
   };
 }
 
+function ctAssignment(overrides: Partial<ModalityProtocolAssignment> = {}): ModalityProtocolAssignment {
+  return {
+    assignmentId: 90,
+    appointmentId: 7,
+    protocolId: 91,
+    protocolVersionId: 92,
+    protocolName: "CT Abdomen",
+    versionNumber: "1.2",
+    modality: "CT",
+    scannerId: 93,
+    scannerName: "GE Revolution",
+    scannerVendor: "GE",
+    protocolNotes: "Renal protocol",
+    contrastNotes: "IV contrast",
+    assignedBy: "Dr. Protocol",
+    assignedAt: "2026-06-29T08:00:00Z",
+    status: "ASSIGNED",
+    ctPhases: [{
+      orderIndex: 1,
+      phasePresetName: "Portal venous",
+      customPhaseName: null,
+      contrastStatus: "POST_CONTRAST",
+      timingType: "FIXED_DELAY",
+      delaySeconds: 70,
+      timingOverride: null,
+      coverage: "abdomen",
+      coverageOverride: "Liver to symphysis",
+      reconstructionNotes: "Soft tissue",
+      reconstructionOverride: null,
+      instructions: "Breath hold",
+      instructionsOverride: null,
+      isRequired: true,
+    }],
+    mriSequences: [],
+    ...overrides,
+  };
+}
+
+function mriAssignment(overrides: Partial<ModalityProtocolAssignment> = {}): ModalityProtocolAssignment {
+  return {
+    ...ctAssignment(),
+    assignmentId: 95,
+    appointmentId: 8,
+    protocolName: "MRI Rectum Primary Staging",
+    modality: "MRI",
+    scannerName: "Philips Ingenia Elition 3T",
+    scannerVendor: "Philips",
+    ctPhases: [],
+    mriSequences: [{
+      orderIndex: 1,
+      scannerId: 93,
+      scannerName: "Philips Ingenia Elition 3T",
+      sequencePresetName: "T2 TSE",
+      vendorSequenceName: "T2W TSE",
+      genericFamily: "TSE",
+      weighting: "T2",
+      defaultPlane: "axial",
+      planeOverride: "oblique axial",
+      defaultCoverage: "pelvis",
+      coverageOverride: "rectum-centered",
+      defaultBValues: "0, 800",
+      bValuesOverride: null,
+      defaultDynamicTiming: null,
+      timingOverride: "pre-contrast",
+      notes: "Small FOV",
+      notesOverride: null,
+      isRequired: true,
+    }],
+    ...overrides,
+  };
+}
+
 function renderPage(rows: AppointmentWithDetails[]) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -117,6 +192,7 @@ function renderPage(rows: AppointmentWithDetails[]) {
     specialReasons: [],
   });
   fetchModalityWorklistMock.mockResolvedValue(rows);
+  fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
   fetchStatisticsMock.mockResolvedValue({
     statusBreakdown: [
       { status: "waiting", count: rows.filter((row) => row.status === "waiting").length },
@@ -458,6 +534,75 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("MRI Abdomen")).toBeTruthy();
     expect(within(drawer).getByText("Urgent")).toBeTruthy();
     expect(within(drawer).getByText("Needs interpreter")).toBeTruthy();
+  });
+
+  it("shows assigned protocol summary on the board row", async () => {
+    await openBoard([
+      appointment({
+        id: 7,
+        accessionNumber: "ACC-PROTOCOL",
+        protocolAssignmentSummary: {
+          assignmentId: 90,
+          protocolName: "MRI Rectum Primary Staging",
+          versionNumber: "1.2",
+          scannerName: "Philips Ingenia Elition 3T",
+          assignedBy: "Dr. Protocol",
+          assignedAt: "2026-06-29T08:00:00Z",
+          protocolNotes: "Rectum protocol",
+          contrastNotes: null,
+        },
+      }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-7");
+    expect(within(row).getByText("Protocol: MRI Rectum Primary Staging v1.2")).toBeTruthy();
+    expect(within(row).getByText("Scanner: Philips Ingenia Elition 3T")).toBeTruthy();
+    expect(within(row).getByText("Notes available")).toBeTruthy();
+  });
+
+  it("renders Assigned CT Protocol with CT phase terminology", async () => {
+    const user = await openBoard([appointment({ id: 7, accessionNumber: "ACC-CT-PROTOCOL" })]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(ctAssignment());
+
+    await user.click(screen.getByTestId("modality-board-row-7"));
+
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    await within(drawer).findByText("Assigned CT Protocol");
+    expect(within(drawer).getByText("CT Abdomen v1.2")).toBeTruthy();
+    expect(within(drawer).getByText("Phase")).toBeTruthy();
+    expect(within(drawer).queryByText("Sequence")).toBeNull();
+    expect(within(drawer).getByText("Liver to symphysis")).toBeTruthy();
+    expect(within(drawer).getByText("This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.")).toBeTruthy();
+    expect(fetchModalityProtocolAssignmentMock).toHaveBeenCalledWith(7);
+  });
+
+  it("renders Assigned MRI Protocol with MRI sequence terminology", async () => {
+    const user = await openBoard([appointment({ id: 8, modalityCode: "MRI", modalityNameEn: "MRI", examNameEn: "MRI Pelvis" })]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(mriAssignment());
+
+    await user.click(screen.getByTestId("modality-board-row-8"));
+
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    await within(drawer).findByText("Assigned MRI Protocol");
+    expect(within(drawer).getByText("MRI Rectum Primary Staging v1.2")).toBeTruthy();
+    expect(within(drawer).getByText("Sequence")).toBeTruthy();
+    expect(within(drawer).queryByText("Phase")).toBeNull();
+    expect(within(drawer).getByText("rectum-centered")).toBeTruthy();
+    expect(within(drawer).getByText("oblique axial")).toBeTruthy();
+  });
+
+  it("renders no assignment state cleanly for CT and exposes no protocol edit controls", async () => {
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
+    const user = await openBoard([appointment({ id: 9, accessionNumber: "ACC-NO-PROTOCOL" })]);
+
+    expect(within(screen.getByTestId("modality-board-row-9")).getByText("No protocol assigned")).toBeTruthy();
+    await user.click(screen.getByTestId("modality-board-row-9"));
+
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    expect(await within(drawer).findByText("No protocol assigned")).toBeTruthy();
+    expect(within(drawer).queryByRole("button", { name: /protocol/i })).toBeNull();
+    expect(within(drawer).queryByText(/Change protocol/i)).toBeNull();
+    expect(within(drawer).queryByText(/Assign protocol/i)).toBeNull();
   });
 
   it("uses a neutral Arabic close action and no cancellation action in the selected drawer", async () => {

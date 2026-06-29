@@ -100,6 +100,16 @@ export interface AppointmentWithDetails extends Appointment {
   createdByUserId?: number | null;
   createdByName?: string | null;
   createdByUsername?: string | null;
+  protocolAssignmentSummary?: {
+    assignmentId: number;
+    protocolName: string;
+    versionNumber: string;
+    scannerName: string | null;
+    assignedBy: string | null;
+    assignedAt: string | null;
+    protocolNotes: string | null;
+    contrastNotes: string | null;
+  } | null;
 }
 
 export interface NoShowCandidate {
@@ -260,6 +270,7 @@ export function mapAppointments(rawArray: RawRecord[]): Appointment[] {
 
 // -- Extended Appointment (with patient/modality details for lists) --
 export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetails {
+  const protocolAssignmentId = numOrNull(raw, "protocol_assignment_id") ?? numOrNull(raw, "protocolAssignmentId");
   return {
     ...mapAppointment(raw),
     // Patient fields
@@ -307,6 +318,18 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     createdByUserId: numOrNull(raw, "created_by_user_id") ?? numOrNull(raw, "createdByUserId"),
     createdByName: strOrNull(raw, "created_by_full_name") ?? strOrNull(raw, "createdByName"),
     createdByUsername: strOrNull(raw, "created_by_username") ?? strOrNull(raw, "createdByUsername"),
+    protocolAssignmentSummary: protocolAssignmentId
+      ? {
+          assignmentId: protocolAssignmentId,
+          protocolName: str(raw, "protocol_name") || str(raw, "protocolName"),
+          versionNumber: str(raw, "protocol_version_number") || str(raw, "protocolVersionNumber"),
+          scannerName: strOrNull(raw, "protocol_scanner_name") ?? strOrNull(raw, "protocolScannerName"),
+          assignedBy: strOrNull(raw, "protocol_assigned_by") ?? strOrNull(raw, "protocolAssignedBy"),
+          assignedAt: strOrNull(raw, "protocol_assigned_at") ?? strOrNull(raw, "protocolAssignedAt"),
+          protocolNotes: strOrNull(raw, "assigned_protocol_notes") ?? strOrNull(raw, "assignedProtocolNotes"),
+          contrastNotes: strOrNull(raw, "assigned_contrast_notes") ?? strOrNull(raw, "assignedContrastNotes"),
+        }
+      : null,
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),

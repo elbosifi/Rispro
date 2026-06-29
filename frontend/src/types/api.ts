@@ -808,6 +808,64 @@ export interface ProtocolAssignmentPayload {
   status: ProtocolAssignmentStatus;
 }
 
+export interface ModalityCtProtocolPhase {
+  orderIndex: number;
+  phasePresetName: string | null;
+  customPhaseName: string | null;
+  contrastStatus: string | null;
+  timingType: string | null;
+  delaySeconds: number | null;
+  timingOverride: string | null;
+  coverage: string | null;
+  coverageOverride: string | null;
+  reconstructionNotes: string | null;
+  reconstructionOverride: string | null;
+  instructions: string | null;
+  instructionsOverride: string | null;
+  isRequired: boolean;
+}
+
+export interface ModalityMriProtocolSequence {
+  orderIndex: number;
+  scannerId: number | null;
+  scannerName: string | null;
+  sequencePresetName: string | null;
+  vendorSequenceName: string | null;
+  genericFamily: string | null;
+  weighting: string | null;
+  defaultPlane: string | null;
+  planeOverride: string | null;
+  defaultCoverage: string | null;
+  coverageOverride: string | null;
+  defaultBValues: string | null;
+  bValuesOverride: string | null;
+  defaultDynamicTiming: string | null;
+  timingOverride: string | null;
+  notes: string | null;
+  notesOverride: string | null;
+  isRequired: boolean;
+}
+
+export interface ModalityProtocolAssignment {
+  assignmentId: number;
+  appointmentId: number;
+  protocolId: number;
+  protocolVersionId: number;
+  protocolName: string;
+  versionNumber: string;
+  modality: "CT" | "MRI";
+  scannerId: number | null;
+  scannerName: string | null;
+  scannerVendor: string | null;
+  protocolNotes: string | null;
+  contrastNotes: string | null;
+  assignedBy: string | null;
+  assignedAt: string | null;
+  status: "ASSIGNED" | "MODIFIED";
+  ctPhases: ModalityCtProtocolPhase[];
+  mriSequences: ModalityMriProtocolSequence[];
+}
+
 export interface ProtocolAnatomyRegion {
   id: number;
   name: string;

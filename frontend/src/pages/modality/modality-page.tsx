@@ -27,13 +27,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/shared";
-import { fetchAppointmentLookups, fetchModalityWorklist, fetchStatistics, completeAppointment, updateAppointmentStatus } from "@/lib/api-hooks";
+import { fetchAppointmentLookups, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, completeAppointment, updateAppointmentStatus } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { AppointmentLookups, AppointmentStatus } from "@/types/api";
+import type { AppointmentLookups, AppointmentStatus, ModalityProtocolAssignment } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 
 const ACTIVE_STATUSES = new Set<AppointmentStatus>(["waiting", "arrived", "in-progress"]);
@@ -218,6 +218,29 @@ function relatedAppointmentBadgeText(
   return chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn) || appointment.accessionNumber;
 }
 
+function isProtocolModality(appointment: AppointmentWithDetails | null): boolean {
+  const code = appointment?.modalityCode?.toUpperCase();
+  return code === "CT" || code === "MRI";
+}
+
+function protocolVersionLabel(name: string, version: string): string {
+  return `${name} v${version}`;
+}
+
+function effectiveValue(override: string | null | undefined, fallback: string | number | null | undefined): string | null {
+  const cleanOverride = override?.trim();
+  if (cleanOverride) return cleanOverride;
+  if (fallback == null) return null;
+  const value = String(fallback).trim();
+  return value || null;
+}
+
+function defaultText(value: string | number | null | undefined): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
 function formatElapsedSince(language: Language, now: Date, value: string | null | undefined): string {
   const start = timestampValue(value);
   if (start == null) return EMPTY_VALUE;
@@ -329,6 +352,11 @@ export default function ModalityPage() {
     () => appointments.find((appointment) => appointment.id === selectedAppointmentId) ?? null,
     [appointments, selectedAppointmentId]
   );
+  const selectedProtocolQuery = useQuery({
+    queryKey: ["modality", "protocol-assignment", selectedAppointmentId],
+    queryFn: () => fetchModalityProtocolAssignment(selectedAppointmentId as number),
+    enabled: selectedAppointmentId != null && isProtocolModality(selectedAppointment),
+  });
 
   useEffect(() => {
     if (selectedAppointmentId == null) return;
@@ -688,7 +716,7 @@ export default function ModalityPage() {
                   </div>
                 ) : (
                   <div className="max-h-[calc(100vh-290px)] overflow-auto">
-                    <table data-testid="modality-board" className="min-w-[1220px] table-fixed text-left text-[11px]">
+                    <table data-testid="modality-board" className="min-w-[1400px] table-fixed text-left text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
                           <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
@@ -699,6 +727,7 @@ export default function ModalityPage() {
                           <th className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "MRN / الرقم الوطني", "MRN / national ID")}</th>
                           <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
                           <th className="w-[170px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
+                          <th className="w-[190px] px-2 py-2 font-semibold">Protocol</th>
                           <th className="w-[110px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
                           <th className="w-[130px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
                           <th className="w-[80px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
@@ -775,6 +804,25 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1 text-[11px] text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), EMPTY_VALUE)}</td>
                               <td className="px-2 py-1 text-[11px] text-slate-700">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || EMPTY_VALUE}</td>
+                              <td className="px-2 py-1 text-[11px] text-slate-700">
+                                {appointment.protocolAssignmentSummary ? (
+                                  <div className="space-y-0.5">
+                                    <Badge variant="info" size="sm">
+                                      Protocol: {protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}
+                                    </Badge>
+                                    {appointment.protocolAssignmentSummary.scannerName ? (
+                                      <p className="text-[10px] text-muted-foreground">Scanner: {appointment.protocolAssignmentSummary.scannerName}</p>
+                                    ) : null}
+                                    {appointment.protocolAssignmentSummary.protocolNotes || appointment.protocolAssignmentSummary.contrastNotes ? (
+                                      <p className="text-[10px] text-muted-foreground">Notes available</p>
+                                    ) : null}
+                                  </div>
+                                ) : isProtocolModality(appointment) ? (
+                                  <span className="text-[10px] text-muted-foreground">No protocol assigned</span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">{EMPTY_VALUE}</span>
+                                )}
+                              </td>
                               <td className="px-2 py-1 text-[11px] text-slate-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || EMPTY_VALUE}</td>
                               <td className="px-2 py-1">
                                 <code data-testid="modality-board-accession" className="font-mono text-[11px] text-foreground">
@@ -1087,6 +1135,13 @@ export default function ModalityPage() {
                 <DetailField label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes?.trim() || selectedAppointment.specialReasonNote?.trim() || null} />
               </div>
 
+              {isProtocolModality(selectedAppointment) ? (
+                <ProtocolAssignmentPanel
+                  assignment={selectedProtocolQuery.data ?? null}
+                  isLoading={selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching}
+                />
+              ) : null}
+
               <DialogFooter>
                 <Button
                   type="button"
@@ -1355,6 +1410,151 @@ function DetailField({
       <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
       <p className="mt-1 font-medium leading-6 text-foreground">{value ?? "—"}</p>
     </div>
+  );
+}
+
+function ValueWithPreset({
+  value,
+  preset,
+}: {
+  value: string | null;
+  preset?: string | null;
+}) {
+  return (
+    <div>
+      <p>{value ?? EMPTY_VALUE}</p>
+      {preset && preset !== value ? <p className="text-[10px] text-muted-foreground">Preset: {preset}</p> : null}
+    </div>
+  );
+}
+
+function ProtocolAssignmentPanel({
+  assignment,
+  isLoading,
+}: {
+  assignment: ModalityProtocolAssignment | null;
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
+        Loading assigned protocol...
+      </section>
+    );
+  }
+
+  if (!assignment) {
+    return (
+      <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
+        No protocol assigned
+      </section>
+    );
+  }
+
+  const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ");
+
+  return (
+    <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Read-only protocol</p>
+          <h3 className="mt-1 text-base font-semibold text-foreground">
+            {assignment.modality === "CT" ? "Assigned CT Protocol" : "Assigned MRI Protocol"}
+          </h3>
+          <p className="mt-1 text-sm text-slate-700">{protocolVersionLabel(assignment.protocolName, assignment.versionNumber)}</p>
+        </div>
+        <Badge variant="info" size="sm">{assignment.status}</Badge>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <DetailField label="Scanner" value={scanner || null} />
+        <DetailField label="Assigned by" value={assignment.assignedBy} />
+        <DetailField label="Contrast notes" value={assignment.contrastNotes} />
+        <DetailField label="Protocol notes" value={assignment.protocolNotes} />
+      </div>
+
+      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+        This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.
+      </p>
+
+      {assignment.modality === "CT" ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-[760px] table-fixed text-left text-xs">
+            <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <tr>
+                <th className="w-16 px-2 py-2">Order</th>
+                <th className="w-36 px-2 py-2">Phase</th>
+                <th className="w-32 px-2 py-2">Timing</th>
+                <th className="w-40 px-2 py-2">Coverage</th>
+                <th className="w-40 px-2 py-2">Reconstruction</th>
+                <th className="w-20 px-2 py-2">Required</th>
+                <th className="w-44 px-2 py-2">Instructions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {assignment.ctPhases.map((phase) => {
+                const phaseName = effectiveValue(phase.customPhaseName, phase.phasePresetName);
+                const timing = effectiveValue(phase.timingOverride, phase.delaySeconds != null ? `${phase.timingType ?? "Delay"} ${phase.delaySeconds}s` : phase.timingType);
+                const coverage = effectiveValue(phase.coverageOverride, phase.coverage);
+                const reconstruction = effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes);
+                const instructions = effectiveValue(phase.instructionsOverride, phase.instructions);
+                return (
+                  <tr key={`${phase.orderIndex}-${phaseName ?? "phase"}`}>
+                    <td className="px-2 py-2 font-mono">{phase.orderIndex}</td>
+                    <td className="px-2 py-2"><ValueWithPreset value={phaseName} preset={defaultText(phase.phasePresetName)} /></td>
+                    <td className="px-2 py-2"><ValueWithPreset value={timing} preset={defaultText(phase.timingType)} /></td>
+                    <td className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(phase.coverage)} /></td>
+                    <td className="px-2 py-2"><ValueWithPreset value={reconstruction} preset={defaultText(phase.reconstructionNotes)} /></td>
+                    <td className="px-2 py-2">{phase.isRequired ? "Yes" : "No"}</td>
+                    <td className="px-2 py-2"><ValueWithPreset value={instructions} preset={defaultText(phase.instructions)} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-[760px] table-fixed text-left text-xs">
+            <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <tr>
+                <th className="w-16 px-2 py-2">Order</th>
+                <th className="w-40 px-2 py-2">Sequence</th>
+                <th className="w-28 px-2 py-2">Plane</th>
+                <th className="w-40 px-2 py-2">Coverage</th>
+                <th className="w-40 px-2 py-2">b-values / timing</th>
+                <th className="w-20 px-2 py-2">Required</th>
+                <th className="w-44 px-2 py-2">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {assignment.mriSequences.map((sequence) => {
+                const sequenceName = effectiveValue(sequence.vendorSequenceName, sequence.sequencePresetName ?? sequence.genericFamily ?? sequence.weighting);
+                const plane = effectiveValue(sequence.planeOverride, sequence.defaultPlane);
+                const coverage = effectiveValue(sequence.coverageOverride, sequence.defaultCoverage);
+                const timing = [
+                  effectiveValue(sequence.bValuesOverride, sequence.defaultBValues),
+                  effectiveValue(sequence.timingOverride, sequence.defaultDynamicTiming),
+                ].filter(Boolean).join(" / ") || null;
+                const timingPreset = [defaultText(sequence.defaultBValues), defaultText(sequence.defaultDynamicTiming)].filter(Boolean).join(" / ") || null;
+                const notes = effectiveValue(sequence.notesOverride, sequence.notes);
+                return (
+                  <tr key={`${sequence.orderIndex}-${sequenceName ?? "sequence"}`}>
+                    <td className="px-2 py-2 font-mono">{sequence.orderIndex}</td>
+                    <td className="px-2 py-2"><ValueWithPreset value={sequenceName} preset={defaultText(sequence.sequencePresetName)} /></td>
+                    <td className="px-2 py-2"><ValueWithPreset value={plane} preset={defaultText(sequence.defaultPlane)} /></td>
+                    <td className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(sequence.defaultCoverage)} /></td>
+                    <td className="px-2 py-2"><ValueWithPreset value={timing} preset={timingPreset} /></td>
+                    <td className="px-2 py-2">{sequence.isRequired ? "Yes" : "No"}</td>
+                    <td className="px-2 py-2"><ValueWithPreset value={notes} preset={defaultText(sequence.notes)} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

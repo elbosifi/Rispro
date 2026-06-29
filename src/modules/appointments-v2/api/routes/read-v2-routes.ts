@@ -21,6 +21,7 @@ import {
   markOldNoShowCandidates,
   updateBookingStatusManual,
 } from "../../booking/services/status-booking.service.js";
+import { getModalityProtocolAssignment } from "../../modality/protocol-assignment.service.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1028,6 +1029,14 @@ router.get(
         et.name_en as exam_name_en,
         rp.name_ar as priority_name_ar,
         rp.name_en as priority_name_en,
+        protocol_assignment.assignment_id as protocol_assignment_id,
+        protocol_assignment.protocol_name,
+        protocol_assignment.version_number as protocol_version_number,
+        protocol_assignment.scanner_name as protocol_scanner_name,
+        protocol_assignment.assigned_by as protocol_assigned_by,
+        protocol_assignment.assigned_at as protocol_assigned_at,
+        protocol_assignment.protocol_notes as assigned_protocol_notes,
+        protocol_assignment.contrast_notes as assigned_contrast_notes,
         row_number() over (partition by b.booking_date, b.modality_id order by b.created_at asc, b.id asc)::int as modality_slot_number,
         coalesce(asd.same_day_appointment_count, case when b.status in ('scheduled', 'arrived', 'waiting') then 1 else 0 end)::int as same_day_appointment_count,
         (coalesce(asd.same_day_appointment_count, 0) > 1) as has_multiple_appointments,
@@ -1038,6 +1047,29 @@ router.get(
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join active_same_day asd on asd.patient_id = b.patient_id and asd.booking_date = b.booking_date
+      left join lateral (
+        select
+          assignment.id as assignment_id,
+          protocol.name as protocol_name,
+          version.version_number,
+          scanner.name as scanner_name,
+          coalesce(doctor.display_name, assigned_user.full_name) as assigned_by,
+          assignment.assigned_at::text as assigned_at,
+          assignment.protocol_notes,
+          assignment.contrast_notes
+        from appointment_protocol_assignments assignment
+        join protocols protocol on protocol.id = assignment.protocol_id
+        join protocol_versions version on version.id = assignment.protocol_version_id
+        left join imaging_scanners scanner on scanner.id = assignment.scanner_id
+        left join users assigned_user on assigned_user.id = assignment.assigned_by
+        left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
+        where assignment.appointment_id = b.id
+          and assignment.status <> 'CANCELLED'
+          and b.status not in ('cancelled', 'discontinued', 'voided')
+          and upper(protocol.modality) in ('CT', 'MRI')
+        order by assignment.updated_at desc, assignment.id desc
+        limit 1
+      ) protocol_assignment on true
       left join lateral (
         select
           coalesce(
@@ -1071,6 +1103,21 @@ router.get(
 
     const result = await pool.query(sql, params);
     res.json({ appointments: result.rows });
+  })
+);
+
+router.get(
+  "/modality/appointments/:appointmentId/protocol-assignment",
+  requirePageAccess("modality"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const appointmentId = Number(req.params.appointmentId);
+    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
+      res.status(400).json({ error: "Invalid appointment ID" });
+      return;
+    }
+
+    const assignment = await getModalityProtocolAssignment(appointmentId);
+    res.json({ assignment });
   })
 );
 

@@ -85,6 +85,7 @@ import type {
   DoctorProtocolingAppointment,
   DoctorProtocolingAppointmentDetail,
   DoctorProtocolingFilters,
+  ModalityProtocolAssignment,
   ProtocolAssignmentPayload,
   ProtocolTask,
   ImagingScanner,
@@ -109,6 +110,78 @@ const IMPORT_CONFIRM_TIMEOUT_MS = 180_000;
 const CATALOG_IMPORT_TIMEOUT_MS = 180_000;
 
 export type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
+
+function rawString(value: unknown): string | null {
+  return value == null ? null : String(value);
+}
+
+function rawNumber(value: unknown): number | null {
+  return value == null ? null : Number(value);
+}
+
+function rawBool(value: unknown): boolean {
+  return Boolean(value);
+}
+
+function rawArray(value: unknown): RawRecord[] {
+  return Array.isArray(value) ? value.filter((item): item is RawRecord => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
+}
+
+function mapModalityProtocolAssignment(raw: RawRecord): ModalityProtocolAssignment {
+  return {
+    assignmentId: Number(raw.assignment_id),
+    appointmentId: Number(raw.appointment_id),
+    protocolId: Number(raw.protocol_id),
+    protocolVersionId: Number(raw.protocol_version_id),
+    protocolName: String(raw.protocol_name),
+    versionNumber: String(raw.version_number),
+    modality: String(raw.modality).toUpperCase() as "CT" | "MRI",
+    scannerId: rawNumber(raw.scanner_id),
+    scannerName: rawString(raw.scanner_name),
+    scannerVendor: rawString(raw.scanner_vendor),
+    protocolNotes: rawString(raw.protocol_notes),
+    contrastNotes: rawString(raw.contrast_notes),
+    assignedBy: rawString(raw.assigned_by),
+    assignedAt: rawString(raw.assigned_at),
+    status: String(raw.status) as "ASSIGNED" | "MODIFIED",
+    ctPhases: rawArray(raw.ct_phases).map((phase) => ({
+      orderIndex: Number(phase.order_index),
+      phasePresetName: rawString(phase.phase_preset_name),
+      customPhaseName: rawString(phase.custom_phase_name),
+      contrastStatus: rawString(phase.contrast_status),
+      timingType: rawString(phase.timing_type),
+      delaySeconds: rawNumber(phase.delay_seconds),
+      timingOverride: rawString(phase.timing_override),
+      coverage: rawString(phase.coverage),
+      coverageOverride: rawString(phase.coverage_override),
+      reconstructionNotes: rawString(phase.reconstruction_notes),
+      reconstructionOverride: rawString(phase.reconstruction_override),
+      instructions: rawString(phase.instructions),
+      instructionsOverride: rawString(phase.instructions_override),
+      isRequired: rawBool(phase.is_required),
+    })),
+    mriSequences: rawArray(raw.mri_sequences).map((sequence) => ({
+      orderIndex: Number(sequence.order_index),
+      scannerId: rawNumber(sequence.scanner_id),
+      scannerName: rawString(sequence.scanner_name),
+      sequencePresetName: rawString(sequence.sequence_preset_name),
+      vendorSequenceName: rawString(sequence.vendor_sequence_name),
+      genericFamily: rawString(sequence.generic_family),
+      weighting: rawString(sequence.weighting),
+      defaultPlane: rawString(sequence.default_plane),
+      planeOverride: rawString(sequence.plane_override),
+      defaultCoverage: rawString(sequence.default_coverage),
+      coverageOverride: rawString(sequence.coverage_override),
+      defaultBValues: rawString(sequence.default_b_values),
+      bValuesOverride: rawString(sequence.b_values_override),
+      defaultDynamicTiming: rawString(sequence.default_dynamic_timing),
+      timingOverride: rawString(sequence.timing_override),
+      notes: rawString(sequence.notes),
+      notesOverride: rawString(sequence.notes_override),
+      isRequired: rawBool(sequence.is_required),
+    })),
+  };
+}
 
 export interface PatientNotAllowedNameWord {
   id: number;
@@ -2963,6 +3036,11 @@ export async function fetchModalityWorklist(modalityId: string, date: string, sc
   }
   const raw = await api<{ appointments: RawRecord[] }>(`/v2/read/modality/worklist?${params.toString()}`);
   return mapAppointmentsWithDetails(raw.appointments);
+}
+
+export async function fetchModalityProtocolAssignment(appointmentId: number): Promise<ModalityProtocolAssignment | null> {
+  const raw = await api<{ assignment: RawRecord | null }>(`/v2/read/modality/appointments/${appointmentId}/protocol-assignment`);
+  return raw.assignment ? mapModalityProtocolAssignment(raw.assignment) : null;
 }
 
 export async function completeAppointment(id: number) {
