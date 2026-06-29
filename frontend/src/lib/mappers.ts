@@ -102,13 +102,19 @@ export interface AppointmentWithDetails extends Appointment {
   createdByUsername?: string | null;
   protocolAssignmentSummary?: {
     assignmentId: number;
+    protocolId?: number | null;
+    protocolVersionId?: number | null;
     protocolName: string;
     versionNumber: string;
+    modality?: string | null;
+    scannerId?: number | null;
     scannerName: string | null;
+    scannerVendor?: string | null;
     assignedBy: string | null;
     assignedAt: string | null;
     protocolNotes: string | null;
     contrastNotes: string | null;
+    status?: string | null;
   } | null;
 }
 
@@ -321,13 +327,20 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     protocolAssignmentSummary: protocolAssignmentId
       ? {
           assignmentId: protocolAssignmentId,
+          protocolId: numOrNull(raw, "assigned_protocol_id") ?? numOrNull(raw, "protocolId"),
+          protocolVersionId:
+            numOrNull(raw, "assigned_protocol_version_id") ?? numOrNull(raw, "protocolVersionId"),
           protocolName: str(raw, "protocol_name") || str(raw, "protocolName"),
           versionNumber: str(raw, "protocol_version_number") || str(raw, "protocolVersionNumber"),
+          modality: strOrNull(raw, "protocol_assignment_modality") ?? strOrNull(raw, "protocolAssignmentModality"),
+          scannerId: numOrNull(raw, "protocol_scanner_id") ?? numOrNull(raw, "protocolScannerId"),
           scannerName: strOrNull(raw, "protocol_scanner_name") ?? strOrNull(raw, "protocolScannerName"),
+          scannerVendor: strOrNull(raw, "protocol_scanner_vendor") ?? strOrNull(raw, "protocolScannerVendor"),
           assignedBy: strOrNull(raw, "protocol_assigned_by") ?? strOrNull(raw, "protocolAssignedBy"),
           assignedAt: strOrNull(raw, "protocol_assigned_at") ?? strOrNull(raw, "protocolAssignedAt"),
           protocolNotes: strOrNull(raw, "assigned_protocol_notes") ?? strOrNull(raw, "assignedProtocolNotes"),
           contrastNotes: strOrNull(raw, "assigned_contrast_notes") ?? strOrNull(raw, "assignedContrastNotes"),
+          status: strOrNull(raw, "protocol_assignment_status") ?? strOrNull(raw, "protocolAssignmentStatus"),
         }
       : null,
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),

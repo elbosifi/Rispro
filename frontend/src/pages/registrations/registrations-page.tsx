@@ -958,6 +958,79 @@ export default function RegistrationsPage() {
     );
   }
 
+  function protocolVersionText(appointment: AppointmentWithDetails): string | null {
+    const summary = appointment.protocolAssignmentSummary;
+    if (!summary) return null;
+    return [summary.protocolName, summary.versionNumber ? `v${summary.versionNumber}` : null]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function usesProtocolWorkflow(appointment: AppointmentWithDetails): boolean {
+    const modality = (appointment.modalityCode || appointment.modalityNameEn || "").toUpperCase();
+    return modality === "CT" || modality === "MRI";
+  }
+
+  function ProtocolStatus({ appointment }: { appointment: AppointmentWithDetails }) {
+    if (!usesProtocolWorkflow(appointment)) return null;
+    const summary = appointment.protocolAssignmentSummary;
+    if (!summary) {
+      return (
+        <div className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">
+          <span className="inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 font-semibold text-slate-600">
+            Protocol: Not protocolled
+          </span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-snug text-muted-foreground">
+        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+          Protocol assigned
+        </span>
+        <p className="truncate text-foreground">Protocol: {protocolVersionText(appointment)}</p>
+        {summary.scannerName ? <p className="truncate">Scanner: {summary.scannerName}</p> : null}
+      </div>
+    );
+  }
+
+  function ProtocolDetailSummary({ appointment }: { appointment: AppointmentWithDetails }) {
+    if (!usesProtocolWorkflow(appointment)) return null;
+    const summary = appointment.protocolAssignmentSummary;
+
+    return (
+      <div className="mt-3 rounded-xl border border-border bg-muted/20 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+              summary
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-white/70 text-slate-600"
+            }`}
+          >
+            {summary ? "Protocol assigned" : "Not protocolled"}
+          </span>
+          <span className="text-xs font-semibold text-foreground">
+            {summary ? protocolVersionText(appointment) : "Protocol: Not protocolled"}
+          </span>
+        </div>
+        {summary ? (
+          <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+            <Field label="Protocol" value={protocolVersionText(appointment)} />
+            <Field label="Scanner" value={summary.scannerName || "Not selected"} />
+            <Field label="Assigned by" value={summary.assignedBy || "Not recorded"} />
+            <Field label="Assigned at" value={summary.assignedAt ? formatDateTimeLy(summary.assignedAt) : "Not recorded"} />
+            <Field label="Protocol notes" value={summary.protocolNotes || "None recorded"} />
+            <Field label="Contrast notes" value={summary.contrastNotes || "None recorded"} />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No protocol assignment is recorded for this CT/MRI appointment.</p>
+        )}
+      </div>
+    );
+  }
+
   const canSubmitReschedule =
     Boolean(selectedAppointment && rescheduleDate && rescheduleSelectedRow) &&
     (!rescheduleSpecialQuotaNeedsDetails ||
@@ -1372,6 +1445,7 @@ export default function RegistrationsPage() {
                     <p className="mt-2 text-xs text-muted-foreground">
                       {[categoryLabel, modalityName, examName, formatDateLy(apt.appointmentDate)].filter(Boolean).join(" • ")}
                     </p>
+                    <ProtocolStatus appointment={apt} />
                     <div className="mt-3 grid grid-cols-6 gap-1" onClick={(event) => event.stopPropagation()}>
                       <Button type="button" size="sm" variant="secondary" className="h-9 px-0" onClick={() => void printAppointmentSlipById(apt.id, language)}>
                         <Printer size={15} />
@@ -1520,6 +1594,7 @@ export default function RegistrationsPage() {
                         <p className="mt-0.5 truncate text-[10.5px] leading-snug text-muted-foreground">
                           {[examName || null, priorityName || null].filter(Boolean).join(" • ") || "—"}
                         </p>
+                        <ProtocolStatus appointment={apt} />
                       </div>
 
                       <div className="text-[12px] font-medium leading-tight text-foreground">{formatDateLy(apt.appointmentDate)}</div>
@@ -1788,6 +1863,7 @@ export default function RegistrationsPage() {
                   {statusLabel(language, selectedAppointment.status)}
                 </span>
               </div>
+              <ProtocolDetailSummary appointment={selectedAppointment} />
             </div>
 
             <div className="border-b border-border px-3 py-2 sm:px-4">

@@ -108,6 +108,36 @@ function getAppointmentRow(accessionNumber: string): HTMLElement {
   return screen.getAllByText(accessionNumber).at(-1)!.closest('[role="button"]') as HTMLElement;
 }
 
+function registrationAppointment(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    modalityId: 1,
+    examTypeId: 3,
+    accessionNumber: "ACC-7",
+    dailySequence: 1,
+    patientId: 1,
+    caseCategory: "non_oncology",
+    arabicFullName: "Test Patient",
+    englishFullName: "Test Patient",
+    modalityNameAr: "CT",
+    modalityNameEn: "CT",
+    modalityCode: "CT",
+    examNameAr: "CT Head",
+    examNameEn: "CT Head",
+    priorityNameAr: null,
+    priorityNameEn: null,
+    appointmentDate: "2027-01-03",
+    status: "scheduled",
+    isWalkIn: false,
+    notes: null,
+    phone1: "0912345678",
+    patientWebPushSubscribed: true,
+    publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
+    protocolAssignmentSummary: null,
+    ...overrides,
+  };
+}
+
 describe("RegistrationsPage print actions", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
@@ -166,6 +196,14 @@ describe("RegistrationsPage print actions", () => {
         examTypeName: "CT Head",
       },
       nextAppointment: null,
+      noShow: {
+        noShowCount: 0,
+        bookingRestricted: false,
+        lastNoShowAppointment: null,
+        lastAuthorizationDate: null,
+        lastAuthorizationUser: null,
+        lastAuthorizationReason: null,
+      },
       recentAppointments: [
         {
           id: 7,
@@ -463,6 +501,90 @@ describe("RegistrationsPage print actions", () => {
     expect(within(dialog).getByText("Completed at")).toBeTruthy();
     expect(within(dialog).getByText(/10:15/)).toBeTruthy();
     expect(within(dialog).getByText(/11:30/)).toBeTruthy();
+  });
+
+  it("shows assigned protocol status and compact summary in the appointment list", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      registrationAppointment({
+        modalityNameEn: "MRI",
+        modalityCode: "MRI",
+        examNameEn: "MRI Rectum",
+        protocolAssignmentSummary: {
+          assignmentId: 11,
+          protocolId: 21,
+          protocolVersionId: 31,
+          protocolName: "MRI Rectum Primary Staging",
+          versionNumber: "1.2",
+          modality: "MRI",
+          scannerId: 41,
+          scannerName: "Philips Ingenia Elition 3T",
+          scannerVendor: "Philips",
+          assignedBy: "Dr. Protocol",
+          assignedAt: "2027-01-02T08:00:00Z",
+          protocolNotes: "Patient prep notes.",
+          contrastNotes: "Use rectal gel.",
+          status: "ASSIGNED",
+        },
+      }),
+    ]);
+
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    expect(screen.getAllByText("Protocol assigned").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Protocol: MRI Rectum Primary Staging v1.2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Scanner: Philips Ingenia Elition 3T").length).toBeGreaterThan(0);
+  });
+
+  it("shows not protocolled for CT/MRI appointments without an assignment", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    expect(screen.getAllByText(/Protocol: Not protocolled/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows protocol notes and contrast notes read-only in the manage drawer", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      registrationAppointment({
+        protocolAssignmentSummary: {
+          assignmentId: 12,
+          protocolId: 22,
+          protocolVersionId: 32,
+          protocolName: "CT Abdomen Liver",
+          versionNumber: "3",
+          modality: "CT",
+          scannerId: 42,
+          scannerName: "GE Revolution CT",
+          scannerVendor: "GE",
+          assignedBy: "Dr. Protocol",
+          assignedAt: "2027-01-02T08:00:00Z",
+          protocolNotes: "Hydration instructions reviewed.",
+          contrastNotes: "IV contrast unless contraindicated.",
+          status: "ASSIGNED",
+        },
+      }),
+    ]);
+
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(getAppointmentRow("ACC-7"));
+    const dialog = await screen.findByRole("dialog", { name: "Manage" });
+
+    expect(within(dialog).getByText("Protocol notes")).toBeTruthy();
+    expect(within(dialog).getByText("Hydration instructions reviewed.")).toBeTruthy();
+    expect(within(dialog).getByText("Contrast notes")).toBeTruthy();
+    expect(within(dialog).getByText("IV contrast unless contraindicated.")).toBeTruthy();
+    expect(within(dialog).queryByText(/assign protocol|edit protocol|change protocol/i)).toBeNull();
   });
 
   it("clears the patient scope when switching to today", async () => {

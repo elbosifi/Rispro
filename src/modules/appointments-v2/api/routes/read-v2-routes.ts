@@ -30,6 +30,52 @@ interface AuthedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
 
+const PROTOCOL_ASSIGNMENT_SELECT = `
+          protocol_assignment.assignment_id as protocol_assignment_id,
+          protocol_assignment.protocol_id as assigned_protocol_id,
+          protocol_assignment.protocol_version_id as assigned_protocol_version_id,
+          protocol_assignment.protocol_name,
+          protocol_assignment.version_number as protocol_version_number,
+          protocol_assignment.modality as protocol_assignment_modality,
+          protocol_assignment.scanner_id as protocol_scanner_id,
+          protocol_assignment.scanner_name as protocol_scanner_name,
+          protocol_assignment.scanner_vendor as protocol_scanner_vendor,
+          protocol_assignment.assigned_by as protocol_assigned_by,
+          protocol_assignment.assigned_at as protocol_assigned_at,
+          protocol_assignment.protocol_notes as assigned_protocol_notes,
+          protocol_assignment.contrast_notes as assigned_contrast_notes,
+          protocol_assignment.status as protocol_assignment_status`;
+
+const PROTOCOL_ASSIGNMENT_JOIN = `
+        left join lateral (
+          select
+            assignment.id as assignment_id,
+            assignment.protocol_id,
+            assignment.protocol_version_id,
+            protocol.name as protocol_name,
+            version.version_number,
+            protocol.modality,
+            assignment.scanner_id,
+            scanner.name as scanner_name,
+            scanner.vendor as scanner_vendor,
+            coalesce(doctor.display_name, assigned_user.full_name, assigned_user.username) as assigned_by,
+            assignment.assigned_at::text as assigned_at,
+            assignment.protocol_notes,
+            assignment.contrast_notes,
+            assignment.status
+          from appointment_protocol_assignments assignment
+          join protocols protocol on protocol.id = assignment.protocol_id
+          join protocol_versions version on version.id = assignment.protocol_version_id
+          left join imaging_scanners scanner on scanner.id = assignment.scanner_id
+          left join users assigned_user on assigned_user.id = assignment.assigned_by
+          left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
+          where assignment.appointment_id = b.id
+            and assignment.status <> 'CANCELLED'
+            and upper(protocol.modality) in ('CT', 'MRI')
+          order by assignment.updated_at desc, assignment.id desc
+          limit 1
+        ) protocol_assignment on true`;
+
 function safeBuildPublicAppointmentUrl(
   token: string,
   settings: Awaited<ReturnType<typeof readPatientQrSettings>>,
@@ -305,6 +351,7 @@ router.get(
           et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
+          ${PROTOCOL_ASSIGNMENT_SELECT},
           (
             select count(*)::int
             from patient_web_push_booking_subscriptions bs
@@ -320,6 +367,7 @@ router.get(
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
+        ${PROTOCOL_ASSIGNMENT_JOIN}
         ${whereClause}
       )
       select *
@@ -413,6 +461,7 @@ router.get(
           et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
+          ${PROTOCOL_ASSIGNMENT_SELECT},
           (
             select count(*)::int
             from patient_web_push_booking_subscriptions bs
@@ -428,6 +477,7 @@ router.get(
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
+        ${PROTOCOL_ASSIGNMENT_JOIN}
         where b.id = $1
         limit 1
       `,
