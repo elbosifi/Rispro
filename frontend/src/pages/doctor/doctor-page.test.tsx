@@ -30,6 +30,39 @@ const saveProtocolDraftMock = vi.fn();
 const assignProtocolMock = vi.fn();
 const requestProtocolClarificationMock = vi.fn();
 const cancelProtocolMock = vi.fn();
+const fetchDoctorProtocolingAppointmentsMock = vi.fn();
+const fetchDoctorProtocolingAppointmentDetailMock = vi.fn();
+const createDoctorProtocolAssignmentMock = vi.fn();
+const updateDoctorProtocolAssignmentMock = vi.fn();
+const cancelDoctorProtocolAssignmentMock = vi.fn();
+const fetchProtocolLibraryAnatomyRegionsMock = vi.fn();
+const fetchProtocolLibraryScannersMock = vi.fn();
+const fetchProtocolLibraryCtPhasePresetsMock = vi.fn();
+const fetchProtocolLibraryMriSequencePresetsMock = vi.fn();
+const fetchProtocolLibraryProtocolsMock = vi.fn();
+const fetchProtocolLibraryProtocolDetailMock = vi.fn();
+const fetchProtocolLibraryVersionDetailMock = vi.fn();
+const createProtocolLibraryProtocolMock = vi.fn();
+const updateProtocolLibraryProtocolMock = vi.fn();
+const updateProtocolLibraryVersionMock = vi.fn();
+const activateProtocolLibraryVersionMock = vi.fn();
+const createProtocolLibraryDraftFromActiveMock = vi.fn();
+const createProtocolLibraryCtPhaseRowMock = vi.fn();
+const updateProtocolLibraryCtPhaseRowMock = vi.fn();
+const deleteProtocolLibraryCtPhaseRowMock = vi.fn();
+const reorderProtocolLibraryCtPhaseRowsMock = vi.fn();
+const createProtocolLibraryMriSequenceRowMock = vi.fn();
+const updateProtocolLibraryMriSequenceRowMock = vi.fn();
+const deleteProtocolLibraryMriSequenceRowMock = vi.fn();
+const reorderProtocolLibraryMriSequenceRowsMock = vi.fn();
+const createProtocolLibraryAnatomyRegionMock = vi.fn();
+const updateProtocolLibraryAnatomyRegionMock = vi.fn();
+const createProtocolLibraryScannerMock = vi.fn();
+const updateProtocolLibraryScannerMock = vi.fn();
+const createProtocolLibraryCtPhasePresetMock = vi.fn();
+const updateProtocolLibraryCtPhasePresetMock = vi.fn();
+const createProtocolLibraryMriSequencePresetMock = vi.fn();
+const updateProtocolLibraryMriSequencePresetMock = vi.fn();
 const fetchTeamWorkloadSummaryMock = vi.fn();
 const runWorkloadCalculationMock = vi.fn();
 const fetchWorkloadCatalogMock = vi.fn();
@@ -103,6 +136,39 @@ vi.mock("@/lib/api-hooks", () => ({
   assignProtocol: (...args: unknown[]) => assignProtocolMock(...args),
   requestProtocolClarification: (...args: unknown[]) => requestProtocolClarificationMock(...args),
   cancelProtocol: (...args: unknown[]) => cancelProtocolMock(...args),
+  fetchDoctorProtocolingAppointments: (...args: unknown[]) => fetchDoctorProtocolingAppointmentsMock(...args),
+  fetchDoctorProtocolingAppointmentDetail: (...args: unknown[]) => fetchDoctorProtocolingAppointmentDetailMock(...args),
+  createDoctorProtocolAssignment: (...args: unknown[]) => createDoctorProtocolAssignmentMock(...args),
+  updateDoctorProtocolAssignment: (...args: unknown[]) => updateDoctorProtocolAssignmentMock(...args),
+  cancelDoctorProtocolAssignment: (...args: unknown[]) => cancelDoctorProtocolAssignmentMock(...args),
+  fetchProtocolLibraryAnatomyRegions: (...args: unknown[]) => fetchProtocolLibraryAnatomyRegionsMock(...args),
+  fetchProtocolLibraryScanners: (...args: unknown[]) => fetchProtocolLibraryScannersMock(...args),
+  fetchProtocolLibraryCtPhasePresets: (...args: unknown[]) => fetchProtocolLibraryCtPhasePresetsMock(...args),
+  fetchProtocolLibraryMriSequencePresets: (...args: unknown[]) => fetchProtocolLibraryMriSequencePresetsMock(...args),
+  fetchProtocolLibraryProtocols: (...args: unknown[]) => fetchProtocolLibraryProtocolsMock(...args),
+  fetchProtocolLibraryProtocolDetail: (...args: unknown[]) => fetchProtocolLibraryProtocolDetailMock(...args),
+  fetchProtocolLibraryVersionDetail: (...args: unknown[]) => fetchProtocolLibraryVersionDetailMock(...args),
+  createProtocolLibraryProtocol: (...args: unknown[]) => createProtocolLibraryProtocolMock(...args),
+  updateProtocolLibraryProtocol: (...args: unknown[]) => updateProtocolLibraryProtocolMock(...args),
+  updateProtocolLibraryVersion: (...args: unknown[]) => updateProtocolLibraryVersionMock(...args),
+  activateProtocolLibraryVersion: (...args: unknown[]) => activateProtocolLibraryVersionMock(...args),
+  createProtocolLibraryDraftFromActive: (...args: unknown[]) => createProtocolLibraryDraftFromActiveMock(...args),
+  createProtocolLibraryCtPhaseRow: (...args: unknown[]) => createProtocolLibraryCtPhaseRowMock(...args),
+  updateProtocolLibraryCtPhaseRow: (...args: unknown[]) => updateProtocolLibraryCtPhaseRowMock(...args),
+  deleteProtocolLibraryCtPhaseRow: (...args: unknown[]) => deleteProtocolLibraryCtPhaseRowMock(...args),
+  reorderProtocolLibraryCtPhaseRows: (...args: unknown[]) => reorderProtocolLibraryCtPhaseRowsMock(...args),
+  createProtocolLibraryMriSequenceRow: (...args: unknown[]) => createProtocolLibraryMriSequenceRowMock(...args),
+  updateProtocolLibraryMriSequenceRow: (...args: unknown[]) => updateProtocolLibraryMriSequenceRowMock(...args),
+  deleteProtocolLibraryMriSequenceRow: (...args: unknown[]) => deleteProtocolLibraryMriSequenceRowMock(...args),
+  reorderProtocolLibraryMriSequenceRows: (...args: unknown[]) => reorderProtocolLibraryMriSequenceRowsMock(...args),
+  createProtocolLibraryAnatomyRegion: (...args: unknown[]) => createProtocolLibraryAnatomyRegionMock(...args),
+  updateProtocolLibraryAnatomyRegion: (...args: unknown[]) => updateProtocolLibraryAnatomyRegionMock(...args),
+  createProtocolLibraryScanner: (...args: unknown[]) => createProtocolLibraryScannerMock(...args),
+  updateProtocolLibraryScanner: (...args: unknown[]) => updateProtocolLibraryScannerMock(...args),
+  createProtocolLibraryCtPhasePreset: (...args: unknown[]) => createProtocolLibraryCtPhasePresetMock(...args),
+  updateProtocolLibraryCtPhasePreset: (...args: unknown[]) => updateProtocolLibraryCtPhasePresetMock(...args),
+  createProtocolLibraryMriSequencePreset: (...args: unknown[]) => createProtocolLibraryMriSequencePresetMock(...args),
+  updateProtocolLibraryMriSequencePreset: (...args: unknown[]) => updateProtocolLibraryMriSequencePresetMock(...args),
   fetchTeamWorkloadSummary: (...args: unknown[]) => fetchTeamWorkloadSummaryMock(...args),
   runWorkloadCalculation: (...args: unknown[]) => runWorkloadCalculationMock(...args),
   fetchWorkloadCatalog: (...args: unknown[]) => fetchWorkloadCatalogMock(...args),
@@ -233,6 +299,39 @@ describe("Doctor Portal shell", () => {
     assignProtocolMock.mockReset();
     requestProtocolClarificationMock.mockReset();
     cancelProtocolMock.mockReset();
+    fetchDoctorProtocolingAppointmentsMock.mockReset();
+    fetchDoctorProtocolingAppointmentDetailMock.mockReset();
+    createDoctorProtocolAssignmentMock.mockReset();
+    updateDoctorProtocolAssignmentMock.mockReset();
+    cancelDoctorProtocolAssignmentMock.mockReset();
+    fetchProtocolLibraryAnatomyRegionsMock.mockReset();
+    fetchProtocolLibraryScannersMock.mockReset();
+    fetchProtocolLibraryCtPhasePresetsMock.mockReset();
+    fetchProtocolLibraryMriSequencePresetsMock.mockReset();
+    fetchProtocolLibraryProtocolsMock.mockReset();
+    fetchProtocolLibraryProtocolDetailMock.mockReset();
+    fetchProtocolLibraryVersionDetailMock.mockReset();
+    createProtocolLibraryProtocolMock.mockReset();
+    updateProtocolLibraryProtocolMock.mockReset();
+    updateProtocolLibraryVersionMock.mockReset();
+    activateProtocolLibraryVersionMock.mockReset();
+    createProtocolLibraryDraftFromActiveMock.mockReset();
+    createProtocolLibraryCtPhaseRowMock.mockReset();
+    updateProtocolLibraryCtPhaseRowMock.mockReset();
+    deleteProtocolLibraryCtPhaseRowMock.mockReset();
+    reorderProtocolLibraryCtPhaseRowsMock.mockReset();
+    createProtocolLibraryMriSequenceRowMock.mockReset();
+    updateProtocolLibraryMriSequenceRowMock.mockReset();
+    deleteProtocolLibraryMriSequenceRowMock.mockReset();
+    reorderProtocolLibraryMriSequenceRowsMock.mockReset();
+    createProtocolLibraryAnatomyRegionMock.mockReset();
+    updateProtocolLibraryAnatomyRegionMock.mockReset();
+    createProtocolLibraryScannerMock.mockReset();
+    updateProtocolLibraryScannerMock.mockReset();
+    createProtocolLibraryCtPhasePresetMock.mockReset();
+    updateProtocolLibraryCtPhasePresetMock.mockReset();
+    createProtocolLibraryMriSequencePresetMock.mockReset();
+    updateProtocolLibraryMriSequencePresetMock.mockReset();
     fetchTeamWorkloadSummaryMock.mockReset();
     runWorkloadCalculationMock.mockReset();
     fetchWorkloadCatalogMock.mockReset();
@@ -337,6 +436,106 @@ describe("Doctor Portal shell", () => {
     assignProtocolMock.mockResolvedValue({});
     requestProtocolClarificationMock.mockResolvedValue({});
     cancelProtocolMock.mockResolvedValue({});
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([]);
+    fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue(null);
+    createDoctorProtocolAssignmentMock.mockResolvedValue({});
+    updateDoctorProtocolAssignmentMock.mockResolvedValue({});
+    cancelDoctorProtocolAssignmentMock.mockResolvedValue({});
+    fetchProtocolLibraryAnatomyRegionsMock.mockResolvedValue([]);
+    fetchProtocolLibraryScannersMock.mockResolvedValue([]);
+    fetchProtocolLibraryCtPhasePresetsMock.mockResolvedValue([]);
+    fetchProtocolLibraryMriSequencePresetsMock.mockResolvedValue([]);
+    fetchProtocolLibraryProtocolsMock.mockResolvedValue([]);
+    fetchProtocolLibraryProtocolDetailMock.mockResolvedValue(null);
+    fetchProtocolLibraryVersionDetailMock.mockResolvedValue(null);
+    createProtocolLibraryProtocolMock.mockResolvedValue({
+      protocol: {
+        id: 20,
+        name: "CT Brain",
+        modality: "CT",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: null,
+        activeVersionId: null,
+        activeVersionNumber: null,
+        activeVersionStatus: null,
+        latestDraftVersionId: 30,
+        latestDraftVersionNumber: "1.0",
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      version: {
+        id: 30,
+        protocolId: 20,
+        versionNumber: "1.0",
+        status: "DRAFT",
+        changeSummary: "Initial protocol version",
+        createdBy: null,
+        approvedBy: null,
+        approvedAt: null,
+        retiredAt: null,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+    });
+    fetchProtocolLibraryVersionDetailMock.mockResolvedValue({
+      protocol: {
+        id: 20,
+        name: "CT Brain",
+        modality: "CT",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: null,
+        activeVersionId: null,
+        activeVersionNumber: null,
+        activeVersionStatus: null,
+        latestDraftVersionId: 30,
+        latestDraftVersionNumber: "1.0",
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      version: {
+        id: 30,
+        protocolId: 20,
+        versionNumber: "1.0",
+        status: "DRAFT",
+        changeSummary: "Initial protocol version",
+        createdBy: null,
+        approvedBy: null,
+        approvedAt: null,
+        retiredAt: null,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      ctPhases: [],
+      mriSequences: [],
+    });
+    updateProtocolLibraryProtocolMock.mockResolvedValue({});
+    updateProtocolLibraryVersionMock.mockResolvedValue({});
+    activateProtocolLibraryVersionMock.mockResolvedValue({});
+    createProtocolLibraryDraftFromActiveMock.mockResolvedValue({});
+    createProtocolLibraryCtPhaseRowMock.mockResolvedValue({});
+    updateProtocolLibraryCtPhaseRowMock.mockResolvedValue({});
+    deleteProtocolLibraryCtPhaseRowMock.mockResolvedValue({});
+    reorderProtocolLibraryCtPhaseRowsMock.mockResolvedValue({});
+    createProtocolLibraryMriSequenceRowMock.mockResolvedValue({});
+    updateProtocolLibraryMriSequenceRowMock.mockResolvedValue({});
+    deleteProtocolLibraryMriSequenceRowMock.mockResolvedValue({});
+    reorderProtocolLibraryMriSequenceRowsMock.mockResolvedValue({});
+    createProtocolLibraryAnatomyRegionMock.mockResolvedValue({});
+    updateProtocolLibraryAnatomyRegionMock.mockResolvedValue({});
+    createProtocolLibraryScannerMock.mockResolvedValue({});
+    updateProtocolLibraryScannerMock.mockResolvedValue({});
+    createProtocolLibraryCtPhasePresetMock.mockResolvedValue({});
+    updateProtocolLibraryCtPhasePresetMock.mockResolvedValue({});
+    createProtocolLibraryMriSequencePresetMock.mockResolvedValue({});
+    updateProtocolLibraryMriSequencePresetMock.mockResolvedValue({});
     fetchTeamWorkloadSummaryMock.mockResolvedValue([]);
     runWorkloadCalculationMock.mockResolvedValue({
       calculatedCount: 0,
@@ -1380,12 +1579,162 @@ describe("Doctor Portal shell", () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal("/doctor/protocols");
 
-    expect(await screen.findByText("No protocol tasks found.")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Protocoling Worklist" })).toBeTruthy();
+    expect(screen.getByText("No appointments need protocol assignment.")).toBeTruthy();
+    await waitFor(() => expect(fetchDoctorProtocolingAppointmentsMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/reschedule/i)).toBeNull();
   });
 
-  it("protocol form renders appointment summary and actions", async () => {
-    fetchProtocolTasksMock.mockResolvedValue([
+  it("normal doctor can open the Protocol Library skeleton", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+
+    expect(await screen.findByRole("heading", { name: "Protocol Library" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Protocol List" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Anatomy / Regions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Scanners" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CT Phase Presets" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "MRI Sequence Presets" })).toBeTruthy();
+    expect(await screen.findByText("No protocols yet")).toBeTruthy();
+    expect(screen.getByText("Create CT or MRI protocols from your saved phase and sequence presets.")).toBeTruthy();
+    await waitFor(() => expect(fetchProtocolLibraryProtocolsMock).toHaveBeenCalled());
+  });
+
+  it("creates an anatomy region from the Protocol Library", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Anatomy / Regions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add region" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Brain" } });
+    fireEvent.change(screen.getByLabelText("Body system"), { target: { value: "Neuro" } });
+    fireEvent.change(screen.getByLabelText("Modality scope"), { target: { value: "BOTH" } });
+    fireEvent.change(screen.getByLabelText("Default coverage note"), { target: { value: "Vertex to skull base" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save region" }));
+
+    await waitFor(() => expect(createProtocolLibraryAnatomyRegionMock.mock.calls[0]?.[0]).toEqual({
+      name: "Brain",
+      bodySystem: "Neuro",
+      modalityScope: "BOTH",
+      defaultCoverageNote: "Vertex to skull base",
+      isActive: true,
+    }));
+    await waitFor(() => expect(fetchProtocolLibraryAnatomyRegionsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("opens Add Protocol and creates a CT draft builder", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add protocol" }));
+    fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "CT Brain" } });
+    fireEvent.change(screen.getByLabelText("Protocol modality"), { target: { value: "CT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create protocol" }));
+
+    await waitFor(() => expect(createProtocolLibraryProtocolMock.mock.calls[0]?.[0]).toMatchObject({
+      name: "CT Brain",
+      modality: "CT",
+      changeSummary: "Initial protocol version",
+    }));
+    expect(await screen.findByText("CT phases")).toBeTruthy();
+    expect(screen.getByText("No CT phases added yet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Activate version" })).toBeTruthy();
+  });
+
+  it("renders MRI sequence terminology in the protocol builder", async () => {
+    fetchProtocolLibraryVersionDetailMock.mockResolvedValue({
+      protocol: {
+        id: 21,
+        name: "MRI Prostate",
+        modality: "MRI",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: null,
+        activeVersionId: null,
+        activeVersionNumber: null,
+        activeVersionStatus: null,
+        latestDraftVersionId: 31,
+        latestDraftVersionNumber: "1.0",
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      version: {
+        id: 31,
+        protocolId: 21,
+        versionNumber: "1.0",
+        status: "DRAFT",
+        changeSummary: "Initial protocol version",
+        createdBy: null,
+        approvedBy: null,
+        approvedAt: null,
+        retiredAt: null,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      ctPhases: [],
+      mriSequences: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add protocol" }));
+    fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "MRI Prostate" } });
+    fireEvent.change(screen.getByLabelText("Protocol modality"), { target: { value: "MRI" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create protocol" }));
+
+    expect(await screen.findByText("MRI sequences")).toBeTruthy();
+    expect(screen.getByText("No MRI sequences added yet")).toBeTruthy();
+    expect(screen.queryByText("CT phases")).toBeNull();
+  });
+
+  it("opens assignment form and saves a matching active protocol", async () => {
+    fetchProtocolLibraryProtocolsMock.mockResolvedValue([
+      {
+        id: 20,
+        name: "CT Brain",
+        modality: "CT",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: "IV contrast if indicated",
+        activeVersionId: 30,
+        activeVersionNumber: "1.0",
+        activeVersionStatus: "ACTIVE",
+        latestDraftVersionId: null,
+        latestDraftVersionNumber: null,
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      {
+        id: 21,
+        name: "MRI Prostate",
+        modality: "MRI",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: null,
+        activeVersionId: 31,
+        activeVersionNumber: "1.0",
+        activeVersionStatus: "ACTIVE",
+        latestDraftVersionId: null,
+        latestDraftVersionNumber: null,
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+    ]);
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([
       {
         appointmentId: 77,
         patientId: 5,
@@ -1403,52 +1752,107 @@ describe("Doctor Portal shell", () => {
         examTypeId: 2,
         examTypeName: "CT Brain",
         caseCategory: "oncology",
-        requiresReport: true,
-        clinicalIndication: "Headache",
+        clinicalNotes: "Headache",
         appointmentStatus: "scheduled",
-        rosterAssignmentId: 9,
-        teamName: "CT Team",
-        protocolStatus: null,
-        assignedByDoctorName: null,
-        updatedAt: null,
+        protocolStatus: "NOT_PROTOCOLLED",
+        assignment: null,
+      },
+    ]);
+    fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({
+      appointment: {
+        appointmentId: 77,
+        patientId: 5,
+        patientMrn: "MRN-5",
+        patientNationalId: "NID-5",
+        patientArabicName: "Arabic Name",
+        patientEnglishName: "Protocol Patient",
+        ageYears: 42,
+        sex: "F",
+        appointmentDate: "2027-01-04",
+        appointmentTime: "09:00",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 2,
+        examTypeName: "CT Brain",
+        caseCategory: "oncology",
+        clinicalNotes: "Headache",
+        appointmentStatus: "scheduled",
+        protocolStatus: "NOT_PROTOCOLLED",
+        assignment: null,
+      },
+      assignmentDetail: null,
+    });
+    createDoctorProtocolAssignmentMock.mockResolvedValue({});
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    expect(await screen.findByRole("heading", { name: "Assign protocol" })).toBeTruthy();
+    expect(screen.getByText("Protocol Patient")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "CT Brain v1.0" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "MRI Prostate v1.0" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Protocol"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Protocol notes"), { target: { value: "Use standard brain protocol" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
+
+    await waitFor(() => expect(createDoctorProtocolAssignmentMock.mock.calls[0]).toEqual([
+      77,
+      {
+        protocolId: 20,
+        scannerId: null,
+        protocolNotes: "Use standard brain protocol",
+        contrastNotes: null,
+        status: "ASSIGNED",
+      },
+    ]));
+  });
+
+  it("shows existing protocol assignment status and version", async () => {
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([
+      {
+        appointmentId: 78,
+        patientId: 6,
+        patientMrn: "MRN-6",
+        patientNationalId: null,
+        patientArabicName: null,
+        patientEnglishName: "Assigned Patient",
+        ageYears: 55,
+        sex: "M",
+        appointmentDate: "2027-01-04",
+        appointmentTime: "10:00",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 3,
+        examTypeName: "CT CAP",
+        caseCategory: "non_oncology",
+        clinicalNotes: null,
+        appointmentStatus: "scheduled",
+        protocolStatus: "ASSIGNED",
+        assignment: {
+          assignmentId: 8,
+          protocolId: 20,
+          protocolVersionId: 30,
+          protocolName: "CT CAP",
+          versionNumber: "1.0",
+          scannerId: null,
+          scannerName: null,
+          protocolNotes: "Portal venous",
+          contrastNotes: null,
+          status: "ASSIGNED",
+          assignedBy: 10,
+          assignedAt: "2027-01-04T09:30:00.000Z",
+        },
       },
     ]);
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
-    fetchProtocolAuditMock.mockResolvedValue([
-      {
-        eventType: "protocol_assigned",
-        changedByDoctorId: 1,
-        changedByDoctorName: "Dr Normal",
-        createdAt: "2027-01-04T10:00:00.000Z",
-        reason: "corrected request",
-        oldSummary: "status draft, version 1",
-        newSummary: "status assigned, version 2, protocol text present",
-        version: 2,
-        protocolStatus: "assigned",
-      },
-    ]);
     renderDoctorPortal("/doctor/protocols");
 
-    fireEvent.click(await screen.findByText("Protocol Patient"));
-
-    expect(await screen.findByText(/Clinical indication:/)).toBeTruthy();
-    expect(screen.getByText("Save draft")).toBeTruthy();
-    expect(screen.getByText("Assign protocol")).toBeTruthy();
-    expect(screen.getByText("Clarification requires a note.")).toBeTruthy();
-    expect(await screen.findByText("Protocol history")).toBeTruthy();
-    expect(screen.getByText(/corrected request/)).toBeTruthy();
-    expect(screen.queryByText(/reschedule/i)).toBeNull();
-  });
-
-  it("supervisor sees team protocol task controls", async () => {
-    fetchDoctorMeMock.mockResolvedValue({
-      ...normalDoctor,
-      canSupervise: true,
-      moduleCapabilities: ["doctor", "doctor_supervisor"],
-    });
-    renderDoctorPortal("/doctor/protocols");
-
-    expect(await screen.findByText("Supervisor/admin team and unassigned protocol tasks are visible here.")).toBeTruthy();
+    expect(await screen.findByText("Assigned Patient")).toBeTruthy();
+    expect(screen.getByText("CT CAP v1.0")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change" })).toBeTruthy();
   });
 
   it("normal doctor sees team workload empty state without calculation controls", async () => {

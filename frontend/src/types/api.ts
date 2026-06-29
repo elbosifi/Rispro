@@ -712,6 +712,240 @@ export interface ProtocolPayload {
   reason?: string | null;
 }
 
+export type ProtocolAssignmentStatus = "ASSIGNED" | "MODIFIED" | "CANCELLED";
+export type DoctorProtocolingStatus = "NOT_PROTOCOLLED" | ProtocolAssignmentStatus;
+
+export interface ProtocolAssignment {
+  assignmentId: number;
+  protocolId: number;
+  protocolVersionId: number;
+  protocolName: string;
+  versionNumber: string;
+  scannerId: number | null;
+  scannerName: string | null;
+  protocolNotes: string | null;
+  contrastNotes: string | null;
+  status: ProtocolAssignmentStatus;
+  assignedBy: number | null;
+  assignedAt: string | null;
+}
+
+export interface DoctorProtocolingAppointment {
+  appointmentId: number;
+  patientId: number;
+  patientMrn: string | null;
+  patientNationalId: string | null;
+  patientArabicName: string | null;
+  patientEnglishName: string | null;
+  ageYears: number | null;
+  sex: string | null;
+  appointmentDate: string;
+  appointmentTime: string | null;
+  modalityId: number;
+  modalityCode: "CT" | "MRI";
+  modalityName: string | null;
+  examTypeId: number | null;
+  examTypeName: string | null;
+  caseCategory: string | null;
+  clinicalNotes: string | null;
+  appointmentStatus: string;
+  protocolStatus: DoctorProtocolingStatus;
+  assignment: ProtocolAssignment | null;
+}
+
+export interface ProtocolingCtPhase {
+  id: number;
+  orderIndex: number;
+  ctPhasePresetId: number | null;
+  ctPhasePresetName: string | null;
+  customPhaseName: string | null;
+  timingOverride: string | null;
+  coverageOverride: string | null;
+  reconstructionOverride: string | null;
+  instructionsOverride: string | null;
+  isRequired: boolean;
+}
+
+export interface ProtocolingMriSequence {
+  id: number;
+  orderIndex: number;
+  scannerId: number | null;
+  scannerName: string | null;
+  mriSequencePresetId: number | null;
+  mriSequencePresetName: string | null;
+  planeOverride: string | null;
+  coverageOverride: string | null;
+  bValuesOverride: string | null;
+  timingOverride: string | null;
+  notesOverride: string | null;
+  isRequired: boolean;
+}
+
+export interface ProtocolAssignmentDetail {
+  assignment: ProtocolAssignment;
+  ctPhases: ProtocolingCtPhase[];
+  mriSequences: ProtocolingMriSequence[];
+}
+
+export interface DoctorProtocolingAppointmentDetail {
+  appointment: DoctorProtocolingAppointment;
+  assignmentDetail: ProtocolAssignmentDetail | null;
+}
+
+export interface DoctorProtocolingFilters {
+  dateFrom: string;
+  dateTo: string;
+  modality?: "CT" | "MRI" | null;
+  protocolStatus?: "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL" | null;
+  search?: string | null;
+}
+
+export interface ProtocolAssignmentPayload {
+  protocolId: number;
+  scannerId: number | null;
+  protocolNotes: string | null;
+  contrastNotes: string | null;
+  status: ProtocolAssignmentStatus;
+}
+
+export interface ProtocolAnatomyRegion {
+  id: number;
+  name: string;
+  bodySystem: string | null;
+  modalityScope: "CT" | "MRI" | "BOTH";
+  defaultCoverageNote: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImagingScanner {
+  id: number;
+  name: string;
+  modality: "CT" | "MRI";
+  vendor: string | null;
+  model: string | null;
+  fieldStrength: string | null;
+  location: string | null;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CtPhasePreset {
+  id: number;
+  name: string;
+  contrastStatus: "NON_CONTRAST" | "POST_CONTRAST" | "DELAYED" | "OTHER";
+  timingType: "NONE" | "FIXED_DELAY" | "BOLUS_TRACKING" | "MANUAL";
+  delaySeconds: number | null;
+  bolusTrackingSite: string | null;
+  triggerHu: number | null;
+  defaultCoverage: string | null;
+  reconstructionNotes: string | null;
+  instructions: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MriSequencePreset {
+  id: number;
+  scannerId: number | null;
+  scannerName: string | null;
+  vendor: string | null;
+  name: string;
+  vendorSequenceName: string | null;
+  genericFamily: string | null;
+  weighting: string | null;
+  defaultPlane: string | null;
+  contrastRelation: string | null;
+  defaultCoverage: string | null;
+  defaultBValues: string | null;
+  defaultDynamicTiming: string | null;
+  estimatedScanTimeMinutes: number | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProtocolLibraryProtocol {
+  id: number;
+  name: string;
+  modality: "CT" | "MRI";
+  anatomyRegionId: number | null;
+  anatomyRegionName: string | null;
+  category: string | null;
+  indication: string | null;
+  contrastPolicy: string | null;
+  activeVersionId: number | null;
+  activeVersionNumber: string | null;
+  activeVersionStatus: ProtocolLibraryVersionStatus | null;
+  latestDraftVersionId: number | null;
+  latestDraftVersionNumber: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProtocolLibraryVersionStatus = "DRAFT" | "ACTIVE" | "RETIRED";
+
+export interface ProtocolLibraryVersion {
+  id: number;
+  protocolId: number;
+  versionNumber: string;
+  status: ProtocolLibraryVersionStatus;
+  changeSummary: string | null;
+  createdBy: number | null;
+  approvedBy: number | null;
+  approvedAt: string | null;
+  retiredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProtocolLibraryCtPhaseRow {
+  id: number;
+  protocolVersionId: number;
+  orderIndex: number;
+  ctPhasePresetId: number | null;
+  ctPhasePresetName: string | null;
+  customPhaseName: string | null;
+  timingOverride: string | null;
+  coverageOverride: string | null;
+  reconstructionOverride: string | null;
+  instructionsOverride: string | null;
+  isRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProtocolLibraryMriSequenceRow {
+  id: number;
+  protocolVersionId: number;
+  scannerId: number | null;
+  scannerName: string | null;
+  orderIndex: number;
+  mriSequencePresetId: number | null;
+  mriSequencePresetName: string | null;
+  planeOverride: string | null;
+  coverageOverride: string | null;
+  bValuesOverride: string | null;
+  timingOverride: string | null;
+  notesOverride: string | null;
+  isRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProtocolLibraryVersionDetail {
+  protocol: ProtocolLibraryProtocol;
+  version: ProtocolLibraryVersion;
+  ctPhases: ProtocolLibraryCtPhaseRow[];
+  mriSequences: ProtocolLibraryMriSequenceRow[];
+}
+
 export interface TeamWorkloadSummaryRow {
   rosterAssignmentId: number;
   teamName: string;

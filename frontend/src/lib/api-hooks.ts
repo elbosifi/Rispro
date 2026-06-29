@@ -73,10 +73,23 @@ import type {
   RosterXmlImportResult,
   AppointmentProtocol,
   ProtocolAuditTimelineEvent,
+  ProtocolAnatomyRegion,
+  ProtocolLibraryProtocol,
+  ProtocolLibraryVersion,
+  ProtocolLibraryVersionDetail,
+  ProtocolLibraryCtPhaseRow,
+  ProtocolLibraryMriSequenceRow,
   ProtocolDetails,
   ProtocolFilters,
   ProtocolPayload,
+  DoctorProtocolingAppointment,
+  DoctorProtocolingAppointmentDetail,
+  DoctorProtocolingFilters,
+  ProtocolAssignmentPayload,
   ProtocolTask,
+  ImagingScanner,
+  CtPhasePreset,
+  MriSequencePreset,
   TeamWorkloadSummaryRow,
   WorkloadCalculationSummary,
   WorkloadCatalogRule,
@@ -991,6 +1004,256 @@ export async function cancelProtocol(appointmentId: number, payload: ProtocolPay
 export async function fetchProtocolAudit(appointmentId: number): Promise<ProtocolAuditTimelineEvent[]> {
   const raw = await api<{ audit: ProtocolAuditTimelineEvent[] }>(`/doctor/protocols/${appointmentId}/audit`);
   return raw.audit;
+}
+
+function protocolingParams(filters: DoctorProtocolingFilters): URLSearchParams {
+  const params = new URLSearchParams({ dateFrom: filters.dateFrom, dateTo: filters.dateTo });
+  if (filters.modality) params.set("modality", filters.modality);
+  if (filters.protocolStatus && filters.protocolStatus !== "ALL") params.set("protocolStatus", filters.protocolStatus);
+  if (filters.search) params.set("search", filters.search);
+  return params;
+}
+
+export async function fetchDoctorProtocolingAppointments(filters: DoctorProtocolingFilters): Promise<DoctorProtocolingAppointment[]> {
+  const raw = await api<{ appointments: DoctorProtocolingAppointment[] }>(`/doctor/protocoling/appointments?${protocolingParams(filters).toString()}`);
+  return raw.appointments;
+}
+
+export async function fetchDoctorProtocolingAppointmentDetail(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
+  const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}`);
+  return raw.detail;
+}
+
+export async function createDoctorProtocolAssignment(appointmentId: number, payload: ProtocolAssignmentPayload): Promise<DoctorProtocolingAppointmentDetail> {
+  const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}/assignment`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function updateDoctorProtocolAssignment(appointmentId: number, payload: ProtocolAssignmentPayload): Promise<DoctorProtocolingAppointmentDetail> {
+  const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}/assignment`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function cancelDoctorProtocolAssignment(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
+  const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}/assignment`, {
+    method: "DELETE",
+  });
+  return raw.detail;
+}
+
+export async function fetchProtocolLibraryAnatomyRegions(): Promise<ProtocolAnatomyRegion[]> {
+  const raw = await api<{ anatomyRegions: ProtocolAnatomyRegion[] }>("/doctor/protocol-library/anatomy-regions");
+  return raw.anatomyRegions;
+}
+
+export async function fetchProtocolLibraryScanners(): Promise<ImagingScanner[]> {
+  const raw = await api<{ scanners: ImagingScanner[] }>("/doctor/protocol-library/scanners");
+  return raw.scanners;
+}
+
+export async function fetchProtocolLibraryCtPhasePresets(): Promise<CtPhasePreset[]> {
+  const raw = await api<{ ctPhasePresets: CtPhasePreset[] }>("/doctor/protocol-library/ct-phase-presets");
+  return raw.ctPhasePresets;
+}
+
+export async function fetchProtocolLibraryMriSequencePresets(): Promise<MriSequencePreset[]> {
+  const raw = await api<{ mriSequencePresets: MriSequencePreset[] }>("/doctor/protocol-library/mri-sequence-presets");
+  return raw.mriSequencePresets;
+}
+
+export async function fetchProtocolLibraryProtocols(): Promise<ProtocolLibraryProtocol[]> {
+  const raw = await api<{ protocols: ProtocolLibraryProtocol[] }>("/doctor/protocol-library/protocols");
+  return raw.protocols;
+}
+
+export async function fetchProtocolLibraryProtocolDetail(id: number): Promise<ProtocolLibraryProtocol> {
+  const raw = await api<{ detail: ProtocolLibraryProtocol }>(`/doctor/protocol-library/protocols/${id}`);
+  return raw.detail;
+}
+
+export async function fetchProtocolLibraryVersionDetail(versionId: number): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}`);
+  return raw.detail;
+}
+
+export type ProtocolAnatomyRegionPayload = Pick<ProtocolAnatomyRegion, "name" | "bodySystem" | "modalityScope" | "defaultCoverageNote" | "isActive">;
+export type ImagingScannerPayload = Pick<ImagingScanner, "name" | "modality" | "vendor" | "model" | "fieldStrength" | "location" | "notes" | "isActive">;
+export type CtPhasePresetPayload = Pick<CtPhasePreset, "name" | "contrastStatus" | "timingType" | "delaySeconds" | "bolusTrackingSite" | "triggerHu" | "defaultCoverage" | "reconstructionNotes" | "instructions" | "isActive">;
+export type MriSequencePresetPayload = Pick<MriSequencePreset, "scannerId" | "vendor" | "name" | "vendorSequenceName" | "genericFamily" | "weighting" | "defaultPlane" | "contrastRelation" | "defaultCoverage" | "defaultBValues" | "defaultDynamicTiming" | "estimatedScanTimeMinutes" | "notes" | "isActive">;
+export type ProtocolLibraryProtocolPayload = Pick<ProtocolLibraryProtocol, "name" | "modality" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy"> & { changeSummary?: string | null };
+export type ProtocolLibraryProtocolPatch = Partial<Pick<ProtocolLibraryProtocol, "name" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy" | "isActive">>;
+export type ProtocolLibraryCtPhaseRowPayload = Pick<ProtocolLibraryCtPhaseRow, "ctPhasePresetId" | "customPhaseName" | "timingOverride" | "coverageOverride" | "reconstructionOverride" | "instructionsOverride" | "isRequired">;
+export type ProtocolLibraryMriSequenceRowPayload = Pick<ProtocolLibraryMriSequenceRow, "scannerId" | "mriSequencePresetId" | "planeOverride" | "coverageOverride" | "bValuesOverride" | "timingOverride" | "notesOverride" | "isRequired">;
+
+export async function createProtocolLibraryProtocol(
+  payload: ProtocolLibraryProtocolPayload
+): Promise<{ protocol: ProtocolLibraryProtocol; version: ProtocolLibraryVersion }> {
+  return api<{ protocol: ProtocolLibraryProtocol; version: ProtocolLibraryVersion }>("/doctor/protocol-library/protocols", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProtocolLibraryProtocol(id: number, payload: ProtocolLibraryProtocolPatch): Promise<ProtocolLibraryProtocol> {
+  const raw = await api<{ protocol: ProtocolLibraryProtocol }>(`/doctor/protocol-library/protocols/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.protocol;
+}
+
+export async function updateProtocolLibraryVersion(versionId: number, payload: { changeSummary?: string | null }): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function activateProtocolLibraryVersion(versionId: number): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/activate`, {
+    method: "POST",
+  });
+  return raw.detail;
+}
+
+export async function createProtocolLibraryDraftFromActive(protocolId: number): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocols/${protocolId}/draft-from-active`, {
+    method: "POST",
+  });
+  return raw.detail;
+}
+
+export async function createProtocolLibraryCtPhaseRow(versionId: number, payload: ProtocolLibraryCtPhaseRowPayload): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/ct-phases`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function updateProtocolLibraryCtPhaseRow(versionId: number, rowId: number, payload: Partial<ProtocolLibraryCtPhaseRowPayload>): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/ct-phases/${rowId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function deleteProtocolLibraryCtPhaseRow(versionId: number, rowId: number): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/ct-phases/${rowId}`, {
+    method: "DELETE",
+  });
+  return raw.detail;
+}
+
+export async function reorderProtocolLibraryCtPhaseRows(versionId: number, rowIds: number[]): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/ct-phases/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ rowIds }),
+  });
+  return raw.detail;
+}
+
+export async function createProtocolLibraryMriSequenceRow(versionId: number, payload: ProtocolLibraryMriSequenceRowPayload): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/mri-sequences`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function updateProtocolLibraryMriSequenceRow(versionId: number, rowId: number, payload: Partial<ProtocolLibraryMriSequenceRowPayload>): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/mri-sequences/${rowId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.detail;
+}
+
+export async function deleteProtocolLibraryMriSequenceRow(versionId: number, rowId: number): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/mri-sequences/${rowId}`, {
+    method: "DELETE",
+  });
+  return raw.detail;
+}
+
+export async function reorderProtocolLibraryMriSequenceRows(versionId: number, rowIds: number[]): Promise<ProtocolLibraryVersionDetail> {
+  const raw = await api<{ detail: ProtocolLibraryVersionDetail }>(`/doctor/protocol-library/protocol-versions/${versionId}/mri-sequences/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ rowIds }),
+  });
+  return raw.detail;
+}
+
+export async function createProtocolLibraryAnatomyRegion(payload: ProtocolAnatomyRegionPayload): Promise<ProtocolAnatomyRegion> {
+  const raw = await api<{ anatomyRegion: ProtocolAnatomyRegion }>("/doctor/protocol-library/anatomy-regions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.anatomyRegion;
+}
+
+export async function updateProtocolLibraryAnatomyRegion(id: number, payload: Partial<ProtocolAnatomyRegionPayload>): Promise<ProtocolAnatomyRegion> {
+  const raw = await api<{ anatomyRegion: ProtocolAnatomyRegion }>(`/doctor/protocol-library/anatomy-regions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.anatomyRegion;
+}
+
+export async function createProtocolLibraryScanner(payload: ImagingScannerPayload): Promise<ImagingScanner> {
+  const raw = await api<{ scanner: ImagingScanner }>("/doctor/protocol-library/scanners", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.scanner;
+}
+
+export async function updateProtocolLibraryScanner(id: number, payload: Partial<ImagingScannerPayload>): Promise<ImagingScanner> {
+  const raw = await api<{ scanner: ImagingScanner }>(`/doctor/protocol-library/scanners/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.scanner;
+}
+
+export async function createProtocolLibraryCtPhasePreset(payload: CtPhasePresetPayload): Promise<CtPhasePreset> {
+  const raw = await api<{ ctPhasePreset: CtPhasePreset }>("/doctor/protocol-library/ct-phase-presets", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.ctPhasePreset;
+}
+
+export async function updateProtocolLibraryCtPhasePreset(id: number, payload: Partial<CtPhasePresetPayload>): Promise<CtPhasePreset> {
+  const raw = await api<{ ctPhasePreset: CtPhasePreset }>(`/doctor/protocol-library/ct-phase-presets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.ctPhasePreset;
+}
+
+export async function createProtocolLibraryMriSequencePreset(payload: MriSequencePresetPayload): Promise<MriSequencePreset> {
+  const raw = await api<{ mriSequencePreset: MriSequencePreset }>("/doctor/protocol-library/mri-sequence-presets", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.mriSequencePreset;
+}
+
+export async function updateProtocolLibraryMriSequencePreset(id: number, payload: Partial<MriSequencePresetPayload>): Promise<MriSequencePreset> {
+  const raw = await api<{ mriSequencePreset: MriSequencePreset }>(`/doctor/protocol-library/mri-sequence-presets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.mriSequencePreset;
 }
 
 function workloadParams(filters: WorkloadFilters): URLSearchParams {

@@ -38,6 +38,7 @@ type DoctorPortalNavItem = {
 const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/my-work", label: "My Work", icon: LayoutDashboard },
   { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
+  { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
 ];
 
 const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
