@@ -77,7 +77,10 @@ const ordinaryDoctorMe: DoctorMe = {
 };
 
 const caseRow: ReportingBoardCaseRow = {
+  caseType: "appointment",
+  caseKey: "appointment:42",
   appointmentId: 42,
+  comparisonRequestId: null,
   patientId: 7,
   patientMrn: "MRN-7",
   patientDicomId: "DICOM-PRIMARY-7",
@@ -92,6 +95,9 @@ const caseRow: ReportingBoardCaseRow = {
   modalityName: "CT",
   examTypeId: 2,
   examTypeName: "CT Brain",
+  linkedPreviousBookingId: null,
+  linkedPreviousStudyDate: null,
+  linkedPreviousAccessionNumber: null,
   caseCategory: "oncology",
   appointmentStatus: "scheduled",
   requiresReport: true,
@@ -154,6 +160,7 @@ describe("DoctorReportingBoardPage", () => {
       filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
       summary: {
         total: 12,
+        comparisonRequests: 0,
         unassigned: 5,
         assigned: 7,
         stat: 2,

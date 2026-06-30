@@ -441,7 +441,10 @@ export interface ReportingBoardSavedView {
 }
 
 export interface ReportingBoardCaseRow {
+  caseType: "appointment" | "comparison";
+  caseKey: string;
   appointmentId: number;
+  comparisonRequestId: number | null;
   patientId: number;
   patientMrn: string | null;
   patientDicomId: string | null;
@@ -456,6 +459,9 @@ export interface ReportingBoardCaseRow {
   modalityName: string;
   examTypeId: number | null;
   examTypeName: string | null;
+  linkedPreviousBookingId: number | null;
+  linkedPreviousStudyDate: string | null;
+  linkedPreviousAccessionNumber: string | null;
   caseCategory: string;
   appointmentStatus: string;
   requiresReport: boolean;
@@ -484,6 +490,7 @@ export interface ReportingBoardCaseRow {
 
 export interface ReportingBoardStatsSummary {
   total: number;
+  comparisonRequests: number;
   unassigned: number;
   assigned: number;
   stat: number;
@@ -503,6 +510,68 @@ export interface ReportingBoardStatsSummary {
   p90AssignedToFinalMinutes: number | null;
   longestActiveAssignmentAgeMinutes: number | null;
   completedUnassigned: number;
+}
+
+export interface PreviousCompletedStudy {
+  bookingId: number;
+  patientId: number;
+  date: string;
+  time: string | null;
+  modalityId: number;
+  modalityCode: string;
+  modalityName: string;
+  examTypeId: number | null;
+  examName: string | null;
+  accessionNumber: string;
+  studyInstanceUid: string | null;
+  reportStatus: "unknown";
+}
+
+export type ComparisonRequestStatus =
+  | "pending_upload_confirmation"
+  | "ready_for_reporting"
+  | "assigned"
+  | "finalized"
+  | "cancelled";
+
+export interface ComparisonRequest {
+  id: number;
+  patientId: number;
+  patientMrn: string | null;
+  patientEnglishName: string | null;
+  patientArabicName: string | null;
+  linkedPreviousBookingId: number;
+  linkedPreviousStudyUid: string | null;
+  linkedPreviousAccessionNumber: string | null;
+  linkedModalityId: number | null;
+  linkedModalityCode: string | null;
+  linkedModalityName: string | null;
+  linkedExamTypeId: number | null;
+  linkedExamName: string | null;
+  linkedStudyDate: string | null;
+  reason: string;
+  status: ComparisonRequestStatus;
+  materialsConfirmed: boolean;
+  materialsConfirmedBy: number | null;
+  materialsConfirmedByName: string | null;
+  materialsConfirmedAt: string | null;
+  materialsConfirmationNote: string | null;
+  imageAvailabilityConfirmed: boolean;
+  documentsAvailabilityConfirmed: boolean;
+  selectedPriorConfirmed: boolean;
+  assignedDoctorId: number | null;
+  assignedDoctorName: string | null;
+  finalizedBy: number | null;
+  finalizedByName: string | null;
+  finalizedAt: string | null;
+  finalText: string | null;
+  createdBy: number | null;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  cancelledBy: number | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
 }
 
 export interface ReportingBoardDoctorStatsRow {

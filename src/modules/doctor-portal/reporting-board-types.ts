@@ -76,7 +76,10 @@ export interface ReportingBoardSavedView {
 }
 
 export interface ReportingBoardCaseRow {
+  caseType: "appointment" | "comparison";
+  caseKey: string;
   appointmentId: number;
+  comparisonRequestId: number | null;
   patientId: number;
   patientMrn: string | null;
   patientDicomId: string | null;
@@ -91,6 +94,9 @@ export interface ReportingBoardCaseRow {
   modalityName: string;
   examTypeId: number | null;
   examTypeName: string | null;
+  linkedPreviousBookingId: number | null;
+  linkedPreviousStudyDate: string | null;
+  linkedPreviousAccessionNumber: string | null;
   caseCategory: string;
   appointmentStatus: string;
   requiresReport: boolean;
@@ -118,7 +124,9 @@ export interface ReportingBoardCaseRow {
 }
 
 export interface ReportingBoardStatsBaseRow {
+  caseType: "appointment" | "comparison";
   appointmentId: number;
+  comparisonRequestId: number | null;
   bookingDate: string;
   appointmentStatus: string;
   modalityCode: string;
@@ -132,10 +140,12 @@ export interface ReportingBoardStatsBaseRow {
   currentAssignedAt: string | null;
   firstAssignedAt: string | null;
   reportFinalAt?: string | null;
+  reportStatus?: Exclude<SonicDicomReportState, "not_required" | "not_completed" | "disabled">;
 }
 
 export interface ReportingBoardStatsSummary {
   total: number;
+  comparisonRequests: number;
   unassigned: number;
   assigned: number;
   stat: number;

@@ -20,6 +20,7 @@ import SchedulingOverrideRequestsPage from "@/pages/scheduling-override-requests
 import QueuePage from "@/pages/queue/queue-page";
 import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
 import ModalityPage from "@/pages/modality/modality-page";
+import ComparisonsPage from "@/pages/comparisons/comparisons-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
 import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-page";
 import PrintPage from "@/pages/print/print-page";
@@ -279,6 +280,8 @@ function AppContent() {
             <Route path="/registrations" element={guardedPage("registrations", <RegistrationsPage />)} />
             <Route path="/queue" element={guardedPage("queue", <QueuePage />)} />
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
+            <Route path="/comparisons" element={guardedPage("comparisons", <ComparisonsPage />)} />
+            <Route path="/comparisons/:id" element={guardedPage("comparisons", <ComparisonsPage />)} />
             <Route path="/print" element={guardedPage("print", <PrintPage />)} />
             <Route path="/statistics" element={guardedPage("statistics", <StatisticsPage />)} />
             <Route path="/search" element={<SearchPage />} />

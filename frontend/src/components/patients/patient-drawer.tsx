@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, CalendarPlus, ChevronRight, Copy, Pencil, Printer, X } from "lucide-react";
+import { AlertTriangle, CalendarPlus, ChevronRight, ClipboardList, Copy, Pencil, Printer, X } from "lucide-react";
 import { authorizePatientNoShowBooking, fetchPatientDirectorySummary } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -10,6 +11,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { useAuth } from "@/providers/auth-provider";
 import { Badge, Button } from "@/components/shared";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { RequestComparisonModal } from "@/components/patients/request-comparison-modal";
 import type { PatientDirectorySummary } from "@/types/api";
 
 function WarningBadge({ warning, label }: { warning: boolean; label: string }) {
@@ -71,6 +73,14 @@ export function PatientDrawer({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isRtl = language === "ar";
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+  const canRequestComparison =
+    user?.role === "receptionist" ||
+    user?.role === "administrative" ||
+    user?.role === "modality_staff" ||
+    user?.role === "doctor" ||
+    user?.role === "supervisor" ||
+    user?.role === "super_admin";
 
   const { data: summary, isLoading, error } = useQuery({
     queryKey: ["patient-directory-summary", patientId],
@@ -445,6 +455,12 @@ export function PatientDrawer({
               <CalendarPlus size={14} />
               {t(language, "patients.directory.action.createAppointment")}
             </Button>
+            {canRequestComparison ? (
+              <Button size="sm" variant="outline" onClick={() => setShowComparisonModal(true)}>
+                <ClipboardList size={14} />
+                Request comparison
+              </Button>
+            ) : null}
             {lastAppointmentId != null && (
               <>
                 <Button
@@ -468,6 +484,9 @@ export function PatientDrawer({
           </div>
         </div>
       </div>
+      {showComparisonModal ? (
+        <RequestComparisonModal patientId={patientId} onClose={() => setShowComparisonModal(false)} />
+      ) : null}
     </div>
   );
 }

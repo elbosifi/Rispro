@@ -58,6 +58,7 @@ const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
   queue: ListOrdered,
   queueCheckIn: ListOrdered,
   modality: Monitor,
+  comparisons: ClipboardList,
   doctor: UserCheck,
   print: Printer,
   statistics: BarChart3,

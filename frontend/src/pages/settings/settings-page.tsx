@@ -4348,6 +4348,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   queue: "Queue",
   "queue.checkin": "Queue Check-In",
   modality: "Modality",
+  comparisons: "Comparisons",
   doctor: "Doctor",
   print: "Print",
   statistics: "Statistics",

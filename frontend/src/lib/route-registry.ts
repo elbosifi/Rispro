@@ -15,6 +15,7 @@ export type AppRouteKey =
   | "queue"
   | "queue.checkin"
   | "modality"
+  | "comparisons"
   | "doctor"
   | "print"
   | "statistics"
@@ -40,6 +41,7 @@ export type AppNavIcon =
   | "queue"
   | "queueCheckIn"
   | "modality"
+  | "comparisons"
   | "doctor"
   | "print"
   | "statistics"
@@ -191,6 +193,15 @@ const ROUTE_REGISTRY: readonly AppRouteRegistryEntry[] = [
     defaultRoles: ["modality_staff", "supervisor", "super_admin"],
     navLabelKey: "nav.modality",
     navIcon: "modality",
+  },
+  {
+    key: "comparisons",
+    path: "/comparisons",
+    titleKey: "routeTitle.comparisons",
+    accessKey: "comparisons",
+    defaultRoles: ["modality_staff", "doctor", "supervisor", "super_admin"],
+    navLabelKey: "nav.comparisons",
+    navIcon: "comparisons",
   },
   {
     key: "doctor",

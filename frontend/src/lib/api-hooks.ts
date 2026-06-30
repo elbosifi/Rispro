@@ -67,6 +67,8 @@ import type {
   ReportingBoardSavedView,
   ReportingBoardSettings,
   ReportingBoardStatsResponse,
+  ComparisonRequest,
+  PreviousCompletedStudy,
   RosterDutyTypeConfig,
   RosterShiftImportMapping,
   RosterXmlImportPreview,
@@ -980,6 +982,141 @@ export async function markReportingBoardCaseDiscontinued(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+function mapComparisonRequest(raw: RawRecord): ComparisonRequest {
+  return {
+    id: Number(raw.id ?? 0),
+    patientId: Number(raw.patientId ?? 0),
+    patientMrn: rawString(raw.patientMrn),
+    patientEnglishName: rawString(raw.patientEnglishName),
+    patientArabicName: rawString(raw.patientArabicName),
+    linkedPreviousBookingId: Number(raw.linkedPreviousBookingId ?? 0),
+    linkedPreviousStudyUid: rawString(raw.linkedPreviousStudyUid),
+    linkedPreviousAccessionNumber: rawString(raw.linkedPreviousAccessionNumber),
+    linkedModalityId: rawNumber(raw.linkedModalityId),
+    linkedModalityCode: rawString(raw.linkedModalityCode),
+    linkedModalityName: rawString(raw.linkedModalityName),
+    linkedExamTypeId: rawNumber(raw.linkedExamTypeId),
+    linkedExamName: rawString(raw.linkedExamName),
+    linkedStudyDate: rawString(raw.linkedStudyDate),
+    reason: String(raw.reason ?? ""),
+    status: String(raw.status ?? "pending_upload_confirmation") as ComparisonRequest["status"],
+    materialsConfirmed: Boolean(raw.materialsConfirmed),
+    materialsConfirmedBy: rawNumber(raw.materialsConfirmedBy),
+    materialsConfirmedByName: rawString(raw.materialsConfirmedByName),
+    materialsConfirmedAt: rawString(raw.materialsConfirmedAt),
+    materialsConfirmationNote: rawString(raw.materialsConfirmationNote),
+    imageAvailabilityConfirmed: Boolean(raw.imageAvailabilityConfirmed),
+    documentsAvailabilityConfirmed: Boolean(raw.documentsAvailabilityConfirmed),
+    selectedPriorConfirmed: Boolean(raw.selectedPriorConfirmed),
+    assignedDoctorId: rawNumber(raw.assignedDoctorId),
+    assignedDoctorName: rawString(raw.assignedDoctorName),
+    finalizedBy: rawNumber(raw.finalizedBy),
+    finalizedByName: rawString(raw.finalizedByName),
+    finalizedAt: rawString(raw.finalizedAt),
+    finalText: rawString(raw.finalText),
+    createdBy: rawNumber(raw.createdBy),
+    createdByName: rawString(raw.createdByName),
+    createdAt: String(raw.createdAt ?? ""),
+    updatedAt: String(raw.updatedAt ?? ""),
+    cancelledBy: rawNumber(raw.cancelledBy),
+    cancelledAt: rawString(raw.cancelledAt),
+    cancellationReason: rawString(raw.cancellationReason),
+  };
+}
+
+export async function fetchPreviousCompletedStudies(patientId: number): Promise<PreviousCompletedStudy[]> {
+  const raw = await api<{ studies: RawRecord[] }>(`/comparisons/patients/${patientId}/previous-studies`);
+  return (raw.studies ?? []).map((study) => ({
+    bookingId: Number(study.bookingId ?? 0),
+    patientId: Number(study.patientId ?? 0),
+    date: String(study.date ?? ""),
+    time: rawString(study.time),
+    modalityId: Number(study.modalityId ?? 0),
+    modalityCode: String(study.modalityCode ?? ""),
+    modalityName: String(study.modalityName ?? study.modalityCode ?? ""),
+    examTypeId: rawNumber(study.examTypeId),
+    examName: rawString(study.examName),
+    accessionNumber: String(study.accessionNumber ?? ""),
+    studyInstanceUid: rawString(study.studyInstanceUid),
+    reportStatus: "unknown",
+  }));
+}
+
+export async function createComparisonRequest(payload: {
+  patientId: number;
+  linkedPreviousBookingId: number;
+  reason: string;
+}): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>("/comparisons", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapComparisonRequest(raw.comparisonRequest);
+}
+
+export async function fetchComparisonRequests(status?: string | null): Promise<ComparisonRequest[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const raw = await api<{ comparisonRequests: RawRecord[] }>(`/comparisons${query}`);
+  return (raw.comparisonRequests ?? []).map(mapComparisonRequest);
+}
+
+export async function fetchComparisonRequest(id: number): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>(`/comparisons/${id}`);
+  return mapComparisonRequest(raw.comparisonRequest);
+}
+
+export async function confirmComparisonMaterials(
+  id: number,
+  payload: {
+    imageAvailabilityConfirmed: boolean;
+    documentsAvailabilityConfirmed: boolean;
+    selectedPriorConfirmed: boolean;
+    materialsConfirmationNote?: string | null;
+  }
+): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>(`/comparisons/${id}/confirm-materials`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapComparisonRequest(raw.comparisonRequest);
+}
+
+export async function assignComparisonRequest(
+  id: number,
+  payload: { doctorId: number; reason?: string | null }
+): Promise<{ assignmentId: number; comparisonRequestId: number }> {
+  return api<{ assignmentId: number; comparisonRequestId: number }>(`/comparisons/${id}/assign`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function unassignComparisonRequest(
+  id: number,
+  payload: { reason: string }
+): Promise<{ unassigned: true; comparisonRequestId: number; assignmentId: number }> {
+  return api<{ unassigned: true; comparisonRequestId: number; assignmentId: number }>(`/comparisons/${id}/unassign`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function finalizeComparisonRequest(id: number, payload: { finalText: string }): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>(`/comparisons/${id}/finalize`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapComparisonRequest(raw.comparisonRequest);
+}
+
+export async function cancelComparisonRequest(id: number, payload: { reason: string }): Promise<ComparisonRequest> {
+  const raw = await api<{ comparisonRequest: RawRecord }>(`/comparisons/${id}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapComparisonRequest(raw.comparisonRequest);
 }
 
 export async function fetchReportingBoardNotifications(): Promise<ReportingBoardNotificationEvent[]> {

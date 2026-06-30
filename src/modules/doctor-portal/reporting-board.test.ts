@@ -29,6 +29,20 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /"\/bulk-reassign-selected"/);
   });
 
+  it("adds comparison requests to Reporting Board without reusing appointment assignments", () => {
+    const types = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-types.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const comparisonService = readFileSync(`${root}/src/services/comparison-request-service.ts`, "utf8");
+
+    assert.match(types, /caseType: "appointment" \| "comparison"/);
+    assert.match(types, /comparisonRequestId: number \| null/);
+    assert.match(types, /comparisonRequests: number/);
+    assert.match(service, /listComparisonReportingBoardRows/);
+    assert.match(service, /caseType === "comparison"/);
+    assert.match(comparisonService, /doctor_portal\.comparison_case_assignments/);
+    assert.doesNotMatch(comparisonService, /doctor_portal\.case_team_assignments/);
+  });
+
   it("keeps saved view token loading authenticated and owner-scoped", () => {
     const index = readFileSync(`${root}/src/modules/doctor-portal/index.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");

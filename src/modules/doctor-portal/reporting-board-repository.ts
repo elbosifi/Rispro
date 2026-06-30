@@ -496,7 +496,10 @@ export async function listReportingBoardCaseCandidates(
   const result = await db.query<ReportingBoardCaseRow>(
     `
       select
+        'appointment'::text as "caseType",
+        ('appointment:' || b.id::text) as "caseKey",
         b.id as "appointmentId",
+        null::bigint as "comparisonRequestId",
         b.patient_id as "patientId",
         p.mrn as "patientMrn",
         coalesce(
@@ -515,6 +518,9 @@ export async function listReportingBoardCaseCandidates(
         m.name_en as "modalityName",
         b.exam_type_id as "examTypeId",
         et.name_en as "examTypeName",
+        null::bigint as "linkedPreviousBookingId",
+        null::text as "linkedPreviousStudyDate",
+        null::text as "linkedPreviousAccessionNumber",
         b.case_category as "caseCategory",
         b.status as "appointmentStatus",
         b.requires_report as "requiresReport",
@@ -577,10 +583,14 @@ export async function listReportingBoardCaseCandidates(
 function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
   return {
     ...row,
+    caseType: row.caseType ?? "appointment",
+    caseKey: row.caseKey ?? `appointment:${row.appointmentId}`,
     appointmentId: Number(row.appointmentId),
+    comparisonRequestId: nullableNumber(row.comparisonRequestId),
     patientId: Number(row.patientId),
     modalityId: Number(row.modalityId),
     examTypeId: nullableNumber(row.examTypeId),
+    linkedPreviousBookingId: nullableNumber(row.linkedPreviousBookingId),
     reportingPriorityId: nullableNumber(row.reportingPriorityId),
     reportingPrioritySortOrder: nullableNumber(row.reportingPrioritySortOrder),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
@@ -601,7 +611,9 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
 function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoardStatsBaseRow {
   return {
     ...row,
+    caseType: row.caseType ?? "appointment",
     appointmentId: Number(row.appointmentId),
+    comparisonRequestId: nullableNumber(row.comparisonRequestId),
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
     completedAt: nullableIsoString(row.completedAt),
     currentAssignedAt: nullableIsoString(row.currentAssignedAt),
@@ -618,7 +630,9 @@ export async function listReportingBoardStatsRows(
   const result = await pool.query<ReportingBoardStatsBaseRow>(
     `
       select
+        'appointment'::text as "caseType",
         b.id as "appointmentId",
+        null::bigint as "comparisonRequestId",
         b.booking_date::text as "bookingDate",
         b.status as "appointmentStatus",
         m.code as "modalityCode",
@@ -658,7 +672,10 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
   const result = await pool.query<ReportingBoardCaseRow>(
     `
       select
+        'appointment'::text as "caseType",
+        ('appointment:' || b.id::text) as "caseKey",
         b.id as "appointmentId",
+        null::bigint as "comparisonRequestId",
         b.patient_id as "patientId",
         p.mrn as "patientMrn",
         coalesce(
@@ -677,6 +694,9 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         m.name_en as "modalityName",
         b.exam_type_id as "examTypeId",
         et.name_en as "examTypeName",
+        null::bigint as "linkedPreviousBookingId",
+        null::text as "linkedPreviousStudyDate",
+        null::text as "linkedPreviousAccessionNumber",
         b.case_category as "caseCategory",
         b.status as "appointmentStatus",
         b.requires_report as "requiresReport",

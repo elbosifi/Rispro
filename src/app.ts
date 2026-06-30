@@ -15,6 +15,7 @@ import { integrationsRouter } from "./routes/integrations.js";
 import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
+import { comparisonsRouter } from "./routes/comparisons.js";
 import { settingsRouter } from "./routes/settings.js";
 import { userNotificationsRouter } from "./routes/user-notifications.js";
 import { nameDictionaryRouter } from "./routes/name-dictionary.js";
@@ -129,6 +130,7 @@ export function createApp(): Application {
   app.use("/api/admin", adminRouter);
   app.use("/api/modality", modalityRouter);
   app.use("/api/audit", auditRouter);
+  app.use("/api/comparisons", comparisonsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/user-notifications", userNotificationsRouter);
   app.use("/api/name-dictionary", nameDictionaryRouter);

@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { AlertTriangle, Bell, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Minus, MoreVertical, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import {
   assignReportingBoardCase,
+  assignComparisonRequest,
   bulkAssignNextReportingCases,
   bulkReassignSelectedReportingCases,
   bulkUnassignSelectedReportingCases,
@@ -17,10 +18,12 @@ import {
   fetchReportingBoardSettings,
   fetchReportingBoardStats,
   fetchRosterDoctors,
+  finalizeComparisonRequest,
   markReportingBoardCaseDiscontinued,
   sendReportingBoardSavedViewTestPush,
   subscribeReportingBoardSavedViewPush,
   unassignReportingBoardCase,
+  unassignComparisonRequest,
   updateReportingBoardSavedView,
   updateReportingBoardSettings,
 } from "@/lib/api-hooks";
@@ -343,6 +346,9 @@ function reportStatusView(status: ReportingBoardCaseRow["reportStatus"]) {
 }
 
 function rowStatusLabel(row: ReportingBoardCaseRow): string {
+  if (row.caseType === "comparison") {
+    return ["Comparison request", reportStatusView(row.reportStatus).label, labelStatus(row.appointmentStatus)].join(", ");
+  }
   const labels = [
     abnormalPriorityLabel(row),
     overdue(row) ? "Overdue" : null,
@@ -353,6 +359,22 @@ function rowStatusLabel(row: ReportingBoardCaseRow): string {
 }
 
 function rowDetailsTitle(row: ReportingBoardCaseRow): string {
+  if (row.caseType === "comparison") {
+    return [
+      `Patient: ${patientName(row)}`,
+      `MRN: ${row.patientMrn ?? "-"}`,
+      `Comparison request: #${row.comparisonRequestId ?? "-"}`,
+      `Linked previous accession: ${row.linkedPreviousAccessionNumber ?? row.accessionNumber}`,
+      `Linked previous study date: ${row.linkedPreviousStudyDate ?? "-"}`,
+      `Pool: ${row.modalityCode}`,
+      `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
+      `Report: ${reportStatusView(row.reportStatus).label}`,
+      `Status: ${labelStatus(row.appointmentStatus)}`,
+      `Ready at: ${formatTimestamp(row.completedAt)}`,
+      `Current assigned at: ${formatTimestamp(row.currentAssignedAt)}`,
+      `Report final at: ${formatTimestamp(row.reportFinalAt)}`,
+    ].join("\n");
+  }
   return [
     `Patient: ${patientName(row)}`,
     `MRN: ${row.patientMrn ?? "-"}`,
@@ -371,6 +393,13 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
 }
 
 function PriorityBadge({ row }: { row: ReportingBoardCaseRow }) {
+  if (row.caseType === "comparison") {
+    return (
+      <span className="inline-flex items-center rounded-full border border-teal-300 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-teal-700" title="Comparison request">
+        Comparison request
+      </span>
+    );
+  }
   const label = abnormalPriorityLabel(row);
   if (!label) return null;
   return (
@@ -397,6 +426,19 @@ function IdsCell({ row }: { row: ReportingBoardCaseRow }) {
 
 function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; showCategoryMarker: boolean }) {
   const studyLabel = `${row.modalityCode}${row.examTypeName ? ` · ${row.examTypeName}` : ""}`;
+  if (row.caseType === "comparison") {
+    return (
+      <div className="leading-tight" title={`Comparison request in ${row.modalityCode} pool; linked previous study ${row.linkedPreviousAccessionNumber ?? row.accessionNumber}`}>
+        <div className="font-medium text-foreground">{studyLabel}</div>
+        <div className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
+          Linked previous: {row.linkedPreviousStudyDate ?? "-"} · {row.linkedPreviousAccessionNumber ?? row.accessionNumber}
+        </div>
+        <span className="mt-1 inline-flex rounded-full border border-teal-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-teal-700">
+          Comparison request
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="leading-tight" title={`Modality ${row.modalityName || row.modalityCode}; Exam ${row.examTypeName ?? "-"}; Category ${labelStatus(row.caseCategory)}`}>
       <div className="font-medium text-foreground">{studyLabel}</div>
@@ -412,7 +454,9 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
 function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
   const view = reportStatusView(row.reportStatus);
   const Icon = view.icon;
-  const appointmentLabel = row.appointmentStatus !== "completed" ? labelStatus(row.appointmentStatus) : null;
+  const appointmentLabel = row.caseType === "comparison"
+    ? labelStatus(row.appointmentStatus)
+    : row.appointmentStatus !== "completed" ? labelStatus(row.appointmentStatus) : null;
   return (
     <div className="flex max-w-40 flex-wrap items-center gap-1" title={rowStatusLabel(row)}>
       <span aria-label={view.label} title={view.label} className={`inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full border px-1.5 text-xs font-semibold ${view.className}`}>
@@ -472,8 +516,8 @@ function AssignmentEditor({
 }: {
   row: ReportingBoardCaseRow;
   doctors: DoctorProfile[];
-  onAssign: (appointmentId: number, doctorId: number, reason: string) => void;
-  onUnassign: (appointmentId: number, reason: string) => Promise<void>;
+  onAssign: (row: ReportingBoardCaseRow, doctorId: number, reason: string) => void;
+  onUnassign: (row: ReportingBoardCaseRow, reason: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [doctorId, setDoctorId] = useState(row.assignedDoctorId ? String(row.assignedDoctorId) : "");
@@ -513,8 +557,8 @@ function AssignmentEditor({
           type="button"
           disabled={!doctorId || (returningToPool && !trimmedReason)}
           onClick={async () => {
-            if (returningToPool) await onUnassign(row.appointmentId, trimmedReason);
-            else onAssign(row.appointmentId, Number(doctorId), reason);
+            if (returningToPool) await onUnassign(row, trimmedReason);
+            else onAssign(row, Number(doctorId), reason);
             setOpen(false);
             setReason("");
           }}
@@ -534,17 +578,21 @@ function RowActionMenu({
   canManage,
   onAssign,
   onUnassign,
+  onFinalize,
   onDiscontinue,
 }: {
   row: ReportingBoardCaseRow;
   doctors: DoctorProfile[];
   canManage: boolean;
-  onAssign: (appointmentId: number, doctorId: number, reason: string) => void;
-  onUnassign: (appointmentId: number, reason: string) => Promise<void>;
+  onAssign: (row: ReportingBoardCaseRow, doctorId: number, reason: string) => void;
+  onUnassign: (row: ReportingBoardCaseRow, reason: string) => Promise<void>;
+  onFinalize: (row: ReportingBoardCaseRow, finalText: string) => Promise<void>;
   onDiscontinue: (row: ReportingBoardCaseRow) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
+  const [showFinalize, setShowFinalize] = useState(false);
+  const [finalText, setFinalText] = useState("");
   const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientDicomId = String(row.patientDicomId || "").trim();
@@ -641,13 +689,13 @@ function RowActionMenu({
           {copyMessage && <p className="px-2 pt-1 text-[11px]" style={{ color: "var(--text-muted)" }}>{copyMessage}</p>}
           <Link
             role="menuitem"
-            to={`/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`}
+            to={row.caseType === "comparison" && row.comparisonRequestId ? `/comparisons/${row.comparisonRequestId}` : `/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`}
             className="mt-2 block rounded-md border-t px-2 py-1.5 pt-2 text-xs font-semibold text-foreground hover:bg-slate-50"
             style={{ borderColor: "var(--border)" }}
           >
-            View appointment
+            {row.caseType === "comparison" ? "Open comparison request" : "View appointment"}
           </Link>
-          {canManage && (
+          {canManage && row.caseType === "appointment" && (
             <button
               type="button"
               role="menuitem"
@@ -659,6 +707,34 @@ function RowActionMenu({
             >
               Mark study as discontinued
             </button>
+          )}
+          {row.caseType === "comparison" && row.reportStatus !== "final" && (
+            <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
+              {!showFinalize ? (
+                <button type="button" role="menuitem" onClick={() => setShowFinalize(true)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
+                  Finalize comparison manually
+                </button>
+              ) : (
+                <div className="grid gap-2 px-2 py-1.5">
+                  <textarea value={finalText} onChange={(event) => setFinalText(event.target.value)} className="min-h-20 rounded border px-2 py-1 text-xs" placeholder="Final report text" />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={!finalText.trim()}
+                      onClick={async () => {
+                        await onFinalize(row, finalText.trim());
+                        setFinalText("");
+                        setShowFinalize(false);
+                      }}
+                      className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-teal-300"
+                    >
+                      Save final report
+                    </button>
+                    <button type="button" onClick={() => setShowFinalize(false)} className="rounded border px-2 py-1 text-xs">Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
             {canManage && row.canAssign ? (
@@ -960,20 +1036,38 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "settings"] }),
   });
   const assignMutation = useMutation({
-    mutationFn: (payload: { appointmentId: number; doctorId: number; reason: string }) => assignReportingBoardCase(payload.appointmentId, { doctorId: payload.doctorId, reason: payload.reason }),
+    mutationFn: (payload: { row: ReportingBoardCaseRow; doctorId: number; reason: string }) => {
+      if (payload.row.caseType === "comparison") {
+        if (!payload.row.comparisonRequestId) throw new Error("Comparison request ID is missing.");
+        return assignComparisonRequest(payload.row.comparisonRequestId, { doctorId: payload.doctorId, reason: payload.reason });
+      }
+      return assignReportingBoardCase(payload.row.appointmentId, { doctorId: payload.doctorId, reason: payload.reason });
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["comparison-requests"] }),
       ]);
     },
   });
-  const unassignMutation = useMutation({
-    mutationFn: (payload: { appointmentId: number; reason: string }) => unassignReportingBoardCase(payload.appointmentId, { reason: payload.reason }),
+  const unassignMutation = useMutation<
+    { unassigned: true; appointmentId?: number; comparisonRequestId?: number; assignmentId: number },
+    Error,
+    { row: ReportingBoardCaseRow; reason: string }
+  >({
+    mutationFn: (payload: { row: ReportingBoardCaseRow; reason: string }) => {
+      if (payload.row.caseType === "comparison") {
+        if (!payload.row.comparisonRequestId) throw new Error("Comparison request ID is missing.");
+        return unassignComparisonRequest(payload.row.comparisonRequestId, { reason: payload.reason });
+      }
+      return unassignReportingBoardCase(payload.row.appointmentId, { reason: payload.reason });
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["comparison-requests"] }),
       ]);
     },
   });
@@ -995,6 +1089,19 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not mark study as discontinued." }),
+  });
+  const finalizeComparisonMutation = useMutation({
+    mutationFn: (payload: { row: ReportingBoardCaseRow; finalText: string }) => {
+      if (!payload.row.comparisonRequestId) throw new Error("Comparison request ID is missing.");
+      return finalizeComparisonRequest(payload.row.comparisonRequestId, { finalText: payload.finalText });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["comparison-requests"] }),
+      ]);
+    },
   });
   const selectedReassignMutation = useMutation({
     mutationFn: () => bulkReassignSelectedReportingCases({
@@ -1047,7 +1154,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
   const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
   const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/mobile/reporting-view/${loadedSavedView.token}` : "";
-  const visibleAppointmentIds = cases.map((row) => row.appointmentId);
+  const visibleAppointmentIds = cases.filter((row) => row.caseType === "appointment").map((row) => row.appointmentId);
   const allVisibleSelected = visibleAppointmentIds.length > 0 && visibleAppointmentIds.every((id) => selectedIds.includes(id));
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
   const selectedReassignDisabled = !canManage || selectedIds.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
@@ -1268,6 +1375,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <StatsTile label="Total" value={statsSummary?.total ?? "-"} />
           <StatsTile label="Unassigned" value={statsSummary?.unassigned ?? "-"} onClick={() => setAssignmentShortcut("unassigned")} />
           <StatsTile label="Assigned" value={statsSummary?.assigned ?? "-"} onClick={() => setAssignmentShortcut("assigned")} />
+          <StatsTile label="Comparison requests" value={statsSummary?.comparisonRequests ?? "-"} size="secondary" />
           <div className="relative">
             <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} emphasis={hasValue(statsSummary?.statOrUrgent ?? "-") ? "danger" : "neutral"} onClick={() => setPriorityShortcutOpen((current) => !current)} />
             {priorityShortcutOpen && (
@@ -1374,12 +1482,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
                   {cases.map((row) => {
-                    const selected = selectedIds.includes(row.appointmentId);
+                    const isAppointmentCase = row.caseType === "appointment";
+                    const selected = isAppointmentCase && selectedIds.includes(row.appointmentId);
                     return (
-                      <tr key={row.appointmentId} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
+                      <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
                         <td className="px-3 py-2"><input
                           type="checkbox"
                           aria-label={`Select case ${row.accessionNumber}`}
+                          disabled={!isAppointmentCase}
                           checked={selected}
                           onChange={(event) => {
                             const checked = event.target.checked;
@@ -1403,9 +1513,12 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                             row={row}
                             doctors={doctorsQuery.data ?? []}
                             canManage={canManage}
-                            onAssign={(appointmentId, doctorId, reason) => assignMutation.mutate({ appointmentId, doctorId, reason })}
-                            onUnassign={async (appointmentId, reason) => {
-                              await unassignMutation.mutateAsync({ appointmentId, reason });
+                            onAssign={(targetRow, doctorId, reason) => assignMutation.mutate({ row: targetRow, doctorId, reason })}
+                            onUnassign={async (targetRow, reason) => {
+                              await unassignMutation.mutateAsync({ row: targetRow, reason });
+                            }}
+                            onFinalize={async (targetRow, finalText) => {
+                              await finalizeComparisonMutation.mutateAsync({ row: targetRow, finalText });
                             }}
                             onDiscontinue={(target) => {
                               setBoardActionMessage(null);

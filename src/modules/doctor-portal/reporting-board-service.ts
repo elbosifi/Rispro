@@ -5,6 +5,7 @@ import { pool } from "../../db/pool.js";
 import { buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
+import { listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
@@ -236,6 +237,16 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   const checkedAt = new Date().toISOString();
   const resolved: ReportingBoardCaseRow[] = [];
   for (const row of rows) {
+    if (row.caseType === "comparison") {
+      const canAssign = row.canAssign && row.reportStatus !== "final";
+      resolved.push(withTimelineMetrics({
+        ...row,
+        reportStatusCheckedAt: checkedAt,
+        canAssign,
+        exclusionReason: canAssign ? null : row.exclusionReason ?? (row.reportStatus === "final" ? "report_final" : null),
+      }));
+      continue;
+    }
     let status: ReportingBoardCaseRow["reportStatus"] = "unavailable";
     try {
       const result = await reportStatusChecker(
@@ -296,6 +307,7 @@ function matchesStatsReportStatus(row: ReportingBoardStatsInputRow, reportStatus
 function emptyStatsSummary(): ReportingBoardStatsSummary {
   return {
     total: 0,
+    comparisonRequests: 0,
     unassigned: 0,
     assigned: 0,
     stat: 0,
@@ -350,6 +362,7 @@ function aggregateReportingBoardStats(rows: ReportingBoardStatsInputRow[]): Omit
     const statOrUrgent = priorityCode === "stat" || priorityCode === "urgent";
 
     summary.total += 1;
+    if (row.caseType === "comparison") summary.comparisonRequests += 1;
     if (row.assignmentStatus === "assigned") summary.assigned += 1;
     else summary.unassigned += 1;
     if (priorityCode === "stat") summary.stat += 1;
@@ -434,7 +447,8 @@ export async function getReportingBoardCases(actor: Actor, input: ReportingBoard
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
   const rows = await listReportingBoardCaseCandidates(scopedFilters);
-  const cases = await applyReportStatuses(rows, filters.reportStatus);
+  const comparisonRows = await listComparisonReportingBoardRows(scopedFilters);
+  const cases = await applyReportStatuses([...rows, ...comparisonRows], filters.reportStatus);
   return { cases, filters };
 }
 
@@ -449,10 +463,14 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
   if (filters.reportStatus && filters.reportStatus !== "all") {
     const rows = await listReportingBoardCaseCandidates(scopedFilters);
-    const cases = await applyReportStatuses(rows, filters.reportStatus);
+    const comparisonRows = await listComparisonReportingBoardRows(scopedFilters);
+    const cases = await applyReportStatuses([...rows, ...comparisonRows], filters.reportStatus);
     return { filters, ...aggregateReportingBoardStats(cases) };
   }
-  const rows = (await listReportingBoardStatsRows(scopedFilters)).filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
+  const rows = [
+    ...(await listReportingBoardStatsRows(scopedFilters)),
+    ...(await listComparisonReportingBoardStatsRows(scopedFilters)),
+  ].filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
   return { filters, ...aggregateReportingBoardStats(rows) };
 }
 
