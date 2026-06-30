@@ -13,6 +13,7 @@ const fetchAppointmentSlipSettingsMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
 const fetchPublicAppointmentReportStatusMock = vi.fn();
+const fetchPublicSchedulingCapacitySettingsMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
 const sendPatientWebPushNotificationMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
@@ -36,10 +37,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
-  fetchPublicSchedulingCapacitySettings: () => Promise.resolve({
-    allow_reception_override_requests_from_availability: "enabled",
-    can_request_scheduling_override: "enabled",
-  }),
+  fetchPublicSchedulingCapacitySettings: (...args: unknown[]) => fetchPublicSchedulingCapacitySettingsMock(...args),
   fetchPublicAppointmentReportStatus: (...args: unknown[]) => fetchPublicAppointmentReportStatusMock(...args),
   sendPatientWebPushNotification: (...args: unknown[]) => sendPatientWebPushNotificationMock(...args),
 }));
@@ -148,6 +146,11 @@ describe("RegistrationsPage print actions", () => {
     sendPatientWebPushNotificationMock.mockReset();
     sendPatientWebPushNotificationMock.mockResolvedValue({});
     fetchPublicAppointmentReportStatusMock.mockReset();
+    fetchPublicSchedulingCapacitySettingsMock.mockReset();
+    fetchPublicSchedulingCapacitySettingsMock.mockReturnValue({
+      allow_reception_override_requests_from_availability: "enabled",
+      can_request_scheduling_override: "enabled",
+    });
     fetchPublicAppointmentReportStatusMock.mockResolvedValue({
       enabled: true,
       state: "final",
@@ -909,7 +912,7 @@ describe("RegistrationsPage print actions", () => {
             decision: {
               isAllowed: true,
               requiresSupervisorOverride: true,
-              displayStatus: "restricted",
+              displayStatus: "available",
               suggestedBookingMode: "override",
               consumedCapacityMode: "override",
               remainingStandardCapacity: 8,
@@ -935,7 +938,10 @@ describe("RegistrationsPage print actions", () => {
 
     await userEvent.click(within(getAppointmentRow("ACC-7")).getByRole("button", { name: "Manage" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
-    await userEvent.click(screen.getByRole("button", { name: /2027-01-05 restricted/i }));
+    await waitFor(() => expect(fetchPublicSchedulingCapacitySettingsMock).toHaveBeenCalled());
+    await userEvent.click(await screen.findByRole("button", { name: "Show full days" }));
+    const restrictedDate = await screen.findByRole("button", { name: /2027-01-05 available/i });
+    await userEvent.click(restrictedDate);
     await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
