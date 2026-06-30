@@ -158,6 +158,7 @@ function buildRegistrationsDrilldownUrl(options: {
   statuses?: string[];
 }): string {
   const params = new URLSearchParams();
+  params.set("source", "statistics");
   params.set("dateMode", options.dateMode);
   if (options.dateMode === "single" && options.date) {
     params.set("date", options.date);

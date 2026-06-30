@@ -236,6 +236,7 @@ describe("StatisticsPage", () => {
 
     const url = drilldownUrlForRow("Scheduled");
     expect(url.pathname).toBe("/registrations");
+    expect(url.searchParams.get("source")).toBe("statistics");
     expect(url.searchParams.get("dateMode")).toBe("range");
     expect(url.searchParams.get("dateFrom")).toBe("2026-06-30");
     expect(url.searchParams.get("dateTo")).toBe("2026-06-30");
@@ -252,6 +253,7 @@ describe("StatisticsPage", () => {
     const url = drilldownUrlForRow("CT");
 
     expect(url.pathname).toBe("/registrations");
+    expect(url.searchParams.get("source")).toBe("statistics");
     expect(url.searchParams.get("dateMode")).toBe("range");
     expect(url.searchParams.get("modalityId")).toBe("1");
     expect(url.searchParams.getAll("status")).toEqual([
@@ -276,6 +278,7 @@ describe("StatisticsPage", () => {
     const url = drilldownUrlForRow("30/06/2026");
 
     expect(url.pathname).toBe("/registrations");
+    expect(url.searchParams.get("source")).toBe("statistics");
     expect(url.searchParams.get("dateMode")).toBe("single");
     expect(url.searchParams.get("date")).toBe("2026-06-30");
     expect(url.searchParams.getAll("status")).toContain("completed");

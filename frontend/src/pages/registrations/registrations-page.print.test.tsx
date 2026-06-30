@@ -352,6 +352,44 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("shows and clears statistics drill-down filter context", async () => {
+    renderRegistrationsPage([
+      "/registrations?source=statistics&dateMode=range&dateFrom=2026-06-01&dateTo=2026-06-30&modalityId=1&status=completed&status=no-show&q=ACC",
+    ]);
+
+    expect(await screen.findByText("Filtered from Statistics")).toBeTruthy();
+    expect(await screen.findByText("Date range: 01/06/2026 - 30/06/2026")).toBeTruthy();
+    expect(await screen.findByText("Modality: CT")).toBeTruthy();
+    expect(screen.getByText("Status: Completed")).toBeTruthy();
+    expect(screen.getByText("Status: No-show")).toBeTruthy();
+    expect(screen.getByText("Search: ACC")).toBeTruthy();
+
+    const backLink = screen.getByRole("link", { name: "Back to Statistics" });
+    const backUrl = new URL(backLink.getAttribute("href") ?? "", "http://rispro.test");
+    expect(backUrl.pathname).toBe("/statistics");
+    expect(backUrl.searchParams.get("dateFrom")).toBe("2026-06-01");
+    expect(backUrl.searchParams.get("dateTo")).toBe("2026-06-30");
+    expect(backUrl.searchParams.get("modalityId")).toBe("1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Filtered from Statistics")).toBeNull();
+      expect(screen.getByTestId("location-probe").getAttribute("data-search")).toBe("");
+    });
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          dateFrom: todayIsoDateLy(),
+          dateTo: todayIsoDateLy(),
+          modalityId: "",
+          q: "",
+          status: ["scheduled", "arrived", "waiting"],
+        })
+      );
+    });
+  });
+
   it("supports status[] URL params and preserves appointment deep links", async () => {
     fetchAppointmentsMock.mockResolvedValueOnce([registrationAppointment({ id: 99, accessionNumber: "ACC-99" })]);
     renderRegistrationsPage([

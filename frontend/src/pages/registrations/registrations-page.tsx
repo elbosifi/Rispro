@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Bell, ExternalLink, Eye, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
 import {
   cancelAppointment,
@@ -74,6 +74,7 @@ const MANAGE_TABS = ["details", "documents", "report", "reschedule", "status", "
 type ManageTab = (typeof MANAGE_TABS)[number];
 const MANUAL_STATUS_OPTIONS = ["scheduled", "arrived", "waiting", "completed", "no-show", "discontinued"] as const;
 const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "discontinued"]);
+const DRILLDOWN_FILTER_PARAM_KEYS = ["source", "dateMode", "date", "dateFrom", "dateTo", "modalityId", "status", "status[]", "q"];
 
 function RegistrationStat({
   label,
@@ -169,6 +170,8 @@ export default function RegistrationsPage() {
   const appointmentIdParam = searchParams.get("appointmentId");
   const patientIdParam = searchParams.get("patientId");
   const tabParam = searchParams.get("tab");
+  const isStatisticsDrilldown = searchParams.get("source") === "statistics";
+  const hasUrlAppointmentFilters = DRILLDOWN_FILTER_PARAM_KEYS.some((key) => key !== "source" && searchParams.has(key));
   const initialManageTab = MANAGE_TABS.includes(tabParam as ManageTab) ? (tabParam as ManageTab) : "details";
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
@@ -449,6 +452,16 @@ export default function RegistrationsPage() {
   });
 
   const modalities = lookups?.modalities ?? [];
+  const selectedFilterModality = filters.modalityId
+    ? modalities.find((modality) => String(modality.id) === filters.modalityId)
+    : null;
+  const selectedFilterModalityLabel = selectedFilterModality
+    ? chooseLocalized(
+        language,
+        selectedFilterModality.nameAr ?? selectedFilterModality.nameEn ?? selectedFilterModality.code ?? `#${selectedFilterModality.id}`,
+        selectedFilterModality.nameEn ?? selectedFilterModality.nameAr ?? selectedFilterModality.code ?? `#${selectedFilterModality.id}`,
+      )
+    : "";
   const listWindowLabel =
     filters.dateMode === "all"
       ? t("registrations.allDates")
@@ -596,6 +609,15 @@ export default function RegistrationsPage() {
     clearDeepLinkState();
   };
 
+  const handleClearDrilldownFilters = () => {
+    setFilters(patientIdParam ? patientScopedDefaultFilters : DEFAULT_FILTERS);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    for (const key of DRILLDOWN_FILTER_PARAM_KEYS) {
+      nextSearchParams.delete(key);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
   const handleTodayShortcut = () => {
     clearPatientScope();
     setFilters({
@@ -634,6 +656,29 @@ export default function RegistrationsPage() {
   const patientScopeName = selectedAppointment
     ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)
     : "";
+  const drilldownChips = [
+    filters.dateMode === "single" && filters.date
+      ? `${t("registrations.date")}: ${formatDateLy(filters.date)}`
+      : filters.dateMode === "range" && filters.dateFrom && filters.dateTo
+        ? `${t("registrations.dateRange")}: ${formatDateLy(filters.dateFrom)} - ${formatDateLy(filters.dateTo)}`
+        : filters.dateMode === "all"
+          ? t("registrations.allDates")
+          : null,
+    selectedFilterModalityLabel ? `${t("registrations.modality")}: ${selectedFilterModalityLabel}` : null,
+    ...filters.statuses.map((status) => `${t("registrations.status")} ${statusLabel(language, status)}`),
+    filters.query ? `${t("registrations.search")}: ${filters.query}` : null,
+  ].filter((chip): chip is string => Boolean(chip));
+  const showStatisticsDrilldownBanner = isStatisticsDrilldown && hasUrlAppointmentFilters && drilldownChips.length > 0;
+  const backToStatisticsParams = new URLSearchParams();
+  if (filters.dateMode === "range") {
+    if (filters.dateFrom) backToStatisticsParams.set("dateFrom", filters.dateFrom);
+    if (filters.dateTo) backToStatisticsParams.set("dateTo", filters.dateTo);
+  } else if (filters.dateMode === "single" && filters.date) {
+    backToStatisticsParams.set("dateFrom", filters.date);
+    backToStatisticsParams.set("dateTo", filters.date);
+  }
+  if (filters.modalityId) backToStatisticsParams.set("modalityId", filters.modalityId);
+  const backToStatisticsHref = `/statistics${backToStatisticsParams.toString() ? `?${backToStatisticsParams.toString()}` : ""}`;
   const selectedAppointmentCreatedBy = selectedAppointment
     ? selectedAppointment.createdByName ||
       selectedAppointment.createdByUsername ||
@@ -1173,6 +1218,41 @@ export default function RegistrationsPage() {
           <span className="gradient-text">{t("registrations.pageTitle")}</span>
         </h1>
       </div>
+
+      {showStatisticsDrilldownBanner ? (
+        <Card className="border-accent/20 bg-accent/5 p-3 sm:p-3.5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 space-y-2">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {t("registrations.statisticsDrilldownTitle")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("registrations.statisticsDrilldownHint")}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {drilldownChips.map((chip) => (
+                  <span
+                    key={chip}
+                    className="rounded-full border border-accent/20 bg-background px-2.5 py-1 text-[11px] font-medium text-foreground"
+                  >
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="ghost" size="sm" className="h-9 px-3 text-xs" onClick={handleClearDrilldownFilters}>
+                {t("registrations.clearDrilldownFilters")}
+              </Button>
+              <Link to={backToStatisticsHref} className="btn-secondary inline-flex h-9 items-center px-3 text-xs">
+                {t("registrations.backToStatistics")}
+              </Link>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="p-3 sm:p-3.5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
