@@ -445,7 +445,7 @@ function OtherAppointmentsCard(props: { preview: PublicAppointmentCancelPreview;
   return (
     <Card className="p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-base font-extrabold text-slate-900">Other appointments</h3>
+        <h3 className="text-base font-extrabold text-slate-900">مواعيد أخرى</h3>
         <span className="text-xs font-semibold text-slate-500">{appointments.length}</span>
       </div>
       <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200">

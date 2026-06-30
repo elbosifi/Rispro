@@ -353,7 +353,7 @@ describe("PublicCancelAppointmentPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Other appointments")).toBeTruthy();
+    expect(await screen.findByText("مواعيد أخرى")).toBeTruthy();
     expect(screen.getByText("MRI Spine")).toBeTruthy();
     expect(screen.getByText("MRI")).toBeTruthy();
     const otherAppointmentLink = screen.getByRole("link", { name: /MRI Spine/ });
@@ -370,7 +370,7 @@ describe("PublicCancelAppointmentPage", () => {
     renderPage();
 
     await screen.findByText("CT Head");
-    expect(screen.queryByText("Other appointments")).toBeNull();
+    expect(screen.queryByText("مواعيد أخرى")).toBeNull();
   });
 
   it("does not duplicate the current appointment in other appointments", async () => {
@@ -405,7 +405,7 @@ describe("PublicCancelAppointmentPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Other appointments")).toBeTruthy();
+    expect(await screen.findByText("مواعيد أخرى")).toBeTruthy();
     expect(screen.getByRole("link", { name: /MRI Brain/ })).toBeTruthy();
     expect(screen.queryByText("Duplicate current token")).toBeNull();
     expect(screen.queryByRole("link", { name: /test-token/ })).toBeNull();
