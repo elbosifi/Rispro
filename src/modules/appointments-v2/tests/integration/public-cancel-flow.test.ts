@@ -102,8 +102,8 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     return Number(result.rows[0]?.id);
   }
 
-  async function readPublicPreview(token: string): Promise<{ status: number; data: { preview: Record<string, unknown> } }> {
-    return fetchJson<{ preview: Record<string, unknown> }>(
+  async function readPublicPreview(token: string): Promise<{ status: number; data: { preview: Record<string, unknown>; otherAppointments?: Record<string, unknown>[] } }> {
+    return fetchJson<{ preview: Record<string, unknown>; otherAppointments?: Record<string, unknown>[] }>(
       app.baseUrl,
       `/api/public/appointments/cancel-preview?t=${encodeURIComponent(token)}`
     );
@@ -140,6 +140,84 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     assert.equal(Number(response.data.preview.bookingId), bookingId);
     assert.equal(String(response.data.preview.currentStatus), "scheduled");
     assert.ok(String(response.data.preview.modalityName).length > 0);
+  });
+
+  it("returns only public-safe tokened appointments for the same patient", async () => {
+    const currentBookingId = await createBooking("2026-09-01");
+    const samePatientOtherId = await createBooking("2040-09-02");
+    const samePatientNoTokenId = await createBooking("2040-09-03");
+    const samePatientVoidedId = await createBooking("2040-09-04");
+    const samePatientRevokedId = await createBooking("2040-09-05");
+
+    const otherPatientResult = await pool.query<{ id: number }>(
+      `
+        insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
+        values ($1, $2, $3, $4, 'M', 30, 'national_id', $3)
+        returning id
+      `,
+      [`${TEST_PREFIX}مريض آخر`, `${TEST_PREFIX}Other Patient`, `2${Date.now().toString().slice(-11)}`, "مريضآخر"]
+    );
+    const otherPatientBooking = await fetchJson<{ booking: { id: number | string } }>(app.baseUrl, "/api/v2/appointments", {
+      method: "POST",
+      cookie: authCookie,
+      body: {
+        patientId: Number(otherPatientResult.rows[0]?.id),
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        reportingPriorityId: 1,
+        bookingDate: "2040-09-06",
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+    assert.equal(otherPatientBooking.status, 201);
+
+    const currentToken = await issuePublicCancelToken(currentBookingId);
+    const samePatientOtherToken = await issuePublicCancelToken(samePatientOtherId);
+    const samePatientVoidedToken = await issuePublicCancelToken(samePatientVoidedId);
+    const samePatientRevokedToken = await issuePublicCancelToken(samePatientRevokedId);
+    const otherPatientToken = await issuePublicCancelToken(Number(otherPatientBooking.data.booking.id));
+    assert.ok(currentToken);
+    assert.ok(samePatientOtherToken);
+    assert.ok(samePatientVoidedToken);
+    assert.ok(samePatientRevokedToken);
+    assert.ok(otherPatientToken);
+
+    await pool.query(`update appointments_v2.bookings set status = 'voided', voided_at = now() where id = $1`, [samePatientVoidedId]);
+    await pool.query(`update appointments_v2.public_appointment_tokens set revoked_at = now() where booking_id = $1`, [samePatientRevokedId]);
+    await updatePatientQrConfig({ publicLinkValidityDays: 6000 });
+
+    try {
+      const response = await readPublicPreview(currentToken);
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(
+        response.data.otherAppointments ?? [],
+        [
+          {
+            date: "2040-09-02",
+            time: "",
+            modality: String(response.data.otherAppointments?.[0]?.modality),
+            examName: String(response.data.otherAppointments?.[0]?.examName),
+            status: "scheduled",
+            publicUrl: `https://rispro.nccb.com.ly/public/appointment?t=${samePatientOtherToken}`,
+            canCancel: true,
+          },
+        ]
+      );
+
+      const serialized = JSON.stringify(response.data);
+      assert.equal(serialized.includes(String(currentBookingId)), true);
+      assert.equal(serialized.includes(String(samePatientNoTokenId)), false);
+      assert.equal(serialized.includes(String(samePatientVoidedId)), false);
+      assert.equal(serialized.includes(String(samePatientRevokedId)), false);
+      assert.equal(serialized.includes(String(otherPatientBooking.data.booking.id)), false);
+      for (const sensitiveKey of ["nationalId", "national_id", "phone", "accession", "studyInstanceUid", "study_instance_uid", "notes"]) {
+        assert.equal(serialized.includes(sensitiveKey), false, `${sensitiveKey} should not be exposed`);
+      }
+    } finally {
+      await updatePatientQrConfig({ publicLinkValidityDays: 14 });
+    }
   });
 
   it("keeps the original QR token valid after reschedule and exam type change", async () => {

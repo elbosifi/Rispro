@@ -426,6 +426,54 @@ function AppointmentSummaryCard(props: {
   );
 }
 
+function OtherAppointmentsCard(props: { preview: PublicAppointmentCancelPreview }) {
+  const currentSignature = [
+    props.preview.bookingDate,
+    formatTimeAr(props.preview.bookingTime),
+    props.preview.modalityNameAr || props.preview.modalityName || "",
+    props.preview.examNameAr || props.preview.examName || "",
+  ].join("|");
+  const appointments = (props.preview.otherAppointments ?? []).filter((appointment) => {
+    const signature = [appointment.date, formatTimeAr(appointment.time), appointment.modality, appointment.examName].join("|");
+    return appointment.publicUrl && signature !== currentSignature;
+  });
+
+  if (appointments.length === 0) return null;
+
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-base font-extrabold text-slate-900">Other appointments</h3>
+        <span className="text-xs font-semibold text-slate-500">{appointments.length}</span>
+      </div>
+      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200">
+        {appointments.map((appointment) => (
+          <a
+            key={appointment.publicUrl}
+            href={appointment.publicUrl}
+            className="flex items-center justify-between gap-3 bg-white px-3 py-3 text-sm transition hover:bg-slate-50"
+          >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold text-slate-900">
+                <span>{formatDateAr(appointment.date)}</span>
+                {appointment.time ? <span className="text-slate-500">{formatTimeAr(appointment.time)}</span> : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+                <span>{appointment.modality || "—"}</span>
+                <span aria-hidden="true">·</span>
+                <span>{appointment.examName || "—"}</span>
+              </div>
+            </div>
+            <Pill tone={appointment.status === "cancelled" ? "danger" : appointment.status === "completed" ? "info" : "success"}>
+              {formatBookingStatusAr(appointment.status)}
+            </Pill>
+          </a>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function SummaryRow(props: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -1332,6 +1380,8 @@ export default function PublicCancelAppointmentPage() {
 
         <div className="space-y-5 p-5">
           <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
+
+          <OtherAppointmentsCard preview={preview} />
 
           {canShowSlip ? (
             <AppointmentSlipCard

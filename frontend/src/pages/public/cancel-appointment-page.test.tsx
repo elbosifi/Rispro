@@ -202,6 +202,7 @@ function preview(overrides: Partial<PublicAppointmentCancelPreview> = {}): Publi
     examInstructionEn: "",
     currentStatus: "scheduled",
     patientQrSettings: baseSettings(),
+    otherAppointments: [],
     ...overrides,
   };
 }
@@ -331,6 +332,82 @@ describe("PublicCancelAppointmentPage", () => {
     expect(fetchPublicAppointmentReportStatus).not.toHaveBeenCalled();
     expect(screen.queryByText(/طلب موعد جديد/i)).toBeNull();
     expect(screen.queryByText("العودة للرئيسية")).toBeNull();
+  });
+
+  it("renders a compact other appointments section when other appointments exist", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({
+        otherAppointments: [
+          {
+            date: "2026-07-08",
+            time: "09:15",
+            modality: "MRI",
+            examName: "MRI Spine",
+            status: "scheduled",
+            publicUrl: "https://rispro.nccb.com.ly/public/appointment?t=other-token",
+            canCancel: true,
+          },
+        ],
+      })
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("Other appointments")).toBeTruthy();
+    expect(screen.getByText("MRI Spine")).toBeTruthy();
+    expect(screen.getByText("MRI")).toBeTruthy();
+    const otherAppointmentLink = screen.getByRole("link", { name: /MRI Spine/ });
+    expect(otherAppointmentLink.textContent).toContain("مجدول");
+    expect(otherAppointmentLink.getAttribute("href")).toBe(
+      "https://rispro.nccb.com.ly/public/appointment?t=other-token"
+    );
+    expect(screen.getByText("CT Head")).toBeTruthy();
+  });
+
+  it("hides other appointments section when no other appointments exist", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(preview({ otherAppointments: [] }));
+
+    renderPage();
+
+    await screen.findByText("CT Head");
+    expect(screen.queryByText("Other appointments")).toBeNull();
+  });
+
+  it("does not duplicate the current appointment in other appointments", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({
+        bookingDate: "2026-07-01",
+        bookingTime: "10:30",
+        modalityNameAr: "CT",
+        examNameAr: "CT Head",
+        otherAppointments: [
+          {
+            date: "2026-07-01",
+            time: "10:30",
+            modality: "CT",
+            examName: "CT Head",
+            status: "scheduled",
+            publicUrl: "https://rispro.nccb.com.ly/public/appointment?t=test-token",
+            canCancel: true,
+          },
+          {
+            date: "2026-07-09",
+            time: "11:00",
+            modality: "MRI",
+            examName: "MRI Brain",
+            status: "completed",
+            publicUrl: "https://rispro.nccb.com.ly/public/appointment?t=other-token",
+            canCancel: false,
+          },
+        ],
+      })
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("Other appointments")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /MRI Brain/ })).toBeTruthy();
+    expect(screen.getAllByText("CT Head")).toHaveLength(1);
   });
 
   it("previews and prints the appointment slip with QR paper settings", async () => {

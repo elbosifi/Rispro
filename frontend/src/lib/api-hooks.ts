@@ -1903,6 +1903,17 @@ export interface PublicAppointmentCancelPreview {
   examInstructionEn?: string;
   currentStatus: string;
   patientQrSettings?: PatientQrSettings;
+  otherAppointments?: PublicAppointmentOtherAppointment[];
+}
+
+export interface PublicAppointmentOtherAppointment {
+  date: string;
+  time?: string;
+  modality: string;
+  examName: string;
+  status: string;
+  publicUrl: string;
+  canCancel?: boolean;
 }
 
 export interface PublicAppointmentCancelResult {
@@ -1915,7 +1926,7 @@ export interface PublicAppointmentCancelResult {
 
 export async function fetchPublicAppointmentCancelPreview(token: string): Promise<PublicAppointmentCancelPreview> {
   const query = new URLSearchParams({ t: token });
-  const raw = await api<{ preview: RawRecord; settings?: RawRecord | RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
+  const raw = await api<{ preview: RawRecord; otherAppointments?: RawRecord[]; settings?: RawRecord | RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
   const preview = raw.preview ?? {};
 
   // Handle both array format (raw records) and object format from the public endpoint.
@@ -1948,6 +1959,15 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
     examInstructionEn: String(preview.examInstructionEn ?? preview.exam_instruction_en ?? ""),
     currentStatus: String(preview.currentStatus ?? preview.current_status ?? ""),
     patientQrSettings,
+    otherAppointments: (raw.otherAppointments ?? []).map((appointment) => ({
+      date: String(appointment.date ?? ""),
+      time: String(appointment.time ?? ""),
+      modality: String(appointment.modality ?? "—"),
+      examName: String(appointment.examName ?? appointment.exam_name ?? "—"),
+      status: String(appointment.status ?? ""),
+      publicUrl: String(appointment.publicUrl ?? appointment.public_url ?? ""),
+      canCancel: Boolean(appointment.canCancel ?? appointment.can_cancel),
+    })).filter((appointment) => appointment.date && appointment.publicUrl),
   };
 }
 

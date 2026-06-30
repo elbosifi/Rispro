@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { pool } from "../../../../db/pool.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import { getBookingDetails } from "../../booking/services/get-booking-details.service.js";
@@ -6,6 +7,7 @@ import { cancelBooking } from "../../booking/services/cancel-booking.service.js"
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { getPublicCancelServiceUserId } from "../../public/utils/public-cancel-config.js";
 import { verifyPublicCancelToken } from "../../public/utils/public-cancel-token.js";
+import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public-appointment-url.js";
 import { isModalityAllowed, readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { readAppointmentSlipSettings } from "../../public/utils/appointment-slip-settings.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
@@ -68,6 +70,61 @@ function formatTimeLabel(value: string | null | undefined): string {
 }
 
 type BookingDetails = Awaited<ReturnType<typeof getBookingDetails>>;
+
+interface OtherPublicAppointmentRow {
+  appointment_date: string;
+  booking_time: string | null;
+  modality_name_ar: string | null;
+  modality_name_en: string | null;
+  exam_name_ar: string | null;
+  exam_name_en: string | null;
+  status: string;
+  token: string;
+}
+
+function isPublicCancellableStatus(status: string): boolean {
+  return ["scheduled", "arrived", "waiting"].includes(status);
+}
+
+async function loadOtherPublicAppointments(
+  booking: BookingDetails,
+  patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>
+) {
+  const result = await pool.query<OtherPublicAppointmentRow>(
+    `
+      select
+        b.booking_date::text as appointment_date,
+        b.booking_time::text as booking_time,
+        m.name_ar as modality_name_ar,
+        m.name_en as modality_name_en,
+        et.name_ar as exam_name_ar,
+        et.name_en as exam_name_en,
+        b.status,
+        t.token
+      from appointments_v2.bookings b
+      join appointments_v2.public_appointment_tokens t on t.booking_id = b.id
+      left join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      where b.patient_id = $1
+        and b.id <> $2
+        and t.revoked_at is null
+        and b.status not in ('discontinued', 'voided')
+        and current_date <= (b.booking_date + ($3::int * interval '1 day'))::date
+      order by b.booking_date asc, b.booking_time asc nulls last, b.id asc
+    `,
+    [booking.patient_id, booking.id, patientQrSettings.publicLinkValidityDays]
+  );
+
+  return result.rows.map((row) => ({
+    date: row.appointment_date,
+    time: formatTimeLabel(row.booking_time),
+    modality: row.modality_name_ar || row.modality_name_en || "—",
+    examName: row.exam_name_ar || row.exam_name_en || "—",
+    status: row.status,
+    publicUrl: buildPublicAppointmentUrlFromSettings(row.token, patientQrSettings),
+    canCancel: patientQrSettings.allowCancellation && isPublicCancellableStatus(row.status),
+  }));
+}
 
 function reportContextFromBooking(booking: BookingDetails) {
   return {
@@ -175,6 +232,7 @@ router.get(
     }
 
     const booking = await getBookingDetails(payload.bookingId);
+    const otherAppointments = await loadOtherPublicAppointments(booking, patientQrSettings);
 
     res.json({
       preview: {
@@ -217,6 +275,7 @@ router.get(
         examInstructionEn: booking.exam_specific_instruction_en || "",
         currentStatus: booking.status,
       },
+      otherAppointments,
       settings: patientQrSettings,
     });
   })
