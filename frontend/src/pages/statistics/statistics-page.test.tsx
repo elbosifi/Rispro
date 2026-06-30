@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import StatisticsPage from "./statistics-page";
@@ -8,6 +8,7 @@ import type { AppointmentStatistics } from "@/types/api";
 const fetchStatisticsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const recordReportOutputMock = vi.fn();
+let mockLanguage: "en" | "ar" = "en";
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
@@ -16,7 +17,7 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("@/providers/language-provider", () => ({
-  useLanguage: () => ({ language: "en" }),
+  useLanguage: () => ({ language: mockLanguage }),
 }));
 
 const baseStats: AppointmentStatistics = {
@@ -109,6 +110,7 @@ function renderPage() {
 
 describe("StatisticsPage", () => {
   beforeEach(() => {
+    mockLanguage = "en";
     fetchStatisticsMock.mockReset();
     fetchAppointmentLookupsMock.mockReset();
     recordReportOutputMock.mockReset();
@@ -134,6 +136,18 @@ describe("StatisticsPage", () => {
     expect(within(registryCard as HTMLElement).getByText("—")).toBeTruthy();
     expect(within(registryCard as HTMLElement).queryByText("0")).toBeNull();
     expect(screen.getByText("Loading statistics...")).toBeTruthy();
+  });
+
+  it("renders translated statistics KPI labels", async () => {
+    mockLanguage = "ar";
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage();
+
+    expect(await screen.findByText("إجمالي سجل المرضى (كل الوقت)")).toBeTruthy();
+    expect(screen.getByText("مواعيد الفترة المحددة")).toBeTruthy();
+    expect(screen.getByText("مرضى الأورام (كل الوقت)")).toBeTruthy();
+    expect(screen.getByText("إجمالي سجل المرضى لكل الوقت. أعداد المواعيد تستخدم الفترة المحددة.")).toBeTruthy();
   });
 
   it("shows an error state on initial query failure", async () => {
@@ -167,6 +181,23 @@ describe("StatisticsPage", () => {
     expect(screen.getAllByText("No-show").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Discontinued").length).toBeGreaterThan(0);
+  });
+
+  it("shows range validation and prevents invalid range refetch", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText("CT").length).toBeGreaterThan(1));
+    const fromInput = screen.getByLabelText("From");
+    await user.clear(fromInput);
+    await user.type(fromInput, "01072026");
+    fireEvent.blur(fromInput);
+
+    await waitFor(() => expect(screen.getAllByText("Start date must be on or before end date.").length).toBeGreaterThan(1));
+    expect(fetchStatisticsMock).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", { name: /Refresh/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("renders CSV and print controls and guards them when no aggregate data exists", async () => {

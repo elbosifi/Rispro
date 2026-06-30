@@ -42,8 +42,32 @@ const STATUS_ORDER: Record<string, number> = {
   voided: 90
 };
 
+const MAX_RANGE_DAYS = 366;
+
 function monthStartIso(today: string): string {
   return `${today.slice(0, 8)}01`;
+}
+
+function isoDateToUtcDay(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const time = new Date(`${value}T00:00:00Z`).getTime();
+  return Number.isNaN(time) ? null : Math.floor(time / 86_400_000);
+}
+
+function validateRange(dateFrom: string, dateTo: string): "required" | "order" | "tooLarge" | null {
+  const fromDay = isoDateToUtcDay(dateFrom);
+  const toDay = isoDateToUtcDay(dateTo);
+  if (fromDay == null || toDay == null) return "required";
+  if (fromDay > toDay) return "order";
+  if (toDay - fromDay + 1 > MAX_RANGE_DAYS) return "tooLarge";
+  return null;
+}
+
+function rangeValidationMessageKey(reason: ReturnType<typeof validateRange>): Parameters<typeof t>[1] | null {
+  if (reason === "required") return "statistics.rangeDatesRequired";
+  if (reason === "order") return "statistics.rangeOrderInvalid";
+  if (reason === "tooLarge") return "statistics.rangeTooLarge";
+  return null;
 }
 
 function rangeForPreset(range: QuickRange): { dateFrom: string; dateTo: string } {
@@ -119,6 +143,9 @@ export default function StatisticsPage() {
   const [dateFrom, setDateFrom] = useState(initialRange.dateFrom);
   const [dateTo, setDateTo] = useState(initialRange.dateTo);
   const [modalityId, setModalityId] = useState("");
+  const rangeValidation = useMemo(() => validateRange(dateFrom, dateTo), [dateFrom, dateTo]);
+  const rangeValidationMessage = rangeValidationMessageKey(rangeValidation);
+  const hasValidRange = !rangeValidation;
 
   const lookupsQuery = useQuery({
     queryKey: ["lookups"],
@@ -130,7 +157,8 @@ export default function StatisticsPage() {
   const statisticsQuery = useQuery({
     queryKey: ["statistics", dateFrom, dateTo, modalityId],
     queryFn: () => fetchStats({ dateFrom, dateTo }, modalityId),
-    staleTime: 1000 * 30
+    staleTime: 1000 * 30,
+    enabled: hasValidRange
   });
 
   const stats = statisticsQuery.data;
@@ -143,7 +171,7 @@ export default function StatisticsPage() {
   const statusMax = maxCount(statusBreakdown);
   const modalityMax = maxCount(modalityBreakdown);
   const dailyMax = maxCount(dailyBreakdown);
-  const hasAggregateRows = Boolean(stats && (
+  const hasAggregateRows = Boolean(hasValidRange && stats && (
     statusBreakdown.length > 0 ||
     modalityBreakdown.length > 0 ||
     dailyBreakdown.length > 0 ||
@@ -205,20 +233,31 @@ export default function StatisticsPage() {
   };
 
   const handleExportCsv = () => {
-    if (!hasAggregateRows) return;
+    if (!hasAggregateRows || !hasValidRange) return;
     const rows = buildExportRows();
     void auditOutput("csv", rows.length);
     downloadCsv(`rispro-statistics-${dateFrom}-to-${dateTo}.csv`, rows);
   };
 
   const handlePrint = () => {
-    if (!hasAggregateRows) return;
+    if (!hasAggregateRows || !hasValidRange) return;
     void auditOutput("print", buildExportRows().length);
     window.print();
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="statistics-page max-w-7xl mx-auto space-y-6">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .statistics-page, .statistics-page * { visibility: visible; }
+          .statistics-page { position: absolute; inset: 0 auto auto 0; max-width: none !important; width: 100% !important; padding: 0 !important; color: #111827 !important; background: #ffffff !important; }
+          .statistics-print-hide { display: none !important; }
+          .statistics-print-card { break-inside: avoid; box-shadow: none !important; border-color: #d1d5db !important; }
+          .statistics-table-scroll { overflow: visible !important; }
+          .statistics-table-scroll table { min-width: 0 !important; font-size: 10px !important; }
+        }
+      `}</style>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--accent)" }}>
@@ -233,11 +272,11 @@ export default function StatisticsPage() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="statistics-print-hide flex flex-wrap items-center gap-2">
           <Badge variant="neutral" size="sm">
             {t(language, "statistics.lastUpdated")}: {statisticsQuery.dataUpdatedAt ? formatDateTimeLy(new Date(statisticsQuery.dataUpdatedAt)) : "—"}
           </Badge>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void statisticsQuery.refetch()} disabled={statisticsQuery.isFetching}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void statisticsQuery.refetch()} disabled={!hasValidRange || statisticsQuery.isFetching}>
             <RefreshCw className={`w-4 h-4 ${statisticsQuery.isFetching ? "animate-spin" : ""}`} />
             {statisticsQuery.isFetching ? t(language, "statistics.refreshing") : t(language, "statistics.refresh")}
           </Button>
@@ -261,7 +300,7 @@ export default function StatisticsPage() {
         </Card>
       )}
 
-      <Card className="p-4">
+      <Card className="statistics-print-hide p-4">
         <div className="space-y-4">
           <div>
             <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
@@ -321,8 +360,20 @@ export default function StatisticsPage() {
         </div>
       </Card>
 
+      <Card className="statistics-print-card p-4">
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          {t(language, "statistics.scopeNote")}
+        </p>
+        {rangeValidationMessage && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-amber-700">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span>{t(language, rangeValidationMessage)}</span>
+          </div>
+        )}
+      </Card>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-5">
+        <Card className="statistics-print-card p-5">
           <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
             {t(language, "statistics.patientRegistryAllTime")}
           </p>
@@ -330,7 +381,7 @@ export default function StatisticsPage() {
             {metricValue(stats, stats?.summary.totalRegisteredPatients, isInitialLoading, isInitialError)}
           </p>
         </Card>
-        <Card className="p-5">
+        <Card className="statistics-print-card p-5">
           <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
             {t(language, "statistics.appointmentsForPeriod")}
           </p>
@@ -338,33 +389,37 @@ export default function StatisticsPage() {
             {metricValue(stats, stats?.summary.totalAppointments, isInitialLoading, isInitialError)}
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
-            Oncology: {metricValue(stats, stats?.summary.oncologyAppointments, isInitialLoading, isInitialError)}
+            {t(language, "statistics.oncologyAppointments")}: {metricValue(stats, stats?.summary.oncologyAppointments, isInitialLoading, isInitialError)}
             {" · "}
-            Non-oncology: {metricValue(stats, stats?.summary.nonOncologyAppointments, isInitialLoading, isInitialError)}
+            {t(language, "statistics.nonOncologyAppointments")}: {metricValue(stats, stats?.summary.nonOncologyAppointments, isInitialLoading, isInitialError)}
           </p>
         </Card>
-        <Card className="p-5">
+        <Card className="statistics-print-card p-5">
           <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
-            {t(language, "statistics.registeredPatients")} - Oncology
+            {t(language, "statistics.oncologyPatientsAllTime")}
           </p>
           <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
             {metricValue(stats, stats?.summary.oncologyPatients, isInitialLoading, isInitialError)}
           </p>
         </Card>
-        <Card className="p-5">
+        <Card className="statistics-print-card p-5">
           <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
-            {t(language, "statistics.registeredPatients")} - Non-oncology
+            {t(language, "statistics.nonOncologyPatientsAllTime")}
           </p>
           <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
             {metricValue(stats, stats?.summary.nonOncologyPatients, isInitialLoading, isInitialError)}
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
-            Uncategorized: {metricValue(stats, stats?.summary.uncategorizedPatients, isInitialLoading, isInitialError)}
+            {t(language, "statistics.uncategorizedPatientsAllTime")}: {metricValue(stats, stats?.summary.uncategorizedPatients, isInitialLoading, isInitialError)}
           </p>
         </Card>
       </div>
 
-      {isInitialLoading ? (
+      {rangeValidationMessage ? (
+        <Card className="statistics-print-card">
+          <EmptyState message={t(language, rangeValidationMessage)} icon={<AlertTriangle size={28} />} />
+        </Card>
+      ) : isInitialLoading ? (
         <Card>
           <LoadingState message={t(language, "statistics.loading")} />
         </Card>
@@ -378,7 +433,7 @@ export default function StatisticsPage() {
         </Card>
       ) : (
         <>
-          <Card className="overflow-hidden">
+          <Card className="statistics-print-card overflow-hidden">
             <div className="px-4 py-3 flex items-center justify-between gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
               <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
                 {t(language, "statistics.byStatus")}
@@ -389,6 +444,7 @@ export default function StatisticsPage() {
                 </span>
               )}
             </div>
+            <div className="statistics-table-scroll overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -405,14 +461,16 @@ export default function StatisticsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </Card>
 
-          <Card className="overflow-hidden">
+          <Card className="statistics-print-card overflow-hidden">
             <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
               <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
                 {t(language, "statistics.byModality")}
               </h3>
             </div>
+            <div className="statistics-table-scroll overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -441,14 +499,16 @@ export default function StatisticsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </Card>
 
-          <Card className="overflow-hidden">
+          <Card className="statistics-print-card overflow-hidden">
             <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
               <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
                 {t(language, "statistics.dailyBreakdown")}
               </h3>
             </div>
+            <div className="statistics-table-scroll overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -473,6 +533,7 @@ export default function StatisticsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </Card>
         </>
       )}
