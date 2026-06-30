@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
+  publicLinkValidityDays: 14,
   showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
