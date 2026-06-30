@@ -142,10 +142,29 @@ function safeWorkbookName(value: unknown): string {
     .slice(0, 80) || "report";
 }
 
-function normalizeIsoDateQuery(value: unknown): string {
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [yearRaw, monthRaw, dayRaw] = value.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function parseStatisticsIsoDateQuery(value: unknown): string | null {
+  if (value == null) return null;
   if (typeof value !== "string") return "";
   const clean = value.trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : "";
+  return isValidIsoDate(clean) ? clean : "";
+}
+
+function isoDateDay(value: string): number {
+  return Math.floor(new Date(`${value}T00:00:00Z`).getTime() / 86_400_000);
 }
 
 router.post(
@@ -518,13 +537,24 @@ router.get(
   requirePageAccess("statistics"),
   asyncRoute(async (req: Request, res: Response) => {
     const query = req.query as Record<string, unknown>;
-    const compatibilityDate = normalizeIsoDateQuery(query.date);
-    const requestedDateFrom = normalizeIsoDateQuery(query.dateFrom);
-    const requestedDateTo = normalizeIsoDateQuery(query.dateTo);
-    let dateFrom = compatibilityDate || requestedDateFrom || requestedDateTo || getTripoliToday();
-    let dateTo = compatibilityDate || requestedDateTo || requestedDateFrom || dateFrom;
+    const compatibilityDate = parseStatisticsIsoDateQuery(query.date);
+    const requestedDateFrom = parseStatisticsIsoDateQuery(query.dateFrom);
+    const requestedDateTo = parseStatisticsIsoDateQuery(query.dateTo);
+
+    if (compatibilityDate === "" || requestedDateFrom === "" || requestedDateTo === "") {
+      res.status(400).json({ error: "date, dateFrom, and dateTo must be valid ISO dates (YYYY-MM-DD)." });
+      return;
+    }
+
+    const dateFrom = compatibilityDate || requestedDateFrom || requestedDateTo || getTripoliToday();
+    const dateTo = compatibilityDate || requestedDateTo || requestedDateFrom || dateFrom;
     if (dateFrom > dateTo) {
-      [dateFrom, dateTo] = [dateTo, dateFrom];
+      res.status(400).json({ error: "dateFrom must be on or before dateTo." });
+      return;
+    }
+    if (isoDateDay(dateTo) - isoDateDay(dateFrom) + 1 > 366) {
+      res.status(400).json({ error: "Statistics date range must be 366 days or less." });
+      return;
     }
     const modalityId = typeof query.modalityId === "string" ? Number(query.modalityId) : null;
 

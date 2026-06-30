@@ -10,11 +10,32 @@ describe("statistics read route", () => {
   });
 
   it("keeps date query compatibility and accepts bounded range filters", () => {
-    assert.match(routeSource, /compatibilityDate = normalizeIsoDateQuery\(query\.date\)/);
-    assert.match(routeSource, /requestedDateFrom = normalizeIsoDateQuery\(query\.dateFrom\)/);
-    assert.match(routeSource, /requestedDateTo = normalizeIsoDateQuery\(query\.dateTo\)/);
+    assert.match(routeSource, /compatibilityDate = parseStatisticsIsoDateQuery\(query\.date\)/);
+    assert.match(routeSource, /requestedDateFrom = parseStatisticsIsoDateQuery\(query\.dateFrom\)/);
+    assert.match(routeSource, /requestedDateTo = parseStatisticsIsoDateQuery\(query\.dateTo\)/);
+    assert.match(routeSource, /const dateFrom = compatibilityDate \|\| requestedDateFrom \|\| requestedDateTo \|\| getTripoliToday\(\)/);
+    assert.match(routeSource, /const dateTo = compatibilityDate \|\| requestedDateTo \|\| requestedDateFrom \|\| dateFrom/);
     assert.match(routeSource, /b\.booking_date >= \$\$\{params\.length\}::date/);
     assert.match(routeSource, /b\.booking_date <= \$\$\{params\.length\}::date/);
+  });
+
+  it("defaults safely to Tripoli today when no date is supplied", () => {
+    assert.match(routeSource, /requestedDateTo \|\| getTripoliToday\(\)/);
+  });
+
+  it("rejects invalid supplied date strings", () => {
+    assert.match(routeSource, /function isValidIsoDate\(value: string\): boolean/);
+    assert.match(routeSource, /date\.getUTCFullYear\(\) === year/);
+    assert.match(routeSource, /compatibilityDate === "" \|\| requestedDateFrom === "" \|\| requestedDateTo === ""/);
+    assert.match(routeSource, /res\.status\(400\)\.json\(\{ error: "date, dateFrom, and dateTo must be valid ISO dates \(YYYY-MM-DD\)\." \}\)/);
+  });
+
+  it("rejects reversed and excessive ranges without silently swapping", () => {
+    assert.doesNotMatch(routeSource, /\[dateFrom, dateTo\] = \[dateTo, dateFrom\]/);
+    assert.match(routeSource, /if \(dateFrom > dateTo\)/);
+    assert.match(routeSource, /res\.status\(400\)\.json\(\{ error: "dateFrom must be on or before dateTo\." \}\)/);
+    assert.match(routeSource, /isoDateDay\(dateTo\) - isoDateDay\(dateFrom\) \+ 1 > 366/);
+    assert.match(routeSource, /res\.status\(400\)\.json\(\{ error: "Statistics date range must be 366 days or less\." \}\)/);
   });
 
   it("returns statistics response metadata", () => {
