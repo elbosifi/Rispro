@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import StatisticsPage from "./statistics-page";
+import { todayIsoDateLy } from "@/lib/date-format";
 import type { AppointmentStatistics } from "@/types/api";
 
 const fetchStatisticsMock = vi.fn();
@@ -100,10 +101,10 @@ const emptyStats: AppointmentStatistics = {
   dailyBreakdown: [],
 };
 
-function renderPage() {
+function renderPage(initialEntries = ["/statistics"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={queryClient}>
         <StatisticsPage />
       </QueryClientProvider>
@@ -223,6 +224,68 @@ describe("StatisticsPage", () => {
 
     expect((csvButton as HTMLButtonElement).disabled).toBe(true);
     expect((printButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("initializes range and modality from URL params", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage(["/statistics?dateFrom=2026-06-10&dateTo=2026-06-20&modalityId=1"]);
+
+    await waitFor(() => {
+      expect(fetchStatisticsMock).toHaveBeenCalledWith(
+        { dateFrom: "2026-06-10", dateTo: "2026-06-20" },
+        "1"
+      );
+    });
+    expect((screen.getByRole("button", { name: "Custom range" }) as HTMLButtonElement).className).toContain("btn-primary");
+  });
+
+  it("initializes same-day range from date URL param", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage(["/statistics?date=2026-06-29"]);
+
+    await waitFor(() => {
+      expect(fetchStatisticsMock).toHaveBeenCalledWith(
+        { dateFrom: "2026-06-29", dateTo: "2026-06-29" },
+        ""
+      );
+    });
+  });
+
+  it("falls back safely for invalid URL date and modality params", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+    const today = todayIsoDateLy();
+
+    renderPage(["/statistics?dateFrom=not-a-date&dateTo=2026-06-20&modalityId=bad"]);
+
+    await waitFor(() => {
+      expect(fetchStatisticsMock).toHaveBeenCalledWith(
+        { dateFrom: today, dateTo: today },
+        ""
+      );
+    });
+  });
+
+  it("renders selected-period operational exception metrics", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage();
+
+    expect(await screen.findByText("Operational exceptions")).toBeTruthy();
+    expect(screen.getByText("Completion rate (selected period)")).toBeTruthy();
+    expect(screen.getByText("33.3%")).toBeTruthy();
+    expect(screen.getByText("No-show rate (selected period)")).toBeTruthy();
+    expect(screen.getAllByText("8.3%").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Walk-ins (selected period)")).toBeTruthy();
+    expect(screen.getByText("Active workload (selected period)")).toBeTruthy();
+    expect(screen.getByText("Scheduled + in queue + in-progress")).toBeTruthy();
+    const noShowOperationalLink = screen
+      .getAllByRole("link", { name: /View appointments/i })
+      .map((link) => new URL(link.getAttribute("href") ?? "", "http://rispro.test"))
+      .find((url) => url.searchParams.getAll("status").includes("no-show"));
+    expect(noShowOperationalLink?.pathname).toBe("/registrations");
+    expect(noShowOperationalLink?.searchParams.get("source")).toBe("statistics");
   });
 
   it("links status rows to registrations with selected range, status, and modality", async () => {

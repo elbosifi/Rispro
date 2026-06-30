@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups, recordReportOutput } from "@/lib/api-hooks";
 import { formatDateLy, formatDateTimeLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
@@ -64,7 +64,9 @@ function monthStartIso(today: string): string {
 function isoDateToUtcDay(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const time = new Date(`${value}T00:00:00Z`).getTime();
-  return Number.isNaN(time) ? null : Math.floor(time / 86_400_000);
+  if (Number.isNaN(time)) return null;
+  if (new Date(time).toISOString().slice(0, 10) !== value) return null;
+  return Math.floor(time / 86_400_000);
 }
 
 function validateRange(dateFrom: string, dateTo: string): "required" | "order" | "tooLarge" | null {
@@ -95,6 +97,40 @@ function rangeForPreset(range: QuickRange): { dateFrom: string; dateTo: string }
   return { dateFrom: today, dateTo: today };
 }
 
+function quickRangeForDates(dateFrom: string, dateTo: string): QuickRange {
+  for (const range of ["today", "yesterday", "last7", "last31", "month"] as QuickRange[]) {
+    const preset = rangeForPreset(range);
+    if (preset.dateFrom === dateFrom && preset.dateTo === dateTo) return range;
+  }
+  return "custom";
+}
+
+function parseInitialStatisticsFilters(searchParams: URLSearchParams): { dateFrom: string; dateTo: string; modalityId: string; quickRange: QuickRange } {
+  const today = rangeForPreset("today");
+  const date = searchParams.get("date")?.trim() ?? "";
+  const requestedDateFrom = searchParams.get("dateFrom")?.trim() ?? "";
+  const requestedDateTo = searchParams.get("dateTo")?.trim() ?? "";
+  const modalityId = searchParams.get("modalityId")?.trim() ?? "";
+  const suppliedDateValues = [date, requestedDateFrom, requestedDateTo].filter(Boolean);
+
+  if (suppliedDateValues.some((value) => isoDateToUtcDay(value) == null)) {
+    return { ...today, modalityId: "", quickRange: "today" };
+  }
+
+  const dateFrom = date || requestedDateFrom || requestedDateTo || today.dateFrom;
+  const dateTo = date || requestedDateTo || requestedDateFrom || dateFrom;
+  if (validateRange(dateFrom, dateTo)) {
+    return { ...today, modalityId: "", quickRange: "today" };
+  }
+
+  return {
+    dateFrom,
+    dateTo,
+    modalityId: /^\d+$/.test(modalityId) && Number(modalityId) > 0 ? modalityId : "",
+    quickRange: quickRangeForDates(dateFrom, dateTo),
+  };
+}
+
 function sortStatusRows(rows: AppointmentStatisticsStatusRow[]): AppointmentStatisticsStatusRow[] {
   return [...rows].sort((a, b) => {
     const left = STATUS_ORDER[String(a.status)] ?? 999;
@@ -117,6 +153,11 @@ function BarCell({ value, max }: { value: number; max: number }) {
       <span className="min-w-10 text-right">{value}</span>
     </div>
   );
+}
+
+function formatRate(numerator: number | undefined, denominator: number | undefined): string {
+  if (!denominator) return "â€”";
+  return `${Math.round(((numerator ?? 0) / denominator) * 1000) / 10}%`;
 }
 
 function metricValue(stats: AppointmentStatistics | undefined, value: number | undefined, isInitialLoading: boolean, isInitialError: boolean) {
@@ -189,13 +230,43 @@ function DrilldownLink({ to }: { to: string }) {
   );
 }
 
+function OperationalMetricCard({
+  label,
+  value,
+  helper,
+  href,
+}: {
+  label: string;
+  value: string | number;
+  helper?: string;
+  href?: string;
+}) {
+  return (
+    <Card className="statistics-print-card p-4">
+      <div className="flex h-full flex-col justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.12em] font-mono text-muted-foreground">{label}</p>
+          <p className="mt-2 text-2xl font-bold" style={{ color: "var(--text)" }}>{value}</p>
+          {helper ? <p className="mt-1 text-xs text-muted-foreground">{helper}</p> : null}
+        </div>
+        {href ? (
+          <div className="statistics-print-hide">
+            <DrilldownLink to={href} />
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 export default function StatisticsPage() {
   const { language } = useLanguage();
-  const [quickRange, setQuickRange] = useState<QuickRange>("today");
-  const initialRange = useMemo(() => rangeForPreset("today"), []);
-  const [dateFrom, setDateFrom] = useState(initialRange.dateFrom);
-  const [dateTo, setDateTo] = useState(initialRange.dateTo);
-  const [modalityId, setModalityId] = useState("");
+  const [searchParams] = useSearchParams();
+  const initialFilters = useMemo(() => parseInitialStatisticsFilters(searchParams), []);
+  const [quickRange, setQuickRange] = useState<QuickRange>(initialFilters.quickRange);
+  const [dateFrom, setDateFrom] = useState(initialFilters.dateFrom);
+  const [dateTo, setDateTo] = useState(initialFilters.dateTo);
+  const [modalityId, setModalityId] = useState(initialFilters.modalityId);
   const rangeValidation = useMemo(() => validateRange(dateFrom, dateTo), [dateFrom, dateTo]);
   const rangeValidationMessage = rangeValidationMessageKey(rangeValidation);
   const hasValidRange = !rangeValidation;
@@ -224,6 +295,14 @@ export default function StatisticsPage() {
   const statusMax = maxCount(statusBreakdown);
   const modalityMax = maxCount(modalityBreakdown);
   const dailyMax = maxCount(dailyBreakdown);
+  const inProgressCount = statusBreakdown.find((row) => row.status === "in-progress")?.count ?? 0;
+  const totalAppointments = stats?.summary.totalAppointments;
+  const completionRate = formatRate(stats?.summary.completedCount, totalAppointments);
+  const noShowRate = formatRate(stats?.summary.noShowCount, totalAppointments);
+  const cancellationRate = formatRate(stats?.summary.cancelledCount, totalAppointments);
+  const activeWorkloadCount = stats
+    ? stats.summary.scheduledCount + stats.summary.inQueueCount + inProgressCount
+    : undefined;
   const hasAggregateRows = Boolean(hasValidRange && stats && (
     statusBreakdown.length > 0 ||
     modalityBreakdown.length > 0 ||
@@ -261,6 +340,11 @@ export default function StatisticsPage() {
       { section: "summary", metric: "appointments_selected_period", value: stats.summary.totalAppointments },
       { section: "summary", metric: "unique_patients_selected_period", value: stats.summary.uniquePatients },
       { section: "summary", metric: "walk_in_selected_period", value: stats.summary.walkInCount },
+      { section: "operational", metric: "completion_rate", value: completionRate },
+      { section: "operational", metric: "no_show_rate", value: noShowRate },
+      { section: "operational", metric: "cancellation_rate", value: cancellationRate },
+      { section: "operational", metric: "in_queue_selected_period", value: stats.summary.inQueueCount },
+      { section: "operational", metric: "active_workload_selected_period", value: activeWorkloadCount ?? 0 },
       ...statusBreakdown.map((row) => ({ section: "status", status: row.status, count: row.count })),
       ...modalityBreakdown.map((row) => ({
         section: "modality",
@@ -467,6 +551,70 @@ export default function StatisticsPage() {
           </p>
         </Card>
       </div>
+
+      {!rangeValidationMessage ? (
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
+              {t(language, "statistics.operationalExceptions")}
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(language, "statistics.operationalExceptionsHint")}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+            <OperationalMetricCard
+              label={t(language, "statistics.completionRate")}
+              value={stats ? completionRate : "â€”"}
+              helper={stats && totalAppointments ? `${stats.summary.completedCount} / ${stats.summary.totalAppointments}` : undefined}
+              href={stats?.summary.completedCount ? buildRegistrationsDrilldownUrl({
+                dateMode: "range",
+                dateFrom,
+                dateTo,
+                modalityId: modalityId || null,
+                statuses: ["completed"],
+              }) : undefined}
+            />
+            <OperationalMetricCard
+              label={t(language, "statistics.noShowRate")}
+              value={stats ? noShowRate : "â€”"}
+              helper={stats && totalAppointments ? `${stats.summary.noShowCount} / ${stats.summary.totalAppointments}` : undefined}
+              href={stats?.summary.noShowCount ? buildRegistrationsDrilldownUrl({
+                dateMode: "range",
+                dateFrom,
+                dateTo,
+                modalityId: modalityId || null,
+                statuses: ["no-show"],
+              }) : undefined}
+            />
+            <OperationalMetricCard
+              label={t(language, "statistics.cancellationRate")}
+              value={stats ? cancellationRate : "â€”"}
+              helper={stats && totalAppointments ? `${stats.summary.cancelledCount} / ${stats.summary.totalAppointments}` : undefined}
+              href={stats?.summary.cancelledCount ? buildRegistrationsDrilldownUrl({
+                dateMode: "range",
+                dateFrom,
+                dateTo,
+                modalityId: modalityId || null,
+                statuses: ["cancelled"],
+              }) : undefined}
+            />
+            <OperationalMetricCard
+              label={t(language, "statistics.walkInSelectedPeriod")}
+              value={metricValue(stats, stats?.summary.walkInCount, isInitialLoading, isInitialError)}
+            />
+            <OperationalMetricCard
+              label={t(language, "statistics.inQueueSelectedPeriod")}
+              value={metricValue(stats, stats?.summary.inQueueCount, isInitialLoading, isInitialError)}
+            />
+            <OperationalMetricCard
+              label={t(language, "statistics.activeWorkloadSelectedPeriod")}
+              value={metricValue(stats, activeWorkloadCount, isInitialLoading, isInitialError)}
+              helper={stats ? t(language, "statistics.activeWorkloadHint") : undefined}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {rangeValidationMessage ? (
         <Card className="statistics-print-card">
