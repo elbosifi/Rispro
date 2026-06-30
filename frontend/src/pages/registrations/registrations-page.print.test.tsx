@@ -141,6 +141,7 @@ function registrationAppointment(overrides: Record<string, unknown> = {}) {
 describe("RegistrationsPage print actions", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    fetchAppointmentsMock.mockReset();
     mockPrintAppointmentSlipById.mockReset();
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockPushToast.mockReset();
@@ -328,6 +329,46 @@ describe("RegistrationsPage print actions", () => {
         dateTo: todayIsoDateLy(),
       })
     );
+  });
+
+  it("initializes appointment filters from URL params", async () => {
+    renderRegistrationsPage([
+      "/registrations?dateMode=range&dateFrom=2026-06-01&dateTo=2026-06-30&modalityId=1&status=completed&status=no-show&q=ACC",
+    ]);
+
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dateFrom: "2026-06-01",
+          dateTo: "2026-06-30",
+          modalityId: "1",
+          q: "ACC",
+          status: ["completed", "no-show"],
+        })
+      );
+    });
+  });
+
+  it("supports status[] URL params and preserves appointment deep links", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([registrationAppointment({ id: 99, accessionNumber: "ACC-99" })]);
+    renderRegistrationsPage([
+      "/registrations?appointmentId=7&patientId=1&tab=status&dateMode=single&date=2026-06-30&status[]=scheduled&status[]=waiting",
+    ]);
+
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          patientId: "1",
+          status: ["scheduled", "waiting"],
+        })
+      );
+      expect(getAppointmentByIdMock).toHaveBeenCalledWith(7);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
+      expect(screen.getByText("Change appointment status")).toBeTruthy();
+    });
   });
 
   it("prints directly from the row print button", async () => {

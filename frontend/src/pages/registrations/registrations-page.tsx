@@ -34,7 +34,7 @@ import {
   prepareAppointmentSlipHtml,
   printAppointmentListV2,
 } from "@/lib/print-utils";
-import { buildRegistrationAppointmentQuery } from "./registration-query";
+import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
 import {
   useCreateSchedulingOverrideRequest,
@@ -220,7 +220,9 @@ export default function RegistrationsPage() {
         dateTo: "",
       }
     : DEFAULT_FILTERS;
-  const [filters, setFilters] = useState<RegistrationsFilters>(() => patientScopedDefaultFilters);
+  const [filters, setFilters] = useState<RegistrationsFilters>(() =>
+    parseRegistrationFiltersFromSearchParams(searchParams, patientScopedDefaultFilters)
+  );
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],

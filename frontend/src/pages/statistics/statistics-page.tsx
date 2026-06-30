@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups, recordReportOutput } from "@/lib/api-hooks";
 import { formatDateLy, formatDateTimeLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
@@ -20,7 +21,7 @@ import {
 } from "@/components/shared";
 import { useLanguage } from "@/providers/language-provider";
 import { statusLabel, t } from "@/lib/i18n";
-import { AlertTriangle, BarChart3, Download, Printer, RefreshCw } from "lucide-react";
+import { AlertTriangle, BarChart3, Download, ExternalLink, Printer, RefreshCw } from "lucide-react";
 import type {
   AppointmentStatistics,
   AppointmentStatisticsDailyRow,
@@ -41,6 +42,18 @@ const STATUS_ORDER: Record<string, number> = {
   discontinued: 80,
   voided: 90
 };
+
+const DRILLDOWN_WORKFLOW_STATUSES = [
+  "scheduled",
+  "arrived",
+  "waiting",
+  "in-progress",
+  "completed",
+  "no-show",
+  "cancelled",
+  "discontinued",
+  "voided",
+];
 
 const MAX_RANGE_DAYS = 366;
 
@@ -134,6 +147,45 @@ function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
     URL.revokeObjectURL(url);
     anchor.remove();
   }, 1000);
+}
+
+function buildRegistrationsDrilldownUrl(options: {
+  dateMode: "single" | "range";
+  date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  modalityId?: string | number | null;
+  statuses?: string[];
+}): string {
+  const params = new URLSearchParams();
+  params.set("dateMode", options.dateMode);
+  if (options.dateMode === "single" && options.date) {
+    params.set("date", options.date);
+  }
+  if (options.dateMode === "range") {
+    if (options.dateFrom) params.set("dateFrom", options.dateFrom);
+    if (options.dateTo) params.set("dateTo", options.dateTo);
+  }
+  if (options.modalityId) {
+    params.set("modalityId", String(options.modalityId));
+  }
+  for (const status of options.statuses ?? []) {
+    params.append("status", status);
+  }
+  return `/registrations?${params.toString()}`;
+}
+
+function DrilldownLink({ to }: { to: string }) {
+  const { language } = useLanguage();
+  return (
+    <Link
+      to={to}
+      className="inline-flex items-center justify-end gap-1 text-xs font-semibold text-accent hover:underline"
+    >
+      {t(language, "statistics.viewAppointments")}
+      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+    </Link>
+  );
 }
 
 export default function StatisticsPage() {
@@ -450,15 +502,26 @@ export default function StatisticsPage() {
                 <TableRow>
                   <TableHead>{t(language, "statistics.statusCol")}</TableHead>
                   <TableHead className="text-right">{t(language, "statistics.countCol")}</TableHead>
+                  <TableHead className="statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {statusBreakdown.map((row) => (
-                  <TableRow key={row.status}>
-                    <TableCell>{statusLabel(language, row.status)}</TableCell>
-                    <TableCell className="text-right"><BarCell value={row.count} max={statusMax} /></TableCell>
-                  </TableRow>
-                ))}
+                {statusBreakdown.map((row) => {
+                  const href = buildRegistrationsDrilldownUrl({
+                    dateMode: "range",
+                    dateFrom,
+                    dateTo,
+                    modalityId: modalityId || null,
+                    statuses: [row.status],
+                  });
+                  return (
+                    <TableRow key={row.status} className="hover:bg-[var(--muted)]/40">
+                      <TableCell>{statusLabel(language, row.status)}</TableCell>
+                      <TableCell className="text-right"><BarCell value={row.count} max={statusMax} /></TableCell>
+                      <TableCell className="statistics-print-hide text-right"><DrilldownLink to={href} /></TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             </div>
@@ -482,21 +545,32 @@ export default function StatisticsPage() {
                   <TableHead className="text-right">{t(language, "statistics.noShowCol")}</TableHead>
                   <TableHead className="text-right">{t(language, "statistics.cancelledCol")}</TableHead>
                   <TableHead className="text-right">{t(language, "statistics.discontinuedCol")}</TableHead>
+                  <TableHead className="statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {modalityBreakdown.map((row) => (
-                  <TableRow key={row.modalityId}>
-                    <TableCell>{language === "ar" ? row.modalityNameAr : row.modalityNameEn}</TableCell>
-                    <TableCell className="text-right"><BarCell value={row.totalCount} max={modalityMax} /></TableCell>
-                    <TableCell className="text-right">{row.scheduledCount}</TableCell>
-                    <TableCell className="text-right">{row.inQueueCount}</TableCell>
-                    <TableCell className="text-right">{row.completedCount}</TableCell>
-                    <TableCell className="text-right">{row.noShowCount}</TableCell>
-                    <TableCell className="text-right">{row.cancelledCount}</TableCell>
-                    <TableCell className="text-right">{row.discontinuedCount}</TableCell>
-                  </TableRow>
-                ))}
+                {modalityBreakdown.map((row) => {
+                  const href = buildRegistrationsDrilldownUrl({
+                    dateMode: "range",
+                    dateFrom,
+                    dateTo,
+                    modalityId: row.modalityId,
+                    statuses: DRILLDOWN_WORKFLOW_STATUSES,
+                  });
+                  return (
+                    <TableRow key={row.modalityId} className="hover:bg-[var(--muted)]/40">
+                      <TableCell>{language === "ar" ? row.modalityNameAr : row.modalityNameEn}</TableCell>
+                      <TableCell className="text-right"><BarCell value={row.totalCount} max={modalityMax} /></TableCell>
+                      <TableCell className="text-right">{row.scheduledCount}</TableCell>
+                      <TableCell className="text-right">{row.inQueueCount}</TableCell>
+                      <TableCell className="text-right">{row.completedCount}</TableCell>
+                      <TableCell className="text-right">{row.noShowCount}</TableCell>
+                      <TableCell className="text-right">{row.cancelledCount}</TableCell>
+                      <TableCell className="text-right">{row.discontinuedCount}</TableCell>
+                      <TableCell className="statistics-print-hide text-right"><DrilldownLink to={href} /></TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             </div>
@@ -518,19 +592,29 @@ export default function StatisticsPage() {
                   <TableHead className="text-right">{t(language, "statistics.noShowCol")}</TableHead>
                   <TableHead className="text-right">{t(language, "statistics.cancelledCol")}</TableHead>
                   <TableHead className="text-right">{t(language, "statistics.discontinuedCol")}</TableHead>
+                  <TableHead className="statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {dailyBreakdown.map((row) => (
-                  <TableRow key={row.appointmentDate}>
-                    <TableCell>{formatDateLy(row.appointmentDate)}</TableCell>
-                    <TableCell className="text-right"><BarCell value={row.totalCount} max={dailyMax} /></TableCell>
-                    <TableCell className="text-right">{row.completedCount}</TableCell>
-                    <TableCell className="text-right">{row.noShowCount}</TableCell>
-                    <TableCell className="text-right">{row.cancelledCount}</TableCell>
-                    <TableCell className="text-right">{row.discontinuedCount}</TableCell>
-                  </TableRow>
-                ))}
+                {dailyBreakdown.map((row) => {
+                  const href = buildRegistrationsDrilldownUrl({
+                    dateMode: "single",
+                    date: row.appointmentDate,
+                    modalityId: modalityId || null,
+                    statuses: DRILLDOWN_WORKFLOW_STATUSES,
+                  });
+                  return (
+                    <TableRow key={row.appointmentDate} className="hover:bg-[var(--muted)]/40">
+                      <TableCell>{formatDateLy(row.appointmentDate)}</TableCell>
+                      <TableCell className="text-right"><BarCell value={row.totalCount} max={dailyMax} /></TableCell>
+                      <TableCell className="text-right">{row.completedCount}</TableCell>
+                      <TableCell className="text-right">{row.noShowCount}</TableCell>
+                      <TableCell className="text-right">{row.cancelledCount}</TableCell>
+                      <TableCell className="text-right">{row.discontinuedCount}</TableCell>
+                      <TableCell className="statistics-print-hide text-right"><DrilldownLink to={href} /></TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             </div>

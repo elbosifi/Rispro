@@ -1318,6 +1318,8 @@ const en = {
   "statistics.countCol": "Count",
   "statistics.dateCol": "Date",
   "statistics.totalCol": "Total",
+  "statistics.actionCol": "Action",
+  "statistics.viewAppointments": "View appointments",
 
   "search.title": "Patient Search",
   "search.placeholder": "Search by name, MRN, or National ID...",
@@ -3044,6 +3046,8 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "statistics.countCol": "العدد",
   "statistics.dateCol": "التاريخ",
   "statistics.totalCol": "الإجمالي",
+  "statistics.actionCol": "الإجراء",
+  "statistics.viewAppointments": "عرض المواعيد",
 
   "search.title": "بحث المرضى",
   "search.placeholder": "ابحث بالاسم أو MRN أو الرقم الوطني...",

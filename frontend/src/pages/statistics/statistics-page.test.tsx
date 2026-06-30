@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import StatisticsPage from "./statistics-page";
 import type { AppointmentStatistics } from "@/types/api";
 
@@ -102,10 +103,21 @@ const emptyStats: AppointmentStatistics = {
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <StatisticsPage />
-    </QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <StatisticsPage />
+      </QueryClientProvider>
+    </MemoryRouter>
   );
+}
+
+function drilldownUrlForRow(text: string): URL {
+  const row = screen
+    .getAllByRole("row")
+    .find((entry) => within(entry).queryByText(text));
+  expect(row).toBeTruthy();
+  const link = within(row as HTMLElement).getByRole("link", { name: /View appointments/i });
+  return new URL(link.getAttribute("href") ?? "", "http://rispro.test");
 }
 
 describe("StatisticsPage", () => {
@@ -211,5 +223,61 @@ describe("StatisticsPage", () => {
 
     expect((csvButton as HTMLButtonElement).disabled).toBe(true);
     expect((printButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("links status rows to registrations with selected range, status, and modality", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText("CT").length).toBeGreaterThan(1));
+    await user.selectOptions(screen.getByRole("combobox"), "1");
+
+    const url = drilldownUrlForRow("Scheduled");
+    expect(url.pathname).toBe("/registrations");
+    expect(url.searchParams.get("dateMode")).toBe("range");
+    expect(url.searchParams.get("dateFrom")).toBe("2026-06-30");
+    expect(url.searchParams.get("dateTo")).toBe("2026-06-30");
+    expect(url.searchParams.getAll("status")).toEqual(["scheduled"]);
+    expect(url.searchParams.get("modalityId")).toBe("1");
+  });
+
+  it("links modality rows with row modality and explicit workflow statuses", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText("CT").length).toBeGreaterThan(1));
+    const url = drilldownUrlForRow("CT");
+
+    expect(url.pathname).toBe("/registrations");
+    expect(url.searchParams.get("dateMode")).toBe("range");
+    expect(url.searchParams.get("modalityId")).toBe("1");
+    expect(url.searchParams.getAll("status")).toEqual([
+      "scheduled",
+      "arrived",
+      "waiting",
+      "in-progress",
+      "completed",
+      "no-show",
+      "cancelled",
+      "discontinued",
+      "voided",
+    ]);
+  });
+
+  it("links daily rows with a single selected day", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage();
+
+    await screen.findByText("30/06/2026");
+    const url = drilldownUrlForRow("30/06/2026");
+
+    expect(url.pathname).toBe("/registrations");
+    expect(url.searchParams.get("dateMode")).toBe("single");
+    expect(url.searchParams.get("date")).toBe("2026-06-30");
+    expect(url.searchParams.getAll("status")).toContain("completed");
   });
 });
