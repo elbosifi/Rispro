@@ -27,7 +27,15 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /protocol_name/);
     assert.match(repo, /version_number/);
     assert.match(repo, /scanner_name/);
+    assert.match(repo, /as accession_number/);
     assert.match(repo, /coalesce\(apa\.status, 'NOT_PROTOCOLLED'\)/);
+  });
+
+  it("includes generated accession number in protocoling search", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+
+    assert.match(repo, /\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\) as accession_number/);
+    assert.match(repo, /\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\) ilike/);
   });
 
   it("validates active protocol version, appointment modality, scanner modality, and single active assignment", () => {

@@ -110,6 +110,7 @@ const fetchReportingBoardNotificationsMock = vi.fn();
 const markReportingBoardNotificationReadMock = vi.fn();
 const dismissReportingBoardNotificationMock = vi.fn();
 const markAllReportingBoardNotificationsReadMock = vi.fn();
+const pushToastMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -223,6 +224,10 @@ vi.mock("@/lib/api-hooks", () => ({
   deleteDoctorRosterAssignment: vi.fn(),
   addDoctorRosterMember: vi.fn(),
   deleteDoctorRosterMember: vi.fn(),
+}));
+
+vi.mock("@/lib/toast", () => ({
+  pushToast: (...args: unknown[]) => pushToastMock(...args),
 }));
 
 function CorePlaceholder() {
@@ -379,6 +384,7 @@ describe("Doctor Portal shell", () => {
     markReportingBoardNotificationReadMock.mockReset();
     dismissReportingBoardNotificationMock.mockReset();
     markAllReportingBoardNotificationsReadMock.mockReset();
+    pushToastMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -1737,6 +1743,7 @@ describe("Doctor Portal shell", () => {
     fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([
       {
         appointmentId: 77,
+        accessionNumber: "V2-000077",
         patientId: 5,
         patientMrn: "MRN-5",
         patientNationalId: "NID-5",
@@ -1761,6 +1768,7 @@ describe("Doctor Portal shell", () => {
     fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({
       appointment: {
         appointmentId: 77,
+        accessionNumber: "V2-000077",
         patientId: 5,
         patientMrn: "MRN-5",
         patientNationalId: "NID-5",
@@ -1789,12 +1797,14 @@ describe("Doctor Portal shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
 
-    expect(await screen.findByRole("heading", { name: "Assign protocol" })).toBeTruthy();
-    expect(screen.getByText("Protocol Patient")).toBeTruthy();
-    expect(screen.getByRole("option", { name: "CT Brain v1.0" })).toBeTruthy();
+    const drawer = await screen.findByRole("dialog", { name: "Assign protocol" });
+    expect(within(drawer).getByRole("heading", { name: "Assign protocol" })).toBeTruthy();
+    expect(within(drawer).getByText(/Protocol Patient/)).toBeTruthy();
+    expect(within(drawer).getByText(/V2-000077/)).toBeTruthy();
+    expect(await screen.findByRole("option", { name: "CT Brain v1.0" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "MRI Prostate v1.0" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Protocol"), { target: { value: "20" } });
-    fireEvent.change(screen.getByLabelText("Protocol notes"), { target: { value: "Use standard brain protocol" } });
+    fireEvent.change(screen.getByLabelText("Protocol instructions"), { target: { value: "Use standard brain protocol" } });
     fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
 
     await waitFor(() => expect(createDoctorProtocolAssignmentMock.mock.calls[0]).toEqual([
@@ -1807,12 +1817,15 @@ describe("Doctor Portal shell", () => {
         status: "ASSIGNED",
       },
     ]));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Assign protocol" })).toBeNull());
+    expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: "success", title: "Protocol assigned." }));
   });
 
   it("shows existing protocol assignment status and version", async () => {
     fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([
       {
         appointmentId: 78,
+        accessionNumber: "V2-000078",
         patientId: 6,
         patientMrn: "MRN-6",
         patientNationalId: null,
@@ -1853,6 +1866,158 @@ describe("Doctor Portal shell", () => {
     expect(await screen.findByText("Assigned Patient")).toBeTruthy();
     expect(screen.getByText("CT CAP v1.0")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Change" })).toBeTruthy();
+  });
+
+  it("opens change assignment drawer with clear assignment only for assigned rows", async () => {
+    const assignedAppointment = {
+      appointmentId: 78,
+      accessionNumber: "V2-000078",
+      patientId: 6,
+      patientMrn: "MRN-6",
+      patientNationalId: null,
+      patientArabicName: null,
+      patientEnglishName: "Assigned Patient",
+      ageYears: 55,
+      sex: "M",
+      appointmentDate: "2027-01-04",
+      appointmentTime: "10:00",
+      modalityId: 1,
+      modalityCode: "CT" as const,
+      modalityName: "CT",
+      examTypeId: 3,
+      examTypeName: "CT CAP",
+      caseCategory: "non_oncology",
+      clinicalNotes: "Long clinical note for drawer",
+      appointmentStatus: "scheduled",
+      protocolStatus: "ASSIGNED" as const,
+      assignment: {
+        assignmentId: 8,
+        protocolId: 20,
+        protocolVersionId: 30,
+        protocolName: "CT CAP",
+        versionNumber: "1.0",
+        scannerId: 2,
+        scannerName: "GE Revolution CT",
+        protocolNotes: "Portal venous",
+        contrastNotes: null,
+        status: "ASSIGNED" as const,
+        assignedBy: 10,
+        assignedAt: "2027-01-04T09:30:00.000Z",
+      },
+    };
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([assignedAppointment]);
+    fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: null });
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Change" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "Change assigned protocol" });
+    expect(within(drawer).getByRole("heading", { name: "Change assigned protocol" })).toBeTruthy();
+    expect(await within(drawer).findByText("Clear assignment")).toBeTruthy();
+    expect(within(drawer).queryByText(/Edit master protocol|Change protocol definition|Assign protocol version/i)).toBeNull();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    cancelDoctorProtocolAssignmentMock.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: null });
+
+    fireEvent.click(within(drawer).getByRole("button", { name: "Clear assignment" }));
+
+    await waitFor(() => expect(cancelDoctorProtocolAssignmentMock).toHaveBeenCalledWith(78));
+    confirmSpy.mockRestore();
+  });
+
+  it("shows save errors inside assignment drawer and preserves form values", async () => {
+    fetchProtocolLibraryProtocolsMock.mockResolvedValue([
+      {
+        id: 20,
+        name: "CT Brain",
+        modality: "CT",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: null,
+        activeVersionId: 30,
+        activeVersionNumber: "1.0",
+        activeVersionStatus: "ACTIVE",
+        latestDraftVersionId: null,
+        latestDraftVersionNumber: null,
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+    ]);
+    const appointment = {
+      appointmentId: 77,
+      accessionNumber: "V2-000077",
+      patientId: 5,
+      patientMrn: "MRN-5",
+      patientNationalId: null,
+      patientArabicName: null,
+      patientEnglishName: "Protocol Patient",
+      ageYears: 42,
+      sex: "F",
+      appointmentDate: "2027-01-04",
+      appointmentTime: "09:00",
+      modalityId: 1,
+      modalityCode: "CT" as const,
+      modalityName: "CT",
+      examTypeId: 2,
+      examTypeName: "CT Brain",
+      caseCategory: "oncology",
+      clinicalNotes: null,
+      appointmentStatus: "scheduled",
+      protocolStatus: "NOT_PROTOCOLLED" as const,
+      assignment: null,
+    };
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([appointment]);
+    fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({ appointment, assignmentDetail: null });
+    createDoctorProtocolAssignmentMock.mockRejectedValue(new Error("Protocol save failed"));
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    fireEvent.change(await screen.findByLabelText("Protocol"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Protocol instructions"), { target: { value: "Keep this value" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
+
+    expect(await screen.findByText("Protocol save failed")).toBeTruthy();
+    expect((screen.getByLabelText("Protocol instructions") as HTMLTextAreaElement).value).toBe("Keep this value");
+  });
+
+  it("shows no active protocol state and disables save", async () => {
+    const appointment = {
+      appointmentId: 77,
+      accessionNumber: "V2-000077",
+      patientId: 5,
+      patientMrn: "MRN-5",
+      patientNationalId: null,
+      patientArabicName: null,
+      patientEnglishName: "Protocol Patient",
+      ageYears: 42,
+      sex: "F",
+      appointmentDate: "2027-01-04",
+      appointmentTime: "09:00",
+      modalityId: 1,
+      modalityCode: "MRI" as const,
+      modalityName: "MRI",
+      examTypeId: 2,
+      examTypeName: "MRI Brain",
+      caseCategory: "oncology",
+      clinicalNotes: null,
+      appointmentStatus: "scheduled",
+      protocolStatus: "NOT_PROTOCOLLED" as const,
+      assignment: null,
+    };
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([appointment]);
+    fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({ appointment, assignmentDetail: null });
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+
+    expect(await screen.findByText("No active MRI protocols available. Create and activate one in Protocol Library.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save assignment" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText("Clear assignment")).toBeNull();
   });
 
   it("normal doctor sees team workload empty state without calculation controls", async () => {

@@ -45,6 +45,7 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
   const assignment = mapAssignment(row);
   return {
     appointmentId: Number(row.appointment_id),
+    accessionNumber: String(row.accession_number),
     patientId: Number(row.patient_id),
     patientMrn: stringOrNull(row.patient_mrn),
     patientNationalId: stringOrNull(row.patient_national_id),
@@ -102,6 +103,7 @@ function mapMriSequence(row: RawRecord): ProtocolingMriSequenceRow {
 const APPOINTMENT_SELECT = `
   select
     b.id as appointment_id,
+    ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
     b.patient_id,
     p.mrn as patient_mrn,
     p.national_id as patient_national_id,
@@ -180,7 +182,13 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
   }
   if (filters.search) {
     values.push(`%${filters.search}%`);
-    where.push(`(p.english_full_name ilike $${values.length} or p.arabic_full_name ilike $${values.length} or p.mrn ilike $${values.length} or b.id::text = $${values.length})`);
+    where.push(`(
+      p.english_full_name ilike $${values.length}
+      or p.arabic_full_name ilike $${values.length}
+      or p.mrn ilike $${values.length}
+      or ('V2-' || lpad(b.id::text, 6, '0')) ilike $${values.length}
+      or b.id::text = $${values.length}
+    )`);
   }
 
   const result = await pool.query<RawRecord>(

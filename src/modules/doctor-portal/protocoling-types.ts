@@ -19,6 +19,7 @@ export interface ProtocolAssignmentSummary {
 
 export interface DoctorProtocolingAppointmentRow {
   appointmentId: number;
+  accessionNumber: string;
   patientId: number;
   patientMrn: string | null;
   patientNationalId: string | null;

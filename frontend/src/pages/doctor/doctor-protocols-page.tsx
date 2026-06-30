@@ -1,7 +1,8 @@
-import { Children, useMemo, useState, type ReactNode } from "react";
+import { Children, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   activateProtocolLibraryVersion,
+  cancelDoctorProtocolAssignment,
   createDoctorProtocolAssignment,
   createProtocolLibraryAnatomyRegion,
   createProtocolLibraryCtPhasePreset,
@@ -41,6 +42,7 @@ import {
   type ProtocolAnatomyRegionPayload,
 } from "@/lib/api-hooks";
 import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
+import { pushToast } from "@/lib/toast";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -169,6 +171,21 @@ function StatusBadge({ active }: { active: boolean }) {
       style={{ borderColor: "var(--border)", color: active ? "#047857" : "var(--text-muted)" }}
     >
       {active ? "Active" : "Inactive"}
+    </span>
+  );
+}
+
+function ProtocolStatusBadge({ assigned }: { assigned: boolean }) {
+  return (
+    <span
+      className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold"
+      style={{
+        borderColor: assigned ? "#a7f3d0" : "var(--border)",
+        backgroundColor: assigned ? "#ecfdf5" : "var(--card)",
+        color: assigned ? "#047857" : "var(--text-muted)",
+      }}
+    >
+      {assigned ? "Protocol assigned" : "Not protocolled"}
     </span>
   );
 }
@@ -775,6 +792,7 @@ function ProtocolingWorklist() {
   const [protocolStatus, setProtocolStatus] = useState<"NOT_PROTOCOLLED" | "ASSIGNED" | "ALL">("NOT_PROTOCOLLED");
   const [search, setSearch] = useState("");
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
 
   const filters = useMemo(() => ({
     dateFrom,
@@ -807,9 +825,33 @@ function ProtocolingWorklist() {
     mutationFn: ({ appointmentId, payload }: { appointmentId: number; payload: ProtocolAssignmentPayload }) => updateDoctorProtocolAssignment(appointmentId, payload),
     onSuccess: invalidate,
   });
+  const clearAssignmentMutation = useMutation({
+    mutationFn: (appointmentId: number) => cancelDoctorProtocolAssignment(appointmentId),
+    onSuccess: invalidate,
+  });
 
   const appointments = appointmentsQuery.data ?? [];
   const selectedAppointment = appointmentDetailQuery.data?.appointment ?? appointments.find((appointment) => appointment.appointmentId === selectedAppointmentId) ?? null;
+  const selectedDetail = appointmentDetailQuery.data ?? null;
+  const assignmentBusy = createAssignmentMutation.isPending || updateAssignmentMutation.isPending || clearAssignmentMutation.isPending;
+  const closeAssignmentDrawer = () => {
+    if (assignmentBusy) return;
+    setSelectedAppointmentId(null);
+    setAssignmentError(null);
+  };
+  const openAssignmentDrawer = (appointmentId: number) => {
+    setAssignmentError(null);
+    setSelectedAppointmentId(appointmentId);
+  };
+  const handleAssignmentSuccess = async (message: string) => {
+    await invalidate();
+    setSelectedAppointmentId(null);
+    setAssignmentError(null);
+    pushToast({ type: "success", title: message });
+  };
+  const handleAssignmentError = (error: unknown) => {
+    setAssignmentError(error instanceof Error ? error.message : "Unable to save protocol assignment.");
+  };
 
   return (
     <section className="space-y-4">
@@ -829,7 +871,7 @@ function ProtocolingWorklist() {
         <label className="text-sm font-medium">To<input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></label>
         <label className="text-sm font-medium">Modality<select value={modality} onChange={(event) => setModality(event.target.value as "" | "CT" | "MRI")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All</option><option value="CT">CT</option><option value="MRI">MRI</option></select></label>
         <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
-        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, appointment ID" /></label>
+        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, accession" /></label>
       </section>
 
       {appointments.length === 0 ? (
@@ -846,27 +888,43 @@ function ProtocolingWorklist() {
               <Cell>{appointment.modalityName ?? appointment.modalityCode}</Cell>
               <Cell>{appointment.examTypeName ?? "-"}</Cell>
               <Cell>{appointment.caseCategory ?? "-"}</Cell>
-              <Cell>{appointment.clinicalNotes ?? "-"}</Cell>
-              <Cell>{appointment.protocolStatus === "NOT_PROTOCOLLED" ? "Not protocolled" : appointment.protocolStatus}</Cell>
-              <Cell>{appointment.assignment ? `${appointment.assignment.protocolName} v${appointment.assignment.versionNumber}` : "-"}</Cell>
-              <Cell><button type="button" onClick={() => setSelectedAppointmentId(appointment.appointmentId)} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>
+              <Cell><span className="block max-w-[16rem] truncate" title={appointment.clinicalNotes ?? undefined}>{appointment.clinicalNotes ?? "-"}</span></Cell>
+              <Cell><ProtocolStatusBadge assigned={appointment.assignment !== null} /></Cell>
+              <Cell>{appointment.assignment ? `${appointment.assignment.protocolName} v${appointment.assignment.versionNumber}${appointment.assignment.scannerName ? ` · ${appointment.assignment.scannerName}` : ""}` : "-"}</Cell>
+              <Cell><button type="button" onClick={() => openAssignmentDrawer(appointment.appointmentId)} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>
             </tr>
           ))}
         </SettingsTable>
       )}
 
       {selectedAppointment && (
-        <ProtocolAssignmentPanel
+        <ProtocolAssignmentDrawer
           key={selectedAppointment.appointmentId}
-          detail={appointmentDetailQuery.data ?? { appointment: selectedAppointment, assignmentDetail: null }}
+          appointment={selectedAppointment}
+          detail={selectedDetail}
+          loading={appointmentDetailQuery.isLoading || !selectedDetail}
+          error={assignmentError}
           protocols={protocolsQuery.data ?? []}
           scanners={scannersQuery.data ?? []}
-          saving={createAssignmentMutation.isPending || updateAssignmentMutation.isPending}
-          onCancel={() => setSelectedAppointmentId(null)}
+          saving={assignmentBusy}
+          onClose={closeAssignmentDrawer}
           onSave={(payload) => {
             const mutationPayload = { appointmentId: selectedAppointment.appointmentId, payload };
-            if (selectedAppointment.assignment) updateAssignmentMutation.mutate(mutationPayload);
-            else createAssignmentMutation.mutate(mutationPayload);
+            setAssignmentError(null);
+            const mutation = selectedAppointment.assignment ? updateAssignmentMutation : createAssignmentMutation;
+            mutation.mutate(mutationPayload, {
+              onSuccess: () => void handleAssignmentSuccess(selectedAppointment.assignment ? "Protocol assignment updated." : "Protocol assigned."),
+              onError: handleAssignmentError,
+            });
+          }}
+          onClear={() => {
+            if (!selectedAppointment.assignment) return;
+            if (!window.confirm("Clear this protocol assignment?")) return;
+            setAssignmentError(null);
+            clearAssignmentMutation.mutate(selectedAppointment.appointmentId, {
+              onSuccess: () => void handleAssignmentSuccess("Protocol assignment cleared."),
+              onError: handleAssignmentError,
+            });
           }}
         />
       )}
@@ -874,7 +932,7 @@ function ProtocolingWorklist() {
   );
 }
 
-function ProtocolAssignmentPanel({ detail, protocols, scanners, saving, onSave, onCancel }: { detail: DoctorProtocolingAppointmentDetail; protocols: ProtocolLibraryProtocol[]; scanners: ImagingScanner[]; saving: boolean; onSave: (payload: ProtocolAssignmentPayload) => void; onCancel: () => void }) {
+function LegacyProtocolAssignmentPanel({ detail, protocols, scanners, saving, onSave, onCancel }: { detail: DoctorProtocolingAppointmentDetail; protocols: ProtocolLibraryProtocol[]; scanners: ImagingScanner[]; saving: boolean; onSave: (payload: ProtocolAssignmentPayload) => void; onCancel: () => void }) {
   const appointment = detail.appointment;
   const existing = appointment.assignment;
   const activeProtocols = protocols.filter((protocol) => protocol.isActive && protocol.modality === appointment.modalityCode && protocol.activeVersionId && protocol.activeVersionStatus === "ACTIVE");
@@ -917,6 +975,118 @@ function ProtocolAssignmentPanel({ detail, protocols, scanners, saving, onSave, 
   );
 }
 
+function ProtocolAssignmentDrawer({
+  appointment,
+  detail,
+  loading,
+  error,
+  protocols,
+  scanners,
+  saving,
+  onSave,
+  onClear,
+  onClose,
+}: {
+  appointment: DoctorProtocolingAppointment;
+  detail: DoctorProtocolingAppointmentDetail | null;
+  loading: boolean;
+  error: string | null;
+  protocols: ProtocolLibraryProtocol[];
+  scanners: ImagingScanner[];
+  saving: boolean;
+  onSave: (payload: ProtocolAssignmentPayload) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const existing = appointment.assignment;
+  const activeProtocols = protocols.filter((protocol) => protocol.isActive && protocol.modality === appointment.modalityCode && protocol.activeVersionId && protocol.activeVersionStatus === "ACTIVE");
+  const matchingScanners = scanners.filter((scanner) => scanner.isActive && scanner.modality === appointment.modalityCode);
+  const [protocolId, setProtocolId] = useState(existing?.protocolId ? String(existing.protocolId) : "");
+  const [scannerId, setScannerId] = useState(existing?.scannerId ? String(existing.scannerId) : "");
+  const [protocolNotes, setProtocolNotes] = useState(existing?.protocolNotes ?? "");
+  const [contrastNotes, setContrastNotes] = useState(existing?.contrastNotes ?? "");
+  const title = existing ? "Change assigned protocol" : "Assign protocol";
+  const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols available. Create and activate one in Protocol Library.`;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const payload = (): ProtocolAssignmentPayload => ({
+    protocolId: Number(protocolId),
+    scannerId: scannerId ? Number(scannerId) : null,
+    protocolNotes: nullableText(protocolNotes),
+    contrastNotes: nullableText(contrastNotes),
+    status: "ASSIGNED",
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/45" onClick={onClose} role="presentation" data-testid="protocol-assignment-drawer-backdrop">
+      <aside
+        className="absolute right-0 top-0 h-full w-full max-w-2xl overflow-y-auto bg-background p-4 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3" style={{ borderColor: "var(--border)" }}>
+          <div>
+            <h3 className="text-xl font-semibold">{title}</h3>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+              {appointment.accessionNumber} - {protocolingPatientName(appointment)} - {appointment.appointmentDate} {appointment.appointmentTime ?? ""} - {appointment.modalityCode} - {appointment.examTypeName ?? "-"}
+            </p>
+            {appointment.clinicalNotes && <p className="mt-2 text-sm">{appointment.clinicalNotes}</p>}
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Close</button>
+        </div>
+
+        {loading ? (
+          <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+            Loading appointment protocol details...
+          </div>
+        ) : (
+          <>
+            {error && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+            {existing && (
+              <div className="mt-4 rounded-lg border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>Current assignment</p>
+                <p className="mt-1 text-sm font-semibold">{existing.protocolName} v{existing.versionNumber}{existing.scannerName ? ` - ${existing.scannerName}` : ""}</p>
+                {existing.protocolNotes && <p className="mt-2 text-sm">Protocol instructions: {existing.protocolNotes}</p>}
+                {existing.contrastNotes && <p className="mt-1 text-sm">Contrast instructions: {existing.contrastNotes}</p>}
+              </div>
+            )}
+            {activeProtocols.length === 0 ? (
+              <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+                {noActiveProtocolsMessage}
+              </div>
+            ) : null}
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <Field label="Protocol"><select aria-label="Protocol" value={protocolId} onChange={(event) => setProtocolId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Select protocol</option>{activeProtocols.map((protocol) => <option key={protocol.id} value={protocol.id}>{protocol.name} v{protocol.activeVersionNumber}</option>)}</select></Field>
+              <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select><span className="mt-1 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Select scanner if the protocol is scanner-specific. Leave blank if scanner will be decided later.</span></Field>
+              <Field label="Protocol instructions"><textarea aria-label="Protocol instructions" placeholder="Example: Ensure rectal tumor-centered oblique axial T2 and DWI. No routine contrast." value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-24`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /><span className="mt-1 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Patient-specific scan instructions, coverage, planes, or special clinical question.</span></Field>
+              <Field label="Contrast instructions"><textarea aria-label="Contrast instructions" placeholder="Example: IV contrast if renal function acceptable. Portal venous only." value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-24`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /><span className="mt-1 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>IV contrast decision, dynamic timing, renal/allergy concerns, or reason contrast should not be given.</span></Field>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" disabled={!protocolId || activeProtocols.length === 0 || saving} onClick={() => onSave(payload())} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving..." : "Save assignment"}</button>
+              {existing ? <button type="button" disabled={saving} onClick={onClear} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Clear assignment</button> : null}
+              <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Cancel</button>
+            </div>
+            {detail?.assignmentDetail && <ProtocolAssignmentSummary detail={detail} />}
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
 function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppointmentDetail }) {
   const assignmentDetail = detail.assignmentDetail;
   if (!assignmentDetail) return null;
@@ -925,8 +1095,8 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
     <div className="mt-6 border-t pt-4" style={{ borderColor: "var(--border)" }}>
       <h4 className="font-semibold">Assigned protocol summary</h4>
       <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{assignment.protocolName} v{assignment.versionNumber}{assignment.scannerName ? ` · ${assignment.scannerName}` : ""}</p>
-      {assignment.protocolNotes && <p className="mt-2 text-sm">Protocol notes: {assignment.protocolNotes}</p>}
-      {assignment.contrastNotes && <p className="mt-1 text-sm">Contrast notes: {assignment.contrastNotes}</p>}
+      {assignment.protocolNotes && <p className="mt-2 text-sm">Protocol instructions: {assignment.protocolNotes}</p>}
+      {assignment.contrastNotes && <p className="mt-1 text-sm">Contrast instructions: {assignment.contrastNotes}</p>}
       {detail.appointment.modalityCode === "CT" ? (
         <SettingsTable emptyText="No CT phases found for this protocol." headers={["Order", "Phase", "Timing", "Coverage", "Required"]}>
           {assignmentDetail.ctPhases.map((phase) => <tr key={phase.id}><Cell>{phase.orderIndex}</Cell><Cell>{phase.customPhaseName ?? phase.ctPhasePresetName ?? "-"}</Cell><Cell>{phase.timingOverride ?? "-"}</Cell><Cell>{phase.coverageOverride ?? "-"}</Cell><Cell>{phase.isRequired ? "Yes" : "No"}</Cell></tr>)}
