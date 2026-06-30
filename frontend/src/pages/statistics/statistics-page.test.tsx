@@ -1,0 +1,184 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import StatisticsPage from "./statistics-page";
+import type { AppointmentStatistics } from "@/types/api";
+
+const fetchStatisticsMock = vi.fn();
+const fetchAppointmentLookupsMock = vi.fn();
+const recordReportOutputMock = vi.fn();
+
+vi.mock("@/lib/api-hooks", () => ({
+  fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
+  fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
+  recordReportOutput: (...args: unknown[]) => recordReportOutputMock(...args),
+}));
+
+vi.mock("@/providers/language-provider", () => ({
+  useLanguage: () => ({ language: "en" }),
+}));
+
+const baseStats: AppointmentStatistics = {
+  metadata: {
+    dateFrom: "2026-06-30",
+    dateTo: "2026-06-30",
+    modalityId: null,
+    generatedAt: "2026-06-30T09:00:00.000Z",
+  },
+  summary: {
+    totalRegisteredPatients: 150,
+    oncologyPatients: 90,
+    nonOncologyPatients: 50,
+    uncategorizedPatients: 10,
+    totalAppointments: 12,
+    oncologyAppointments: 7,
+    nonOncologyAppointments: 5,
+    uniquePatients: 11,
+    uniqueModalities: 1,
+    scheduledCount: 2,
+    inQueueCount: 3,
+    completedCount: 4,
+    discontinuedCount: 1,
+    noShowCount: 1,
+    cancelledCount: 1,
+    walkInCount: 2,
+  },
+  statusBreakdown: [
+    { status: "completed", count: 4 },
+    { status: "scheduled", count: 2 },
+    { status: "waiting", count: 1 },
+  ],
+  modalityBreakdown: [
+    {
+      modalityId: 1,
+      modalityCode: "CT",
+      modalityNameEn: "CT",
+      modalityNameAr: "CT",
+      totalCount: 12,
+      scheduledCount: 2,
+      inQueueCount: 3,
+      completedCount: 4,
+      discontinuedCount: 1,
+      noShowCount: 1,
+      cancelledCount: 1,
+    },
+  ],
+  dailyBreakdown: [
+    {
+      appointmentDate: "2026-06-30",
+      totalCount: 12,
+      completedCount: 4,
+      discontinuedCount: 1,
+      cancelledCount: 1,
+      noShowCount: 1,
+    },
+  ],
+};
+
+const emptyStats: AppointmentStatistics = {
+  ...baseStats,
+  summary: {
+    ...baseStats.summary,
+    totalAppointments: 0,
+    oncologyAppointments: 0,
+    nonOncologyAppointments: 0,
+    uniquePatients: 0,
+    uniqueModalities: 0,
+    scheduledCount: 0,
+    inQueueCount: 0,
+    completedCount: 0,
+    discontinuedCount: 0,
+    noShowCount: 0,
+    cancelledCount: 0,
+    walkInCount: 0,
+  },
+  statusBreakdown: [],
+  modalityBreakdown: [],
+  dailyBreakdown: [],
+};
+
+function renderPage() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StatisticsPage />
+    </QueryClientProvider>
+  );
+}
+
+describe("StatisticsPage", () => {
+  beforeEach(() => {
+    fetchStatisticsMock.mockReset();
+    fetchAppointmentLookupsMock.mockReset();
+    recordReportOutputMock.mockReset();
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 1, nameEn: "CT", nameAr: "CT" }] });
+    recordReportOutputMock.mockResolvedValue(undefined);
+    vi.spyOn(window, "print").mockImplementation(() => undefined);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:statistics");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("does not show zero KPI values while loading", () => {
+    fetchStatisticsMock.mockReturnValue(new Promise(() => undefined));
+
+    renderPage();
+
+    const registryCard = screen.getByText("Patient registry totals (all-time)").closest("div");
+    expect(registryCard).toBeTruthy();
+    expect(within(registryCard as HTMLElement).getByText("—")).toBeTruthy();
+    expect(within(registryCard as HTMLElement).queryByText("0")).toBeNull();
+    expect(screen.getByText("Loading statistics...")).toBeTruthy();
+  });
+
+  it("shows an error state on initial query failure", async () => {
+    fetchStatisticsMock.mockRejectedValue(new Error("failed"));
+
+    renderPage();
+
+    expect(await screen.findByText("Could not load statistics.")).toBeTruthy();
+    expect(screen.queryByText(/^0$/)).toBeNull();
+  });
+
+  it("shows stale data warning when refresh fails after data loaded", async () => {
+    fetchStatisticsMock.mockResolvedValueOnce(baseStats).mockRejectedValueOnce(new Error("failed"));
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText("CT").length).toBeGreaterThan(1));
+    await user.click(screen.getByRole("button", { name: /Refresh/i }));
+
+    expect(await screen.findByText("Showing the last loaded statistics because refresh failed.")).toBeTruthy();
+    expect(screen.getAllByText("CT").length).toBeGreaterThan(1);
+  });
+
+  it("renders rich modality columns", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+
+    renderPage();
+
+    expect(await screen.findByText("In queue")).toBeTruthy();
+    expect(screen.getAllByText("No-show").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Discontinued").length).toBeGreaterThan(0);
+  });
+
+  it("renders CSV and print controls and guards them when no aggregate data exists", async () => {
+    fetchStatisticsMock.mockResolvedValue(emptyStats);
+
+    renderPage();
+
+    expect(await screen.findByText("No statistics found for this range.")).toBeTruthy();
+    const csvButton = screen.getByRole("button", { name: /Export CSV/i });
+    const printButton = screen.getByRole("button", { name: /Print/i });
+
+    expect((csvButton as HTMLButtonElement).disabled).toBe(true);
+    expect((printButton as HTMLButtonElement).disabled).toBe(true);
+  });
+});

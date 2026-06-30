@@ -489,7 +489,14 @@ export function mapAppointmentLookups(raw: RawRecord): { modalities: Modality[];
 // -- Statistics Mapping --
 export function mapStatistics(raw: RawRecord): AppointmentStatistics {
   const summaryRaw: RawRecord = (raw.summary ?? {}) as RawRecord;
+  const metadataRaw: RawRecord = (raw.metadata ?? {}) as RawRecord;
   return {
+    metadata: {
+      dateFrom: normalizeIsoDate(metadataRaw.date_from ?? metadataRaw.dateFrom ?? ""),
+      dateTo: normalizeIsoDate(metadataRaw.date_to ?? metadataRaw.dateTo ?? ""),
+      modalityId: num(metadataRaw, 'modality_id') || num(metadataRaw, 'modalityId') || null,
+      generatedAt: str(metadataRaw, 'generated_at') || str(metadataRaw, 'generatedAt')
+    },
     summary: {
       totalRegisteredPatients: num(summaryRaw, 'total_registered_patients') || num(summaryRaw, 'totalRegisteredPatients'),
       oncologyPatients: num(summaryRaw, 'oncology_patients') || num(summaryRaw, 'oncologyPatients'),

@@ -1489,7 +1489,15 @@ export interface AppointmentStatisticsDailyRow {
   noShowCount: number;
 }
 
+export interface AppointmentStatisticsMetadata {
+  dateFrom: string;
+  dateTo: string;
+  modalityId: number | null;
+  generatedAt: string;
+}
+
 export interface AppointmentStatistics {
+  metadata: AppointmentStatisticsMetadata;
   summary: AppointmentStatisticsSummary;
   statusBreakdown: AppointmentStatisticsStatusRow[];
   modalityBreakdown: AppointmentStatisticsModalityRow[];

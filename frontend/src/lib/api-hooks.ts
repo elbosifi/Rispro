@@ -2977,9 +2977,18 @@ export async function exportReportXlsx(payload: {
 }
 
 // -- Statistics --
-export async function fetchStatistics(date: string, modalityId: string): Promise<AppointmentStatistics> {
+export async function fetchStatistics(
+  dateOrFilters: string | { dateFrom?: string; dateTo?: string; date?: string },
+  modalityId: string
+): Promise<AppointmentStatistics> {
   const params = new URLSearchParams();
-  params.set("date", date);
+  if (typeof dateOrFilters === "string") {
+    params.set("date", dateOrFilters);
+  } else {
+    if (dateOrFilters.date) params.set("date", dateOrFilters.date);
+    if (dateOrFilters.dateFrom) params.set("dateFrom", dateOrFilters.dateFrom);
+    if (dateOrFilters.dateTo) params.set("dateTo", dateOrFilters.dateTo);
+  }
   if (modalityId) params.set("modalityId", modalityId);
   const raw = await api<RawRecord>(`/v2/read/statistics?${params.toString()}`);
   return mapStatistics(raw);

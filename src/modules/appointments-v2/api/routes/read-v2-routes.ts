@@ -142,6 +142,12 @@ function safeWorkbookName(value: unknown): string {
     .slice(0, 80) || "report";
 }
 
+function normalizeIsoDateQuery(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const clean = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : "";
+}
+
 router.post(
   "/reports/output-audit",
   asyncRoute(async (req: AuthedRequest, res: Response) => {
@@ -512,16 +518,24 @@ router.get(
   requirePageAccess("statistics"),
   asyncRoute(async (req: Request, res: Response) => {
     const query = req.query as Record<string, unknown>;
-    const date = typeof query.date === "string" ? query.date : "";
+    const compatibilityDate = normalizeIsoDateQuery(query.date);
+    const requestedDateFrom = normalizeIsoDateQuery(query.dateFrom);
+    const requestedDateTo = normalizeIsoDateQuery(query.dateTo);
+    let dateFrom = compatibilityDate || requestedDateFrom || requestedDateTo || getTripoliToday();
+    let dateTo = compatibilityDate || requestedDateTo || requestedDateFrom || dateFrom;
+    if (dateFrom > dateTo) {
+      [dateFrom, dateTo] = [dateTo, dateFrom];
+    }
     const modalityId = typeof query.modalityId === "string" ? Number(query.modalityId) : null;
 
     const params: unknown[] = [];
     const where: string[] = [];
 
-    if (date) {
-      params.push(date);
-      where.push(`b.booking_date = $${params.length}::date`);
-    }
+    params.push(dateFrom);
+    where.push(`b.booking_date >= $${params.length}::date`);
+    params.push(dateTo);
+    where.push(`b.booking_date <= $${params.length}::date`);
+
     if (modalityId && Number.isFinite(modalityId)) {
       params.push(modalityId);
       where.push(`b.modality_id = $${params.length}`);
@@ -560,7 +574,18 @@ router.get(
           from appointments_v2.bookings b
           ${whereClause}
           group by b.status
-          order by b.status asc
+          order by case b.status
+            when 'scheduled' then 10
+            when 'arrived' then 20
+            when 'waiting' then 30
+            when 'in-progress' then 40
+            when 'completed' then 50
+            when 'no-show' then 60
+            when 'cancelled' then 70
+            when 'discontinued' then 80
+            when 'voided' then 90
+            else 999
+          end, b.status asc
         `,
         params
       ),
@@ -625,6 +650,12 @@ router.get(
     };
 
     res.json({
+      metadata: {
+        dateFrom,
+        dateTo,
+        modalityId: modalityId && Number.isFinite(modalityId) ? modalityId : null,
+        generatedAt: new Date().toISOString(),
+      },
       summary: {
         totalRegisteredPatients: summaryRow.total_registered_patients,
         totalAppointments: summaryRow.total_appointments,
