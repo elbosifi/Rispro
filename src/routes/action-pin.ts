@@ -11,16 +11,20 @@ import { authenticateUser } from "../services/auth-service.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import {
+  clearActionPinIdleLock,
   clearActionPin,
   createActionPinVerification,
   expireActionPinForUser,
+  getActionPinIdleLockStatus,
   getActionPinStatus,
   listActionPinAdminUsers,
+  lockActionPinIdleSession,
   setActionPin,
   unlockActionPinForUser,
   verifyActionPin,
 } from "../services/action-pin-service.js";
 import {
+  isIdleLockRequiredForUser,
   readActionPinPolicy,
   resolveActionPinRequirement,
 } from "../services/action-pin-policy-service.js";
@@ -153,8 +157,13 @@ actionPinRouter.get(
     const request = req as ActionPinRequest;
     const policy = await readActionPinPolicy();
     const status = await getActionPinStatus(request.user.sub);
+    const idleLockEligible = isIdleLockRequiredForUser(policy, request.user.sub, request.user.role);
+    const idleLockStatus = await getActionPinIdleLockStatus(request.user.sub);
     res.json({
       ...status,
+      idleLockEligible,
+      idleLockActive: idleLockEligible ? idleLockStatus.active : false,
+      idleLockedAt: idleLockEligible ? idleLockStatus.lockedAt : null,
       policy: {
         enabled: policy.enabled,
         pinLength: policy.pinLength,
@@ -167,6 +176,22 @@ actionPinRouter.get(
         requirePinToViewOwnPinSettings: policy.requirePinToViewOwnPinSettings,
       },
     });
+  })
+);
+
+actionPinRouter.post(
+  "/idle-lock",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as ActionPinRequest;
+    const policy = await readActionPinPolicy();
+    if (!isIdleLockRequiredForUser(policy, request.user.sub, request.user.role)) {
+      await clearActionPinIdleLock(request.user.sub);
+      res.json({ active: false, lockedAt: null });
+      return;
+    }
+
+    const lock = await lockActionPinIdleSession(request.user.sub);
+    res.json(lock);
   })
 );
 
@@ -214,6 +239,9 @@ actionPinRouter.post(
       ipAddress: req.ip ?? null,
       userAgent: req.get("user-agent") ?? null,
     });
+    if (actionKey === "session_unlock") {
+      await clearActionPinIdleLock(request.user.sub);
+    }
     writeActionPinVerificationCookie(res, verification.token, policy.verificationTtlSeconds);
     res.json({ ok: true, expiresAt: verification.expiresAt });
   })

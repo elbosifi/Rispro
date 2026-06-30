@@ -2,13 +2,19 @@ import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.js";
 import {
   isActionPinActionKey,
+  isIdleLockRequiredForUser,
   readActionPinPolicy,
   resolveActionPinRequirement,
   type ActionPinActionKey,
   type ActionPinMode,
   type ActionPinPolicy,
 } from "../services/action-pin-policy-service.js";
-import { validateActionPinVerification, type ActionPinVerificationValidationResult } from "../services/action-pin-service.js";
+import {
+  getActionPinIdleLockStatus,
+  validateActionPinVerification,
+  type ActionPinIdleLockStatus,
+  type ActionPinVerificationValidationResult,
+} from "../services/action-pin-service.js";
 import { HttpError } from "../utils/http-error.js";
 
 export const ACTION_PIN_COOKIE_NAME = "rispro_action_pin";
@@ -16,6 +22,7 @@ export const ACTION_PIN_TOKEN_PURPOSE = "action-pin";
 
 type PolicyReader = () => Promise<ActionPinPolicy>;
 type VerificationValidator = typeof validateActionPinVerification;
+type IdleLockReader = (userId: number) => Promise<ActionPinIdleLockStatus>;
 
 function readActionPinToken(req: Request): string {
   return req.cookies?.[ACTION_PIN_COOKIE_NAME] ?? "";
@@ -61,7 +68,8 @@ export async function hasRecentActionPinVerification(
 export function requireActionPin(
   actionKey: ActionPinActionKey,
   readPolicy: PolicyReader = readActionPinPolicy,
-  validateVerification: VerificationValidator = validateActionPinVerification
+  validateVerification: VerificationValidator = validateActionPinVerification,
+  readIdleLock: IdleLockReader = (userId) => getActionPinIdleLockStatus(userId)
 ) {
   return async function actionPinGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
@@ -75,6 +83,18 @@ export function requireActionPin(
       if (requirement.disabledForRole) {
         res.status(403).json({ error: "action_pin_disabled_for_role", actionKey });
         return;
+      }
+
+      if (isIdleLockRequiredForUser(policy, req.user.sub, req.user.role)) {
+        const idleLock = await readIdleLock(Number(req.user.sub));
+        if (idleLock.active && actionKey !== "session_unlock") {
+          res.status(403).json({
+            error: "action_pin_required",
+            actionKey: "session_unlock",
+            requiresReason: false,
+          });
+          return;
+        }
       }
 
       if (!requirement.required) {

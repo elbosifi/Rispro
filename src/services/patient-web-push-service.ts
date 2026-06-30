@@ -594,7 +594,7 @@ export async function safeEnqueuePatientNotificationEvent(input: {
 
 async function buildFreshClickUrl(bookingId: number): Promise<string | null> {
   const settings = await readPatientQrSettings();
-  const token = issuePublicCancelToken(bookingId);
+  const token = await issuePublicCancelToken(bookingId);
   if (!token) return null;
   return buildPublicAppointmentUrlFromSettings(token, settings);
 }

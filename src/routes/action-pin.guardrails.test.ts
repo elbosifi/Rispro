@@ -63,6 +63,15 @@ describe("action PIN route guardrails", () => {
     assert.match(service, /\\d\{4,8\}/);
     assert.doesNotMatch(service, /exactly 4 digits/);
   });
+
+  it("clears idle screen lock only after successful session unlock verification", async () => {
+    const routes = await readFile("src/routes/action-pin.ts", "utf-8");
+    const verifyRoute = routes.slice(routes.indexOf('"/verify"'), routes.indexOf('"/set"'));
+
+    assert.match(verifyRoute, /if \(!result\.ok\) \{/);
+    assert.match(verifyRoute, /return;\s*\}\s*const reason =/s);
+    assert.match(verifyRoute, /if \(actionKey === "session_unlock"\) \{\s*await clearActionPinIdleLock\(request\.user\.sub\);\s*\}/s);
+  });
 });
 
 describe("action PIN route enforcement wiring", () => {

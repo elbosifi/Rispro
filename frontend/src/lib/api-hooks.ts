@@ -1471,6 +1471,9 @@ export async function reAuthSupervisor(password: string): Promise<User> {
 export interface ActionPinStatus {
   hasPin: boolean;
   lockedUntil: string | null;
+  idleLockEligible?: boolean;
+  idleLockActive?: boolean;
+  idleLockedAt?: string | null;
   pinExpiresAt: string | null;
   isExpired: boolean;
   policy: {
@@ -1478,6 +1481,10 @@ export interface ActionPinStatus {
     pinLength: number;
     idleLockEnabled: boolean;
     idleLockSeconds: number;
+    idleLockRoleMode?: string;
+    idleLockRoles?: string[];
+    idleLockUserIds?: number[];
+    idleLockExcludedUserIds?: number[];
     verificationTtlSeconds: number;
     allowUserPinChange: boolean;
     requirePinToViewOwnPinSettings: boolean;
@@ -1486,6 +1493,10 @@ export interface ActionPinStatus {
 
 export async function fetchActionPinStatus(): Promise<ActionPinStatus> {
   return api<ActionPinStatus>("/action-pin/status");
+}
+
+export async function lockActionPinIdleSession(): Promise<{ active: boolean; lockedAt: string | null }> {
+  return api<{ active: boolean; lockedAt: string | null }>("/action-pin/idle-lock", { method: "POST" });
 }
 
 export async function setOwnActionPin(pin: string, confirmPin: string, currentPassword: string): Promise<{ ok: true }> {
@@ -2085,6 +2096,7 @@ export interface PatientQrSettings {
   qrSlipPaperSize: AppointmentSlipPaperSize;
   allowCancellation: boolean;
   allowAddToCalendar: boolean;
+  publicLinkValidityDays: number;
   showBookingTime: boolean;
   showPreparationInstructions: boolean;
   showDocumentsChecklist: boolean;
@@ -2201,6 +2213,7 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
+  publicLinkValidityDays: 14,
   showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
@@ -2533,6 +2546,7 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     qrSlipPaperSize: paperSize(record.qrSlipPaperSize),
     allowCancellation: bool(record.allowCancellation, true),
     allowAddToCalendar: bool(record.allowAddToCalendar, true),
+    publicLinkValidityDays: Number.isInteger(Number(record.publicLinkValidityDays)) ? Number(record.publicLinkValidityDays) : 14,
     showBookingTime: bool(record.showBookingTime, true),
     showPreparationInstructions: bool(record.showPreparationInstructions, true),
     showDocumentsChecklist: bool(record.showDocumentsChecklist, true),

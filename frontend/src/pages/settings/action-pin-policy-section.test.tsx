@@ -174,6 +174,34 @@ describe("ActionPinPolicySection", () => {
     expect(policy.lockoutMinutes).toBe(20);
   });
 
+  it("saves idle-lock role and user eligibility settings", async () => {
+    const fetchMock = mockPolicyFetch({
+      ...basePolicy(),
+      idleLockEnabled: true,
+      idleLockRoleMode: "include",
+      idleLockRoles: ["receptionist"],
+      idleLockUserIds: [1],
+      idleLockExcludedUserIds: [],
+    });
+
+    renderSection();
+    await screen.findByText("Action PIN Policy");
+
+    await userEvent.selectOptions(screen.getByLabelText("Idle lock role eligibility"), "exclude");
+    await userEvent.click(screen.getByLabelText("Idle lock role Doctor"));
+    await userEvent.clear(screen.getByLabelText("Idle lock included user IDs"));
+    await userEvent.type(screen.getByLabelText("Idle lock included user IDs"), "2, 3");
+    await userEvent.clear(screen.getByLabelText("Idle lock excluded user IDs"));
+    await userEvent.type(screen.getByLabelText("Idle lock excluded user IDs"), "4");
+    await userEvent.click(screen.getByRole("button", { name: "Save Action PIN Policy" }));
+
+    const policy = await savedPolicy(fetchMock);
+    expect(policy.idleLockRoleMode).toBe("exclude");
+    expect(policy.idleLockRoles).toContain("doctor");
+    expect(policy.idleLockUserIds).toEqual([2, 3]);
+    expect(policy.idleLockExcludedUserIds).toEqual([4]);
+  });
+
   it("saves role/action matrix changes and reason-required mode", async () => {
     const fetchMock = mockPolicyFetch(basePolicy());
 

@@ -107,11 +107,15 @@ function renderIdleLock() {
 function mockIdleFetch({
   policyEnabled,
   idleLockEnabled,
+  idleLockEligible = true,
+  idleLockActive = false,
   hasPin = true,
   verifyOk = true,
 }: {
   policyEnabled: boolean;
   idleLockEnabled: boolean;
+  idleLockEligible?: boolean;
+  idleLockActive?: boolean;
   hasPin?: boolean;
   verifyOk?: boolean;
 }) {
@@ -124,6 +128,9 @@ function mockIdleFetch({
       return jsonResponse(200, {
         hasPin,
         lockedUntil: null,
+        idleLockEligible,
+        idleLockActive,
+        idleLockedAt: idleLockActive ? "2026-06-30T10:00:00.000Z" : null,
         pinExpiresAt: null,
         isExpired: false,
         policy: {
@@ -136,6 +143,9 @@ function mockIdleFetch({
           requirePinToViewOwnPinSettings: false,
         },
       });
+    }
+    if (url === "/api/action-pin/idle-lock") {
+      return idleLockEligible ? jsonResponse(200, { active: true, lockedAt: "2026-06-30T10:00:00.000Z" }) : jsonResponse(200, { active: false, lockedAt: null });
     }
     if (url === "/api/action-pin/verify") {
       return verifyOk ? jsonResponse(200, { ok: true }) : jsonResponse(403, { error: "invalid_action_pin" });
@@ -528,8 +538,32 @@ describe("ActionPinIdleLock", () => {
     expect(screen.queryByText("Session locked")).toBeNull();
   });
 
+  it("does not activate when the current user is not eligible for idle lock", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true, idleLockEligible: false });
+    renderIdleLock();
+    await flushIdleQueries();
+    expect(screen.getByText("Patient screen content")).toBeTruthy();
+
+    await delay(150);
+
+    expect(screen.queryByText("Session locked")).toBeNull();
+  });
+
+  it("shows persisted lock state after remount", async () => {
+    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true, idleLockActive: true });
+    const rendered = renderIdleLock();
+    await flushIdleQueries();
+    expect(await screen.findByText("Session locked")).toBeTruthy();
+
+    rendered.unmount();
+    renderIdleLock();
+    await flushIdleQueries();
+
+    expect(await screen.findByText("Session locked")).toBeTruthy();
+  });
+
   it("appears after idleLockSeconds when enabled and activity resets the timer", async () => {
-    mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
+    const fetchMock = mockIdleFetch({ policyEnabled: true, idleLockEnabled: true });
     renderIdleLock();
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
@@ -541,6 +575,7 @@ describe("ActionPinIdleLock", () => {
 
     await delay(60);
     expect(screen.getByText("Session locked")).toBeTruthy();
+    expect(fetchMock.mock.calls.some((call) => call[0] === "/api/action-pin/idle-lock")).toBe(true);
   });
 
   it("submits unlock PIN only to verify and hides overlay on success", async () => {

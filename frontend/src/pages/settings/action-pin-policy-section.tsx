@@ -22,6 +22,7 @@ import {
   type ActionPinMode,
   type ActionPinPolicy,
   type ActionPinRole,
+  type ActionPinIdleLockRoleMode,
   type ActionPinRotationMode,
 } from "@/lib/action-pin-policy";
 import { useLanguage } from "@/providers/language-provider";
@@ -86,6 +87,19 @@ function validate(policy: ActionPinPolicy): string | null {
   if (policy.lockoutMinutes <= 0) return "Lockout minutes must be greater than 0.";
   if (policy.rotationMode !== "manual" && policy.rotationIntervalDays <= 0) return "Rotation interval days must be greater than 0 when rotation is scheduled.";
   return null;
+}
+
+function formatUserIds(ids: number[] | undefined): string {
+  return (ids ?? []).join(", ");
+}
+
+function parseUserIds(value: string): number[] {
+  const result: number[] = [];
+  for (const raw of value.split(",")) {
+    const id = Number(raw.trim());
+    if (Number.isInteger(id) && id > 0 && !result.includes(id)) result.push(id);
+  }
+  return result;
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -257,6 +271,8 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<ActionPinPolicy>(() => normalizeActionPinPolicy({}));
+  const [idleIncludedUserIdsText, setIdleIncludedUserIdsText] = useState("");
+  const [idleExcludedUserIdsText, setIdleExcludedUserIdsText] = useState("");
   const [message, setMessage] = useState("");
   const isArabic = language === "ar";
 
@@ -274,7 +290,12 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
   });
 
   useEffect(() => {
-    if (query.data) setDraft(normalizeActionPinPolicy(query.data));
+    if (query.data) {
+      const normalized = normalizeActionPinPolicy(query.data);
+      setDraft(normalized);
+      setIdleIncludedUserIdsText(formatUserIds(normalized.idleLockUserIds));
+      setIdleExcludedUserIdsText(formatUserIds(normalized.idleLockExcludedUserIds));
+    }
   }, [query.data]);
 
   useEffect(() => {
@@ -309,7 +330,10 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
       return saveActionPinPolicy(draft);
     },
     onSuccess: async (saved) => {
-      setDraft(normalizeActionPinPolicy(saved));
+      const normalized = normalizeActionPinPolicy(saved);
+      setDraft(normalized);
+      setIdleIncludedUserIdsText(formatUserIds(normalized.idleLockUserIds));
+      setIdleExcludedUserIdsText(formatUserIds(normalized.idleLockExcludedUserIds));
       setMessage("Action PIN policy saved.");
       await queryClient.invalidateQueries({ queryKey: ["settings", "users_and_roles", "action_pin_policy"] });
     },
@@ -376,6 +400,67 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         <BoolField label="Notify user on PIN change" checked={draft.notifyUserOnPinChange} onChange={(checked) => update("notifyUserOnPinChange", checked)} />
       </div>
 
+      <div className="space-y-3 rounded-lg border border-stone-200 p-3 dark:border-stone-700">
+        <h5 className="text-sm font-semibold text-stone-900 dark:text-white">Idle lock eligibility</h5>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="space-y-1">
+            <FieldLabel>Idle lock role eligibility</FieldLabel>
+            <select
+              aria-label="Idle lock role eligibility"
+              value={draft.idleLockRoleMode}
+              onChange={(event) => update("idleLockRoleMode", event.target.value as ActionPinIdleLockRoleMode)}
+              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+            >
+              <option value="all">All roles</option>
+              <option value="include">Only selected roles</option>
+              <option value="exclude">All except selected roles</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <FieldLabel>Idle lock included user IDs</FieldLabel>
+            <input
+              aria-label="Idle lock included user IDs"
+              value={idleIncludedUserIdsText}
+              onChange={(event) => {
+                setIdleIncludedUserIdsText(event.target.value);
+                update("idleLockUserIds", parseUserIds(event.target.value));
+              }}
+              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+            />
+          </label>
+          <label className="space-y-1">
+            <FieldLabel>Idle lock excluded user IDs</FieldLabel>
+            <input
+              aria-label="Idle lock excluded user IDs"
+              value={idleExcludedUserIdsText}
+              onChange={(event) => {
+                setIdleExcludedUserIdsText(event.target.value);
+                update("idleLockExcludedUserIds", parseUserIds(event.target.value));
+              }}
+              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+            />
+          </label>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {ACTION_PIN_ROLES.map((role) => (
+            <label key={role} className="flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-sm dark:border-stone-700">
+              <input
+                aria-label={`Idle lock role ${ACTION_PIN_ROLE_LABELS[role]}`}
+                type="checkbox"
+                checked={draft.idleLockRoles.includes(role)}
+                onChange={(event) => {
+                  const nextRoles = event.target.checked
+                    ? [...draft.idleLockRoles, role]
+                    : draft.idleLockRoles.filter((item) => item !== role);
+                  update("idleLockRoles", nextRoles);
+                }}
+              />
+              <span>{ACTION_PIN_ROLE_LABELS[role]}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-5">
         {ACTION_PIN_GROUPS.map((group) => (
           <div key={group.label} className="space-y-2">
@@ -423,7 +508,12 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         </button>
         <button
           className="btn-secondary text-sm"
-          onClick={() => setDraft(normalizeActionPinPolicy(query.data ?? {}))}
+          onClick={() => {
+            const normalized = normalizeActionPinPolicy(query.data ?? {});
+            setDraft(normalized);
+            setIdleIncludedUserIdsText(formatUserIds(normalized.idleLockUserIds));
+            setIdleExcludedUserIdsText(formatUserIds(normalized.idleLockExcludedUserIds));
+          }}
           disabled={saveMutation.isPending}
         >
           Reset

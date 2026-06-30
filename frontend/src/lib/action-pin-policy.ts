@@ -46,6 +46,7 @@ export type ActionPinRole = (typeof ACTION_PIN_ROLES)[number];
 export type ActionPinMode = (typeof ACTION_PIN_MODES)[number];
 export type ActionPinActionKey = (typeof ACTION_PIN_ACTION_KEYS)[number];
 export type ActionPinRotationMode = "manual" | "daily" | "weekly" | "monthly";
+export type ActionPinIdleLockRoleMode = "all" | "include" | "exclude";
 
 export type ActionPinPolicy = Record<string, unknown> & {
   enabled: boolean;
@@ -56,6 +57,10 @@ export type ActionPinPolicy = Record<string, unknown> & {
   verificationTtlSeconds: number;
   idleLockEnabled: boolean;
   idleLockSeconds: number;
+  idleLockRoleMode: ActionPinIdleLockRoleMode;
+  idleLockRoles: ActionPinRole[];
+  idleLockUserIds: number[];
+  idleLockExcludedUserIds: number[];
   maxFailedAttempts: number;
   lockoutMinutes: number;
   allowUserPinChange: boolean;
@@ -197,6 +202,10 @@ export const DEFAULT_ACTION_PIN_POLICY: ActionPinPolicy = {
   verificationTtlSeconds: 300,
   idleLockEnabled: false,
   idleLockSeconds: 180,
+  idleLockRoleMode: "all",
+  idleLockRoles: [],
+  idleLockUserIds: [],
+  idleLockExcludedUserIds: [],
   maxFailedAttempts: 5,
   lockoutMinutes: 15,
   allowUserPinChange: true,
@@ -225,6 +234,25 @@ function isMode(value: unknown): value is ActionPinMode {
   return ACTION_PIN_MODES.includes(value as ActionPinMode);
 }
 
+function isRole(value: unknown): value is ActionPinRole {
+  return ACTION_PIN_ROLES.includes(value as ActionPinRole);
+}
+
+function normalizeRoles(value: unknown): ActionPinRole[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((role, index, roles): role is ActionPinRole => isRole(role) && roles.indexOf(role) === index);
+}
+
+function normalizeUserIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const result: number[] = [];
+  for (const raw of value) {
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0 && !result.includes(id)) result.push(id);
+  }
+  return result;
+}
+
 function normalizeActionModes(input: unknown): ActionPinPolicy["actionModes"] {
   const source = asRecord(input);
   const next: ActionPinPolicy["actionModes"] = {
@@ -246,6 +274,7 @@ function normalizeActionModes(input: unknown): ActionPinPolicy["actionModes"] {
 export function normalizeActionPinPolicy(input: unknown): ActionPinPolicy {
   const source = asRecord(input);
   const rotationMode = String(source.rotationMode ?? DEFAULT_ACTION_PIN_POLICY.rotationMode);
+  const idleLockRoleMode = String(source.idleLockRoleMode ?? DEFAULT_ACTION_PIN_POLICY.idleLockRoleMode);
   return {
     ...source,
     enabled: asBoolean(source.enabled, DEFAULT_ACTION_PIN_POLICY.enabled),
@@ -256,6 +285,10 @@ export function normalizeActionPinPolicy(input: unknown): ActionPinPolicy {
     verificationTtlSeconds: asNumber(source.verificationTtlSeconds, DEFAULT_ACTION_PIN_POLICY.verificationTtlSeconds),
     idleLockEnabled: asBoolean(source.idleLockEnabled, DEFAULT_ACTION_PIN_POLICY.idleLockEnabled),
     idleLockSeconds: asNumber(source.idleLockSeconds, DEFAULT_ACTION_PIN_POLICY.idleLockSeconds),
+    idleLockRoleMode: ["all", "include", "exclude"].includes(idleLockRoleMode) ? idleLockRoleMode as ActionPinIdleLockRoleMode : DEFAULT_ACTION_PIN_POLICY.idleLockRoleMode,
+    idleLockRoles: normalizeRoles(source.idleLockRoles),
+    idleLockUserIds: normalizeUserIds(source.idleLockUserIds),
+    idleLockExcludedUserIds: normalizeUserIds(source.idleLockExcludedUserIds),
     maxFailedAttempts: asNumber(source.maxFailedAttempts, DEFAULT_ACTION_PIN_POLICY.maxFailedAttempts),
     lockoutMinutes: asNumber(source.lockoutMinutes, DEFAULT_ACTION_PIN_POLICY.lockoutMinutes),
     allowUserPinChange: asBoolean(source.allowUserPinChange, DEFAULT_ACTION_PIN_POLICY.allowUserPinChange),

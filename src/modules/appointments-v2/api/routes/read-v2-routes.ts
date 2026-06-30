@@ -407,10 +407,10 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    const appointments = result.rows.map((row) => {
+    const appointments = await Promise.all(result.rows.map(async (row) => {
       const publicCancelToken =
         patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
-          ? issuePublicCancelToken(Number(row.id))
+          ? await issuePublicCancelToken(Number(row.id))
           : null;
       return {
         ...row,
@@ -419,7 +419,7 @@ router.get(
           ? safeBuildPublicAppointmentUrl(publicCancelToken, patientQrSettings, "read_v2_list")
           : null,
       };
-    });
+    }));
 
     res.json({ appointments });
   })
@@ -517,7 +517,7 @@ router.get(
 
     const publicCancelToken =
       patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
-        ? issuePublicCancelToken(bookingId)
+        ? await issuePublicCancelToken(bookingId)
         : null;
 
     res.json({

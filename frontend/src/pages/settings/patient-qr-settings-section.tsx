@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
+  publicLinkValidityDays: 14,
   showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
@@ -254,6 +255,9 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
   const canSave = useMemo(() => {
     const nextErrors: Record<string, string> = {};
     if (!isValidUrl(draft.risproPublicBaseUrl)) nextErrors.risproPublicBaseUrl = "Public RISpro URL is invalid.";
+    if (!Number.isInteger(Number(draft.publicLinkValidityDays)) || Number(draft.publicLinkValidityDays) < 0 || Number(draft.publicLinkValidityDays) > 3650) {
+      nextErrors.publicLinkValidityDays = "QR link validity must be between 0 and 3650 days.";
+    }
     if (!isValidPhone(draft.contact.primaryPhone)) nextErrors.contactPrimaryPhone = "رقم الهاتف غير صالح.";
     if (!isValidPhone(draft.contact.secondaryPhone)) nextErrors.contactSecondaryPhone = "رقم الهاتف غير صالح.";
     if (!isValidPhone(draft.contact.whatsapp)) nextErrors.contactWhatsapp = "رقم الواتساب غير صالح.";
@@ -461,6 +465,18 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
           />
           <ToggleRow label={chooseLocalized(language, "السماح بإلغاء الموعد", "Allow Appointment Cancellation")} checked={draft.allowCancellation} onChange={(checked) => setDraft((current) => ({ ...current, allowCancellation: checked }))} />
           <ToggleRow label={chooseLocalized(language, "إضافة إلى التقويم", "Add to Calendar")} checked={draft.allowAddToCalendar} onChange={(checked) => setDraft((current) => ({ ...current, allowAddToCalendar: checked }))} />
+          <label className="block text-sm font-semibold text-slate-700">
+            {chooseLocalized(language, "صلاحية رابط QR بعد الموعد (أيام)", "QR link validity after appointment (days)")}
+            <input
+              type="number"
+              min={0}
+              max={3650}
+              value={draft.publicLinkValidityDays}
+              onChange={(event) => setDraft((current) => ({ ...current, publicLinkValidityDays: Number(event.target.value) }))}
+              className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+            />
+            {errors.publicLinkValidityDays ? <span className="mt-1 block text-xs text-rose-700">{errors.publicLinkValidityDays}</span> : null}
+          </label>
           <ToggleRow label={chooseLocalized(language, "إظهار وقت الموعد في صفحة QR", "Show Appointment Time on QR Page")} checked={draft.showBookingTime} onChange={(checked) => setDraft((current) => ({ ...current, showBookingTime: checked }))} />
         </FieldCard>
 

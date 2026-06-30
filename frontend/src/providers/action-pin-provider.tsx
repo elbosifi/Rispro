@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type FormEvent,
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { ApiError, api, setActionPinChallengeHandler } from "@/lib/api-client";
-import { fetchActionPinStatus, logout as logoutApi } from "@/lib/api-hooks";
+import { fetchActionPinStatus, lockActionPinIdleSession, logout as logoutApi } from "@/lib/api-hooks";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 
@@ -262,7 +262,7 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [locked, setLocked] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { data: status } = useQuery({
+  const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ["action-pin", "status", "idle-lock"],
     queryFn: fetchActionPinStatus,
     enabled: Boolean(user),
@@ -270,13 +270,23 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
     retry: false,
   });
   const policy = status?.policy;
-  const enabled = Boolean(user && policy?.enabled && policy?.idleLockEnabled);
+  const enabled = Boolean(user && policy?.enabled && policy?.idleLockEnabled && status?.idleLockEligible !== false);
   const idleSeconds = Number(policy?.idleLockSeconds || 180);
+
+  const triggerIdleLock = async () => {
+    if (!enabled || locked) return;
+    try {
+      const result = await lockActionPinIdleSession();
+      setLocked(result.active);
+    } catch {
+      setLocked(true);
+    }
+  };
 
   const resetTimer = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!enabled || locked) return;
-    timerRef.current = setTimeout(() => setLocked(true), Math.max(idleSeconds, 0.1) * 1000);
+    timerRef.current = setTimeout(() => { void triggerIdleLock(); }, Math.max(idleSeconds, 0.1) * 1000);
   };
 
   useEffect(() => {
@@ -285,11 +295,15 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
       setLocked(false);
       return;
     }
+    if (status?.idleLockActive) {
+      setLocked(true);
+      return;
+    }
     resetTimer();
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [enabled, idleSeconds, locked, location.pathname]);
+  }, [enabled, idleSeconds, locked, location.pathname, status?.idleLockActive]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -310,6 +324,7 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
           username={user.username}
           onUnlocked={() => {
             setLocked(false);
+            void refetchStatus();
             resetTimer();
           }}
         />

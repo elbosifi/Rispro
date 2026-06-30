@@ -46,6 +46,7 @@ export const ACTION_PIN_MODES = [
 export type ActionPinActionKey = (typeof ACTION_PIN_ACTION_KEYS)[number];
 export type ActionPinMode = (typeof ACTION_PIN_MODES)[number];
 export type ActionPinRotationMode = "manual" | "daily" | "weekly" | "monthly";
+export type ActionPinIdleLockRoleMode = "all" | "include" | "exclude";
 export type ActionPinRoleMatrix = Record<ActionPinActionKey, Partial<Record<Role, ActionPinMode>>>;
 
 export interface ActionPinPolicy {
@@ -57,6 +58,10 @@ export interface ActionPinPolicy {
   verificationTtlSeconds: number;
   idleLockEnabled: boolean;
   idleLockSeconds: number;
+  idleLockRoleMode: ActionPinIdleLockRoleMode;
+  idleLockRoles: Role[];
+  idleLockUserIds: number[];
+  idleLockExcludedUserIds: number[];
   maxFailedAttempts: number;
   lockoutMinutes: number;
   allowUserPinChange: boolean;
@@ -81,6 +86,7 @@ export interface ResolvedActionPinRequirement {
 const ACTION_KEYS = new Set<string>(ACTION_PIN_ACTION_KEYS);
 const MODES = new Set<string>(ACTION_PIN_MODES);
 const ROTATION_MODES = new Set<string>(["manual", "daily", "weekly", "monthly"]);
+const IDLE_LOCK_ROLE_MODES = new Set<string>(["all", "include", "exclude"]);
 
 function emptyActionMatrix(): ActionPinRoleMatrix {
   return ACTION_PIN_ACTION_KEYS.reduce((matrix, actionKey) => {
@@ -138,6 +144,10 @@ export const DEFAULT_ACTION_PIN_POLICY: ActionPinPolicy = {
   verificationTtlSeconds: 300,
   idleLockEnabled: false,
   idleLockSeconds: 180,
+  idleLockRoleMode: "all",
+  idleLockRoles: [],
+  idleLockUserIds: [],
+  idleLockExcludedUserIds: [],
   maxFailedAttempts: 5,
   lockoutMinutes: 15,
   allowUserPinChange: true,
@@ -206,10 +216,26 @@ function normalizeDisabledForRoleModes(input: unknown): Partial<Record<ActionPin
   return result;
 }
 
+function normalizeRoles(input: unknown): Role[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter((role, index, roles): role is Role => isRole(role) && roles.indexOf(role) === index);
+}
+
+function normalizeUserIds(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  const result: number[] = [];
+  for (const raw of input) {
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0 && !result.includes(id)) result.push(id);
+  }
+  return result;
+}
+
 export function normalizeActionPinPolicy(input: unknown): ActionPinPolicy {
   const raw = asRecord(input);
   const value = "value" in raw ? asRecord(raw.value) : raw;
   const rotationMode = String(value.rotationMode ?? DEFAULT_ACTION_PIN_POLICY.rotationMode);
+  const idleLockRoleMode = String(value.idleLockRoleMode ?? DEFAULT_ACTION_PIN_POLICY.idleLockRoleMode);
 
   return {
     enabled: asBoolean(value.enabled, DEFAULT_ACTION_PIN_POLICY.enabled),
@@ -220,6 +246,10 @@ export function normalizeActionPinPolicy(input: unknown): ActionPinPolicy {
     verificationTtlSeconds: asInteger(value.verificationTtlSeconds, DEFAULT_ACTION_PIN_POLICY.verificationTtlSeconds, 30, 86400),
     idleLockEnabled: asBoolean(value.idleLockEnabled, DEFAULT_ACTION_PIN_POLICY.idleLockEnabled),
     idleLockSeconds: asInteger(value.idleLockSeconds, DEFAULT_ACTION_PIN_POLICY.idleLockSeconds, 30, 86400),
+    idleLockRoleMode: IDLE_LOCK_ROLE_MODES.has(idleLockRoleMode) ? idleLockRoleMode as ActionPinIdleLockRoleMode : DEFAULT_ACTION_PIN_POLICY.idleLockRoleMode,
+    idleLockRoles: normalizeRoles(value.idleLockRoles),
+    idleLockUserIds: normalizeUserIds(value.idleLockUserIds),
+    idleLockExcludedUserIds: normalizeUserIds(value.idleLockExcludedUserIds),
     maxFailedAttempts: asInteger(value.maxFailedAttempts, DEFAULT_ACTION_PIN_POLICY.maxFailedAttempts, 1, 50),
     lockoutMinutes: asInteger(value.lockoutMinutes, DEFAULT_ACTION_PIN_POLICY.lockoutMinutes, 1, 1440),
     allowUserPinChange: asBoolean(value.allowUserPinChange, DEFAULT_ACTION_PIN_POLICY.allowUserPinChange),
@@ -230,6 +260,16 @@ export function normalizeActionPinPolicy(input: unknown): ActionPinPolicy {
     reasonRequiredModes: normalizeReasonRequiredModes(value.reasonRequiredModes),
     disabledForRoleModes: normalizeDisabledForRoleModes(value.disabledForRoleModes),
   };
+}
+
+export function isIdleLockRequiredForUser(policy: ActionPinPolicy, userId: UserId | number, role: Role): boolean {
+  if (!policy.enabled || !policy.idleLockEnabled) return false;
+  const numericUserId = Number(userId);
+  if (Number.isInteger(numericUserId) && policy.idleLockExcludedUserIds.includes(numericUserId)) return false;
+  if (Number.isInteger(numericUserId) && policy.idleLockUserIds.includes(numericUserId)) return true;
+  if (policy.idleLockRoleMode === "include") return policy.idleLockRoles.includes(role);
+  if (policy.idleLockRoleMode === "exclude") return !policy.idleLockRoles.includes(role);
+  return true;
 }
 
 export function resolveActionPinRequirement(

@@ -35,6 +35,7 @@ export interface PatientQrSettings {
   qrSlipPaperSize: "a5" | "a4";
   allowCancellation: boolean;
   allowAddToCalendar: boolean;
+  publicLinkValidityDays: number;
   showBookingTime: boolean;
   showPreparationInstructions: boolean;
   showDocumentsChecklist: boolean;
@@ -151,6 +152,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
+  publicLinkValidityDays: 14,
   showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
@@ -349,6 +351,12 @@ function asNumberArray(value: unknown): number[] {
     .filter((item, index, arr) => Number.isFinite(item) && item > 0 && arr.indexOf(item) === index);
 }
 
+function asInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+}
+
 export function isModalityAllowed(
   mode: "all" | "include" | "exclude",
   modalityIds: number[],
@@ -376,6 +384,7 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     qrSlipPaperSize: asPaperSize(record.qrSlipPaperSize, DEFAULT_SETTINGS.qrSlipPaperSize),
     allowCancellation: asBoolean(record.allowCancellation, DEFAULT_SETTINGS.allowCancellation),
     allowAddToCalendar: asBoolean(record.allowAddToCalendar, DEFAULT_SETTINGS.allowAddToCalendar),
+    publicLinkValidityDays: asInteger(record.publicLinkValidityDays, DEFAULT_SETTINGS.publicLinkValidityDays, 0, 3650),
     showBookingTime: asBoolean(record.showBookingTime, DEFAULT_SETTINGS.showBookingTime),
     showPreparationInstructions: asBoolean(record.showPreparationInstructions, DEFAULT_SETTINGS.showPreparationInstructions),
     showDocumentsChecklist: asBoolean(record.showDocumentsChecklist, DEFAULT_SETTINGS.showDocumentsChecklist),

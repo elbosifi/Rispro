@@ -79,4 +79,25 @@ describe("action PIN policy", () => {
     assert.equal(result.required, true);
     assert.equal(result.requiresReason, true);
   });
+
+  it("normalizes idle-lock role and user eligibility settings", async () => {
+    const { normalizeActionPinPolicy, isIdleLockRequiredForUser } = await import("./action-pin-policy-service.js");
+    const policy = normalizeActionPinPolicy({
+      enabled: true,
+      idleLockEnabled: true,
+      idleLockRoleMode: "include",
+      idleLockRoles: ["receptionist", "bad_role", "doctor"],
+      idleLockUserIds: [55, "77", -1, "bad"],
+      idleLockExcludedUserIds: [77],
+    });
+
+    assert.equal(policy.idleLockRoleMode, "include");
+    assert.deepEqual(policy.idleLockRoles, ["receptionist", "doctor"]);
+    assert.deepEqual(policy.idleLockUserIds, [55, 77]);
+    assert.deepEqual(policy.idleLockExcludedUserIds, [77]);
+    assert.equal(isIdleLockRequiredForUser(policy, 10, "receptionist"), true);
+    assert.equal(isIdleLockRequiredForUser(policy, 10, "supervisor"), false);
+    assert.equal(isIdleLockRequiredForUser(policy, 55, "supervisor"), true);
+    assert.equal(isIdleLockRequiredForUser(policy, 77, "receptionist"), false);
+  });
 });

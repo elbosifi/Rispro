@@ -156,7 +156,7 @@ function readPushSubscription(body: unknown): BrowserPushSubscriptionInput {
 
 async function readVerifiedPushContext(req: Request) {
   const token = readToken(req);
-  const payload = verifyPublicCancelToken(token);
+  const payload = await verifyPublicCancelToken(token);
   const patientQrSettings = await readPatientQrSettings();
   if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
   const context = await getBookingNotificationContext(payload.bookingId);
@@ -168,7 +168,7 @@ router.get(
   "/cancel-preview",
   asyncRoute(async (req: Request, res: Response) => {
     const token = readToken(req);
-    const payload = verifyPublicCancelToken(token);
+    const payload = await verifyPublicCancelToken(token);
     const patientQrSettings = await readPatientQrSettings();
     if (!patientQrSettings.enabled) {
       throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
@@ -226,7 +226,7 @@ router.get(
   "/slip",
   asyncRoute(async (req: Request, res: Response) => {
     const token = readToken(req);
-    const payload = verifyPublicCancelToken(token);
+    const payload = await verifyPublicCancelToken(token);
     const patientQrSettings = await readPatientQrSettings();
     if (!patientQrSettings.enabled) {
       throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
@@ -254,7 +254,7 @@ router.post(
   "/cancel",
   asyncRoute(async (req: Request, res: Response) => {
     const token = readToken(req);
-    const payload = verifyPublicCancelToken(token);
+    const payload = await verifyPublicCancelToken(token);
     const serviceUserId = getPublicCancelServiceUserId();
 
     try {
@@ -381,7 +381,7 @@ router.get(
       throw new HttpError(400, "Public report lookup identifiers are not accepted.", { code: "public_identifier_rejected" });
     }
 
-    const payload = verifyPublicCancelToken(token);
+    const payload = await verifyPublicCancelToken(token);
     const patientQrSettings = await readPatientQrSettings();
     if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
     if (!patientQrSettings.allowReportAccess) {
@@ -422,7 +422,7 @@ router.get(
   reportRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const token = readToken(req);
-    const payload = verifyPublicCancelToken(token);
+    const payload = await verifyPublicCancelToken(token);
     const patientQrSettings = await readPatientQrSettings();
     if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
     if (!patientQrSettings.allowImageAccess) throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "image_access_disabled" });
@@ -463,7 +463,7 @@ router.get(
   reportRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const token = readToken(req);
-    const payload = verifyPublicCancelToken(token);
+    const payload = await verifyPublicCancelToken(token);
     const patientQrSettings = await readPatientQrSettings();
     if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
     if (!patientQrSettings.allowReportAccess) throw new HttpError(403, "Report access is disabled.", { code: "report_access_disabled" });

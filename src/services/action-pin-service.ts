@@ -15,9 +15,16 @@ export interface ActionPinStatus {
   hasPin: boolean;
   lockedUntil: string | null;
   isLocked: boolean;
+  idleLockActive?: boolean;
+  idleLockedAt?: string | null;
   pinExpiresAt: string | null;
   isExpired: boolean;
   failedAttempts: number;
+}
+
+export interface ActionPinIdleLockStatus {
+  active: boolean;
+  lockedAt: string | null;
 }
 
 export interface ActionPinAdminUserRow {
@@ -147,14 +154,76 @@ function hashVerificationToken(token: string): string {
 
 export async function getActionPinStatus(userId: UserId, executor: DbExecutor = pool): Promise<ActionPinStatus> {
   const row = await getActionPinRow(userId, executor);
+  const idleLock = await getActionPinIdleLockStatus(userId, executor);
   return {
     hasPin: Boolean(row),
     lockedUntil: row?.locked_until ?? null,
     isLocked: isFuture(row?.locked_until),
+    idleLockActive: idleLock.active,
+    idleLockedAt: idleLock.lockedAt,
     pinExpiresAt: row?.pin_expires_at ?? null,
     isExpired: isPast(row?.pin_expires_at),
     failedAttempts: Number(row?.failed_attempts ?? 0),
   };
+}
+
+export async function getActionPinIdleLockStatus(
+  userId: UserId | number,
+  executor: DbExecutor = pool
+): Promise<ActionPinIdleLockStatus> {
+  const { rows } = await executor.query<{ locked_at: string }>(
+    `
+      select locked_at
+      from action_pin_idle_locks
+      where user_id = $1
+        and unlocked_at is null
+      limit 1
+    `,
+    [userId]
+  );
+  const lockedAt = rows[0]?.locked_at ?? null;
+  return { active: Boolean(lockedAt), lockedAt };
+}
+
+export async function lockActionPinIdleSession(
+  userId: UserId | number,
+  executor: DbExecutor = pool
+): Promise<ActionPinIdleLockStatus> {
+  const { rows } = await executor.query<{ locked_at: string }>(
+    `
+      insert into action_pin_idle_locks (user_id, locked_at, unlocked_at, updated_at)
+      values ($1, now(), null, now())
+      on conflict (user_id)
+      do update set
+        locked_at = case
+          when action_pin_idle_locks.unlocked_at is null then action_pin_idle_locks.locked_at
+          else now()
+        end,
+        unlocked_at = null,
+        updated_at = now()
+      returning locked_at
+    `,
+    [userId]
+  );
+  const lockedAt = rows[0]?.locked_at ?? null;
+  return { active: Boolean(lockedAt), lockedAt };
+}
+
+export async function clearActionPinIdleLock(
+  userId: UserId | number,
+  executor: DbExecutor = pool
+): Promise<ActionPinIdleLockStatus> {
+  await executor.query(
+    `
+      update action_pin_idle_locks
+      set unlocked_at = now(),
+          updated_at = now()
+      where user_id = $1
+        and unlocked_at is null
+    `,
+    [userId]
+  );
+  return { active: false, lockedAt: null };
 }
 
 function mapActionPinAdminUser(row: ActionPinAdminDbRow): ActionPinAdminUserRow {

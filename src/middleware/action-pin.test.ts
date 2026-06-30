@@ -172,4 +172,38 @@ describe("action PIN middleware", () => {
     assert.deepEqual(payload, { error: "action_pin_disabled_for_role", actionKey: "patient_create" });
     assert.equal(nextCalled, false);
   });
+
+  it("blocks protected actions with session_unlock while idle locked", async () => {
+    const { requireActionPin } = await import("./action-pin.js");
+    const { DEFAULT_ACTION_PIN_POLICY } = await import("../services/action-pin-policy-service.js");
+    const guard = requireActionPin(
+      "patient_create",
+      async () => ({
+        ...DEFAULT_ACTION_PIN_POLICY,
+        enabled: true,
+        idleLockEnabled: true,
+      }),
+      async () => ({ ok: true }),
+      async () => ({ active: true, lockedAt: "2026-06-30T10:00:00.000Z" })
+    );
+    let payload: unknown;
+    let nextCalled = false;
+
+    await guard(
+      { user: { sub: 1, role: "receptionist" }, cookies: { rispro_action_pin: "patientCreateToken" } } as unknown as Request,
+      {
+        status() {
+          return this;
+        },
+        json(body: unknown) {
+          payload = body;
+          return this;
+        },
+      } as unknown as Response,
+      () => { nextCalled = true; }
+    );
+
+    assert.deepEqual(payload, { error: "action_pin_required", actionKey: "session_unlock", requiresReason: false });
+    assert.equal(nextCalled, false);
+  });
 });
