@@ -426,16 +426,18 @@ function AppointmentSummaryCard(props: {
   );
 }
 
-function OtherAppointmentsCard(props: { preview: PublicAppointmentCancelPreview }) {
-  const currentSignature = [
-    props.preview.bookingDate,
-    formatTimeAr(props.preview.bookingTime),
-    props.preview.modalityNameAr || props.preview.modalityName || "",
-    props.preview.examNameAr || props.preview.examName || "",
-  ].join("|");
+function tokenFromPublicAppointmentUrl(value: string): string {
+  try {
+    return new URL(value, window.location.origin).searchParams.get("t")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function OtherAppointmentsCard(props: { preview: PublicAppointmentCancelPreview; currentToken: string }) {
   const appointments = (props.preview.otherAppointments ?? []).filter((appointment) => {
-    const signature = [appointment.date, formatTimeAr(appointment.time), appointment.modality, appointment.examName].join("|");
-    return appointment.publicUrl && signature !== currentSignature;
+    const appointmentToken = tokenFromPublicAppointmentUrl(appointment.publicUrl);
+    return appointment.publicUrl && (!appointmentToken || appointmentToken !== props.currentToken);
   });
 
   if (appointments.length === 0) return null;
@@ -1381,7 +1383,7 @@ export default function PublicCancelAppointmentPage() {
         <div className="space-y-5 p-5">
           <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
 
-          <OtherAppointmentsCard preview={preview} />
+          <OtherAppointmentsCard preview={preview} currentToken={token} />
 
           {canShowSlip ? (
             <AppointmentSlipCard

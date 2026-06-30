@@ -382,10 +382,10 @@ describe("PublicCancelAppointmentPage", () => {
         examNameAr: "CT Head",
         otherAppointments: [
           {
-            date: "2026-07-01",
-            time: "10:30",
-            modality: "CT",
-            examName: "CT Head",
+            date: "2026-07-02",
+            time: "12:00",
+            modality: "MRI",
+            examName: "Duplicate current token",
             status: "scheduled",
             publicUrl: "https://rispro.nccb.com.ly/public/appointment?t=test-token",
             canCancel: true,
@@ -407,7 +407,8 @@ describe("PublicCancelAppointmentPage", () => {
 
     expect(await screen.findByText("Other appointments")).toBeTruthy();
     expect(screen.getByRole("link", { name: /MRI Brain/ })).toBeTruthy();
-    expect(screen.getAllByText("CT Head")).toHaveLength(1);
+    expect(screen.queryByText("Duplicate current token")).toBeNull();
+    expect(screen.queryByRole("link", { name: /test-token/ })).toBeNull();
   });
 
   it("previews and prints the appointment slip with QR paper settings", async () => {

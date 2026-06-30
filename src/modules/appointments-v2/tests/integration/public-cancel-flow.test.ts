@@ -142,7 +142,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     assert.ok(String(response.data.preview.modalityName).length > 0);
   });
 
-  it("returns only public-safe tokened appointments for the same patient", async () => {
+  it("ensures public tokens and returns only public-safe appointments for the same patient", async () => {
     const currentBookingId = await createBooking("2026-09-01");
     const samePatientOtherId = await createBooking("2040-09-02");
     const samePatientNoTokenId = await createBooking("2040-09-03");
@@ -185,38 +185,53 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
 
     await pool.query(`update appointments_v2.bookings set status = 'voided', voided_at = now() where id = $1`, [samePatientVoidedId]);
     await pool.query(`update appointments_v2.public_appointment_tokens set revoked_at = now() where booking_id = $1`, [samePatientRevokedId]);
-    await updatePatientQrConfig({ publicLinkValidityDays: 6000 });
+    const tokenBeforePreview = await pool.query<{ count: string }>(
+      `select count(*)::text as count from appointments_v2.public_appointment_tokens where booking_id = $1`,
+      [samePatientNoTokenId]
+    );
+    assert.equal(tokenBeforePreview.rows[0]?.count, "0");
 
-    try {
-      const response = await readPublicPreview(currentToken);
+    const response = await readPublicPreview(currentToken);
+    const generatedToken = await pool.query<{ token: string }>(
+      `select token from appointments_v2.public_appointment_tokens where booking_id = $1 and revoked_at is null`,
+      [samePatientNoTokenId]
+    );
 
-      assert.equal(response.status, 200);
-      assert.deepEqual(
-        response.data.otherAppointments ?? [],
-        [
-          {
-            date: "2040-09-02",
-            time: "",
-            modality: String(response.data.otherAppointments?.[0]?.modality),
-            examName: String(response.data.otherAppointments?.[0]?.examName),
-            status: "scheduled",
-            publicUrl: `https://rispro.nccb.com.ly/public/appointment?t=${samePatientOtherToken}`,
-            canCancel: true,
-          },
-        ]
-      );
+    assert.equal(response.status, 200);
+    assert.ok(generatedToken.rows[0]?.token);
+    assert.deepEqual(
+      response.data.otherAppointments ?? [],
+      [
+        {
+          date: "2040-09-02",
+          time: "",
+          modality: String(response.data.otherAppointments?.[0]?.modality),
+          examName: String(response.data.otherAppointments?.[0]?.examName),
+          status: "scheduled",
+          publicUrl: `https://rispro.nccb.com.ly/public/appointment?t=${samePatientOtherToken}`,
+          canCancel: true,
+        },
+        {
+          date: "2040-09-03",
+          time: "",
+          modality: String(response.data.otherAppointments?.[1]?.modality),
+          examName: String(response.data.otherAppointments?.[1]?.examName),
+          status: "scheduled",
+          publicUrl: `https://rispro.nccb.com.ly/public/appointment?t=${generatedToken.rows[0]?.token}`,
+          canCancel: true,
+        },
+      ]
+    );
 
-      const serialized = JSON.stringify(response.data);
-      assert.equal(serialized.includes(String(currentBookingId)), true);
-      assert.equal(serialized.includes(String(samePatientNoTokenId)), false);
-      assert.equal(serialized.includes(String(samePatientVoidedId)), false);
-      assert.equal(serialized.includes(String(samePatientRevokedId)), false);
-      assert.equal(serialized.includes(String(otherPatientBooking.data.booking.id)), false);
-      for (const sensitiveKey of ["nationalId", "national_id", "phone", "accession", "studyInstanceUid", "study_instance_uid", "notes"]) {
-        assert.equal(serialized.includes(sensitiveKey), false, `${sensitiveKey} should not be exposed`);
-      }
-    } finally {
-      await updatePatientQrConfig({ publicLinkValidityDays: 14 });
+    const serialized = JSON.stringify(response.data);
+    assert.equal(serialized.includes(String(currentBookingId)), true);
+    assert.equal((response.data.otherAppointments ?? []).some((appointment) => String(appointment.publicUrl || "").includes(currentToken)), false);
+    assert.equal(serialized.includes(String(samePatientNoTokenId)), false);
+    assert.equal(serialized.includes(String(samePatientVoidedId)), false);
+    assert.equal(serialized.includes(String(samePatientRevokedId)), false);
+    assert.equal(serialized.includes(String(otherPatientBooking.data.booking.id)), false);
+    for (const sensitiveKey of ["nationalId", "national_id", "phone", "accession", "studyInstanceUid", "study_instance_uid", "notes"]) {
+      assert.equal(serialized.includes(sensitiveKey), false, `${sensitiveKey} should not be exposed`);
     }
   });
 
