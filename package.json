@@ -15,6 +15,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:frontend": "cd frontend && npx tsc --noEmit",
     "build:frontend": "cd frontend && npm run build",
+    "db:test:up": "node scripts/db-test-container.js up",
+    "db:test:down": "node scripts/db-test-container.js down",
     "db:test:check": "node scripts/check-db-test.js",
     "db:test:repair": "node scripts/repair-db-test.js",
     "test": "node --import tsx --test src/**/*.test.ts",

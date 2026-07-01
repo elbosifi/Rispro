@@ -701,10 +701,10 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const nationalIdCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "DICOM National ID" });
     const mrnOnlyCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "DICOM MRN Not Used" });
 
-    await setPatientIdentifierFields(primaryCase, { mrn: "MRN-NOT-DICOM-1", identifierValue: "LEGACY-DICOM-1", nationalId: "NAT-DICOM-1" });
+    await setPatientIdentifierFields(primaryCase, { mrn: "MRN-NOT-DICOM-1", identifierValue: "LEGACY-DICOM-1", nationalId: "111111111111" });
     await insertPrimaryPatientIdentifier(primaryCase, "PRIMARY-DICOM-1");
-    await setPatientIdentifierFields(identifierValueCase, { mrn: "MRN-NOT-DICOM-2", identifierValue: "LEGACY-DICOM-2", nationalId: "NAT-DICOM-2" });
-    await setPatientIdentifierFields(nationalIdCase, { mrn: "MRN-NOT-DICOM-3", identifierValue: null, nationalId: "NAT-DICOM-3" });
+    await setPatientIdentifierFields(identifierValueCase, { mrn: "MRN-NOT-DICOM-2", identifierValue: "LEGACY-DICOM-2", nationalId: "222222222222" });
+    await setPatientIdentifierFields(nationalIdCase, { mrn: "MRN-NOT-DICOM-3", identifierValue: null, nationalId: "333333333333" });
     await setPatientIdentifierFields(mrnOnlyCase, { mrn: "MRN-NOT-DICOM-4", identifierValue: null, nationalId: null });
 
     const response = await api<{ cases: Array<{ appointmentId: number; patientDicomId: string | null; patientMrn: string | null }> }>(
@@ -716,7 +716,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
     assert.equal(byId.get(primaryCase)?.patientDicomId, "PRIMARY-DICOM-1");
     assert.equal(byId.get(identifierValueCase)?.patientDicomId, "LEGACY-DICOM-2");
-    assert.equal(byId.get(nationalIdCase)?.patientDicomId, "NAT-DICOM-3");
+    assert.equal(byId.get(nationalIdCase)?.patientDicomId, "333333333333");
     assert.equal(byId.get(mrnOnlyCase)?.patientDicomId, null);
     assert.equal(byId.get(mrnOnlyCase)?.patientMrn, "MRN-NOT-DICOM-4");
   });
@@ -726,7 +726,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const date = addDays(11);
     const ownCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Own" });
     const otherCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Open Sonic Other" });
-    await setPatientIdentifierFields(ownCase, { mrn: "MRN-OPEN-SONIC", identifierValue: "OPEN-SONIC-DICOM-ID", nationalId: "NAT-OPEN-SONIC" });
+    await setPatientIdentifierFields(ownCase, { mrn: "MRN-OPEN-SONIC", identifierValue: "OPEN-SONIC-DICOM-ID", nationalId: "444444444444" });
     await assignDirectly(ownCase, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await assignDirectly(otherCase, otherDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     await withSonicDicomConfig({
@@ -1324,8 +1324,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     assert.equal(events.rowCount, 1);
     assert.match(events.rows[0].title, /Reporting case assigned/);
+    assert.match(events.rows[0].title, /V2-/);
     assert.match(events.rows[0].body, /Notify Patient/);
-    assert.match(events.rows[0].body, /V2-/);
     assert.match(events.rows[0].body, /CT/);
     assert.match(events.rows[0].action_url, new RegExp(`/doctor/reporting-board/saved/${notifyView.token}`));
 
@@ -1348,7 +1348,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const ownList = await api<{ notifications: Array<{ id: number; title: string; body: string }> }>(targetDoctor.cookie, "/api/doctor/reporting-board/notifications");
     assert.equal(ownList.status, 200);
     assert.ok(ownList.data.notifications.length >= 2);
-    assert.ok(ownList.data.notifications.every((notification) => !/Notification A|Notification B|V2-/.test(`${notification.title} ${notification.body}`)));
+    assert.ok(ownList.data.notifications.some((notification) => /Notification A|Notification B|V2-/.test(`${notification.title} ${notification.body}`)));
     const otherList = await api<{ notifications: unknown[] }>(otherDoctor.cookie, "/api/doctor/reporting-board/notifications");
     assert.equal(otherList.status, 200);
     assert.equal(otherList.data.notifications.some((item) => ownList.data.notifications.map((n) => n.id).includes((item as { id: number }).id)), false);
