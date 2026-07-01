@@ -246,10 +246,10 @@ function StatsTile({
   const content = (
     <>
       <span className="text-xs font-semibold uppercase" style={{ color: emphasis === "neutral" ? "var(--text-muted)" : undefined }}>{label}</span>
-      <span className={size === "primary" ? "mt-1 text-2xl font-semibold" : "mt-1 text-lg font-semibold"}>{value}</span>
+      <span className={size === "primary" ? "mt-0.5 text-xl font-semibold" : "mt-0.5 text-base font-semibold"}>{value}</span>
     </>
   );
-  const className = `${size === "primary" ? "min-h-20" : "min-h-16"} rounded-lg border px-3 py-2 text-left ${emphasisClass}`;
+  const className = `${size === "primary" ? "min-h-16" : "min-h-14"} rounded-lg border px-3 py-2 text-left ${emphasisClass}`;
   const style = { backgroundColor: "var(--card)", borderColor: "var(--border)" };
   const mergedStyle = emphasis === "neutral" ? style : undefined;
   if (!onClick) return <div className={className} style={mergedStyle} title={title}>{content}</div>;
@@ -322,29 +322,48 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ActiveFilterStrip({
-  chips,
+  scopeChips,
+  userChips,
+  loadedSavedViewName,
   onReset,
 }: {
-  chips: Array<{ key: string; label: string; value: string; removable?: boolean; onRemove?: () => void }>;
+  scopeChips: Array<{ key: string; label: string; value: string }>;
+  userChips: Array<{ key: string; label: string; value: string; onRemove: () => void }>;
+  loadedSavedViewName?: string | null;
   onReset: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-      <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Active filters</span>
-      {chips.map((chip) => (
-        <span key={chip.key} className="inline-flex min-h-8 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
-          <span className="text-slate-500">{chip.label}:</span>
-          <span>{chip.value}</span>
-          {chip.removable && chip.onRemove && (
+    <div className="space-y-2 rounded-lg border px-3 py-2 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Board scope</span>
+        {scopeChips.map((chip) => (
+          <span key={chip.key} className="inline-flex min-h-7 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
+            <span className="text-slate-500">{chip.label}:</span>
+            <span>{chip.value}</span>
+          </span>
+        ))}
+        {loadedSavedViewName && (
+          <span className="inline-flex min-h-7 items-center rounded-full border border-teal-200 bg-teal-50 px-2 text-xs font-semibold text-teal-700">
+            Saved view: {loadedSavedViewName}
+          </span>
+        )}
+        <button type="button" onClick={onReset} className="ml-auto inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+          Reset to default board
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Active user filters</span>
+        {userChips.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>No additional user filters</span>}
+        {userChips.map((chip) => (
+          <span key={chip.key} className="inline-flex min-h-7 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
+            <span className="text-slate-500">{chip.label}:</span>
+            <span>{chip.value}</span>
             <button type="button" onClick={chip.onRemove} className="rounded-full p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label={`Clear filter: ${chip.label}`}>
               <X size={12} />
             </button>
-          )}
-        </span>
-      ))}
-      <button type="button" onClick={onReset} className="ml-auto inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-        Reset to default board
-      </button>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -366,21 +385,19 @@ function overdue(row: ReportingBoardCaseRow): boolean {
   return requiredReportNotFinal(row) && row.bookingDate < new Date().toISOString().slice(0, 10);
 }
 
-function rowState(row: ReportingBoardCaseRow): "critical" | "orange" | "amber" | "normal" {
+function rowPriorityTone(row: ReportingBoardCaseRow): "stat" | "urgent" | "normal" {
   const priority = String(row.reportingPriorityCode || "").trim().toLowerCase();
-  if (priority === "stat" || priority === "urgent" || overdue(row)) return "critical";
-  if (row.reportStatus === "study_not_found" || row.reportStatus === "unavailable") return "orange";
-  if (requiredReportNotFinal(row)) return "amber";
+  if (priority === "stat") return "stat";
+  if (priority === "urgent") return "urgent";
   return "normal";
 }
 
 function reportingRowClass(row: ReportingBoardCaseRow, selected: boolean): string {
-  if (selected) return "border-l-4 border-teal-600 bg-teal-50 ring-2 ring-inset ring-teal-600 transition hover:bg-teal-100";
-  const state = rowState(row);
-  if (state === "critical") return "border-l-4 border-red-400 bg-red-50 transition hover:bg-red-100/70";
-  if (state === "orange") return "border-l-4 border-orange-400 bg-orange-50 transition hover:bg-orange-100/70";
-  if (state === "amber") return "border-l-4 border-amber-400 bg-amber-50 transition hover:bg-amber-100/70";
-  return "border-l-4 border-transparent transition hover:bg-slate-50";
+  if (selected) return "border-l-2 border-teal-600 bg-teal-50 ring-2 ring-inset ring-teal-600 transition hover:bg-teal-100";
+  const tone = rowPriorityTone(row);
+  if (tone === "stat") return "border-l-2 border-red-300 bg-red-50/70 transition hover:bg-red-50";
+  if (tone === "urgent") return "border-l-2 border-orange-300 bg-orange-50/70 transition hover:bg-orange-50";
+  return "border-l-2 border-transparent transition hover:bg-slate-50";
 }
 
 function reportStatusView(status: ReportingBoardCaseRow["reportStatus"]) {
@@ -442,13 +459,6 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
 }
 
 function PriorityBadge({ row }: { row: ReportingBoardCaseRow }) {
-  if (row.caseType === "comparison") {
-    return (
-      <span className="inline-flex items-center rounded-full border border-teal-300 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-teal-700" title="Comparison request">
-        Comparison request
-      </span>
-    );
-  }
   const label = abnormalPriorityLabel(row);
   if (!label) return null;
   return (
@@ -982,7 +992,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
-  const [savedViewsOpen, setSavedViewsOpen] = useState(true);
+  const [savedViewsOpen, setSavedViewsOpen] = useState(false);
+  const [metricDetailsOpen, setMetricDetailsOpen] = useState(false);
   const [savedViewMessage, setSavedViewMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [boardActionMessage, setBoardActionMessage] = useState<{ tone: "success" | "error"; text: string; detail?: string | null } | null>(null);
   const [savedViewQr, setSavedViewQr] = useState<string | null>(null);
@@ -1320,21 +1331,30 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       : filters.assignmentStatus === "unassigned"
         ? "Unassigned"
         : "All";
-  const activeFilterChips = [
-    { key: "dateFrom", label: "Date from", value: filters.dateFrom ?? effectiveFilters.dateFrom ?? "-", removable: Boolean(filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom), onRemove: () => clearFilter("dateFrom") },
-    { key: "dateTo", label: "Date to", value: filters.dateTo ?? effectiveFilters.dateTo ?? "Open", removable: Boolean(filters.dateTo), onRemove: () => clearFilter("dateTo") },
-    { key: "modality", label: "Modality", value: modalityChipValue, removable: Boolean(filters.modalityId || filters.modalityCode), onRemove: () => clearFilter("modality") },
-    { key: "assignment", label: "Assigned", value: assignmentChipValue, removable: Boolean(filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all")), onRemove: () => clearFilter("assignment") },
-    { key: "reportStatus", label: "Report", value: reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus), removable: (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus, onRemove: () => clearFilter("reportStatus") },
-    { key: "requiresReport", label: "Requires report", value: (filters.requiresReport ?? effectiveFilters.requiresReport) === false ? "No" : (filters.requiresReport ?? effectiveFilters.requiresReport) === true ? "Yes" : "All", removable: (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport, onRemove: () => clearFilter("requiresReport") },
-    { key: "caseCategory", label: "Category", value: filters.caseCategory ? labelStatus(filters.caseCategory) : "All", removable: Boolean(filters.caseCategory), onRemove: () => clearFilter("caseCategory") },
-    { key: "priorityCode", label: "Priority", value: filters.priorityCode || "All", removable: Boolean(filters.priorityCode), onRemove: () => clearFilter("priorityCode") },
-    { key: "q", label: "Search", value: filters.q || "None", removable: Boolean(filters.q), onRemove: () => clearFilter("q") },
-    { key: "caseSource", label: "Case type", value: caseSourceLabel(filters.caseSource ?? effectiveFilters.caseSource), removable: (filters.caseSource ?? "all") !== "all", onRemove: () => clearFilter("caseSource") },
-    { key: "sort", label: "Sort", value: `${sortLabel(filters.sortBy ?? effectiveFilters.sortBy)} ${(filters.sortDirection ?? effectiveFilters.sortDirection ?? "asc").toUpperCase()}`, removable: (filters.sortBy ?? "priority_study_date") !== "priority_study_date" || (filters.sortDirection ?? "asc") !== "asc", onRemove: () => clearFilter("sort") },
-    { key: "pinUrgentToTop", label: "Urgent pin", value: (filters.pinUrgentToTop ?? effectiveFilters.pinUrgentToTop) === false ? "Off" : "On", removable: filters.pinUrgentToTop === false, onRemove: () => clearFilter("pinUrgentToTop") },
-    { key: "limit", label: "Limit", value: String(filters.limit ?? effectiveFilters.limit ?? 100), removable: (filters.limit ?? 100) !== 100, onRemove: () => clearFilter("limit") },
+  const requiresReportValue = (filters.requiresReport ?? effectiveFilters.requiresReport) === false ? "No" : (filters.requiresReport ?? effectiveFilters.requiresReport) === true ? "Yes" : "All";
+  const sortValue = `${sortLabel(filters.sortBy ?? effectiveFilters.sortBy)} ${(filters.sortDirection ?? effectiveFilters.sortDirection ?? "asc").toUpperCase()}`;
+  const boardScopeChips = [
+    { key: "modality", label: "Scope", value: modalityChipValue },
+    { key: "reportStatus", label: "Report", value: reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus) },
+    { key: "requiresReport", label: "Requires report", value: requiresReportValue },
+    { key: "dateFrom", label: "From", value: filters.dateFrom ?? effectiveFilters.dateFrom ?? "-" },
+    { key: "limit", label: "Limit", value: String(filters.limit ?? effectiveFilters.limit ?? 100) },
   ];
+  const userFilterChips = [
+    filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom ? { key: "dateFrom", label: "Date from", value: filters.dateFrom, onRemove: () => clearFilter("dateFrom") } : null,
+    filters.dateTo ? { key: "dateTo", label: "Date to", value: filters.dateTo, onRemove: () => clearFilter("dateTo") } : null,
+    filters.modalityId || filters.modalityCode ? { key: "modality", label: "Modality", value: modalityChipValue, onRemove: () => clearFilter("modality") } : null,
+    filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all") ? { key: "assignment", label: "Assigned", value: assignmentChipValue, onRemove: () => clearFilter("assignment") } : null,
+    (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus ? { key: "reportStatus", label: "Report", value: reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus), onRemove: () => clearFilter("reportStatus") } : null,
+    (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport ? { key: "requiresReport", label: "Requires report", value: requiresReportValue, onRemove: () => clearFilter("requiresReport") } : null,
+    filters.caseCategory ? { key: "caseCategory", label: "Category", value: labelStatus(filters.caseCategory), onRemove: () => clearFilter("caseCategory") } : null,
+    filters.priorityCode ? { key: "priorityCode", label: "Priority", value: filters.priorityCode, onRemove: () => clearFilter("priorityCode") } : null,
+    filters.q ? { key: "q", label: "Search", value: filters.q, onRemove: () => clearFilter("q") } : null,
+    (filters.caseSource ?? "all") !== "all" ? { key: "caseSource", label: "Case type", value: caseSourceLabel(filters.caseSource ?? effectiveFilters.caseSource), onRemove: () => clearFilter("caseSource") } : null,
+    (filters.sortBy ?? "priority_study_date") !== "priority_study_date" || (filters.sortDirection ?? "asc") !== "asc" ? { key: "sort", label: "Sort", value: sortValue, onRemove: () => clearFilter("sort") } : null,
+    filters.pinUrgentToTop === false ? { key: "pinUrgentToTop", label: "Urgent pin", value: "Off", onRemove: () => clearFilter("pinUrgentToTop") } : null,
+    (filters.limit ?? 100) !== 100 ? { key: "limit", label: "Limit", value: String(filters.limit ?? effectiveFilters.limit ?? 100), onRemove: () => clearFilter("limit") } : null,
+  ].filter((chip): chip is { key: string; label: string; value: string; onRemove: () => void } => Boolean(chip));
   const advancedFilterCount = [
     Boolean(filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom),
     Boolean(filters.dateTo),
@@ -1353,6 +1373,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   ].filter(Boolean).length;
   const isBoardFetching = casesQuery.isFetching || statsQuery.isFetching || boardRefreshing;
   const refreshedLabel = lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
+  const resultCount = statsSummary?.total ?? cases.length;
+  const comparisonCount = statsSummary?.comparisonRequests ?? cases.filter((row) => row.caseType === "comparison").length;
+  const resultReportPhrase = reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus).toLowerCase().replaceAll(" ", "-");
+  const resultScopePhrase = modalityChipValue.replace(/^Configured /, "");
+  const resultDate = filters.dateFrom ?? effectiveFilters.dateFrom;
+  const resultDatePhrase = resultDate ? ` from ${resultDate} onward` : "";
+  const resultComparisonPhrase = comparisonCount > 0 ? `, including ${comparisonCount} comparison ${comparisonCount === 1 ? "request" : "requests"}` : "";
+  const resultSummary = `Showing ${resultCount} ${resultReportPhrase} ${resultScopePhrase} reporting ${resultCount === 1 ? "case" : "cases"}${resultDatePhrase}${resultComparisonPhrase}.`;
 
   const refreshBoard = async () => {
     setBoardRefreshing(true);
@@ -1395,6 +1423,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
             Effective cutoff: {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"} - Cutoff settings are controlled by superadmin. {selectedAssignedDoctor ? `Selected doctor: ${selectedAssignedDoctor.displayName}.` : ""}
           </p>
+          {loadedSavedView && (
+            <p className="mt-1 text-xs font-semibold text-teal-700">Saved view: {loadedSavedView.name}</p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={printUrl} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
@@ -1533,13 +1564,24 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {statsQuery.error instanceof Error ? statsQuery.error.message : "Could not load board statistics."}
           </p>
         )}
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12">
+        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-9">
           <StatsTile label="Total" value={statsSummary?.total ?? "-"} />
           <StatsTile label="Unassigned" value={statsSummary?.unassigned ?? "-"} onClick={() => setAssignmentShortcut("unassigned")} />
           <StatsTile label="Assigned" value={statsSummary?.assigned ?? "-"} onClick={() => setAssignmentShortcut("assigned")} />
-          <StatsTile label="Comparison requests" value={statsSummary?.comparisonRequests ?? "-"} size="secondary" />
+          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} />
+          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} />
+          <StatsTile label="Comparison requests" value={statsSummary?.comparisonRequests ?? "-"} />
+          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "warning" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." />
+          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} />
+          <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} />
+        </div>
+        <button type="button" onClick={() => setMetricDetailsOpen((current) => !current)} className="inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+          {metricDetailsOpen ? "Hide metric details" : "Show metric details"}
+        </button>
+        {metricDetailsOpen && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <div className="relative">
-            <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} emphasis={hasValue(statsSummary?.statOrUrgent ?? "-") ? "danger" : "neutral"} onClick={() => setPriorityShortcutOpen((current) => !current)} />
+            <StatsTile label="STAT/Urgent" value={statsSummary?.statOrUrgent ?? "-"} emphasis={hasValue(statsSummary?.statOrUrgent ?? "-") ? "danger" : "neutral"} onClick={() => setPriorityShortcutOpen((current) => !current)} size="secondary" />
             {priorityShortcutOpen && (
               <div className="absolute left-0 top-full z-20 mt-1 flex gap-1 rounded-lg border p-2 shadow-lg" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
                 <button type="button" onClick={() => setPriorityShortcut("stat")} className="rounded-lg border px-3 py-1.5 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>STAT</button>
@@ -1547,8 +1589,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               </div>
             )}
           </div>
-          <StatsTile label="Required not final" value={statsSummary?.requiredNotFinal ?? "-"} />
-          <StatsTile label="Overdue" value={statsSummary?.overdue ?? "-"} emphasis={hasValue(statsSummary?.overdue ?? "-") ? "danger" : "neutral"} title="Informational. Overdue filtering is not part of the current board filter contract." />
+          <StatsTile label="Required not final" value={statsSummary?.requiredNotFinal ?? "-"} size="secondary" />
           <StatsTile label="Median C→A" value={formatDuration(statsSummary?.medianCompletedToAssignedMinutes)} size="secondary" />
           <StatsTile label="Longest assigned" value={formatDuration(statsSummary?.longestActiveAssignmentAgeMinutes)} size="secondary" />
           <StatsTile label="Completed unassigned" value={statsSummary?.completedUnassigned ?? "-"} emphasis={hasValue(statsSummary?.completedUnassigned ?? "-") ? "warning" : "neutral"} size="secondary" />
@@ -1558,11 +1599,8 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           {statsSummary?.p90AssignedToFinalMinutes !== null && statsSummary?.p90AssignedToFinalMinutes !== undefined && (
             <StatsTile label="P90 A→F" value={formatDuration(statsSummary.p90AssignedToFinalMinutes)} size="secondary" />
           )}
-          <StatsTile label="Draft" value={statsSummary?.draft ?? "-"} emphasis={hasValue(statsSummary?.draft ?? "-") ? "warning" : "neutral"} size="secondary" />
-          <StatsTile label="Final" value={statsSummary?.final ?? "-"} emphasis={hasValue(statsSummary?.final ?? "-") ? "success" : "muted"} size="secondary" />
-          <StatsTile label="CT" value={statsSummary?.ct ?? "-"} onClick={() => setModalityShortcut("CT")} size="secondary" />
-          <StatsTile label="MR" value={statsSummary?.mr ?? "-"} onClick={() => setModalityShortcut("MR")} size="secondary" />
         </div>
+        )}
         <DoctorWorkloadPanel
           open={doctorStatsOpen}
           rows={doctorStats}
@@ -1616,10 +1654,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
           </div>
           )}
-          <ActiveFilterStrip chips={activeFilterChips} onReset={resetToDefaultBoard} />
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {isBoardFetching && cases.length > 0 ? "Refreshing... " : ""}Last refreshed: {refreshedLabel}
-          </p>
+          <ActiveFilterStrip scopeChips={boardScopeChips} userChips={userFilterChips} loadedSavedViewName={loadedSavedView?.name ?? null} onReset={resetToDefaultBoard} />
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+            <p>{resultSummary}</p>
+            <p>{isBoardFetching && cases.length > 0 ? "Refreshing... " : ""}Last refreshed: {refreshedLabel}</p>
+          </div>
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
             <div className="max-h-[70vh] overflow-auto">
               <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>

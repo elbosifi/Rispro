@@ -168,6 +168,18 @@ function setNavigatorPlatform(platform: string) {
   Object.defineProperty(window.navigator, "userAgent", { configurable: true, value: platform });
 }
 
+async function openSavedViews() {
+  fireEvent.click(await screen.findByRole("button", { name: "Open saved views" }));
+}
+
+function expectNoPriorityTint(row: Element) {
+  expect(row.className).not.toContain("bg-red");
+  expect(row.className).not.toContain("bg-orange");
+  expect(row.className).not.toContain("bg-amber");
+  expect(row.className).not.toContain("bg-yellow");
+  expect(row.className).not.toContain("bg-teal");
+}
+
 describe("DoctorReportingBoardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -289,6 +301,41 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row!).getByText("STAT")).toBeTruthy();
     expect(within(row!).getByLabelText("Draft report")).toBeTruthy();
     expect(within(row!).getByText("Unassigned 3h")).toBeTruthy();
+  });
+
+  it("does not tint draft, overdue, or unassigned routine rows", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, reportingPriorityCode: null, reportingPriorityName: null, reportStatus: "draft", assignmentStatus: "unassigned", assignedDoctorId: null, assignedDoctorName: null }],
+      filters: { reportStatus: "required_not_final", limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(row.getAttribute("aria-label")).toContain("Overdue");
+    expectNoPriorityTint(row);
+  });
+
+  it("uses priority-only row tinting for urgent and STAT cases", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [
+        { ...caseRow, caseKey: "appointment:43", appointmentId: 43, accessionNumber: "V2-000043", patientEnglishName: "Urgent Patient", reportingPriorityCode: "urgent", reportingPriorityName: "Urgent" },
+        { ...caseRow, caseKey: "appointment:44", appointmentId: 44, accessionNumber: "V2-000044", patientEnglishName: "Stat Patient", reportingPriorityCode: "stat", reportingPriorityName: "STAT urgent" },
+        { ...comparisonRow, reportingPriorityCode: null, reportingPriorityName: null, patientEnglishName: "Comparison Patient" },
+      ],
+      filters: { reportStatus: "required_not_final", limit: 100, offset: 0 },
+    });
+    renderPage();
+
+    const urgentRow = (await screen.findByText("Urgent Patient")).closest("tr")!;
+    expect(urgentRow.className).toContain("bg-orange");
+    expect(urgentRow.className).not.toContain("bg-red");
+
+    const statRow = (await screen.findByText("Stat Patient")).closest("tr")!;
+    expect(statRow.className).toContain("bg-red");
+    expect(statRow.className).not.toContain("bg-orange");
+
+    const comparisonRoutineRow = (await screen.findByText("Comparison Patient")).closest("tr")!;
+    expectNoPriorityTint(comparisonRoutineRow);
   });
 
   it("renders assigned aging and final TAT without inventing missing final time", async () => {
@@ -501,23 +548,28 @@ describe("DoctorReportingBoardPage", () => {
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
   });
 
-  it("renders active filter chips for default-effective filters", async () => {
+  it("renders board scope and omits noisy default active filters", async () => {
     renderPage();
 
-    const strip = (await screen.findByText("Active filters")).closest("div")!;
-    expect(within(strip).getByText(/Date from/)).toBeTruthy();
-    await waitFor(() => expect(within(strip).getByText("2026-05-15")).toBeTruthy());
-    expect(within(strip).getByText("Configured CT/MR")).toBeTruthy();
-    expect(within(strip).getByText("Required not final")).toBeTruthy();
-    expect(within(strip).getByText("Yes")).toBeTruthy();
-    expect(within(strip).getByText("Case type:")).toBeTruthy();
-    expect(within(strip).getByText("Priority + oldest study ASC")).toBeTruthy();
-    expect(within(strip).getByText("100")).toBeTruthy();
+    await screen.findByText("Board scope");
+    expect(screen.getByText("Configured CT/MR")).toBeTruthy();
+    expect(screen.getAllByText("Required not final").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Yes").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2026-05-15").length).toBeGreaterThan(0);
+    expect(screen.getByText("No additional user filters")).toBeTruthy();
+    expect(screen.queryByText("Category:")).toBeNull();
+    expect(screen.queryByText("Priority:")).toBeNull();
+    expect(screen.queryByText("Search:")).toBeNull();
+    expect(screen.queryByText("Case type:")).toBeNull();
+    expect(screen.queryByText("Date to:")).toBeNull();
+    expect(screen.queryByText("Assigned:")).toBeNull();
+    expect(screen.getByText(/Showing 12 required-not-final CT\/MR reporting cases from 2026-05-15 onward/i)).toBeTruthy();
   });
 
   it("clears a removable chip and resets offset to zero", async () => {
     renderPage();
 
+    await openSavedViews();
     fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent", offset: 50 })));
     fireEvent.click(await screen.findByRole("button", { name: "Clear filter: Priority" }));
@@ -553,6 +605,7 @@ describe("DoctorReportingBoardPage", () => {
     ]);
     renderPage();
 
+    await openSavedViews();
     fireEvent.click(await screen.findByRole("button", { name: "Comparisons only" }));
 
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ caseSource: "comparisons" })));
@@ -562,6 +615,7 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
     await screen.findByText("Reporting Assignment Board");
 
+    await openSavedViews();
     fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
     fireEvent.change(screen.getByPlaceholderText("Saved view name"), { target: { value: "Comparison pool" } });
     fireEvent.click(screen.getByRole("button", { name: "Save new view" }));
@@ -630,6 +684,7 @@ describe("DoctorReportingBoardPage", () => {
     fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: true, publicKey: "public-key" });
     renderPage();
 
+    await openSavedViews();
     fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
     fireEvent.click(await screen.findByRole("button", { name: /Send test notification/i }));
 
@@ -640,6 +695,7 @@ describe("DoctorReportingBoardPage", () => {
   it("generates QR links for the mobile read-only saved view route", async () => {
     renderPage();
 
+    await openSavedViews();
     fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
     fireEvent.click(await screen.findByRole("button", { name: /Show mobile QR/i }));
 
@@ -741,6 +797,7 @@ describe("DoctorReportingBoardPage", () => {
 
     expect((await screen.findAllByText("Total")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("12")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Show metric details" }));
     expect((await screen.findAllByText("STAT/Urgent")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /STAT\/Urgent/i }));
