@@ -48,10 +48,16 @@ export function RequestComparisonModal({
   const canSubmit = Boolean(selectedBookingId && reason.trim()) && !mutation.isPending;
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="request-comparison-title"
+      onClick={(event) => event.stopPropagation()}
+    >
       <section className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl">
         <div className="flex items-center justify-between border-b border-border p-4">
-          <h3 className="text-lg font-semibold">Request comparison</h3>
+          <h3 id="request-comparison-title" className="text-lg font-semibold">Request comparison</h3>
           <Button type="button" variant="ghost" size="sm" onClick={onClose} aria-label="Close request comparison">
             <X size={18} />
           </Button>
