@@ -34,6 +34,7 @@ import type {
   ReportingBoardBulkAssignResult,
   ReportingBoardBulkUnassignResult,
   ReportingBoardCaseRow,
+  ReportingBoardCaseSource,
   ReportingBoardDoctorStatsRow,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
@@ -66,6 +67,12 @@ const SORT_OPTIONS: Array<{ value: ReportingBoardSortBy; label: string }> = [
   { value: "longest_unassigned", label: "Longest unassigned" },
   { value: "longest_assigned_not_final", label: "Longest assigned" },
   { value: "oldest_completed", label: "Oldest completed" },
+];
+
+const CASE_SOURCE_OPTIONS: Array<{ value: ReportingBoardCaseSource; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "appointments", label: "Appointments" },
+  { value: "comparisons", label: "Comparisons" },
 ];
 
 const UNASSIGN_VALUE = "__UNASSIGN__";
@@ -158,6 +165,7 @@ function defaultFilters(settings?: ReportingBoardSettings): ReportingBoardFilter
     sortBy: "priority_study_date",
     sortDirection: "asc",
     pinUrgentToTop: true,
+    caseSource: "all",
     limit: 100,
     offset: 0,
   };
@@ -181,6 +189,18 @@ function assignmentOrderText(filters: ReportingBoardFilters): string {
   };
   const selectedOrder = descriptions[sortBy]?.[direction] ?? descriptions.priority_study_date.asc;
   return `Assignment order: ${filters.pinUrgentToTop === false ? selectedOrder : `STAT/urgent first, then ${selectedOrder}`}.`;
+}
+
+function reportStatusLabel(status: ReportingBoardReportStatus | null | undefined): string {
+  return REPORT_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? "All";
+}
+
+function sortLabel(sortBy: ReportingBoardSortBy | null | undefined): string {
+  return SORT_OPTIONS.find((option) => option.value === sortBy)?.label ?? SORT_OPTIONS[0].label;
+}
+
+function caseSourceLabel(caseSource: ReportingBoardCaseSource | null | undefined): string {
+  return CASE_SOURCE_OPTIONS.find((option) => option.value === caseSource)?.label ?? "All";
 }
 
 function hasValue(value: number | string): boolean {
@@ -298,6 +318,34 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-foreground">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
+  );
+}
+
+function ActiveFilterStrip({
+  chips,
+  onReset,
+}: {
+  chips: Array<{ key: string; label: string; value: string; removable?: boolean; onRemove?: () => void }>;
+  onReset: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <span className="text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Active filters</span>
+      {chips.map((chip) => (
+        <span key={chip.key} className="inline-flex min-h-8 items-center gap-1 rounded-full border bg-white px-2 text-xs font-semibold text-slate-700" style={{ borderColor: "var(--border)" }}>
+          <span className="text-slate-500">{chip.label}:</span>
+          <span>{chip.value}</span>
+          {chip.removable && chip.onRemove && (
+            <button type="button" onClick={chip.onRemove} className="rounded-full p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label={`Clear filter: ${chip.label}`}>
+              <X size={12} />
+            </button>
+          )}
+        </span>
+      ))}
+      <button type="button" onClick={onReset} className="ml-auto inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+        Reset to default board
+      </button>
+    </div>
   );
 }
 function inputClass() {
@@ -916,7 +964,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams();
   const savedViewToken = params.token ?? searchParams.get("savedViewToken");
-  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 100, offset: 0 });
+  const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, caseSource: "all", limit: 100, offset: 0 });
   const [loadedSavedView, setLoadedSavedView] = useState<ReportingBoardSavedView | null>(null);
   const [selectedCaseKeys, setSelectedCaseKeys] = useState<string[]>([]);
   const [saveName, setSaveName] = useState("");
@@ -941,17 +989,20 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [boardRefreshing, setBoardRefreshing] = useState(false);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
   const casesQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "cases", filters],
     queryFn: () => fetchReportingBoardCases(filters),
     refetchInterval: 30000,
+    placeholderData: (previousData) => previousData,
   });
   const statsQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "stats", filters],
     queryFn: () => fetchReportingBoardStats(filters),
     refetchInterval: 30000,
+    placeholderData: (previousData) => previousData,
   });
   const pushConfigQuery = useQuery({ queryKey: ["doctor", "reporting-board", "push-config"], queryFn: fetchReportingBoardPushConfig });
   const savedViewsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "saved-views"], queryFn: fetchReportingBoardSavedViews });
@@ -979,6 +1030,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   useEffect(() => {
     setSearchText(filters.q ?? "");
   }, [filters.q]);
+
+  useEffect(() => {
+    if (casesQuery.dataUpdatedAt > 0) setLastRefreshedAt(new Date(casesQuery.dataUpdatedAt));
+  }, [casesQuery.dataUpdatedAt]);
 
   const saveViewMutation = useMutation({
     mutationFn: () => createReportingBoardSavedView({ name: saveName, filters: compactFilters(filters), notificationSettings: notifications }),
@@ -1172,17 +1227,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
   const selectedReassignDisabled = !canManage || selectedCaseKeys.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
   const selectedUnassignDisabled = !canManage || selectedCaseKeys.length === 0 || selectedUnassignMutation.isPending;
-  const advancedFilterCount = [
-    Boolean(filters.caseCategory),
-    Boolean(filters.priorityCode),
-    (filters.sortDirection ?? "asc") !== "asc",
-    filters.pinUrgentToTop === false,
-    (filters.limit ?? 100) !== 100,
-  ].filter(Boolean).length;
   const visibleCategoryCount = new Set(cases.map((row) => row.caseCategory).filter(Boolean)).size;
   const showCategoryMarker = visibleCategoryCount > 1;
   const activeAssignedDoctorId = filters.assignedDoctorId ?? effectiveFilters.assignedDoctorId ?? null;
   const showAssignedDoctorColumn = !activeAssignedDoctorId;
+  const boardDefaults = defaultFilters(settingsQuery.data);
 
   const setFilter = <K extends keyof ReportingBoardFilters>(key: K, value: ReportingBoardFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value, offset: 0 }));
@@ -1209,6 +1258,101 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     setSearchText("");
     setFilter("q", null);
   };
+
+  const resetToDefaultBoard = () => {
+    setLoadedSavedView(null);
+    setSearchParams({});
+    setSearchText("");
+    setFilters(defaultFilters(settingsQuery.data));
+  };
+
+  const clearFilter = (key: string) => {
+    if (key === "q") setSearchText("");
+    setFilters((current) => {
+      const next: ReportingBoardFilters = { ...current, offset: 0 };
+      if (key === "dateFrom") {
+        next.dateFrom = null;
+        next.cutoffDate = null;
+      } else if (key === "dateTo") {
+        next.dateTo = null;
+      } else if (key === "modality") {
+        next.modalityId = null;
+        next.modalityCode = null;
+      } else if (key === "assignment") {
+        next.assignedDoctorId = null;
+        next.assignmentStatus = "all";
+      } else if (key === "reportStatus") {
+        next.reportStatus = boardDefaults.reportStatus;
+      } else if (key === "requiresReport") {
+        next.requiresReport = boardDefaults.requiresReport;
+      } else if (key === "caseCategory") {
+        next.caseCategory = null;
+      } else if (key === "priorityCode") {
+        next.priorityCode = null;
+      } else if (key === "q") {
+        next.q = null;
+      } else if (key === "caseSource") {
+        next.caseSource = "all";
+      } else if (key === "sort") {
+        next.sortBy = "priority_study_date";
+        next.sortDirection = "asc";
+      } else if (key === "pinUrgentToTop") {
+        next.pinUrgentToTop = true;
+      } else if (key === "limit") {
+        next.limit = 100;
+      }
+      return next;
+    });
+  };
+
+  const selectedModality = filters.modalityId
+    ? (lookupsQuery.data?.modalities ?? []).find((modality) => modality.id === filters.modalityId) ?? null
+    : null;
+  const modalityChipValue = filters.modalityId
+    ? selectedModality?.code ?? selectedModality?.nameEn ?? `Modality ${filters.modalityId}`
+    : filters.modalityCode
+      ? filters.modalityCode
+      : `Configured ${settingsQuery.data?.enabledModalityCodes?.join("/") || "CT/MR"}`;
+  const assignmentChipValue = filters.assignedDoctorId
+    ? selectedAssignedDoctor?.displayName ?? `Doctor ${filters.assignedDoctorId}`
+    : filters.assignmentStatus === "assigned"
+      ? "Assigned"
+      : filters.assignmentStatus === "unassigned"
+        ? "Unassigned"
+        : "All";
+  const activeFilterChips = [
+    { key: "dateFrom", label: "Date from", value: filters.dateFrom ?? effectiveFilters.dateFrom ?? "-", removable: Boolean(filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom), onRemove: () => clearFilter("dateFrom") },
+    { key: "dateTo", label: "Date to", value: filters.dateTo ?? effectiveFilters.dateTo ?? "Open", removable: Boolean(filters.dateTo), onRemove: () => clearFilter("dateTo") },
+    { key: "modality", label: "Modality", value: modalityChipValue, removable: Boolean(filters.modalityId || filters.modalityCode), onRemove: () => clearFilter("modality") },
+    { key: "assignment", label: "Assigned", value: assignmentChipValue, removable: Boolean(filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all")), onRemove: () => clearFilter("assignment") },
+    { key: "reportStatus", label: "Report", value: reportStatusLabel(filters.reportStatus ?? effectiveFilters.reportStatus), removable: (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus, onRemove: () => clearFilter("reportStatus") },
+    { key: "requiresReport", label: "Requires report", value: (filters.requiresReport ?? effectiveFilters.requiresReport) === false ? "No" : (filters.requiresReport ?? effectiveFilters.requiresReport) === true ? "Yes" : "All", removable: (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport, onRemove: () => clearFilter("requiresReport") },
+    { key: "caseCategory", label: "Category", value: filters.caseCategory ? labelStatus(filters.caseCategory) : "All", removable: Boolean(filters.caseCategory), onRemove: () => clearFilter("caseCategory") },
+    { key: "priorityCode", label: "Priority", value: filters.priorityCode || "All", removable: Boolean(filters.priorityCode), onRemove: () => clearFilter("priorityCode") },
+    { key: "q", label: "Search", value: filters.q || "None", removable: Boolean(filters.q), onRemove: () => clearFilter("q") },
+    { key: "caseSource", label: "Case type", value: caseSourceLabel(filters.caseSource ?? effectiveFilters.caseSource), removable: (filters.caseSource ?? "all") !== "all", onRemove: () => clearFilter("caseSource") },
+    { key: "sort", label: "Sort", value: `${sortLabel(filters.sortBy ?? effectiveFilters.sortBy)} ${(filters.sortDirection ?? effectiveFilters.sortDirection ?? "asc").toUpperCase()}`, removable: (filters.sortBy ?? "priority_study_date") !== "priority_study_date" || (filters.sortDirection ?? "asc") !== "asc", onRemove: () => clearFilter("sort") },
+    { key: "pinUrgentToTop", label: "Urgent pin", value: (filters.pinUrgentToTop ?? effectiveFilters.pinUrgentToTop) === false ? "Off" : "On", removable: filters.pinUrgentToTop === false, onRemove: () => clearFilter("pinUrgentToTop") },
+    { key: "limit", label: "Limit", value: String(filters.limit ?? effectiveFilters.limit ?? 100), removable: (filters.limit ?? 100) !== 100, onRemove: () => clearFilter("limit") },
+  ];
+  const advancedFilterCount = [
+    Boolean(filters.dateFrom && filters.dateFrom !== boardDefaults.dateFrom),
+    Boolean(filters.dateTo),
+    Boolean(filters.modalityId || filters.modalityCode),
+    Boolean(filters.assignedDoctorId || (filters.assignmentStatus && filters.assignmentStatus !== "all")),
+    (filters.reportStatus ?? boardDefaults.reportStatus) !== boardDefaults.reportStatus,
+    (filters.requiresReport ?? boardDefaults.requiresReport) !== boardDefaults.requiresReport,
+    Boolean(filters.caseCategory),
+    Boolean(filters.priorityCode),
+    Boolean(filters.q),
+    (filters.caseSource ?? "all") !== "all",
+    (filters.sortBy ?? "priority_study_date") !== "priority_study_date",
+    (filters.sortDirection ?? "asc") !== "asc",
+    filters.pinUrgentToTop === false,
+    (filters.limit ?? 100) !== 100,
+  ].filter(Boolean).length;
+  const isBoardFetching = casesQuery.isFetching || statsQuery.isFetching || boardRefreshing;
+  const refreshedLabel = lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
 
   const refreshBoard = async () => {
     setBoardRefreshing(true);
@@ -1280,7 +1424,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       )}
 
       <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-8">
           <Field label="Search">
             <div className="relative">
               <Search size={16} className="absolute left-3 top-3" style={{ color: "var(--text-muted)" }} />
@@ -1331,6 +1475,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <Field label="Report status">
             <select value={filters.reportStatus ?? "required_not_final"} onChange={(event) => setFilter("reportStatus", event.target.value as ReportingBoardReportStatus)} className={inputClass()}>
               {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Case type">
+            <select value={filters.caseSource ?? "all"} onChange={(event) => setFilter("caseSource", event.target.value as ReportingBoardCaseSource)} className={inputClass()}>
+              {CASE_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
           <Field label="Sort by">
@@ -1467,6 +1616,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
           </div>
           )}
+          <ActiveFilterStrip chips={activeFilterChips} onReset={resetToDefaultBoard} />
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {isBoardFetching && cases.length > 0 ? "Refreshing... " : ""}Last refreshed: {refreshedLabel}
+          </p>
           <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
             <div className="max-h-[70vh] overflow-auto">
               <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>

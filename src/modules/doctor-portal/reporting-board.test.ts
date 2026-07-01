@@ -35,12 +35,29 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const comparisonService = readFileSync(`${root}/src/services/comparison-request-service.ts`, "utf8");
 
     assert.match(types, /caseType: "appointment" \| "comparison"/);
+    assert.match(types, /ReportingBoardCaseSource = "all" \| "appointments" \| "comparisons"/);
     assert.match(types, /comparisonRequestId: number \| null/);
     assert.match(types, /comparisonRequests: number/);
-    assert.match(service, /listComparisonReportingBoardRows/);
+    assert.match(service, /listUnifiedReportingBoardCases/);
+    assert.match(service, /sourceAllowsAppointments/);
+    assert.match(service, /sourceAllowsComparisons/);
+    assert.match(service, /\.sort\(compareReportingBoardRows\(filters\)\)/);
     assert.match(service, /caseType === "comparison"/);
     assert.match(comparisonService, /doctor_portal\.comparison_case_assignments/);
     assert.doesNotMatch(comparisonService, /doctor_portal\.case_team_assignments/);
+  });
+
+  it("parses caseSource and keeps it in saved-view filter narrowing", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const frontendTypes = readFileSync(`${root}/frontend/src/types/api.ts`, "utf8");
+
+    assert.match(routes, /REPORTING_BOARD_CASE_SOURCES = new Set\(\["all", "appointments", "comparisons"\]\)/);
+    assert.match(routes, /caseSource: optionalCaseSource\(query\.caseSource\)/);
+    assert.match(routes, /caseSource: optionalCaseSource\(body\.caseSource\)/);
+    assert.match(service, /caseSource: input\.caseSource \?\? "all"/);
+    assert.match(service, /"caseSource"/);
+    assert.match(frontendTypes, /ReportingBoardCaseSource = "all" \| "appointments" \| "comparisons"/);
   });
 
   it("keeps comparison mobile saved views and notifications case-type aware", () => {
@@ -50,7 +67,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const comparisonService = readFileSync(`${root}/src/services/comparison-request-service.ts`, "utf8");
     const migration = readFileSync(`${root}/src/db/migrations/104_comparison_reporting_board_notifications.sql`, "utf8");
 
-    assert.match(service, /listComparisonReportingBoardRows\(scopedFilters\)/);
+    assert.match(service, /listUnifiedReportingBoardCases\(scopedFilters\)/);
     assert.match(service, /caseKey: row\.caseKey/);
     assert.match(service, /comparisonRequestId: row\.comparisonRequestId/);
     assert.match(publicRoutes, /caseIdentity\(body\)/);

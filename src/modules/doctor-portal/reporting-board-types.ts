@@ -1,6 +1,7 @@
 import type { SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 
 export type ReportingBoardAssignmentStatus = "all" | "unassigned" | "assigned";
+export type ReportingBoardCaseSource = "all" | "appointments" | "comparisons";
 export type ReportingBoardReportStatus =
   | "required_not_final"
   | "final"
@@ -37,6 +38,7 @@ export interface ReportingBoardFilters {
   reportStatus?: ReportingBoardReportStatus | null;
   priorityCode?: string | null;
   q?: string | null;
+  caseSource?: ReportingBoardCaseSource | null;
   appointmentId?: number | null;
   comparisonRequestId?: number | null;
   sortBy?: ReportingBoardSortBy | null;

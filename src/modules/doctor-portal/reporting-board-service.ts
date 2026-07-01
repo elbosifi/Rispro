@@ -59,6 +59,7 @@ interface Actor {
 }
 
 const MAX_CASE_LIST_LIMIT = 300;
+const MAX_UNIFIED_CANDIDATE_FETCH = 3000;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
 const REPORTING_BOARD_SORT_BY = new Set([
@@ -77,6 +78,7 @@ const REPORTING_BOARD_SORT_BY = new Set([
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 let reportStatusChecker = checkSonicDicomReportStatus;
 const reportStatusSnapshot = new Map<number, ReportingBoardCaseRow["reportStatus"]>();
+type EffectiveReportingBoardFilters = Omit<ReportingBoardFilters, "limit" | "offset"> & { limit: number; offset: number };
 
 export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
   reportStatusChecker = checker ?? checkSonicDicomReportStatus;
@@ -175,7 +177,7 @@ function withTimelineMetrics(row: ReportingBoardCaseRow, nowMs = Date.now()): Re
   };
 }
 
-async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters> {
+async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<EffectiveReportingBoardFilters> {
   const settings = await readReportingBoardSettings();
   const cutoffDate =
     input.dateFrom ??
@@ -196,6 +198,7 @@ async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Requ
     caseCategory: input.caseCategory ?? null,
     priorityCode: input.priorityCode ?? null,
     q: input.q?.trim() || null,
+    caseSource: input.caseSource ?? "all",
     assignedDoctorId: input.assignedDoctorId ?? null,
     modalityId: input.modalityId ?? null,
     modalityCodes: input.modalityCodes ?? null,
@@ -218,6 +221,7 @@ export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, 
     "sortBy",
     "sortDirection",
     "pinUrgentToTop",
+    "caseSource",
   ];
   for (const key of keys) {
     if (savedViewFilters[key] === null || savedViewFilters[key] === undefined || savedViewFilters[key] === "") {
@@ -281,6 +285,129 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
     return resolved.filter((row) => row.requiresReport && row.reportStatus !== "final");
   }
   return resolved.filter((row) => row.reportStatus === reportStatus);
+}
+
+function fetchLimitForUnifiedCandidates(filters: EffectiveReportingBoardFilters): number {
+  const requestedWindow = filters.limit + filters.offset;
+  const needsPostFilter = Boolean(filters.reportStatus && filters.reportStatus !== "all");
+  const multiplier = needsPostFilter ? 5 : 2;
+  return Math.min(MAX_UNIFIED_CANDIDATE_FETCH, Math.max(100, requestedWindow * multiplier));
+}
+
+function sourceAllowsAppointments(caseSource: ReportingBoardFilters["caseSource"]): boolean {
+  return !caseSource || caseSource === "all" || caseSource === "appointments";
+}
+
+function sourceAllowsComparisons(caseSource: ReportingBoardFilters["caseSource"]): boolean {
+  return !caseSource || caseSource === "all" || caseSource === "comparisons";
+}
+
+function tieBreakCase(left: ReportingBoardCaseRow, right: ReportingBoardCaseRow): number {
+  const leftType = left.caseType === "appointment" ? 0 : 1;
+  const rightType = right.caseType === "appointment" ? 0 : 1;
+  return leftType - rightType || left.appointmentId - right.appointmentId || (left.comparisonRequestId ?? 0) - (right.comparisonRequestId ?? 0);
+}
+
+function compareText(left: string | null | undefined, right: string | null | undefined, direction: ReportingBoardFilters["sortDirection"]): number {
+  const result = String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true, sensitivity: "base" });
+  return direction === "desc" ? -result : result;
+}
+
+function compareNumber(
+  left: number | null | undefined,
+  right: number | null | undefined,
+  direction: ReportingBoardFilters["sortDirection"],
+  nulls: "first" | "last" = "last"
+): number {
+  const leftMissing = left === null || left === undefined;
+  const rightMissing = right === null || right === undefined;
+  if (leftMissing || rightMissing) {
+    if (leftMissing && rightMissing) return 0;
+    return leftMissing === (nulls === "first") ? -1 : 1;
+  }
+  const result = left - right;
+  return direction === "desc" ? -result : result;
+}
+
+function compareTimestamp(
+  left: string | null | undefined,
+  right: string | null | undefined,
+  direction: ReportingBoardFilters["sortDirection"],
+  nulls: "first" | "last" = "last"
+): number {
+  const leftMs = left ? Date.parse(left) : NaN;
+  const rightMs = right ? Date.parse(right) : NaN;
+  const leftMissing = Number.isNaN(leftMs);
+  const rightMissing = Number.isNaN(rightMs);
+  if (leftMissing || rightMissing) {
+    if (leftMissing && rightMissing) return 0;
+    return leftMissing === (nulls === "first") ? -1 : 1;
+  }
+  const result = leftMs - rightMs;
+  return direction === "desc" ? -result : result;
+}
+
+function priorityPinRank(row: ReportingBoardCaseRow): number {
+  const priority = String(row.reportingPriorityCode || "").toLowerCase();
+  if (priority === "stat") return 0;
+  if (priority === "urgent") return 1;
+  return 2;
+}
+
+function compareReportingBoardRows(filters: EffectiveReportingBoardFilters) {
+  const direction = filters.sortDirection ?? "asc";
+  const sortBy = filters.sortBy ?? "priority_study_date";
+  return (left: ReportingBoardCaseRow, right: ReportingBoardCaseRow): number => {
+    if (filters.pinUrgentToTop !== false) {
+      const pinned = priorityPinRank(left) - priorityPinRank(right);
+      if (pinned !== 0) return pinned;
+    }
+
+    switch (sortBy) {
+      case "priority_study_date":
+        return (
+          compareNumber(left.reportingPrioritySortOrder, right.reportingPrioritySortOrder, "asc", "last") ||
+          compareTimestamp(left.bookingDate, right.bookingDate, direction) ||
+          compareText(left.bookingTime, right.bookingTime, direction) ||
+          tieBreakCase(left, right)
+        );
+      case "study_date":
+        return compareTimestamp(left.bookingDate, right.bookingDate, direction) || compareText(left.bookingTime, right.bookingTime, direction) || tieBreakCase(left, right);
+      case "accession":
+        return compareText(left.accessionNumber, right.accessionNumber, direction) || tieBreakCase(left, right);
+      case "patient_name":
+        return compareText(left.patientEnglishName ?? left.patientArabicName ?? left.patientMrn, right.patientEnglishName ?? right.patientArabicName ?? right.patientMrn, direction) || tieBreakCase(left, right);
+      case "mrn":
+        return compareText(left.patientMrn, right.patientMrn, direction) || tieBreakCase(left, right);
+      case "exam_type":
+        return compareText(left.examTypeName, right.examTypeName, direction) || tieBreakCase(left, right);
+      case "modality":
+        return compareText(left.modalityCode, right.modalityCode, direction) || tieBreakCase(left, right);
+      case "assigned_doctor":
+        return compareText(left.assignedDoctorName, right.assignedDoctorName, direction) || tieBreakCase(left, right);
+      case "longest_unassigned":
+        return compareNumber(left.completedUnassignedAgeMinutes, right.completedUnassignedAgeMinutes, "desc", "last") || tieBreakCase(left, right);
+      case "longest_assigned_not_final":
+        return compareNumber(left.currentAssignmentAgeMinutes, right.currentAssignmentAgeMinutes, "desc", "last") || tieBreakCase(left, right);
+      case "oldest_completed":
+        return compareTimestamp(left.completedAt, right.completedAt, direction, "last") || tieBreakCase(left, right);
+      default:
+        return tieBreakCase(left, right);
+    }
+  };
+}
+
+async function listUnifiedReportingBoardCases(filters: EffectiveReportingBoardFilters): Promise<ReportingBoardCaseRow[]> {
+  const fetchLimit = fetchLimitForUnifiedCandidates(filters);
+  const sourceFilters = { ...filters, limit: fetchLimit, offset: 0 };
+  const [appointmentRows, comparisonRows] = await Promise.all([
+    sourceAllowsAppointments(filters.caseSource) ? listReportingBoardCaseCandidates(sourceFilters) : Promise.resolve([]),
+    sourceAllowsComparisons(filters.caseSource) ? listComparisonReportingBoardRows(sourceFilters) : Promise.resolve([]),
+  ]);
+  const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
+  return resolved
+    .sort(compareReportingBoardRows(filters))
+    .slice(filters.offset, filters.offset + filters.limit);
 }
 
 type ReportingBoardStatsInputRow = ReportingBoardStatsBaseRow & Partial<Pick<ReportingBoardCaseRow, "reportStatus">>;
@@ -446,9 +573,7 @@ export async function getReportingBoardCases(actor: Actor, input: ReportingBoard
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  const rows = await listReportingBoardCaseCandidates(scopedFilters);
-  const comparisonRows = await listComparisonReportingBoardRows(scopedFilters);
-  const cases = await applyReportStatuses([...rows, ...comparisonRows], filters.reportStatus);
+  const cases = await listUnifiedReportingBoardCases(scopedFilters);
   return { cases, filters };
 }
 
@@ -462,14 +587,12 @@ export async function getReportingBoardStats(actor: Actor, input: ReportingBoard
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
   if (filters.reportStatus && filters.reportStatus !== "all") {
-    const rows = await listReportingBoardCaseCandidates(scopedFilters);
-    const comparisonRows = await listComparisonReportingBoardRows(scopedFilters);
-    const cases = await applyReportStatuses([...rows, ...comparisonRows], filters.reportStatus);
+    const cases = await listUnifiedReportingBoardCases({ ...scopedFilters, limit: MAX_UNIFIED_CANDIDATE_FETCH, offset: 0 });
     return { filters, ...aggregateReportingBoardStats(cases) };
   }
   const rows = [
-    ...(await listReportingBoardStatsRows(scopedFilters)),
-    ...(await listComparisonReportingBoardStatsRows(scopedFilters)),
+    ...(sourceAllowsAppointments(filters.caseSource) ? await listReportingBoardStatsRows(scopedFilters) : []),
+    ...(sourceAllowsComparisons(filters.caseSource) ? await listComparisonReportingBoardStatsRows(scopedFilters) : []),
   ].filter((row) => matchesStatsReportStatus(row, filters.reportStatus));
   return { filters, ...aggregateReportingBoardStats(rows) };
 }
@@ -639,9 +762,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
   const settings = await readReportingBoardSettings();
   const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
-  const rows = await listReportingBoardCaseCandidates(scopedFilters);
-  const comparisonRows = await listComparisonReportingBoardRows(scopedFilters);
-  const cases = await applyReportStatuses([...rows, ...comparisonRows], filters.reportStatus);
+  const cases = await listUnifiedReportingBoardCases(scopedFilters);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
 
   await insertDoctorAuditEvent(pool, {

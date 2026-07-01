@@ -372,6 +372,7 @@ export interface DoctorCaseAssignmentSummary {
 }
 
 export type ReportingBoardAssignmentStatus = "all" | "unassigned" | "assigned";
+export type ReportingBoardCaseSource = "all" | "appointments" | "comparisons";
 export type ReportingBoardReportStatus = "required_not_final" | "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | "all";
 
 export interface ReportingBoardFilters {
@@ -388,6 +389,7 @@ export interface ReportingBoardFilters {
   reportStatus?: ReportingBoardReportStatus | null;
   priorityCode?: string | null;
   q?: string | null;
+  caseSource?: ReportingBoardCaseSource | null;
   appointmentId?: number | null;
   sortBy?: ReportingBoardSortBy | null;
   sortDirection?: ReportingBoardSortDirection | null;

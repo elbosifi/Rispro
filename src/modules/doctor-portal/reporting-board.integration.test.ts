@@ -251,6 +251,63 @@ async function patientIdForBooking(bookingId: number): Promise<number> {
   return Number(result.rows[0].patient_id);
 }
 
+async function createComparisonRequestForBooking(bookingId: number, createdAt: string, reason: string): Promise<number> {
+  const result = await pool.query<{ id: string }>(
+    `
+      insert into comparison_requests (
+        patient_id,
+        linked_previous_booking_id,
+        linked_previous_study_uid,
+        linked_previous_accession_number,
+        linked_modality_id,
+        linked_modality_code,
+        linked_exam_type_id,
+        linked_exam_name,
+        linked_study_date,
+        reason,
+        status,
+        materials_confirmed,
+        materials_confirmed_by,
+        materials_confirmed_at,
+        image_availability_confirmed,
+        documents_availability_confirmed,
+        selected_prior_confirmed,
+        created_by,
+        created_at,
+        updated_at
+      )
+      select
+        b.patient_id,
+        b.id,
+        b.study_instance_uid,
+        ('V2-' || lpad(b.id::text, 6, '0')),
+        b.modality_id,
+        m.code,
+        b.exam_type_id,
+        et.name_en,
+        b.booking_date,
+        $2,
+        'ready_for_reporting',
+        true,
+        $3,
+        $4::timestamptz,
+        true,
+        true,
+        true,
+        $3,
+        $4::timestamptz,
+        $4::timestamptz
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      where b.id = $1
+      returning id::text as id
+    `,
+    [bookingId, reason, admin.id, createdAt]
+  );
+  return Number(result.rows[0].id);
+}
+
 async function setPatientIdentifierFields(bookingId: number, input: { mrn?: string | null; identifierValue?: string | null; nationalId?: string | null }) {
   await pool.query(
     `
@@ -352,15 +409,22 @@ async function cleanup() {
     [patientIds, examTypeIds]
   );
   const bookingIds = bookingRows.rows.map((row) => Number(row.id));
+  const comparisonRows = await pool.query<{ id: string }>(
+    `select id::text as id from comparison_requests where patient_id = any($1::bigint[]) or linked_previous_booking_id = any($2::bigint[])`,
+    [patientIds, bookingIds]
+  ).catch(() => ({ rows: [] }));
+  const comparisonRequestIds = comparisonRows.rows.map((row) => Number(row.id));
   const savedViewRows = await pool.query<{ id: string }>(
     `select id::text as id from doctor_portal.reporting_board_saved_views where owner_user_id = any($1::bigint[]) or owner_doctor_id = any($2::bigint[])`,
     [userIds, doctorIds]
   ).catch(() => ({ rows: [] }));
   const savedViewIds = savedViewRows.rows.map((row) => Number(row.id));
 
-  await pool.query(`delete from doctor_portal.reporting_board_notification_events where recipient_user_id = any($1::bigint[]) or recipient_doctor_id = any($2::bigint[]) or appointment_id = any($3::bigint[]) or saved_view_id = any($4::bigint[])`, [userIds, doctorIds, bookingIds, savedViewIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.reporting_board_notification_events where recipient_user_id = any($1::bigint[]) or recipient_doctor_id = any($2::bigint[]) or appointment_id = any($3::bigint[]) or saved_view_id = any($4::bigint[]) or comparison_request_id = any($5::bigint[])`, [userIds, doctorIds, bookingIds, savedViewIds, comparisonRequestIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.reporting_board_saved_views where id = any($1::bigint[])`, [savedViewIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_module_audit_events where actor_user_id = any($1::bigint[]) or actor_doctor_id = any($2::bigint[]) or target_id in (select id from doctor_portal.case_team_assignments where appointment_id = any($3::bigint[]))`, [userIds, doctorIds, bookingIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.comparison_case_assignments where comparison_request_id = any($1::bigint[])`, [comparisonRequestIds]).catch(() => undefined);
+  await pool.query(`delete from comparison_requests where id = any($1::bigint[])`, [comparisonRequestIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_workload_units where appointment_id = any($1::bigint[])`, [bookingIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[])`, [bookingIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
@@ -541,6 +605,10 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 200);
     assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 200);
     assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 404);
+    const caseSourceView = await createSavedView(doctor, true, { caseSource: "comparisons" });
+    const loadedCaseSourceView = await api<{ savedView: { filters: { caseSource?: string } } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${caseSourceView.token}`);
+    assert.equal(loadedCaseSourceView.status, 200);
+    assert.equal(loadedCaseSourceView.data.savedView.filters.caseSource, "comparisons");
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${ownerView.id}`, { method: "PATCH", body: { active: false } })).status, 200);
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 404);
   });
@@ -569,6 +637,60 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const ids = response.data.cases.map((row) => row.appointmentId);
     assert.deepEqual(ids.sort((a, b) => a - b), [ctDraft, mrNoReport].sort((a, b) => a - b));
     assert.ok(response.data.cases.every((row) => ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(row.reportStatus)));
+  });
+
+  it("returns a unified CT/MR appointment and comparison board with caseSource filtering and shared sorting", async () => {
+    guard();
+    const date = addDays(24);
+    const previousDate = addDays(-24);
+    const label = uniq("unified");
+    const ctAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} Zulu appointment`, time: "10:00" });
+    const mrAppointment = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date, patientName: `${label} Yankee appointment`, time: "11:00" });
+    const usAppointment = await createBooking({ modalityId: usModalityId, examTypeId: usExamTypeId, date, patientName: `${label} US appointment`, time: "12:00" });
+    const ctPrevious = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: previousDate, patientName: `${label} Alpha comparison` });
+    const mrPrevious = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date: previousDate, patientName: `${label} Bravo comparison` });
+    const usPrevious = await createBooking({ modalityId: usModalityId, examTypeId: usExamTypeId, date: previousDate, patientName: `${label} US comparison` });
+    const ctComparison = await createComparisonRequestForBooking(ctPrevious, `${date}T08:00:00.000Z`, label);
+    const mrComparison = await createComparisonRequestForBooking(mrPrevious, `${date}T08:05:00.000Z`, label);
+    const usComparison = await createComparisonRequestForBooking(usPrevious, `${date}T08:10:00.000Z`, label);
+    statusByAppointmentId.set(ctAppointment, "draft");
+    statusByAppointmentId.set(mrAppointment, "draft");
+    statusByAppointmentId.set(usAppointment, "draft");
+
+    const baseQuery = `dateFrom=${date}&dateTo=${date}&q=${encodeURIComponent(label)}&reportStatus=required_not_final&sortBy=patient_name&sortDirection=asc&limit=20`;
+    const all = await api<{ cases: Array<{ caseType: string; appointmentId: number; comparisonRequestId: number | null; modalityCode: string; patientEnglishName: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?${baseQuery}&caseSource=all`
+    );
+    assert.equal(all.status, 200);
+    assert.deepEqual(
+      all.data.cases.map((row) => `${row.caseType}:${row.caseType === "comparison" ? row.comparisonRequestId : row.appointmentId}`),
+      [`comparison:${ctComparison}`, `comparison:${mrComparison}`, `appointment:${mrAppointment}`, `appointment:${ctAppointment}`]
+    );
+    assert.equal(all.data.cases.some((row) => row.appointmentId === usAppointment || row.comparisonRequestId === usComparison), false);
+
+    const appointments = await api<{ cases: Array<{ caseType: string; appointmentId: number }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?${baseQuery}&caseSource=appointments`
+    );
+    assert.equal(appointments.status, 200);
+    assert.deepEqual(appointments.data.cases.map((row) => row.caseType), ["appointment", "appointment"]);
+    assert.deepEqual(appointments.data.cases.map((row) => row.appointmentId).sort((a, b) => a - b), [ctAppointment, mrAppointment].sort((a, b) => a - b));
+
+    const comparisons = await api<{ cases: Array<{ caseType: string; comparisonRequestId: number | null }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?${baseQuery}&caseSource=comparisons`
+    );
+    assert.equal(comparisons.status, 200);
+    assert.deepEqual(comparisons.data.cases.map((row) => row.caseType), ["comparison", "comparison"]);
+    assert.deepEqual(comparisons.data.cases.map((row) => row.comparisonRequestId).sort((a, b) => Number(a) - Number(b)), [ctComparison, mrComparison].sort((a, b) => a - b));
+
+    const ctOnly = await api<{ cases: Array<{ caseType: string; modalityCode: string }> }>(
+      supervisor.cookie,
+      `/api/doctor/reporting-board/cases?${baseQuery}&modalityCode=CT&caseSource=all`
+    );
+    assert.equal(ctOnly.status, 200);
+    assert.deepEqual(ctOnly.data.cases.map((row) => `${row.caseType}:${row.modalityCode}`), ["comparison:CT", "appointment:CT"]);
   });
 
   it("exposes patientDicomId from primary patient identifier with legacy fallbacks but never MRN", async () => {

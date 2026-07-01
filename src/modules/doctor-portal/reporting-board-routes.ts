@@ -45,6 +45,7 @@ const REPORTING_BOARD_SORT_BY = new Set([
   "oldest_completed",
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
+const REPORTING_BOARD_CASE_SOURCES = new Set(["all", "appointments", "comparisons"]);
 
 interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;
@@ -105,6 +106,13 @@ function optionalSortDirection(value: unknown): ReportingBoardFilters["sortDirec
   return parsed as ReportingBoardFilters["sortDirection"];
 }
 
+function optionalCaseSource(value: unknown): ReportingBoardFilters["caseSource"] | null {
+  const parsed = asOptionalString(value);
+  if (!parsed) return null;
+  if (!REPORTING_BOARD_CASE_SOURCES.has(parsed)) throw new HttpError(400, "caseSource must be all, appointments, or comparisons.");
+  return parsed as ReportingBoardFilters["caseSource"];
+}
+
 function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
   return {
     dateFrom: asOptionalString(query.dateFrom) ?? null,
@@ -119,6 +127,7 @@ function filtersFromQuery(query: Request["query"]): ReportingBoardFilters {
     reportStatus: (asOptionalString(query.reportStatus) as ReportingBoardFilters["reportStatus"]) ?? null,
     priorityCode: asOptionalString(query.priorityCode) ?? null,
     q: asOptionalString(query.q) ?? null,
+    caseSource: optionalCaseSource(query.caseSource),
     sortBy: optionalSortBy(query.sortBy),
     sortDirection: optionalSortDirection(query.sortDirection),
     pinUrgentToTop: booleanFromQuery(query.pinUrgentToTop),
@@ -134,6 +143,7 @@ function filtersFromBody(value: unknown): ReportingBoardFilters {
     modalityId: optionalPositiveInteger(body.modalityId, "modalityId"),
     assignedDoctorId: optionalPositiveInteger(body.assignedDoctorId, "assignedDoctorId"),
     requiresReport: asOptionalBoolean(body.requiresReport) ?? null,
+    caseSource: optionalCaseSource(body.caseSource),
     sortBy: optionalSortBy(body.sortBy),
     sortDirection: optionalSortDirection(body.sortDirection),
     pinUrgentToTop: asOptionalBoolean(body.pinUrgentToTop) ?? null,

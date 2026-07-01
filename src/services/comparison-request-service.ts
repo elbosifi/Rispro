@@ -670,6 +670,8 @@ function comparisonReportingWhere(filters: ReportingBoardFilters, values: unknow
   if (filters.assignmentStatus === "unassigned") where.push(`cca.id is null`);
   if (filters.assignmentStatus === "assigned") where.push(`cca.id is not null`);
   if (filters.comparisonRequestId) where.push(`cr.id = ${addComparisonFilter(values, filters.comparisonRequestId)}`);
+  if (filters.caseCategory && filters.caseCategory !== "comparison") where.push(`false`);
+  if (filters.priorityCode) where.push(`false`);
   if (filters.requiresReport === false) where.push(`false`);
   if (filters.q) {
     values.push(`%${filters.q.trim().toLowerCase()}%`);

@@ -23,6 +23,9 @@ const fetchRosterDoctorsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const assignReportingBoardCaseMock = vi.fn();
 const unassignReportingBoardCaseMock = vi.fn();
+const assignComparisonRequestMock = vi.fn();
+const unassignComparisonRequestMock = vi.fn();
+const finalizeComparisonRequestMock = vi.fn();
 const markReportingBoardCaseDiscontinuedMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -44,6 +47,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   assignReportingBoardCase: (...args: unknown[]) => assignReportingBoardCaseMock(...args),
   unassignReportingBoardCase: (...args: unknown[]) => unassignReportingBoardCaseMock(...args),
+  assignComparisonRequest: (...args: unknown[]) => assignComparisonRequestMock(...args),
+  unassignComparisonRequest: (...args: unknown[]) => unassignComparisonRequestMock(...args),
+  finalizeComparisonRequest: (...args: unknown[]) => finalizeComparisonRequestMock(...args),
   markReportingBoardCaseDiscontinued: (...args: unknown[]) => markReportingBoardCaseDiscontinuedMock(...args),
 }));
 
@@ -175,9 +181,25 @@ describe("DoctorReportingBoardPage", () => {
       defaultReportStatusFilter: "required_not_final",
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
-    fetchReportingBoardCasesMock.mockResolvedValue({ cases: [caseRow], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [caseRow],
+      filters: {
+        dateFrom: "2026-05-15",
+        dateTo: null,
+        cutoffDate: "2026-05-15",
+        assignmentStatus: "all",
+        reportStatus: "required_not_final",
+        requiresReport: true,
+        caseSource: "all",
+        sortBy: "priority_study_date",
+        sortDirection: "asc",
+        pinUrgentToTop: true,
+        limit: 100,
+        offset: 0,
+      },
+    });
     fetchReportingBoardStatsMock.mockResolvedValue({
-      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final", requiresReport: true, caseSource: "all", limit: 100, offset: 0 },
       summary: {
         total: 12,
         comparisonRequests: 0,
@@ -215,7 +237,7 @@ describe("DoctorReportingBoardPage", () => {
       ],
     });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([
-      { id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent" }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" },
+      { id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent", offset: 50 }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" },
     ]);
     fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 9, ownerUserId: 10, ownerDoctorId: 1, name: "Urgent CT", token: "tok-9", filters: { priorityCode: "urgent" }, notificationSettings: { notifyUnassignedUrgent: true }, active: true, createdAt: "", updatedAt: "" });
     createReportingBoardSavedViewMock.mockResolvedValue({ id: 10, name: "Saved", token: "tok-10", filters: {}, notificationSettings: {}, active: true });
@@ -234,6 +256,9 @@ describe("DoctorReportingBoardPage", () => {
     });
     assignReportingBoardCaseMock.mockResolvedValue({ assignmentId: 100 });
     unassignReportingBoardCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 100 });
+    assignComparisonRequestMock.mockResolvedValue({ assignmentId: 101, comparisonRequestId: 77 });
+    unassignComparisonRequestMock.mockResolvedValue({ unassigned: true, comparisonRequestId: 77, assignmentId: 101 });
+    finalizeComparisonRequestMock.mockResolvedValue({});
     markReportingBoardCaseDiscontinuedMock.mockResolvedValue({ ok: true, status: "discontinued" });
   });
 
@@ -474,6 +499,89 @@ describe("DoctorReportingBoardPage", () => {
 
     await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
     await waitFor(() => expect(fetchReportingBoardStatsMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 100, offset: 0 })));
+  });
+
+  it("renders active filter chips for default-effective filters", async () => {
+    renderPage();
+
+    const strip = (await screen.findByText("Active filters")).closest("div")!;
+    expect(within(strip).getByText(/Date from/)).toBeTruthy();
+    await waitFor(() => expect(within(strip).getByText("2026-05-15")).toBeTruthy());
+    expect(within(strip).getByText("Configured CT/MR")).toBeTruthy();
+    expect(within(strip).getByText("Required not final")).toBeTruthy();
+    expect(within(strip).getByText("Yes")).toBeTruthy();
+    expect(within(strip).getByText("Case type:")).toBeTruthy();
+    expect(within(strip).getByText("Priority + oldest study ASC")).toBeTruthy();
+    expect(within(strip).getByText("100")).toBeTruthy();
+  });
+
+  it("clears a removable chip and resets offset to zero", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Urgent CT" }));
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent", offset: 50 })));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear filter: Priority" }));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: null, offset: 0 })));
+  });
+
+  it("resets filters to the default CT/MR reporting board", async () => {
+    renderPage();
+
+    await screen.findByText("Reporting Assignment Board");
+    fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ caseSource: "comparisons" })));
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default board" }));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({
+      assignmentStatus: "all",
+      reportStatus: "required_not_final",
+      requiresReport: true,
+      caseSource: "all",
+      sortBy: "priority_study_date",
+      sortDirection: "asc",
+      pinUrgentToTop: true,
+      limit: 100,
+      offset: 0,
+    })));
+  });
+
+  it("saves and loads caseSource through saved views", async () => {
+    fetchReportingBoardSavedViewsMock.mockResolvedValue([
+      { id: 12, ownerUserId: 10, ownerDoctorId: 1, name: "Comparisons only", token: "tok-12", filters: { caseSource: "comparisons" }, notificationSettings: {}, active: true, createdAt: "", updatedAt: "" },
+    ]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comparisons only" }));
+
+    await waitFor(() => expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ caseSource: "comparisons" })));
+  });
+
+  it("includes caseSource when saving a new view", async () => {
+    renderPage();
+    await screen.findByText("Reporting Assignment Board");
+
+    fireEvent.change(screen.getByLabelText("Case type"), { target: { value: "comparisons" } });
+    fireEvent.change(screen.getByPlaceholderText("Saved view name"), { target: { value: "Comparison pool" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save new view" }));
+
+    await waitFor(() => expect(createReportingBoardSavedViewMock).toHaveBeenCalledWith(expect.objectContaining({
+      name: "Comparison pool",
+      filters: expect.objectContaining({ caseSource: "comparisons" }),
+    })));
+  });
+
+  it("keeps previous rows visible while refresh is fetching", async () => {
+    renderPage();
+    expect(await screen.findByText("V2-000042")).toBeTruthy();
+
+    fetchReportingBoardCasesMock.mockReturnValue(new Promise(() => undefined));
+    fetchReportingBoardStatsMock.mockReturnValue(new Promise(() => undefined));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(screen.getByText("V2-000042")).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText(/Refreshing/).length).toBeGreaterThan(0));
   });
 
   it("allows a reporting board limit up to 300", async () => {
