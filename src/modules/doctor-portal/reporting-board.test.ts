@@ -43,6 +43,24 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.doesNotMatch(comparisonService, /doctor_portal\.case_team_assignments/);
   });
 
+  it("keeps comparison mobile saved views and notifications case-type aware", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const publicRoutes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-public-routes.ts`, "utf8");
+    const comparisonService = readFileSync(`${root}/src/services/comparison-request-service.ts`, "utf8");
+    const migration = readFileSync(`${root}/src/db/migrations/104_comparison_reporting_board_notifications.sql`, "utf8");
+
+    assert.match(service, /listComparisonReportingBoardRows\(scopedFilters\)/);
+    assert.match(service, /caseKey: row\.caseKey/);
+    assert.match(service, /comparisonRequestId: row\.comparisonRequestId/);
+    assert.match(publicRoutes, /caseIdentity\(body\)/);
+    assert.match(repository, /Comparison case assigned/);
+    assert.match(repository, /comparisonRequestIds/);
+    assert.match(repository, /\/comparisons\/\$\{caseRow\.comparisonRequestId\}/);
+    assert.match(comparisonService, /createAssignedToMeNotifications/);
+    assert.match(migration, /comparison_request_id bigint references comparison_requests\(id\)/);
+  });
+
   it("keeps saved view token loading authenticated and owner-scoped", () => {
     const index = readFileSync(`${root}/src/modules/doctor-portal/index.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");

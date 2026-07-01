@@ -38,6 +38,7 @@ export interface ReportingBoardFilters {
   priorityCode?: string | null;
   q?: string | null;
   appointmentId?: number | null;
+  comparisonRequestId?: number | null;
   sortBy?: ReportingBoardSortBy | null;
   sortDirection?: ReportingBoardSortDirection | null;
   pinUrgentToTop?: boolean | null;
@@ -211,6 +212,7 @@ export interface BulkAssignNextCasesInput {
 
 export interface BulkReassignSelectedCasesInput {
   appointmentIds: number[];
+  comparisonRequestIds?: number[];
   doctorId: number;
   reason?: string | null;
   allowFinal?: boolean | null;
@@ -221,11 +223,13 @@ export interface BulkAssignNextCasesResult {
   assignedCount: number;
   skippedCount: number;
   assignedAppointmentIds: number[];
-  skipped: Array<{ appointmentId: number; reason: string }>;
+  assignedComparisonRequestIds?: number[];
+  skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
 export interface BulkUnassignSelectedCasesInput {
   appointmentIds: number[];
+  comparisonRequestIds?: number[];
   reason?: string | null;
   allowFinal?: boolean | null;
 }
@@ -235,7 +239,8 @@ export interface BulkUnassignSelectedCasesResult {
   unassignedCount: number;
   skippedCount: number;
   unassignedAppointmentIds: number[];
-  skipped: Array<{ appointmentId: number; reason: string }>;
+  unassignedComparisonRequestIds?: number[];
+  skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
 export interface ReportingBoardNotificationEvent {

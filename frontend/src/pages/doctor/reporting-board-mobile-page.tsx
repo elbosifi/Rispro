@@ -39,6 +39,12 @@ function dateTime(row: ReportingBoardMobileCase): string {
   return row.time ? `${row.date} ${row.time}` : row.date;
 }
 
+function mobileCaseIdentity(row: ReportingBoardMobileCase) {
+  return row.caseType === "comparison" && row.comparisonRequestId
+    ? { caseType: "comparison" as const, comparisonRequestId: row.comparisonRequestId }
+    : { caseType: "appointment" as const, appointmentId: row.appointmentId };
+}
+
 function urlBase64ToUint8Array(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
@@ -76,10 +82,16 @@ function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () =
           </div>
           <p className="mt-1 text-sm text-slate-500">MRN {row.mrn ?? "-"} · Accession {row.accessionNumber}</p>
           <div className="mt-3 flex flex-wrap gap-2">
+            {row.caseType === "comparison" && <span className={chipClass("teal")}>Comparison request</span>}
             <span className={chipClass("blue")}>{row.modality}</span>
             {row.exam && <span className={chipClass("purple")}>{row.exam}</span>}
             <span className={chipClass("teal")}>{row.category}</span>
           </div>
+          {row.caseType === "comparison" && (
+            <p className="mt-2 text-xs font-semibold text-slate-500">
+              Prior {row.linkedPreviousAccessionNumber ?? "-"} {row.linkedPreviousStudyDate ? `· ${row.linkedPreviousStudyDate}` : ""}
+            </p>
+          )}
         </div>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
@@ -131,7 +143,7 @@ export function ReportingBoardMobilePage() {
     await queryClient.invalidateQueries({ queryKey: ["reporting-board", "mobile", token] });
   };
   const assignMutation = useMutation({
-    mutationFn: (appointmentId: number) => assignReportingBoardMobileCaseToMe(token, appointmentId),
+    mutationFn: (row: ReportingBoardMobileCase) => assignReportingBoardMobileCaseToMe(token, mobileCaseIdentity(row)),
     onSuccess: async () => {
       setMessage("Case assigned to you.");
       await invalidate();
@@ -139,7 +151,7 @@ export function ReportingBoardMobilePage() {
     onError: (error) => setMessage(error instanceof Error ? error.message : "Assignment failed."),
   });
   const reassignMutation = useMutation({
-    mutationFn: () => reassignReportingBoardMobileCase(token, selectedCase!.appointmentId, Number(reassignDoctorId), reason),
+    mutationFn: () => reassignReportingBoardMobileCase(token, mobileCaseIdentity(selectedCase!), Number(reassignDoctorId), reason),
     onSuccess: async () => {
       setMessage("Case reassigned.");
       setSelectedCase(null);
@@ -148,7 +160,7 @@ export function ReportingBoardMobilePage() {
     onError: (error) => setMessage(error instanceof Error ? error.message : "Reassignment failed."),
   });
   const unassignMutation = useMutation({
-    mutationFn: () => unassignReportingBoardMobileCase(token, selectedCase!.appointmentId, unassignReason.trim()),
+    mutationFn: () => unassignReportingBoardMobileCase(token, mobileCaseIdentity(selectedCase!), unassignReason.trim()),
     onSuccess: async () => {
       setMessage("Case returned to waiting pool.");
       setSelectedCase(null);
@@ -256,7 +268,7 @@ export function ReportingBoardMobilePage() {
       </section>
 
       <section className="mx-auto mt-5 grid max-w-xl gap-3">
-        {data.cases.map((row) => <CaseCard key={row.appointmentId} row={row} onOpen={() => setSelectedCase(row)} />)}
+        {data.cases.map((row) => <CaseCard key={row.caseKey} row={row} onOpen={() => setSelectedCase(row)} />)}
         {data.cases.length === 0 && <p className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-sm text-slate-500">No cases match this saved view.</p>}
       </section>
 
@@ -268,6 +280,7 @@ export function ReportingBoardMobilePage() {
                 <div>
                   <h2 className="text-xl font-bold">{selectedCase.patientName}</h2>
                   <p className="mt-1 text-sm text-slate-500">MRN {selectedCase.mrn ?? "-"} · {selectedCase.accessionNumber}</p>
+                  {selectedCase.caseType === "comparison" && <p className="mt-1 text-xs font-bold uppercase tracking-wide text-teal-700">Comparison request</p>}
                 </div>
                 <button type="button" onClick={() => setSelectedCase(null)} className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold">Close</button>
               </div>
@@ -280,11 +293,12 @@ export function ReportingBoardMobilePage() {
                 <Info icon={<FileText size={15} />} label="Report" value={labelStatus(selectedCase.reportStatus)} />
                 <Info icon={<Clipboard size={15} />} label="Appointment" value={labelStatus(selectedCase.appointmentStatus)} />
                 <Info icon={<Clipboard size={15} />} label="Category" value={selectedCase.category} />
+                {selectedCase.caseType === "comparison" && <Info icon={<Clipboard size={15} />} label="Prior" value={`${selectedCase.linkedPreviousAccessionNumber ?? "-"} ${selectedCase.linkedPreviousStudyDate ?? ""}`.trim()} />}
               </div>
               {message && <p className="mt-4 rounded-xl bg-teal-50 px-3 py-2 text-sm text-teal-700">{message}</p>}
               {!data.allowedActions.readOnly && (
                 <div className="mt-5 grid gap-2">
-                  <button type="button" disabled={assignMutation.isPending} onClick={() => assignMutation.mutate(selectedCase.appointmentId)} className="h-11 rounded-xl bg-teal-600 text-sm font-bold text-white disabled:opacity-50">Assign to me</button>
+                  <button type="button" disabled={assignMutation.isPending} onClick={() => assignMutation.mutate(selectedCase)} className="h-11 rounded-xl bg-teal-600 text-sm font-bold text-white disabled:opacity-50">Assign to me</button>
                   {data.allowedActions.reassign && selectedCase.assignmentStatus === "assigned" && (
                     <div className="grid gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
                       {!unassignOpen ? (

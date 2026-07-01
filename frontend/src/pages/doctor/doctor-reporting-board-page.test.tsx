@@ -124,6 +124,26 @@ const caseRow: ReportingBoardCaseRow = {
   exclusionReason: null,
 };
 
+const comparisonRow: ReportingBoardCaseRow = {
+  ...caseRow,
+  caseType: "comparison",
+  caseKey: "comparison:77",
+  appointmentId: 620,
+  comparisonRequestId: 77,
+  accessionNumber: "CMP-000077",
+  bookingDate: "2026-06-22",
+  bookingTime: null,
+  examTypeName: "Comparison report",
+  linkedPreviousBookingId: 620,
+  linkedPreviousStudyDate: "2026-05-20",
+  linkedPreviousAccessionNumber: "V2-000620",
+  appointmentStatus: "ready_for_reporting",
+  assignedDoctorId: null,
+  assignedDoctorName: null,
+  assignmentStatus: "unassigned",
+  reportStatus: "draft",
+};
+
 function renderPage(path = "/doctor/reporting-board", me: DoctorMe = managerMe) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -204,8 +224,8 @@ describe("DoctorReportingBoardPage", () => {
     subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     sendReportingBoardSavedViewTestPushMock.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
-    bulkReassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, assignedCount: 1, skippedCount: 0, assignedAppointmentIds: [42], skipped: [] });
-    bulkUnassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, unassignedCount: 1, skippedCount: 0, unassignedAppointmentIds: [42], skipped: [] });
+    bulkReassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, assignedCount: 1, skippedCount: 0, assignedAppointmentIds: [42], assignedComparisonRequestIds: [], skipped: [] });
+    bulkUnassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, unassignedCount: 1, skippedCount: 0, unassignedAppointmentIds: [42], unassignedComparisonRequestIds: [], skipped: [] });
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
     fetchAppointmentLookupsMock.mockResolvedValue({
       modalities: [{ id: 1, code: "CT", nameEn: "CT", nameAr: "CT" }],
@@ -327,9 +347,10 @@ describe("DoctorReportingBoardPage", () => {
 
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(within(row).getByRole("button", { name: "Reassign" }));
-    await waitFor(() => expect(within(row).getByRole("combobox")).toBeTruthy());
-    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(within(menu).getByRole("combobox")).toBeTruthy());
+    fireEvent.change(within(menu).getByRole("combobox"), { target: { value: "5" } });
     fireEvent.change(screen.getByPlaceholderText("Notes for doctor"), { target: { value: "normal reassignment" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -348,21 +369,21 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
-    const openStudy = within(row).getByRole("menuitem", { name: "Open this study in SonicDICOM" }) as HTMLAnchorElement;
+    const openStudy = screen.getByRole("menuitem", { name: "Open this study in SonicDICOM" }) as HTMLAnchorElement;
     expect(openStudy.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom?scope=study");
     expect(openStudy.getAttribute("target")).toBe("_blank");
     expect(openStudy.getAttribute("rel")).toBe("noopener noreferrer");
     expect(openStudy.getAttribute("href")).not.toMatch(/username|password|https?:/i);
-    const openPatient = within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }) as HTMLAnchorElement;
+    const openPatient = screen.getByRole("menuitem", { name: "Open patient list in SonicDICOM" }) as HTMLAnchorElement;
     expect(openPatient.getAttribute("href")).toBe("/api/doctor/reporting-board/cases/42/open-sonicdicom?scope=patient");
     expect(openPatient.getAttribute("href")).not.toMatch(/username|password|DICOM-PRIMARY-7|MRN-7|7$/i);
-    expect(within(row).queryByRole("menuitem", { name: "Open patient studies in SonicDICOM" })).toBeNull();
-    expect(within(row).queryByRole("menuitem", { name: "Open this study in RadiAnt" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Open patient studies in SonicDICOM" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Open this study in RadiAnt" })).toBeNull();
 
-    fireEvent.click(within(row).getByRole("menuitem", { name: "Copy accession number" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy accession number" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("V2-000042"));
-    expect(await within(row).findByText("Accession copied.")).toBeTruthy();
-    expect(within(row).getByText("View appointment")).toBeTruthy();
+    expect(await screen.findByText("Accession copied.")).toBeTruthy();
+    expect(screen.getByText("View appointment")).toBeTruthy();
   });
 
   it("shows RadiAnt actions only on Windows and builds tag search URLs", async () => {
@@ -373,9 +394,9 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
-    const openStudy = within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
+    const openStudy = screen.getByRole("menuitem", { name: "Open this study in RadiAnt" }) as HTMLAnchorElement;
     expect(openStudy.getAttribute("href")).toBe("radiant:///?n=pstv&v=00080050&v=%22V2-000042%22");
-    const openPatient = within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
+    const openPatient = screen.getByRole("menuitem", { name: "Open patient studies in RadiAnt" }) as HTMLAnchorElement;
     expect(openPatient.getAttribute("href")).toBe("radiant:///?n=pstv&v=00100020&v=%22DICOM-PRIMARY-7%22");
     expect(openPatient.getAttribute("href")).not.toMatch(/MRN-7|%227%22/);
   });
@@ -392,8 +413,8 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
-    expect(within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
-    expect(within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Open patient list in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("disables viewer actions when accession and patient identifiers are missing", async () => {
@@ -408,11 +429,11 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("Alpha Patient").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: /Open actions for/ }));
 
-    expect(within(row).getByRole("menuitem", { name: "Open this study in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
-    expect(within(row).getByRole("menuitem", { name: "Open patient list in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
-    expect(within(row).getByRole("menuitem", { name: "Open this study in RadiAnt" }).hasAttribute("disabled")).toBe(true);
-    expect(within(row).getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
-    expect(within(row).getByRole("menuitem", { name: "Copy accession number" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Open this study in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Open patient list in SonicDICOM" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Open this study in RadiAnt" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Open patient studies in RadiAnt" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("menuitem", { name: "Copy accession number" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("shows discontinued action only to managers and requires a reason before submitting", async () => {
@@ -421,7 +442,7 @@ describe("DoctorReportingBoardPage", () => {
 
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(within(row).getByRole("menuitem", { name: "Mark study as discontinued" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark study as discontinued" }));
 
     expect(screen.getByRole("heading", { name: "Mark study as discontinued?" })).toBeTruthy();
     const submit = screen.getByRole("button", { name: "Mark discontinued" }) as HTMLButtonElement;
@@ -444,8 +465,8 @@ describe("DoctorReportingBoardPage", () => {
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
 
-    expect(within(row).queryByRole("menuitem", { name: "Mark study as discontinued" })).toBeNull();
-    expect(within(row).getByText("View appointment")).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Mark study as discontinued" })).toBeNull();
+    expect(screen.getByText("View appointment")).toBeTruthy();
   });
 
   it("uses a default board limit of 100", async () => {
@@ -662,17 +683,19 @@ describe("DoctorReportingBoardPage", () => {
 
     const assignedRow = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(assignedRow).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(within(assignedRow).getByRole("button", { name: "Reassign" }));
-    await waitFor(() => expect(within(screen.getByText("V2-000042").closest("tr")!).getByRole("option", { name: "Return to waiting pool" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+    let menu = await screen.findByRole("menu");
+    await waitFor(() => expect(within(menu).getByRole("option", { name: "Return to waiting pool" })).toBeTruthy());
 
     const unassignedRow = screen.getByText("V2-000043").closest("tr")!;
     fireEvent.click(within(unassignedRow).getByRole("button", { name: "Open actions for V2-000043" }));
-    fireEvent.click(within(unassignedRow).getByRole("button", { name: "Assign" }));
-    const assignedSelect = within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox");
-    const unassignedSelect = within(screen.getByText("V2-000043").closest("tr")!).getByRole("combobox");
-    expect(within(unassignedSelect).queryByRole("option", { name: "Return to waiting pool" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() => expect(screen.getAllByRole("menu").length).toBeGreaterThan(1));
+    menu = screen.getAllByRole("menu").at(-1)!;
+    expect(within(menu).queryByRole("option", { name: "Return to waiting pool" })).toBeNull();
 
-    fireEvent.change(assignedSelect, { target: { value: "__UNASSIGN__" } });
+    menu = screen.getAllByRole("menu")[0];
+    fireEvent.change(within(menu).getByRole("combobox"), { target: { value: "__UNASSIGN__" } });
     expect(await screen.findByText(/removes the assigned doctor and returns the case to the unassigned pool/i)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Confirm return to waiting pool" }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -694,9 +717,10 @@ describe("DoctorReportingBoardPage", () => {
 
     const row = screen.getByText("V2-000042").closest("tr")!;
     fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
-    fireEvent.click(within(row).getByRole("button", { name: "Reassign" }));
-    await waitFor(() => expect(within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox")).toBeTruthy());
-    const combobox = within(screen.getByText("V2-000042").closest("tr")!).getByRole("combobox");
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(within(menu).getByRole("combobox")).toBeTruthy());
+    const combobox = within(menu).getByRole("combobox");
     fireEvent.change(combobox, { target: { value: "5" } });
     fireEvent.change(screen.getByPlaceholderText("Notes for doctor"), { target: { value: "normal reassignment" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -719,10 +743,45 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.change(screen.getByPlaceholderText("Reason for returning selected cases"), { target: { value: "rebalance workload" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm return selected to waiting pool" }));
 
-    await waitFor(() => expect(bulkUnassignSelectedReportingCasesMock).toHaveBeenCalledWith({ appointmentIds: [42], reason: "rebalance workload" }));
+    await waitFor(() => expect(bulkUnassignSelectedReportingCasesMock).toHaveBeenCalledWith({ appointmentIds: [42], comparisonRequestIds: [], reason: "rebalance workload" }));
     await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
     await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
     await waitFor(() => expect(fetchReportingBoardStatsMock.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("selects comparison rows and sends comparison IDs to selected bulk actions", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [caseRow, comparisonRow],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+    bulkReassignSelectedReportingCasesMock.mockResolvedValue({
+      requestedCount: 2,
+      assignedCount: 2,
+      skippedCount: 0,
+      assignedAppointmentIds: [42],
+      assignedComparisonRequestIds: [77],
+      skipped: [],
+    });
+    renderPage();
+
+    await screen.findByText("V2-000042");
+    await screen.findByText("CMP-000077");
+    fireEvent.click(screen.getByLabelText("Select case V2-000042"));
+    fireEvent.click(screen.getByLabelText("Select case CMP-000077"));
+    expect(await screen.findByText("2 selected")).toBeTruthy();
+    expect((screen.getByLabelText("Select case CMP-000077") as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Reassign to"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Reason/note"), { target: { value: "mixed reporting queue" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reassign selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm reassignment" }));
+
+    await waitFor(() => expect(bulkReassignSelectedReportingCasesMock).toHaveBeenCalledWith({
+      appointmentIds: [42],
+      comparisonRequestIds: [77],
+      doctorId: 5,
+      reason: "mixed reporting queue",
+    }));
   });
 
   it("does not expose editable settings for non-superadmin managers", async () => {

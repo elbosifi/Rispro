@@ -1163,6 +1163,22 @@ function reportingCaseNotificationText(row: ReportingBoardCaseRow | null): { tit
     };
   }
   const patient = row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`;
+  if (row.caseType === "comparison") {
+    const prior = [
+      row.modalityCode,
+      row.linkedPreviousAccessionNumber ? `prior ${row.linkedPreviousAccessionNumber}` : null,
+      row.linkedPreviousStudyDate ?? null,
+    ].filter(Boolean).join(" ");
+    return {
+      title: "Comparison case assigned",
+      body: [
+        `Comparison request for ${patient}`,
+        row.patientMrn ? `MRN ${row.patientMrn}` : null,
+        prior || row.modalityCode,
+        row.assignedDoctorName ? `Assigned to ${row.assignedDoctorName}` : "Assigned to you",
+      ].filter(Boolean).join(" - "),
+    };
+  }
   const exam = row.examTypeName ? `${row.modalityCode} ${row.examTypeName}` : row.modalityCode;
   const appointmentTime = row.bookingTime ? `${row.bookingDate} ${row.bookingTime}` : row.bookingDate;
   const priority = row.reportingPriorityName || row.reportingPriorityCode;
@@ -1241,9 +1257,12 @@ export async function sendReportingBoardSavedViewTestPush(input: {
 
 export async function createAssignedToMeNotifications(input: {
   doctorId: number;
-  appointmentIds: number[];
+  appointmentIds?: number[];
+  comparisonRequestIds?: number[];
 }): Promise<number> {
-  if (input.appointmentIds.length === 0) return 0;
+  const appointmentIds = input.appointmentIds ?? [];
+  const comparisonRequestIds = input.comparisonRequestIds ?? [];
+  if (appointmentIds.length === 0 && comparisonRequestIds.length === 0) return 0;
   const targets = await pool.query<NotificationTargetRow>(
     `
       select
@@ -1266,11 +1285,22 @@ export async function createAssignedToMeNotifications(input: {
 
   let created = 0;
   const pushNotifications: CreatedNotificationRow[] = [];
+  const notificationCases: Array<{ caseType: "appointment"; id: number } | { caseType: "comparison"; id: number }> = [
+    ...appointmentIds.map((id) => ({ caseType: "appointment" as const, id })),
+    ...comparisonRequestIds.map((id) => ({ caseType: "comparison" as const, id })),
+  ];
   for (const target of targets.rows) {
-    for (const appointmentId of input.appointmentIds) {
-      const [caseRow] = await listReportingBoardCaseCandidates({ appointmentId, limit: 1, offset: 0 });
+    for (const notificationCase of notificationCases) {
+      const [caseRow] = notificationCase.caseType === "appointment"
+        ? await listReportingBoardCaseCandidates({ appointmentId: notificationCase.id, limit: 1, offset: 0 })
+        : await import("../../services/comparison-request-service.js").then((module) =>
+            module.listComparisonReportingBoardRows({ comparisonRequestId: notificationCase.id, reportStatus: "all", limit: 1, offset: 0 })
+          );
       const text = reportingCaseNotificationText(caseRow ?? null);
-      const dedupeKey = `reporting_case_assigned_to_me:${target.savedViewId}:${target.recipientDoctorId}:${appointmentId}`;
+      const actionUrl = caseRow?.caseType === "comparison" && caseRow.comparisonRequestId
+        ? `/comparisons/${caseRow.comparisonRequestId}`
+        : `/doctor/reporting-board/saved/${target.token}`;
+      const dedupeKey = `reporting_case_assigned_to_me:${target.savedViewId}:${target.recipientDoctorId}:${notificationCase.caseType}:${notificationCase.id}`;
       const result = await pool.query<CreatedNotificationRow>(
         `
           insert into doctor_portal.reporting_board_notification_events (
@@ -1278,6 +1308,7 @@ export async function createAssignedToMeNotifications(input: {
             recipient_user_id,
             recipient_doctor_id,
             appointment_id,
+            comparison_request_id,
             event_type,
             delivery_channel,
             status,
@@ -1293,6 +1324,7 @@ export async function createAssignedToMeNotifications(input: {
             $2,
             $3,
             $4,
+            $10,
             'reporting_case_assigned_to_me',
             'in_app',
             'delivered',
@@ -1315,12 +1347,13 @@ export async function createAssignedToMeNotifications(input: {
           target.savedViewId,
           target.recipientUserId,
           target.recipientDoctorId,
-          appointmentId,
-          `/doctor/reporting-board/saved/${target.token}`,
+          notificationCase.caseType === "appointment" ? notificationCase.id : null,
+          actionUrl,
           dedupeKey,
-          JSON.stringify({ notificationType: "reporting_case_assigned_to_me" }),
+          JSON.stringify({ notificationType: "reporting_case_assigned_to_me", caseType: notificationCase.caseType }),
           text.title,
           text.body,
+          notificationCase.caseType === "comparison" ? notificationCase.id : null,
         ]
       );
       created += Number(result.rowCount ?? 0);

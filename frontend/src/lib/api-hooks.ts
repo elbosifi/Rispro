@@ -866,24 +866,28 @@ export async function subscribeReportingBoardMobilePush(token: string, subscript
   });
 }
 
-export async function assignReportingBoardMobileCaseToMe(token: string, appointmentId: number): Promise<{ assignmentId: number }> {
+type ReportingBoardMobileCaseIdentity =
+  | { caseType: "appointment"; appointmentId: number }
+  | { caseType: "comparison"; comparisonRequestId: number };
+
+export async function assignReportingBoardMobileCaseToMe(token: string, identity: ReportingBoardMobileCaseIdentity): Promise<{ assignmentId: number }> {
   return api<{ assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/assign-to-me`, {
     method: "POST",
-    body: JSON.stringify({ appointmentId }),
+    body: JSON.stringify(identity),
   });
 }
 
-export async function reassignReportingBoardMobileCase(token: string, appointmentId: number, doctorId: number, reason: string): Promise<{ assignmentId: number }> {
+export async function reassignReportingBoardMobileCase(token: string, identity: ReportingBoardMobileCaseIdentity, doctorId: number, reason: string): Promise<{ assignmentId: number }> {
   return api<{ assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/reassign`, {
     method: "POST",
-    body: JSON.stringify({ appointmentId, doctorId, reason }),
+    body: JSON.stringify({ ...identity, doctorId, reason }),
   });
 }
 
-export async function unassignReportingBoardMobileCase(token: string, appointmentId: number, reason: string): Promise<{ unassigned: true; appointmentId: number; assignmentId: number }> {
-  return api<{ unassigned: true; appointmentId: number; assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/unassign`, {
+export async function unassignReportingBoardMobileCase(token: string, identity: ReportingBoardMobileCaseIdentity, reason: string): Promise<{ unassigned: true; appointmentId?: number; comparisonRequestId?: number; assignmentId: number }> {
+  return api<{ unassigned: true; appointmentId?: number; comparisonRequestId?: number; assignmentId: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/unassign`, {
     method: "POST",
-    body: JSON.stringify({ appointmentId, reason }),
+    body: JSON.stringify({ ...identity, reason }),
   });
 }
 

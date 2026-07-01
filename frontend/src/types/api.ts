@@ -611,7 +611,8 @@ export interface ReportingBoardBulkAssignResult {
   assignedCount: number;
   skippedCount: number;
   assignedAppointmentIds: number[];
-  skipped: Array<{ appointmentId: number; reason: string }>;
+  assignedComparisonRequestIds?: number[];
+  skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
 export interface ReportingBoardBulkUnassignResult {
@@ -619,11 +620,13 @@ export interface ReportingBoardBulkUnassignResult {
   unassignedCount: number;
   skippedCount: number;
   unassignedAppointmentIds: number[];
-  skipped: Array<{ appointmentId: number; reason: string }>;
+  unassignedComparisonRequestIds?: number[];
+  skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
 export interface ReportingBoardBulkReassignSelectedPayload {
   appointmentIds: number[];
+  comparisonRequestIds?: number[];
   doctorId: number;
   reason?: string | null;
   allowFinal?: boolean;
@@ -631,6 +634,7 @@ export interface ReportingBoardBulkReassignSelectedPayload {
 
 export interface ReportingBoardBulkUnassignSelectedPayload {
   appointmentIds: number[];
+  comparisonRequestIds?: number[];
   reason: string;
   allowFinal?: boolean;
 }
@@ -654,7 +658,10 @@ export interface ReportingBoardPushConfig {
 }
 
 export interface ReportingBoardMobileCase {
+  caseType: "appointment" | "comparison";
+  caseKey: string;
   appointmentId: number;
+  comparisonRequestId: number | null;
   patientName: string;
   mrn: string | null;
   accessionNumber: string;
@@ -671,6 +678,8 @@ export interface ReportingBoardMobileCase {
   assignmentStatus: "assigned" | "unassigned";
   canAssign: boolean;
   exclusionReason: string | null;
+  linkedPreviousStudyDate?: string | null;
+  linkedPreviousAccessionNumber?: string | null;
 }
 
 export interface ReportingBoardMobileResponse {

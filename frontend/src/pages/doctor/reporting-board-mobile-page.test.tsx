@@ -32,7 +32,10 @@ const mobileResponse: ReportingBoardMobileResponse = {
   refreshedAt: "2026-05-29T12:32:00.000Z",
   cases: [
     {
+      caseType: "appointment",
+      caseKey: "appointment:42",
       appointmentId: 42,
+      comparisonRequestId: null,
       patientName: "Mohammed Bashir Meftah",
       mrn: "005279",
       accessionNumber: "V2-001579",
@@ -51,7 +54,10 @@ const mobileResponse: ReportingBoardMobileResponse = {
       exclusionReason: null,
     },
     {
+      caseType: "appointment",
+      caseKey: "appointment:43",
       appointmentId: 43,
+      comparisonRequestId: null,
       patientName: "Abeer Farhat Salem Al-Sadeq",
       mrn: "001628",
       accessionNumber: "V2-001586",
@@ -68,6 +74,30 @@ const mobileResponse: ReportingBoardMobileResponse = {
       assignmentStatus: "unassigned",
       canAssign: true,
       exclusionReason: null,
+    },
+    {
+      caseType: "comparison",
+      caseKey: "comparison:77",
+      appointmentId: 620,
+      comparisonRequestId: 77,
+      patientName: "Comparison Patient",
+      mrn: "009977",
+      accessionNumber: "CMP-000077",
+      date: "2026-06-22",
+      time: null,
+      modality: "CT",
+      exam: "Comparison report",
+      category: "comparison",
+      assignedDoctor: null,
+      priority: "Normal",
+      priorityCode: null,
+      reportStatus: "draft",
+      appointmentStatus: "ready_for_reporting",
+      assignmentStatus: "unassigned",
+      canAssign: true,
+      exclusionReason: null,
+      linkedPreviousStudyDate: "2026-05-20",
+      linkedPreviousAccessionNumber: "V2-000620",
     },
   ],
 };
@@ -103,12 +133,31 @@ describe("ReportingBoardMobilePage", () => {
     expect(await screen.findByText("Seraj - Reporting Board")).toBeTruthy();
     expect(screen.getByText("Total")).toBeTruthy();
     expect(screen.getByText("Mohammed Bashir Meftah")).toBeTruthy();
+    expect(screen.getByText("Comparison Patient")).toBeTruthy();
+    expect(screen.getByText("Comparison request")).toBeTruthy();
+    expect(screen.getByText(/Prior V2-000620/)).toBeTruthy();
     expect(screen.getByText(/V2-001579/)).toBeTruthy();
     expect(screen.queryByText("Reporting Assignment Board")).toBeNull();
     expect(screen.queryByText("Saved views")).toBeNull();
     expect(screen.queryByText("Board settings")).toBeNull();
     expect(screen.getByText("Read-only via QR.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Assign to me" })).toBeNull();
+  });
+
+  it("uses comparison identity for mobile saved-view actions", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true, reassign: true },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Comparison Patient"));
+    fireEvent.click(await screen.findByRole("button", { name: "Assign to me" }));
+
+    await waitFor(() => expect(assignReportingBoardMobileCaseToMeMock).toHaveBeenCalledWith(
+      "tok-9",
+      expect.objectContaining({ caseType: "comparison", comparisonRequestId: 77 })
+    ));
   });
 
   it("renders the QR reporting view as English LTR", async () => {
@@ -182,7 +231,11 @@ describe("ReportingBoardMobilePage", () => {
     fireEvent.change(screen.getByPlaceholderText("Reason for returning to waiting pool"), { target: { value: "mobile workload rebalance" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm return to waiting pool" }));
 
-    await waitFor(() => expect(unassignReportingBoardMobileCaseMock).toHaveBeenCalledWith("tok-9", 42, "mobile workload rebalance"));
+    await waitFor(() => expect(unassignReportingBoardMobileCaseMock).toHaveBeenCalledWith(
+      "tok-9",
+      { caseType: "appointment", appointmentId: 42 },
+      "mobile workload rebalance"
+    ));
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledTimes(2));
   });
 

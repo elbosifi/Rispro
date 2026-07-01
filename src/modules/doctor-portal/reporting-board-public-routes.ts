@@ -43,6 +43,19 @@ function optionalPositiveInteger(value: unknown, field: string): number | null {
   return requiredPositiveInteger(value, field);
 }
 
+function caseIdentity(body: Record<string, unknown>) {
+  if (body.caseType === "comparison" || body.comparisonRequestId !== undefined) {
+    return {
+      caseType: "comparison" as const,
+      comparisonRequestId: requiredPositiveInteger(body.comparisonRequestId, "comparisonRequestId"),
+    };
+  }
+  return {
+    caseType: "appointment" as const,
+    appointmentId: requiredPositiveInteger(body.appointmentId, "appointmentId"),
+  };
+}
+
 function mobileFilters(query: Request["query"]): ReportingBoardFilters {
   return {
     q: asOptionalString(query.q) ?? null,
@@ -84,7 +97,7 @@ router.get(
     res.json(await getPublicReportingBoardMobileCase(
       actor(req),
       String(req.params.token || ""),
-      requiredPositiveInteger(req.params.caseId, "caseId"),
+      { caseType: "appointment", appointmentId: requiredPositiveInteger(req.params.caseId, "caseId") },
       mobileFilters(req.query)
     ));
   })
@@ -114,11 +127,12 @@ router.post(
   "/saved-views/public/:token/mobile/assign-to-me",
   requireAuth,
   asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
     res.json(await assignReportingBoardMobileCaseToMe(
       actor(req)!,
       String(req.params.token || ""),
-      requiredPositiveInteger((req.body as Record<string, unknown> | undefined)?.appointmentId, "appointmentId"),
-      asOptionalString((req.body as Record<string, unknown> | undefined)?.reason) ?? null
+      caseIdentity(body),
+      asOptionalString(body.reason) ?? null
     ));
   })
 );
@@ -131,7 +145,7 @@ router.post(
     res.json(await reassignReportingBoardMobileCase(
       actor(req)!,
       String(req.params.token || ""),
-      requiredPositiveInteger(body.appointmentId, "appointmentId"),
+      caseIdentity(body),
       requiredPositiveInteger(body.doctorId, "doctorId"),
       asOptionalString(body.reason) ?? null
     ));
@@ -146,7 +160,7 @@ router.post(
     res.json(await unassignReportingBoardMobileCase(
       actor(req)!,
       String(req.params.token || ""),
-      requiredPositiveInteger(body.appointmentId, "appointmentId"),
+      caseIdentity(body),
       asOptionalString(body.reason) ?? null
     ));
   })

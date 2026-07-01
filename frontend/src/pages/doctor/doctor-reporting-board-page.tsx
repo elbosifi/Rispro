@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
@@ -593,6 +594,9 @@ function RowActionMenu({
   const [copyMessage, setCopyMessage] = useState("");
   const [showFinalize, setShowFinalize] = useState(false);
   const [finalText, setFinalText] = useState("");
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; minWidth: number } | null>(null);
   const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientDicomId = String(row.patientDicomId || "").trim();
@@ -607,9 +611,139 @@ function RowActionMenu({
     }
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const menuWidth = 256;
+      const estimatedHeight = row.caseType === "comparison" ? 360 : 320;
+      const viewportPadding = 8;
+      const opensUp = rect.bottom + estimatedHeight > window.innerHeight && rect.top > estimatedHeight;
+      setMenuPosition({
+        top: opensUp ? Math.max(viewportPadding, rect.top - estimatedHeight - 4) : Math.min(window.innerHeight - viewportPadding, rect.bottom + 4),
+        left: Math.min(Math.max(viewportPadding, rect.right - menuWidth), window.innerWidth - menuWidth - viewportPadding),
+        minWidth: menuWidth,
+      });
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, row.caseType]);
+
+  const menuContent = (
+    <>
+      {accessionNumber ? (
+        <a role="menuitem" href={buildSonicDicomRedirectPath(row.appointmentId, "study")} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+          Open this study in SonicDICOM
+        </a>
+      ) : (
+        <button type="button" role="menuitem" disabled title="Accession number missing" className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+          Open this study in SonicDICOM
+        </button>
+      )}
+      {patientDicomId ? (
+        <a role="menuitem" href={buildSonicDicomRedirectPath(row.appointmentId, "patient")} target="_blank" rel="noopener noreferrer" className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+          Open patient list in SonicDICOM
+        </a>
+      ) : (
+        <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+          Open patient list in SonicDICOM
+        </button>
+      )}
+      {showRadiantActions && accessionNumber && (
+        <a role="menuitem" href={buildRadiantPacsTagUrl("00080050", accessionNumber)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+          Open this study in RadiAnt
+        </a>
+      )}
+      {showRadiantActions && !accessionNumber && (
+        <button type="button" role="menuitem" disabled title="Accession number missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+          Open this study in RadiAnt
+        </button>
+      )}
+      {showRadiantActions && patientDicomId && (
+        <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientDicomId)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
+          Open patient studies in RadiAnt
+        </a>
+      )}
+      {showRadiantActions && !patientDicomId && (
+        <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
+          Open patient studies in RadiAnt
+        </button>
+      )}
+      <button type="button" role="menuitem" disabled={!accessionNumber} onClick={copyAccession} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+        Copy accession number
+      </button>
+      {copyMessage && <p className="px-2 pt-1 text-[11px]" style={{ color: "var(--text-muted)" }}>{copyMessage}</p>}
+      <Link role="menuitem" to={row.caseType === "comparison" && row.comparisonRequestId ? `/comparisons/${row.comparisonRequestId}` : `/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`} className="mt-2 block rounded-md border-t px-2 py-1.5 pt-2 text-xs font-semibold text-foreground hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        {row.caseType === "comparison" ? "Open comparison request" : "View appointment"}
+      </Link>
+      {canManage && row.caseType === "appointment" && (
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onDiscontinue(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">
+          Mark study as discontinued
+        </button>
+      )}
+      {row.caseType === "comparison" && row.reportStatus !== "final" && (
+        <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
+          {!showFinalize ? (
+            <button type="button" role="menuitem" onClick={() => setShowFinalize(true)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
+              Finalize comparison manually
+            </button>
+          ) : (
+            <div className="grid gap-2 px-2 py-1.5">
+              <textarea value={finalText} onChange={(event) => setFinalText(event.target.value)} className="min-h-20 rounded border px-2 py-1 text-xs" placeholder="Final report text" />
+              <div className="flex gap-2">
+                <button type="button" disabled={!finalText.trim()} onClick={async () => { await onFinalize(row, finalText.trim()); setFinalText(""); setShowFinalize(false); setOpen(false); }} className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-teal-300">
+                  Save final report
+                </button>
+                <button type="button" onClick={() => setShowFinalize(false)} className="rounded border px-2 py-1 text-xs">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
+        {canManage && row.canAssign ? (
+          <AssignmentEditor row={row} doctors={doctors} onAssign={onAssign} onUnassign={onUnassign} />
+        ) : (
+          <p className="px-2 py-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{actionUnavailable}</p>
+        )}
+      </div>
+    </>
+  );
+
+  const menu = open && menuPosition ? createPortal(
+    <div
+      ref={menuRef}
+      role="menu"
+      className="fixed z-[120] rounded-lg border p-2 text-left shadow-xl"
+      style={{ top: menuPosition.top, left: menuPosition.left, minWidth: menuPosition.minWidth, backgroundColor: "var(--card)", borderColor: "var(--border)" }}
+    >
+      {menuContent}
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <div className="relative flex justify-end">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border text-foreground"
@@ -621,135 +755,7 @@ function RowActionMenu({
       >
         <MoreVertical size={16} aria-hidden="true" />
       </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-9 z-40 min-w-64 rounded-lg border p-2 text-left shadow-lg"
-          style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
-        >
-          {accessionNumber ? (
-            <a
-              role="menuitem"
-              href={buildSonicDicomRedirectPath(row.appointmentId, "study")}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
-            >
-              Open this study in SonicDICOM
-            </a>
-          ) : (
-            <button type="button" role="menuitem" disabled title="Accession number missing" className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
-              Open this study in SonicDICOM
-            </button>
-          )}
-          {patientDicomId ? (
-            <a
-              role="menuitem"
-              href={buildSonicDicomRedirectPath(row.appointmentId, "patient")}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50"
-            >
-              Open patient list in SonicDICOM
-            </a>
-          ) : (
-            <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
-              Open patient list in SonicDICOM
-            </button>
-          )}
-          {showRadiantActions && accessionNumber && (
-            <a role="menuitem" href={buildRadiantPacsTagUrl("00080050", accessionNumber)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
-              Open this study in RadiAnt
-            </a>
-          )}
-          {showRadiantActions && !accessionNumber && (
-            <button type="button" role="menuitem" disabled title="Accession number missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
-              Open this study in RadiAnt
-            </button>
-          )}
-          {showRadiantActions && patientDicomId && (
-            <a role="menuitem" href={buildRadiantPacsTagUrl("00100020", patientDicomId)} className="mt-1 block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
-              Open patient studies in RadiAnt
-            </a>
-          )}
-          {showRadiantActions && !patientDicomId && (
-            <button type="button" role="menuitem" disabled title="DICOM Patient ID missing" className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground opacity-50">
-              Open patient studies in RadiAnt
-            </button>
-          )}
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!accessionNumber}
-            onClick={copyAccession}
-            className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Copy accession number
-          </button>
-          {copyMessage && <p className="px-2 pt-1 text-[11px]" style={{ color: "var(--text-muted)" }}>{copyMessage}</p>}
-          <Link
-            role="menuitem"
-            to={row.caseType === "comparison" && row.comparisonRequestId ? `/comparisons/${row.comparisonRequestId}` : `/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`}
-            className="mt-2 block rounded-md border-t px-2 py-1.5 pt-2 text-xs font-semibold text-foreground hover:bg-slate-50"
-            style={{ borderColor: "var(--border)" }}
-          >
-            {row.caseType === "comparison" ? "Open comparison request" : "View appointment"}
-          </Link>
-          {canManage && row.caseType === "appointment" && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                onDiscontinue(row);
-              }}
-              className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50"
-            >
-              Mark study as discontinued
-            </button>
-          )}
-          {row.caseType === "comparison" && row.reportStatus !== "final" && (
-            <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
-              {!showFinalize ? (
-                <button type="button" role="menuitem" onClick={() => setShowFinalize(true)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
-                  Finalize comparison manually
-                </button>
-              ) : (
-                <div className="grid gap-2 px-2 py-1.5">
-                  <textarea value={finalText} onChange={(event) => setFinalText(event.target.value)} className="min-h-20 rounded border px-2 py-1 text-xs" placeholder="Final report text" />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={!finalText.trim()}
-                      onClick={async () => {
-                        await onFinalize(row, finalText.trim());
-                        setFinalText("");
-                        setShowFinalize(false);
-                      }}
-                      className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-teal-300"
-                    >
-                      Save final report
-                    </button>
-                    <button type="button" onClick={() => setShowFinalize(false)} className="rounded border px-2 py-1 text-xs">Cancel</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
-            {canManage && row.canAssign ? (
-              <AssignmentEditor
-                row={row}
-                doctors={doctors}
-                onAssign={onAssign}
-                onUnassign={onUnassign}
-              />
-            ) : (
-              <p className="px-2 py-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{actionUnavailable}</p>
-            )}
-          </div>
-        </div>
-      )}
+      {menu}
     </div>
   );
 }
@@ -912,7 +918,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const savedViewToken = params.token ?? searchParams.get("savedViewToken");
   const [filters, setFilters] = useState<ReportingBoardFilters>({ assignmentStatus: "all", reportStatus: "required_not_final", requiresReport: true, sortBy: "priority_study_date", sortDirection: "asc", pinUrgentToTop: true, limit: 100, offset: 0 });
   const [loadedSavedView, setLoadedSavedView] = useState<ReportingBoardSavedView | null>(null);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedCaseKeys, setSelectedCaseKeys] = useState<string[]>([]);
   const [saveName, setSaveName] = useState("");
   const [notifications, setNotifications] = useState<ReportingBoardNotificationSettings>(EMPTY_NOTIFICATIONS);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -1077,7 +1083,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       const discontinuedId = discontinueTarget?.appointmentId ?? null;
       setDiscontinueTarget(null);
       setDiscontinueReason("");
-      if (discontinuedId !== null) setSelectedIds((current) => current.filter((id) => id !== discontinuedId));
+      if (discontinuedId !== null) setSelectedCaseKeys((current) => current.filter((key) => key !== `appointment:${discontinuedId}`));
       setBoardActionMessage({
         tone: "success",
         text: "Study marked as discontinued and removed from reporting pool.",
@@ -1105,13 +1111,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
   const selectedReassignMutation = useMutation({
     mutationFn: () => bulkReassignSelectedReportingCases({
-      appointmentIds: selectedIds,
+      appointmentIds: selectedAppointmentIds,
+      comparisonRequestIds: selectedComparisonRequestIds,
       doctorId: Number(selectedReassignDoctorId),
       reason: selectedReassignReason.trim() || null,
     }),
     onSuccess: async (result) => {
       setBulkResult(result);
-      setSelectedIds([]);
+      setSelectedCaseKeys([]);
       setSelectedReassignConfirmOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
@@ -1121,12 +1128,13 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
   const selectedUnassignMutation = useMutation({
     mutationFn: () => bulkUnassignSelectedReportingCases({
-      appointmentIds: selectedIds,
+      appointmentIds: selectedAppointmentIds,
+      comparisonRequestIds: selectedComparisonRequestIds,
       reason: selectedUnassignReason.trim(),
     }),
     onSuccess: async (result) => {
       setBulkResult(result);
-      if (result.unassignedCount > 0) setSelectedIds([]);
+      if (result.unassignedCount > 0) setSelectedCaseKeys([]);
       setSelectedUnassignReason("");
       setSelectedUnassignConfirmOpen(false);
       await Promise.all([
@@ -1137,6 +1145,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   });
 
   const cases = casesQuery.data?.cases ?? [];
+  const selectedRows = cases.filter((row) => selectedCaseKeys.includes(row.caseKey));
+  const selectedAppointmentIds = selectedRows.filter((row) => row.caseType === "appointment").map((row) => row.appointmentId);
+  const selectedComparisonRequestIds = selectedRows
+    .filter((row) => row.caseType === "comparison" && row.comparisonRequestId != null)
+    .map((row) => row.comparisonRequestId!);
   const effectiveFilters = casesQuery.data?.filters ?? filters;
   const statsSummary = statsQuery.data?.summary;
   const doctorStats = statsQuery.data?.byDoctor ?? [];
@@ -1149,16 +1162,16 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const printUrl = buildReportingBoardPrintUrl({
     filters: effectiveFilters,
     savedViewToken: loadedSavedView?.token ?? null,
-    selectedAppointmentIds: selectedIds,
+    selectedAppointmentIds,
     selectedDoctorName: selectedAssignedDoctor?.displayName ?? null,
   });
   const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
   const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/mobile/reporting-view/${loadedSavedView.token}` : "";
-  const visibleAppointmentIds = cases.filter((row) => row.caseType === "appointment").map((row) => row.appointmentId);
-  const allVisibleSelected = visibleAppointmentIds.length > 0 && visibleAppointmentIds.every((id) => selectedIds.includes(id));
+  const visibleCaseKeys = cases.map((row) => row.caseKey);
+  const allVisibleSelected = visibleCaseKeys.length > 0 && visibleCaseKeys.every((key) => selectedCaseKeys.includes(key));
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
-  const selectedReassignDisabled = !canManage || selectedIds.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
-  const selectedUnassignDisabled = !canManage || selectedIds.length === 0 || selectedUnassignMutation.isPending;
+  const selectedReassignDisabled = !canManage || selectedCaseKeys.length === 0 || !selectedReassignDoctorId || selectedReassignMutation.isPending;
+  const selectedUnassignDisabled = !canManage || selectedCaseKeys.length === 0 || selectedUnassignMutation.isPending;
   const advancedFilterCount = [
     Boolean(filters.caseCategory),
     Boolean(filters.priorityCode),
@@ -1241,7 +1254,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={printUrl} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-            <Printer size={16} /> {selectedIds.length > 0 ? `Print handoff (${selectedIds.length} selected)` : "Print handoff"}
+            <Printer size={16} /> {selectedAppointmentIds.length > 0 ? `Print handoff (${selectedAppointmentIds.length} selected)` : selectedCaseKeys.length > 0 ? "Print handoff (appointments only)" : "Print handoff"}
           </Link>
           <button type="button" onClick={refreshBoard} disabled={boardRefreshing} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "var(--border)" }}>
             <RefreshCw size={16} className={boardRefreshing ? "animate-spin" : undefined} /> {boardRefreshing ? "Refreshing..." : "Refresh"}
@@ -1411,11 +1424,11 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
 
       <div className={savedViewsOpen ? "grid gap-4 xl:grid-cols-[1fr_340px]" : "grid gap-4 xl:grid-cols-[1fr_48px]"}>
         <section className="space-y-3">
-          {selectedIds.length === 0 && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Select cases to reassign.</p>}
-          {selectedIds.length > 0 && (
+          {selectedCaseKeys.length === 0 && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Select cases to reassign.</p>}
+          {selectedCaseKeys.length > 0 && (
           <div className="sticky top-0 z-30 rounded-lg border p-3 shadow-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <div className="flex flex-wrap items-end gap-3">
-              <p className="min-w-24 text-sm font-semibold text-foreground">{selectedIds.length} selected</p>
+              <p className="min-w-24 text-sm font-semibold text-foreground">{selectedCaseKeys.length} selected</p>
               <Field label="Reassign to">
                 <select value={selectedReassignDoctorId} onChange={(event) => setSelectedReassignDoctorId(event.target.value)} disabled={!canManage} className={inputClass()}>
                   <option value="">Select doctor</option>
@@ -1442,10 +1455,13 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
               >
                 Return selected to waiting pool
               </button>
-              <button type="button" onClick={() => setSelectedIds([])} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+              <button type="button" onClick={() => setSelectedCaseKeys([])} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                 Clear
               </button>
             </div>
+            {selectedCaseKeys.length > selectedAppointmentIds.length && (
+              <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Print handoff includes appointment cases only; comparison requests are excluded from print.</p>
+            )}
             {!canManage && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>Only supervisors/admins can reassign selected cases.</p>}
             {selectedReassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedReassignMutation.error instanceof Error ? selectedReassignMutation.error.message : "Selected reassignment failed."}</p>}
             {selectedUnassignMutation.error && <p className="mt-2 text-sm text-red-600">{selectedUnassignMutation.error instanceof Error ? selectedUnassignMutation.error.message : "Selected return failed."}</p>}
@@ -1463,9 +1479,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                         checked={allVisibleSelected}
                         onChange={(event) => {
                           const checked = event.target.checked;
-                          setSelectedIds((current) => {
-                            if (checked) return [...new Set([...current, ...visibleAppointmentIds])];
-                            return current.filter((id) => !visibleAppointmentIds.includes(id));
+                          setSelectedCaseKeys((current) => {
+                            if (checked) return [...new Set([...current, ...visibleCaseKeys])];
+                            return current.filter((key) => !visibleCaseKeys.includes(key));
                           });
                         }}
                       />
@@ -1482,18 +1498,16 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
                   {cases.map((row) => {
-                    const isAppointmentCase = row.caseType === "appointment";
-                    const selected = isAppointmentCase && selectedIds.includes(row.appointmentId);
+                    const selected = selectedCaseKeys.includes(row.caseKey);
                     return (
                       <tr key={row.caseKey ?? `${row.caseType}:${row.appointmentId}:${row.comparisonRequestId ?? ""}`} className={reportingRowClass(row, selected)} aria-label={`Case ${row.accessionNumber}: ${patientName(row)}. ${rowStatusLabel(row)}`} title={rowDetailsTitle(row)}>
                         <td className="px-3 py-2"><input
                           type="checkbox"
                           aria-label={`Select case ${row.accessionNumber}`}
-                          disabled={!isAppointmentCase}
                           checked={selected}
                           onChange={(event) => {
                             const checked = event.target.checked;
-                            setSelectedIds((current) => checked ? [...new Set([...current, row.appointmentId])] : current.filter((id) => id !== row.appointmentId));
+                            setSelectedCaseKeys((current) => checked ? [...new Set([...current, row.caseKey])] : current.filter((key) => key !== row.caseKey));
                           }}
                         /></td>
                         <td className="px-3 py-2">
@@ -1547,14 +1561,16 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 <>
                   <p className="font-semibold">Bulk return result: {bulkResult.unassignedCount}/{bulkResult.requestedCount} returned, {bulkResult.skippedCount} skipped.</p>
                   <p className="mt-1">Returned appointment IDs: {bulkResult.unassignedAppointmentIds.join(", ") || "-"}</p>
+                  {bulkResult.unassignedComparisonRequestIds?.length ? <p className="mt-1">Returned comparison request IDs: {bulkResult.unassignedComparisonRequestIds.join(", ")}</p> : null}
                 </>
               ) : (
                 <>
                   <p className="font-semibold">Bulk assignment result: {bulkResult.assignedCount}/{bulkResult.requestedCount} assigned, {bulkResult.skippedCount} skipped.</p>
                   <p className="mt-1">Assigned appointment IDs: {bulkResult.assignedAppointmentIds.join(", ") || "-"}</p>
+                  {bulkResult.assignedComparisonRequestIds?.length ? <p className="mt-1">Assigned comparison request IDs: {bulkResult.assignedComparisonRequestIds.join(", ")}</p> : null}
                 </>
               )}
-              {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => `${item.appointmentId} ${item.reason}`).join("; ")}</p>}
+              {bulkResult.skipped.length > 0 && <p className="mt-1">Skipped: {bulkResult.skipped.map((item) => `${item.appointmentId ? `appointment ${item.appointmentId}` : `comparison ${item.comparisonRequestId}`} ${item.reason}`).join("; ")}</p>}
             </div>
           )}
         </section>
@@ -1732,7 +1748,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <h3 className="text-lg font-semibold text-foreground">Confirm selected reassignment</h3>
             <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
-              Reassign {selectedIds.length} selected cases to {selectedReassignDoctor.displayName}. Already-assigned cases will be reassigned.
+              Reassign {selectedCaseKeys.length} selected cases to {selectedReassignDoctor.displayName}. Already-assigned cases will be reassigned.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setSelectedReassignConfirmOpen(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>

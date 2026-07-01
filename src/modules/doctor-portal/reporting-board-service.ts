@@ -5,7 +5,7 @@ import { pool } from "../../db/pool.js";
 import { buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
-import { listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows } from "../../services/comparison-request-service.js";
+import { assignComparisonRequest, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import { assignDoctorCase } from "./cases-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
@@ -576,7 +576,10 @@ export async function markReportingBoardCaseDiscontinued(actor: Actor, appointme
 
 function mobileCase(row: ReportingBoardCaseRow) {
   return {
+    caseType: row.caseType,
+    caseKey: row.caseKey,
     appointmentId: row.appointmentId,
+    comparisonRequestId: row.comparisonRequestId,
     patientName: row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`,
     mrn: row.patientMrn,
     accessionNumber: row.accessionNumber,
@@ -593,6 +596,8 @@ function mobileCase(row: ReportingBoardCaseRow) {
     assignmentStatus: row.assignmentStatus,
     canAssign: row.canAssign,
     exclusionReason: row.exclusionReason,
+    linkedPreviousStudyDate: row.linkedPreviousStudyDate,
+    linkedPreviousAccessionNumber: row.linkedPreviousAccessionNumber,
   };
 }
 
@@ -635,7 +640,8 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const settings = await readReportingBoardSettings();
   const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
   const rows = await listReportingBoardCaseCandidates(scopedFilters);
-  const cases = await applyReportStatuses(rows, filters.reportStatus);
+  const comparisonRows = await listComparisonReportingBoardRows(scopedFilters);
+  const cases = await applyReportStatuses([...rows, ...comparisonRows], filters.reportStatus);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
 
   await insertDoctorAuditEvent(pool, {
@@ -665,37 +671,69 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   };
 }
 
-export async function getPublicReportingBoardMobileCase(actor: Actor | null, token: string, appointmentId: number, input: ReportingBoardFilters = {}) {
-  const view = await getPublicReportingBoardMobileView(actor, token, { ...input, appointmentId, limit: 1, offset: 0 });
-  const found = view.cases.find((row) => row.appointmentId === appointmentId);
+type MobileCaseIdentity =
+  | { caseType: "appointment"; appointmentId: number }
+  | { caseType: "comparison"; comparisonRequestId: number };
+
+export async function getPublicReportingBoardMobileCase(actor: Actor | null, token: string, identity: MobileCaseIdentity, input: ReportingBoardFilters = {}) {
+  const view = await getPublicReportingBoardMobileView(actor, token, {
+    ...input,
+    appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,
+    comparisonRequestId: identity.caseType === "comparison" ? identity.comparisonRequestId : null,
+    limit: 1,
+    offset: 0,
+  });
+  const found = view.cases.find((row) =>
+    identity.caseType === "appointment"
+      ? row.caseType === "appointment" && row.appointmentId === identity.appointmentId
+      : row.caseType === "comparison" && row.comparisonRequestId === identity.comparisonRequestId
+  );
   if (!found) throw new HttpError(404, "Case not found.");
   return { savedView: view.savedView, case: found, allowedActions: view.allowedActions, refreshedAt: view.refreshedAt };
 }
 
-async function ensureCaseInSavedViewScope(token: string, appointmentId: number): Promise<void> {
+async function ensureCaseInSavedViewScope(token: string, identity: MobileCaseIdentity): Promise<void> {
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
-  const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { appointmentId, limit: 1, offset: 0 }));
-  const rows = await listReportingBoardCaseCandidates(filters);
-  if (!rows.some((row) => row.appointmentId === appointmentId)) throw new HttpError(404, "Case not found.");
+  const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, {
+    appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,
+    comparisonRequestId: identity.caseType === "comparison" ? identity.comparisonRequestId : null,
+    limit: 1,
+    offset: 0,
+  }));
+  const rows = identity.caseType === "appointment"
+    ? await listReportingBoardCaseCandidates(filters)
+    : await listComparisonReportingBoardRows(filters);
+  const found = rows.some((row) =>
+    identity.caseType === "appointment"
+      ? row.caseType === "appointment" && row.appointmentId === identity.appointmentId
+      : row.caseType === "comparison" && row.comparisonRequestId === identity.comparisonRequestId
+  );
+  if (!found) throw new HttpError(404, "Case not found.");
 }
 
-export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: string, appointmentId: number, reason?: string | null) {
+export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: string, identity: MobileCaseIdentity, reason?: string | null) {
   const me = await requireRosterManager(actor);
-  await ensureCaseInSavedViewScope(token, appointmentId);
-  return assignReportingBoardCaseToDoctor(actor, { appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
+  await ensureCaseInSavedViewScope(token, identity);
+  return identity.caseType === "appointment"
+    ? assignReportingBoardCaseToDoctor(actor, { appointmentId: identity.appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" })
+    : assignComparisonRequest(actor, identity.comparisonRequestId, { doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
 }
 
-export async function reassignReportingBoardMobileCase(actor: Actor, token: string, appointmentId: number, doctorId: number, reason?: string | null) {
+export async function reassignReportingBoardMobileCase(actor: Actor, token: string, identity: MobileCaseIdentity, doctorId: number, reason?: string | null) {
   await requireRosterManager(actor);
-  await ensureCaseInSavedViewScope(token, appointmentId);
-  return assignReportingBoardCaseToDoctor(actor, { appointmentId, doctorId, reason: reason ?? "mobile saved-view reassignment" });
+  await ensureCaseInSavedViewScope(token, identity);
+  return identity.caseType === "appointment"
+    ? assignReportingBoardCaseToDoctor(actor, { appointmentId: identity.appointmentId, doctorId, reason: reason ?? "mobile saved-view reassignment" })
+    : assignComparisonRequest(actor, identity.comparisonRequestId, { doctorId, reason: reason ?? "mobile saved-view reassignment" });
 }
 
-export async function unassignReportingBoardMobileCase(actor: Actor, token: string, appointmentId: number, reason?: string | null) {
+export async function unassignReportingBoardMobileCase(actor: Actor, token: string, identity: MobileCaseIdentity, reason?: string | null) {
   await requireRosterManager(actor);
-  await ensureCaseInSavedViewScope(token, appointmentId);
-  return unassignReportingBoardCase(actor, { appointmentId, reason });
+  await ensureCaseInSavedViewScope(token, identity);
+  return identity.caseType === "appointment"
+    ? unassignReportingBoardCase(actor, { appointmentId: identity.appointmentId, reason })
+    : unassignComparisonRequest(actor, identity.comparisonRequestId, reason);
 }
 
 export async function listMyReportingBoardSavedViews(actor: Actor) {
@@ -791,6 +829,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   const { cases } = await getReportingBoardCases(actor, filters);
   const explicitlyAllowsFinal = filters.reportStatus === "final" || filters.reportStatus === "all";
   const eligible = cases.filter((row) => {
+    if (row.caseType !== "appointment") return false;
     if (!row.canAssign) return false;
     if (input.unassignedOnly !== false && row.assignmentStatus !== "unassigned") return false;
     if (row.reportStatus === "final" && !explicitlyAllowsFinal) return false;
@@ -831,37 +870,49 @@ function uniquePositiveAppointmentIds(appointmentIds: number[]): number[] {
   if (!Array.isArray(appointmentIds) || appointmentIds.length === 0) {
     throw new HttpError(400, "appointmentIds must be a non-empty array.");
   }
+  return uniquePositiveIds(appointmentIds, "appointmentIds");
+}
+
+function uniquePositiveIds(ids: number[], field: string): number[] {
   const uniqueIds: number[] = [];
   const seen = new Set<number>();
-  for (const appointmentId of appointmentIds) {
-    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
-      throw new HttpError(400, "appointmentIds must contain only positive integers.");
+  for (const id of ids) {
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpError(400, `${field} must contain only positive integers.`);
     }
-    if (!seen.has(appointmentId)) {
-      seen.add(appointmentId);
-      uniqueIds.push(appointmentId);
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
     }
   }
   if (uniqueIds.length > MAX_SELECTED_REASSIGN_COUNT) {
-    throw new HttpError(400, `appointmentIds must contain ${MAX_SELECTED_REASSIGN_COUNT} or fewer cases.`);
+    throw new HttpError(400, `${field} must contain ${MAX_SELECTED_REASSIGN_COUNT} or fewer cases.`);
   }
   return uniqueIds;
 }
 
 export async function bulkReassignSelectedReportingBoardCases(actor: Actor, input: BulkReassignSelectedCasesInput): Promise<BulkAssignNextCasesResult> {
   const me = await requireRosterManager(actor);
-  const appointmentIds = uniquePositiveAppointmentIds(input.appointmentIds);
+  const appointmentIds = input.appointmentIds.length ? uniquePositiveIds(input.appointmentIds, "appointmentIds") : [];
+  const comparisonRequestIds = input.comparisonRequestIds?.length ? uniquePositiveIds(input.comparisonRequestIds, "comparisonRequestIds") : [];
+  if (appointmentIds.length === 0 && comparisonRequestIds.length === 0) throw new HttpError(400, "At least one selected case is required.");
   const doctor = await findAssignableDoctorForReporting(input.doctorId);
   if (!doctor) throw new HttpError(404, "Active doctor profile not found.");
   if (!doctor.canFinalizeReports) throw new HttpError(400, "Doctor must be allowed to finalize reports.");
 
   const rows = await applyReportStatuses(await listReportingBoardCasesByAppointmentIds(appointmentIds), "all");
+  const comparisonRows = await applyReportStatuses(
+    (await Promise.all(comparisonRequestIds.map((id) => listComparisonReportingBoardRows({ comparisonRequestId: id, reportStatus: "all", limit: 1, offset: 0 })))).flat(),
+    "all"
+  );
   const rowsById = new Map(rows.map((row) => [row.appointmentId, row]));
+  const comparisonRowsById = new Map(comparisonRows.map((row) => [row.comparisonRequestId, row]));
   const selectedModalities = [...new Set(rows.map((row) => row.modalityId))];
+  for (const row of comparisonRows) selectedModalities.push(row.modalityId);
   const hasModalityPermission = await doctorCanReportAllModalities(input.doctorId, selectedModalities);
   if (!hasModalityPermission) throw new HttpError(400, "Doctor does not have report permission for the selected modalities.");
 
-  const skipped: Array<{ appointmentId: number; reason: string }> = [];
+  const skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }> = [];
   const eligibleIds: number[] = [];
   for (const appointmentId of appointmentIds) {
     const row = rowsById.get(appointmentId);
@@ -879,6 +930,20 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
     }
     eligibleIds.push(appointmentId);
   }
+  const assignedComparisonRequestIds: number[] = [];
+  for (const comparisonRequestId of comparisonRequestIds) {
+    const row = comparisonRowsById.get(comparisonRequestId);
+    if (!row) {
+      skipped.push({ comparisonRequestId, reason: "comparison_not_found" });
+      continue;
+    }
+    if (row.reportStatus === "final" && input.allowFinal !== true) {
+      skipped.push({ comparisonRequestId, reason: "report_final" });
+      continue;
+    }
+    await assignComparisonRequest(actor, comparisonRequestId, { doctorId: input.doctorId, reason: input.reason?.trim() || null });
+    assignedComparisonRequestIds.push(comparisonRequestId);
+  }
 
   const result = await bulkAssignReportingCases({
     doctorId: input.doctorId,
@@ -894,10 +959,11 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
     appointmentIds: result.assignedAppointmentIds,
   });
   return {
-    requestedCount: appointmentIds.length,
-    assignedCount: result.assignedCount,
+    requestedCount: appointmentIds.length + comparisonRequestIds.length,
+    assignedCount: result.assignedCount + assignedComparisonRequestIds.length,
     skippedCount: skipped.length + result.skippedCount,
     assignedAppointmentIds: result.assignedAppointmentIds,
+    assignedComparisonRequestIds,
     skipped: [...skipped, ...result.skipped],
   };
 }
@@ -937,7 +1003,9 @@ export async function unassignReportingBoardCase(
 
 export async function bulkUnassignSelectedReportingBoardCases(actor: Actor, input: BulkUnassignSelectedCasesInput): Promise<BulkUnassignSelectedCasesResult> {
   const me = await requireRosterManager(actor);
-  const appointmentIds = uniquePositiveAppointmentIds(input.appointmentIds);
+  const appointmentIds = input.appointmentIds.length ? uniquePositiveIds(input.appointmentIds, "appointmentIds") : [];
+  const comparisonRequestIds = input.comparisonRequestIds?.length ? uniquePositiveIds(input.comparisonRequestIds, "comparisonRequestIds") : [];
+  if (appointmentIds.length === 0 && comparisonRequestIds.length === 0) throw new HttpError(400, "At least one selected case is required.");
   const reason = input.reason?.trim();
   if (!reason) throw new HttpError(400, "Reason is required.");
 
@@ -969,13 +1037,45 @@ export async function bulkUnassignSelectedReportingBoardCases(actor: Actor, inpu
     }
     eligibleIds.push(appointmentId);
   }
+  const comparisonRows = await applyReportStatuses(
+    (await Promise.all(comparisonRequestIds.map((id) => listComparisonReportingBoardRows({ comparisonRequestId: id, reportStatus: "all", limit: 1, offset: 0 })))).flat(),
+    "all"
+  );
+  const comparisonRowsById = new Map(comparisonRows.map((row) => [row.comparisonRequestId, row]));
+  const unassignedComparisonRequestIds: number[] = [];
+  const comparisonSkipped: Array<{ comparisonRequestId: number; reason: string }> = [];
+  for (const comparisonRequestId of comparisonRequestIds) {
+    const row = comparisonRowsById.get(comparisonRequestId);
+    if (!row) {
+      comparisonSkipped.push({ comparisonRequestId, reason: "comparison_not_found" });
+      continue;
+    }
+    if (row.assignmentStatus !== "assigned") {
+      comparisonSkipped.push({ comparisonRequestId, reason: "no_active_assignment" });
+      continue;
+    }
+    if (row.reportStatus === "final" && input.allowFinal !== true) {
+      comparisonSkipped.push({ comparisonRequestId, reason: "report_final" });
+      continue;
+    }
+    await unassignComparisonRequest(actor, comparisonRequestId, reason);
+    unassignedComparisonRequestIds.push(comparisonRequestId);
+  }
 
-  return bulkUnassignReportingCases({
+  const result = await bulkUnassignReportingCases({
     candidateAppointmentIds: eligibleIds,
     reason,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
     skipped,
   });
+  return {
+    ...result,
+    requestedCount: appointmentIds.length + comparisonRequestIds.length,
+    unassignedCount: result.unassignedCount + unassignedComparisonRequestIds.length,
+    skippedCount: result.skippedCount + comparisonSkipped.length,
+    unassignedComparisonRequestIds,
+    skipped: [...result.skipped, ...comparisonSkipped],
+  };
 }
 
 export async function assignReportingBoardCaseToDoctor(

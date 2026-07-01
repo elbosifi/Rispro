@@ -7,7 +7,7 @@ import { normalizePositiveInteger } from "../utils/normalize.js";
 import { findActiveDoctorProfileByUserId } from "../modules/doctor-portal/profile-repository.js";
 import { insertDoctorAuditEvent } from "../modules/doctor-portal/profile-repository.js";
 import { requireRosterManager } from "../modules/doctor-portal/roster-service.js";
-import { doctorCanReportAllModalities, findAssignableDoctorForReporting } from "../modules/doctor-portal/reporting-board-repository.js";
+import { createAssignedToMeNotifications, doctorCanReportAllModalities, findAssignableDoctorForReporting } from "../modules/doctor-portal/reporting-board-repository.js";
 import type { ReportingBoardCaseRow, ReportingBoardFilters, ReportingBoardStatsBaseRow } from "../modules/doctor-portal/reporting-board-types.js";
 
 export type ComparisonRequestStatus =
@@ -536,6 +536,7 @@ export async function assignComparisonRequest(
     if (!updated) throw new HttpError(404, "Comparison request not found.");
     await audit(client, actor, "comparison_assigned", updated, { assignmentId, doctorId, noteForDoctor: reason }, reason, manager.profile);
     await client.query("commit");
+    await createAssignedToMeNotifications({ doctorId, comparisonRequestIds: [id] });
     return { assignmentId, comparisonRequestId: id };
   } catch (error) {
     await client.query("rollback");
@@ -668,6 +669,7 @@ function comparisonReportingWhere(filters: ReportingBoardFilters, values: unknow
   if (filters.assignedDoctorId) where.push(`cca.assigned_doctor_id = ${addComparisonFilter(values, filters.assignedDoctorId)}`);
   if (filters.assignmentStatus === "unassigned") where.push(`cca.id is null`);
   if (filters.assignmentStatus === "assigned") where.push(`cca.id is not null`);
+  if (filters.comparisonRequestId) where.push(`cr.id = ${addComparisonFilter(values, filters.comparisonRequestId)}`);
   if (filters.requiresReport === false) where.push(`false`);
   if (filters.q) {
     values.push(`%${filters.q.trim().toLowerCase()}%`);

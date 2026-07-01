@@ -80,6 +80,12 @@ function positiveIntegerArray(value: unknown, field: string): number[] {
   return value.map((item) => requiredPositiveInteger(item, field));
 }
 
+function optionalPositiveIntegerArray(value: unknown, field: string): number[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) throw new HttpError(400, `${field} must be an array.`);
+  return value.map((item) => requiredPositiveInteger(item, field));
+}
+
 function booleanFromQuery(value: unknown): boolean | null {
   const parsed = asOptionalBoolean(value);
   return parsed ?? null;
@@ -343,7 +349,8 @@ router.post(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
     const result = await bulkReassignSelectedReportingBoardCases(actor(req), {
-      appointmentIds: positiveIntegerArray(body.appointmentIds, "appointmentIds"),
+      appointmentIds: optionalPositiveIntegerArray(body.appointmentIds, "appointmentIds"),
+      comparisonRequestIds: optionalPositiveIntegerArray(body.comparisonRequestIds, "comparisonRequestIds"),
       doctorId: requiredPositiveInteger(body.doctorId, "doctorId"),
       reason: asOptionalString(body.reason) ?? null,
       allowFinal: asOptionalBoolean(body.allowFinal) ?? false,
@@ -357,7 +364,8 @@ router.post(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
     const result = await bulkUnassignSelectedReportingBoardCases(actor(req), {
-      appointmentIds: positiveIntegerArray(body.appointmentIds, "appointmentIds"),
+      appointmentIds: optionalPositiveIntegerArray(body.appointmentIds, "appointmentIds"),
+      comparisonRequestIds: optionalPositiveIntegerArray(body.comparisonRequestIds, "comparisonRequestIds"),
       reason: asOptionalString(body.reason) ?? null,
       allowFinal: asOptionalBoolean(body.allowFinal) ?? false,
     });
