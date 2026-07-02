@@ -579,6 +579,56 @@ describe("ModalityPage modality board", () => {
     expect(within(screen.getByTestId("modality-board-row-11")).getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("marks active waiting rows over 30 minutes with mild warning", async () => {
+    const arrivedAt = new Date(Date.now() - 40 * 60_000).toISOString();
+    await openBoard([
+      appointment({ id: 12, accessionNumber: "ACC-MILD", status: "waiting", arrivedAt, englishFullName: "Mild Delay" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-12");
+    expect(row.getAttribute("data-waiting-warning")).toBe("mild");
+    expect(row.getAttribute("title")).toContain("Waiting more than 30 minutes");
+  });
+
+  it("marks active waiting rows over 60 minutes with strong warning", async () => {
+    const arrivedAt = new Date(Date.now() - 75 * 60_000).toISOString();
+    await openBoard([
+      appointment({ id: 13, accessionNumber: "ACC-STRONG", status: "arrived", arrivedAt, englishFullName: "Strong Delay" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-13");
+    expect(row.getAttribute("data-waiting-warning")).toBe("strong");
+    expect(row.getAttribute("title")).toContain("Waiting more than 60 minutes");
+  });
+
+  it("does not mark active waiting rows under the warning threshold", async () => {
+    const arrivedAt = new Date(Date.now() - 20 * 60_000).toISOString();
+    await openBoard([
+      appointment({ id: 14, accessionNumber: "ACC-OK", status: "waiting", arrivedAt, englishFullName: "Normal Wait" }),
+    ]);
+
+    expect(screen.getByTestId("modality-board-row-14").getAttribute("data-waiting-warning")).toBeNull();
+  });
+
+  it("does not mark completed rows as active overdue even when frozen wait was long", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 15,
+        accessionNumber: "ACC-COMPLETE-LONG",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T10:30:00Z",
+        pacsAutoCompletionEnabled: false,
+        englishFullName: "Long Completed",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-15");
+    expect(row.getAttribute("data-waiting-warning")).toBeNull();
+    expect(within(row).getByText("2h 30m")).toBeTruthy();
+  });
+
   it("shows frozen PACS study-start waiting duration for completed auto-completion rows", async () => {
     const user = await openBoard([
       appointment({
@@ -618,6 +668,8 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-21");
     expect(within(row).getByText("35m")).toBeTruthy();
     expect(within(row).getByText("PACS first seen / approximate")).toBeTruthy();
+    expect(within(row).getByText("Approx")).toBeTruthy();
+    expect(within(row).getByText("Approx").getAttribute("title")).toContain("PACS first seen is approximate");
   });
 
   it("falls back to completed_at and marks manual fallback for auto-completion rows without PACS timing", async () => {
@@ -637,6 +689,27 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-22");
     expect(within(row).getByText("1h 10m")).toBeTruthy();
     expect(within(row).getByText("Manual complete fallback")).toBeTruthy();
+    expect(within(row).getByText("Manual fallback")).toBeTruthy();
+    expect(within(row).getByText("Manual fallback").getAttribute("title")).toContain("PACS study-start timing was unavailable");
+  });
+
+  it("marks completed auto-completion rows with missing PACS timing and endpoint", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 29,
+        accessionNumber: "ACC-PACS-MISSING",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: null,
+        pacsAutoCompletionEnabled: true,
+        englishFullName: "PACS Missing",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-29");
+    expect(within(row).getByText("Timing missing")).toBeTruthy();
+    expect(within(row).getByText("Timing missing").getAttribute("title")).toContain("PACS timing missing");
   });
 
   it("uses manual completed_at for completed non-auto-completion rows", async () => {
@@ -710,6 +783,16 @@ describe("ModalityPage modality board", () => {
     expect(within(row).getByText("Passport: P123456")).toBeTruthy();
     expect(within(row).queryByText("MRN-SHOULD-NOT-SHOW")).toBeNull();
     expect(within(row).queryByText("NAT-SHOULD-NOT-SHOW")).toBeNull();
+  });
+
+  it("shows compact No primary ID flag when primary identifier is missing", async () => {
+    await openBoard([
+      appointment({ id: 31, accessionNumber: "ACC-NO-ID", status: "waiting", englishFullName: "Missing ID" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-31");
+    expect(within(row).getByText("No primary ID")).toBeTruthy();
+    expect(within(row).getByText("No primary ID").getAttribute("title")).toContain("Primary identifier is missing");
   });
 
   it("renders Routine when priority names are missing", async () => {

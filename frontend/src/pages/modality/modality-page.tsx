@@ -57,6 +57,15 @@ type WaitingDurationInfo = {
   source: string;
   title: string;
 };
+type WaitingWarningInfo = {
+  level: "mild" | "strong";
+  title: string;
+};
+type RowFlag = {
+  label: string;
+  title: string;
+  variant: "warning" | "info" | "neutral";
+};
 
 function isActiveStatus(status: AppointmentStatus): boolean {
   return ACTIVE_STATUSES.has(status);
@@ -311,6 +320,55 @@ function waitingDurationInfo(language: Language, appointment: AppointmentWithDet
   };
 }
 
+function waitingWarningInfo(language: Language, appointment: AppointmentWithDetails, now: Date): WaitingWarningInfo | null {
+  if (!ACTIVE_STATUSES.has(appointment.status)) return null;
+  const arrivedAt = timestampValue(appointment.arrivedAt);
+  if (arrivedAt == null) return null;
+
+  const elapsedMinutes = Math.floor((now.getTime() - arrivedAt) / 60_000);
+  if (elapsedMinutes > 60) {
+    return {
+      level: "strong",
+      title: chooseLocalized(language, "الانتظار أكثر من 60 دقيقة", "Waiting more than 60 minutes"),
+    };
+  }
+  if (elapsedMinutes > 30) {
+    return {
+      level: "mild",
+      title: chooseLocalized(language, "الانتظار أكثر من 30 دقيقة", "Waiting more than 30 minutes"),
+    };
+  }
+  return null;
+}
+
+function timingFlags(language: Language, appointment: AppointmentWithDetails): RowFlag[] {
+  if (appointment.status !== "completed" || !appointment.pacsAutoCompletionEnabled) return [];
+  if (timestampValue(appointment.pacsStudyStartedAt) != null) return [];
+  if (timestampValue(appointment.pacsFirstSeenAt) != null) {
+    return [{
+      label: chooseLocalized(language, "تقريبي", "Approx"),
+      title: chooseLocalized(language, "أول ظهور في PACS تقريبي", "PACS first seen is approximate"),
+      variant: "info",
+    }];
+  }
+  if (timestampValue(appointment.completedAt) != null) {
+    return [{
+      label: chooseLocalized(language, "إكمال يدوي احتياطي", "Manual fallback"),
+      title: chooseLocalized(
+        language,
+        "تم استخدام الإكمال اليدوي لأن توقيت بداية الدراسة من PACS غير متاح",
+        "Manual complete fallback used because PACS study-start timing was unavailable"
+      ),
+      variant: "warning",
+    }];
+  }
+  return [{
+    label: chooseLocalized(language, "توقيت مفقود", "Timing missing"),
+    title: chooseLocalized(language, "توقيت PACS مفقود", "PACS timing missing"),
+    variant: "warning",
+  }];
+}
+
 function priorityDisplay(language: Language, appointment: Pick<AppointmentWithDetails, "priorityNameAr" | "priorityNameEn">): string {
   return chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || chooseLocalized(language, "روتيني", "Routine");
 }
@@ -324,6 +382,10 @@ function primaryIdentifierText(language: Language, appointment: AppointmentWithD
     appointment.patientPrimaryIdentifierLabelEn
   ) || appointment.patientPrimaryIdentifierType || chooseLocalized(language, "المعرف الأساسي", "Primary ID");
   return `${label}: ${value}`;
+}
+
+function hasPrimaryIdentifier(appointment: AppointmentWithDetails): boolean {
+  return Boolean(appointment.patientPrimaryIdentifierValue?.trim());
 }
 
 function boardFilterLabel(language: Language, filter: BoardFilter): string {
@@ -398,6 +460,17 @@ function rowStatusClass(status: AppointmentStatus, selected: boolean): string {
       return `border-l-4 border-l-rose-300 bg-rose-50/45 text-slate-600 hover:bg-rose-50/70 ${selectedClass}`.trim();
     default:
       return `border-l-4 border-l-transparent bg-white hover:bg-slate-50 ${selectedClass}`.trim();
+  }
+}
+
+function waitingWarningClass(level: WaitingWarningInfo["level"] | null): string {
+  switch (level) {
+    case "strong":
+      return "border-l-orange-500 bg-orange-50/90 hover:bg-orange-50 ring-1 ring-orange-200/70";
+    case "mild":
+      return "border-l-amber-400 bg-amber-50/80 hover:bg-amber-50";
+    default:
+      return "";
   }
 }
 
@@ -888,6 +961,9 @@ export default function ModalityPage() {
                       const arrivalNumber = arrivalNumberById.get(appointment.id);
                       const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
                       const waitingInfo = waitingDurationInfo(language, appointment, elapsedNow);
+                      const waitingWarning = waitingWarningInfo(language, appointment, elapsedNow);
+                      const rowFlags = timingFlags(language, appointment);
+                      const missingPrimaryIdentifier = !hasPrimaryIdentifier(appointment);
                       const englishName = appointment.englishFullName?.trim();
                       const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
                       return (
@@ -895,6 +971,8 @@ export default function ModalityPage() {
                               key={appointment.id}
                               ref={selected ? selectedRef : undefined}
                               data-testid={`modality-board-row-${appointment.id}`}
+                              data-waiting-warning={waitingWarning?.level}
+                              title={waitingWarning?.title}
                               tabIndex={0}
                               onClick={() => {
                                 setOpenMoreMenu(null);
@@ -906,7 +984,7 @@ export default function ModalityPage() {
                                   setSelectedAppointmentId(appointment.id);
                                 }
                               }}
-                              className={`cursor-pointer align-top transition-colors ${rowStatusClass(appointment.status, selected)}`}
+                              className={`cursor-pointer align-top transition-colors ${rowStatusClass(appointment.status, selected)} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
                             >
                               <td className="px-2 py-1 font-mono text-xs font-semibold text-foreground">
                                 {arrivalNumber ? `#${arrivalNumber}` : "—"}
@@ -917,6 +995,11 @@ export default function ModalityPage() {
                                     {normalizeStatusLabel(language, appointment.status)}
                                   </Badge>
                                   <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
+                                  {rowFlags.map((flag) => (
+                                    <Badge key={flag.label} variant={flag.variant} size="sm" title={flag.title} className="text-[10px]">
+                                      {flag.label}
+                                    </Badge>
+                                  ))}
                                 </div>
                               </td>
                               <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
@@ -956,7 +1039,18 @@ export default function ModalityPage() {
                                 ) : null}
                               </td>
                               <td className="px-2 py-1 text-xs font-medium text-slate-800">
-                                {primaryIdentifierText(language, appointment)}
+                                {missingPrimaryIdentifier ? (
+                                  <Badge
+                                    variant="warning"
+                                    size="sm"
+                                    title={chooseLocalized(language, "المعرف الأساسي مفقود", "Primary identifier is missing")}
+                                    className="text-[10px]"
+                                  >
+                                    {chooseLocalized(language, "لا يوجد معرف أساسي", "No primary ID")}
+                                  </Badge>
+                                ) : (
+                                  primaryIdentifierText(language, appointment)
+                                )}
                               </td>
                               <td className="px-2 py-1 text-xs font-medium text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), EMPTY_VALUE)}</td>
                               <td className="px-2 py-1 text-xs font-semibold leading-snug text-slate-800">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || EMPTY_VALUE}</td>
