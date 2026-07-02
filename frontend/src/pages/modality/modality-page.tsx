@@ -326,6 +326,31 @@ function primaryIdentifierText(language: Language, appointment: AppointmentWithD
   return `${label}: ${value}`;
 }
 
+function boardFilterLabel(language: Language, filter: BoardFilter): string {
+  switch (filter) {
+    case "operational":
+      return chooseLocalized(language, "تشغيلي", "Operational");
+    case "ready":
+      return chooseLocalized(language, "جاهز", "Arrived/Ready");
+    case "waiting":
+      return t(language, "status.waiting");
+    case "arrived":
+      return t(language, "status.arrived");
+    case "in-progress":
+      return t(language, "status.in-progress");
+    case "not-arrived":
+      return chooseLocalized(language, "لم يصل", "Not arrived");
+    case "completed":
+      return t(language, "status.completed");
+    case "problem":
+      return chooseLocalized(language, "مشكلة", "Problem");
+    case "all":
+      return chooseLocalized(language, "الكل", "All");
+    default:
+      return "";
+  }
+}
+
 function statusActionLabel(language: Language, action: BoardStatusAction): string {
   switch (action.status) {
     case "discontinued":
@@ -400,7 +425,12 @@ export default function ModalityPage() {
     staleTime: 1000 * 60 * 5,
   });
 
-  const { data: appointments = [], isLoading, isFetching } = useQuery({
+  const {
+    data: appointments = [],
+    isLoading,
+    isFetching,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ["modality-worklist", modalityId, date, scope],
     queryFn: () => fetchModalityWorklist(modalityId, date, scope),
     enabled: !!modalityId,
@@ -522,6 +552,7 @@ export default function ModalityPage() {
   const completedCount = statusCounts.get("completed") ?? 0;
   const liveCount = boardAppointments.filter((appointment) => LIVE_BOARD_STATUSES.has(appointment.status)).length;
   const historyCount = boardAppointments.length - liveCount;
+  const initialWorklistLoading = isLoading && appointments.length === 0;
 
   const selectedEdited =
     Boolean(selectedAppointment?.createdAt && selectedAppointment?.updatedAt) &&
@@ -534,6 +565,20 @@ export default function ModalityPage() {
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
     void queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
+  };
+
+  const handleClearStatusFilter = () => {
+    setBoardFilter("operational");
+  };
+
+  const handleResetView = () => {
+    setBoardFilter("operational");
+    setDate(todayIsoDateLy());
+    setScope("day");
+    setSelectedAppointmentId(null);
+    setConfirmTargetId(null);
+    setConfirmVerified(false);
+    setOpenMoreMenu(null);
   };
 
   const handlePrint = (appointmentId: number) => {
@@ -591,7 +636,27 @@ export default function ModalityPage() {
   };
 
   const modalities = lookups?.modalities ?? [];
+  const today = todayIsoDateLy();
   const headerTitle = t(language, "modality.title");
+  const currentModality = modalities.find((modality) => String(modality.id) === modalityId);
+  const currentModalityLabel = currentModality
+    ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
+    : "";
+  const activeFilterParts = [
+    currentModalityLabel,
+    scope === "all" ? t(language, "modality.scopeAll") : date !== today ? date : "",
+    boardFilter !== "operational" ? boardFilterLabel(language, boardFilter) : "",
+  ].filter(Boolean);
+  const hasActiveFilters = boardFilter !== "operational" || scope !== "day" || date !== today;
+  const lastRefreshedText = dataUpdatedAt > 0
+    ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+    : EMPTY_VALUE;
+  const headerCounterChips = [
+    { filter: "waiting" as const, label: t(language, "status.waiting"), value: waitingStatisticsCount, className: "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" },
+    { filter: "arrived" as const, label: t(language, "status.arrived"), value: arrivedStatisticsCount, className: "border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100" },
+    { filter: "in-progress" as const, label: t(language, "status.in-progress"), value: inProgressStatisticsCount, className: "border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100" },
+    { filter: "completed" as const, label: t(language, "status.completed"), value: completedCount, className: "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" },
+  ];
   const selectedName = selectedAppointment ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName) : "";
   const selectedModality = selectedAppointment ? chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn) : "";
   const selectedExam = selectedAppointment ? chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || t(language, "common.na") : "";
@@ -603,7 +668,7 @@ export default function ModalityPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
       <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-3 p-3 sm:p-4 lg:p-5">
-        <header className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-md">
+        <header data-testid="modality-board-header" className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-md">
           <div className={`flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
             <div className={`flex items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white shadow-sm">
@@ -613,21 +678,45 @@ export default function ModalityPage() {
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "لوحة العمل", "Worklist board")}</p>
                 <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">{headerTitle}</h1>
+                <p className="mt-1 text-xs font-medium text-muted-foreground">
+                  {[currentModalityLabel || chooseLocalized(language, "لم يتم اختيار جهاز", "No modality selected"), scope === "all" ? t(language, "modality.scopeAll") : date].join(" • ")}
+                </p>
               </div>
             </div>
 
-            <div className={`flex flex-wrap items-center gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
+            <div className={`flex flex-wrap items-center justify-end gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <div className={`flex flex-wrap items-center gap-1.5 ${isArabic ? "flex-row-reverse" : ""}`}>
+                {headerCounterChips.map((chip) => (
+                  <button
+                    key={chip.filter}
+                    type="button"
+                    aria-label={`${chip.label} ${chip.value}`}
+                    aria-pressed={boardFilter === chip.filter}
+                    onClick={() => setBoardFilter(chip.filter)}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition ${chip.className} ${
+                      boardFilter === chip.filter ? "ring-2 ring-accent/35" : ""
+                    }`}
+                  >
+                    <span>{chip.label}</span>
+                    <span className="font-mono text-sm">{chip.value}</span>
+                  </button>
+                ))}
+              </div>
+
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                   <Clock3 size={14} />
                   <span>{chooseLocalized(language, "الوقت الحالي", "Current time")}</span>
                 </div>
                 <p className="mt-0.5 text-base font-semibold text-foreground">{new Date().toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}</p>
+                <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">
+                  {chooseLocalized(language, "آخر تحديث", "Last refreshed")} {lastRefreshedText}
+                </p>
               </div>
 
-              <Button variant="ghost" size="sm" onClick={handleRefresh} className="rounded-xl px-3">
-                <RefreshCw size={16} />
-                <span>{t(language, "modality.refresh")}</span>
+              <Button variant="primary" size="sm" onClick={handleRefresh} disabled={isFetching} className="rounded-xl px-3 shadow-sm">
+                <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
+                <span>{isFetching ? chooseLocalized(language, "جار التحديث", "Refreshing") : t(language, "modality.refresh")}</span>
               </Button>
             </div>
           </div>
@@ -693,41 +782,6 @@ export default function ModalityPage() {
               </div>
             </Card>
 
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                label={t(language, "status.waiting")}
-                value={waitingStatisticsCount}
-                tone="amber"
-                icon={<Clock3 size={20} />}
-                active={boardFilter === "waiting"}
-                onClick={() => setBoardFilter("waiting")}
-              />
-              <MetricCard
-                label={t(language, "status.arrived")}
-                value={arrivedStatisticsCount}
-                tone="sky"
-                icon={<BadgeCheck size={20} />}
-                active={boardFilter === "arrived"}
-                onClick={() => setBoardFilter("arrived")}
-              />
-              <MetricCard
-                label={t(language, "status.in-progress")}
-                value={inProgressStatisticsCount}
-                tone="indigo"
-                icon={<TimerReset size={20} />}
-                active={boardFilter === "in-progress"}
-                onClick={() => setBoardFilter("in-progress")}
-              />
-              <MetricCard
-                label={t(language, "status.completed")}
-                value={completedCount}
-                tone="emerald"
-                icon={<CheckCircle2 size={20} />}
-                active={boardFilter === "completed"}
-                onClick={() => setBoardFilter("completed")}
-              />
-            </div>
-
             <Card className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/94 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                 <div>
@@ -765,8 +819,30 @@ export default function ModalityPage() {
                 </div>
               </div>
 
+              {hasActiveFilters ? (
+                <div
+                  data-testid="modality-active-filters"
+                  className={`flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-amber-50/70 px-3 py-2 text-xs ${isArabic ? "flex-row-reverse" : ""}`}
+                >
+                  <div className={`flex flex-wrap items-center gap-2 font-medium text-amber-900 ${isArabic ? "flex-row-reverse" : ""}`}>
+                    <span className="uppercase tracking-[0.12em] text-amber-700">{chooseLocalized(language, "الفلاتر النشطة", "Active filters")}:</span>
+                    <span>{activeFilterParts.join(" • ")}</span>
+                  </div>
+                  <div className={`flex flex-wrap items-center gap-1.5 ${isArabic ? "flex-row-reverse" : ""}`}>
+                    {boardFilter !== "operational" ? (
+                      <Button type="button" variant="secondary" size="sm" onClick={handleClearStatusFilter} className="h-7 px-2 text-[11px]">
+                        {chooseLocalized(language, "مسح الحالة", "Clear status")}
+                      </Button>
+                    ) : null}
+                    <Button type="button" variant="secondary" size="sm" onClick={handleResetView} className="h-7 px-2 text-[11px]">
+                      {chooseLocalized(language, "إعادة العرض", "Reset view")}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="border-t border-slate-200">
-                {isLoading ? (
+                {initialWorklistLoading ? (
                   <div className="m-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-muted-foreground">
                     {t(language, "modality.loading")}
                   </div>
@@ -1427,53 +1503,6 @@ export default function ModalityPage() {
           ) : null}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  tone,
-  icon,
-  active = false,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  tone: "amber" | "sky" | "indigo" | "emerald";
-  icon: React.ReactNode;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  const toneClasses: Record<"amber" | "sky" | "indigo" | "emerald", string> = {
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    sky: "border-sky-200 bg-sky-50 text-sky-700",
-    indigo: "border-indigo-200 bg-indigo-50 text-indigo-700",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  };
-
-  const className = `rounded-xl border px-3 py-2 text-left shadow-sm transition-all ${onClick ? "cursor-pointer hover:shadow-md" : ""} ${toneClasses[tone]} ${active ? "ring-2 ring-offset-1 ring-[var(--accent)]" : ""}`;
-
-  if (onClick) {
-    return (
-      <button type="button" className={className} onClick={onClick} aria-pressed={active}>
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[10px] uppercase tracking-[0.14em] opacity-80">{label}</p>
-          {icon}
-        </div>
-        <p className="mt-1 text-xl font-semibold tracking-tight">{value}</p>
-      </button>
-    );
-  }
-
-  return (
-    <div className={className}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[10px] uppercase tracking-[0.14em] opacity-80">{label}</p>
-        {icon}
-      </div>
-      <p className="mt-1 text-xl font-semibold tracking-tight">{value}</p>
     </div>
   );
 }

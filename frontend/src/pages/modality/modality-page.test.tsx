@@ -363,7 +363,7 @@ describe("ModalityPage modality board", () => {
     expect(boardAccessions()).toEqual(["ACC-CANCEL"]);
   });
 
-  it("summary metric cards apply exact board filters", async () => {
+  it("compact counter chips render in the board header and apply exact filters", async () => {
     const user = await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-ARRIVED", status: "arrived", arrivedAt: "2026-06-18T08:05:00Z", englishFullName: "Arrived Patient" }),
       appointment({ id: 2, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
@@ -371,19 +371,112 @@ describe("ModalityPage modality board", () => {
       appointment({ id: 4, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
     ]);
 
-    const waitingCard = screen.getByRole("button", { name: /^Waiting\s+1$/i });
-    await user.click(waitingCard);
-    expect(waitingCard.getAttribute("aria-pressed")).toBe("true");
+    const header = screen.getByTestId("modality-board-header");
+    const waitingChip = within(header).getByRole("button", { name: /^Waiting\s+1$/i });
+    expect(waitingChip).toBeTruthy();
+    expect(within(header).getByRole("button", { name: /^Arrived\s+1$/i })).toBeTruthy();
+    expect(within(header).getByRole("button", { name: /^In Progress\s+1$/i })).toBeTruthy();
+    expect(within(header).getByRole("button", { name: /^Completed\s+1$/i })).toBeTruthy();
+
+    await user.click(waitingChip);
+    expect(waitingChip.getAttribute("aria-pressed")).toBe("true");
     expect(boardAccessions()).toEqual(["ACC-WAIT"]);
 
-    await user.click(screen.getByRole("button", { name: /^Arrived\s+1$/i }));
+    await user.click(within(header).getByRole("button", { name: /^Arrived\s+1$/i }));
     expect(boardAccessions()).toEqual(["ACC-ARRIVED"]);
 
-    await user.click(screen.getByRole("button", { name: /^In Progress\s+1$/i }));
+    await user.click(within(header).getByRole("button", { name: /^In Progress\s+1$/i }));
     expect(boardAccessions()).toEqual(["ACC-PROGRESS"]);
 
-    await user.click(screen.getByRole("button", { name: /^Completed\s+1$/i }));
+    await user.click(within(header).getByRole("button", { name: /^Completed\s+1$/i }));
     expect(boardAccessions()).toEqual(["ACC-DONE"]);
+  });
+
+  it("does not render the old standalone metric card row", () => {
+    expect(modalityPageSource).not.toContain("<MetricCard");
+  });
+
+  it("shows active filter strip for completed status and can clear only status", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+      appointment({ id: 2, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: /^Completed\s+1$/i }));
+
+    expect(screen.getByTestId("modality-active-filters").textContent).toContain("Completed");
+    expect(boardAccessions()).toEqual(["ACC-DONE"]);
+
+    await user.click(screen.getByRole("button", { name: "Clear status" }));
+
+    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
+    expect(boardAccessions()).toEqual(["ACC-WAIT"]);
+  });
+
+  it("shows active filter strip when date is not today", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+    ]);
+
+    await user.clear(screen.getByLabelText("Date"));
+    await user.type(screen.getByLabelText("Date"), "17/06/2026");
+    await user.tab();
+
+    expect(screen.getByTestId("modality-active-filters").textContent).toContain("2026-06-17");
+  });
+
+  it("shows active filter strip when all dates scope is selected", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "All Dates" }));
+
+    expect(screen.getByTestId("modality-active-filters").textContent).toContain("All Dates");
+  });
+
+  it("reset view returns to operational today scope while preserving selected modality", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+      appointment({ id: 2, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "All Dates" }));
+    await user.click(screen.getByRole("button", { name: /^Completed\s+1$/i }));
+    await user.click(screen.getByRole("button", { name: "Reset view" }));
+
+    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
+    expect(screen.getByRole("combobox")).toHaveProperty("value", "1");
+    expect(screen.getByLabelText("Date")).toHaveProperty("value", "18/06/2026");
+    expect(boardAccessions()).toEqual(["ACC-WAIT"]);
+  });
+
+  it("keeps existing table visible during a refetch", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+    ]);
+
+    fetchModalityWorklistMock.mockImplementation(() => new Promise(() => undefined));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(boardAccessions()).toEqual(["ACC-WAIT"]);
+    expect(screen.queryByText("Loading modality worklist...")).toBeNull();
+  });
+
+  it("shows last refreshed time after fetch and manual refresh", async () => {
+    const user = await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+    ]);
+
+    expect(screen.getByText(/Last refreshed \d{2}:\d{2}:\d{2}/)).toBeTruthy();
+
+    fetchModalityWorklistMock.mockResolvedValue([
+      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(fetchModalityWorklistMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/Last refreshed \d{2}:\d{2}:\d{2}/)).toBeTruthy();
   });
 
   it("keeps row print, complete, and status actions wired", async () => {
