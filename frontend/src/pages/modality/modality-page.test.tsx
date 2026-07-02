@@ -216,7 +216,7 @@ async function openBoard(rows: AppointmentWithDetails[]) {
   renderPage(rows);
   await screen.findByRole("option", { name: "CT" });
   await user.selectOptions(screen.getByRole("combobox"), "1");
-  await screen.findByRole("button", { name: "Operational" });
+  await screen.findByRole("button", { name: languageState.language === "ar" ? "نشط" : "Operational" });
   return user;
 }
 
@@ -361,6 +361,42 @@ describe("ModalityPage modality board", () => {
     expect(boardAccessions()).toEqual(["ACC-SCHEDULED"]);
     await user.click(screen.getByRole("button", { name: "Problem" }));
     expect(boardAccessions()).toEqual(["ACC-CANCEL"]);
+  });
+
+  it("uses LTR direction for the English modality board section", async () => {
+    await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-LTR", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z" }),
+    ]);
+
+    expect(screen.getByTestId("modality-page-root").getAttribute("dir")).toBe("ltr");
+    expect(screen.getByTestId("modality-board-section").getAttribute("dir")).toBe("ltr");
+    expect(screen.getByTestId("modality-board").getAttribute("dir")).toBe("ltr");
+  });
+
+  it("uses RTL direction for the Arabic modality board section and table", async () => {
+    languageState.language = "ar";
+    await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-RTL", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z" }),
+    ]);
+
+    expect(screen.getByTestId("modality-page-root").getAttribute("dir")).toBe("rtl");
+    expect(screen.getByTestId("modality-board-section").getAttribute("dir")).toBe("rtl");
+    expect(screen.getByTestId("modality-board-table-wrap").getAttribute("dir")).toBe("rtl");
+    expect(screen.getByTestId("modality-board").getAttribute("dir")).toBe("rtl");
+    expect(screen.getByTestId("modality-board").className).toContain("text-start");
+  });
+
+  it("keeps the worklist table horizontal-only without a vertical inner scroll container", async () => {
+    await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-SCROLL", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z" }),
+    ]);
+
+    const wrapper = screen.getByTestId("modality-board-table-wrap");
+    expect(wrapper.className).toContain("overflow-x-auto");
+    expect(wrapper.className).not.toContain("overflow-auto");
+    expect(wrapper.className).not.toContain("overflow-y-auto");
+    expect(wrapper.className).not.toContain("max-h-");
+    expect(modalityPageSource).not.toContain("max-h-[calc(100vh-290px)] overflow-auto");
   });
 
   it("compact counter chips render in the board header and apply exact filters", async () => {
@@ -565,7 +601,7 @@ describe("ModalityPage modality board", () => {
 
     const menu = screen.getByRole("menu");
     expect(menu.getAttribute("dir")).toBe("rtl");
-    expect(menu.className).toContain("text-right");
+    expect(menu.className).toContain("text-end");
   });
 
   it("shows elapsed waiting duration from arrivedAt and fallback when missing", async () => {

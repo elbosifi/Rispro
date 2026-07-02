@@ -444,31 +444,31 @@ function rowStatusClass(status: AppointmentStatus, selected: boolean): string {
   const selectedClass = selected ? "ring-1 ring-accent/40" : "";
   switch (status) {
     case "in-progress":
-      return `border-l-4 border-l-indigo-500 bg-indigo-50/90 hover:bg-indigo-50 ${selectedClass}`.trim();
+      return `border-s-4 border-s-indigo-500 bg-indigo-50/90 hover:bg-indigo-50 ${selectedClass}`.trim();
     case "arrived":
     case "waiting":
-      return `border-l-4 border-l-sky-400 bg-sky-50/80 hover:bg-sky-50 ${selectedClass}`.trim();
+      return `border-s-4 border-s-sky-400 bg-sky-50/80 hover:bg-sky-50 ${selectedClass}`.trim();
     case "scheduled":
-      return `border-l-4 border-l-slate-300 bg-slate-50/70 text-slate-700 hover:bg-slate-100 ${selectedClass}`.trim();
+      return `border-s-4 border-s-slate-300 bg-slate-50/70 text-slate-700 hover:bg-slate-100 ${selectedClass}`.trim();
     case "completed":
-      return `border-l-4 border-l-emerald-300 bg-emerald-50/45 text-slate-600 hover:bg-emerald-50/70 ${selectedClass}`.trim();
+      return `border-s-4 border-s-emerald-300 bg-emerald-50/45 text-slate-600 hover:bg-emerald-50/70 ${selectedClass}`.trim();
     case "no-show":
-      return `border-l-4 border-l-amber-400 bg-amber-50/70 text-slate-700 hover:bg-amber-50 ${selectedClass}`.trim();
+      return `border-s-4 border-s-amber-400 bg-amber-50/70 text-slate-700 hover:bg-amber-50 ${selectedClass}`.trim();
     case "cancelled":
     case "discontinued":
     case "voided":
-      return `border-l-4 border-l-rose-300 bg-rose-50/45 text-slate-600 hover:bg-rose-50/70 ${selectedClass}`.trim();
+      return `border-s-4 border-s-rose-300 bg-rose-50/45 text-slate-600 hover:bg-rose-50/70 ${selectedClass}`.trim();
     default:
-      return `border-l-4 border-l-transparent bg-white hover:bg-slate-50 ${selectedClass}`.trim();
+      return `border-s-4 border-s-transparent bg-white hover:bg-slate-50 ${selectedClass}`.trim();
   }
 }
 
 function waitingWarningClass(level: WaitingWarningInfo["level"] | null): string {
   switch (level) {
     case "strong":
-      return "border-l-orange-500 bg-orange-50/90 hover:bg-orange-50 ring-1 ring-orange-200/70";
+      return "border-s-orange-500 bg-orange-50/90 hover:bg-orange-50 ring-1 ring-orange-200/70";
     case "mild":
-      return "border-l-amber-400 bg-amber-50/80 hover:bg-amber-50";
+      return "border-s-amber-400 bg-amber-50/80 hover:bg-amber-50";
     default:
       return "";
   }
@@ -739,7 +739,7 @@ export default function ModalityPage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
+    <div data-testid="modality-page-root" className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.10),transparent_26%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.08),transparent_20%),linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]" dir={isArabic ? "rtl" : "ltr"}>
       <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-3 p-3 sm:p-4 lg:p-5">
         <header data-testid="modality-board-header" className="rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-md">
           <div className={`flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
@@ -855,9 +855,13 @@ export default function ModalityPage() {
               </div>
             </Card>
 
-            <Card className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/94 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                <div>
+            <section
+              data-testid="modality-board-section"
+              dir={isArabic ? "rtl" : "ltr"}
+              className="rounded-xl border border-slate-200/80 bg-white/94"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-start">
+                <div className="text-start">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{chooseLocalized(language, "لوحة الأجهزة", "Modality board")}</p>
                   <h2 className="text-sm font-semibold text-foreground">
                     {chooseLocalized(language, "الحالات الحية أولاً، السجل في الأسفل", "Live cases first, history below")}
@@ -932,8 +936,8 @@ export default function ModalityPage() {
                     {chooseLocalized(language, "لا توجد حالات لهذا الفلتر.", "No cases match this filter.")}
                   </div>
                 ) : (
-                  <div className="max-h-[calc(100vh-290px)] overflow-auto">
-                    <table data-testid="modality-board" className="min-w-[1400px] table-fixed text-left text-[11px]">
+                  <div data-testid="modality-board-table-wrap" dir={isArabic ? "rtl" : "ltr"} className="overflow-x-auto">
+                    <table data-testid="modality-board" dir={isArabic ? "rtl" : "ltr"} className="min-w-[1400px] table-fixed text-start text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
                           <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
@@ -1168,7 +1172,7 @@ export default function ModalityPage() {
                   </div>
                 )}
               </div>
-            </Card>
+            </section>
           </section>
 
           <aside className="hidden" hidden aria-hidden="true">
@@ -1292,7 +1296,7 @@ export default function ModalityPage() {
         <div
           role="menu"
           dir={isArabic ? "rtl" : "ltr"}
-          className={`fixed z-[80] min-w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-2xl ${isArabic ? "text-right" : "text-left"}`}
+          className={`fixed z-[80] min-w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-2xl ${isArabic ? "text-end" : "text-start"}`}
           style={{ top: openMoreMenu.top, left: openMoreMenu.left }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -1301,7 +1305,7 @@ export default function ModalityPage() {
               <button
                 type="button"
                 role="menuitem"
-                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-amber-900 hover:bg-amber-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-amber-900 hover:bg-amber-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`}
                 disabled={statusMutation.isPending}
                 onClick={() => {
                   setStatusAction({ appointment: moreMenuAppointment, status: "discontinued", reasonRequired: true });
@@ -1318,7 +1322,7 @@ export default function ModalityPage() {
             <button
               type="button"
               role="menuitem"
-              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`}
               disabled={statusMutation.isPending}
               onClick={() => {
                 setOpenMoreMenu(null);
@@ -1333,7 +1337,7 @@ export default function ModalityPage() {
             <button
               type="button"
               role="menuitem"
-              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-right" : "text-left"}`}
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`}
               disabled={statusMutation.isPending}
               onClick={() => {
                 setOpenMoreMenu(null);
