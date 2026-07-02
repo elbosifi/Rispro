@@ -691,11 +691,23 @@ async function completeBookingIfStillEligible({
           auto_completed_by = 'orthanc_pacs_auto_completion',
           auto_completed_at = now(),
           auto_completion_check_id = $2,
+          pacs_study_started_at = $3::timestamptz,
+          pacs_first_seen_at = $4::timestamptz,
+          pacs_timing_source = $5,
+          pacs_timing_confidence = $6,
+          pacs_timing_checked_at = now(),
           updated_at = now(),
           updated_by_user_id = null
         where id = $1
       `,
-      [bookingId, historyId]
+      [
+        bookingId,
+        historyId,
+        result.studyStartedAt,
+        result.pacsFirstSeenAt,
+        result.timingSource,
+        result.timingConfidence,
+      ]
     );
 
     await markHistoryCompleted(historyId, client);
@@ -716,6 +728,10 @@ async function completeBookingIfStillEligible({
           accessionNumber: result.accessionNumber,
           seriesCount: result.seriesCount,
           instanceCount: result.instanceCount,
+          pacsStudyStartedAt: result.studyStartedAt,
+          pacsFirstSeenAt: result.pacsFirstSeenAt,
+          pacsTimingSource: result.timingSource,
+          pacsTimingConfidence: result.timingConfidence,
           verificationCheckId: historyId,
         },
         changedByUserId: null,

@@ -91,6 +91,15 @@ export interface AppointmentWithDetails extends Appointment {
   specialReasonLabelEn?: string | null;
   priorityNameAr: string | null;
   priorityNameEn: string | null;
+  patientPrimaryIdentifierType?: string | null;
+  patientPrimaryIdentifierLabelAr?: string | null;
+  patientPrimaryIdentifierLabelEn?: string | null;
+  patientPrimaryIdentifierValue?: string | null;
+  pacsAutoCompletionEnabled?: boolean;
+  pacsStudyStartedAt?: string | null;
+  pacsFirstSeenAt?: string | null;
+  pacsTimingSource?: string | null;
+  pacsTimingConfidence?: "high" | "medium" | "low" | null;
   modalitySlotNumber: number | null;
   publicCancelToken?: string | null;
   publicAppointmentUrl?: string | null;
@@ -312,6 +321,23 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     // Priority fields
     priorityNameAr: strOrNull(raw, 'priority_name_ar') ?? strOrNull(raw, 'priorityNameAr'),
     priorityNameEn: strOrNull(raw, 'priority_name_en') ?? strOrNull(raw, 'priorityNameEn'),
+    patientPrimaryIdentifierType:
+      strOrNull(raw, "patient_primary_identifier_type") ?? strOrNull(raw, "patientPrimaryIdentifierType"),
+    patientPrimaryIdentifierLabelAr:
+      strOrNull(raw, "patient_primary_identifier_label_ar") ?? strOrNull(raw, "patientPrimaryIdentifierLabelAr"),
+    patientPrimaryIdentifierLabelEn:
+      strOrNull(raw, "patient_primary_identifier_label_en") ?? strOrNull(raw, "patientPrimaryIdentifierLabelEn"),
+    patientPrimaryIdentifierValue:
+      strOrNull(raw, "patient_primary_identifier_value") ?? strOrNull(raw, "patientPrimaryIdentifierValue"),
+    pacsAutoCompletionEnabled:
+      bool(raw, "pacs_auto_completion_enabled", bool(raw, "pacsAutoCompletionEnabled", false)),
+    pacsStudyStartedAt: strOrNull(raw, "pacs_study_started_at") ?? strOrNull(raw, "pacsStudyStartedAt"),
+    pacsFirstSeenAt: strOrNull(raw, "pacs_first_seen_at") ?? strOrNull(raw, "pacsFirstSeenAt"),
+    pacsTimingSource: strOrNull(raw, "pacs_timing_source") ?? strOrNull(raw, "pacsTimingSource"),
+    pacsTimingConfidence: (() => {
+      const value = strOrNull(raw, "pacs_timing_confidence") ?? strOrNull(raw, "pacsTimingConfidence");
+      return value === "high" || value === "medium" || value === "low" ? value : null;
+    })(),
     // Other
     modalitySlotNumber: numOrNull(raw, 'modality_slot_number') ?? numOrNull(raw, 'modalitySlotNumber'),
     publicCancelToken: strOrNull(raw, 'public_cancel_token') ?? strOrNull(raw, 'publicCancelToken'),

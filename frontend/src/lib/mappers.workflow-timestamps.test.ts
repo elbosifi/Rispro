@@ -24,6 +24,40 @@ describe("workflow timestamp mapping", () => {
     expect(appointment.completedAt).toBe("2026-06-18T09:30:00Z");
   });
 
+  it("maps modality worklist PACS timing and primary identifier fields", () => {
+    const appointment = mapAppointmentWithDetails({
+      id: 1,
+      patient_id: 2,
+      modality_id: 3,
+      accession_number: "ACC-1",
+      appointment_date: "2026-06-18",
+      daily_sequence: 1,
+      status: "completed",
+      arabic_full_name: "Patient",
+      modality_name_ar: "CT",
+      modality_name_en: "CT",
+      patient_primary_identifier_type: "passport",
+      patient_primary_identifier_label_ar: "جواز سفر",
+      patient_primary_identifier_label_en: "Passport",
+      patient_primary_identifier_value: "P12345",
+      pacs_auto_completion_enabled: true,
+      pacs_study_started_at: "2026-06-18T08:25:00Z",
+      pacs_first_seen_at: "2026-06-18T08:27:00Z",
+      pacs_timing_source: "instance_acquisition_datetime",
+      pacs_timing_confidence: "high",
+    });
+
+    expect(appointment.patientPrimaryIdentifierType).toBe("passport");
+    expect(appointment.patientPrimaryIdentifierLabelAr).toBe("جواز سفر");
+    expect(appointment.patientPrimaryIdentifierLabelEn).toBe("Passport");
+    expect(appointment.patientPrimaryIdentifierValue).toBe("P12345");
+    expect(appointment.pacsAutoCompletionEnabled).toBe(true);
+    expect(appointment.pacsStudyStartedAt).toBe("2026-06-18T08:25:00Z");
+    expect(appointment.pacsFirstSeenAt).toBe("2026-06-18T08:27:00Z");
+    expect(appointment.pacsTimingSource).toBe("instance_acquisition_datetime");
+    expect(appointment.pacsTimingConfidence).toBe("high");
+  });
+
   it("maps queue workflow timestamps while preserving scannedAt", () => {
     const snapshot = mapQueueSnapshot({
       queue_date: "2026-06-18",

@@ -95,6 +95,128 @@ test("UID match returns matched", async () => {
   assert.equal(result.matchKey, "study_instance_uid");
 });
 
+test("matched study uses AcquisitionDateTime as high-confidence timing", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({
+        MainDicomTags: {
+          AcquisitionDateTime: "20260504081530",
+          StudyDate: "20260504",
+          StudyTime: "081000",
+        },
+      }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.studyStartedAt, "2026-05-04T08:15:30.000Z");
+  assert.equal(result.timingSource, "study_acquisition_datetime");
+  assert.equal(result.timingConfidence, "high");
+});
+
+test("matched local study uses earliest instance acquisition time before later series time", async () => {
+  const paths: string[] = [];
+  service.__setOrthancFetchForTests(async (path) => {
+    paths.push(path);
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({
+        Series: ["series-1", "series-2"],
+        MainDicomTags: { StudyDate: "20260504", StudyTime: "100000" },
+      }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 2, CountInstances: 4 });
+    if (path === "/series/series-1") {
+      return orthancResponse({ ID: "series-1", MainDicomTags: { SeriesDate: "20260504", SeriesTime: "091000" }, Instances: ["instance-1", "instance-2"] });
+    }
+    if (path === "/series/series-2") {
+      return orthancResponse({ ID: "series-2", MainDicomTags: { SeriesDate: "20260504", SeriesTime: "092000" }, Instances: ["instance-3"] });
+    }
+    if (path === "/instances/instance-1/tags") return orthancResponse({ AcquisitionDate: "20260504", AcquisitionTime: "084500" });
+    if (path === "/instances/instance-2/tags") return orthancResponse({ AcquisitionDate: "20260504", AcquisitionTime: "083000" });
+    if (path === "/instances/instance-3/tags") return orthancResponse({ AcquisitionDate: "20260504", AcquisitionTime: "085500" });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.studyStartedAt, "2026-05-04T08:30:00.000Z");
+  assert.equal(result.timingSource, "instance_acquisition_datetime");
+  assert.equal(result.timingConfidence, "high");
+  assert.ok(paths.includes("/series/series-1"));
+  assert.ok(paths.includes("/instances/instance-1/tags"));
+});
+
+test("matched local study uses earliest series time when instance acquisition is unavailable", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({
+        Series: ["series-1", "series-2"],
+        MainDicomTags: { StudyDate: "20260504", StudyTime: "100000" },
+      }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 2, CountInstances: 4 });
+    if (path === "/series/series-1") return orthancResponse({ MainDicomTags: { SeriesDate: "20260504", SeriesTime: "091500" }, Instances: ["instance-1"] });
+    if (path === "/series/series-2") return orthancResponse({ MainDicomTags: { SeriesDate: "20260504", SeriesTime: "090500" }, Instances: ["instance-2"] });
+    if (path.endsWith("/tags")) return orthancResponse({});
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.studyStartedAt, "2026-05-04T09:05:00.000Z");
+  assert.equal(result.timingSource, "series_datetime");
+  assert.equal(result.timingConfidence, "medium");
+});
+
+test("matched study uses StudyDate and StudyTime as medium-confidence fallback", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({ MainDicomTags: { StudyDate: "20260504", StudyTime: "101530" } }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.studyStartedAt, "2026-05-04T10:15:30.000Z");
+  assert.equal(result.timingSource, "study_datetime");
+  assert.equal(result.timingConfidence, "medium");
+});
+
+test("matched study uses Orthanc LastUpdate as low-confidence fallback", async () => {
+  service.__setOrthancFetchForTests(async (path) => {
+    if (path === "/tools/find") return orthancResponse(["study-1"]);
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({
+        LastUpdate: "20260504T112233",
+        MainDicomTags: { StudyDate: undefined, StudyTime: undefined },
+      }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.studyStartedAt, "2026-05-04T11:22:33.000Z");
+  assert.equal(result.pacsFirstSeenAt, "2026-05-04T11:22:33.000Z");
+  assert.equal(result.timingSource, "orthanc_last_update");
+  assert.equal(result.timingConfidence, "low");
+});
+
 test("accession fallback single match returns matched", async () => {
   let findCount = 0;
   const queries: unknown[] = [];

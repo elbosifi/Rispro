@@ -1121,12 +1121,21 @@ router.get(
         coalesce(b.arrived_at, status_times.arrived_at) as arrived_at,
         b.waiting_started_at,
         coalesce(b.completed_at, status_times.completed_at) as completed_at,
+        coalesce(pacs_settings.enabled, false) as pacs_auto_completion_enabled,
+        b.pacs_study_started_at,
+        b.pacs_first_seen_at,
+        b.pacs_timing_source,
+        b.pacs_timing_confidence,
         b.created_at,
         b.updated_at,
         p.arabic_full_name,
         p.english_full_name,
         p.national_id,
         p.mrn,
+        patient_primary_identifier.identifier_type as patient_primary_identifier_type,
+        patient_primary_identifier.label_ar as patient_primary_identifier_label_ar,
+        patient_primary_identifier.label_en as patient_primary_identifier_label_en,
+        patient_primary_identifier.value as patient_primary_identifier_value,
         p.age_years,
         p.demographics_estimated,
         p.sex,
@@ -1138,8 +1147,8 @@ router.get(
         m.general_instruction_en as modality_general_instruction_en,
         et.name_ar as exam_name_ar,
         et.name_en as exam_name_en,
-        rp.name_ar as priority_name_ar,
-        rp.name_en as priority_name_en,
+        coalesce(rp.name_ar, 'روتيني') as priority_name_ar,
+        coalesce(rp.name_en, 'Routine') as priority_name_en,
         protocol_assignment.assignment_id as protocol_assignment_id,
         protocol_assignment.protocol_name,
         protocol_assignment.version_number as protocol_version_number,
@@ -1157,7 +1166,62 @@ router.get(
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
+      left join appointments_v2.pacs_auto_completion_settings pacs_settings on pacs_settings.modality_id = b.modality_id
       left join active_same_day asd on asd.patient_id = b.patient_id and asd.booking_date = b.booking_date
+      left join patient_identifier_types legacy_type on legacy_type.code = p.identifier_type
+      left join lateral (
+        select source.identifier_type, source.label_ar, source.label_en, source.value
+        from (
+          select
+            1 as sort_order,
+            pi.id as tie_order,
+            pit.code as identifier_type,
+            pit.label_ar,
+            pit.label_en,
+            pi.value
+          from patient_identifiers pi
+          join patient_identifier_types pit on pit.id = pi.identifier_type_id
+          where pi.patient_id = p.id
+            and pi.is_primary = true
+            and nullif(pi.value, '') is not null
+
+          union all
+
+          select
+            2 as sort_order,
+            0 as tie_order,
+            p.identifier_type,
+            legacy_type.label_ar,
+            legacy_type.label_en,
+            p.identifier_value
+          where nullif(p.identifier_type, '') is not null
+            and nullif(p.identifier_value, '') is not null
+
+          union all
+
+          select
+            3 as sort_order,
+            0 as tie_order,
+            'national_id' as identifier_type,
+            'الرقم الوطني' as label_ar,
+            'National ID' as label_en,
+            p.national_id as value
+          where nullif(p.national_id, '') is not null
+
+          union all
+
+          select
+            4 as sort_order,
+            0 as tie_order,
+            'mrn' as identifier_type,
+            'رقم الملف' as label_ar,
+            'MRN' as label_en,
+            p.mrn as value
+          where nullif(p.mrn, '') is not null
+        ) source
+        order by source.sort_order asc, source.tie_order asc
+        limit 1
+      ) patient_primary_identifier on true
       left join lateral (
         select
           assignment.id as assignment_id,

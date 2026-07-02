@@ -42,6 +42,10 @@ export interface OrthancVerificationResult {
   accessionNumber: string | null;
   seriesCount: number | null;
   instanceCount: number | null;
+  studyStartedAt: string | null;
+  pacsFirstSeenAt: string | null;
+  timingSource: string | null;
+  timingConfidence: "high" | "medium" | "low" | null;
   resultJson: Record<string, unknown>;
   lastError: string | null;
 }
@@ -79,6 +83,10 @@ interface StudyCandidate {
   instanceCount: number | null;
   reliableSeriesCount: boolean;
   reliableInstanceCount: boolean;
+  studyStartedAt: string | null;
+  pacsFirstSeenAt: string | null;
+  timingSource: string | null;
+  timingConfidence: "high" | "medium" | "low" | null;
   raw: unknown;
 }
 
@@ -207,6 +215,42 @@ function normalizeDicomDate(value: unknown): string | null {
   return null;
 }
 
+function normalizeDicomTime(value: unknown): string | null {
+  const clean = firstString(value)?.replace(/[^0-9.]/g, "") || "";
+  const match = clean.match(/^(\d{2})(\d{2})?(\d{2})?(?:\.(\d{1,6}))?/);
+  if (!match) return null;
+  const [, hour, minute = "00", second = "00", fraction = ""] = match;
+  const paddedFraction = fraction.padEnd(3, "0").slice(0, 3);
+  return `${hour}:${minute}:${second}.${paddedFraction}`;
+}
+
+function parseDicomDateTime(value: unknown): string | null {
+  const raw = firstString(value);
+  if (!raw) return null;
+  const clean = raw.trim();
+  const isoDate = new Date(clean);
+  if (!Number.isNaN(isoDate.getTime())) return isoDate.toISOString();
+
+  const match = clean.match(/^(\d{8})(?:T)?(\d{2}(?:\d{2})?(?:\d{2})?(?:\.\d{1,6})?)/);
+  if (!match) return null;
+  return parseDicomDateAndTime(match[1], match[2]);
+}
+
+function parseDicomDateAndTime(dateValue: unknown, timeValue: unknown): string | null {
+  const date = normalizeDicomDate(dateValue);
+  const time = normalizeDicomTime(timeValue);
+  if (!date || !time) return null;
+  const iso = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time}Z`;
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function parseOrthancTimestamp(value: unknown): string | null {
+  const raw = firstString(value);
+  if (!raw) return null;
+  return parseDicomDateTime(raw) ?? null;
+}
+
 function normalizeBookingDate(booking: OrthancBookingVerificationContext): string | null {
   return normalizeDicomDate(booking.appointment_date || booking.booking_date);
 }
@@ -260,6 +304,10 @@ function makeResult(
     accessionNumber: patch.accessionNumber ?? null,
     seriesCount: patch.seriesCount ?? null,
     instanceCount: patch.instanceCount ?? null,
+    studyStartedAt: patch.studyStartedAt ?? null,
+    pacsFirstSeenAt: patch.pacsFirstSeenAt ?? null,
+    timingSource: patch.timingSource ?? null,
+    timingConfidence: patch.timingConfidence ?? null,
     resultJson: patch.resultJson ?? {},
     lastError: patch.lastError ?? null,
   };
@@ -285,6 +333,24 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
   const tags = extractTags(payload);
   const seriesCount = parseCount(record.SeriesCount ?? record.CountSeries ?? tags.NumberOfStudyRelatedSeries ?? tags["00201206"]);
   const instanceCount = parseCount(record.InstanceCount ?? record.CountInstances ?? tags.NumberOfStudyRelatedInstances ?? tags["00201208"]);
+  const acquisitionDateTime = parseDicomDateTime(tags.AcquisitionDateTime ?? tags["0008002A"]);
+  const studyDateTime = parseDicomDateAndTime(tags.StudyDate ?? tags["00080020"], tags.StudyTime ?? tags["00080030"]);
+  const lastUpdate = parseOrthancTimestamp(record.LastUpdate ?? record.LastUpdateTime ?? record.FirstSeen ?? record.CreatedAt);
+  const studyStartedAt = acquisitionDateTime ?? studyDateTime ?? lastUpdate;
+  const timingSource = acquisitionDateTime
+    ? "study_acquisition_datetime"
+    : studyDateTime
+      ? "study_datetime"
+      : lastUpdate
+        ? "orthanc_last_update"
+        : null;
+  const timingConfidence = acquisitionDateTime
+    ? "high"
+    : studyDateTime
+      ? "medium"
+      : lastUpdate
+        ? "low"
+        : null;
 
   return {
     orthancStudyId: firstString(options.orthancStudyId, record.ID, record.Id, record.id) || null,
@@ -300,8 +366,71 @@ function candidateFromPayload(payload: unknown, options: { remote: boolean; orth
     instanceCount,
     reliableSeriesCount: !options.remote && seriesCount != null,
     reliableInstanceCount: !options.remote && instanceCount != null,
+    studyStartedAt,
+    pacsFirstSeenAt: lastUpdate,
+    timingSource,
+    timingConfidence,
     raw: payload,
   };
+}
+
+const MAX_LOCAL_SERIES_FOR_TIMING = 16;
+const MAX_LOCAL_INSTANCES_FOR_TIMING = 64;
+const MAX_LOCAL_INSTANCES_PER_SERIES_FOR_TIMING = 16;
+
+function earlierTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) return right;
+  if (!right) return left;
+  return new Date(left).getTime() <= new Date(right).getTime() ? left : right;
+}
+
+async function extractLocalDetailedTiming(
+  studyPayload: unknown,
+  settings: ResolvedOrthancSettings
+): Promise<Pick<StudyCandidate, "studyStartedAt" | "timingSource" | "timingConfidence"> | null> {
+  const studyRecord = getRecord(studyPayload);
+  const seriesIds = Array.isArray(studyRecord.Series)
+    ? studyRecord.Series.map((value) => firstString(value)).filter((value): value is string => Boolean(value))
+    : [];
+  if (seriesIds.length === 0) return null;
+
+  let earliestSeries: string | null = null;
+  let earliestInstance: string | null = null;
+  let inspectedInstances = 0;
+
+  for (const seriesId of seriesIds.slice(0, MAX_LOCAL_SERIES_FOR_TIMING)) {
+    const seriesResponse = await fetchOrthancForVerification(`/series/${encodeURIComponent(seriesId)}`, { settings }).catch(() => null);
+    if (!seriesResponse?.ok) continue;
+    const seriesRecord = getRecord(seriesResponse.json);
+    const seriesTags = extractTags(seriesResponse.json);
+    earliestSeries = earlierTimestamp(
+      earliestSeries,
+      parseDicomDateAndTime(seriesTags.SeriesDate ?? seriesTags["00080021"], seriesTags.SeriesTime ?? seriesTags["00080031"])
+    );
+
+    const instanceIds = Array.isArray(seriesRecord.Instances)
+      ? seriesRecord.Instances.map((value) => firstString(value)).filter((value): value is string => Boolean(value))
+      : [];
+    for (const instanceId of instanceIds.slice(0, MAX_LOCAL_INSTANCES_PER_SERIES_FOR_TIMING)) {
+      if (inspectedInstances >= MAX_LOCAL_INSTANCES_FOR_TIMING) break;
+      inspectedInstances += 1;
+      const instanceResponse = await fetchOrthancForVerification(`/instances/${encodeURIComponent(instanceId)}/tags`, { settings }).catch(() => null);
+      if (!instanceResponse?.ok) continue;
+      const instanceTags = extractTags(instanceResponse.json);
+      earliestInstance = earlierTimestamp(
+        earliestInstance,
+        parseDicomDateAndTime(instanceTags.AcquisitionDate ?? instanceTags["00080022"], instanceTags.AcquisitionTime ?? instanceTags["00080032"])
+      );
+    }
+  }
+
+  if (earliestInstance) {
+    return { studyStartedAt: earliestInstance, timingSource: "instance_acquisition_datetime", timingConfidence: "high" };
+  }
+  if (earliestSeries) {
+    return { studyStartedAt: earliestSeries, timingSource: "series_datetime", timingConfidence: "medium" };
+  }
+  return null;
 }
 
 function hasConflict(booking: OrthancBookingVerificationContext, candidate: StudyCandidate): string | null {
@@ -390,6 +519,10 @@ function evaluateCandidates({
       accessionNumber: candidate.accessionNumber,
       seriesCount: candidate.seriesCount,
       instanceCount: candidate.instanceCount,
+      studyStartedAt: candidate.studyStartedAt,
+      pacsFirstSeenAt: candidate.pacsFirstSeenAt,
+      timingSource: candidate.timingSource,
+      timingConfidence: candidate.timingConfidence,
       resultJson: { conflict, candidate: candidate.raw },
       lastError: conflict,
     });
@@ -404,6 +537,10 @@ function evaluateCandidates({
       accessionNumber: candidate.accessionNumber,
       seriesCount: candidate.seriesCount,
       instanceCount: candidate.instanceCount,
+      studyStartedAt: candidate.studyStartedAt,
+      pacsFirstSeenAt: candidate.pacsFirstSeenAt,
+      timingSource: candidate.timingSource,
+      timingConfidence: candidate.timingConfidence,
       resultJson: {
         reason: thresholdResult.reason,
         minimumSeriesCount: thresholdResult.minimumSeriesCount ?? null,
@@ -421,8 +558,18 @@ function evaluateCandidates({
     accessionNumber: candidate.accessionNumber,
     seriesCount: candidate.seriesCount,
     instanceCount: candidate.instanceCount,
+    studyStartedAt: candidate.studyStartedAt,
+    pacsFirstSeenAt: candidate.pacsFirstSeenAt,
+    timingSource: candidate.timingSource,
+    timingConfidence: candidate.timingConfidence,
     resultJson: {
       candidate: candidate.raw,
+      timing: {
+        studyStartedAt: candidate.studyStartedAt,
+        pacsFirstSeenAt: candidate.pacsFirstSeenAt,
+        source: candidate.timingSource,
+        confidence: candidate.timingConfidence,
+      },
       minimumSeriesCount: thresholdResult.minimumSeriesCount ?? null,
       seriesCountUnavailableAccepted: thresholdResult.reason === "series_count_unavailable",
     },
@@ -447,7 +594,15 @@ async function readLocalCandidate(studyId: string, settings: ResolvedOrthancSett
     ...getRecord(detail.json),
     ...getRecord(statistics?.json),
   };
-  return candidateFromPayload(merged, { remote: false, orthancStudyId: studyId });
+  const candidate = candidateFromPayload(merged, { remote: false, orthancStudyId: studyId });
+  if (candidate.timingSource === "study_acquisition_datetime") return candidate;
+
+  const detailedTiming = await extractLocalDetailedTiming(detail.json, settings);
+  if (!detailedTiming) return candidate;
+  return {
+    ...candidate,
+    ...detailedTiming,
+  };
 }
 
 async function queryLocal(matchKey: OrthancMatchKey, matchValue: string, settings: ResolvedOrthancSettings): Promise<StudyCandidate[]> {

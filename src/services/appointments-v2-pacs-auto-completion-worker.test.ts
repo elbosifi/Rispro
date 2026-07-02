@@ -20,6 +20,11 @@ test("worker preserves manually or MPPS completed rows after for update re-check
   assert.match(source, /return false/);
 });
 
+test("worker does not persist PACS timing for non-matched Orthanc results", () => {
+  assert.match(source, /if \(result\.status !== "matched"\) \{\s*return false;\s*\}/);
+  assert.match(source, /pacs_timing_checked_at = now\(\)/);
+});
+
 test("worker excludes bookings after manual PACS auto-completion override", () => {
   assert.match(source, /b\.pacs_auto_completion_disabled_at is null/);
   assert.match(source, /select id, status, pacs_auto_completion_disabled_at/);
@@ -30,6 +35,25 @@ test("worker writes orthanc_auto_complete audit payload", () => {
   assert.match(source, /actionType: "orthanc_auto_complete"/);
   assert.match(source, /entityType: "appointments_v2_booking"/);
   assert.match(source, /verificationCheckId: historyId/);
+});
+
+test("worker persists PACS timing only when a booking is auto-completed", () => {
+  assert.match(source, /pacs_study_started_at = \$3::timestamptz/);
+  assert.match(source, /pacs_first_seen_at = \$4::timestamptz/);
+  assert.match(source, /pacs_timing_source = \$5/);
+  assert.match(source, /pacs_timing_confidence = \$6/);
+  assert.match(source, /pacs_timing_checked_at = now\(\)/);
+  assert.match(source, /result\.studyStartedAt/);
+  assert.match(source, /result\.pacsFirstSeenAt/);
+  assert.match(source, /result\.timingSource/);
+  assert.match(source, /result\.timingConfidence/);
+});
+
+test("worker audit payload records persisted PACS timing fields", () => {
+  assert.match(source, /pacsStudyStartedAt: result\.studyStartedAt/);
+  assert.match(source, /pacsFirstSeenAt: result\.pacsFirstSeenAt/);
+  assert.match(source, /pacsTimingSource: result\.timingSource/);
+  assert.match(source, /pacsTimingConfidence: result\.timingConfidence/);
 });
 
 test("worker activates pending reporting assignment intents after PACS completion commit", () => {
