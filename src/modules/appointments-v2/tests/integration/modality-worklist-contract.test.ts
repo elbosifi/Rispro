@@ -1,0 +1,151 @@
+import { after, before, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { pool } from "../../../../db/pool.js";
+import {
+  canReachDatabase,
+  createTestApp,
+  createTestAuthCookie,
+  fetchJson,
+  isDatabaseAvailable,
+  seedTestData,
+  setupTestDatabase,
+  type TestData,
+} from "./helpers.js";
+
+const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
+const TEST_PREFIX = "MODWL_";
+
+describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
+  let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
+  let testData: TestData;
+  let app: Awaited<ReturnType<typeof createTestApp>>;
+  let authCookie: string;
+
+  before(async () => {
+    if (!await canReachDatabase()) {
+      console.warn("WARNING: Database is not reachable. Skipping modality worklist contract integration tests.");
+      return;
+    }
+    testDb = await setupTestDatabase(TEST_PREFIX);
+    testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
+    app = await createTestApp();
+    authCookie = createTestAuthCookie(testData.userId, "supervisor");
+  });
+
+  after(async () => {
+    if (!testData) return;
+    await app.close();
+    await testDb.cleanup();
+  });
+
+  function guard() {
+    if (!testData) throw new Error("Test setup failed - database unreachable");
+  }
+
+  async function createBooking(patientId: number): Promise<number> {
+    const result = await pool.query<{ id: string }>(
+      `
+        insert into appointments_v2.bookings (
+          patient_id,
+          modality_id,
+          exam_type_id,
+          booking_date,
+          booking_time,
+          case_category,
+          status,
+          policy_version_id,
+          created_by_user_id,
+          updated_by_user_id
+        )
+        values ($1, $2, $3, '2026-06-20'::date, null, 'non_oncology', 'completed', $4, $5, $5)
+        returning id::text
+      `,
+      [patientId, testData.modalityId, testData.examTypeId, testData.policyVersionId, testData.userId]
+    );
+    return Number(result.rows[0].id);
+  }
+
+  it("returns PACS timing, primary identifier, and Routine priority defaults", async () => {
+    guard();
+    const passportType = await pool.query<{ id: string }>(
+      `select id::text from patient_identifier_types where code = 'passport' limit 1`
+    );
+    assert.ok(passportType.rows[0]?.id);
+
+    await pool.query(
+      `
+        insert into patient_identifiers (patient_id, identifier_type_id, value, normalized_value, is_primary)
+        values ($1, $2, 'PASS-MODWL-1', 'PASS-MODWL-1', true)
+      `,
+      [testData.patientId, Number(passportType.rows[0].id)]
+    );
+
+    const passportBookingId = await createBooking(testData.patientId);
+    await pool.query(
+      `
+        update appointments_v2.bookings
+        set
+          pacs_study_started_at = '2026-06-20T08:15:00Z'::timestamptz,
+          pacs_first_seen_at = '2026-06-20T08:17:00Z'::timestamptz,
+          pacs_timing_source = 'instance_acquisition_datetime',
+          pacs_timing_confidence = 'high',
+          pacs_timing_checked_at = '2026-06-20T08:18:00Z'::timestamptz
+        where id = $1
+      `,
+      [passportBookingId]
+    );
+
+    const fallbackPatient = await pool.query<{ id: string }>(
+      `
+        insert into patients (
+          arabic_full_name,
+          english_full_name,
+          national_id,
+          normalized_arabic_name,
+          sex,
+          age_years,
+          mrn,
+          identifier_type,
+          identifier_value
+        )
+        values ($1, $2, null, $3, 'F', 41, 'MRN-MODWL-1', null, null)
+        returning id::text
+      `,
+      [`${TEST_PREFIX}مريضة بدون معرف`, `${TEST_PREFIX}Fallback Patient`, `${TEST_PREFIX}fallback`]
+    );
+    const fallbackBookingId = await createBooking(Number(fallbackPatient.rows[0].id));
+
+    await pool.query(
+      `
+        insert into appointments_v2.pacs_auto_completion_settings (modality_id, enabled)
+        values ($1, true)
+        on conflict (modality_id) do update set enabled = excluded.enabled
+      `,
+      [testData.modalityId]
+    );
+
+    const response = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(
+      app.baseUrl,
+      `/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`,
+      { cookie: authCookie }
+    );
+
+    assert.equal(response.status, 200);
+    const passportRow = response.data.appointments.find((row) => Number(row.id) === passportBookingId);
+    const fallbackRow = response.data.appointments.find((row) => Number(row.id) === fallbackBookingId);
+
+    assert.equal(passportRow?.patient_primary_identifier_type, "passport");
+    assert.equal(passportRow?.patient_primary_identifier_label_en, "Passport");
+    assert.equal(passportRow?.patient_primary_identifier_value, "PASS-MODWL-1");
+    assert.equal(passportRow?.pacs_auto_completion_enabled, true);
+    assert.equal(passportRow?.pacs_study_started_at, "2026-06-20T08:15:00.000Z");
+    assert.equal(passportRow?.pacs_first_seen_at, "2026-06-20T08:17:00.000Z");
+    assert.equal(passportRow?.pacs_timing_source, "instance_acquisition_datetime");
+    assert.equal(passportRow?.pacs_timing_confidence, "high");
+    assert.equal(passportRow?.priority_name_en, "Routine");
+
+    assert.equal(fallbackRow?.patient_primary_identifier_type, "mrn");
+    assert.equal(fallbackRow?.patient_primary_identifier_value, "MRN-MODWL-1");
+    assert.equal(fallbackRow?.priority_name_en, "Routine");
+  });
+});

@@ -52,6 +52,11 @@ type MoreMenuState = {
   top: number;
   left: number;
 };
+type WaitingDurationInfo = {
+  value: string;
+  source: string;
+  title: string;
+};
 
 function isActiveStatus(status: AppointmentStatus): boolean {
   return ACTIVE_STATUSES.has(status);
@@ -241,10 +246,7 @@ function defaultText(value: string | number | null | undefined): string | null {
   return text || null;
 }
 
-function formatElapsedSince(language: Language, now: Date, value: string | null | undefined): string {
-  const start = timestampValue(value);
-  if (start == null) return EMPTY_VALUE;
-  const elapsedMinutes = Math.max(0, Math.floor((now.getTime() - start) / 60_000));
+function formatDurationMinutes(language: Language, elapsedMinutes: number): string {
   const hours = Math.floor(elapsedMinutes / 60);
   const minutes = elapsedMinutes % 60;
   if (hours > 0) {
@@ -253,9 +255,75 @@ function formatElapsedSince(language: Language, now: Date, value: string | null 
   return language === "ar" ? `${minutes}د` : `${minutes}m`;
 }
 
-function elapsedLabel(language: Language, appointment: AppointmentWithDetails, now: Date): string {
-  if (!ACTIVE_STATUSES.has(appointment.status)) return EMPTY_VALUE;
-  return formatElapsedSince(language, now, appointment.arrivedAt);
+function waitingSourceLabel(language: Language, source: "live" | "pacs_start" | "pacs_first_seen" | "manual" | "manual_fallback"): string {
+  switch (source) {
+    case "live":
+      return chooseLocalized(language, "انتظار مباشر", "Live waiting");
+    case "pacs_start":
+      return chooseLocalized(language, "بداية الدراسة من PACS", "PACS study start");
+    case "pacs_first_seen":
+      return chooseLocalized(language, "أول ظهور في PACS / تقريبي", "PACS first seen / approximate");
+    case "manual":
+      return chooseLocalized(language, "إكمال يدوي", "Manual complete");
+    case "manual_fallback":
+      return chooseLocalized(language, "إكمال يدوي احتياطي", "Manual complete fallback");
+  }
+}
+
+function waitingDurationInfo(language: Language, appointment: AppointmentWithDetails, now: Date): WaitingDurationInfo | null {
+  const arrivedAt = timestampValue(appointment.arrivedAt);
+  if (arrivedAt == null) return null;
+
+  let endpoint: number | null = null;
+  let source: string | null = null;
+
+  if (ACTIVE_STATUSES.has(appointment.status)) {
+    endpoint = now.getTime();
+    source = waitingSourceLabel(language, "live");
+  } else if (appointment.status === "completed") {
+    if (appointment.pacsAutoCompletionEnabled) {
+      const pacsStartedAt = timestampValue(appointment.pacsStudyStartedAt);
+      const pacsFirstSeenAt = timestampValue(appointment.pacsFirstSeenAt);
+      const completedAt = timestampValue(appointment.completedAt);
+      if (pacsStartedAt != null) {
+        endpoint = pacsStartedAt;
+        source = waitingSourceLabel(language, "pacs_start");
+      } else if (pacsFirstSeenAt != null) {
+        endpoint = pacsFirstSeenAt;
+        source = waitingSourceLabel(language, "pacs_first_seen");
+      } else if (completedAt != null) {
+        endpoint = completedAt;
+        source = waitingSourceLabel(language, "manual_fallback");
+      }
+    } else {
+      endpoint = timestampValue(appointment.completedAt);
+      source = endpoint == null ? null : waitingSourceLabel(language, "manual");
+    }
+  }
+
+  if (endpoint == null || source == null || endpoint < arrivedAt) return null;
+  const elapsedMinutes = Math.floor((endpoint - arrivedAt) / 60_000);
+  const value = formatDurationMinutes(language, elapsedMinutes);
+  return {
+    value,
+    source,
+    title: `${value} - ${source}`,
+  };
+}
+
+function priorityDisplay(language: Language, appointment: Pick<AppointmentWithDetails, "priorityNameAr" | "priorityNameEn">): string {
+  return chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || chooseLocalized(language, "روتيني", "Routine");
+}
+
+function primaryIdentifierText(language: Language, appointment: AppointmentWithDetails): string {
+  const value = appointment.patientPrimaryIdentifierValue?.trim();
+  if (!value) return chooseLocalized(language, "لا يوجد معرف أساسي", "No primary ID");
+  const label = chooseLocalized(
+    language,
+    appointment.patientPrimaryIdentifierLabelAr,
+    appointment.patientPrimaryIdentifierLabelEn
+  ) || appointment.patientPrimaryIdentifierType || chooseLocalized(language, "المعرف الأساسي", "Primary ID");
+  return `${label}: ${value}`;
 }
 
 function statusActionLabel(language: Language, action: BoardStatusAction): string {
@@ -527,7 +595,7 @@ export default function ModalityPage() {
   const selectedName = selectedAppointment ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName) : "";
   const selectedModality = selectedAppointment ? chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn) : "";
   const selectedExam = selectedAppointment ? chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || t(language, "common.na") : "";
-  const selectedPriority = selectedAppointment ? chooseLocalized(language, selectedAppointment.priorityNameAr, selectedAppointment.priorityNameEn) || t(language, "common.na") : "";
+  const selectedPriority = selectedAppointment ? priorityDisplay(language, selectedAppointment) : "";
   const moreMenuAppointment = openMoreMenu
     ? boardAppointments.find((appointment) => appointment.id === openMoreMenu.appointmentId) ?? null
     : null;
@@ -723,10 +791,10 @@ export default function ModalityPage() {
                           <th className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
                           <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
                           <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "مدة الانتظار", "Waiting duration")}</th>
-                          <th className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
-                          <th className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "MRN / الرقم الوطني", "MRN / national ID")}</th>
-                          <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
-                          <th className="w-[170px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
+                          <th className="w-[220px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
+                          <th className="w-[170px] px-2 py-2 font-semibold">{chooseLocalized(language, "المعرف الأساسي", "Primary ID")}</th>
+                          <th className="w-[115px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
+                          <th className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
                           <th className="w-[190px] px-2 py-2 font-semibold">Protocol</th>
                           <th className="w-[110px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
                           <th className="w-[130px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
@@ -743,6 +811,9 @@ export default function ModalityPage() {
                       const canMarkArrived = appointment.status === "scheduled" || appointment.status === "waiting";
                       const arrivalNumber = arrivalNumberById.get(appointment.id);
                       const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
+                      const waitingInfo = waitingDurationInfo(language, appointment, elapsedNow);
+                      const englishName = appointment.englishFullName?.trim();
+                      const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
                       return (
                             <tr
                               key={appointment.id}
@@ -775,11 +846,21 @@ export default function ModalityPage() {
                               <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
                                 <p>{formatArrivalColumn(language, appointment)}</p>
                               </td>
-                              <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
-                                {elapsedLabel(language, appointment, elapsedNow)}
+                              <td className="px-2 py-1 text-slate-700">
+                                {waitingInfo ? (
+                                  <div title={waitingInfo.title} className="leading-tight">
+                                    <p className="font-mono text-xs font-semibold text-slate-900">{waitingInfo.value}</p>
+                                    <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">{waitingInfo.source}</p>
+                                  </div>
+                                ) : (
+                                  <span className="font-mono text-[11px] text-muted-foreground">{EMPTY_VALUE}</span>
+                                )}
                               </td>
                               <td className="px-2 py-1">
-                                <p className="font-semibold text-foreground">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
+                                <p className="text-sm font-bold leading-snug text-foreground">{appointment.arabicFullName}</p>
+                                {showEnglishName ? (
+                                  <p className="text-xs font-medium leading-snug text-slate-600">{englishName}</p>
+                                ) : null}
                                 <p className="text-[10px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
                                 {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? (
                                   <div className="mt-1 flex flex-wrap gap-1">
@@ -798,12 +879,11 @@ export default function ModalityPage() {
                                   </div>
                                 ) : null}
                               </td>
-                              <td className="px-2 py-1 text-[11px] text-slate-700">
-                                <p>{appointment.mrn || EMPTY_VALUE}</p>
-                                <p className="text-muted-foreground">{appointment.nationalId || EMPTY_VALUE}</p>
+                              <td className="px-2 py-1 text-xs font-medium text-slate-800">
+                                {primaryIdentifierText(language, appointment)}
                               </td>
-                              <td className="px-2 py-1 text-[11px] text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), EMPTY_VALUE)}</td>
-                              <td className="px-2 py-1 text-[11px] text-slate-700">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || EMPTY_VALUE}</td>
+                              <td className="px-2 py-1 text-xs font-medium text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), EMPTY_VALUE)}</td>
+                              <td className="px-2 py-1 text-xs font-semibold leading-snug text-slate-800">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || EMPTY_VALUE}</td>
                               <td className="px-2 py-1 text-[11px] text-slate-700">
                                 {appointment.protocolAssignmentSummary ? (
                                   <div className="space-y-0.5">
@@ -823,7 +903,7 @@ export default function ModalityPage() {
                                   <span className="text-xs text-muted-foreground">{EMPTY_VALUE}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1 text-[11px] text-slate-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn) || EMPTY_VALUE}</td>
+                              <td className="px-2 py-1 text-[11px] font-semibold text-slate-700">{priorityDisplay(language, appointment)}</td>
                               <td className="px-2 py-1">
                                 <code data-testid="modality-board-accession" className="font-mono text-[11px] text-foreground">
                                   {appointment.accessionNumber}
@@ -1299,7 +1379,7 @@ export default function ModalityPage() {
                     <DetailField label={t(language, "modality.fieldAccession")} value={completionTarget.accessionNumber} />
                     <DetailField label={t(language, "modality.fieldModality")} value={chooseLocalized(language, completionTarget.modalityNameAr, completionTarget.modalityNameEn)} />
                     <DetailField label={t(language, "modality.fieldExam")} value={chooseLocalized(language, completionTarget.examNameAr, completionTarget.examNameEn) || t(language, "common.na")} />
-                    <DetailField label={t(language, "modality.fieldPriority")} value={chooseLocalized(language, completionTarget.priorityNameAr, completionTarget.priorityNameEn) || t(language, "common.na")} />
+                    <DetailField label={t(language, "modality.fieldPriority")} value={priorityDisplay(language, completionTarget)} />
                     <DetailField label={t(language, "modality.fieldPatient")} value={chooseLocalized(language, completionTarget.arabicFullName, completionTarget.englishFullName)} />
                     <DetailField label={t(language, "settings.fieldMRN")} value={completionTarget.mrn ?? null} />
                     <DetailField label={t(language, "settings.fieldNationalId")} value={completionTarget.nationalId ?? null} />

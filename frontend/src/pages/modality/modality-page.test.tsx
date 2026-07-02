@@ -486,6 +486,153 @@ describe("ModalityPage modality board", () => {
     expect(within(screen.getByTestId("modality-board-row-11")).getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("shows frozen PACS study-start waiting duration for completed auto-completion rows", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 20,
+        accessionNumber: "ACC-PACS-START",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T09:30:00Z",
+        pacsAutoCompletionEnabled: true,
+        pacsStudyStartedAt: "2026-06-18T08:45:00Z",
+        pacsFirstSeenAt: "2026-06-18T08:50:00Z",
+        englishFullName: "PACS Started",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-20");
+    expect(within(row).getByText("45m")).toBeTruthy();
+    expect(within(row).getByText("PACS study start")).toBeTruthy();
+  });
+
+  it("falls back to PACS first seen and marks approximate", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 21,
+        accessionNumber: "ACC-PACS-SEEN",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T09:30:00Z",
+        pacsAutoCompletionEnabled: true,
+        pacsFirstSeenAt: "2026-06-18T08:35:00Z",
+        englishFullName: "PACS Seen",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-21");
+    expect(within(row).getByText("35m")).toBeTruthy();
+    expect(within(row).getByText("PACS first seen / approximate")).toBeTruthy();
+  });
+
+  it("falls back to completed_at and marks manual fallback for auto-completion rows without PACS timing", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 22,
+        accessionNumber: "ACC-PACS-FALLBACK",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T09:10:00Z",
+        pacsAutoCompletionEnabled: true,
+        englishFullName: "PACS Fallback",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-22");
+    expect(within(row).getByText("1h 10m")).toBeTruthy();
+    expect(within(row).getByText("Manual complete fallback")).toBeTruthy();
+  });
+
+  it("uses manual completed_at for completed non-auto-completion rows", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 23,
+        accessionNumber: "ACC-MANUAL",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T08:25:00Z",
+        pacsAutoCompletionEnabled: false,
+        englishFullName: "Manual Complete",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-23");
+    expect(within(row).getByText("25m")).toBeTruthy();
+    expect(within(row).getByText("Manual complete")).toBeTruthy();
+  });
+
+  it("shows live waiting source for active arrived rows and dash without arrived_at", async () => {
+    const arrivedAt = new Date(Date.now() - 70 * 60_000).toISOString();
+    await openBoard([
+      appointment({ id: 24, accessionNumber: "ACC-LIVE", status: "waiting", arrivedAt, englishFullName: "Live Waiting" }),
+      appointment({ id: 25, accessionNumber: "ACC-NO-ARRIVAL", status: "waiting", arrivedAt: null, englishFullName: "No Arrival" }),
+    ]);
+
+    const liveRow = screen.getByTestId("modality-board-row-24");
+    expect(within(liveRow).getByText(/1h (9|10)m/)).toBeTruthy();
+    expect(within(liveRow).getByText("Live waiting")).toBeTruthy();
+
+    const missingRow = screen.getByTestId("modality-board-row-25");
+    expect(within(missingRow).queryByText("Live waiting")).toBeNull();
+    expect(within(missingRow).getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders both Arabic and English patient names in the board row", async () => {
+    await openBoard([
+      appointment({
+        id: 26,
+        accessionNumber: "ACC-NAMES",
+        status: "waiting",
+        arabicFullName: "أحمد علي",
+        englishFullName: "Ahmed Ali",
+      }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-26");
+    expect(within(row).getByText("أحمد علي")).toBeTruthy();
+    expect(within(row).getByText("Ahmed Ali")).toBeTruthy();
+  });
+
+  it("shows Primary ID and renders passport identifier instead of MRN or National ID", async () => {
+    await openBoard([
+      appointment({
+        id: 27,
+        accessionNumber: "ACC-PASSPORT",
+        status: "waiting",
+        patientPrimaryIdentifierType: "passport",
+        patientPrimaryIdentifierLabelEn: "Passport",
+        patientPrimaryIdentifierLabelAr: "جواز السفر",
+        patientPrimaryIdentifierValue: "P123456",
+        mrn: "MRN-SHOULD-NOT-SHOW",
+        nationalId: "NAT-SHOULD-NOT-SHOW",
+      }),
+    ]);
+
+    expect(screen.getByText("Primary ID")).toBeTruthy();
+    const row = screen.getByTestId("modality-board-row-27");
+    expect(within(row).getByText("Passport: P123456")).toBeTruthy();
+    expect(within(row).queryByText("MRN-SHOULD-NOT-SHOW")).toBeNull();
+    expect(within(row).queryByText("NAT-SHOULD-NOT-SHOW")).toBeNull();
+  });
+
+  it("renders Routine when priority names are missing", async () => {
+    await openBoard([
+      appointment({
+        id: 28,
+        accessionNumber: "ACC-ROUTINE",
+        status: "waiting",
+        priorityNameAr: null,
+        priorityNameEn: null,
+      }),
+    ]);
+
+    expect(within(screen.getByTestId("modality-board-row-28")).getByText("Routine")).toBeTruthy();
+  });
+
   it("reopens completed rows only after a required reason is entered", async () => {
     const user = await openBoard([
       appointment({ id: 9, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
