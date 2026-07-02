@@ -998,4 +998,36 @@ describe("ModalityPage modality board", () => {
     expect(modalityPageSource).not.toContain("Confirm cancellation");
     expect(modalityPageSource).not.toContain("إلغاء الموعد");
   });
+
+  it("does not render ambiguous حي or سجل labels on the Arabic modality board", async () => {
+    languageState.language = "ar";
+    await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-AR-LIVE", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Arabic Live" }),
+    ]);
+
+    expect(screen.queryByText("حي")).toBeNull();
+    expect(screen.queryByText("سجل")).toBeNull();
+    expect(screen.queryByText("الحالات الحية أولاً، السجل في الأسفل")).toBeNull();
+    expect(screen.getByRole("button", { name: "نشط" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "جاهز" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "لم يصل" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "مكتمل" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "مشكلة" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "الكل" })).toBeTruthy();
+  });
+
+  it("renders English modality board without broken live/history labels", async () => {
+    languageState.language = "en";
+    await openBoard([
+      appointment({ id: 1, accessionNumber: "ACC-EN-LIVE", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "English Live" }),
+    ]);
+
+    expect(screen.queryByText("Live cases first, history below")).toBeNull();
+    expect(screen.getByRole("button", { name: "Operational" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Arrived/Ready" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Not arrived" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Completed" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Problem" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All" })).toBeTruthy();
+  });
 });

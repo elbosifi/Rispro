@@ -863,9 +863,6 @@ export default function ModalityPage() {
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-start">
                 <div className="text-start">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{chooseLocalized(language, "لوحة الأجهزة", "Modality board")}</p>
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {chooseLocalized(language, "الحالات الحية أولاً، السجل في الأسفل", "Live cases first, history below")}
-                  </h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {([
@@ -887,12 +884,6 @@ export default function ModalityPage() {
                       {label}
                     </Button>
                   ))}
-                  <Badge variant="selected" size="sm">
-                    {chooseLocalized(language, "حي", "Live")} {liveCount}
-                  </Badge>
-                  <Badge variant="neutral" size="sm">
-                    {chooseLocalized(language, "سجل", "History")} {historyCount}
-                  </Badge>
                 </div>
               </div>
 
@@ -1279,11 +1270,11 @@ export default function ModalityPage() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 <SnapshotLine
-                  label={chooseLocalized(language, "الحالات الحية", "Live cases")}
+                  label={chooseLocalized(language, "الحالات النشطة", "Active cases")}
                   value={liveCount}
                 />
                 <SnapshotLine
-                  label={chooseLocalized(language, "السجل / الاستثناءات", "History / exceptions")}
+                  label={chooseLocalized(language, "الحالات السابقة / الاستثناءات", "Previous / exceptions")}
                   value={historyCount}
                 />
               </div>
