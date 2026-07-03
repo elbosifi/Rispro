@@ -19,6 +19,7 @@ export interface ImagingScannerRow {
   vendor: string | null;
   model: string | null;
   fieldStrength: string | null;
+  ctSliceDetectorSpecification: string | null;
   location: string | null;
   isActive: boolean;
   notes: string | null;
@@ -72,6 +73,9 @@ export interface ProtocolLibraryProtocolRow {
   category: string | null;
   indication: string | null;
   contrastPolicy: string | null;
+  oralContrastPolicy: string | null;
+  bowelPreparation: string | null;
+  preparationNotes: string | null;
   activeVersionId: number | null;
   activeVersionNumber: string | null;
   activeVersionStatus: ProtocolVersionStatus | null;
@@ -93,6 +97,9 @@ export interface ProtocolInput {
   category: string | null;
   indication: string | null;
   contrastPolicy: string | null;
+  oralContrastPolicy: string | null;
+  bowelPreparation: string | null;
+  preparationNotes: string | null;
   changeSummary: string | null;
 }
 
@@ -102,6 +109,9 @@ export interface ProtocolUpdateInput {
   category?: string | null;
   indication?: string | null;
   contrastPolicy?: string | null;
+  oralContrastPolicy?: string | null;
+  bowelPreparation?: string | null;
+  preparationNotes?: string | null;
   isActive?: boolean;
 }
 
@@ -195,6 +205,7 @@ export interface ImagingScannerInput {
   vendor: string | null;
   model: string | null;
   fieldStrength: string | null;
+  ctSliceDetectorSpecification: string | null;
   location: string | null;
   notes: string | null;
   isActive: boolean;
@@ -259,6 +270,7 @@ function mapScanner(row: RawRecord): ImagingScannerRow {
     vendor: stringOrNull(row.vendor),
     model: stringOrNull(row.model),
     fieldStrength: stringOrNull(row.field_strength),
+    ctSliceDetectorSpecification: stringOrNull(row.ct_slice_detector_specification),
     location: stringOrNull(row.location),
     isActive: Boolean(row.is_active),
     notes: stringOrNull(row.notes),
@@ -318,6 +330,9 @@ function mapProtocol(row: RawRecord): ProtocolLibraryProtocolRow {
     category: stringOrNull(row.category),
     indication: stringOrNull(row.indication),
     contrastPolicy: stringOrNull(row.contrast_policy),
+    oralContrastPolicy: stringOrNull(row.oral_contrast_policy),
+    bowelPreparation: stringOrNull(row.bowel_preparation),
+    preparationNotes: stringOrNull(row.preparation_notes),
     activeVersionId: numberOrNull(row.active_version_id),
     activeVersionNumber: stringOrNull(row.active_version_number),
     activeVersionStatus: row.active_version_status == null ? null : String(row.active_version_status) as ProtocolVersionStatus,
@@ -394,7 +409,7 @@ export async function listProtocolAnatomyRegions(): Promise<ProtocolAnatomyRegio
 
 export async function listImagingScanners(): Promise<ImagingScannerRow[]> {
   const result = await pool.query(`
-    select id, name, modality, vendor, model, field_strength, location, is_active, notes, created_at, updated_at
+    select id, name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, is_active, notes, created_at, updated_at
     from imaging_scanners
     order by is_active desc, modality asc, name asc
   `);
@@ -427,7 +442,7 @@ export async function listMriSequencePresets(): Promise<MriSequencePresetRow[]> 
 export async function listProtocols(): Promise<ProtocolLibraryProtocolRow[]> {
   const result = await pool.query(`
     select p.id, p.name, p.modality, p.anatomy_region_id, ar.name as anatomy_region_name,
-           p.category, p.indication, p.contrast_policy, p.active_version_id,
+           p.category, p.indication, p.contrast_policy, p.oral_contrast_policy, p.bowel_preparation, p.preparation_notes, p.active_version_id,
            av.version_number as active_version_number,
            av.status as active_version_status,
            dv.id as latest_draft_version_id,
@@ -490,11 +505,11 @@ export async function updateProtocolAnatomyRegion(id: number, input: Partial<Pro
 export async function createImagingScanner(input: ImagingScannerInput): Promise<ImagingScannerRow> {
   const result = await pool.query(
     `
-      insert into imaging_scanners (name, modality, vendor, model, field_strength, location, notes, is_active)
-      values ($1, $2, $3, $4, $5, $6, $7, $8)
-      returning id, name, modality, vendor, model, field_strength, location, is_active, notes, created_at, updated_at
+      insert into imaging_scanners (name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, notes, is_active)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      returning id, name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, is_active, notes, created_at, updated_at
     `,
-    [input.name, input.modality, input.vendor, input.model, input.fieldStrength, input.location, input.notes, input.isActive]
+    [input.name, input.modality, input.vendor, input.model, input.fieldStrength, input.ctSliceDetectorSpecification, input.location, input.notes, input.isActive]
   );
   return mapScanner(result.rows[0]);
 }
@@ -509,11 +524,12 @@ export async function updateImagingScanner(id: number, input: Partial<ImagingSca
         vendor = case when $4::boolean then $5 else vendor end,
         model = case when $6::boolean then $7 else model end,
         field_strength = case when $8::boolean then $9 else field_strength end,
-        location = case when $10::boolean then $11 else location end,
-        notes = case when $12::boolean then $13 else notes end,
-        is_active = coalesce($14, is_active)
+        ct_slice_detector_specification = case when $10::boolean then $11 else ct_slice_detector_specification end,
+        location = case when $12::boolean then $13 else location end,
+        notes = case when $14::boolean then $15 else notes end,
+        is_active = coalesce($16, is_active)
       where id = $1
-      returning id, name, modality, vendor, model, field_strength, location, is_active, notes, created_at, updated_at
+      returning id, name, modality, vendor, model, field_strength, ct_slice_detector_specification, location, is_active, notes, created_at, updated_at
     `,
     [
       id,
@@ -525,6 +541,8 @@ export async function updateImagingScanner(id: number, input: Partial<ImagingSca
       input.model ?? null,
       "fieldStrength" in input,
       input.fieldStrength ?? null,
+      "ctSliceDetectorSpecification" in input,
+      input.ctSliceDetectorSpecification ?? null,
       "location" in input,
       input.location ?? null,
       "notes" in input,
@@ -698,7 +716,7 @@ async function protocolById(client: DbClient, protocolId: number): Promise<Proto
   const result = await client.query(
     `
       select p.id, p.name, p.modality, p.anatomy_region_id, ar.name as anatomy_region_name,
-             p.category, p.indication, p.contrast_policy, p.active_version_id,
+             p.category, p.indication, p.contrast_policy, p.oral_contrast_policy, p.bowel_preparation, p.preparation_notes, p.active_version_id,
              av.version_number as active_version_number,
              av.status as active_version_status,
              dv.id as latest_draft_version_id,
@@ -804,11 +822,24 @@ export async function createProtocolWithDraft(input: ProtocolInput, actorUserId:
     await client.query("begin");
     const protocolResult = await client.query(
       `
-        insert into protocols (name, modality, anatomy_region_id, category, indication, contrast_policy, is_active)
-        values ($1, $2, $3, $4, $5, $6, true)
+        insert into protocols (
+          name, modality, anatomy_region_id, category, indication, contrast_policy,
+          oral_contrast_policy, bowel_preparation, preparation_notes, is_active
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
         returning id
       `,
-      [input.name, input.modality, input.anatomyRegionId, input.category, input.indication, input.contrastPolicy]
+      [
+        input.name,
+        input.modality,
+        input.anatomyRegionId,
+        input.category,
+        input.indication,
+        input.contrastPolicy,
+        input.oralContrastPolicy,
+        input.bowelPreparation,
+        input.preparationNotes,
+      ]
     );
     const protocolId = Number(protocolResult.rows[0].id);
     const versionResult = await client.query(
@@ -841,7 +872,10 @@ export async function updateProtocol(protocolId: number, input: ProtocolUpdateIn
         category = case when $5::boolean then $6 else category end,
         indication = case when $7::boolean then $8 else indication end,
         contrast_policy = case when $9::boolean then $10 else contrast_policy end,
-        is_active = coalesce($11, is_active)
+        oral_contrast_policy = case when $11::boolean then $12 else oral_contrast_policy end,
+        bowel_preparation = case when $13::boolean then $14 else bowel_preparation end,
+        preparation_notes = case when $15::boolean then $16 else preparation_notes end,
+        is_active = coalesce($17, is_active)
       where id = $1
       returning id
     `,
@@ -856,6 +890,12 @@ export async function updateProtocol(protocolId: number, input: ProtocolUpdateIn
       input.indication ?? null,
       "contrastPolicy" in input,
       input.contrastPolicy ?? null,
+      "oralContrastPolicy" in input,
+      input.oralContrastPolicy ?? null,
+      "bowelPreparation" in input,
+      input.bowelPreparation ?? null,
+      "preparationNotes" in input,
+      input.preparationNotes ?? null,
       input.isActive,
     ]
   );

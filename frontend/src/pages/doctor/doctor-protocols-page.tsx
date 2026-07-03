@@ -86,7 +86,7 @@ function SectionButton({
 }
 
 const EMPTY_REGION: ProtocolAnatomyRegionPayload = { name: "", bodySystem: null, modalityScope: "BOTH", defaultCoverageNote: null, isActive: true };
-const EMPTY_SCANNER: ImagingScannerPayload = { name: "", modality: "MRI", vendor: null, model: null, fieldStrength: null, location: null, notes: null, isActive: true };
+const EMPTY_SCANNER: ImagingScannerPayload = { name: "", modality: "MRI", vendor: null, model: null, fieldStrength: null, ctSliceDetectorSpecification: null, location: null, notes: null, isActive: true };
 const EMPTY_CT_PHASE: CtPhasePresetPayload = {
   name: "",
   contrastStatus: "NON_CONTRAST",
@@ -119,11 +119,16 @@ const EMPTY_PROTOCOL: ProtocolLibraryProtocolPayload = {
   name: "",
   modality: "CT",
   anatomyRegionId: null,
-  category: null,
+  category: "General",
   indication: null,
-  contrastPolicy: null,
+  contrastPolicy: "Non-contrast",
+  oralContrastPolicy: null,
+  bowelPreparation: null,
+  preparationNotes: null,
   changeSummary: "Initial protocol version",
 };
+const PROTOCOL_CATEGORIES = ["General", "Oncology", "Non-oncology"] as const;
+const IV_CONTRAST_POLICIES = ["Non-contrast", "With IV contrast", "Without and with IV contrast", "Dynamic contrast", "Conditional / radiologist decision"] as const;
 const EMPTY_PROTOCOL_CT_PHASE: ProtocolLibraryCtPhaseRowPayload = {
   ctPhasePresetId: null,
   customPhaseName: null,
@@ -151,6 +156,18 @@ function textValue(value: string | null): string {
 function nullableText(value: string): string | null {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function editableText(value: string): string | null {
+  return value === "" ? null : value;
+}
+
+function canManageProtocolLibrary(me: DoctorMe): boolean {
+  return Boolean(me.isSuperAdmin || me.canAccessDoctorAdmin || me.canSupervise || me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"));
+}
+
+function canAccessProtocolsPage(me: DoctorMe): boolean {
+  return Boolean(me.canAssignProtocols || canManageProtocolLibrary(me));
 }
 
 function numberText(value: number | null): string {
@@ -290,7 +307,7 @@ function ProtocolLibraryPanel() {
   const reorderMriRowsMutation = useMutation({ mutationFn: ({ versionId, rowIds }: { versionId: number; rowIds: number[] }) => reorderProtocolLibraryMriSequenceRows(versionId, rowIds), onError: onMutationError, onSuccess: refreshBuilder });
 
   const startRegionEdit = (item: ProtocolAnatomyRegion) => { setEditingRegionId(item.id); setRegionDraft({ name: item.name, bodySystem: item.bodySystem, modalityScope: item.modalityScope, defaultCoverageNote: item.defaultCoverageNote, isActive: item.isActive }); };
-  const startScannerEdit = (item: ImagingScanner) => { setEditingScannerId(item.id); setScannerDraft({ name: item.name, modality: item.modality, vendor: item.vendor, model: item.model, fieldStrength: item.fieldStrength, location: item.location, notes: item.notes, isActive: item.isActive }); };
+  const startScannerEdit = (item: ImagingScanner) => { setEditingScannerId(item.id); setScannerDraft({ name: item.name, modality: item.modality, vendor: item.vendor, model: item.model, fieldStrength: item.fieldStrength, ctSliceDetectorSpecification: item.ctSliceDetectorSpecification, location: item.location, notes: item.notes, isActive: item.isActive }); };
   const startCtPhaseEdit = (item: CtPhasePreset) => { setEditingCtPhaseId(item.id); setCtPhaseDraft({ name: item.name, contrastStatus: item.contrastStatus, timingType: item.timingType, delaySeconds: item.delaySeconds, bolusTrackingSite: item.bolusTrackingSite, triggerHu: item.triggerHu, defaultCoverage: item.defaultCoverage, reconstructionNotes: item.reconstructionNotes, instructions: item.instructions, isActive: item.isActive }); };
   const startMriSequenceEdit = (item: MriSequencePreset) => { setEditingMriSequenceId(item.id); setMriSequenceDraft({ scannerId: item.scannerId, vendor: item.vendor, name: item.name, vendorSequenceName: item.vendorSequenceName, genericFamily: item.genericFamily, weighting: item.weighting, defaultPlane: item.defaultPlane, contrastRelation: item.contrastRelation, defaultCoverage: item.defaultCoverage, defaultBValues: item.defaultBValues, defaultDynamicTiming: item.defaultDynamicTiming, estimatedScanTimeMinutes: item.estimatedScanTimeMinutes, notes: item.notes, isActive: item.isActive }); };
   const startCtRowEdit = (item: ProtocolLibraryCtPhaseRow) => { setEditingCtRowId(item.id); setCtRowDraft({ ctPhasePresetId: item.ctPhasePresetId, customPhaseName: item.customPhaseName, timingOverride: item.timingOverride, coverageOverride: item.coverageOverride, reconstructionOverride: item.reconstructionOverride, instructionsOverride: item.instructionsOverride, isRequired: item.isRequired }); };
@@ -371,6 +388,7 @@ function ProtocolLibraryPanel() {
           setFilter={setProtocolFilter}
           setSearch={setProtocolSearch}
           setDraft={setProtocolDraft}
+          onManageAnatomy={() => setSection("anatomy")}
           onCreate={() => protocolDraft && createProtocolMutation.mutate(protocolDraft)}
           onOpen={(protocol) => {
             const versionId = protocol.latestDraftVersionId ?? protocol.activeVersionId;
@@ -386,9 +404,9 @@ function ProtocolLibraryPanel() {
         </SettingsTable>
       )}
       {section === "scanners" && (
-        <SettingsTable emptyText="No scanners yet" headers={["Name", "Modality", "Vendor", "Details", "Status", "Actions"]}>
+        <SettingsTable emptyText="No scanners yet" headers={["Display name", "Modality", "Vendor", "Details", "Status", "Actions"]}>
           {scannerDraft && <ScannerForm draft={scannerDraft} setDraft={setScannerDraft} saving={createScannerMutation.isPending || updateScannerMutation.isPending} onCancel={() => { setScannerDraft(null); setEditingScannerId(null); }} onSave={() => editingScannerId ? updateScannerMutation.mutate({ id: editingScannerId, payload: scannerDraft }) : createScannerMutation.mutate(scannerDraft)} />}
-          {scanners.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{item.modality}</Cell><Cell>{item.vendor ?? "-"}</Cell><Cell>{item.modality === "MRI" && item.fieldStrength ? item.fieldStrength : item.model ?? item.location ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startScannerEdit(item)} onToggle={() => updateScannerMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
+          {scanners.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{item.modality}</Cell><Cell>{item.vendor ?? "-"}</Cell><Cell>{item.modality === "MRI" ? item.fieldStrength ?? item.model ?? "-" : item.ctSliceDetectorSpecification ?? item.model ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startScannerEdit(item)} onToggle={() => updateScannerMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
         </SettingsTable>
       )}
       {section === "ctPhases" && (
@@ -447,6 +465,7 @@ function ProtocolList({
   setFilter,
   setSearch,
   setDraft,
+  onManageAnatomy,
   onCreate,
   onOpen,
   onToggle,
@@ -460,6 +479,7 @@ function ProtocolList({
   setFilter: (filter: "all" | "CT" | "MRI" | "active" | "draft") => void;
   setSearch: (search: string) => void;
   setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void;
+  onManageAnatomy: () => void;
   onCreate: () => void;
   onOpen: (protocol: ProtocolLibraryProtocol) => void;
   onToggle: (protocol: ProtocolLibraryProtocol) => void;
@@ -478,7 +498,7 @@ function ProtocolList({
         <input aria-label="Search protocols" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name" className="h-9 min-w-52 rounded-lg border px-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }} />
       </div>
       <SettingsTable emptyText="No protocols yet" headers={["Name", "Modality", "Region", "Category", "Indication", "Contrast policy", "Active version", "Status", "Actions"]}>
-        {draft && <ProtocolCreateForm draft={draft} anatomy={anatomy} saving={saving} setDraft={setDraft} onCancel={() => setDraft(null)} onSave={onCreate} />}
+        {draft && <ProtocolCreateForm draft={draft} anatomy={anatomy} saving={saving} setDraft={setDraft} onManageAnatomy={onManageAnatomy} onCancel={() => setDraft(null)} onSave={onCreate} />}
         {rows.length === 0 && !draft ? <tr><td className="p-6 text-sm" colSpan={9} style={{ color: "var(--text-muted)" }}><p>No protocols yet</p><p>Create CT or MRI protocols from your saved phase and sequence presets.</p></td></tr> : null}
         {rows.map((item) => (
           <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}>
@@ -498,14 +518,21 @@ function ProtocolList({
   );
 }
 
-function ProtocolCreateForm({ draft, anatomy, saving, setDraft, onSave, onCancel }: { draft: ProtocolLibraryProtocolPayload; anatomy: ProtocolAnatomyRegion[]; saving: boolean; setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void; onSave: () => void; onCancel: () => void }) {
+function ProtocolCreateForm({ draft, anatomy, saving, setDraft, onManageAnatomy, onSave, onCancel }: { draft: ProtocolLibraryProtocolPayload; anatomy: ProtocolAnatomyRegion[]; saving: boolean; setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void; onManageAnatomy: () => void; onSave: () => void; onCancel: () => void }) {
   const matchingAnatomy = anatomy.filter((item) => item.isActive && (item.modalityScope === "BOTH" || item.modalityScope === draft.modality));
   return (
     <tr><td colSpan={9} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
       <Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
       <Field label="Protocol modality"><select aria-label="Protocol modality" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modality} onChange={(event) => setDraft({ ...draft, modality: event.target.value as ProtocolLibraryProtocolPayload["modality"], anatomyRegionId: null })}><option value="CT">CT</option><option value="MRI">MRI</option></select></Field>
       <Field label="Anatomy / region"><select aria-label="Anatomy / region" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.anatomyRegionId ?? ""} onChange={(event) => setDraft({ ...draft, anatomyRegionId: event.target.value ? Number(event.target.value) : null })}><option value="">Not specified</option>{matchingAnatomy.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
-      {(["category", "indication", "contrastPolicy", "changeSummary"] as const).map((key) => <Field key={key} label={key === "contrastPolicy" ? "Contrast policy" : key === "changeSummary" ? "Change summary" : key[0].toUpperCase() + key.slice(1)}><input aria-label={key === "contrastPolicy" ? "Contrast policy" : key === "changeSummary" ? "Change summary" : key[0].toUpperCase() + key.slice(1)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key] ?? null)} onChange={(event) => setDraft({ ...draft, [key]: nullableText(event.target.value) })} /></Field>)}
+      <Field label="Category"><select aria-label="Category" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.category ?? ""} onChange={(event) => setDraft({ ...draft, category: event.target.value || null })}><option value="">Not specified</option>{PROTOCOL_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field>
+      <Field label="Indication"><input aria-label="Indication" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field>
+      <Field label="IV contrast policy"><select aria-label="IV contrast policy" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastPolicy ?? ""} onChange={(event) => setDraft({ ...draft, contrastPolicy: event.target.value || null })}><option value="">Not specified</option>{IV_CONTRAST_POLICIES.map((policy) => <option key={policy} value={policy}>{policy}</option>)}</select></Field>
+      <Field label="Oral contrast policy"><input aria-label="Oral contrast policy" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.oralContrastPolicy)} onChange={(event) => setDraft({ ...draft, oralContrastPolicy: editableText(event.target.value) })} /></Field>
+      <Field label="Bowel preparation"><input aria-label="Bowel preparation" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bowelPreparation)} onChange={(event) => setDraft({ ...draft, bowelPreparation: editableText(event.target.value) })} /></Field>
+      <Field label="Preparation notes"><input aria-label="Preparation notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.preparationNotes)} onChange={(event) => setDraft({ ...draft, preparationNotes: editableText(event.target.value) })} /></Field>
+      <Field label="Change summary"><input aria-label="Change summary" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.changeSummary ?? null)} onChange={(event) => setDraft({ ...draft, changeSummary: editableText(event.target.value) })} /></Field>
+      <button type="button" onClick={onManageAnatomy} className="h-10 self-end rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Manage anatomy / regions</button>
       <FormActions saving={saving} saveLabel="Create protocol" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -640,11 +667,11 @@ function CtProtocolRowForm({ draft, presets, setDraft, onSave, onCancel }: { dra
   return (
     <tr><td colSpan={9} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
       <Field label="CT phase preset"><select aria-label="CT phase preset" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.ctPhasePresetId ?? ""} onChange={(event) => setDraft({ ...draft, ctPhasePresetId: event.target.value ? Number(event.target.value) : null })}><option value="">No preset</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></Field>
-      <Field label="Custom phase name"><input aria-label="Custom phase name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.customPhaseName)} onChange={(event) => setDraft({ ...draft, customPhaseName: nullableText(event.target.value) })} /></Field>
-      <Field label="Timing override"><input aria-label="Timing override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="Coverage override"><input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="Reconstruction override"><input aria-label="Reconstruction override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.reconstructionOverride)} onChange={(event) => setDraft({ ...draft, reconstructionOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="Instructions override"><input aria-label="Instructions override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.instructionsOverride)} onChange={(event) => setDraft({ ...draft, instructionsOverride: nullableText(event.target.value) })} /></Field>
+      <Field label="Custom phase name"><input aria-label="Custom phase name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.customPhaseName)} onChange={(event) => setDraft({ ...draft, customPhaseName: editableText(event.target.value) })} /></Field>
+      <Field label="Timing override"><input aria-label="Timing override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Coverage override"><input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Reconstruction override"><input aria-label="Reconstruction override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.reconstructionOverride)} onChange={(event) => setDraft({ ...draft, reconstructionOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Instructions override"><input aria-label="Instructions override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.instructionsOverride)} onChange={(event) => setDraft({ ...draft, instructionsOverride: editableText(event.target.value) })} /></Field>
       <label className="flex items-end gap-2 text-sm font-medium"><input type="checkbox" checked={draft.isRequired} onChange={(event) => setDraft({ ...draft, isRequired: event.target.checked })} /> Required</label>
       <FormActions saving={false} saveLabel="Save phase" canSave={Boolean(draft.ctPhasePresetId || draft.customPhaseName?.trim())} onSave={onSave} onCancel={onCancel} />
       {selectedPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Preset reference: {selectedPreset.contrastStatus} · {selectedPreset.timingType} · {selectedPreset.defaultCoverage ?? "No default coverage"}</p>}
@@ -694,11 +721,11 @@ function MriProtocolRowForm({ draft, scanners, presets, setDraft, onSave, onCanc
     <tr><td colSpan={9} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
       <Field label="Scanner"><select aria-label="Scanner" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.scannerId ?? ""} onChange={(event) => setDraft({ ...draft, scannerId: event.target.value ? Number(event.target.value) : null, mriSequencePresetId: null })}><option value="">Generic / not scanner-specific</option>{scanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
       <Field label="MRI sequence preset"><select aria-label="MRI sequence preset" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.mriSequencePresetId ?? ""} onChange={(event) => setDraft({ ...draft, mriSequencePresetId: event.target.value ? Number(event.target.value) : null })}><option value="">No preset</option>{filteredPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></Field>
-      <Field label="Plane override"><input aria-label="Plane override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.planeOverride)} onChange={(event) => setDraft({ ...draft, planeOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="Coverage override"><input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="b-values override"><input aria-label="b-values override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bValuesOverride)} onChange={(event) => setDraft({ ...draft, bValuesOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="Timing override"><input aria-label="Timing override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: nullableText(event.target.value) })} /></Field>
-      <Field label="Notes override"><input aria-label="Notes override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notesOverride)} onChange={(event) => setDraft({ ...draft, notesOverride: nullableText(event.target.value) })} /></Field>
+      <Field label="Plane override"><input aria-label="Plane override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.planeOverride)} onChange={(event) => setDraft({ ...draft, planeOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Coverage override"><input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field>
+      <Field label="b-values override"><input aria-label="b-values override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bValuesOverride)} onChange={(event) => setDraft({ ...draft, bValuesOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Timing override"><input aria-label="Timing override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Notes override"><input aria-label="Notes override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notesOverride)} onChange={(event) => setDraft({ ...draft, notesOverride: editableText(event.target.value) })} /></Field>
       <label className="flex items-end gap-2 text-sm font-medium"><input type="checkbox" checked={draft.isRequired} onChange={(event) => setDraft({ ...draft, isRequired: event.target.checked })} /> Required</label>
       <FormActions saving={false} saveLabel="Save sequence" canSave={Boolean(draft.mriSequencePresetId || draft.planeOverride?.trim() || draft.coverageOverride?.trim())} onSave={onSave} onCancel={onCancel} />
       {selectedPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Preset reference: {selectedPreset.defaultPlane ?? "No default plane"} · {selectedPreset.defaultCoverage ?? "No default coverage"} · {selectedPreset.defaultBValues ?? "No b-values"}</p>}
@@ -721,9 +748,9 @@ function RegionForm({ draft, setDraft, saving, onSave, onCancel }: { draft: Prot
   return (
     <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
       <Field label="Name"><input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Body system"><input aria-label="Body system" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bodySystem)} onChange={(event) => setDraft({ ...draft, bodySystem: nullableText(event.target.value) })} /></Field>
+      <Field label="Body system"><input aria-label="Body system" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bodySystem)} onChange={(event) => setDraft({ ...draft, bodySystem: editableText(event.target.value) })} /></Field>
       <Field label="Modality scope"><select aria-label="Modality scope" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modalityScope} onChange={(event) => setDraft({ ...draft, modalityScope: event.target.value as ProtocolAnatomyRegionPayload["modalityScope"] })}><option value="CT">CT</option><option value="MRI">MRI</option><option value="BOTH">BOTH</option></select></Field>
-      <Field label="Default coverage note"><input aria-label="Default coverage note" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverageNote)} onChange={(event) => setDraft({ ...draft, defaultCoverageNote: nullableText(event.target.value) })} /></Field>
+      <Field label="Default coverage note"><input aria-label="Default coverage note" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverageNote)} onChange={(event) => setDraft({ ...draft, defaultCoverageNote: editableText(event.target.value) })} /></Field>
       <FormActions saving={saving} saveLabel="Save region" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -732,10 +759,13 @@ function RegionForm({ draft, setDraft, saving, onSave, onCancel }: { draft: Prot
 function ScannerForm({ draft, setDraft, saving, onSave, onCancel }: { draft: ImagingScannerPayload; setDraft: (draft: ImagingScannerPayload | null) => void; saving: boolean; onSave: () => void; onCancel: () => void }) {
   return (
     <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Name"><input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Modality"><select aria-label="Modality" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modality} onChange={(event) => setDraft({ ...draft, modality: event.target.value as ImagingScannerPayload["modality"] })}><option value="CT">CT</option><option value="MRI">MRI</option></select></Field>
-      {(["vendor", "model", "fieldStrength", "location"] as const).map((key) => <Field key={key} label={key === "fieldStrength" ? "Field strength" : key[0].toUpperCase() + key.slice(1)}><input aria-label={key === "fieldStrength" ? "Field strength" : key[0].toUpperCase() + key.slice(1)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key])} onChange={(event) => setDraft({ ...draft, [key]: nullableText(event.target.value) })} /></Field>)}
-      <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: nullableText(event.target.value) })} /></Field>
+      <Field label="Display name"><input aria-label="Display name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <Field label="Modality"><select aria-label="Modality" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modality} onChange={(event) => setDraft({ ...draft, modality: event.target.value as ImagingScannerPayload["modality"], fieldStrength: event.target.value === "MRI" ? draft.fieldStrength : null, ctSliceDetectorSpecification: event.target.value === "CT" ? draft.ctSliceDetectorSpecification : null })}><option value="CT">CT</option><option value="MRI">MRI</option></select></Field>
+      {(["vendor", "model"] as const).map((key) => <Field key={key} label={key[0].toUpperCase() + key.slice(1)}><input aria-label={key[0].toUpperCase() + key.slice(1)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key])} onChange={(event) => setDraft({ ...draft, [key]: editableText(event.target.value) })} /></Field>)}
+      {draft.modality === "MRI" ? <Field label="Field strength"><input aria-label="Field strength" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.fieldStrength)} onChange={(event) => setDraft({ ...draft, fieldStrength: editableText(event.target.value) })} placeholder="1.5T, 3T" /></Field> : null}
+      {draft.modality === "CT" ? <Field label="Slice / detector specification"><input aria-label="Slice / detector specification" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.ctSliceDetectorSpecification)} onChange={(event) => setDraft({ ...draft, ctSliceDetectorSpecification: editableText(event.target.value) })} /></Field> : null}
+      <Field label="Location"><input aria-label="Location" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.location)} onChange={(event) => setDraft({ ...draft, location: editableText(event.target.value) })} /></Field>
+      <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: editableText(event.target.value) })} /></Field>
       <FormActions saving={saving} saveLabel="Save scanner" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -748,11 +778,11 @@ function CtPhaseForm({ draft, setDraft, saving, onSave, onCancel }: { draft: CtP
       <Field label="Contrast status"><select aria-label="Contrast status" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastStatus} onChange={(event) => setDraft({ ...draft, contrastStatus: event.target.value as CtPhasePresetPayload["contrastStatus"] })}><option value="NON_CONTRAST">NON_CONTRAST</option><option value="POST_CONTRAST">POST_CONTRAST</option><option value="DELAYED">DELAYED</option><option value="OTHER">OTHER</option></select></Field>
       <Field label="Timing type"><select aria-label="Timing type" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.timingType} onChange={(event) => setDraft({ ...draft, timingType: event.target.value as CtPhasePresetPayload["timingType"] })}><option value="NONE">NONE</option><option value="FIXED_DELAY">FIXED_DELAY</option><option value="BOLUS_TRACKING">BOLUS_TRACKING</option><option value="MANUAL">MANUAL</option></select></Field>
       <NumberField label="Delay seconds" value={draft.delaySeconds} onChange={(value) => setDraft({ ...draft, delaySeconds: nullableNumber(value) })} />
-      <Field label="Bolus tracking site"><input aria-label="Bolus tracking site" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: nullableText(event.target.value) })} /></Field>
+      <Field label="Bolus tracking site"><input aria-label="Bolus tracking site" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: editableText(event.target.value) })} /></Field>
       <NumberField label="Trigger HU" value={draft.triggerHu} onChange={(value) => setDraft({ ...draft, triggerHu: nullableNumber(value) })} />
-      <Field label="Default coverage"><input aria-label="Default coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: nullableText(event.target.value) })} /></Field>
-      <Field label="Reconstruction notes"><input aria-label="Reconstruction notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.reconstructionNotes)} onChange={(event) => setDraft({ ...draft, reconstructionNotes: nullableText(event.target.value) })} /></Field>
-      <Field label="Instructions"><input aria-label="Instructions" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.instructions)} onChange={(event) => setDraft({ ...draft, instructions: nullableText(event.target.value) })} /></Field>
+      <Field label="Default coverage"><input aria-label="Default coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: editableText(event.target.value) })} /></Field>
+      <Field label="Reconstruction notes"><input aria-label="Reconstruction notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.reconstructionNotes)} onChange={(event) => setDraft({ ...draft, reconstructionNotes: editableText(event.target.value) })} /></Field>
+      <Field label="Instructions"><input aria-label="Instructions" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.instructions)} onChange={(event) => setDraft({ ...draft, instructions: editableText(event.target.value) })} /></Field>
       <FormActions saving={saving} saveLabel="Save CT phase" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -763,9 +793,9 @@ function MriSequenceForm({ draft, scanners, setDraft, saving, onSave, onCancel }
     <tr><td colSpan={7} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
       <Field label="Scanner"><select aria-label="Scanner" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.scannerId ?? ""} onChange={(event) => setDraft({ ...draft, scannerId: event.target.value ? Number(event.target.value) : null })}><option value="">Generic / not scanner-specific</option>{scanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
       <Field label="Name"><input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      {(["vendor", "vendorSequenceName", "genericFamily", "weighting", "defaultPlane", "contrastRelation", "defaultCoverage", "defaultBValues", "defaultDynamicTiming"] as const).map((key) => <Field key={key} label={key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase())}><input aria-label={key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase())} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key])} onChange={(event) => setDraft({ ...draft, [key]: nullableText(event.target.value) })} /></Field>)}
+      {(["vendor", "vendorSequenceName", "genericFamily", "weighting", "defaultPlane", "contrastRelation", "defaultCoverage", "defaultBValues", "defaultDynamicTiming"] as const).map((key) => <Field key={key} label={key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase())}><input aria-label={key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase())} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key])} onChange={(event) => setDraft({ ...draft, [key]: editableText(event.target.value) })} /></Field>)}
       <NumberField label="Estimated scan time minutes" value={draft.estimatedScanTimeMinutes} positive onChange={(value) => setDraft({ ...draft, estimatedScanTimeMinutes: nullableNumber(value, true) })} />
-      <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: nullableText(event.target.value) })} /></Field>
+      <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: editableText(event.target.value) })} /></Field>
       <FormActions saving={saving} saveLabel="Save MRI sequence" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -784,7 +814,7 @@ function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving:
   );
 }
 
-function ProtocolingWorklist() {
+function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const queryClient = useQueryClient();
   const [dateFrom, setDateFrom] = useState(todayIso());
   const [dateTo, setDateTo] = useState(addDays(todayIso(), 7));
@@ -805,14 +835,15 @@ function ProtocolingWorklist() {
   const appointmentsQuery = useQuery({
     queryKey: ["doctor", "protocoling", "appointments", filters],
     queryFn: () => fetchDoctorProtocolingAppointments(filters),
+    enabled: canAssign,
   });
   const appointmentDetailQuery = useQuery({
     queryKey: ["doctor", "protocoling", "appointments", selectedAppointmentId],
     queryFn: () => fetchDoctorProtocolingAppointmentDetail(selectedAppointmentId!),
     enabled: selectedAppointmentId !== null,
   });
-  const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols });
-  const scannersQuery = useQuery({ queryKey: ["doctor", "protocol-library", "scanners"], queryFn: fetchProtocolLibraryScanners });
+  const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: canAssign });
+  const scannersQuery = useQuery({ queryKey: ["doctor", "protocol-library", "scanners"], queryFn: fetchProtocolLibraryScanners, enabled: canAssign });
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] });
@@ -861,7 +892,13 @@ function ProtocolingWorklist() {
         <p className="mt-2 max-w-3xl text-sm leading-6" style={{ color: "var(--text-muted)" }}>Assign active CT/MRI protocol library versions to scheduled appointments.</p>
       </div>
 
-      <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-6" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      {!canAssign ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          You do not have permission to assign protocols.
+        </div>
+      ) : null}
+
+      {canAssign ? <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-6" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <div className="flex items-end gap-2 md:col-span-3">
           <button type="button" onClick={() => { setDateFrom(todayIso()); setDateTo(todayIso()); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Today</button>
           <button type="button" onClick={() => { const tomorrow = addDays(todayIso(), 1); setDateFrom(tomorrow); setDateTo(tomorrow); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Tomorrow</button>
@@ -872,9 +909,17 @@ function ProtocolingWorklist() {
         <label className="text-sm font-medium">Modality<select value={modality} onChange={(event) => setModality(event.target.value as "" | "CT" | "MRI")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All</option><option value="CT">CT</option><option value="MRI">MRI</option></select></label>
         <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
         <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Patient, MRN, accession" /></label>
-      </section>
+      </section> : null}
 
-      {appointments.length === 0 ? (
+      {!canAssign ? null : appointmentsQuery.isLoading ? (
+        <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+          Loading protocoling appointments...
+        </div>
+      ) : appointmentsQuery.isError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+          {appointmentsQuery.error instanceof Error ? appointmentsQuery.error.message : "Unable to load protocoling appointments."}
+        </div>
+      ) : appointments.length === 0 ? (
         <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
           No appointments need protocol assignment.
         </div>
@@ -1110,16 +1155,26 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
   );
 }
 
-export function DoctorProtocolsPage(_props: { me: DoctorMe }) {
-  const [activeArea, setActiveArea] = useState<"protocoling" | "library">("protocoling");
+export function DoctorProtocolsPage({ me }: { me: DoctorMe }) {
+  const canEditLibrary = canManageProtocolLibrary(me);
+  const canAssign = Boolean(me.canAssignProtocols);
+  const [activeArea, setActiveArea] = useState<"protocoling" | "library">(canAssign ? "protocoling" : "library");
+
+  if (!canAssign && !canEditLibrary) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        You do not have permission to use protocoling or protocol library administration.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex gap-2 overflow-x-auto">
-        <SectionButton label="Protocoling" active={activeArea === "protocoling"} onClick={() => setActiveArea("protocoling")} />
-        <SectionButton label="Protocol Library" active={activeArea === "library"} onClick={() => setActiveArea("library")} />
+        {canAssign && <SectionButton label="Protocoling" active={activeArea === "protocoling"} onClick={() => setActiveArea("protocoling")} />}
+        {canEditLibrary && <SectionButton label="Protocol Library" active={activeArea === "library"} onClick={() => setActiveArea("library")} />}
       </div>
-      {activeArea === "library" ? <ProtocolLibraryPanel /> : <ProtocolingWorklist />}
+      {activeArea === "library" && canEditLibrary ? <ProtocolLibraryPanel /> : <ProtocolingWorklist canAssign={canAssign} />}
     </div>
   );
 }

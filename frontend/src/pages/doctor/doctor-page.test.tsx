@@ -257,6 +257,14 @@ const normalDoctor: DoctorMe = {
   canAccessCoreWorkspace: true,
 };
 
+const protocolLibraryAdmin: DoctorMe = {
+  ...normalDoctor,
+  canSupervise: true,
+  canAccessDoctorAdmin: true,
+  canManageDoctorProfiles: true,
+  moduleCapabilities: ["doctor", "doctor_supervisor"],
+};
+
 function renderDoctorPortal(initialPath = "/doctor") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -1582,17 +1590,45 @@ describe("Doctor Portal shell", () => {
   });
 
   it("normal doctor sees Protocols page empty state", async () => {
-    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     expect(await screen.findByRole("heading", { name: "Protocoling Worklist" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Protocol Library" })).toBeNull();
     expect(screen.getByText("No appointments need protocol assignment.")).toBeTruthy();
     await waitFor(() => expect(fetchDoctorProtocolingAppointmentsMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/reschedule/i)).toBeNull();
   });
 
-  it("normal doctor can open the Protocol Library skeleton", async () => {
-    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+  it("does not expose protocol navigation to doctors without protocol access", async () => {
+    fetchDoctorMeMock.mockResolvedValue({ ...normalDoctor, canAssignProtocols: false, profile: { ...normalDoctor.profile!, canAssignProtocols: false } });
+    renderDoctorPortal("/doctor/my-work");
+
+    expect(await screen.findByText("Dr Normal")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Protocols" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Protocols" })).toBeNull();
+  });
+
+  it("redirects non-protocol doctors away from /doctor/protocols", async () => {
+    fetchDoctorMeMock.mockResolvedValue({ ...normalDoctor, canAssignProtocols: false, profile: { ...normalDoctor.profile!, canAssignProtocols: false } });
+    renderDoctorPortal("/doctor/protocols");
+
+    expect(await screen.findByText("Dr Normal")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Protocoling Worklist" })).toBeNull();
+    expect(fetchDoctorProtocolingAppointmentsMock).not.toHaveBeenCalled();
+  });
+
+  it("does not render failed protocoling loads as an empty worklist", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
+    fetchDoctorProtocolingAppointmentsMock.mockRejectedValue(new Error("Network unavailable"));
+    renderDoctorPortal("/doctor/protocols");
+
+    expect(await screen.findByText("Network unavailable")).toBeTruthy();
+    expect(screen.queryByText("No appointments need protocol assignment.")).toBeNull();
+  });
+
+  it("protocol library admins can open the Protocol Library skeleton", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
@@ -1609,7 +1645,7 @@ describe("Doctor Portal shell", () => {
   });
 
   it("creates an anatomy region from the Protocol Library", async () => {
-    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
@@ -1631,19 +1667,55 @@ describe("Doctor Portal shell", () => {
     await waitFor(() => expect(fetchProtocolLibraryAnatomyRegionsMock).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps scanner text spaces and swaps MRI field strength for CT detector details", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Scanners" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add scanner" }));
+
+    expect(screen.getByLabelText("Field strength")).toBeTruthy();
+    expect(screen.queryByLabelText("Slice / detector specification")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Main MRI " } });
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Main MRI ");
+    fireEvent.change(screen.getByLabelText("Field strength"), { target: { value: "1.5T" } });
+    fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Room A 1" } });
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Shared morning scanner" } });
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "CT" } });
+
+    expect(screen.queryByLabelText("Field strength")).toBeNull();
+    expect(screen.getByLabelText("Slice / detector specification")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Slice / detector specification"), { target: { value: "128 slice / 256 detector" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save scanner" }));
+
+    await waitFor(() => expect(createProtocolLibraryScannerMock.mock.calls[0]?.[0]).toMatchObject({
+      name: "Main MRI ",
+      modality: "CT",
+      fieldStrength: null,
+      ctSliceDetectorSpecification: "128 slice / 256 detector",
+      location: "Room A 1",
+      notes: "Shared morning scanner",
+    }));
+  });
+
   it("opens Add Protocol and creates a CT draft builder", async () => {
-    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add protocol" }));
     fireEvent.change(screen.getByLabelText("Protocol name"), { target: { value: "CT Brain" } });
     fireEvent.change(screen.getByLabelText("Protocol modality"), { target: { value: "CT" } });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Oncology" } });
+    fireEvent.change(screen.getByLabelText("IV contrast policy"), { target: { value: "With IV contrast" } });
     fireEvent.click(screen.getByRole("button", { name: "Create protocol" }));
 
     await waitFor(() => expect(createProtocolLibraryProtocolMock.mock.calls[0]?.[0]).toMatchObject({
       name: "CT Brain",
       modality: "CT",
+      category: "Oncology",
+      contrastPolicy: "With IV contrast",
       changeSummary: "Initial protocol version",
     }));
     expect(await screen.findByText("CT phases")).toBeTruthy();
@@ -1687,7 +1759,7 @@ describe("Doctor Portal shell", () => {
       ctPhases: [],
       mriSequences: [],
     });
-    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
@@ -1907,7 +1979,7 @@ describe("Doctor Portal shell", () => {
     };
     fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([assignedAppointment]);
     fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: null });
-    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Change" }));

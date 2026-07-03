@@ -1009,6 +1009,7 @@ export interface ImagingScanner {
   vendor: string | null;
   model: string | null;
   fieldStrength: string | null;
+  ctSliceDetectorSpecification: string | null;
   location: string | null;
   isActive: boolean;
   notes: string | null;
@@ -1062,6 +1063,9 @@ export interface ProtocolLibraryProtocol {
   category: string | null;
   indication: string | null;
   contrastPolicy: string | null;
+  oralContrastPolicy: string | null;
+  bowelPreparation: string | null;
+  preparationNotes: string | null;
   activeVersionId: number | null;
   activeVersionNumber: string | null;
   activeVersionStatus: ProtocolLibraryVersionStatus | null;

@@ -56,6 +56,14 @@ function canManageClinicalRoster(me: DoctorMe): boolean {
   return Boolean(me.canAccessClinicalDoctorPortal) && (me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"));
 }
 
+function canManageProtocolLibrary(me: DoctorMe): boolean {
+  return Boolean(me.isSuperAdmin || me.canAccessDoctorAdmin || me.canSupervise || me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"));
+}
+
+function canAccessProtocolsPage(me: DoctorMe): boolean {
+  return Boolean(me.canAssignProtocols || canManageProtocolLibrary(me));
+}
+
 function LoadingShell() {
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: "var(--background)" }}>
@@ -92,7 +100,7 @@ function DoctorPortalHome({ me }: { me: DoctorMe }) {
           <ShortcutCard title="My Roster" body="Review your published roster and assigned shifts." to="/doctor/roster" />
           <ShortcutCard title="Availability" body="Update availability and leave for roster planning." to="/doctor/availability" />
           <ShortcutCard title="My Cases" body="Open your report-required case worklist." to="/doctor/today-cases" />
-          <ShortcutCard title="Protocols" body="Review and manage protocol tasks." to="/doctor/protocols" />
+          {canAccessProtocolsPage(me) && <ShortcutCard title="Protocols" body="Review and manage protocol tasks." to="/doctor/protocols" />}
         </section>
       )}
     </div>
@@ -264,7 +272,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route
         path="protocols"
-        element={canAccessClinical ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+        element={canAccessProtocolsPage(me) ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="team-workload"
@@ -368,7 +376,7 @@ export default function DoctorPage() {
 
   const navItems = useMemo(() => {
     if (!me) return DOCTOR_NAV;
-    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV : [];
+    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV.filter((item) => item.path !== "/doctor/protocols" || canAccessProtocolsPage(me)) : [];
     const byPath = new Map<string, DoctorPortalNavItem>();
     baseNav.forEach((item) => byPath.set(item.path, item));
     if (canManageClinicalRoster(me)) {

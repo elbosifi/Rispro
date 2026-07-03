@@ -49,6 +49,21 @@ async function requireDoctorPortalAccess(req: DoctorRequest): Promise<void> {
   }
 }
 
+async function requireProtocolLibraryAdminAccess(req: DoctorRequest): Promise<void> {
+  if (!req.user) throw new HttpError(401, "Authentication required.");
+  const me = await getDoctorMe(req.user.sub, req.user.role);
+  if (!me.canAccessDoctorPortal) throw new HttpError(403, "Doctor Portal access is required.");
+  if (
+    req.user.role !== "super_admin" &&
+    req.user.role !== "supervisor" &&
+    !me.canSupervise &&
+    !me.moduleCapabilities.includes("doctor_supervisor") &&
+    !me.moduleCapabilities.includes("doctor_admin")
+  ) {
+    throw new HttpError(403, "Protocol Library administration access is required.");
+  }
+}
+
 function positiveInteger(value: unknown, field: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new HttpError(400, `${field} must be a positive integer.`);
@@ -96,6 +111,9 @@ function optionalText(value: unknown): string | null {
   return text ? text : null;
 }
 
+const PROTOCOL_CATEGORIES = ["General", "Oncology", "Non-oncology"] as const;
+const IV_CONTRAST_POLICIES = ["Non-contrast", "With IV contrast", "Without and with IV contrast", "Dynamic contrast", "Conditional / radiologist decision"] as const;
+
 function oneOf<T extends string>(value: unknown, field: string, allowed: readonly T[]): T {
   const parsed = String(value ?? "");
   if (!allowed.includes(parsed as T)) throw new HttpError(400, `${field} is invalid.`);
@@ -133,9 +151,12 @@ function protocolInput(body: Record<string, unknown>) {
     name: requiredText(body.name, "name"),
     modality: oneOf(body.modality, "modality", ["CT", "MRI"] as const),
     anatomyRegionId: optionalPositiveInteger(body.anatomyRegionId ?? body.anatomy_region_id, "anatomyRegionId"),
-    category: optionalText(body.category),
+    category: body.category == null || body.category === "" ? null : oneOf(body.category, "category", PROTOCOL_CATEGORIES),
     indication: optionalText(body.indication),
-    contrastPolicy: optionalText(body.contrastPolicy ?? body.contrast_policy),
+    contrastPolicy: body.contrastPolicy == null && body.contrast_policy == null ? null : oneOf(body.contrastPolicy ?? body.contrast_policy, "contrastPolicy", IV_CONTRAST_POLICIES),
+    oralContrastPolicy: optionalText(body.oralContrastPolicy ?? body.oral_contrast_policy),
+    bowelPreparation: optionalText(body.bowelPreparation ?? body.bowel_preparation),
+    preparationNotes: optionalText(body.preparationNotes ?? body.preparation_notes),
     changeSummary: optionalText(body.changeSummary ?? body.change_summary) ?? "Initial protocol version",
   };
 }
@@ -144,9 +165,12 @@ function protocolPatch(body: Record<string, unknown>) {
   return {
     name: maybe(body, "name", (value) => requiredText(value, "name")),
     anatomyRegionId: maybeEither(body, "anatomyRegionId", "anatomy_region_id", (value) => optionalPositiveInteger(value, "anatomyRegionId")),
-    category: maybe(body, "category", optionalText),
+    category: maybe(body, "category", (value) => value == null || value === "" ? null : oneOf(value, "category", PROTOCOL_CATEGORIES)),
     indication: maybe(body, "indication", optionalText),
-    contrastPolicy: maybeEither(body, "contrastPolicy", "contrast_policy", optionalText),
+    contrastPolicy: maybeEither(body, "contrastPolicy", "contrast_policy", (value) => value == null || value === "" ? null : oneOf(value, "contrastPolicy", IV_CONTRAST_POLICIES)),
+    oralContrastPolicy: maybeEither(body, "oralContrastPolicy", "oral_contrast_policy", optionalText),
+    bowelPreparation: maybeEither(body, "bowelPreparation", "bowel_preparation", optionalText),
+    preparationNotes: maybeEither(body, "preparationNotes", "preparation_notes", optionalText),
     isActive: optionalBoolean(body.isActive ?? body.is_active, "isActive"),
   };
 }
@@ -218,7 +242,7 @@ router.get(
 router.post(
   "/anatomy-regions",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const anatomyRegion = await createProtocolAnatomyRegion({
       name: requiredText(body.name, "name"),
@@ -234,7 +258,7 @@ router.post(
 router.patch(
   "/anatomy-regions/:id",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const anatomyRegion = await updateProtocolAnatomyRegion(positiveInteger(req.params.id, "region id"), {
       name: maybe(body, "name", (value) => requiredText(value, "name")),
@@ -258,7 +282,7 @@ router.get(
 router.post(
   "/scanners",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const scanner = await createImagingScanner({
       name: requiredText(body.name, "name"),
@@ -266,6 +290,7 @@ router.post(
       vendor: optionalText(body.vendor),
       model: optionalText(body.model),
       fieldStrength: optionalText(body.fieldStrength ?? body.field_strength),
+      ctSliceDetectorSpecification: optionalText(body.ctSliceDetectorSpecification ?? body.ct_slice_detector_specification),
       location: optionalText(body.location),
       notes: optionalText(body.notes),
       isActive: requiredBoolean(body.isActive ?? body.is_active, true),
@@ -277,7 +302,7 @@ router.post(
 router.patch(
   "/scanners/:id",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const scanner = await updateImagingScanner(positiveInteger(req.params.id, "scanner id"), {
       name: maybe(body, "name", (value) => requiredText(value, "name")),
@@ -285,6 +310,7 @@ router.patch(
       vendor: maybe(body, "vendor", optionalText),
       model: maybe(body, "model", optionalText),
       fieldStrength: maybeEither(body, "fieldStrength", "field_strength", optionalText),
+      ctSliceDetectorSpecification: maybeEither(body, "ctSliceDetectorSpecification", "ct_slice_detector_specification", optionalText),
       location: maybe(body, "location", optionalText),
       notes: maybe(body, "notes", optionalText),
       isActive: optionalBoolean(body.isActive ?? body.is_active, "isActive"),
@@ -304,7 +330,7 @@ router.get(
 router.post(
   "/ct-phase-presets",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const ctPhasePreset = await createCtPhasePreset({
       name: requiredText(body.name, "name"),
@@ -325,7 +351,7 @@ router.post(
 router.patch(
   "/ct-phase-presets/:id",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const ctPhasePreset = await updateCtPhasePreset(positiveInteger(req.params.id, "CT phase preset id"), {
       name: maybe(body, "name", (value) => requiredText(value, "name")),
@@ -354,7 +380,7 @@ router.get(
 router.post(
   "/mri-sequence-presets",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const mriSequencePreset = await createMriSequencePreset({
       scannerId: optionalPositiveInteger(body.scannerId ?? body.scanner_id, "scannerId"),
@@ -379,7 +405,7 @@ router.post(
 router.patch(
   "/mri-sequence-presets/:id",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const mriSequencePreset = await updateMriSequencePreset(positiveInteger(req.params.id, "MRI sequence preset id"), {
       scannerId: maybeEither(body, "scannerId", "scanner_id", (value) => optionalPositiveInteger(value, "scannerId")),
@@ -413,7 +439,7 @@ router.get(
 router.post(
   "/protocols",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const result = await createProtocolWithDraft(protocolInput(body), actorUserId(req));
     res.status(201).json(result);
@@ -423,7 +449,7 @@ router.post(
 router.patch(
   "/protocols/:id",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const body = asUnknownRecord(req.body);
     const protocol = await updateProtocol(positiveInteger(req.params.id, "protocol id"), protocolPatch(body));
     res.json({ protocol: requireFound(protocol, "Protocol not found.") });
@@ -433,7 +459,7 @@ router.patch(
 router.post(
   "/protocols/:id/draft-from-active",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const detail = await createDraftFromActiveVersion(positiveInteger(req.params.id, "protocol id"), actorUserId(req));
     res.status(201).json({ detail });
   })
@@ -451,7 +477,7 @@ router.get(
 router.patch(
   "/protocol-versions/:versionId",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     const body = asUnknownRecord(req.body);
     const version = await updateProtocolVersion(versionId, {
@@ -465,7 +491,7 @@ router.patch(
 router.post(
   "/protocol-versions/:versionId/activate",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const detail = await activateProtocolVersion(positiveInteger(req.params.versionId, "version id"), actorUserId(req));
     res.json({ detail });
   })
@@ -474,7 +500,7 @@ router.post(
 router.post(
   "/protocol-versions/:versionId/ct-phases",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     await addProtocolCtPhase(versionId, ctPhaseRowInput(asUnknownRecord(req.body)));
     res.status(201).json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
@@ -484,7 +510,7 @@ router.post(
 router.patch(
   "/protocol-versions/:versionId/ct-phases/:rowId",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     const row = await updateProtocolCtPhase(versionId, positiveInteger(req.params.rowId, "row id"), ctPhaseRowPatch(asUnknownRecord(req.body)));
     requireFound(row, "CT phase row not found.");
@@ -495,7 +521,7 @@ router.patch(
 router.delete(
   "/protocol-versions/:versionId/ct-phases/:rowId",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     await removeProtocolCtPhase(versionId, positiveInteger(req.params.rowId, "row id"));
     res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
@@ -505,7 +531,7 @@ router.delete(
 router.post(
   "/protocol-versions/:versionId/ct-phases/reorder",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     await reorderProtocolRows(versionId, rowIds(asUnknownRecord(req.body)), "CT");
     res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
@@ -515,7 +541,7 @@ router.post(
 router.post(
   "/protocol-versions/:versionId/mri-sequences",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     await addProtocolMriSequence(versionId, mriSequenceRowInput(asUnknownRecord(req.body)));
     res.status(201).json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
@@ -525,7 +551,7 @@ router.post(
 router.patch(
   "/protocol-versions/:versionId/mri-sequences/:rowId",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     const row = await updateProtocolMriSequence(versionId, positiveInteger(req.params.rowId, "row id"), mriSequenceRowPatch(asUnknownRecord(req.body)));
     requireFound(row, "MRI sequence row not found.");
@@ -536,7 +562,7 @@ router.patch(
 router.delete(
   "/protocol-versions/:versionId/mri-sequences/:rowId",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     await removeProtocolMriSequence(versionId, positiveInteger(req.params.rowId, "row id"));
     res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });
@@ -546,7 +572,7 @@ router.delete(
 router.post(
   "/protocol-versions/:versionId/mri-sequences/reorder",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
-    await requireDoctorPortalAccess(req);
+    await requireProtocolLibraryAdminAccess(req);
     const versionId = positiveInteger(req.params.versionId, "version id");
     await reorderProtocolRows(versionId, rowIds(asUnknownRecord(req.body)), "MRI");
     res.json({ detail: requireFound(await getProtocolVersionDetail(versionId), "Protocol version not found.") });

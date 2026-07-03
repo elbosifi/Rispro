@@ -10,9 +10,13 @@ describe("Protocol library schema", () => {
 
     assert.match(migration, /create table if not exists protocol_anatomy_regions/i);
     assert.match(migration, /create table if not exists imaging_scanners/i);
+    assert.match(migration, /ct_slice_detector_specification text/i);
     assert.match(migration, /create table if not exists ct_phase_presets/i);
     assert.match(migration, /create table if not exists mri_sequence_presets/i);
     assert.match(migration, /create table if not exists protocols/i);
+    assert.match(migration, /oral_contrast_policy text/i);
+    assert.match(migration, /bowel_preparation text/i);
+    assert.match(migration, /preparation_notes text/i);
     assert.match(migration, /create table if not exists protocol_versions/i);
     assert.match(migration, /create table if not exists protocol_ct_phases/i);
     assert.match(migration, /create table if not exists protocol_mri_sequences/i);
@@ -21,6 +25,17 @@ describe("Protocol library schema", () => {
     assert.match(migration, /protocol_versions_status_idx/i);
     assert.match(migration, /appointment_protocol_assignments_appointment_idx/i);
     assert.doesNotMatch(migration, /doctor_portal\.protocol/i);
+  });
+
+  it("adds scanner and preparation metadata through an idempotent migration", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/109_protocol_library_scanner_and_preparation_metadata.sql`, "utf8");
+
+    assert.match(migration, /alter table imaging_scanners/i);
+    assert.match(migration, /add column if not exists ct_slice_detector_specification text/i);
+    assert.match(migration, /alter table protocols/i);
+    assert.match(migration, /add column if not exists oral_contrast_policy text/i);
+    assert.match(migration, /add column if not exists bowel_preparation text/i);
+    assert.match(migration, /add column if not exists preparation_notes text/i);
   });
 });
 
@@ -222,6 +237,41 @@ describe("Protocol library read repository", () => {
     assert.match(routes, /router\.patch\(\s*"\/mri-sequence-presets\/:id"/);
     assert.match(routes, /router\.delete\(\s*"\/protocol-versions\/:versionId\/ct-phases\/:rowId"/);
     assert.match(routes, /router\.delete\(\s*"\/protocol-versions\/:versionId\/mri-sequences\/:rowId"/);
+  });
+
+  it("requires protocol library admin access for create and update routes", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-routes.ts`, "utf8");
+
+    assert.match(routes, /requireProtocolLibraryAdminAccess/);
+    assert.match(routes, /Protocol Library administration access is required/);
+    assert.match(routes, /router\.post\(\s*"\/protocols"[^]*requireProtocolLibraryAdminAccess\(req\)/);
+    assert.match(routes, /router\.patch\(\s*"\/protocols\/:id"[^]*requireProtocolLibraryAdminAccess\(req\)/);
+    assert.match(routes, /router\.post\(\s*"\/scanners"[^]*requireProtocolLibraryAdminAccess\(req\)/);
+    assert.match(routes, /router\.patch\(\s*"\/scanners\/:id"[^]*requireProtocolLibraryAdminAccess\(req\)/);
+    assert.match(routes, /router\.post\(\s*"\/protocol-versions\/:versionId\/activate"[^]*requireProtocolLibraryAdminAccess\(req\)/);
+  });
+
+  it("validates protocol category and structured IV contrast policies", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-routes.ts`, "utf8");
+
+    assert.match(routes, /General/);
+    assert.match(routes, /Oncology/);
+    assert.match(routes, /Non-oncology/);
+    assert.match(routes, /Non-contrast/);
+    assert.match(routes, /With IV contrast/);
+    assert.match(routes, /Without and with IV contrast/);
+    assert.match(routes, /Dynamic contrast/);
+    assert.match(routes, /Conditional \/ radiologist decision/);
+  });
+
+  it("maps scanner detector and protocol preparation metadata", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-repository.ts`, "utf8");
+
+    assert.match(repo, /ct_slice_detector_specification/);
+    assert.match(repo, /ctSliceDetectorSpecification/);
+    assert.match(repo, /oral_contrast_policy/);
+    assert.match(repo, /bowel_preparation/);
+    assert.match(repo, /preparation_notes/);
   });
 
   it("exposes protocol builder endpoints and guards draft-only edits", () => {
