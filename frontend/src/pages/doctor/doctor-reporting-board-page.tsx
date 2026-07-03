@@ -204,6 +204,12 @@ function addDaysToDateString(date: string, days: number): string {
   return next.toISOString().slice(0, 10);
 }
 
+function sundayForDateString(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const selected = new Date(Date.UTC(year, month - 1, day));
+  return addDaysToDateString(date, -selected.getUTCDay());
+}
+
 function nextTripoliSunday(): string {
   const parts = tripoliDateParts(new Date());
   const today = `${parts.year}-${parts.month}-${parts.day}`;
@@ -1069,7 +1075,7 @@ function ScheduleBulkAssignModal({
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Sunday date">
-                <input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} className={inputClass()} />
+                <input type="date" value={weekStart} onChange={(event) => setWeekStart(sundayForDateString(event.target.value))} className={inputClass()} />
               </Field>
               <Field label="Daily time">
                 <input type="time" value={weekTime} onChange={(event) => setWeekTime(event.target.value)} className={inputClass()} />
