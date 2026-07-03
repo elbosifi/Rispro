@@ -170,6 +170,7 @@ function bulkAssignmentJob(row: {
   cancelledAt: string | null;
   lockedAt: string | null;
   lockedBy: string | null;
+  resumedFromJobId: number | null;
   targetDoctorId: number;
   targetDoctorName: string | null;
   caseCount: number;
@@ -195,6 +196,7 @@ function bulkAssignmentJob(row: {
     targetDoctorId: Number(row.targetDoctorId),
     caseCount: Number(row.caseCount),
     savedViewId: nullableNumber(row.savedViewId),
+    resumedFromJobId: nullableNumber(row.resumedFromJobId),
     unassignedOnly: true,
     filters: cleanRecord(row.filters) as ReportingBoardFilters,
     result: row.result ? (cleanRecord(row.result) as unknown as BulkAssignNextCasesResult) : null,
@@ -215,6 +217,7 @@ const BULK_ASSIGNMENT_JOB_SELECT = `
     j.cancelled_at as "cancelledAt",
     j.locked_at as "lockedAt",
     j.locked_by as "lockedBy",
+    j.resumed_from_job_id as "resumedFromJobId",
     j.target_doctor_id as "targetDoctorId",
     target_doctor.display_name as "targetDoctorName",
     j.case_count as "caseCount",
@@ -460,9 +463,10 @@ export async function createReportingBoardBulkAssignmentJob(
         unassigned_only,
         reason,
         created_by_user_id,
-        created_by_doctor_id
+        created_by_doctor_id,
+        resumed_from_job_id
       )
-      values ($1::timestamptz, $2, $3, $4::jsonb, $5, $6, true, $7, $8, $9)
+      values ($1::timestamptz, $2, $3, $4::jsonb, $5, $6, true, $7, $8, $9, $10)
       returning id
     `,
     [
@@ -475,6 +479,7 @@ export async function createReportingBoardBulkAssignmentJob(
       input.reason?.trim() || null,
       actor.userId,
       actor.doctorId,
+      input.resumedFromJobId ?? null,
     ]
   );
   const job = await findReportingBoardBulkAssignmentJobById(Number(result.rows[0].id));
@@ -643,24 +648,27 @@ export async function claimReportingBoardBulkAssignmentJobForRunNow(input: {
   }
 }
 
-export async function completeReportingBoardBulkAssignmentJob(input: {
+export async function finishReportingBoardBulkAssignmentJob(input: {
   id: number;
   result: BulkAssignNextCasesResult;
 }): Promise<void> {
+  const remainingCount = Math.max(0, input.result.requestedCount - input.result.assignedCount);
+  const status = input.result.assignedCount >= input.result.requestedCount ? "completed" : "partial";
+  const result = { ...input.result, remainingCount };
   await pool.query(
     `
       update doctor_portal.reporting_board_bulk_assignment_jobs
       set
-        status = 'completed',
+        status = $2,
         run_completed_at = now(),
         locked_at = null,
         locked_by = null,
-        result_json = $2::jsonb,
+        result_json = $3::jsonb,
         last_error = null
       where id = $1
         and status = 'running'
     `,
-    [input.id, JSON.stringify(input.result)]
+    [input.id, status, JSON.stringify(result)]
   );
 }
 

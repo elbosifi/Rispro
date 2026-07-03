@@ -28,6 +28,7 @@ import {
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
+  resumeScheduledReportingBoardBulkAssignmentJob,
   runScheduledReportingBoardBulkAssignmentJobNow,
   sendReportingBoardSavedViewTestNotification,
   subscribeReportingBoardSavedViewPush,
@@ -417,6 +418,19 @@ router.post(
       `api:${requestActor.userId}`
     );
     res.json({ job });
+  })
+);
+
+router.post(
+  "/bulk-assignment-jobs/:id/resume",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const requestActor = actor(req);
+    const result = await resumeScheduledReportingBoardBulkAssignmentJob(
+      requestActor,
+      requiredPositiveInteger(req.params.id, "id"),
+      `api:${requestActor.userId}`
+    );
+    res.status(201).json(result);
   })
 );
 

@@ -15,13 +15,13 @@ import {
   cancelReportingBoardBulkAssignmentJob,
   claimReportingBoardBulkAssignmentJobForRunNow,
   claimDueReportingBoardBulkAssignmentJobs,
-  completeReportingBoardBulkAssignmentJob,
   createAssignedToMeNotifications,
   createReportingBoardBulkAssignmentJob,
   createSavedView,
   doctorCanReportAllModalities,
   dismissReportingBoardNotification,
   failReportingBoardBulkAssignmentJob,
+  finishReportingBoardBulkAssignmentJob,
   findActiveSavedViewByToken,
   findReportingBoardBulkAssignmentJobById,
   findAssignableDoctorForReporting,
@@ -1110,7 +1110,7 @@ export async function executeClaimedReportingBoardBulkAssignmentJob(
         reason: job.reason,
       }
     );
-    await completeReportingBoardBulkAssignmentJob({ id: job.id, result });
+    await finishReportingBoardBulkAssignmentJob({ id: job.id, result });
   } catch (error) {
     await failReportingBoardBulkAssignmentJob({ id: job.id, error: error instanceof Error ? error.message : String(error) });
   }
@@ -1122,16 +1122,18 @@ export async function executeClaimedReportingBoardBulkAssignmentJob(
 export async function runDueScheduledReportingBoardBulkAssignmentJobs(options: {
   limit?: number;
   lockedBy: string;
-}): Promise<{ checked: number; completed: number; failed: number }> {
+}): Promise<{ checked: number; completed: number; partial: number; failed: number }> {
   const claimed = await claimDueReportingBoardBulkAssignmentJobs({ limit: options.limit ?? 5, lockedBy: options.lockedBy });
   let completed = 0;
+  let partial = 0;
   let failed = 0;
   for (const job of claimed) {
     const result = await executeClaimedReportingBoardBulkAssignmentJob(job);
     if (result.status === "completed") completed += 1;
+    if (result.status === "partial") partial += 1;
     if (result.status === "failed") failed += 1;
   }
-  return { checked: claimed.length, completed, failed };
+  return { checked: claimed.length, completed, partial, failed };
 }
 
 export async function runScheduledReportingBoardBulkAssignmentJobNow(
@@ -1147,6 +1149,37 @@ export async function runScheduledReportingBoardBulkAssignmentJobNow(
     throw new HttpError(409, "Only scheduled or failed jobs can be run now.");
   }
   return executeClaimedReportingBoardBulkAssignmentJob(claimed);
+}
+
+export async function resumeScheduledReportingBoardBulkAssignmentJob(
+  actor: Actor,
+  id: number,
+  lockedBy: string
+): Promise<{ job: ReportingBoardBulkAssignmentJob; jobs: ReportingBoardBulkAssignmentJob[] }> {
+  const me = await requireRosterManager(actor);
+  const parent = await findReportingBoardBulkAssignmentJobById(id);
+  if (!parent) throw new HttpError(404, "Scheduled bulk assignment job not found.");
+  if (parent.status !== "partial") throw new HttpError(409, "Only partial jobs can be resumed.");
+  const requestedCount = parent.result?.requestedCount ?? parent.caseCount;
+  const assignedCount = parent.result?.assignedCount ?? 0;
+  const remainingCount = Math.max(0, requestedCount - assignedCount);
+  if (remainingCount <= 0) throw new HttpError(409, "Partial job has no remaining cases to resume.");
+
+  const child = await createReportingBoardBulkAssignmentJob(
+    {
+      scheduledFor: new Date().toISOString(),
+      doctorId: parent.targetDoctorId,
+      count: remainingCount,
+      filters: frozenScheduledFilters(parent.filters),
+      savedViewId: parent.savedViewId,
+      savedViewName: parent.savedViewName,
+      resumedFromJobId: parent.id,
+      reason: parent.reason ? `Resume of scheduled job #${parent.id}: ${parent.reason}` : `Resume of scheduled job #${parent.id}`,
+    },
+    { userId: actor.userId, doctorId: me.profile!.id }
+  );
+  const job = await runScheduledReportingBoardBulkAssignmentJobNow(actor, child.id, lockedBy);
+  return { job, jobs: await listReportingBoardBulkAssignmentJobs() };
 }
 
 function uniquePositiveAppointmentIds(appointmentIds: number[]): number[] {

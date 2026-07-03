@@ -19,9 +19,10 @@ function workerId(): string {
 export async function runReportingBoardBulkAssignmentTick(options: { batchSize?: number } = {}): Promise<{
   checked: number;
   completed: number;
+  partial: number;
   failed: number;
 }> {
-  if (workerTickRunning || workerStopped) return { checked: 0, completed: 0, failed: 0 };
+  if (workerTickRunning || workerStopped) return { checked: 0, completed: 0, partial: 0, failed: 0 };
   workerTickRunning = true;
   try {
     return await runDueScheduledReportingBoardBulkAssignmentJobs({

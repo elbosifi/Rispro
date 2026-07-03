@@ -612,12 +612,13 @@ export interface ReportingBoardBulkAssignResult {
   requestedCount: number;
   assignedCount: number;
   skippedCount: number;
+  remainingCount?: number;
   assignedAppointmentIds: number[];
   assignedComparisonRequestIds?: number[];
   skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
-export type ReportingBoardBulkAssignmentJobStatus = "scheduled" | "running" | "completed" | "failed" | "cancelled";
+export type ReportingBoardBulkAssignmentJobStatus = "scheduled" | "running" | "completed" | "partial" | "failed" | "cancelled";
 
 export interface ReportingBoardBulkAssignmentJob {
   id: number;
@@ -628,6 +629,7 @@ export interface ReportingBoardBulkAssignmentJob {
   cancelledAt: string | null;
   lockedAt: string | null;
   lockedBy: string | null;
+  resumedFromJobId: number | null;
   targetDoctorId: number;
   targetDoctorName: string | null;
   caseCount: number;
@@ -655,6 +657,7 @@ export interface CreateReportingBoardBulkAssignmentJobPayload {
   filters: ReportingBoardFilters;
   savedViewId?: number | null;
   savedViewName?: string | null;
+  resumedFromJobId?: number | null;
   reason?: string | null;
 }
 

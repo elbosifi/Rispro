@@ -25,6 +25,7 @@ import {
   fetchRosterDoctors,
   finalizeComparisonRequest,
   markReportingBoardCaseDiscontinued,
+  resumeReportingBoardBulkAssignmentJob,
   sendReportingBoardSavedViewTestPush,
   runReportingBoardBulkAssignmentJobNow,
   subscribeReportingBoardSavedViewPush,
@@ -145,6 +146,7 @@ function compactFilters(filters: ReportingBoardFilters): ReportingBoardFilters {
 }
 
 const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
+const DEFAULT_SCHEDULE_TIME = "07:30";
 
 function tripoliDateParts(date: Date): Record<string, string> {
   return Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
@@ -158,9 +160,9 @@ function tripoliDateParts(date: Date): Record<string, string> {
   }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
 }
 
-function tripoliNowInput(): string {
+function tripoliTodayDate(): string {
   const parts = tripoliDateParts(new Date());
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function timeZoneOffsetMs(timeZone: string, utcMs: number): number {
@@ -1024,16 +1026,28 @@ function ScheduleBulkAssignModal({
   const [count, setCount] = useState("5");
   const [modalityId, setModalityId] = useState("");
   const [mode, setMode] = useState<"single" | "week">("single");
-  const [scheduledAt, setScheduledAt] = useState(() => tripoliNowInput());
+  const [scheduledDate, setScheduledDate] = useState(() => tripoliTodayDate());
+  const [scheduledTime, setScheduledTime] = useState(DEFAULT_SCHEDULE_TIME);
   const [weekStart, setWeekStart] = useState(() => nextTripoliSunday());
-  const [weekTime, setWeekTime] = useState("09:00");
+  const [weekRows, setWeekRows] = useState(() =>
+    ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"].map((day, index) => ({
+      day,
+      enabled: true,
+      date: addDaysToDateString(nextTripoliSunday(), index),
+      time: DEFAULT_SCHEDULE_TIME,
+      doctorId: "",
+      count: "5",
+    }))
+  );
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
 
-  const buildPayload = (scheduledFor: string): CreateReportingBoardBulkAssignmentJobPayload => ({
+  const frozenLabel = savedView?.name ?? (modalityId ? (modalities.find((modality) => modality.id === Number(modalityId))?.code ?? "Selected modality") : "Current board filters");
+
+  const buildPayload = (scheduledFor: string, rowDoctorId = doctorId, rowCount = count): CreateReportingBoardBulkAssignmentJobPayload => ({
     scheduledFor,
-    doctorId: Number(doctorId),
-    count: Number(count),
+    doctorId: Number(rowDoctorId),
+    count: Number(rowCount),
     filters: scheduledFilters(filters, modalityId),
     savedViewId: savedView?.id ?? null,
     savedViewName: savedView?.name ?? null,
@@ -1043,10 +1057,12 @@ function ScheduleBulkAssignModal({
   const mutation = useMutation({
     mutationFn: () => {
       if (mode === "week") {
-        const jobs = [0, 1, 2, 3, 4].map((offset) => buildPayload(tripoliLocalInputToIso(`${addDaysToDateString(weekStart, offset)}T${weekTime}`)));
+        const jobs = weekRows
+          .filter((row) => row.enabled)
+          .map((row) => buildPayload(tripoliLocalInputToIso(`${row.date}T${row.time}`), row.doctorId, row.count));
         return createReportingBoardBulkAssignmentJobs({ jobs });
       }
-      return createReportingBoardBulkAssignmentJob(buildPayload(tripoliLocalInputToIso(scheduledAt))).then((job) => [job]);
+      return createReportingBoardBulkAssignmentJob(buildPayload(tripoliLocalInputToIso(`${scheduledDate}T${scheduledTime}`))).then((job) => [job]);
     },
     onSuccess: () => {
       onCreated();
@@ -1056,11 +1072,24 @@ function ScheduleBulkAssignModal({
   });
 
   if (!open) return null;
-  const invalid = !doctorId || !Number.isInteger(Number(count)) || Number(count) <= 0 || (mode === "single" ? !scheduledAt : !weekStart || !weekTime);
+  const enabledWeekRows = weekRows.filter((row) => row.enabled);
+  const invalid = mode === "single"
+    ? !doctorId || !scheduledDate || !scheduledTime || !Number.isInteger(Number(count)) || Number(count) <= 0
+    : enabledWeekRows.length === 0 || enabledWeekRows.some((row) => !row.doctorId || !row.date || !row.time || !Number.isInteger(Number(row.count)) || Number(row.count) <= 0);
+
+  const setWeekRow = (index: number, patch: Partial<(typeof weekRows)[number]>) => {
+    setWeekRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  };
+
+  const setWeekSunday = (date: string) => {
+    const sunday = sundayForDateString(date);
+    setWeekStart(sunday);
+    setWeekRows((current) => current.map((row, index) => ({ ...row, date: addDaysToDateString(sunday, index) })));
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
-      <section className="w-full max-w-lg rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <section className="w-full max-w-4xl rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <h3 className="text-lg font-semibold text-foreground">Schedule auto-assign</h3>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>One-time jobs use frozen current filters, appointments only, unassigned only. Times are Africa/Tripoli.</p>
         <div className="mt-4 grid gap-3">
@@ -1069,28 +1098,67 @@ function ScheduleBulkAssignModal({
             <button type="button" onClick={() => setMode("week")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "week" ? "bg-teal-600 text-white" : ""}`}>Sun-Thu</button>
           </div>
           {mode === "single" ? (
-            <Field label="Scheduled time">
-              <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} className={inputClass()} />
-            </Field>
-          ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Sunday date">
-                <input type="date" value={weekStart} onChange={(event) => setWeekStart(sundayForDateString(event.target.value))} className={inputClass()} />
+              <Field label="Scheduled date">
+                <input type="date" value={scheduledDate} onChange={(event) => setScheduledDate(event.target.value)} className={inputClass()} />
               </Field>
-              <Field label="Daily time">
-                <input type="time" value={weekTime} onChange={(event) => setWeekTime(event.target.value)} className={inputClass()} />
+              <Field label="Scheduled time">
+                <input type="time" value={scheduledTime} onChange={(event) => setScheduledTime(event.target.value)} className={inputClass()} />
               </Field>
             </div>
+          ) : (
+            <div className="grid gap-3">
+              <Field label="Sunday date">
+                <input type="date" value={weekStart} onChange={(event) => setWeekSunday(event.target.value)} className={inputClass()} />
+              </Field>
+              <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead style={{ backgroundColor: "var(--background)" }}>
+                    <tr className="text-left">
+                      <th className="px-3 py-2">Use</th>
+                      <th className="px-3 py-2">Day</th>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Time</th>
+                      <th className="px-3 py-2">Doctor</th>
+                      <th className="px-3 py-2">Count</th>
+                      <th className="px-3 py-2">Filter</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+                    {weekRows.map((row, index) => (
+                      <tr key={row.day}>
+                        <td className="px-3 py-2"><input type="checkbox" checked={row.enabled} onChange={(event) => setWeekRow(index, { enabled: event.target.checked })} /></td>
+                        <td className="px-3 py-2 font-semibold">{row.day}</td>
+                        <td className="px-3 py-2"><input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { date: event.target.value })} className={inputClass()} /></td>
+                        <td className="px-3 py-2"><input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { time: event.target.value })} className={inputClass()} /></td>
+                        <td className="px-3 py-2">
+                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { doctorId: event.target.value })} className={inputClass()}>
+                            <option value="">Select doctor</option>
+                            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2"><input value={row.count} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { count: event.target.value })} type="number" min={1} className={inputClass()} /></td>
+                        <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>{frozenLabel}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
-          <Field label="Doctor">
-            <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className={inputClass()}>
-              <option value="">Select doctor</option>
-              {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
-            </select>
-          </Field>
-          <Field label="Number of cases">
-            <input value={count} onChange={(event) => setCount(event.target.value)} type="number" min={1} className={inputClass()} />
-          </Field>
+          {mode === "single" && (
+            <>
+              <Field label="Doctor">
+                <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className={inputClass()}>
+                  <option value="">Select doctor</option>
+                  {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+                </select>
+              </Field>
+              <Field label="Number of cases">
+                <input value={count} onChange={(event) => setCount(event.target.value)} type="number" min={1} className={inputClass()} />
+              </Field>
+            </>
+          )}
           <Field label="Modality">
             <select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className={inputClass()}>
               <option value="">Configured CT/MR</option>
@@ -1120,57 +1188,101 @@ function ScheduleBulkAssignModal({
 function ScheduledJobsPanel({
   jobs,
   loading,
+  onSchedule,
   onCancel,
   onRunNow,
+  onResume,
   busyJobId,
 }: {
   jobs: ReportingBoardBulkAssignmentJob[];
   loading: boolean;
+  onSchedule: () => void;
   onCancel: (id: number) => void;
   onRunNow: (id: number) => void;
+  onResume: (id: number) => void;
   busyJobId: number | null;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const summary = {
+    partial: jobs.filter((job) => job.status === "partial").length,
+    failed: jobs.filter((job) => job.status === "failed").length,
+    scheduled: jobs.filter((job) => job.status === "scheduled").length,
+    running: jobs.filter((job) => job.status === "running").length,
+  };
+  const attentionJobs = jobs.filter((job) => ["failed", "partial", "running", "scheduled"].includes(job.status));
+  const historyJobs = jobs.filter((job) => job.status === "completed" || job.status === "cancelled");
+  const statusLabel = (job: ReportingBoardBulkAssignmentJob) => {
+    if (job.status === "completed") return `Completed · ${job.result?.assignedCount ?? job.caseCount}/${job.result?.requestedCount ?? job.caseCount} assigned`;
+    if (job.status === "partial") return `Partial · ${job.result?.assignedCount ?? 0}/${job.result?.requestedCount ?? job.caseCount} assigned · ${job.result?.remainingCount ?? Math.max(0, (job.result?.requestedCount ?? job.caseCount) - (job.result?.assignedCount ?? 0))} remaining`;
+    if (job.status === "failed") return `Failed · ${job.lastError ?? "review required"}`;
+    if (job.status === "scheduled") return `Scheduled · ${tripoliDisplay(job.scheduledFor)}`;
+    if (job.status === "running") return "Running";
+    return "Cancelled";
+  };
+  const renderJob = (job: ReportingBoardBulkAssignmentJob, history = false) => (
+    <div key={job.id} className={`grid gap-2 py-3 lg:grid-cols-[1.2fr_1fr_1.7fr_auto] lg:items-center ${history ? "opacity-75" : ""}`}>
+      <div>
+        <p className="font-semibold text-foreground">{tripoliDisplay(job.scheduledFor)}</p>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>Tripoli time</p>
+      </div>
+      <div>
+        <p>{job.targetDoctorName ?? `Doctor ${job.targetDoctorId}`}</p>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.caseCount} cases</p>
+      </div>
+      <div className="min-w-0">
+        <p className="font-semibold">{statusLabel(job)}</p>
+        <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>{job.savedViewName ?? job.filters.modalityCode ?? (job.filters.modalityId ? `Modality ${job.filters.modalityId}` : "Frozen board filters")}</p>
+      </div>
+      <div className="flex gap-2 lg:justify-end">
+        {job.status === "scheduled" && (
+          <button type="button" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            <X size={13} /> Cancel
+          </button>
+        )}
+        {(job.status === "scheduled" || job.status === "failed") && (
+          <button type="button" disabled={busyJobId === job.id} onClick={() => onRunNow(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            <Play size={13} /> Run now
+          </button>
+        )}
+        {job.status === "partial" && (
+          <button type="button" disabled={busyJobId === job.id} onClick={() => onResume(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            <Play size={13} /> Resume
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground"><CalendarClock size={16} /> Scheduled auto-assign jobs</h3>
-        {loading && <span className="text-xs" style={{ color: "var(--text-muted)" }}>Loading...</span>}
+        <div>
+          <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground"><CalendarClock size={16} /> Scheduled auto-assign jobs</h3>
+          <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+            Partial {summary.partial} · Failed {summary.failed} · Scheduled {summary.scheduled}{summary.running ? ` · Running ${summary.running}` : ""}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {loading && <span className="self-center text-xs" style={{ color: "var(--text-muted)" }}>Loading...</span>}
+          <button type="button" onClick={() => setExpanded((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+          <button type="button" onClick={onSchedule} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            <CalendarClock size={14} /> Schedule auto-assign
+          </button>
+        </div>
       </div>
-      <div className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-        {jobs.length === 0 && <p className="py-2" style={{ color: "var(--text-muted)" }}>No scheduled jobs.</p>}
-        {jobs.map((job) => (
-          <div key={job.id} className="grid gap-2 py-3 lg:grid-cols-[1.2fr_1fr_0.8fr_1.3fr_auto] lg:items-center">
-            <div>
-              <p className="font-semibold text-foreground">{tripoliDisplay(job.scheduledFor)}</p>
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Tripoli time</p>
-            </div>
-            <div>
-              <p>{job.targetDoctorName ?? `Doctor ${job.targetDoctorId}`}</p>
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.caseCount} cases</p>
-            </div>
-            <div>
-              <span className="rounded-full border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{job.status}</span>
-            </div>
-            <div className="min-w-0">
-              <p className="truncate">{job.savedViewName ?? job.filters.modalityCode ?? (job.filters.modalityId ? `Modality ${job.filters.modalityId}` : "Frozen board filters")}</p>
-              {job.result && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.result.assignedCount}/{job.result.requestedCount} assigned, {job.result.skippedCount} skipped</p>}
-              {job.lastError && <p className="text-xs text-red-600">{job.lastError}</p>}
-            </div>
-            <div className="flex gap-2 lg:justify-end">
-              {job.status === "scheduled" && (
-                <button type="button" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-                  <X size={13} /> Cancel
-                </button>
-              )}
-              {(job.status === "scheduled" || job.status === "failed") && (
-                <button type="button" disabled={busyJobId === job.id} onClick={() => onRunNow(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-                  <Play size={13} /> Run now
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+      {expanded && (
+        <div className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+          {attentionJobs.length === 0 && <p className="py-2" style={{ color: "var(--text-muted)" }}>No current scheduled jobs need attention.</p>}
+          {attentionJobs.map((job) => renderJob(job))}
+          <button type="button" onClick={() => setShowHistory((value) => !value)} className="mt-3 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            {showHistory ? "Hide history" : `Show history (${historyJobs.length})`}
+          </button>
+          {showHistory && <div className="mt-2 divide-y" style={{ borderColor: "var(--border)" }}>{historyJobs.map((job) => renderJob(job, true))}</div>}
+        </div>
+      )}
     </section>
   );
 }
@@ -1317,6 +1429,17 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       await refreshScheduledJobsAndBoard();
     },
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not run scheduled job." }),
+    onSettled: () => setBusyScheduledJobId(null),
+  });
+
+  const resumeScheduledJobMutation = useMutation({
+    mutationFn: resumeReportingBoardBulkAssignmentJob,
+    onMutate: (id) => setBusyScheduledJobId(id),
+    onSuccess: async (result) => {
+      setBoardActionMessage({ tone: result.job.status === "failed" ? "error" : "success", text: result.job.status === "failed" ? "Resume job failed." : "Resume job ran.", detail: result.job.lastError });
+      await refreshScheduledJobsAndBoard();
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not resume scheduled job." }),
     onSettled: () => setBusyScheduledJobId(null),
   });
   const tokenQuery = useQuery({
@@ -1738,14 +1861,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             <Settings size={16} /> Board settings
           </button>
           {canManage && (
-            <>
-              <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">
-                <Users size={16} /> Auto-assign next cases
-              </button>
-              <button type="button" onClick={() => setScheduleBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-                <CalendarClock size={16} /> Schedule auto-assign
-              </button>
-            </>
+            <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">
+              <Users size={16} /> Auto-assign next cases
+            </button>
           )}
         </div>
       </div>
@@ -1764,8 +1882,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           jobs={scheduledJobsQuery.data ?? []}
           loading={scheduledJobsQuery.isLoading}
           busyJobId={busyScheduledJobId}
+          onSchedule={() => setScheduleBulkOpen(true)}
           onCancel={(id) => cancelScheduledJobMutation.mutate(id)}
           onRunNow={(id) => runScheduledJobNowMutation.mutate(id)}
+          onResume={(id) => resumeScheduledJobMutation.mutate(id)}
         />
       )}
 

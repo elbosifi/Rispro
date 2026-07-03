@@ -184,6 +184,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
 
   it("adds one-time scheduled Reporting Board bulk assignment jobs without a new assignment algorithm", () => {
     const migration = readFileSync(`${root}/src/db/migrations/106_reporting_board_scheduled_bulk_assignments.sql`, "utf8");
+    const partialMigration = readFileSync(`${root}/src/db/migrations/107_reporting_board_bulk_assignment_partial_resume.sql`, "utf8");
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
@@ -194,19 +195,35 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /scheduled_for timestamptz not null/);
     assert.match(migration, /locked_at timestamptz/);
     assert.match(migration, /locked_by text/);
+    assert.match(migration, /partial/);
+    assert.match(partialMigration, /resumed_from_job_id/);
+    assert.match(partialMigration, /status = 'partial'/);
     assert.doesNotMatch(migration, /recurr/i);
     assert.match(routes, /"\/bulk-assignment-jobs\/batch"/);
     assert.match(routes, /"\/bulk-assignment-jobs\/:id\/run-now"/);
     assert.match(routes, /"\/bulk-assignment-jobs\/:id\/cancel"/);
+    assert.match(routes, /"\/bulk-assignment-jobs\/:id\/resume"/);
     assert.match(service, /caseSource: "appointments"/);
     assert.match(service, /assignmentStatus: "unassigned"/);
     assert.match(service, /bulkAssignNextReportingBoardCases\(/);
     assert.match(service, /unassignedOnly: true/);
     assert.match(service, /creatorUserActive/);
+    assert.match(service, /parent\.status !== "partial"/);
+    assert.match(service, /remainingCount/);
+    assert.match(repo, /input\.result\.assignedCount >= input\.result\.requestedCount \? "completed" : "partial"/);
+    assert.match(repo, /status in \('scheduled', 'failed'\)/);
+    assert.match(repo, /where status = 'scheduled'[\s\S]*scheduled_for <= now\(\)/);
     assert.match(repo, /for update skip locked/);
     assert.match(worker, /runDueScheduledReportingBoardBulkAssignmentJobs/);
+    assert.match(frontend, /DEFAULT_SCHEDULE_TIME = "07:30"/);
     assert.match(frontend, /TRIPOLI_TIME_ZONE = "Africa\/Tripoli"/);
+    assert.match(frontend, /Scheduled date/);
+    assert.match(frontend, /Scheduled time/);
     assert.match(frontend, /Sun-Thu/);
+    assert.match(frontend, /Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"/);
+    assert.doesNotMatch(frontend, /Friday", "Saturday"/);
+    assert.match(frontend, /Resume/);
+    assert.match(frontend, /const \[expanded, setExpanded\] = useState\(false\)/);
   });
 
   it("saved view tokens are active-only and owner scoped unless loaded by a manager", () => {

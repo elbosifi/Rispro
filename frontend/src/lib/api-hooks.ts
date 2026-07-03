@@ -977,6 +977,10 @@ export async function runReportingBoardBulkAssignmentJobNow(id: number): Promise
   return raw.job;
 }
 
+export async function resumeReportingBoardBulkAssignmentJob(id: number): Promise<{ job: ReportingBoardBulkAssignmentJob; jobs: ReportingBoardBulkAssignmentJob[] }> {
+  return api<{ job: ReportingBoardBulkAssignmentJob; jobs: ReportingBoardBulkAssignmentJob[] }>(`/doctor/reporting-board/bulk-assignment-jobs/${id}/resume`, { method: "POST" });
+}
+
 export async function bulkReassignSelectedReportingCases(payload: ReportingBoardBulkReassignSelectedPayload): Promise<ReportingBoardBulkAssignResult> {
   return api<ReportingBoardBulkAssignResult>("/doctor/reporting-board/bulk-reassign-selected", {
     method: "POST",
