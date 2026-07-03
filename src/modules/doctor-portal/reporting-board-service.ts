@@ -41,6 +41,7 @@ import {
   unassignReportingCase,
   updateSavedView,
   updateReportingBoardSettings,
+  undoReportingBoardBulkAssignmentJobAssignments,
   upsertReportingBoardPushSubscription,
 } from "./reporting-board-repository.js";
 import type {
@@ -1180,6 +1181,36 @@ export async function resumeScheduledReportingBoardBulkAssignmentJob(
   );
   const job = await runScheduledReportingBoardBulkAssignmentJobNow(actor, child.id, lockedBy);
   return { job, jobs: await listReportingBoardBulkAssignmentJobs() };
+}
+
+export async function undoScheduledReportingBoardBulkAssignmentJob(
+  actor: Actor,
+  id: number
+): Promise<{ job: ReportingBoardBulkAssignmentJob; result: BulkUnassignSelectedCasesResult }> {
+  const me = await requireRosterManager(actor);
+  const job = await findReportingBoardBulkAssignmentJobById(id);
+  if (!job) throw new HttpError(404, "Scheduled bulk assignment job not found.");
+  if (job.status !== "completed" && job.status !== "partial") {
+    throw new HttpError(409, "Only completed or partial jobs can be undone.");
+  }
+  const assignedAppointmentIds = job.result?.assignedAppointmentIds ?? [];
+  if (assignedAppointmentIds.length === 0 || (job.result?.assignedCount ?? 0) <= 0) {
+    throw new HttpError(409, "This job did not assign any cases.");
+  }
+
+  const rows = await applyReportStatuses(await listReportingBoardCasesByAppointmentIds(assignedAppointmentIds), "all");
+  const finalAppointmentIds = rows.filter((row) => row.reportStatus === "final").map((row) => row.appointmentId);
+  const result = await undoReportingBoardBulkAssignmentJobAssignments({
+    jobId: job.id,
+    targetDoctorId: job.targetDoctorId,
+    assignedAppointmentIds,
+    finalAppointmentIds,
+    completedAt: job.runCompletedAt,
+    actor: { userId: actor.userId, doctorId: me.profile!.id },
+  });
+  const refreshed = await findReportingBoardBulkAssignmentJobById(id);
+  if (!refreshed) throw new HttpError(404, "Scheduled bulk assignment job not found.");
+  return { job: refreshed, result };
 }
 
 function uniquePositiveAppointmentIds(appointmentIds: number[]): number[] {

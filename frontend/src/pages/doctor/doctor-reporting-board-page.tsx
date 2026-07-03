@@ -28,6 +28,7 @@ import {
   resumeReportingBoardBulkAssignmentJob,
   sendReportingBoardSavedViewTestPush,
   runReportingBoardBulkAssignmentJobNow,
+  undoReportingBoardBulkAssignmentJob,
   subscribeReportingBoardSavedViewPush,
   unassignReportingBoardCase,
   unassignComparisonRequest,
@@ -198,6 +199,11 @@ function tripoliDisplay(value: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function weekdayLabel(date: string): string {
+  if (!date) return "-";
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
 }
 
 function addDaysToDateString(date: string, days: number): string {
@@ -1025,22 +1031,21 @@ function ScheduleBulkAssignModal({
   const [doctorId, setDoctorId] = useState("");
   const [count, setCount] = useState("5");
   const [modalityId, setModalityId] = useState("");
-  const [mode, setMode] = useState<"single" | "week">("single");
+  const [mode, setMode] = useState<"single" | "plan">("single");
   const [scheduledDate, setScheduledDate] = useState(() => tripoliTodayDate());
   const [scheduledTime, setScheduledTime] = useState(DEFAULT_SCHEDULE_TIME);
-  const [weekStart, setWeekStart] = useState(() => nextTripoliSunday());
-  const [weekRows, setWeekRows] = useState(() =>
-    ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"].map((day, index) => ({
-      day,
-      enabled: true,
-      date: addDaysToDateString(nextTripoliSunday(), index),
-      time: DEFAULT_SCHEDULE_TIME,
-      doctorId: "",
-      count: "5",
-    }))
-  );
+  const [templateStart, setTemplateStart] = useState(() => nextTripoliSunday());
+  const [planRows, setPlanRows] = useState<Array<{ id: string; enabled: boolean; date: string; time: string; doctorId: string; count: string }>>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  const newPlanRow = (date = tripoliTodayDate(), rowCount = count) => ({
+    id: `${Date.now()}-${Math.random()}`,
+    enabled: true,
+    date,
+    time: DEFAULT_SCHEDULE_TIME,
+    doctorId: "",
+    count: rowCount,
+  });
 
   const frozenLabel = savedView?.name ?? (modalityId ? (modalities.find((modality) => modality.id === Number(modalityId))?.code ?? "Selected modality") : "Current board filters");
 
@@ -1056,8 +1061,8 @@ function ScheduleBulkAssignModal({
 
   const mutation = useMutation({
     mutationFn: () => {
-      if (mode === "week") {
-        const jobs = weekRows
+      if (mode === "plan") {
+        const jobs = planRows
           .filter((row) => row.enabled)
           .map((row) => buildPayload(tripoliLocalInputToIso(`${row.date}T${row.time}`), row.doctorId, row.count));
         return createReportingBoardBulkAssignmentJobs({ jobs });
@@ -1072,19 +1077,27 @@ function ScheduleBulkAssignModal({
   });
 
   if (!open) return null;
-  const enabledWeekRows = weekRows.filter((row) => row.enabled);
+  const enabledPlanRows = planRows.filter((row) => row.enabled);
   const invalid = mode === "single"
     ? !doctorId || !scheduledDate || !scheduledTime || !Number.isInteger(Number(count)) || Number(count) <= 0
-    : enabledWeekRows.length === 0 || enabledWeekRows.some((row) => !row.doctorId || !row.date || !row.time || !Number.isInteger(Number(row.count)) || Number(row.count) <= 0);
+    : enabledPlanRows.length === 0 || enabledPlanRows.some((row) => !row.doctorId || !row.date || !row.time || !Number.isInteger(Number(row.count)) || Number(row.count) <= 0);
 
-  const setWeekRow = (index: number, patch: Partial<(typeof weekRows)[number]>) => {
-    setWeekRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  const setPlanRow = (id: string, patch: Partial<(typeof planRows)[number]>) => {
+    setPlanRows((current) => current.map((row) => row.id === id ? { ...row, ...patch } : row));
   };
 
-  const setWeekSunday = (date: string) => {
+  const addSunThuTemplate = () => {
+    const sunday = sundayForDateString(templateStart);
+    setTemplateStart(sunday);
+    setPlanRows((current) => [
+      ...current,
+      ...[0, 1, 2, 3, 4].map((offset) => newPlanRow(addDaysToDateString(sunday, offset))),
+    ]);
+  };
+
+  const setTemplateSunday = (date: string) => {
     const sunday = sundayForDateString(date);
-    setWeekStart(sunday);
-    setWeekRows((current) => current.map((row, index) => ({ ...row, date: addDaysToDateString(sunday, index) })));
+    setTemplateStart(sunday);
   };
 
   return (
@@ -1095,7 +1108,7 @@ function ScheduleBulkAssignModal({
         <div className="mt-4 grid gap-3">
           <div className="inline-flex rounded-lg border p-1" style={{ borderColor: "var(--border)" }}>
             <button type="button" onClick={() => setMode("single")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "single" ? "bg-teal-600 text-white" : ""}`}>Single</button>
-            <button type="button" onClick={() => setMode("week")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "week" ? "bg-teal-600 text-white" : ""}`}>Sun-Thu</button>
+            <button type="button" onClick={() => setMode("plan")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "plan" ? "bg-teal-600 text-white" : ""}`}>Assignment plan</button>
           </div>
           {mode === "single" ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1108,9 +1121,13 @@ function ScheduleBulkAssignModal({
             </div>
           ) : (
             <div className="grid gap-3">
-              <Field label="Sunday date">
-                <input type="date" value={weekStart} onChange={(event) => setWeekSunday(event.target.value)} className={inputClass()} />
-              </Field>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+                <Field label="Template Sunday date">
+                  <input type="date" value={templateStart} onChange={(event) => setTemplateSunday(event.target.value)} className={inputClass()} />
+                </Field>
+                <button type="button" onClick={addSunThuTemplate} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add Sun-Thu template</button>
+                <button type="button" onClick={() => setPlanRows((current) => [...current, newPlanRow()])} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add row</button>
+              </div>
               <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
                 <table className="w-full min-w-[760px] text-sm">
                   <thead style={{ backgroundColor: "var(--background)" }}>
@@ -1122,23 +1139,33 @@ function ScheduleBulkAssignModal({
                       <th className="px-3 py-2">Doctor</th>
                       <th className="px-3 py-2">Count</th>
                       <th className="px-3 py-2">Filter</th>
+                      <th className="px-3 py-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
-                    {weekRows.map((row, index) => (
-                      <tr key={row.day}>
-                        <td className="px-3 py-2"><input type="checkbox" checked={row.enabled} onChange={(event) => setWeekRow(index, { enabled: event.target.checked })} /></td>
-                        <td className="px-3 py-2 font-semibold">{row.day}</td>
-                        <td className="px-3 py-2"><input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { date: event.target.value })} className={inputClass()} /></td>
-                        <td className="px-3 py-2"><input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { time: event.target.value })} className={inputClass()} /></td>
+                    {planRows.length === 0 && (
+                      <tr><td colSpan={8} className="px-3 py-4" style={{ color: "var(--text-muted)" }}>Add rows or start from the Sunday-Thursday template.</td></tr>
+                    )}
+                    {planRows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="px-3 py-2"><input type="checkbox" checked={row.enabled} onChange={(event) => setPlanRow(row.id, { enabled: event.target.checked })} /></td>
+                        <td className="px-3 py-2 font-semibold">{weekdayLabel(row.date)}</td>
+                        <td className="px-3 py-2"><input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { date: event.target.value })} className={inputClass()} /></td>
+                        <td className="px-3 py-2"><input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { time: event.target.value })} className={inputClass()} /></td>
                         <td className="px-3 py-2">
-                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { doctorId: event.target.value })} className={inputClass()}>
+                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { doctorId: event.target.value })} className={inputClass()}>
                             <option value="">Select doctor</option>
                             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
                           </select>
                         </td>
-                        <td className="px-3 py-2"><input value={row.count} disabled={!row.enabled} onChange={(event) => setWeekRow(index, { count: event.target.value })} type="number" min={1} className={inputClass()} /></td>
+                        <td className="px-3 py-2"><input value={row.count} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { count: event.target.value })} type="number" min={1} className={inputClass()} /></td>
                         <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>{frozenLabel}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-1">
+                            <button type="button" onClick={() => setPlanRows((current) => [...current, { ...row, id: `${Date.now()}-${Math.random()}` }])} className="rounded border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Duplicate</button>
+                            <button type="button" onClick={() => setPlanRows((current) => current.filter((item) => item.id !== row.id))} className="rounded border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Delete</button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1192,6 +1219,7 @@ function ScheduledJobsPanel({
   onCancel,
   onRunNow,
   onResume,
+  onUndo,
   busyJobId,
 }: {
   jobs: ReportingBoardBulkAssignmentJob[];
@@ -1200,27 +1228,51 @@ function ScheduledJobsPanel({
   onCancel: (id: number) => void;
   onRunNow: (id: number) => void;
   onResume: (id: number) => void;
+  onUndo: (id: number) => void;
   busyJobId: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const summary = {
-    partial: jobs.filter((job) => job.status === "partial").length,
-    failed: jobs.filter((job) => job.status === "failed").length,
-    scheduled: jobs.filter((job) => job.status === "scheduled").length,
-    running: jobs.filter((job) => job.status === "running").length,
+  const [openAttempts, setOpenAttempts] = useState<Set<number>>(new Set());
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  const rootIdForJob = (job: ReportingBoardBulkAssignmentJob): number => {
+    let current = job;
+    const seen = new Set<number>();
+    while (current.resumedFromJobId && jobsById.has(current.resumedFromJobId) && !seen.has(current.id)) {
+      seen.add(current.id);
+      current = jobsById.get(current.resumedFromJobId)!;
+    }
+    return current.id;
   };
-  const attentionJobs = jobs.filter((job) => ["failed", "partial", "running", "scheduled"].includes(job.status));
-  const historyJobs = jobs.filter((job) => job.status === "completed" || job.status === "cancelled");
+  const attemptsByRoot = new Map<number, ReportingBoardBulkAssignmentJob[]>();
+  for (const job of jobs) {
+    const rootId = rootIdForJob(job);
+    if (rootId === job.id) continue;
+    attemptsByRoot.set(rootId, [...(attemptsByRoot.get(rootId) ?? []), job]);
+  }
+  const rootJobs = jobs.filter((job) => rootIdForJob(job) === job.id);
+  const summary = {
+    partial: rootJobs.filter((job) => job.status === "partial").length,
+    failed: rootJobs.filter((job) => job.status === "failed").length,
+    scheduled: rootJobs.filter((job) => job.status === "scheduled").length,
+    running: rootJobs.filter((job) => job.status === "running").length,
+  };
+  const hasAttentionAttempt = (job: ReportingBoardBulkAssignmentJob) => (attemptsByRoot.get(job.id) ?? []).some((attempt) => ["failed", "partial", "running", "scheduled"].includes(attempt.status));
+  const attentionJobs = rootJobs.filter((job) => ["failed", "partial", "running", "scheduled"].includes(job.status) || hasAttentionAttempt(job));
+  const historyJobs = rootJobs.filter((job) => job.status === "completed" || job.status === "cancelled" || job.status === "undone" || job.status === "partially_undone");
   const statusLabel = (job: ReportingBoardBulkAssignmentJob) => {
-    if (job.status === "completed") return `Completed · ${job.result?.assignedCount ?? job.caseCount}/${job.result?.requestedCount ?? job.caseCount} assigned`;
-    if (job.status === "partial") return `Partial · ${job.result?.assignedCount ?? 0}/${job.result?.requestedCount ?? job.caseCount} assigned · ${job.result?.remainingCount ?? Math.max(0, (job.result?.requestedCount ?? job.caseCount) - (job.result?.assignedCount ?? 0))} remaining`;
+    const undo = (job.result as ReportingBoardBulkAssignResult & { undo?: ReportingBoardBulkUnassignResult } | null)?.undo;
+    const undoSummary = undo ? ` · undo ${undo.unassignedCount}/${undo.requestedCount} undone · ${undo.skippedCount} skipped` : "";
+    if (job.status === "completed") return `Completed · ${job.result?.assignedCount ?? job.caseCount}/${job.result?.requestedCount ?? job.caseCount} assigned${undoSummary}`;
+    if (job.status === "partial") return `Partial · ${job.result?.assignedCount ?? 0}/${job.result?.requestedCount ?? job.caseCount} assigned · ${job.result?.remainingCount ?? Math.max(0, (job.result?.requestedCount ?? job.caseCount) - (job.result?.assignedCount ?? 0))} remaining${undoSummary}`;
     if (job.status === "failed") return `Failed · ${job.lastError ?? "review required"}`;
     if (job.status === "scheduled") return `Scheduled · ${tripoliDisplay(job.scheduledFor)}`;
     if (job.status === "running") return "Running";
+    if (job.status === "undone") return `Undone · ${undo?.unassignedCount ?? 0} assignments undone`;
+    if (job.status === "partially_undone") return `Partially undone · ${undo?.unassignedCount ?? 0} undone · ${undo?.skippedCount ?? 0} skipped`;
     return "Cancelled";
   };
-  const renderJob = (job: ReportingBoardBulkAssignmentJob, history = false) => (
+  const renderJob = (job: ReportingBoardBulkAssignmentJob, history = false, nested = false) => (
     <div key={job.id} className={`grid gap-2 py-3 lg:grid-cols-[1.2fr_1fr_1.7fr_auto] lg:items-center ${history ? "opacity-75" : ""}`}>
       <div>
         <p className="font-semibold text-foreground">{tripoliDisplay(job.scheduledFor)}</p>
@@ -1231,7 +1283,7 @@ function ScheduledJobsPanel({
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.caseCount} cases</p>
       </div>
       <div className="min-w-0">
-        <p className="font-semibold">{statusLabel(job)}</p>
+        <p className="font-semibold">{nested ? "Attempt · " : ""}{statusLabel(job)}</p>
         <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>{job.savedViewName ?? job.filters.modalityCode ?? (job.filters.modalityId ? `Modality ${job.filters.modalityId}` : "Frozen board filters")}</p>
       </div>
       <div className="flex gap-2 lg:justify-end">
@@ -1247,12 +1299,44 @@ function ScheduledJobsPanel({
         )}
         {job.status === "partial" && (
           <button type="button" disabled={busyJobId === job.id} onClick={() => onResume(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
-            <Play size={13} /> Resume
+            <Play size={13} /> Continue remaining
+          </button>
+        )}
+        {(job.status === "completed" || job.status === "partial") && (job.result?.assignedCount ?? 0) > 0 && !(job.result as ReportingBoardBulkAssignResult & { undo?: ReportingBoardBulkUnassignResult } | null)?.undo && (
+          <button type="button" disabled={busyJobId === job.id} onClick={() => onUndo(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            <X size={13} /> Undo assigned cases
           </button>
         )}
       </div>
     </div>
   );
+  const renderGroup = (job: ReportingBoardBulkAssignmentJob, history = false) => {
+    const attempts = attemptsByRoot.get(job.id) ?? [];
+    const attemptsOpen = openAttempts.has(job.id);
+    return (
+      <div key={job.id}>
+        {renderJob(job, history)}
+        {attempts.length > 0 && (
+          <div className="pb-2 pl-4">
+            <button
+              type="button"
+              onClick={() => setOpenAttempts((current) => {
+                const next = new Set(current);
+                if (next.has(job.id)) next.delete(job.id);
+                else next.add(job.id);
+                return next;
+              })}
+              className="rounded border px-2 py-1 text-xs font-semibold"
+              style={{ borderColor: "var(--border)" }}
+            >
+              {attemptsOpen ? "Hide attempts" : `Show attempts (${attempts.length})`}
+            </button>
+            {attemptsOpen && <div className="mt-2 divide-y border-l pl-3" style={{ borderColor: "var(--border)" }}>{attempts.map((attempt) => renderJob(attempt, history, true))}</div>}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
@@ -1276,11 +1360,11 @@ function ScheduledJobsPanel({
       {expanded && (
         <div className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
           {attentionJobs.length === 0 && <p className="py-2" style={{ color: "var(--text-muted)" }}>No current scheduled jobs need attention.</p>}
-          {attentionJobs.map((job) => renderJob(job))}
+          {attentionJobs.map((job) => renderGroup(job))}
           <button type="button" onClick={() => setShowHistory((value) => !value)} className="mt-3 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
             {showHistory ? "Hide history" : `Show history (${historyJobs.length})`}
           </button>
-          {showHistory && <div className="mt-2 divide-y" style={{ borderColor: "var(--border)" }}>{historyJobs.map((job) => renderJob(job, true))}</div>}
+          {showHistory && <div className="mt-2 divide-y" style={{ borderColor: "var(--border)" }}>{historyJobs.map((job) => renderGroup(job, true))}</div>}
         </div>
       )}
     </section>
@@ -1440,6 +1524,21 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       await refreshScheduledJobsAndBoard();
     },
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not resume scheduled job." }),
+    onSettled: () => setBusyScheduledJobId(null),
+  });
+
+  const undoScheduledJobMutation = useMutation({
+    mutationFn: undoReportingBoardBulkAssignmentJob,
+    onMutate: (id) => setBusyScheduledJobId(id),
+    onSuccess: async (result) => {
+      setBoardActionMessage({
+        tone: result.result.unassignedCount > 0 ? "success" : "error",
+        text: result.result.unassignedCount > 0 ? "Scheduled job assignments undone." : "No scheduled job assignments were undone.",
+        detail: `${result.result.unassignedCount}/${result.result.requestedCount} unassigned, ${result.result.skippedCount} skipped.`,
+      });
+      await refreshScheduledJobsAndBoard();
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not undo scheduled job assignments." }),
     onSettled: () => setBusyScheduledJobId(null),
   });
   const tokenQuery = useQuery({
@@ -1886,6 +1985,10 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           onCancel={(id) => cancelScheduledJobMutation.mutate(id)}
           onRunNow={(id) => runScheduledJobNowMutation.mutate(id)}
           onResume={(id) => resumeScheduledJobMutation.mutate(id)}
+          onUndo={(id) => {
+            const ok = window.confirm("This will unassign only cases assigned by this scheduled job, only if they are still active, still assigned to the same doctor, and not final. Cases changed after the job ran will be skipped.");
+            if (ok) undoScheduledJobMutation.mutate(id);
+          }}
         />
       )}
 

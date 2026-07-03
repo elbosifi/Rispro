@@ -1235,6 +1235,7 @@ interface ActiveReportingAssignment {
   assignedDoctorId: number | null;
   rosterAssignmentId: number | null;
   assignmentType: "reporting";
+  assignedAt?: string | null;
 }
 
 function activeReportingAssignment(row: ActiveReportingAssignment): ActiveReportingAssignment {
@@ -1244,7 +1245,144 @@ function activeReportingAssignment(row: ActiveReportingAssignment): ActiveReport
     assignedDoctorId: nullableNumber(row.assignedDoctorId),
     rosterAssignmentId: nullableNumber(row.rosterAssignmentId),
     assignmentType: row.assignmentType,
+    assignedAt: nullableIsoString(row.assignedAt),
   };
+}
+
+export async function undoReportingBoardBulkAssignmentJobAssignments(input: {
+  jobId: number;
+  targetDoctorId: number;
+  assignedAppointmentIds: number[];
+  finalAppointmentIds: number[];
+  completedAt: string | null;
+  actor: AssignmentActor;
+}): Promise<BulkUnassignSelectedCasesResult> {
+  const client = await pool.connect();
+  const unassignedAppointmentIds: number[] = [];
+  const skipped: Array<{ appointmentId: number; reason: string }> = [];
+  const finalIds = new Set(input.finalAppointmentIds);
+  try {
+    await client.query("begin");
+    const lockedBookings = await client.query<{ appointmentId: number }>(
+      `
+        select id as "appointmentId"
+        from appointments_v2.bookings
+        where id = any($1::bigint[])
+        for update
+      `,
+      [input.assignedAppointmentIds]
+    );
+    const lockedIds = new Set(lockedBookings.rows.map((row) => Number(row.appointmentId)));
+    const activeRows = await client.query<ActiveReportingAssignment>(
+      `
+        select
+          id,
+          appointment_id as "appointmentId",
+          assigned_doctor_id as "assignedDoctorId",
+          roster_assignment_id as "rosterAssignmentId",
+          assignment_type as "assignmentType",
+          assigned_at as "assignedAt"
+        from doctor_portal.case_team_assignments
+        where appointment_id = any($1::bigint[]) and assignment_type = 'reporting' and status = 'active'
+        for update
+      `,
+      [input.assignedAppointmentIds]
+    );
+    const activeByAppointmentId = new Map(activeRows.rows.map((row) => {
+      const assignment = activeReportingAssignment(row);
+      return [assignment.appointmentId, assignment];
+    }));
+
+    for (const appointmentId of input.assignedAppointmentIds) {
+      if (!lockedIds.has(appointmentId)) {
+        skipped.push({ appointmentId, reason: "appointment_not_found" });
+        continue;
+      }
+      if (finalIds.has(appointmentId)) {
+        skipped.push({ appointmentId, reason: "report_final" });
+        continue;
+      }
+      const assignment = activeByAppointmentId.get(appointmentId);
+      if (!assignment) {
+        skipped.push({ appointmentId, reason: "no_active_assignment" });
+        continue;
+      }
+      if (assignment.assignedDoctorId !== input.targetDoctorId) {
+        skipped.push({ appointmentId, reason: "assignment_changed" });
+        continue;
+      }
+      if (input.completedAt && assignment.assignedAt && new Date(assignment.assignedAt).getTime() > new Date(input.completedAt).getTime()) {
+        skipped.push({ appointmentId, reason: "assignment_changed_after_job" });
+        continue;
+      }
+      await client.query(
+        `
+          update doctor_portal.case_team_assignments
+          set status = 'cancelled', updated_at = now()
+          where id = $1
+        `,
+        [assignment.id]
+      );
+      unassignedAppointmentIds.push(appointmentId);
+      await insertDoctorAuditEvent(client, {
+        actorUserId: input.actor.userId,
+        actorDoctorId: input.actor.doctorId,
+        eventType: "reporting_board_bulk_assignment_job_case_undone",
+        targetType: "case_team_assignment",
+        targetId: assignment.id,
+        metadata: {
+          jobId: input.jobId,
+          appointmentId,
+          previousDoctorId: assignment.assignedDoctorId,
+          previousRosterAssignmentId: assignment.rosterAssignmentId,
+          assignmentType: assignment.assignmentType,
+        },
+        reason: `Undo scheduled job #${input.jobId}`,
+      });
+    }
+
+    const result = {
+      requestedCount: input.assignedAppointmentIds.length,
+      unassignedCount: unassignedAppointmentIds.length,
+      skippedCount: skipped.length,
+      unassignedAppointmentIds,
+      skipped,
+    };
+    const nextStatus =
+      result.unassignedCount === result.requestedCount
+        ? "undone"
+        : result.unassignedCount > 0
+          ? "partially_undone"
+          : null;
+    await client.query(
+      `
+        update doctor_portal.reporting_board_bulk_assignment_jobs
+        set
+          status = coalesce($2, status),
+          result_json = coalesce(result_json, '{}'::jsonb) || jsonb_build_object('undo', $3::jsonb),
+          last_error = case when $2::text is null then 'No assigned cases could be undone.' else null end,
+          updated_at = now()
+        where id = $1
+      `,
+      [input.jobId, nextStatus, JSON.stringify(result)]
+    );
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_bulk_assignment_job_undo_completed",
+      targetType: "reporting_board_bulk_assignment_job",
+      targetId: input.jobId,
+      metadata: result,
+      reason: `Undo scheduled job #${input.jobId}`,
+    });
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function unassignReportingCase(input: {

@@ -33,6 +33,7 @@ import {
   sendReportingBoardSavedViewTestNotification,
   subscribeReportingBoardSavedViewPush,
   unassignReportingBoardCase,
+  undoScheduledReportingBoardBulkAssignmentJob,
   updateReportingBoardSavedView,
 } from "./reporting-board-service.js";
 
@@ -431,6 +432,14 @@ router.post(
       `api:${requestActor.userId}`
     );
     res.status(201).json(result);
+  })
+);
+
+router.post(
+  "/bulk-assignment-jobs/:id/undo",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const result = await undoScheduledReportingBoardBulkAssignmentJob(actor(req), requiredPositiveInteger(req.params.id, "id"));
+    res.json(result);
   })
 );
 

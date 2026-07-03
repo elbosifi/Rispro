@@ -185,6 +185,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
   it("adds one-time scheduled Reporting Board bulk assignment jobs without a new assignment algorithm", () => {
     const migration = readFileSync(`${root}/src/db/migrations/106_reporting_board_scheduled_bulk_assignments.sql`, "utf8");
     const partialMigration = readFileSync(`${root}/src/db/migrations/107_reporting_board_bulk_assignment_partial_resume.sql`, "utf8");
+    const undoMigration = readFileSync(`${root}/src/db/migrations/108_reporting_board_bulk_assignment_undo_status.sql`, "utf8");
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
@@ -198,11 +199,14 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /partial/);
     assert.match(partialMigration, /resumed_from_job_id/);
     assert.match(partialMigration, /status = 'partial'/);
+    assert.match(undoMigration, /undone/);
+    assert.match(undoMigration, /partially_undone/);
     assert.doesNotMatch(migration, /recurr/i);
     assert.match(routes, /"\/bulk-assignment-jobs\/batch"/);
     assert.match(routes, /"\/bulk-assignment-jobs\/:id\/run-now"/);
     assert.match(routes, /"\/bulk-assignment-jobs\/:id\/cancel"/);
     assert.match(routes, /"\/bulk-assignment-jobs\/:id\/resume"/);
+    assert.match(routes, /"\/bulk-assignment-jobs\/:id\/undo"/);
     assert.match(service, /caseSource: "appointments"/);
     assert.match(service, /assignmentStatus: "unassigned"/);
     assert.match(service, /bulkAssignNextReportingBoardCases\(/);
@@ -210,7 +214,16 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /creatorUserActive/);
     assert.match(service, /parent\.status !== "partial"/);
     assert.match(service, /remainingCount/);
+    assert.match(service, /undoScheduledReportingBoardBulkAssignmentJob/);
+    assert.match(service, /job\.status !== "completed" && job\.status !== "partial"/);
+    assert.match(service, /job\.result\?\.assignedAppointmentIds/);
     assert.match(repo, /input\.result\.assignedCount >= input\.result\.requestedCount \? "completed" : "partial"/);
+    assert.match(repo, /undoReportingBoardBulkAssignmentJobAssignments/);
+    assert.match(repo, /assignment\.assignedDoctorId !== input\.targetDoctorId/);
+    assert.match(repo, /assignment_changed_after_job/);
+    assert.match(repo, /reporting_board_bulk_assignment_job_case_undone/);
+    assert.match(repo, /reporting_board_bulk_assignment_job_undo_completed/);
+    assert.match(repo, /jsonb_build_object\('undo'/);
     assert.match(repo, /status in \('scheduled', 'failed'\)/);
     assert.match(repo, /where status = 'scheduled'[\s\S]*scheduled_for <= now\(\)/);
     assert.match(repo, /for update skip locked/);
@@ -219,10 +232,17 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(frontend, /TRIPOLI_TIME_ZONE = "Africa\/Tripoli"/);
     assert.match(frontend, /Scheduled date/);
     assert.match(frontend, /Scheduled time/);
-    assert.match(frontend, /Sun-Thu/);
-    assert.match(frontend, /Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"/);
-    assert.doesNotMatch(frontend, /Friday", "Saturday"/);
-    assert.match(frontend, /Resume/);
+    assert.match(frontend, /Assignment plan/);
+    assert.match(frontend, /Add Sun-Thu template/);
+    assert.match(frontend, /Add row/);
+    assert.match(frontend, /Duplicate/);
+    assert.match(frontend, /Delete/);
+    assert.match(frontend, /\[0, 1, 2, 3, 4\]/);
+    assert.match(frontend, /Continue remaining/);
+    assert.match(frontend, /Undo assigned cases/);
+    assert.match(frontend, /Cases changed after the job ran will be skipped/);
+    assert.match(frontend, /attemptsByRoot/);
+    assert.match(frontend, /resumedFromJobId/);
     assert.match(frontend, /const \[expanded, setExpanded\] = useState\(false\)/);
   });
 

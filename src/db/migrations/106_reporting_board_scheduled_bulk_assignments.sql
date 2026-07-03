@@ -1,6 +1,6 @@
 create table if not exists doctor_portal.reporting_board_bulk_assignment_jobs (
   id bigserial primary key,
-  status text not null default 'scheduled' check (status in ('scheduled', 'running', 'completed', 'partial', 'failed', 'cancelled')),
+  status text not null default 'scheduled' check (status in ('scheduled', 'running', 'completed', 'partial', 'failed', 'cancelled', 'undone', 'partially_undone')),
   scheduled_for timestamptz not null,
   run_started_at timestamptz,
   run_completed_at timestamptz,

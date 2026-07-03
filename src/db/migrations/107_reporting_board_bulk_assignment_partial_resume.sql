@@ -6,7 +6,7 @@ alter table doctor_portal.reporting_board_bulk_assignment_jobs
 
 alter table doctor_portal.reporting_board_bulk_assignment_jobs
   add constraint reporting_board_bulk_assignment_jobs_status_check
-  check (status in ('scheduled', 'running', 'completed', 'partial', 'failed', 'cancelled'));
+  check (status in ('scheduled', 'running', 'completed', 'partial', 'failed', 'cancelled', 'undone', 'partially_undone'));
 
 create index if not exists reporting_board_bulk_assignment_jobs_resumed_from_idx
   on doctor_portal.reporting_board_bulk_assignment_jobs(resumed_from_job_id);

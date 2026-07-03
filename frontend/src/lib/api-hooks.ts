@@ -981,6 +981,10 @@ export async function resumeReportingBoardBulkAssignmentJob(id: number): Promise
   return api<{ job: ReportingBoardBulkAssignmentJob; jobs: ReportingBoardBulkAssignmentJob[] }>(`/doctor/reporting-board/bulk-assignment-jobs/${id}/resume`, { method: "POST" });
 }
 
+export async function undoReportingBoardBulkAssignmentJob(id: number): Promise<{ job: ReportingBoardBulkAssignmentJob; result: ReportingBoardBulkUnassignResult }> {
+  return api<{ job: ReportingBoardBulkAssignmentJob; result: ReportingBoardBulkUnassignResult }>(`/doctor/reporting-board/bulk-assignment-jobs/${id}/undo`, { method: "POST" });
+}
+
 export async function bulkReassignSelectedReportingCases(payload: ReportingBoardBulkReassignSelectedPayload): Promise<ReportingBoardBulkAssignResult> {
   return api<ReportingBoardBulkAssignResult>("/doctor/reporting-board/bulk-reassign-selected", {
     method: "POST",

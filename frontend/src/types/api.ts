@@ -618,7 +618,7 @@ export interface ReportingBoardBulkAssignResult {
   skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
-export type ReportingBoardBulkAssignmentJobStatus = "scheduled" | "running" | "completed" | "partial" | "failed" | "cancelled";
+export type ReportingBoardBulkAssignmentJobStatus = "scheduled" | "running" | "completed" | "partial" | "failed" | "cancelled" | "undone" | "partially_undone";
 
 export interface ReportingBoardBulkAssignmentJob {
   id: number;
