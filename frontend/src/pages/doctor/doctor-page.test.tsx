@@ -1863,19 +1863,73 @@ describe("Doctor Portal shell", () => {
       },
       assignmentDetail: null,
     });
+    fetchProtocolLibraryVersionDetailMock.mockResolvedValue({
+      protocol: {
+        id: 20,
+        name: "CT Brain",
+        modality: "CT",
+        anatomyRegionId: null,
+        anatomyRegionName: null,
+        category: null,
+        indication: null,
+        contrastPolicy: null,
+        activeVersionId: 30,
+        activeVersionNumber: "1.0",
+        activeVersionStatus: "ACTIVE",
+        latestDraftVersionId: null,
+        latestDraftVersionNumber: null,
+        isActive: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      version: {
+        id: 30,
+        protocolId: 20,
+        versionNumber: "1.0",
+        status: "ACTIVE",
+        changeSummary: "Activated",
+        createdBy: null,
+        approvedBy: 10,
+        approvedAt: "2026-06-29T10:00:00.000Z",
+        retiredAt: null,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      },
+      ctPhases: [{
+        id: 301,
+        protocolVersionId: 30,
+        orderIndex: 1,
+        ctPhasePresetId: 11,
+        ctPhasePresetName: "Portal venous",
+        customPhaseName: null,
+        timingOverride: "70 seconds",
+        coverageOverride: "Brain",
+        reconstructionOverride: "Soft tissue",
+        instructionsOverride: "Thin slices",
+        isRequired: true,
+        createdAt: "2026-06-29T10:00:00.000Z",
+        updatedAt: "2026-06-29T10:00:00.000Z",
+      }],
+      mriSequences: [],
+    });
     createDoctorProtocolAssignmentMock.mockResolvedValue({});
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
 
-    const drawer = await screen.findByRole("dialog", { name: "Assign protocol" });
-    expect(within(drawer).getByRole("heading", { name: "Assign protocol" })).toBeTruthy();
-    expect(within(drawer).getByText(/Protocol Patient/)).toBeTruthy();
-    expect(within(drawer).getByText(/V2-000077/)).toBeTruthy();
+    const modal = await screen.findByRole("dialog", { name: "Assign protocol" });
+    expect(within(modal).getByRole("heading", { name: "Assign protocol" })).toBeTruthy();
+    expect(within(modal).getByText(/Protocol Patient/)).toBeTruthy();
+    expect(within(modal).getByText(/MRN-5/)).toBeTruthy();
+    expect(within(modal).getByText(/V2-000077/)).toBeTruthy();
+    expect(within(modal).getByText(/Headache/)).toBeTruthy();
     expect(await screen.findByRole("option", { name: "CT Brain v1.0" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "MRI Prostate v1.0" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Protocol"), { target: { value: "20" } });
+    expect(await screen.findByText("Protocol preview")).toBeTruthy();
+    expect(await screen.findByText("Portal venous")).toBeTruthy();
+    expect(fetchProtocolLibraryVersionDetailMock).toHaveBeenCalledWith(30);
     fireEvent.change(screen.getByLabelText("Protocol instructions"), { target: { value: "Use standard brain protocol" } });
     fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
 
