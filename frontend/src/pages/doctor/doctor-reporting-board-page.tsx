@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Lock, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import {
   assignReportingBoardCase,
   assignComparisonRequest,
@@ -1078,9 +1078,25 @@ function ScheduleBulkAssignModal({
 
   if (!open) return null;
   const enabledPlanRows = planRows.filter((row) => row.enabled);
+  const planRowValidation = enabledPlanRows.map((row) => ({
+    id: row.id,
+    missingDate: !row.date,
+    missingTime: !row.time,
+    missingDoctor: !row.doctorId,
+    invalidCount: !Number.isInteger(Number(row.count)) || Number(row.count) <= 0,
+  }));
+  const planValidationById = new Map(planRowValidation.map((row) => [row.id, row]));
+  const planValidationSummary = [
+    enabledPlanRows.length === 0 ? "Add or enable at least one plan row." : null,
+    planRowValidation.filter((row) => row.missingDate).length ? `${planRowValidation.filter((row) => row.missingDate).length} enabled row${planRowValidation.filter((row) => row.missingDate).length === 1 ? " is" : "s are"} missing a date.` : null,
+    planRowValidation.filter((row) => row.missingTime).length ? `${planRowValidation.filter((row) => row.missingTime).length} enabled row${planRowValidation.filter((row) => row.missingTime).length === 1 ? " is" : "s are"} missing a time.` : null,
+    planRowValidation.filter((row) => row.missingDoctor).length ? `${planRowValidation.filter((row) => row.missingDoctor).length} enabled row${planRowValidation.filter((row) => row.missingDoctor).length === 1 ? " is" : "s are"} missing a doctor.` : null,
+    planRowValidation.filter((row) => row.invalidCount).length ? `${planRowValidation.filter((row) => row.invalidCount).length} enabled row${planRowValidation.filter((row) => row.invalidCount).length === 1 ? " has" : "s have"} an invalid count.` : null,
+  ].filter(Boolean) as string[];
+  const planInvalid = enabledPlanRows.length === 0 || planRowValidation.some((row) => row.missingDate || row.missingTime || row.missingDoctor || row.invalidCount);
   const invalid = mode === "single"
     ? !doctorId || !scheduledDate || !scheduledTime || !Number.isInteger(Number(count)) || Number(count) <= 0
-    : enabledPlanRows.length === 0 || enabledPlanRows.some((row) => !row.doctorId || !row.date || !row.time || !Number.isInteger(Number(row.count)) || Number(row.count) <= 0);
+    : planInvalid;
 
   const setPlanRow = (id: string, patch: Partial<(typeof planRows)[number]>) => {
     setPlanRows((current) => current.map((row) => row.id === id ? { ...row, ...patch } : row));
@@ -1122,14 +1138,29 @@ function ScheduleBulkAssignModal({
           ) : (
             <div className="grid gap-3">
               <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-                <Field label="Template Sunday date">
+                <Field label="Sun–Thu template start date">
                   <input type="date" value={templateStart} onChange={(event) => setTemplateSunday(event.target.value)} className={inputClass()} />
                 </Field>
                 <button type="button" onClick={addSunThuTemplate} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add Sun-Thu template</button>
                 <button type="button" onClick={() => setPlanRows((current) => [...current, newPlanRow()])} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add row</button>
               </div>
-              <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
-                <table className="w-full min-w-[760px] text-sm">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>Frozen filters: <span className="font-semibold text-foreground">{frozenLabel}</span></p>
+              {planValidationSummary.length > 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {planValidationSummary.map((message) => <p key={message}>{message}</p>)}
+                </div>
+              )}
+              <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "rgba(148, 163, 184, 0.28)" }}>
+                <table className="w-full min-w-[980px] table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-14" />
+                    <col className="w-28" />
+                    <col className="w-40" />
+                    <col className="w-32" />
+                    <col className="w-72" />
+                    <col className="w-24" />
+                    <col className="w-36" />
+                  </colgroup>
                   <thead style={{ backgroundColor: "var(--background)" }}>
                     <tr className="text-left">
                       <th className="px-3 py-2">Use</th>
@@ -1138,28 +1169,29 @@ function ScheduleBulkAssignModal({
                       <th className="px-3 py-2">Time</th>
                       <th className="px-3 py-2">Doctor</th>
                       <th className="px-3 py-2">Count</th>
-                      <th className="px-3 py-2">Filter</th>
                       <th className="px-3 py-2">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+                  <tbody className="divide-y" style={{ borderColor: "rgba(148, 163, 184, 0.18)" }}>
                     {planRows.length === 0 && (
-                      <tr><td colSpan={8} className="px-3 py-4" style={{ color: "var(--text-muted)" }}>Add rows or start from the Sunday-Thursday template.</td></tr>
+                      <tr><td colSpan={7} className="px-3 py-4" style={{ color: "var(--text-muted)" }}>Add rows or start from the Sunday-Thursday template.</td></tr>
                     )}
-                    {planRows.map((row) => (
-                      <tr key={row.id}>
+                    {planRows.map((row) => {
+                      const rowValidation = planValidationById.get(row.id);
+                      const invalidFieldClass = (isInvalid?: boolean) => `${inputClass()} ${isInvalid ? "border-red-400 text-red-900" : ""}`;
+                      return (
+                      <tr key={row.id} className="align-middle">
                         <td className="px-3 py-2"><input type="checkbox" checked={row.enabled} onChange={(event) => setPlanRow(row.id, { enabled: event.target.checked })} /></td>
                         <td className="px-3 py-2 font-semibold">{weekdayLabel(row.date)}</td>
-                        <td className="px-3 py-2"><input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { date: event.target.value })} className={inputClass()} /></td>
-                        <td className="px-3 py-2"><input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { time: event.target.value })} className={inputClass()} /></td>
+                        <td className="px-3 py-2"><input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { date: event.target.value })} className={invalidFieldClass(rowValidation?.missingDate)} /></td>
+                        <td className="px-3 py-2"><input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { time: event.target.value })} className={invalidFieldClass(rowValidation?.missingTime)} /></td>
                         <td className="px-3 py-2">
-                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { doctorId: event.target.value })} className={inputClass()}>
+                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { doctorId: event.target.value })} className={`${invalidFieldClass(rowValidation?.missingDoctor)} min-w-64`}>
                             <option value="">Select doctor</option>
                             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
                           </select>
                         </td>
-                        <td className="px-3 py-2"><input value={row.count} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { count: event.target.value })} type="number" min={1} className={inputClass()} /></td>
-                        <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>{frozenLabel}</td>
+                        <td className="px-3 py-2"><input value={row.count} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { count: event.target.value })} type="number" min={1} className={invalidFieldClass(rowValidation?.invalidCount)} /></td>
                         <td className="px-3 py-2">
                           <div className="flex gap-1">
                             <button type="button" onClick={() => setPlanRows((current) => [...current, { ...row, id: `${Date.now()}-${Math.random()}` }])} className="rounded border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Duplicate</button>
@@ -1167,7 +1199,8 @@ function ScheduleBulkAssignModal({
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1192,10 +1225,10 @@ function ScheduleBulkAssignModal({
               {modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
             </select>
           </Field>
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" checked readOnly />
-            Unassigned only
-          </label>
+          <div className="inline-flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--text-muted)" }}>
+            <Lock size={14} />
+            Locked: unassigned only
+          </div>
           <Field label="Notes for assigned doctor">
             <textarea value={note} onChange={(event) => setNote(event.target.value)} className="min-h-20 w-full rounded-lg border px-3 py-2 text-sm" />
           </Field>
