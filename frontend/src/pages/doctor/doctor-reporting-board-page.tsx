@@ -1393,6 +1393,244 @@ function ScheduledJobsPanel({
   );
 }
 
+function ScheduledJobsPanelCompact({
+  jobs,
+  loading,
+  onSchedule,
+  onCancel,
+  onRunNow,
+  onResume,
+  onUndo,
+  busyJobId,
+}: {
+  jobs: ReportingBoardBulkAssignmentJob[];
+  loading: boolean;
+  onSchedule: () => void;
+  onCancel: (id: number) => void;
+  onRunNow: (id: number) => void;
+  onResume: (id: number) => void;
+  onUndo: (id: number) => void;
+  busyJobId: number | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [openAttempts, setOpenAttempts] = useState<Set<number>>(new Set());
+  const [showAllAttempts, setShowAllAttempts] = useState<Set<number>>(new Set());
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  const rootIdForJob = (job: ReportingBoardBulkAssignmentJob): number => {
+    let current = job;
+    const seen = new Set<number>();
+    while (current.resumedFromJobId && jobsById.has(current.resumedFromJobId) && !seen.has(current.id)) {
+      seen.add(current.id);
+      current = jobsById.get(current.resumedFromJobId)!;
+    }
+    return current.id;
+  };
+  const attemptsByRoot = new Map<number, ReportingBoardBulkAssignmentJob[]>();
+  for (const job of jobs) {
+    const rootId = rootIdForJob(job);
+    if (rootId === job.id) continue;
+    attemptsByRoot.set(rootId, [...(attemptsByRoot.get(rootId) ?? []), job]);
+  }
+  const rootJobs = jobs.filter((job) => rootIdForJob(job) === job.id);
+  const attemptTime = (job: ReportingBoardBulkAssignmentJob) => new Date(job.runCompletedAt ?? job.runStartedAt ?? job.scheduledFor).getTime();
+  const sortedAttemptsForRoot = (rootId: number) => [...(attemptsByRoot.get(rootId) ?? [])].sort((a, b) => attemptTime(b) - attemptTime(a));
+  const undoResult = (job: ReportingBoardBulkAssignmentJob) => (job.result as ReportingBoardBulkAssignResult & { undo?: ReportingBoardBulkUnassignResult } | null)?.undo;
+  const effectiveAssignedCount = (job: ReportingBoardBulkAssignmentJob) => Math.max(0, (job.result?.assignedCount ?? 0) - (undoResult(job)?.unassignedCount ?? 0));
+  const chainSummaryForRoot = (root: ReportingBoardBulkAssignmentJob) => {
+    const attempts = sortedAttemptsForRoot(root.id);
+    const chainJobs = [root, ...attempts];
+    const rootRequestedCount = root.result?.requestedCount ?? root.caseCount;
+    const chainAssignedCount = chainJobs.reduce((total, job) => total + effectiveAssignedCount(job), 0);
+    return {
+      attempts,
+      attemptCount: attempts.length,
+      latestAttempt: attempts[0] ?? null,
+      rootRequestedCount,
+      chainAssignedCount,
+      chainRemainingCount: Math.max(0, rootRequestedCount - chainAssignedCount),
+      hasUndo: chainJobs.some((job) => !!undoResult(job)),
+    };
+  };
+  const summary = {
+    partial: rootJobs.filter((job) => job.status === "partial" && chainSummaryForRoot(job).chainRemainingCount > 0).length,
+    failed: rootJobs.filter((job) => job.status === "failed").length,
+    scheduled: rootJobs.filter((job) => job.status === "scheduled").length,
+    running: rootJobs.filter((job) => job.status === "running").length,
+  };
+  const hasAttentionAttempt = (job: ReportingBoardBulkAssignmentJob) => sortedAttemptsForRoot(job.id).some((attempt) => ["failed", "partial", "running", "scheduled"].includes(attempt.status));
+  const attentionJobs = rootJobs.filter((job) => {
+    const chain = chainSummaryForRoot(job);
+    return ["failed", "running", "scheduled"].includes(job.status) || (job.status === "partial" && chain.chainRemainingCount > 0) || hasAttentionAttempt(job);
+  });
+  const historyJobs = rootJobs.filter((job) => {
+    const chain = chainSummaryForRoot(job);
+    return ["completed", "cancelled", "undone", "partially_undone"].includes(job.status) || (job.status === "partial" && chain.chainRemainingCount === 0);
+  });
+  const jobResultText = (job: ReportingBoardBulkAssignmentJob) => {
+    const assigned = effectiveAssignedCount(job);
+    const requested = job.result?.requestedCount ?? job.caseCount;
+    const remaining = Math.max(0, requested - assigned);
+    if (job.status === "partial") return `${assigned}/${requested} assigned - ${remaining} remaining`;
+    return `${assigned}/${requested} assigned`;
+  };
+  const undoSummaryText = (job: ReportingBoardBulkAssignmentJob) => {
+    const undo = undoResult(job);
+    return undo ? `Undo attempted - ${undo.unassignedCount} undone - ${undo.skippedCount} skipped` : null;
+  };
+  const rootStatusLabel = (job: ReportingBoardBulkAssignmentJob) => {
+    const chain = chainSummaryForRoot(job);
+    if (job.status === "partial" && chain.chainAssignedCount >= chain.rootRequestedCount) return `Fulfilled after resume - ${chain.chainAssignedCount}/${chain.rootRequestedCount} assigned`;
+    if (job.status === "partial") {
+      const attemptText = chain.attemptCount > 0 ? ` across ${chain.attemptCount + 1} attempts` : "";
+      return `Partial - ${chain.chainAssignedCount}/${chain.rootRequestedCount} assigned${attemptText} - ${chain.chainRemainingCount} remaining`;
+    }
+    if (job.status === "completed") return chain.attemptCount > 0 ? `Fulfilled after resume - ${chain.chainAssignedCount}/${chain.rootRequestedCount} assigned` : `Completed - ${chain.chainAssignedCount}/${chain.rootRequestedCount} assigned`;
+    if (job.status === "failed") return `Failed - ${job.lastError ?? "review required"}`;
+    if (job.status === "scheduled") return `Scheduled - ${tripoliDisplay(job.scheduledFor)}`;
+    if (job.status === "running") return "Running";
+    if (job.status === "undone") return `Undone - ${undoResult(job)?.unassignedCount ?? 0} assignments undone`;
+    if (job.status === "partially_undone") return `Partially undone - ${undoResult(job)?.unassignedCount ?? 0} undone - ${undoResult(job)?.skippedCount ?? 0} skipped`;
+    return "Cancelled";
+  };
+  const renderAttempt = (job: ReportingBoardBulkAssignmentJob) => {
+    const undoText = undoSummaryText(job);
+    return (
+      <div key={job.id} className="grid gap-1 py-2 text-xs sm:grid-cols-[10rem_1fr] sm:gap-3">
+        <div style={{ color: "var(--text-muted)" }}>{tripoliDisplay(job.runCompletedAt ?? job.runStartedAt ?? job.scheduledFor)}</div>
+        <div>
+          <p className="font-semibold text-foreground">
+            Attempt - {job.status === "partial" ? `Partial - ${jobResultText(job)}` : job.status === "completed" ? `Completed - ${jobResultText(job)}` : job.status === "failed" ? `Failed - ${job.lastError ?? "review required"}` : job.status}
+          </p>
+          {undoText && <p style={{ color: "var(--text-muted)" }}>{undoText}</p>}
+        </div>
+      </div>
+    );
+  };
+  const renderGroup = (job: ReportingBoardBulkAssignmentJob, history = false) => {
+    const chain = chainSummaryForRoot(job);
+    const attemptsOpen = openAttempts.has(job.id);
+    const allAttemptsOpen = showAllAttempts.has(job.id);
+    const visibleAttempts = allAttemptsOpen ? chain.attempts : chain.attempts.slice(0, 3);
+    const undoText = undoSummaryText(job);
+    const showContinue = job.status === "partial" && chain.chainRemainingCount > 0;
+    const showUndo = (job.status === "completed" || job.status === "partial") && chain.chainAssignedCount > 0 && !chain.hasUndo;
+    return (
+      <div key={job.id}>
+        <div className={`grid gap-2 py-3 lg:grid-cols-[1.2fr_1fr_1.7fr_auto] lg:items-center ${history ? "opacity-75" : ""}`}>
+          <div>
+            <p className="font-semibold text-foreground">{tripoliDisplay(job.scheduledFor)}</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>Tripoli time</p>
+          </div>
+          <div>
+            <p>{job.targetDoctorName ?? `Doctor ${job.targetDoctorId}`}</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.caseCount} cases</p>
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold">{rootStatusLabel(job)}</p>
+            {undoText && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{undoText}</p>}
+            {chain.latestAttempt && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Latest attempt: {jobResultText(chain.latestAttempt)}</p>}
+            <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>{job.savedViewName ?? job.filters.modalityCode ?? (job.filters.modalityId ? `Modality ${job.filters.modalityId}` : "Frozen board filters")}</p>
+          </div>
+          <div className="flex gap-2 lg:justify-end">
+            {job.status === "scheduled" && (
+              <button type="button" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+                <X size={13} /> Cancel
+              </button>
+            )}
+            {(job.status === "scheduled" || job.status === "failed") && (
+              <button type="button" disabled={busyJobId === job.id} onClick={() => onRunNow(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+                <Play size={13} /> Run now
+              </button>
+            )}
+            {showContinue && (
+              <button type="button" disabled={busyJobId === job.id} onClick={() => onResume(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+                <Play size={13} /> Continue remaining
+              </button>
+            )}
+            {showUndo && (
+              <button type="button" disabled={busyJobId === job.id} onClick={() => onUndo(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+                <X size={13} /> Undo assigned cases
+              </button>
+            )}
+          </div>
+        </div>
+        {chain.attempts.length > 0 && (
+          <div className="pb-2 pl-4">
+            <button
+              type="button"
+              onClick={() => setOpenAttempts((current) => {
+                const next = new Set(current);
+                if (next.has(job.id)) next.delete(job.id);
+                else next.add(job.id);
+                return next;
+              })}
+              className="rounded border px-2 py-1 text-xs font-semibold"
+              style={{ borderColor: "var(--border)" }}
+            >
+              {attemptsOpen ? "Hide attempts" : `Show attempts (${chain.attempts.length})`}
+            </button>
+            {attemptsOpen && (
+              <div className="mt-2 border-l pl-3" style={{ borderColor: "rgba(148, 163, 184, 0.35)" }}>
+                <div className="divide-y rounded-md border px-3" style={{ borderColor: "rgba(148, 163, 184, 0.22)" }}>
+                  {visibleAttempts.map((attempt) => renderAttempt(attempt))}
+                </div>
+                {chain.attempts.length > 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllAttempts((current) => {
+                      const next = new Set(current);
+                      if (next.has(job.id)) next.delete(job.id);
+                      else next.add(job.id);
+                      return next;
+                    })}
+                    className="mt-2 rounded border px-2 py-1 text-xs font-semibold"
+                    style={{ borderColor: "var(--border)" }}
+                  >
+                    {allAttemptsOpen ? "Show latest 3 attempts" : `Show all attempts (${chain.attempts.length})`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground"><CalendarClock size={16} /> Scheduled auto-assign jobs</h3>
+          <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+            Partial {summary.partial} - Failed {summary.failed} - Scheduled {summary.scheduled}{summary.running ? ` - Running ${summary.running}` : ""}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {loading && <span className="self-center text-xs" style={{ color: "var(--text-muted)" }}>Loading...</span>}
+          <button type="button" onClick={() => setExpanded((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+          <button type="button" onClick={onSchedule} className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            <CalendarClock size={14} /> Schedule auto-assign
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+          {attentionJobs.length === 0 && <p className="py-2" style={{ color: "var(--text-muted)" }}>No current scheduled jobs need attention.</p>}
+          {attentionJobs.map((job) => renderGroup(job))}
+          <button type="button" onClick={() => setShowHistory((value) => !value)} className="mt-3 inline-flex h-8 items-center rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+            {showHistory ? "Hide history" : `Show history (${historyJobs.length})`}
+          </button>
+          {showHistory && <div className="mt-2 divide-y" style={{ borderColor: "var(--border)" }}>{historyJobs.map((job) => renderGroup(job, true))}</div>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function BoardSettingsModal({
   open,
   settingsDraft,
@@ -1999,7 +2237,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       )}
 
       {canManage && (
-        <ScheduledJobsPanel
+        <ScheduledJobsPanelCompact
           jobs={scheduledJobsQuery.data ?? []}
           loading={scheduledJobsQuery.isLoading}
           busyJobId={busyScheduledJobId}

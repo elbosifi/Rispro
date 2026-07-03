@@ -243,6 +243,11 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(frontend, /Cases changed after the job ran will be skipped/);
     assert.match(frontend, /attemptsByRoot/);
     assert.match(frontend, /resumedFromJobId/);
+    assert.match(frontend, /<ScheduledJobsPanelCompact/);
+    assert.match(frontend, /chainSummaryForRoot/);
+    assert.match(frontend, /Fulfilled after resume/);
+    assert.match(frontend, /visibleAttempts = allAttemptsOpen \? chain\.attempts : chain\.attempts\.slice\(0, 3\)/);
+    assert.match(frontend, /Show all attempts/);
     assert.match(frontend, /const \[expanded, setExpanded\] = useState\(false\)/);
   });
 
