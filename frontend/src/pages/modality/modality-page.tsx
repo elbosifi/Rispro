@@ -29,6 +29,7 @@ import {
 } from "@/components/shared";
 import { fetchAppointmentLookups, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, completeAppointment, updateAppointmentStatus } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -1382,6 +1383,7 @@ export default function ModalityPage() {
 
               {isProtocolModality(selectedAppointment) ? (
                 <ProtocolAssignmentPanel
+                  appointment={selectedAppointment}
                   assignment={selectedProtocolQuery.data ?? null}
                   isLoading={selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching}
                 />
@@ -1626,10 +1628,69 @@ function ValueWithPreset({
   );
 }
 
+function protocolPrintSheetFromModality(appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment): ProtocolPrintSheet {
+  const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ") || null;
+  const appointmentDateTime = [appointment.appointmentDate, appointment.bookingTime].filter(Boolean).join(" ") || null;
+  const base = {
+    patientName: appointment.englishFullName || appointment.arabicFullName || `Patient ${appointment.patientId}`,
+    mrn: appointment.mrn,
+    accession: appointment.accessionNumber,
+    appointmentDateTime,
+    modality: assignment.modality,
+    exam: appointment.examNameEn ?? appointment.examNameAr,
+    category: appointment.caseCategory ?? null,
+    clinicalNotes: appointment.notes?.trim() || appointment.specialReasonNote?.trim() || null,
+    protocolName: assignment.protocolName,
+    versionNumber: assignment.versionNumber,
+    scanner,
+    assignedBy: assignment.assignedBy,
+    assignedAt: assignment.assignedAt,
+    protocolInstructions: assignment.protocolNotes,
+    contrastInstructions: assignment.contrastNotes,
+  };
+
+  if (assignment.modality === "CT") {
+    return {
+      ...base,
+      modality: "CT",
+      ctPhases: assignment.ctPhases.map((phase) => ({
+        orderIndex: phase.orderIndex,
+        phase: effectiveValue(phase.customPhaseName, phase.phasePresetName),
+        timing: effectiveValue(phase.timingOverride, phase.delaySeconds != null ? `${phase.timingType ?? "Delay"} ${phase.delaySeconds}s` : phase.timingType),
+        coverage: effectiveValue(phase.coverageOverride, phase.coverage),
+        reconstruction: effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes),
+        instructions: effectiveValue(phase.instructionsOverride, phase.instructions),
+        isRequired: phase.isRequired,
+      })),
+    };
+  }
+
+  return {
+    ...base,
+    modality: "MRI",
+    mriSequences: assignment.mriSequences.map((sequence) => ({
+      orderIndex: sequence.orderIndex,
+      scanner: sequence.scannerName ?? scanner,
+      sequence: sequence.sequencePresetName ?? sequence.genericFamily ?? sequence.weighting,
+      vendorSequenceName: sequence.vendorSequenceName,
+      plane: effectiveValue(sequence.planeOverride, sequence.defaultPlane),
+      coverage: effectiveValue(sequence.coverageOverride, sequence.defaultCoverage),
+      bValuesTiming: [
+        effectiveValue(sequence.bValuesOverride, sequence.defaultBValues),
+        effectiveValue(sequence.timingOverride, sequence.defaultDynamicTiming),
+      ].filter(Boolean).join(" / ") || null,
+      notes: effectiveValue(sequence.notesOverride, sequence.notes),
+      isRequired: sequence.isRequired,
+    })),
+  };
+}
+
 function ProtocolAssignmentPanel({
+  appointment,
   assignment,
   isLoading,
 }: {
+  appointment: AppointmentWithDetails;
   assignment: ModalityProtocolAssignment | null;
   isLoading: boolean;
 }) {
@@ -1650,25 +1711,40 @@ function ProtocolAssignmentPanel({
   }
 
   const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ");
+  const printSheet = protocolPrintSheetFromModality(appointment, assignment);
 
   return (
     <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Read-only protocol</p>
-          <h3 className="mt-1 text-base font-semibold text-foreground">
-            {assignment.modality === "CT" ? "Assigned CT Protocol" : "Assigned MRI Protocol"}
-          </h3>
-          <p className="mt-1 text-sm text-slate-700">{protocolVersionLabel(assignment.protocolName, assignment.versionNumber)}</p>
+          <h3 className="mt-1 text-lg font-semibold text-foreground">Assigned protocol</h3>
+          <p className="mt-1 text-base font-semibold text-slate-800">{protocolVersionLabel(assignment.protocolName, assignment.versionNumber)}</p>
+          {scanner ? <p className="mt-1 text-sm font-medium text-slate-700">{scanner}</p> : null}
         </div>
-        <Badge variant="info" size="sm">{assignment.status}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="info" size="sm">{assignment.status}</Badge>
+          <Button type="button" variant="secondary" size="sm" onClick={() => printProtocolSheet(printSheet)}>
+            <Printer size={16} />
+            <span>Print protocol</span>
+          </Button>
+        </div>
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <DetailField label="Scanner" value={scanner || null} />
         <DetailField label="Assigned by" value={assignment.assignedBy} />
-        <DetailField label="Contrast notes" value={assignment.contrastNotes} />
-        <DetailField label="Protocol notes" value={assignment.protocolNotes} />
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Doctor instructions</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.protocolNotes || EMPTY_VALUE}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Contrast/prep instructions</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.contrastNotes || EMPTY_VALUE}</p>
+        </div>
       </div>
 
       <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
@@ -1677,7 +1753,7 @@ function ProtocolAssignmentPanel({
 
       {assignment.modality === "CT" ? (
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[760px] table-fixed text-left text-xs">
+          <table className="min-w-full table-fixed text-left text-xs">
             <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               <tr>
                 <th className="w-16 px-2 py-2">Order</th>
@@ -1713,11 +1789,13 @@ function ProtocolAssignmentPanel({
         </div>
       ) : (
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[760px] table-fixed text-left text-xs">
+          <table className="min-w-full table-fixed text-left text-xs">
             <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               <tr>
                 <th className="w-16 px-2 py-2">Order</th>
+                <th className="w-32 px-2 py-2">Scanner</th>
                 <th className="w-40 px-2 py-2">Sequence</th>
+                <th className="w-36 px-2 py-2">Vendor name</th>
                 <th className="w-28 px-2 py-2">Plane</th>
                 <th className="w-40 px-2 py-2">Coverage</th>
                 <th className="w-40 px-2 py-2">b-values / timing</th>
@@ -1739,7 +1817,9 @@ function ProtocolAssignmentPanel({
                 return (
                   <tr key={`${sequence.orderIndex}-${sequenceName ?? "sequence"}`}>
                     <td className="px-2 py-2 font-mono">{sequence.orderIndex}</td>
+                    <td className="px-2 py-2">{sequence.scannerName ?? scanner ?? EMPTY_VALUE}</td>
                     <td className="px-2 py-2"><ValueWithPreset value={sequenceName} preset={defaultText(sequence.sequencePresetName)} /></td>
+                    <td className="px-2 py-2">{sequence.vendorSequenceName ?? EMPTY_VALUE}</td>
                     <td className="px-2 py-2"><ValueWithPreset value={plane} preset={defaultText(sequence.defaultPlane)} /></td>
                     <td className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(sequence.defaultCoverage)} /></td>
                     <td className="px-2 py-2"><ValueWithPreset value={timing} preset={timingPreset} /></td>

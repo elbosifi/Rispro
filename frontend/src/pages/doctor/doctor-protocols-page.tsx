@@ -50,6 +50,7 @@ import {
   type ProtocolAnatomyRegionPayload,
 } from "@/lib/api-hooks";
 import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
+import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 
 function todayIso(): string {
@@ -1223,11 +1224,21 @@ function ProtocolAssignmentModal({
   const title = existing ? "Change assigned protocol" : "Assign protocol";
   const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols available. Create and activate one in Protocol Library.`;
   const selectedProtocol = activeProtocols.find((protocol) => String(protocol.id) === protocolId) ?? null;
+  const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
   const selectedVersionId = selectedProtocol?.activeVersionId ?? null;
   const selectedVersionQuery = useQuery({
     queryKey: ["doctor", "protocol-library", "protocol-version-preview", selectedVersionId],
     queryFn: () => fetchProtocolLibraryVersionDetail(selectedVersionId!),
     enabled: selectedVersionId !== null,
+  });
+  const printableSheet = doctorAssignmentPrintSheet({
+    appointment,
+    detail,
+    selectedProtocol,
+    selectedVersionDetail: selectedVersionQuery.data ?? null,
+    selectedScannerName,
+    protocolNotes,
+    contrastNotes,
   });
 
   useEffect(() => {
@@ -1313,6 +1324,7 @@ function ProtocolAssignmentModal({
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <button type="button" disabled={!protocolId || activeProtocols.length === 0 || saving} onClick={() => onSave(payload())} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving..." : "Save assignment"}</button>
+              {printableSheet ? <button type="button" disabled={saving} onClick={() => printProtocolSheet(printableSheet)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Print protocol</button> : null}
               {existing ? <button type="button" disabled={saving} onClick={onClear} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Clear assignment</button> : null}
               <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Cancel</button>
             </div>
@@ -1322,6 +1334,106 @@ function ProtocolAssignmentModal({
       </section>
     </div>
   );
+}
+
+function combineProtocolValues(...values: Array<string | number | null | undefined>): string | null {
+  const parts = values.map((value) => (value == null ? "" : String(value).trim())).filter(Boolean);
+  return parts.length > 0 ? parts.join(" / ") : null;
+}
+
+function doctorAssignmentPrintSheet({
+  appointment,
+  detail,
+  selectedProtocol,
+  selectedVersionDetail,
+  selectedScannerName,
+  protocolNotes,
+  contrastNotes,
+}: {
+  appointment: DoctorProtocolingAppointment;
+  detail: DoctorProtocolingAppointmentDetail | null;
+  selectedProtocol: ProtocolLibraryProtocol | null;
+  selectedVersionDetail: ProtocolLibraryVersionDetail | null;
+  selectedScannerName: string | null;
+  protocolNotes: string;
+  contrastNotes: string;
+}): ProtocolPrintSheet | null {
+  const assignmentDetail = detail?.assignmentDetail ?? null;
+  const assigned = assignmentDetail?.assignment ?? appointment.assignment ?? null;
+  if (!assigned && (!selectedProtocol || !selectedVersionDetail)) return null;
+
+  const appointmentDateTime = [appointment.appointmentDate, appointment.appointmentTime].filter(Boolean).join(" ") || null;
+  const base = {
+    patientName: protocolingPatientName(appointment),
+    mrn: appointment.patientMrn,
+    accession: appointment.accessionNumber,
+    appointmentDateTime,
+    modality: appointment.modalityCode,
+    exam: appointment.examTypeName,
+    category: appointment.caseCategory,
+    clinicalNotes: appointment.clinicalNotes,
+    protocolName: assigned?.protocolName ?? selectedProtocol?.name ?? "",
+    versionNumber: assigned?.versionNumber ?? selectedVersionDetail?.version.versionNumber ?? selectedProtocol?.activeVersionNumber ?? "",
+    scanner: assigned?.scannerName ?? selectedScannerName,
+    assignedBy: assigned?.assignedBy != null ? String(assigned.assignedBy) : null,
+    assignedAt: assigned?.assignedAt ?? null,
+    protocolInstructions: assigned?.protocolNotes ?? nullableText(protocolNotes),
+    contrastInstructions: assigned?.contrastNotes ?? nullableText(contrastNotes),
+  };
+
+  if (appointment.modalityCode === "CT") {
+    return {
+      ...base,
+      modality: "CT",
+      ctPhases: assignmentDetail
+        ? assignmentDetail.ctPhases.map((phase) => ({
+          orderIndex: phase.orderIndex,
+          phase: phase.customPhaseName ?? phase.ctPhasePresetName,
+          timing: phase.timingOverride,
+          coverage: phase.coverageOverride,
+          reconstruction: phase.reconstructionOverride,
+          instructions: phase.instructionsOverride,
+          isRequired: phase.isRequired,
+        }))
+        : (selectedVersionDetail?.ctPhases ?? []).map((phase) => ({
+          orderIndex: phase.orderIndex,
+          phase: phase.customPhaseName ?? phase.ctPhasePresetName,
+          timing: phase.timingOverride,
+          coverage: phase.coverageOverride,
+          reconstruction: phase.reconstructionOverride,
+          instructions: phase.instructionsOverride,
+          isRequired: phase.isRequired,
+        })),
+    };
+  }
+
+  return {
+    ...base,
+    modality: "MRI",
+    mriSequences: assignmentDetail
+      ? assignmentDetail.mriSequences.map((sequence) => ({
+        orderIndex: sequence.orderIndex,
+        scanner: sequence.scannerName,
+        sequence: sequence.mriSequencePresetName,
+        vendorSequenceName: null,
+        plane: sequence.planeOverride,
+        coverage: sequence.coverageOverride,
+        bValuesTiming: combineProtocolValues(sequence.bValuesOverride, sequence.timingOverride),
+        notes: sequence.notesOverride,
+        isRequired: sequence.isRequired,
+      }))
+      : (selectedVersionDetail?.mriSequences ?? []).map((sequence) => ({
+        orderIndex: sequence.orderIndex,
+        scanner: sequence.scannerName ?? selectedScannerName,
+        sequence: mriSequenceRowLabel(sequence),
+        vendorSequenceName: sequence.scannerAliasVendorSequenceName ?? null,
+        plane: sequence.planeOverride ?? sequence.presetDefaultPlane ?? null,
+        coverage: sequence.coverageOverride,
+        bValuesTiming: combineProtocolValues(sequence.bValuesOverride, sequence.timingOverride),
+        notes: sequence.notesOverride,
+        isRequired: sequence.isRequired,
+      })),
+  };
 }
 
 function ProtocolVersionPreview({

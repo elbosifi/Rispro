@@ -15,6 +15,7 @@ const fetchStatisticsMock = vi.fn();
 const completeAppointmentMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
+const printProtocolSheetMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
 
@@ -29,6 +30,10 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/appointment-printing", () => ({
   printAppointmentSlipById: (...args: unknown[]) => printAppointmentSlipByIdMock(...args),
+}));
+
+vi.mock("@/lib/protocol-printing", () => ({
+  printProtocolSheet: (...args: unknown[]) => printProtocolSheetMock(...args),
 }));
 
 vi.mock("@/providers/language-provider", () => ({
@@ -926,13 +931,32 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByTestId("modality-board-row-7"));
 
     const drawer = await screen.findByTestId("selected-appointment-drawer");
-    await within(drawer).findByText("Assigned CT Protocol");
+    await within(drawer).findByText("Assigned protocol");
     expect(within(drawer).getByText("CT Abdomen v1.2")).toBeTruthy();
     expect(within(drawer).getByText("Phase")).toBeTruthy();
     expect(within(drawer).queryByText("Sequence")).toBeNull();
     expect(within(drawer).getByText("Liver to symphysis")).toBeTruthy();
     expect(within(drawer).getByText("This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.")).toBeTruthy();
     expect(fetchModalityProtocolAssignmentMock).toHaveBeenCalledWith(7);
+  });
+
+  it("prints assigned protocol separately from the appointment slip", async () => {
+    const user = await openBoard([appointment({ id: 7, accessionNumber: "ACC-CT-PROTOCOL" })]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(ctAssignment());
+
+    await user.click(screen.getByTestId("modality-board-row-7"));
+
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    await user.click(await within(drawer).findByRole("button", { name: "Print protocol" }));
+    expect(printProtocolSheetMock).toHaveBeenCalledWith(expect.objectContaining({
+      patientName: "Patient One",
+      accession: "ACC-CT-PROTOCOL",
+      protocolName: "CT Abdomen",
+      modality: "CT",
+    }));
+
+    await user.click(within(drawer).getByLabelText("Print"));
+    expect(printAppointmentSlipByIdMock).toHaveBeenCalledWith(7, "en");
   });
 
   it("renders Assigned MRI Protocol with MRI sequence terminology", async () => {
@@ -942,8 +966,10 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByTestId("modality-board-row-8"));
 
     const drawer = await screen.findByTestId("selected-appointment-drawer");
-    await within(drawer).findByText("Assigned MRI Protocol");
+    await within(drawer).findByText("Assigned protocol");
     expect(within(drawer).getByText("MRI Rectum Primary Staging v1.2")).toBeTruthy();
+    expect(within(drawer).getAllByText("Philips Ingenia Elition 3T - Philips").length).toBeGreaterThan(0);
+    expect(within(drawer).getByRole("button", { name: "Print protocol" })).toBeTruthy();
     expect(within(drawer).getByText("Sequence")).toBeTruthy();
     expect(within(drawer).queryByText("Phase")).toBeNull();
     expect(within(drawer).getByText("rectum-centered")).toBeTruthy();

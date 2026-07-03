@@ -207,7 +207,7 @@ export async function getModalityProtocolAssignment(
           coalesce(sequence.scanner_id, preset.scanner_id) as scanner_id,
           coalesce(sequence_scanner.name, preset_scanner.name) as scanner_name,
           preset.name as sequence_preset_name,
-          preset.vendor_sequence_name,
+          coalesce(alias.vendor_sequence_name, preset.vendor_sequence_name) as vendor_sequence_name,
           preset.generic_family,
           preset.weighting,
           preset.default_plane,
@@ -225,10 +225,13 @@ export async function getModalityProtocolAssignment(
         left join mri_sequence_presets preset on preset.id = sequence.mri_sequence_preset_id
         left join imaging_scanners sequence_scanner on sequence_scanner.id = sequence.scanner_id
         left join imaging_scanners preset_scanner on preset_scanner.id = preset.scanner_id
+        left join mri_sequence_scanner_aliases alias
+          on alias.mri_sequence_preset_id = preset.id
+         and alias.scanner_id = coalesce(sequence.scanner_id, $2::bigint, preset.scanner_id)
         where sequence.protocol_version_id = $1
         order by sequence.order_index asc, sequence.id asc
       `,
-      [assignment.protocol_version_id]
+      [assignment.protocol_version_id, assignment.scanner_id]
     ),
   ]);
 

@@ -62,7 +62,7 @@ test("modality protocol assignment returns CT assignment with CT phases", async 
   assert.equal(assignment?.scanner_vendor, "GE");
   assert.equal(assignment?.ct_phases.length, 1);
   assert.equal(assignment?.ct_phases[0].coverage_override, "Liver to symphysis");
-  assert.deepEqual(db.calls.map((call) => call.values), [[101], [31], [31]]);
+  assert.deepEqual(db.calls.map((call) => call.values), [[101], [31], [31, 41]]);
 });
 
 test("modality protocol assignment returns MRI assignment with MRI sequences", async () => {
@@ -113,6 +113,54 @@ test("modality protocol assignment returns MRI assignment with MRI sequences", a
   assert.equal(assignment?.mri_sequences.length, 1);
   assert.equal(assignment?.mri_sequences[0].plane_override, "oblique axial");
   assert.equal(assignment?.mri_sequences[0].vendor_sequence_name, "T2W TSE");
+});
+
+test("modality protocol assignment prefers scanner-specific MRI sequence alias", async () => {
+  const db = executor([
+    [{
+      assignment_id: 13,
+      appointment_id: 104,
+      protocol_id: 22,
+      protocol_version_id: 32,
+      protocol_name: "MRI Rectum Primary Staging",
+      version_number: "1.2",
+      modality: "MRI",
+      scanner_id: 42,
+      scanner_name: "Philips Ingenia Elition 3T",
+      scanner_vendor: "Philips",
+      protocol_notes: "Rectum protocol",
+      contrast_notes: "Buscopan if allowed",
+      assigned_by: "Dr. Protocol",
+      assigned_at: "2026-06-29T08:05:00Z",
+      status: "ASSIGNED",
+    }],
+    [],
+    [{
+      order_index: 1,
+      scanner_id: 42,
+      scanner_name: "Philips Ingenia Elition 3T",
+      sequence_preset_name: "T2 TSE",
+      vendor_sequence_name: "T2W_TSE_ALIAS",
+      generic_family: "TSE",
+      weighting: "T2",
+      default_plane: "axial",
+      plane_override: "oblique axial",
+      default_coverage: "pelvis",
+      coverage_override: "rectum-centered",
+      default_b_values: null,
+      b_values_override: null,
+      default_dynamic_timing: null,
+      timing_override: null,
+      notes: "Small FOV",
+      notes_override: null,
+      is_required: true,
+    }],
+  ]);
+
+  const assignment = await getModalityProtocolAssignment(104, db);
+
+  assert.equal(assignment?.mri_sequences[0].vendor_sequence_name, "T2W_TSE_ALIAS");
+  assert.match(db.calls[2].sql, /mri_sequence_scanner_aliases/i);
 });
 
 test("modality protocol assignment returns null when no active assignment exists", async () => {

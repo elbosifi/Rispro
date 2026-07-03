@@ -1,8 +1,36 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
+import { mock } from "node:test";
 
 const root = process.cwd();
+
+function protocolingAppointmentRow(overrides: Record<string, unknown> = {}) {
+  return {
+    appointment_id: 101,
+    accession_number: "V2-000101",
+    patient_id: 1,
+    patient_mrn: "MRN-1",
+    patient_national_id: null,
+    patient_arabic_name: null,
+    patient_english_name: "MRI Patient",
+    age_years: 44,
+    sex: "F",
+    appointment_date: "2026-07-03",
+    appointment_time: "09:00:00",
+    modality_id: 2,
+    modality_code: "MR",
+    modality_name: "MR",
+    exam_type_id: 3,
+    exam_type_name: "MRI Brain",
+    case_category: null,
+    clinical_notes: null,
+    appointment_status: "scheduled",
+    protocol_status: "NOT_PROTOCOLLED",
+    assignment_id: null,
+    ...overrides,
+  };
+}
 
 describe("Doctor Portal protocoling worklist backend", () => {
   it("mounts Library-backed protocoling endpoints separately from legacy protocol text routes", () => {
@@ -23,12 +51,54 @@ describe("Doctor Portal protocoling worklist backend", () => {
 
     assert.match(repo, /appointments_v2\.bookings/);
     assert.match(repo, /appointment_protocol_assignments/);
-    assert.match(repo, /upper\(m\.code\) in \('CT', 'MRI'\)/);
+    assert.match(repo, /protocoling_modality\.modality_code in \('CT', 'MRI'\)/);
+    assert.match(repo, /upper\(m\.code\) in \('MRI', 'MR'\)/);
     assert.match(repo, /protocol_name/);
     assert.match(repo, /version_number/);
     assert.match(repo, /scanner_name/);
     assert.match(repo, /as accession_number/);
     assert.match(repo, /coalesce\(apa\.status, 'NOT_PROTOCOLLED'\)/);
+  });
+
+  it("normalizes MR modality rows to MRI in the protocoling worklist", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const poolModule = await import("../../db/pool.js");
+    const queryMock = mock.method(poolModule.pool, "query", async () => ({ rows: [protocolingAppointmentRow()] }));
+
+    try {
+      const { listProtocolingAppointments } = await import("./protocoling-repository.js");
+      const rows = await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03" });
+
+      assert.equal(rows[0].modalityCode, "MRI");
+    } finally {
+      queryMock.mock.restore();
+    }
+  });
+
+  it("uses normalized modality filtering for CT, MRI, and non-CT/MRI exclusion", async () => {
+    process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
+    process.env.JWT_SECRET ??= "protocoling-test-secret";
+    const poolModule = await import("../../db/pool.js");
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
+      queries.push({ sql, params: params ?? [] });
+      return { rows: [protocolingAppointmentRow({ modality_code: "MRI" })] };
+    });
+
+    try {
+      const { listProtocolingAppointments } = await import("./protocoling-repository.js");
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", modality: "MRI" });
+      await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03", modality: "CT" });
+
+      const combinedSql = queries.map((query) => query.sql).join("\n");
+      assert.match(combinedSql, /protocoling_modality/i);
+      assert.doesNotMatch(combinedSql, /upper\(m\.code\) in \('CT', 'MRI'\)/i);
+      assert.doesNotMatch(combinedSql, /and upper\(m\.code\) = \$3/i);
+      assert.deepEqual(queries.map((query) => query.params[2]), ["MRI", "CT"]);
+    } finally {
+      queryMock.mock.restore();
+    }
   });
 
   it("includes generated accession number in protocoling search", () => {

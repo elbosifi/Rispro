@@ -123,6 +123,7 @@ const markReportingBoardNotificationReadMock = vi.fn();
 const dismissReportingBoardNotificationMock = vi.fn();
 const markAllReportingBoardNotificationsReadMock = vi.fn();
 const pushToastMock = vi.fn();
+const printProtocolSheetMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -252,6 +253,10 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({
   pushToast: (...args: unknown[]) => pushToastMock(...args),
+}));
+
+vi.mock("@/lib/protocol-printing", () => ({
+  printProtocolSheet: (...args: unknown[]) => printProtocolSheetMock(...args),
 }));
 
 function CorePlaceholder() {
@@ -432,6 +437,7 @@ describe("Doctor Portal shell", () => {
     dismissReportingBoardNotificationMock.mockReset();
     markAllReportingBoardNotificationsReadMock.mockReset();
     pushToastMock.mockReset();
+    printProtocolSheetMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -2129,6 +2135,104 @@ describe("Doctor Portal shell", () => {
     ]));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Assign protocol" })).toBeNull());
     expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: "success", title: "Protocol assigned." }));
+  });
+
+  it("renders MRI protocoling rows and sends MRI modality filter", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([{
+      appointmentId: 79,
+      accessionNumber: "V2-000079",
+      patientId: 8,
+      patientMrn: "MRN-MRI",
+      patientNationalId: null,
+      patientArabicName: null,
+      patientEnglishName: "MRI Protocol Patient",
+      ageYears: 40,
+      sex: "F",
+      appointmentDate: "2027-01-04",
+      appointmentTime: "10:00",
+      modalityId: 2,
+      modalityCode: "MRI",
+      modalityName: "MR",
+      examTypeId: 5,
+      examTypeName: "MRI Brain",
+      caseCategory: "oncology",
+      clinicalNotes: null,
+      appointmentStatus: "scheduled",
+      protocolStatus: "NOT_PROTOCOLLED",
+      assignment: null,
+    }]);
+
+    renderDoctorPortal("/doctor/protocols");
+
+    expect(await screen.findByText("MRI Protocol Patient")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "MRI" } });
+    await waitFor(() => expect(fetchDoctorProtocolingAppointmentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ modality: "MRI" })));
+  });
+
+  it("prints selected protocol preview from the assignment modal", async () => {
+    fetchProtocolLibraryProtocolsMock.mockResolvedValue([{
+      id: 20,
+      name: "CT Brain",
+      modality: "CT",
+      anatomyRegionId: null,
+      anatomyRegionName: null,
+      category: null,
+      indication: null,
+      contrastPolicy: null,
+      activeVersionId: 30,
+      activeVersionNumber: "1.0",
+      activeVersionStatus: "ACTIVE",
+      latestDraftVersionId: null,
+      latestDraftVersionNumber: null,
+      isActive: true,
+      createdAt: "2026-06-29T10:00:00.000Z",
+      updatedAt: "2026-06-29T10:00:00.000Z",
+    }]);
+    fetchDoctorProtocolingAppointmentsMock.mockResolvedValue([{
+      appointmentId: 77,
+      accessionNumber: "V2-000077",
+      patientId: 5,
+      patientMrn: "MRN-5",
+      patientNationalId: "NID-5",
+      patientArabicName: null,
+      patientEnglishName: "Protocol Patient",
+      ageYears: 42,
+      sex: "F",
+      appointmentDate: "2027-01-04",
+      appointmentTime: "09:00",
+      modalityId: 1,
+      modalityCode: "CT",
+      modalityName: "CT",
+      examTypeId: 2,
+      examTypeName: "CT Brain",
+      caseCategory: "oncology",
+      clinicalNotes: "Headache",
+      appointmentStatus: "scheduled",
+      protocolStatus: "NOT_PROTOCOLLED",
+      assignment: null,
+    }]);
+    fetchDoctorProtocolingAppointmentDetailMock.mockResolvedValue({ appointment: (await fetchDoctorProtocolingAppointmentsMock())[0], assignmentDetail: null });
+    fetchProtocolLibraryVersionDetailMock.mockResolvedValue({
+      protocol: { id: 20, name: "CT Brain", modality: "CT", anatomyRegionId: null, anatomyRegionName: null, category: null, indication: null, contrastPolicy: null, activeVersionId: 30, activeVersionNumber: "1.0", activeVersionStatus: "ACTIVE", latestDraftVersionId: null, latestDraftVersionNumber: null, isActive: true, createdAt: "2026-06-29T10:00:00.000Z", updatedAt: "2026-06-29T10:00:00.000Z" },
+      version: { id: 30, protocolId: 20, versionNumber: "1.0", status: "ACTIVE", changeSummary: null, createdBy: null, approvedBy: null, approvedAt: null, retiredAt: null, createdAt: "2026-06-29T10:00:00.000Z", updatedAt: "2026-06-29T10:00:00.000Z" },
+      ctPhases: [{ id: 301, protocolVersionId: 30, orderIndex: 1, ctPhasePresetId: 11, ctPhasePresetName: "Portal venous", customPhaseName: null, timingOverride: "70 seconds", coverageOverride: "Brain", reconstructionOverride: "Soft tissue", instructionsOverride: "Thin slices", isRequired: true, createdAt: "2026-06-29T10:00:00.000Z", updatedAt: "2026-06-29T10:00:00.000Z" }],
+      mriSequences: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+
+    renderDoctorPortal("/doctor/protocols");
+    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    fireEvent.change(await screen.findByLabelText("Protocol"), { target: { value: "20" } });
+    expect(await screen.findByText("Portal venous")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Print protocol" }));
+
+    expect(printProtocolSheetMock).toHaveBeenCalledWith(expect.objectContaining({
+      patientName: "Protocol Patient",
+      protocolName: "CT Brain",
+      versionNumber: "1.0",
+      modality: "CT",
+    }));
   });
 
   it("shows existing protocol assignment status and version", async () => {

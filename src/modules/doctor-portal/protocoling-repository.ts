@@ -23,6 +23,11 @@ function numberOrNull(value: unknown): number | null {
   return value == null ? null : Number(value);
 }
 
+function normalizeProtocolingModality(value: unknown): ProtocolingModality {
+  const code = String(value ?? "").trim().toUpperCase();
+  return code === "MR" ? "MRI" : code as ProtocolingModality;
+}
+
 function mapAssignment(row: RawRecord): ProtocolAssignmentSummary | null {
   if (row.assignment_id == null) return null;
   return {
@@ -56,7 +61,7 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
     appointmentDate: String(row.appointment_date),
     appointmentTime: stringOrNull(row.appointment_time),
     modalityId: Number(row.modality_id),
-    modalityCode: String(row.modality_code).toUpperCase() as ProtocolingModality,
+    modalityCode: normalizeProtocolingModality(row.modality_code),
     modalityName: stringOrNull(row.modality_name),
     examTypeId: numberOrNull(row.exam_type_id),
     examTypeName: stringOrNull(row.exam_type_name),
@@ -100,6 +105,20 @@ function mapMriSequence(row: RawRecord): ProtocolingMriSequenceRow {
   };
 }
 
+const PROTOCOLING_MODALITY_SQL = `
+  case
+    when upper(m.code) = 'CT'
+      or coalesce(m.name_en, '') ~* '(^|[^[:alpha:]])CT([^[:alpha:]]|$)|computed tomography'
+      or coalesce(m.name_ar, '') like '%مقط%'
+      then 'CT'
+    when upper(m.code) in ('MRI', 'MR')
+      or coalesce(m.name_en, '') ~* '(^|[^[:alpha:]])MRI([^[:alpha:]]|$)|magnetic resonance'
+      or coalesce(m.name_ar, '') like '%رنين%'
+      then 'MRI'
+    else null
+  end
+`;
+
 const APPOINTMENT_SELECT = `
   select
     b.id as appointment_id,
@@ -114,7 +133,7 @@ const APPOINTMENT_SELECT = `
     b.booking_date::text as appointment_date,
     b.booking_time::text as appointment_time,
     b.modality_id,
-    upper(m.code) as modality_code,
+    protocoling_modality.modality_code,
     m.name_en as modality_name,
     b.exam_type_id,
     et.name_en as exam_type_name,
@@ -137,6 +156,9 @@ const APPOINTMENT_SELECT = `
   from appointments_v2.bookings b
   join patients p on p.id = b.patient_id
   join modalities m on m.id = b.modality_id
+  cross join lateral (
+    select ${PROTOCOLING_MODALITY_SQL} as modality_code
+  ) protocoling_modality
   left join exam_types et on et.id = b.exam_type_id
   left join lateral (
     select
@@ -169,11 +191,11 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
     "b.booking_date >= $1::date",
     "b.booking_date <= $2::date",
     "b.status not in ('cancelled', 'discontinued', 'voided')",
-    "upper(m.code) in ('CT', 'MRI')",
+    "protocoling_modality.modality_code in ('CT', 'MRI')",
   ];
   if (filters.modality) {
     values.push(filters.modality);
-    where.push(`upper(m.code) = $${values.length}`);
+    where.push(`protocoling_modality.modality_code = $${values.length}`);
   }
   if (filters.protocolStatus === "NOT_PROTOCOLLED") {
     where.push("apa.assignment_id is null");
@@ -205,7 +227,7 @@ async function getProtocolingAppointment(appointmentId: number): Promise<DoctorP
   const result = await pool.query<RawRecord>(
     `${APPOINTMENT_SELECT}
      where b.id = $1
-       and upper(m.code) in ('CT', 'MRI')
+       and protocoling_modality.modality_code in ('CT', 'MRI')
      limit 1`,
     [appointmentId]
   );
