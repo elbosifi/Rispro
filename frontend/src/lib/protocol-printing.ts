@@ -210,11 +210,20 @@ function html(sheet: ProtocolPrintSheet): string {
 }
 
 export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
-  const printWindow = window.open("", "_blank", "noopener,noreferrer,width=980,height=900");
-  if (!printWindow) return;
+  const printWindow = window.open("", "_blank", "width=980,height=900");
+  if (!printWindow) {
+    console.warn("Unable to open protocol print window. Check popup blocker settings.");
+    return;
+  }
   printWindow.document.open();
   printWindow.document.write(html(sheet));
   printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
+  window.setTimeout(() => {
+    try {
+      printWindow.focus();
+      printWindow.print();
+    } catch (error) {
+      console.warn("Unable to print protocol sheet.", error);
+    }
+  }, 150);
 }
