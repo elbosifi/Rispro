@@ -51,6 +51,15 @@ describe("Protocol library schema", () => {
     assert.match(migration, /vendor_sequence_name text not null/i);
     assert.match(migration, /unique \(mri_sequence_preset_id, scanner_id\)/i);
   });
+
+  it("adds MRI sequence stable external keys through an idempotent migration", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/111_mri_sequence_preset_sequence_key.sql`, "utf8");
+
+    assert.match(migration, /add column if not exists sequence_key text/i);
+    assert.match(migration, /unique index if not exists mri_sequence_presets_sequence_key_lower_uidx/i);
+    assert.match(migration, /lower\(sequence_key\)/i);
+    assert.match(migration, /where sequence_key is not null/i);
+  });
 });
 
 describe("Protocol library read repository", () => {
@@ -269,6 +278,22 @@ describe("Protocol library read repository", () => {
     assert.match(routes, /router\.patch\(\s*"\/mri-sequence-presets\/:id"/);
     assert.match(routes, /router\.delete\(\s*"\/protocol-versions\/:versionId\/ct-phases\/:rowId"/);
     assert.match(routes, /router\.delete\(\s*"\/protocol-versions\/:versionId\/mri-sequences\/:rowId"/);
+  });
+
+  it("mounts MRI sequence XLSX import and export endpoints behind protocol library admin access", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-routes.ts`, "utf8");
+
+    assert.match(routes, /"\/mri-sequence-presets\/import-template\.xlsx"/);
+    assert.match(routes, /"\/mri-sequence-presets\/export\.xlsx"/);
+    assert.match(routes, /"\/mri-sequence-presets\/import\/inspect"/);
+    assert.match(routes, /"\/mri-sequence-presets\/import\/preview"/);
+    assert.match(routes, /"\/mri-sequence-presets\/import\/confirm"/);
+    assert.match(routes, /mriSequenceImportTemplateXlsx/);
+    assert.match(routes, /exportMriSequencePresetsXlsx/);
+    assert.match(routes, /inspectMriSequenceImport/);
+    assert.match(routes, /previewMriSequenceImport/);
+    assert.match(routes, /confirmMriSequenceImport/);
+    assert.match(routes, /router\.post\(\s*"\/mri-sequence-presets\/import\/confirm"[^]*requireProtocolLibraryAdminAccess\(req\)/);
   });
 
   it("requires protocol library admin access for create and update routes", () => {

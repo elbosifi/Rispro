@@ -63,6 +63,11 @@ const createProtocolLibraryCtPhasePresetMock = vi.fn();
 const updateProtocolLibraryCtPhasePresetMock = vi.fn();
 const createProtocolLibraryMriSequencePresetMock = vi.fn();
 const updateProtocolLibraryMriSequencePresetMock = vi.fn();
+const downloadMriSequenceImportTemplateMock = vi.fn();
+const exportMriSequencePresetsWorkbookMock = vi.fn();
+const inspectMriSequenceImportMock = vi.fn();
+const previewMriSequenceImportMock = vi.fn();
+const confirmMriSequenceImportMock = vi.fn();
 const fetchTeamWorkloadSummaryMock = vi.fn();
 const runWorkloadCalculationMock = vi.fn();
 const fetchWorkloadCatalogMock = vi.fn();
@@ -106,6 +111,13 @@ const fetchReportingBoardSavedViewByTokenMock = vi.fn();
 const fetchReportingBoardPushConfigMock = vi.fn();
 const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
+const fetchReportingBoardBulkAssignmentJobsMock = vi.fn();
+const createReportingBoardBulkAssignmentJobMock = vi.fn();
+const createReportingBoardBulkAssignmentJobsMock = vi.fn();
+const cancelReportingBoardBulkAssignmentJobMock = vi.fn();
+const runReportingBoardBulkAssignmentJobNowMock = vi.fn();
+const resumeReportingBoardBulkAssignmentJobMock = vi.fn();
+const undoReportingBoardBulkAssignmentJobMock = vi.fn();
 const fetchReportingBoardNotificationsMock = vi.fn();
 const markReportingBoardNotificationReadMock = vi.fn();
 const dismissReportingBoardNotificationMock = vi.fn();
@@ -170,6 +182,11 @@ vi.mock("@/lib/api-hooks", () => ({
   updateProtocolLibraryCtPhasePreset: (...args: unknown[]) => updateProtocolLibraryCtPhasePresetMock(...args),
   createProtocolLibraryMriSequencePreset: (...args: unknown[]) => createProtocolLibraryMriSequencePresetMock(...args),
   updateProtocolLibraryMriSequencePreset: (...args: unknown[]) => updateProtocolLibraryMriSequencePresetMock(...args),
+  downloadMriSequenceImportTemplate: (...args: unknown[]) => downloadMriSequenceImportTemplateMock(...args),
+  exportMriSequencePresetsWorkbook: (...args: unknown[]) => exportMriSequencePresetsWorkbookMock(...args),
+  inspectMriSequenceImport: (...args: unknown[]) => inspectMriSequenceImportMock(...args),
+  previewMriSequenceImport: (...args: unknown[]) => previewMriSequenceImportMock(...args),
+  confirmMriSequenceImport: (...args: unknown[]) => confirmMriSequenceImportMock(...args),
   fetchTeamWorkloadSummary: (...args: unknown[]) => fetchTeamWorkloadSummaryMock(...args),
   runWorkloadCalculation: (...args: unknown[]) => runWorkloadCalculationMock(...args),
   fetchWorkloadCatalog: (...args: unknown[]) => fetchWorkloadCatalogMock(...args),
@@ -213,6 +230,13 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardPushConfig: (...args: unknown[]) => fetchReportingBoardPushConfigMock(...args),
   subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
+  fetchReportingBoardBulkAssignmentJobs: (...args: unknown[]) => fetchReportingBoardBulkAssignmentJobsMock(...args),
+  createReportingBoardBulkAssignmentJob: (...args: unknown[]) => createReportingBoardBulkAssignmentJobMock(...args),
+  createReportingBoardBulkAssignmentJobs: (...args: unknown[]) => createReportingBoardBulkAssignmentJobsMock(...args),
+  cancelReportingBoardBulkAssignmentJob: (...args: unknown[]) => cancelReportingBoardBulkAssignmentJobMock(...args),
+  runReportingBoardBulkAssignmentJobNow: (...args: unknown[]) => runReportingBoardBulkAssignmentJobNowMock(...args),
+  resumeReportingBoardBulkAssignmentJob: (...args: unknown[]) => resumeReportingBoardBulkAssignmentJobMock(...args),
+  undoReportingBoardBulkAssignmentJob: (...args: unknown[]) => undoReportingBoardBulkAssignmentJobMock(...args),
   fetchReportingBoardNotifications: (...args: unknown[]) => fetchReportingBoardNotificationsMock(...args),
   markReportingBoardNotificationRead: (...args: unknown[]) => markReportingBoardNotificationReadMock(...args),
   dismissReportingBoardNotification: (...args: unknown[]) => dismissReportingBoardNotificationMock(...args),
@@ -252,6 +276,9 @@ const normalDoctor: DoctorMe = {
   canFinalizeReports: false,
   canAssignProtocols: true,
   canSupervise: false,
+  isSuperAdmin: false,
+  canAccessDoctorAdmin: false,
+  canManageDoctorProfiles: false,
   allowedModalities: [],
   moduleCapabilities: ["doctor"],
   canAccessCoreWorkspace: true,
@@ -345,6 +372,11 @@ describe("Doctor Portal shell", () => {
     updateProtocolLibraryCtPhasePresetMock.mockReset();
     createProtocolLibraryMriSequencePresetMock.mockReset();
     updateProtocolLibraryMriSequencePresetMock.mockReset();
+    downloadMriSequenceImportTemplateMock.mockReset();
+    exportMriSequencePresetsWorkbookMock.mockReset();
+    inspectMriSequenceImportMock.mockReset();
+    previewMriSequenceImportMock.mockReset();
+    confirmMriSequenceImportMock.mockReset();
     fetchTeamWorkloadSummaryMock.mockReset();
     runWorkloadCalculationMock.mockReset();
     fetchWorkloadCatalogMock.mockReset();
@@ -388,6 +420,13 @@ describe("Doctor Portal shell", () => {
     fetchReportingBoardPushConfigMock.mockReset();
     subscribeReportingBoardSavedViewPushMock.mockReset();
     bulkAssignNextReportingCasesMock.mockReset();
+    fetchReportingBoardBulkAssignmentJobsMock.mockReset();
+    createReportingBoardBulkAssignmentJobMock.mockReset();
+    createReportingBoardBulkAssignmentJobsMock.mockReset();
+    cancelReportingBoardBulkAssignmentJobMock.mockReset();
+    runReportingBoardBulkAssignmentJobNowMock.mockReset();
+    resumeReportingBoardBulkAssignmentJobMock.mockReset();
+    undoReportingBoardBulkAssignmentJobMock.mockReset();
     fetchReportingBoardNotificationsMock.mockReset();
     markReportingBoardNotificationReadMock.mockReset();
     dismissReportingBoardNotificationMock.mockReset();
@@ -550,6 +589,11 @@ describe("Doctor Portal shell", () => {
     updateProtocolLibraryCtPhasePresetMock.mockResolvedValue({});
     createProtocolLibraryMriSequencePresetMock.mockResolvedValue({});
     updateProtocolLibraryMriSequencePresetMock.mockResolvedValue({});
+    downloadMriSequenceImportTemplateMock.mockResolvedValue(undefined);
+    exportMriSequencePresetsWorkbookMock.mockResolvedValue(undefined);
+    inspectMriSequenceImportMock.mockResolvedValue({ format: "xlsx", sheets: [] });
+    previewMriSequenceImportMock.mockResolvedValue({ sequenceRows: [], aliasRows: [], canConfirm: true });
+    confirmMriSequenceImportMock.mockResolvedValue({ createdSequences: 0, updatedSequences: 0, unchangedSequences: 0, createdAliases: 0, updatedAliases: 0, unchangedAliases: 0 });
     fetchTeamWorkloadSummaryMock.mockResolvedValue([]);
     runWorkloadCalculationMock.mockResolvedValue({
       calculatedCount: 0,
@@ -645,6 +689,13 @@ describe("Doctor Portal shell", () => {
     createReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: { priorityCode: "urgent" }, notificationSettings: {}, active: true });
+    fetchReportingBoardBulkAssignmentJobsMock.mockResolvedValue([]);
+    createReportingBoardBulkAssignmentJobMock.mockResolvedValue({});
+    createReportingBoardBulkAssignmentJobsMock.mockResolvedValue([]);
+    cancelReportingBoardBulkAssignmentJobMock.mockResolvedValue({});
+    runReportingBoardBulkAssignmentJobNowMock.mockResolvedValue({});
+    resumeReportingBoardBulkAssignmentJobMock.mockResolvedValue({ job: {}, jobs: [] });
+    undoReportingBoardBulkAssignmentJobMock.mockResolvedValue({ job: {}, result: { unassignedCount: 0, failedRows: [] } });
     fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
     subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [1, 2], skipped: [] });
@@ -1529,7 +1580,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/reporting-board");
 
     expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Bulk assign next cases/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Assign next cases/i })).toBeTruthy();
     expect(screen.getByText("Saved views")).toBeTruthy();
   });
 
@@ -1594,8 +1645,6 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     expect(await screen.findByRole("heading", { name: "Protocoling Worklist" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Protocol Library" })).toBeNull();
-    expect(screen.getByText("No appointments need protocol assignment.")).toBeTruthy();
     await waitFor(() => expect(fetchDoctorProtocolingAppointmentsMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/reschedule/i)).toBeNull();
   });
@@ -1737,6 +1786,101 @@ describe("Doctor Portal shell", () => {
       defaultBValues: "not applicable",
       scannerAliases: [{ scannerId: 10, vendorSequenceName: "T2 PROPELLER FS", notes: null }],
     }));
+  });
+
+  it("protocol library admin sees MRI sequence XLSX import and export controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+
+    expect(screen.getByRole("button", { name: "Download template" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Export current XLSX" })).toBeTruthy();
+    expect(screen.getByText("Import XLSX")).toBeTruthy();
+  });
+
+  it("does not show MRI sequence import/export controls without protocol-library write access", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    expect(await screen.findByRole("heading", { name: "Protocoling Worklist" })).toBeTruthy();
+    expect(screen.queryByText("Download template")).toBeNull();
+    expect(screen.queryByText("Export current XLSX")).toBeNull();
+    expect(screen.queryByText("Import XLSX")).toBeNull();
+  });
+
+  it("renders MRI sequence XLSX inspect preview confirm flow and blocks invalid confirm", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
+    inspectMriSequenceImportMock.mockResolvedValue({
+      format: "xlsx",
+      sheets: [
+        { sheetName: "MRI Sequences", columns: ["sequence_key"], requiredColumns: ["sequence_key", "plane"], missingRequiredColumns: ["plane"], rowCount: 1 },
+        { sheetName: "Scanner Aliases", columns: ["sequence_key", "scanner_display_name", "vendor_sequence_name"], requiredColumns: ["sequence_key", "scanner_display_name", "vendor_sequence_name"], missingRequiredColumns: [], rowCount: 1 },
+      ],
+    });
+    previewMriSequenceImportMock.mockResolvedValueOnce({
+      canConfirm: false,
+      sequenceRows: [{ rowNumber: 2, sequenceKey: "bad", sequenceName: "Bad", action: "invalid", errors: ["plane is invalid"] }],
+      aliasRows: [],
+    });
+    const readAsDataURL = vi.fn(function readAsDataURL(this: FileReader) {
+      setTimeout(() => {
+        Object.defineProperty(this, "result", { value: "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,QUJD", configurable: true });
+        this.onload?.({} as ProgressEvent<FileReader>);
+      }, 0);
+    });
+    vi.stubGlobal("FileReader", class {
+      result: string | ArrayBuffer | null = null;
+      onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL = readAsDataURL;
+    });
+
+    renderDoctorPortal("/doctor/protocols");
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.change(screen.getByLabelText("Import XLSX"), { target: { files: [new File(["abc"], "mri.xlsx")] } });
+
+    expect(await screen.findByText("Workbook inspect")).toBeTruthy();
+    expect(screen.getByText(/MRI Sequences: 1 rows/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
+    expect(await screen.findByText(/2: bad - invalid/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Confirm import" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("refreshes MRI sequence presets after successful XLSX confirm", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
+    inspectMriSequenceImportMock.mockResolvedValue({ format: "xlsx", sheets: [{ sheetName: "MRI Sequences", columns: [], requiredColumns: [], missingRequiredColumns: [], rowCount: 1 }] });
+    previewMriSequenceImportMock.mockResolvedValue({
+      canConfirm: true,
+      sequenceRows: [{ rowNumber: 2, sequenceKey: "dwi", sequenceName: "DWI", action: "create_sequence", errors: [] }],
+      aliasRows: [{ rowNumber: 2, sequenceKey: "dwi", scannerDisplayName: "MRI A", vendorSequenceName: "ep2d_diff", action: "create_alias", errors: [] }],
+    });
+    confirmMriSequenceImportMock.mockResolvedValue({ createdSequences: 1, updatedSequences: 0, unchangedSequences: 0, createdAliases: 1, updatedAliases: 0, unchangedAliases: 0 });
+    vi.stubGlobal("FileReader", class {
+      result: string | ArrayBuffer | null = null;
+      onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL() {
+        setTimeout(() => {
+          Object.defineProperty(this, "result", { value: "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,QUJD", configurable: true });
+          this.onload?.({} as ProgressEvent<FileReader>);
+        }, 0);
+      }
+    });
+
+    renderDoctorPortal("/doctor/protocols");
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.change(screen.getByLabelText("Import XLSX"), { target: { files: [new File(["abc"], "mri.xlsx")] } });
+    await screen.findByText("Workbook inspect");
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
+    await screen.findByText(/2: dwi - create_sequence/);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+
+    expect(await screen.findByText(/Import complete: 1 sequences created/)).toBeTruthy();
+    await waitFor(() => expect(fetchProtocolLibraryMriSequencePresetsMock).toHaveBeenCalledTimes(2));
   });
 
   it("opens Add Protocol and creates a CT draft builder", async () => {

@@ -112,6 +112,7 @@ const IMPORT_WORKBOOK_TIMEOUT_MS = 180_000;
 const IMPORT_PREVIEW_TIMEOUT_MS = 180_000;
 const IMPORT_CONFIRM_TIMEOUT_MS = 180_000;
 const CATALOG_IMPORT_TIMEOUT_MS = 180_000;
+const MRI_SEQUENCE_IMPORT_TIMEOUT_MS = 180_000;
 
 export type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
 
@@ -1320,6 +1321,73 @@ export async function fetchProtocolLibraryCtPhasePresets(): Promise<CtPhasePrese
 export async function fetchProtocolLibraryMriSequencePresets(): Promise<MriSequencePreset[]> {
   const raw = await api<{ mriSequencePresets: MriSequencePreset[] }>("/doctor/protocol-library/mri-sequence-presets");
   return raw.mriSequencePresets;
+}
+
+export type MriSequenceImportInspect = {
+  format: "xlsx";
+  sheets: Array<{ sheetName: string; columns: string[]; requiredColumns: string[]; missingRequiredColumns: string[]; rowCount: number }>;
+};
+
+export type MriSequenceImportPreview = {
+  sequenceRows: Array<{ rowNumber: number; sequenceKey: string; sequenceName: string; action: "create_sequence" | "update_sequence" | "unchanged" | "invalid"; errors: string[] }>;
+  aliasRows: Array<{ rowNumber: number; sequenceKey: string; scannerDisplayName: string; vendorSequenceName: string; action: "create_alias" | "update_alias" | "unchanged" | "invalid"; errors: string[] }>;
+  canConfirm: boolean;
+};
+
+export type MriSequenceImportSummary = {
+  createdSequences: number;
+  updatedSequences: number;
+  unchangedSequences: number;
+  createdAliases: number;
+  updatedAliases: number;
+  unchangedAliases: number;
+};
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadProtocolLibraryWorkbook(path: string, fallbackFilename: string) {
+  const response = await fetch(`/api/doctor/protocol-library/${path}`, { credentials: "include" });
+  if (!response.ok) throw new Error("Workbook download failed");
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="?([^"]+)"?/i)?.[1] || fallbackFilename;
+  downloadBlob(await response.blob(), filename);
+}
+
+export function downloadMriSequenceImportTemplate() {
+  return downloadProtocolLibraryWorkbook("mri-sequence-presets/import-template.xlsx", "rispro-mri-sequence-import-template.xlsx");
+}
+
+export function exportMriSequencePresetsWorkbook() {
+  return downloadProtocolLibraryWorkbook("mri-sequence-presets/export.xlsx", "rispro-mri-sequences.xlsx");
+}
+
+export async function inspectMriSequenceImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<MriSequenceImportInspect> {
+  return api<MriSequenceImportInspect>("/doctor/protocol-library/mri-sequence-presets/import/inspect", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
+}
+
+export async function previewMriSequenceImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<MriSequenceImportPreview> {
+  return api<MriSequenceImportPreview>("/doctor/protocol-library/mri-sequence-presets/import/preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
+}
+
+export async function confirmMriSequenceImport(payload: { fileContentBase64: string; fileName?: string | null }): Promise<MriSequenceImportSummary> {
+  const raw = await api<{ summary: MriSequenceImportSummary }>("/doctor/protocol-library/mri-sequence-presets/import/confirm", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, MRI_SEQUENCE_IMPORT_TIMEOUT_MS);
+  return raw.summary;
 }
 
 export async function fetchProtocolLibraryProtocols(): Promise<ProtocolLibraryProtocol[]> {

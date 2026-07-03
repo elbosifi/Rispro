@@ -14,6 +14,9 @@ import {
   createProtocolLibraryScanner,
   deleteProtocolLibraryCtPhaseRow,
   deleteProtocolLibraryMriSequenceRow,
+  confirmMriSequenceImport,
+  downloadMriSequenceImportTemplate,
+  exportMriSequencePresetsWorkbook,
   fetchDoctorProtocolingAppointmentDetail,
   fetchDoctorProtocolingAppointments,
   fetchProtocolLibraryAnatomyRegions,
@@ -22,6 +25,8 @@ import {
   fetchProtocolLibraryVersionDetail,
   fetchProtocolLibraryProtocols,
   fetchProtocolLibraryScanners,
+  inspectMriSequenceImport,
+  previewMriSequenceImport,
   reorderProtocolLibraryCtPhaseRows,
   reorderProtocolLibraryMriSequenceRows,
   updateProtocolLibraryCtPhaseRow,
@@ -36,6 +41,9 @@ import {
   type CtPhasePresetPayload,
   type ImagingScannerPayload,
   type MriSequencePresetPayload,
+  type MriSequenceImportInspect,
+  type MriSequenceImportPreview,
+  type MriSequenceImportSummary,
   type ProtocolLibraryCtPhaseRowPayload,
   type ProtocolLibraryMriSequenceRowPayload,
   type ProtocolLibraryProtocolPayload,
@@ -265,6 +273,11 @@ function ProtocolLibraryPanel() {
   const [editingCtRowId, setEditingCtRowId] = useState<number | null>(null);
   const [mriRowDraft, setMriRowDraft] = useState<ProtocolLibraryMriSequenceRowPayload | null>(null);
   const [editingMriRowId, setEditingMriRowId] = useState<number | null>(null);
+  const [mriImportFileBase64, setMriImportFileBase64] = useState("");
+  const [mriImportFileName, setMriImportFileName] = useState("");
+  const [mriImportInspect, setMriImportInspect] = useState<MriSequenceImportInspect | null>(null);
+  const [mriImportPreview, setMriImportPreview] = useState<MriSequenceImportPreview | null>(null);
+  const [mriImportSummary, setMriImportSummary] = useState<MriSequenceImportSummary | null>(null);
 
   const protocolsQuery = useQuery({ queryKey: ["doctor", "protocol-library", "protocols"], queryFn: fetchProtocolLibraryProtocols, enabled: section === "protocols" });
   const anatomyQuery = useQuery({ queryKey: ["doctor", "protocol-library", "anatomy-regions"], queryFn: fetchProtocolLibraryAnatomyRegions, enabled: section === "anatomy" || section === "protocols" });
@@ -304,6 +317,34 @@ function ProtocolLibraryPanel() {
   const updateCtPhaseMutation = useMutation({ mutationFn: ({ id, payload }: { id: number; payload: Partial<CtPhasePresetPayload> }) => updateProtocolLibraryCtPhasePreset(id, payload), onError: onMutationError, onSuccess: async () => { setCtPhaseDraft(null); setEditingCtPhaseId(null); await onMutationSuccess("ct-phase-presets", "CT phase saved."); } });
   const createMriSequenceMutation = useMutation({ mutationFn: createProtocolLibraryMriSequencePreset, onError: onMutationError, onSuccess: async () => { setMriSequenceDraft(null); setEditingMriSequenceId(null); await onMutationSuccess("mri-sequence-presets", "MRI sequence saved."); } });
   const updateMriSequenceMutation = useMutation({ mutationFn: ({ id, payload }: { id: number; payload: Partial<MriSequencePresetPayload> }) => updateProtocolLibraryMriSequencePreset(id, payload), onError: onMutationError, onSuccess: async () => { setMriSequenceDraft(null); setEditingMriSequenceId(null); await onMutationSuccess("mri-sequence-presets", "MRI sequence saved."); } });
+  const downloadMriTemplateMutation = useMutation({ mutationFn: downloadMriSequenceImportTemplate, onError: onMutationError });
+  const exportMriSequencesMutation = useMutation({ mutationFn: exportMriSequencePresetsWorkbook, onError: onMutationError });
+  const inspectMriImportMutation = useMutation({ mutationFn: inspectMriSequenceImport, onError: onMutationError, onSuccess: (inspect) => { setMriImportInspect(inspect); setMriImportPreview(null); setMriImportSummary(null); } });
+  const previewMriImportMutation = useMutation({ mutationFn: previewMriSequenceImport, onError: onMutationError, onSuccess: (preview) => { setMriImportPreview(preview); setMriImportSummary(null); } });
+  const confirmMriImportMutation = useMutation({
+    mutationFn: confirmMriSequenceImport,
+    onError: onMutationError,
+    onSuccess: async (summary) => {
+      setMriImportSummary(summary);
+      await onMutationSuccess("mri-sequence-presets", "MRI sequence import applied.");
+    },
+  });
+
+  const readMriImportFile = async (file: File) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Failed to read MRI sequence import file."));
+      reader.readAsDataURL(file);
+    });
+    const base64 = dataUrl.split(",")[1] ?? "";
+    setMriImportFileBase64(base64);
+    setMriImportFileName(file.name);
+    setMriImportInspect(null);
+    setMriImportPreview(null);
+    setMriImportSummary(null);
+    inspectMriImportMutation.mutate({ fileContentBase64: base64, fileName: file.name });
+  };
   const refreshBuilder = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] });
     if (selectedVersionId) await queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocol-version", selectedVersionId] });
@@ -441,10 +482,50 @@ function ProtocolLibraryPanel() {
         </SettingsTable>
       )}
       {section === "mriSequences" && (
-        <SettingsTable emptyText="No MRI sequence presets yet" headers={["Name", "Clinical label", "Scanner-specific names", "Time", "Status", "Actions"]}>
-          {mriSequenceDraft && <MriSequenceForm draft={mriSequenceDraft} scanners={scanners} setDraft={setMriSequenceDraft} saving={createMriSequenceMutation.isPending || updateMriSequenceMutation.isPending} onCancel={() => { setMriSequenceDraft(null); setEditingMriSequenceId(null); }} onSave={() => editingMriSequenceId ? updateMriSequenceMutation.mutate({ id: editingMriSequenceId, payload: mriSequenceDraft }) : createMriSequenceMutation.mutate(mriSequenceDraft)} />}
-          {mriSequences.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{mriSequencePresetLabel(item)}</Cell><Cell>{item.scannerAliases?.length ? `${item.scannerAliases.length} scanner name${item.scannerAliases.length === 1 ? "" : "s"}` : "Generic"}</Cell><Cell>{item.estimatedScanTimeMinutes ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startMriSequenceEdit(item)} onToggle={() => updateMriSequenceMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
-        </SettingsTable>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => downloadMriTemplateMutation.mutate()} disabled={downloadMriTemplateMutation.isPending}>Download template</button>
+            <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => exportMriSequencesMutation.mutate()} disabled={exportMriSequencesMutation.isPending}>Export current XLSX</button>
+            <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+              Import XLSX
+              <input className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readMriImportFile(file); event.currentTarget.value = ""; }} />
+            </label>
+            {mriImportFileName && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{mriImportFileName}</span>}
+          </div>
+          {(mriImportInspect || mriImportPreview || mriImportSummary) && (
+            <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+              {mriImportInspect && (
+                <div className="space-y-1">
+                  <p className="font-semibold">Workbook inspect</p>
+                  {mriImportInspect.sheets.map((sheet) => (
+                    <p key={sheet.sheetName} className={sheet.missingRequiredColumns.length ? "text-red-700" : ""}>
+                      {sheet.sheetName}: {sheet.rowCount} rows, {sheet.columns.length} columns{sheet.missingRequiredColumns.length ? `, missing ${sheet.missingRequiredColumns.join(", ")}` : ""}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {mriImportFileBase64 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={previewMriImportMutation.isPending} onClick={() => previewMriImportMutation.mutate({ fileContentBase64: mriImportFileBase64, fileName: mriImportFileName })}>Preview import</button>
+                  <button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={!mriImportPreview?.canConfirm || confirmMriImportMutation.isPending} onClick={() => confirmMriImportMutation.mutate({ fileContentBase64: mriImportFileBase64, fileName: mriImportFileName })}>Confirm import</button>
+                </div>
+              )}
+              {mriImportPreview && (
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <ImportPreviewList title="MRI Sequences" rows={mriImportPreview.sequenceRows.map((row) => ({ key: `${row.rowNumber}-${row.sequenceKey}`, label: `${row.rowNumber}: ${row.sequenceKey || "missing key"} - ${row.action}`, errors: row.errors }))} />
+                  <ImportPreviewList title="Scanner Aliases" rows={mriImportPreview.aliasRows.map((row) => ({ key: `${row.rowNumber}-${row.sequenceKey}-${row.scannerDisplayName}`, label: `${row.rowNumber}: ${row.sequenceKey || "missing key"} / ${row.scannerDisplayName || "missing scanner"} - ${row.action}`, errors: row.errors }))} />
+                </div>
+              )}
+              {mriImportSummary && (
+                <p className="mt-2 text-emerald-700">Import complete: {mriImportSummary.createdSequences} sequences created, {mriImportSummary.updatedSequences} updated, {mriImportSummary.createdAliases} aliases created, {mriImportSummary.updatedAliases} updated.</p>
+              )}
+            </div>
+          )}
+          <SettingsTable emptyText="No MRI sequence presets yet" headers={["Name", "Clinical label", "Scanner-specific names", "Time", "Status", "Actions"]}>
+            {mriSequenceDraft && <MriSequenceForm draft={mriSequenceDraft} scanners={scanners} setDraft={setMriSequenceDraft} saving={createMriSequenceMutation.isPending || updateMriSequenceMutation.isPending} onCancel={() => { setMriSequenceDraft(null); setEditingMriSequenceId(null); }} onSave={() => editingMriSequenceId ? updateMriSequenceMutation.mutate({ id: editingMriSequenceId, payload: mriSequenceDraft }) : createMriSequenceMutation.mutate(mriSequenceDraft)} />}
+            {mriSequences.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{mriSequencePresetLabel(item)}</Cell><Cell>{item.scannerAliases?.length ? `${item.scannerAliases.length} scanner name${item.scannerAliases.length === 1 ? "" : "s"}` : "Generic"}</Cell><Cell>{item.estimatedScanTimeMinutes ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startMriSequenceEdit(item)} onToggle={() => updateMriSequenceMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
+          </SettingsTable>
+        </div>
       )}
     </section>
   );
@@ -476,6 +557,22 @@ function SettingsTable({ headers, emptyText, children }: { headers: string[]; em
         <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>{headers.map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
         <tbody>{hasRows ? childArray : <tr><td className="p-6 text-sm" colSpan={headers.length} style={{ color: "var(--text-muted)" }}>{emptyText}</td></tr>}</tbody>
       </table>
+    </div>
+  );
+}
+
+function ImportPreviewList({ title, rows }: { title: string; rows: Array<{ key: string; label: string; errors: string[] }> }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{title}</p>
+      <div className="mt-1 max-h-40 overflow-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        {rows.length ? rows.slice(0, 20).map((row) => (
+          <div key={row.key} className="border-b px-2 py-1 last:border-b-0" style={{ borderColor: "var(--border)" }}>
+            <p>{row.label}</p>
+            {row.errors.map((error) => <p key={error} className="text-xs text-red-700">{error}</p>)}
+          </div>
+        )) : <p className="px-2 py-1" style={{ color: "var(--text-muted)" }}>No rows</p>}
+      </div>
     </div>
   );
 }

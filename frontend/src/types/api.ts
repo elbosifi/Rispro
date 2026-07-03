@@ -1035,6 +1035,7 @@ export interface CtPhasePreset {
 
 export interface MriSequencePreset {
   id: number;
+  sequenceKey: string | null;
   scannerId: number | null;
   scannerName: string | null;
   vendor: string | null;

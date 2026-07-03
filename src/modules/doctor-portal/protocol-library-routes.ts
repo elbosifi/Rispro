@@ -34,6 +34,13 @@ import {
   updateProtocolVersion,
   updateProtocolAnatomyRegion,
 } from "./protocol-library-repository.js";
+import {
+  confirmMriSequenceImport,
+  exportMriSequencePresetsXlsx,
+  inspectMriSequenceImport,
+  mriSequenceImportTemplateXlsx,
+  previewMriSequenceImport,
+} from "./protocol-library-mri-sequence-import-export-service.js";
 
 const router = Router();
 
@@ -396,6 +403,52 @@ router.patch(
       isActive: optionalBoolean(body.isActive ?? body.is_active, "isActive"),
     });
     res.json({ ctPhasePreset: requireFound(ctPhasePreset, "CT phase preset not found.") });
+  })
+);
+
+router.get(
+  "/mri-sequence-presets/import-template.xlsx",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    const payload = await mriSequenceImportTemplateXlsx();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+    res.send(payload.buffer);
+  })
+);
+
+router.get(
+  "/mri-sequence-presets/export.xlsx",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    const payload = await exportMriSequencePresetsXlsx();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+    res.send(payload.buffer);
+  })
+);
+
+router.post(
+  "/mri-sequence-presets/import/inspect",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    res.json(await inspectMriSequenceImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }));
+  })
+);
+
+router.post(
+  "/mri-sequence-presets/import/preview",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    res.json(await previewMriSequenceImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }));
+  })
+);
+
+router.post(
+  "/mri-sequence-presets/import/confirm",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolLibraryAdminAccess(req);
+    res.json({ summary: await confirmMriSequenceImport(asUnknownRecord(req.body) as { fileContentBase64: string; fileName?: string | null }) });
   })
 );
 

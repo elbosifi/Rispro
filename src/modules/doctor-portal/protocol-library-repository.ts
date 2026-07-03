@@ -45,6 +45,7 @@ export interface CtPhasePresetRow {
 
 export interface MriSequencePresetRow {
   id: number;
+  sequenceKey: string | null;
   scannerId: number | null;
   scannerName: string | null;
   vendor: string | null;
@@ -330,6 +331,7 @@ function mapCtPhasePreset(row: RawRecord): CtPhasePresetRow {
 function mapMriSequencePreset(row: RawRecord): MriSequencePresetRow {
   return {
     id: Number(row.id),
+    sequenceKey: stringOrNull(row.sequence_key),
     scannerId: numberOrNull(row.scanner_id),
     scannerName: stringOrNull(row.scanner_name),
     vendor: stringOrNull(row.vendor),
@@ -485,7 +487,7 @@ export async function listCtPhasePresets(): Promise<CtPhasePresetRow[]> {
 
 export async function listMriSequencePresets(): Promise<MriSequencePresetRow[]> {
   const result = await pool.query(`
-    select msp.id, msp.scanner_id, s.name as scanner_name, msp.vendor, msp.name, msp.vendor_sequence_name,
+    select msp.id, msp.sequence_key, msp.scanner_id, s.name as scanner_name, msp.vendor, msp.name, msp.vendor_sequence_name,
            msp.generic_family, msp.weighting, msp.default_plane, msp.fat_suppression, msp.acquisition_type,
            msp.contrast_relation, msp.default_coverage,
            msp.default_b_values, msp.default_dynamic_timing, msp.estimated_scan_time_minutes, msp.notes,
