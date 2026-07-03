@@ -1340,7 +1340,9 @@ export async function fetchProtocolLibraryVersionDetail(versionId: number): Prom
 export type ProtocolAnatomyRegionPayload = Pick<ProtocolAnatomyRegion, "name" | "bodySystem" | "modalityScope" | "defaultCoverageNote" | "isActive">;
 export type ImagingScannerPayload = Pick<ImagingScanner, "name" | "modality" | "vendor" | "model" | "fieldStrength" | "ctSliceDetectorSpecification" | "location" | "notes" | "isActive">;
 export type CtPhasePresetPayload = Pick<CtPhasePreset, "name" | "contrastStatus" | "timingType" | "delaySeconds" | "bolusTrackingSite" | "triggerHu" | "defaultCoverage" | "reconstructionNotes" | "instructions" | "isActive">;
-export type MriSequencePresetPayload = Pick<MriSequencePreset, "scannerId" | "vendor" | "name" | "vendorSequenceName" | "genericFamily" | "weighting" | "defaultPlane" | "contrastRelation" | "defaultCoverage" | "defaultBValues" | "defaultDynamicTiming" | "estimatedScanTimeMinutes" | "notes" | "isActive">;
+export type MriSequencePresetPayload = Pick<MriSequencePreset, "scannerId" | "vendor" | "name" | "vendorSequenceName" | "genericFamily" | "weighting" | "defaultPlane" | "fatSuppression" | "acquisitionType" | "contrastRelation" | "defaultCoverage" | "defaultBValues" | "defaultDynamicTiming" | "estimatedScanTimeMinutes" | "notes" | "isActive"> & {
+  scannerAliases?: Array<Pick<NonNullable<MriSequencePreset["scannerAliases"]>[number], "scannerId" | "vendorSequenceName" | "notes">>;
+};
 export type ProtocolLibraryProtocolPayload = Pick<ProtocolLibraryProtocol, "name" | "modality" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy" | "oralContrastPolicy" | "bowelPreparation" | "preparationNotes"> & { changeSummary?: string | null };
 export type ProtocolLibraryProtocolPatch = Partial<Pick<ProtocolLibraryProtocol, "name" | "anatomyRegionId" | "category" | "indication" | "contrastPolicy" | "oralContrastPolicy" | "bowelPreparation" | "preparationNotes" | "isActive">>;
 export type ProtocolLibraryCtPhaseRowPayload = Pick<ProtocolLibraryCtPhaseRow, "ctPhasePresetId" | "customPhaseName" | "timingOverride" | "coverageOverride" | "reconstructionOverride" | "instructionsOverride" | "isRequired">;

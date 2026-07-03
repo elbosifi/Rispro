@@ -113,6 +113,11 @@ function optionalText(value: unknown): string | null {
 
 const PROTOCOL_CATEGORIES = ["General", "Oncology", "Non-oncology"] as const;
 const IV_CONTRAST_POLICIES = ["Non-contrast", "With IV contrast", "Without and with IV contrast", "Dynamic contrast", "Conditional / radiologist decision"] as const;
+const MRI_SEQUENCE_PLANES = ["Axial", "Sagittal", "Coronal", "Oblique axial", "Oblique coronal", "3D / isotropic", "Other"] as const;
+const MRI_SEQUENCE_FAMILIES = ["T1", "T2", "PD", "FLAIR", "DWI / ADC", "SWI / T2*", "Perfusion", "Dynamic contrast", "MRCP", "MRA / TOF", "Localizer", "Other"] as const;
+const MRI_FAT_SUPPRESSION = ["None", "Fat saturated", "Dixon", "STIR", "SPAIR / SPIR", "Other"] as const;
+const MRI_ACQUISITION_TYPES = ["2D", "3D", "Not specified"] as const;
+const MRI_CONTRAST_RELATIONS = ["Non-contrast", "Pre-contrast", "Post-contrast", "Dynamic", "Optional / depends on protocol"] as const;
 
 function oneOf<T extends string>(value: unknown, field: string, allowed: readonly T[]): T {
   const parsed = String(value ?? "");
@@ -173,6 +178,31 @@ function protocolPatch(body: Record<string, unknown>) {
     preparationNotes: maybeEither(body, "preparationNotes", "preparation_notes", optionalText),
     isActive: optionalBoolean(body.isActive ?? body.is_active, "isActive"),
   };
+}
+
+function optionalDropdown<T extends string>(value: unknown, field: string, allowed: readonly T[]): T | null {
+  if (value === null || value === undefined || value === "") return null;
+  return oneOf(value, field, allowed);
+}
+
+function mriSequenceAliases(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null) return [];
+  if (!Array.isArray(value)) throw new HttpError(400, "scannerAliases must be an array.");
+  return value.map((item, index) => {
+    const alias = asUnknownRecord(item);
+    return {
+      scannerId: positiveInteger(alias.scannerId ?? alias.scanner_id, `scannerAliases[${index}].scannerId`),
+      vendorSequenceName: requiredText(alias.vendorSequenceName ?? alias.vendor_sequence_name, `scannerAliases[${index}].vendorSequenceName`),
+      notes: optionalText(alias.notes),
+    };
+  });
+}
+
+function maybeMriSequenceAliases(body: Record<string, unknown>) {
+  if ("scannerAliases" in body) return mriSequenceAliases(body.scannerAliases);
+  if ("scanner_aliases" in body) return mriSequenceAliases(body.scanner_aliases);
+  return undefined;
 }
 
 function ctPhaseRowInput(body: Record<string, unknown>) {
@@ -388,14 +418,17 @@ router.post(
       name: requiredText(body.name, "name"),
       vendorSequenceName: optionalText(body.vendorSequenceName ?? body.vendor_sequence_name),
       genericFamily: optionalText(body.genericFamily ?? body.generic_family),
-      weighting: optionalText(body.weighting),
-      defaultPlane: optionalText(body.defaultPlane ?? body.default_plane),
-      contrastRelation: optionalText(body.contrastRelation ?? body.contrast_relation),
+      weighting: optionalDropdown(body.weighting, "weighting", MRI_SEQUENCE_FAMILIES),
+      defaultPlane: optionalDropdown(body.defaultPlane ?? body.default_plane, "defaultPlane", MRI_SEQUENCE_PLANES),
+      fatSuppression: optionalDropdown(body.fatSuppression ?? body.fat_suppression, "fatSuppression", MRI_FAT_SUPPRESSION),
+      acquisitionType: optionalDropdown(body.acquisitionType ?? body.acquisition_type, "acquisitionType", MRI_ACQUISITION_TYPES),
+      contrastRelation: optionalDropdown(body.contrastRelation ?? body.contrast_relation, "contrastRelation", MRI_CONTRAST_RELATIONS),
       defaultCoverage: optionalText(body.defaultCoverage ?? body.default_coverage),
       defaultBValues: optionalText(body.defaultBValues ?? body.default_b_values),
       defaultDynamicTiming: optionalText(body.defaultDynamicTiming ?? body.default_dynamic_timing),
       estimatedScanTimeMinutes: optionalPositiveNumber(body.estimatedScanTimeMinutes ?? body.estimated_scan_time_minutes, "estimatedScanTimeMinutes"),
       notes: optionalText(body.notes),
+      scannerAliases: maybeMriSequenceAliases(body),
       isActive: requiredBoolean(body.isActive ?? body.is_active, true),
     });
     res.status(201).json({ mriSequencePreset });
@@ -413,14 +446,17 @@ router.patch(
       name: maybe(body, "name", (value) => requiredText(value, "name")),
       vendorSequenceName: maybeEither(body, "vendorSequenceName", "vendor_sequence_name", optionalText),
       genericFamily: maybeEither(body, "genericFamily", "generic_family", optionalText),
-      weighting: maybe(body, "weighting", optionalText),
-      defaultPlane: maybeEither(body, "defaultPlane", "default_plane", optionalText),
-      contrastRelation: maybeEither(body, "contrastRelation", "contrast_relation", optionalText),
+      weighting: maybe(body, "weighting", (value) => optionalDropdown(value, "weighting", MRI_SEQUENCE_FAMILIES)),
+      defaultPlane: maybeEither(body, "defaultPlane", "default_plane", (value) => optionalDropdown(value, "defaultPlane", MRI_SEQUENCE_PLANES)),
+      fatSuppression: maybeEither(body, "fatSuppression", "fat_suppression", (value) => optionalDropdown(value, "fatSuppression", MRI_FAT_SUPPRESSION)),
+      acquisitionType: maybeEither(body, "acquisitionType", "acquisition_type", (value) => optionalDropdown(value, "acquisitionType", MRI_ACQUISITION_TYPES)),
+      contrastRelation: maybeEither(body, "contrastRelation", "contrast_relation", (value) => optionalDropdown(value, "contrastRelation", MRI_CONTRAST_RELATIONS)),
       defaultCoverage: maybeEither(body, "defaultCoverage", "default_coverage", optionalText),
       defaultBValues: maybeEither(body, "defaultBValues", "default_b_values", optionalText),
       defaultDynamicTiming: maybeEither(body, "defaultDynamicTiming", "default_dynamic_timing", optionalText),
       estimatedScanTimeMinutes: maybeEither(body, "estimatedScanTimeMinutes", "estimated_scan_time_minutes", (value) => optionalPositiveNumber(value, "estimatedScanTimeMinutes")),
       notes: maybe(body, "notes", optionalText),
+      scannerAliases: maybeMriSequenceAliases(body),
       isActive: optionalBoolean(body.isActive ?? body.is_active, "isActive"),
     });
     res.json({ mriSequencePreset: requireFound(mriSequencePreset, "MRI sequence preset not found.") });

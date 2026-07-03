@@ -1699,6 +1699,46 @@ describe("Doctor Portal shell", () => {
     }));
   });
 
+  it("creates a generic MRI sequence preset with dropdown fields and scanner-specific alias", async () => {
+    fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
+    fetchProtocolLibraryScannersMock.mockResolvedValue([
+      { id: 10, name: "GE Signa Hero", modality: "MRI", vendor: "GE", model: "Signa Hero", fieldStrength: "3T", ctSliceDetectorSpecification: null, location: null, isActive: true, notes: null, createdAt: "2026-06-29T10:00:00.000Z", updatedAt: "2026-06-29T10:00:00.000Z" },
+    ]);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Protocol Library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "MRI Sequence Presets" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add MRI sequence" }));
+
+    expect(screen.queryByLabelText("Scanner")).toBeNull();
+    expect(screen.queryByLabelText("b-values")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Sequence name"), { target: { value: "Axial T2 fat sat" } });
+    fireEvent.change(screen.getByLabelText("Plane"), { target: { value: "Axial" } });
+    fireEvent.change(screen.getByLabelText("Weighting / family"), { target: { value: "T2" } });
+    fireEvent.change(screen.getByLabelText("Fat suppression"), { target: { value: "Fat saturated" } });
+    fireEvent.change(screen.getByLabelText("Acquisition type"), { target: { value: "2D" } });
+    fireEvent.change(screen.getByLabelText("Contrast relation"), { target: { value: "Non-contrast" } });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced details" }));
+    fireEvent.change(screen.getByLabelText("b-values"), { target: { value: "not applicable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scanner-specific names" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add scanner name" }));
+    fireEvent.change(screen.getByLabelText("Vendor sequence name 1"), { target: { value: "T2 PROPELLER FS" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save MRI sequence" }));
+
+    await waitFor(() => expect(createProtocolLibraryMriSequencePresetMock.mock.calls[0]?.[0]).toMatchObject({
+      scannerId: null,
+      name: "Axial T2 fat sat",
+      defaultPlane: "Axial",
+      weighting: "T2",
+      genericFamily: "T2",
+      fatSuppression: "Fat saturated",
+      acquisitionType: "2D",
+      contrastRelation: "Non-contrast",
+      defaultBValues: "not applicable",
+      scannerAliases: [{ scannerId: 10, vendorSequenceName: "T2 PROPELLER FS", notes: null }],
+    }));
+  });
+
   it("opens Add Protocol and creates a CT draft builder", async () => {
     fetchDoctorMeMock.mockResolvedValue(protocolLibraryAdmin);
     renderDoctorPortal("/doctor/protocols");

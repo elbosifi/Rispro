@@ -1043,13 +1043,27 @@ export interface MriSequencePreset {
   genericFamily: string | null;
   weighting: string | null;
   defaultPlane: string | null;
+  fatSuppression?: string | null;
+  acquisitionType?: string | null;
   contrastRelation: string | null;
   defaultCoverage: string | null;
   defaultBValues: string | null;
   defaultDynamicTiming: string | null;
   estimatedScanTimeMinutes: number | null;
   notes: string | null;
+  scannerAliases?: MriSequenceScannerAlias[];
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MriSequenceScannerAlias {
+  id: number;
+  mriSequencePresetId: number;
+  scannerId: number;
+  scannerName: string | null;
+  vendorSequenceName: string;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1116,6 +1130,13 @@ export interface ProtocolLibraryMriSequenceRow {
   orderIndex: number;
   mriSequencePresetId: number | null;
   mriSequencePresetName: string | null;
+  presetGenericFamily?: string | null;
+  presetWeighting?: string | null;
+  presetDefaultPlane?: string | null;
+  presetFatSuppression?: string | null;
+  presetAcquisitionType?: string | null;
+  presetContrastRelation?: string | null;
+  scannerAliasVendorSequenceName?: string | null;
   planeOverride: string | null;
   coverageOverride: string | null;
   bValuesOverride: string | null;

@@ -49,6 +49,8 @@ create table if not exists mri_sequence_presets (
   generic_family text,
   weighting text,
   default_plane text,
+  fat_suppression text,
+  acquisition_type text,
   contrast_relation text,
   default_coverage text,
   default_b_values text,
@@ -58,6 +60,17 @@ create table if not exists mri_sequence_presets (
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists mri_sequence_scanner_aliases (
+  id bigserial primary key,
+  mri_sequence_preset_id bigint not null references mri_sequence_presets(id) on delete cascade,
+  scanner_id bigint not null references imaging_scanners(id) on delete cascade,
+  vendor_sequence_name text not null,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (mri_sequence_preset_id, scanner_id)
 );
 
 create table if not exists protocols (
@@ -149,6 +162,7 @@ create index if not exists protocol_versions_status_idx on protocol_versions(sta
 create index if not exists appointment_protocol_assignments_appointment_idx on appointment_protocol_assignments(appointment_id);
 create index if not exists appointment_protocol_assignments_protocol_version_idx on appointment_protocol_assignments(protocol_version_id);
 create index if not exists mri_sequence_presets_scanner_id_idx on mri_sequence_presets(scanner_id);
+create index if not exists mri_sequence_scanner_aliases_preset_idx on mri_sequence_scanner_aliases(mri_sequence_preset_id);
 
 create or replace function touch_protocol_management_updated_at()
 returns trigger
@@ -178,6 +192,11 @@ for each row execute function touch_protocol_management_updated_at();
 drop trigger if exists trg_mri_sequence_presets_updated_at on mri_sequence_presets;
 create trigger trg_mri_sequence_presets_updated_at
 before update on mri_sequence_presets
+for each row execute function touch_protocol_management_updated_at();
+
+drop trigger if exists trg_mri_sequence_scanner_aliases_updated_at on mri_sequence_scanner_aliases;
+create trigger trg_mri_sequence_scanner_aliases_updated_at
+before update on mri_sequence_scanner_aliases
 for each row execute function touch_protocol_management_updated_at();
 
 drop trigger if exists trg_protocols_updated_at on protocols;

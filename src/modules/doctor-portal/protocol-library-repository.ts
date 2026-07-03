@@ -53,13 +53,27 @@ export interface MriSequencePresetRow {
   genericFamily: string | null;
   weighting: string | null;
   defaultPlane: string | null;
+  fatSuppression: string | null;
+  acquisitionType: string | null;
   contrastRelation: string | null;
   defaultCoverage: string | null;
   defaultBValues: string | null;
   defaultDynamicTiming: string | null;
   estimatedScanTimeMinutes: number | null;
   notes: string | null;
+  scannerAliases: MriSequenceScannerAliasRow[];
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MriSequenceScannerAliasRow {
+  id: number;
+  mriSequencePresetId: number;
+  scannerId: number;
+  scannerName: string | null;
+  vendorSequenceName: string;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -153,6 +167,13 @@ export interface ProtocolMriSequenceRow {
   orderIndex: number;
   mriSequencePresetId: number | null;
   mriSequencePresetName: string | null;
+  presetGenericFamily: string | null;
+  presetWeighting: string | null;
+  presetDefaultPlane: string | null;
+  presetFatSuppression: string | null;
+  presetAcquisitionType: string | null;
+  presetContrastRelation: string | null;
+  scannerAliasVendorSequenceName: string | null;
   planeOverride: string | null;
   coverageOverride: string | null;
   bValuesOverride: string | null;
@@ -232,13 +253,22 @@ export interface MriSequencePresetInput {
   genericFamily: string | null;
   weighting: string | null;
   defaultPlane: string | null;
+  fatSuppression: string | null;
+  acquisitionType: string | null;
   contrastRelation: string | null;
   defaultCoverage: string | null;
   defaultBValues: string | null;
   defaultDynamicTiming: string | null;
   estimatedScanTimeMinutes: number | null;
   notes: string | null;
+  scannerAliases?: MriSequenceScannerAliasInput[];
   isActive: boolean;
+}
+
+export interface MriSequenceScannerAliasInput {
+  scannerId: number;
+  vendorSequenceName: string;
+  notes: string | null;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -308,16 +338,36 @@ function mapMriSequencePreset(row: RawRecord): MriSequencePresetRow {
     genericFamily: stringOrNull(row.generic_family),
     weighting: stringOrNull(row.weighting),
     defaultPlane: stringOrNull(row.default_plane),
+    fatSuppression: stringOrNull(row.fat_suppression),
+    acquisitionType: stringOrNull(row.acquisition_type),
     contrastRelation: stringOrNull(row.contrast_relation),
     defaultCoverage: stringOrNull(row.default_coverage),
     defaultBValues: stringOrNull(row.default_b_values),
     defaultDynamicTiming: stringOrNull(row.default_dynamic_timing),
     estimatedScanTimeMinutes: numberOrNull(row.estimated_scan_time_minutes),
     notes: stringOrNull(row.notes),
+    scannerAliases: rawAliases(row.scanner_aliases),
     isActive: Boolean(row.is_active),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
+}
+
+function rawAliases(value: unknown): MriSequenceScannerAliasRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as RawRecord;
+    return {
+      id: Number(row.id),
+      mriSequencePresetId: Number(row.mri_sequence_preset_id),
+      scannerId: Number(row.scanner_id),
+      scannerName: stringOrNull(row.scanner_name),
+      vendorSequenceName: String(row.vendor_sequence_name),
+      notes: stringOrNull(row.notes),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  });
 }
 
 function mapProtocol(row: RawRecord): ProtocolLibraryProtocolRow {
@@ -387,6 +437,13 @@ function mapProtocolMriSequence(row: RawRecord): ProtocolMriSequenceRow {
     orderIndex: Number(row.order_index),
     mriSequencePresetId: numberOrNull(row.mri_sequence_preset_id),
     mriSequencePresetName: stringOrNull(row.mri_sequence_preset_name),
+    presetGenericFamily: stringOrNull(row.preset_generic_family),
+    presetWeighting: stringOrNull(row.preset_weighting),
+    presetDefaultPlane: stringOrNull(row.preset_default_plane),
+    presetFatSuppression: stringOrNull(row.preset_fat_suppression),
+    presetAcquisitionType: stringOrNull(row.preset_acquisition_type),
+    presetContrastRelation: stringOrNull(row.preset_contrast_relation),
+    scannerAliasVendorSequenceName: stringOrNull(row.scanner_alias_vendor_sequence_name),
     planeOverride: stringOrNull(row.plane_override),
     coverageOverride: stringOrNull(row.coverage_override),
     bValuesOverride: stringOrNull(row.b_values_override),
@@ -429,11 +486,28 @@ export async function listCtPhasePresets(): Promise<CtPhasePresetRow[]> {
 export async function listMriSequencePresets(): Promise<MriSequencePresetRow[]> {
   const result = await pool.query(`
     select msp.id, msp.scanner_id, s.name as scanner_name, msp.vendor, msp.name, msp.vendor_sequence_name,
-           msp.generic_family, msp.weighting, msp.default_plane, msp.contrast_relation, msp.default_coverage,
+           msp.generic_family, msp.weighting, msp.default_plane, msp.fat_suppression, msp.acquisition_type,
+           msp.contrast_relation, msp.default_coverage,
            msp.default_b_values, msp.default_dynamic_timing, msp.estimated_scan_time_minutes, msp.notes,
-           msp.is_active, msp.created_at, msp.updated_at
+           msp.is_active, msp.created_at, msp.updated_at,
+           coalesce(aliases.items, '[]'::json) as scanner_aliases
     from mri_sequence_presets msp
     left join imaging_scanners s on s.id = msp.scanner_id
+    left join lateral (
+      select json_agg(json_build_object(
+        'id', alias.id,
+        'mri_sequence_preset_id', alias.mri_sequence_preset_id,
+        'scanner_id', alias.scanner_id,
+        'scanner_name', alias_scanner.name,
+        'vendor_sequence_name', alias.vendor_sequence_name,
+        'notes', alias.notes,
+        'created_at', alias.created_at,
+        'updated_at', alias.updated_at
+      ) order by alias_scanner.name asc, alias.id asc) as items
+      from mri_sequence_scanner_aliases alias
+      left join imaging_scanners alias_scanner on alias_scanner.id = alias.scanner_id
+      where alias.mri_sequence_preset_id = msp.id
+    ) aliases on true
     order by msp.is_active desc, coalesce(s.name, ''), msp.name asc
   `);
   return result.rows.map(mapMriSequencePreset);
@@ -622,18 +696,32 @@ export async function updateCtPhasePreset(id: number, input: Partial<CtPhasePres
   return result.rows[0] ? mapCtPhasePreset(result.rows[0]) : null;
 }
 
+async function replaceMriSequenceScannerAliases(client: DbClient, presetId: number, aliases: MriSequenceScannerAliasInput[]): Promise<void> {
+  await client.query("delete from mri_sequence_scanner_aliases where mri_sequence_preset_id = $1", [presetId]);
+  for (const alias of aliases) {
+    await client.query(
+      `
+        insert into mri_sequence_scanner_aliases (mri_sequence_preset_id, scanner_id, vendor_sequence_name, notes)
+        values ($1, $2, $3, $4)
+      `,
+      [presetId, alias.scannerId, alias.vendorSequenceName, alias.notes]
+    );
+  }
+}
+
 export async function createMriSequencePreset(input: MriSequencePresetInput): Promise<MriSequencePresetRow> {
-  const result = await pool.query(
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await client.query(
     `
       insert into mri_sequence_presets (
         scanner_id, vendor, name, vendor_sequence_name, generic_family, weighting, default_plane,
-        contrast_relation, default_coverage, default_b_values, default_dynamic_timing,
+        fat_suppression, acquisition_type, contrast_relation, default_coverage, default_b_values, default_dynamic_timing,
         estimated_scan_time_minutes, notes, is_active
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      returning id, scanner_id, null::text as scanner_name, vendor, name, vendor_sequence_name, generic_family,
-                weighting, default_plane, contrast_relation, default_coverage, default_b_values,
-                default_dynamic_timing, estimated_scan_time_minutes, notes, is_active, created_at, updated_at
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      returning id
     `,
     [
       input.scannerId,
@@ -643,6 +731,8 @@ export async function createMriSequencePreset(input: MriSequencePresetInput): Pr
       input.genericFamily,
       input.weighting,
       input.defaultPlane,
+      input.fatSuppression,
+      input.acquisitionType,
       input.contrastRelation,
       input.defaultCoverage,
       input.defaultBValues,
@@ -652,11 +742,24 @@ export async function createMriSequencePreset(input: MriSequencePresetInput): Pr
       input.isActive,
     ]
   );
-  return mapMriSequencePreset(result.rows[0]);
+    const id = Number(result.rows[0].id);
+    if (input.scannerAliases) await replaceMriSequenceScannerAliases(client, id, input.scannerAliases);
+    await client.query("commit");
+    const rows = await listMriSequencePresets();
+    return rows.find((row) => row.id === id)!;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateMriSequencePreset(id: number, input: Partial<MriSequencePresetInput>): Promise<MriSequencePresetRow | null> {
-  const result = await pool.query(
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await client.query(
     `
       update mri_sequence_presets
       set
@@ -667,17 +770,17 @@ export async function updateMriSequencePreset(id: number, input: Partial<MriSequ
         generic_family = case when $9::boolean then $10 else generic_family end,
         weighting = case when $11::boolean then $12 else weighting end,
         default_plane = case when $13::boolean then $14 else default_plane end,
-        contrast_relation = case when $15::boolean then $16 else contrast_relation end,
-        default_coverage = case when $17::boolean then $18 else default_coverage end,
-        default_b_values = case when $19::boolean then $20 else default_b_values end,
-        default_dynamic_timing = case when $21::boolean then $22 else default_dynamic_timing end,
-        estimated_scan_time_minutes = case when $23::boolean then $24 else estimated_scan_time_minutes end,
-        notes = case when $25::boolean then $26 else notes end,
-        is_active = coalesce($27, is_active)
+        fat_suppression = case when $15::boolean then $16 else fat_suppression end,
+        acquisition_type = case when $17::boolean then $18 else acquisition_type end,
+        contrast_relation = case when $19::boolean then $20 else contrast_relation end,
+        default_coverage = case when $21::boolean then $22 else default_coverage end,
+        default_b_values = case when $23::boolean then $24 else default_b_values end,
+        default_dynamic_timing = case when $25::boolean then $26 else default_dynamic_timing end,
+        estimated_scan_time_minutes = case when $27::boolean then $28 else estimated_scan_time_minutes end,
+        notes = case when $29::boolean then $30 else notes end,
+        is_active = coalesce($31, is_active)
       where id = $1
-      returning id, scanner_id, null::text as scanner_name, vendor, name, vendor_sequence_name, generic_family,
-                weighting, default_plane, contrast_relation, default_coverage, default_b_values,
-                default_dynamic_timing, estimated_scan_time_minutes, notes, is_active, created_at, updated_at
+      returning id
     `,
     [
       id,
@@ -694,6 +797,10 @@ export async function updateMriSequencePreset(id: number, input: Partial<MriSequ
       input.weighting ?? null,
       "defaultPlane" in input,
       input.defaultPlane ?? null,
+      "fatSuppression" in input,
+      input.fatSuppression ?? null,
+      "acquisitionType" in input,
+      input.acquisitionType ?? null,
       "contrastRelation" in input,
       input.contrastRelation ?? null,
       "defaultCoverage" in input,
@@ -709,7 +816,20 @@ export async function updateMriSequencePreset(id: number, input: Partial<MriSequ
       input.isActive,
     ]
   );
-  return result.rows[0] ? mapMriSequencePreset(result.rows[0]) : null;
+    if (!result.rows[0]) {
+      await client.query("rollback");
+      return null;
+    }
+    if ("scannerAliases" in input && input.scannerAliases) await replaceMriSequenceScannerAliases(client, id, input.scannerAliases);
+    await client.query("commit");
+    const rows = await listMriSequencePresets();
+    return rows.find((row) => row.id === id) ?? null;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function protocolById(client: DbClient, protocolId: number): Promise<ProtocolLibraryProtocolRow | null> {
@@ -774,11 +894,16 @@ async function mriSequencesForVersion(client: DbClient, versionId: number): Prom
     `
       select pms.id, pms.protocol_version_id, pms.scanner_id, s.name as scanner_name,
              pms.order_index, pms.mri_sequence_preset_id, msp.name as mri_sequence_preset_name,
+             msp.generic_family as preset_generic_family, msp.weighting as preset_weighting,
+             msp.default_plane as preset_default_plane, msp.fat_suppression as preset_fat_suppression,
+             msp.acquisition_type as preset_acquisition_type, msp.contrast_relation as preset_contrast_relation,
+             msa.vendor_sequence_name as scanner_alias_vendor_sequence_name,
              pms.plane_override, pms.coverage_override, pms.b_values_override, pms.timing_override,
              pms.notes_override, pms.is_required, pms.created_at, pms.updated_at
       from protocol_mri_sequences pms
       left join imaging_scanners s on s.id = pms.scanner_id
       left join mri_sequence_presets msp on msp.id = pms.mri_sequence_preset_id
+      left join mri_sequence_scanner_aliases msa on msa.mri_sequence_preset_id = msp.id and msa.scanner_id = pms.scanner_id
       where pms.protocol_version_id = $1
       order by pms.order_index asc, pms.id asc
     `,

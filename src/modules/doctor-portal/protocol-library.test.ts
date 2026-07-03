@@ -13,6 +13,10 @@ describe("Protocol library schema", () => {
     assert.match(migration, /ct_slice_detector_specification text/i);
     assert.match(migration, /create table if not exists ct_phase_presets/i);
     assert.match(migration, /create table if not exists mri_sequence_presets/i);
+    assert.match(migration, /fat_suppression text/i);
+    assert.match(migration, /acquisition_type text/i);
+    assert.match(migration, /create table if not exists mri_sequence_scanner_aliases/i);
+    assert.match(migration, /unique \(mri_sequence_preset_id, scanner_id\)/i);
     assert.match(migration, /create table if not exists protocols/i);
     assert.match(migration, /oral_contrast_policy text/i);
     assert.match(migration, /bowel_preparation text/i);
@@ -36,6 +40,16 @@ describe("Protocol library schema", () => {
     assert.match(migration, /add column if not exists oral_contrast_policy text/i);
     assert.match(migration, /add column if not exists bowel_preparation text/i);
     assert.match(migration, /add column if not exists preparation_notes text/i);
+  });
+
+  it("adds MRI sequence aliases and simple display fields through an idempotent migration", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/110_mri_sequence_aliases_and_simple_fields.sql`, "utf8");
+
+    assert.match(migration, /add column if not exists fat_suppression text/i);
+    assert.match(migration, /add column if not exists acquisition_type text/i);
+    assert.match(migration, /create table if not exists mri_sequence_scanner_aliases/i);
+    assert.match(migration, /vendor_sequence_name text not null/i);
+    assert.match(migration, /unique \(mri_sequence_preset_id, scanner_id\)/i);
   });
 });
 
@@ -132,6 +146,7 @@ describe("Protocol library read repository", () => {
     process.env.JWT_SECRET ??= "protocol-library-test-secret";
     const poolModule = await import("../../db/pool.js");
     const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const clientQueries: Array<{ sql: string; params: unknown[] }> = [];
     const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
       queries.push({ sql, params: params ?? [] });
       if (/ct_phase_presets/i.test(sql)) {
@@ -164,18 +179,29 @@ describe("Protocol library read repository", () => {
           generic_family: "DWI",
           weighting: "DWI",
           default_plane: "Axial",
+          fat_suppression: "None",
+          acquisition_type: "2D",
           contrast_relation: null,
           default_coverage: null,
           default_b_values: "0,800",
           default_dynamic_timing: null,
           estimated_scan_time_minutes: 4,
           notes: null,
+          scanner_aliases: [{ id: 9, mri_sequence_preset_id: 4, scanner_id: 8, scanner_name: "GE Signa Hero", vendor_sequence_name: "DWI PROPELLER", notes: null, created_at: "2026-06-29T10:00:00.000Z", updated_at: "2026-06-29T10:00:00.000Z" }],
           is_active: true,
           created_at: "2026-06-29T10:00:00.000Z",
           updated_at: "2026-06-29T10:00:00.000Z",
         }],
       };
     });
+    const connectMock = mock.method(poolModule.pool, "connect", async () => ({
+      query: async (sql: string, params?: unknown[]) => {
+        clientQueries.push({ sql, params: params ?? [] });
+        if (/insert into mri_sequence_presets/i.test(sql)) return { rows: [{ id: 4 }] };
+        return { rows: [] };
+      },
+      release: () => undefined,
+    }));
 
     try {
       const { createCtPhasePreset, createMriSequencePreset } = await import("./protocol-library-repository.js");
@@ -199,21 +225,27 @@ describe("Protocol library read repository", () => {
         genericFamily: "DWI",
         weighting: "DWI",
         defaultPlane: "Axial",
+        fatSuppression: "None",
+        acquisitionType: "2D",
         contrastRelation: null,
         defaultCoverage: null,
         defaultBValues: "0,800",
         defaultDynamicTiming: null,
         estimatedScanTimeMinutes: 4,
         notes: null,
+        scannerAliases: [{ scannerId: 8, vendorSequenceName: "DWI PROPELLER", notes: null }],
         isActive: true,
       });
 
       assert.match(queries[0].sql, /insert into ct_phase_presets/i);
       assert.equal(queries[0].params[3], 70);
-      assert.match(queries[1].sql, /insert into mri_sequence_presets/i);
-      assert.equal(queries[1].params[11], 4);
+      assert.match(clientQueries[1].sql, /insert into mri_sequence_presets/i);
+      assert.equal(clientQueries[1].params[13], 4);
+      assert.match(clientQueries.map((query) => query.sql).join("\n"), /insert into mri_sequence_scanner_aliases/i);
+      assert.equal(clientQueries.find((query) => /insert into mri_sequence_scanner_aliases/i.test(query.sql))?.params[2], "DWI PROPELLER");
     } finally {
       queryMock.mock.restore();
+      connectMock.mock.restore();
     }
   });
 
@@ -262,6 +294,22 @@ describe("Protocol library read repository", () => {
     assert.match(routes, /Without and with IV contrast/);
     assert.match(routes, /Dynamic contrast/);
     assert.match(routes, /Conditional \/ radiologist decision/);
+  });
+
+  it("validates simplified MRI sequence dropdown fields and aliases", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocol-library-routes.ts`, "utf8");
+
+    assert.match(routes, /MRI_SEQUENCE_PLANES/);
+    assert.match(routes, /Oblique axial/);
+    assert.match(routes, /MRI_SEQUENCE_FAMILIES/);
+    assert.match(routes, /DWI \/ ADC/);
+    assert.match(routes, /MRI_FAT_SUPPRESSION/);
+    assert.match(routes, /Fat saturated/);
+    assert.match(routes, /MRI_ACQUISITION_TYPES/);
+    assert.match(routes, /Not specified/);
+    assert.match(routes, /MRI_CONTRAST_RELATIONS/);
+    assert.match(routes, /Optional \/ depends on protocol/);
+    assert.match(routes, /scannerAliases must be an array/);
   });
 
   it("maps scanner detector and protocol preparation metadata", () => {

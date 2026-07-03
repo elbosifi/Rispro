@@ -105,14 +105,17 @@ const EMPTY_MRI_SEQUENCE: MriSequencePresetPayload = {
   name: "",
   vendorSequenceName: null,
   genericFamily: null,
-  weighting: null,
-  defaultPlane: null,
-  contrastRelation: null,
+  weighting: "T2",
+  defaultPlane: "Axial",
+  fatSuppression: "None",
+  acquisitionType: "Not specified",
+  contrastRelation: "Non-contrast",
   defaultCoverage: null,
   defaultBValues: null,
   defaultDynamicTiming: null,
   estimatedScanTimeMinutes: null,
   notes: null,
+  scannerAliases: [],
   isActive: true,
 };
 const EMPTY_PROTOCOL: ProtocolLibraryProtocolPayload = {
@@ -129,6 +132,11 @@ const EMPTY_PROTOCOL: ProtocolLibraryProtocolPayload = {
 };
 const PROTOCOL_CATEGORIES = ["General", "Oncology", "Non-oncology"] as const;
 const IV_CONTRAST_POLICIES = ["Non-contrast", "With IV contrast", "Without and with IV contrast", "Dynamic contrast", "Conditional / radiologist decision"] as const;
+const MRI_SEQUENCE_PLANES = ["Axial", "Sagittal", "Coronal", "Oblique axial", "Oblique coronal", "3D / isotropic", "Other"] as const;
+const MRI_SEQUENCE_FAMILIES = ["T1", "T2", "PD", "FLAIR", "DWI / ADC", "SWI / T2*", "Perfusion", "Dynamic contrast", "MRCP", "MRA / TOF", "Localizer", "Other"] as const;
+const MRI_FAT_SUPPRESSION = ["None", "Fat saturated", "Dixon", "STIR", "SPAIR / SPIR", "Other"] as const;
+const MRI_ACQUISITION_TYPES = ["2D", "3D", "Not specified"] as const;
+const MRI_CONTRAST_RELATIONS = ["Non-contrast", "Pre-contrast", "Post-contrast", "Dynamic", "Optional / depends on protocol"] as const;
 const EMPTY_PROTOCOL_CT_PHASE: ProtocolLibraryCtPhaseRowPayload = {
   ctPhasePresetId: null,
   customPhaseName: null,
@@ -179,6 +187,23 @@ function nullableNumber(value: string, positive = false): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return positive ? (parsed > 0 ? parsed : null) : (parsed >= 0 ? parsed : null);
+}
+
+function mriFatLabel(value: string | null | undefined): string | null {
+  if (!value || value === "None") return null;
+  return value === "Fat saturated" ? "fat sat" : value;
+}
+
+function mriSequencePresetLabel(preset: Pick<MriSequencePreset, "name" | "defaultPlane" | "weighting" | "genericFamily" | "fatSuppression" | "acquisitionType" | "contrastRelation">): string {
+  const clinical = [preset.defaultPlane, preset.weighting ?? preset.genericFamily, mriFatLabel(preset.fatSuppression)].filter(Boolean).join(" ");
+  const details = [preset.acquisitionType, preset.contrastRelation].filter(Boolean).join(" · ");
+  return [clinical || preset.name, details].filter(Boolean).join(" · ");
+}
+
+function mriSequenceRowLabel(row: ProtocolLibraryMriSequenceRow): string {
+  const clinical = [row.planeOverride ?? row.presetDefaultPlane, row.presetWeighting ?? row.presetGenericFamily, mriFatLabel(row.presetFatSuppression)].filter(Boolean).join(" ");
+  const details = [row.presetAcquisitionType, row.presetContrastRelation].filter(Boolean).join(" · ");
+  return [clinical || row.mriSequencePresetName || "-", details].filter(Boolean).join(" · ");
 }
 
 function StatusBadge({ active }: { active: boolean }) {
@@ -309,7 +334,7 @@ function ProtocolLibraryPanel() {
   const startRegionEdit = (item: ProtocolAnatomyRegion) => { setEditingRegionId(item.id); setRegionDraft({ name: item.name, bodySystem: item.bodySystem, modalityScope: item.modalityScope, defaultCoverageNote: item.defaultCoverageNote, isActive: item.isActive }); };
   const startScannerEdit = (item: ImagingScanner) => { setEditingScannerId(item.id); setScannerDraft({ name: item.name, modality: item.modality, vendor: item.vendor, model: item.model, fieldStrength: item.fieldStrength, ctSliceDetectorSpecification: item.ctSliceDetectorSpecification, location: item.location, notes: item.notes, isActive: item.isActive }); };
   const startCtPhaseEdit = (item: CtPhasePreset) => { setEditingCtPhaseId(item.id); setCtPhaseDraft({ name: item.name, contrastStatus: item.contrastStatus, timingType: item.timingType, delaySeconds: item.delaySeconds, bolusTrackingSite: item.bolusTrackingSite, triggerHu: item.triggerHu, defaultCoverage: item.defaultCoverage, reconstructionNotes: item.reconstructionNotes, instructions: item.instructions, isActive: item.isActive }); };
-  const startMriSequenceEdit = (item: MriSequencePreset) => { setEditingMriSequenceId(item.id); setMriSequenceDraft({ scannerId: item.scannerId, vendor: item.vendor, name: item.name, vendorSequenceName: item.vendorSequenceName, genericFamily: item.genericFamily, weighting: item.weighting, defaultPlane: item.defaultPlane, contrastRelation: item.contrastRelation, defaultCoverage: item.defaultCoverage, defaultBValues: item.defaultBValues, defaultDynamicTiming: item.defaultDynamicTiming, estimatedScanTimeMinutes: item.estimatedScanTimeMinutes, notes: item.notes, isActive: item.isActive }); };
+  const startMriSequenceEdit = (item: MriSequencePreset) => { setEditingMriSequenceId(item.id); setMriSequenceDraft({ scannerId: item.scannerId, vendor: item.vendor, name: item.name, vendorSequenceName: item.vendorSequenceName, genericFamily: item.genericFamily, weighting: item.weighting, defaultPlane: item.defaultPlane, fatSuppression: item.fatSuppression ?? null, acquisitionType: item.acquisitionType ?? null, contrastRelation: item.contrastRelation, defaultCoverage: item.defaultCoverage, defaultBValues: item.defaultBValues, defaultDynamicTiming: item.defaultDynamicTiming, estimatedScanTimeMinutes: item.estimatedScanTimeMinutes, notes: item.notes, scannerAliases: (item.scannerAliases ?? []).map((alias) => ({ scannerId: alias.scannerId, vendorSequenceName: alias.vendorSequenceName, notes: alias.notes })), isActive: item.isActive }); };
   const startCtRowEdit = (item: ProtocolLibraryCtPhaseRow) => { setEditingCtRowId(item.id); setCtRowDraft({ ctPhasePresetId: item.ctPhasePresetId, customPhaseName: item.customPhaseName, timingOverride: item.timingOverride, coverageOverride: item.coverageOverride, reconstructionOverride: item.reconstructionOverride, instructionsOverride: item.instructionsOverride, isRequired: item.isRequired }); };
   const startMriRowEdit = (item: ProtocolLibraryMriSequenceRow) => { setEditingMriRowId(item.id); setMriRowDraft({ scannerId: item.scannerId, mriSequencePresetId: item.mriSequencePresetId, planeOverride: item.planeOverride, coverageOverride: item.coverageOverride, bValuesOverride: item.bValuesOverride, timingOverride: item.timingOverride, notesOverride: item.notesOverride, isRequired: item.isRequired }); };
 
@@ -416,9 +441,9 @@ function ProtocolLibraryPanel() {
         </SettingsTable>
       )}
       {section === "mriSequences" && (
-        <SettingsTable emptyText="No MRI sequence presets yet" headers={["Name", "Scanner", "Vendor", "Family", "Time", "Status", "Actions"]}>
+        <SettingsTable emptyText="No MRI sequence presets yet" headers={["Name", "Clinical label", "Scanner-specific names", "Time", "Status", "Actions"]}>
           {mriSequenceDraft && <MriSequenceForm draft={mriSequenceDraft} scanners={scanners} setDraft={setMriSequenceDraft} saving={createMriSequenceMutation.isPending || updateMriSequenceMutation.isPending} onCancel={() => { setMriSequenceDraft(null); setEditingMriSequenceId(null); }} onSave={() => editingMriSequenceId ? updateMriSequenceMutation.mutate({ id: editingMriSequenceId, payload: mriSequenceDraft }) : createMriSequenceMutation.mutate(mriSequenceDraft)} />}
-          {mriSequences.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{item.scannerName ?? "Generic / not scanner-specific"}</Cell><Cell>{item.vendor ?? "-"}</Cell><Cell>{item.weighting ?? item.genericFamily ?? "-"}</Cell><Cell>{item.estimatedScanTimeMinutes ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startMriSequenceEdit(item)} onToggle={() => updateMriSequenceMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
+          {mriSequences.map((item) => <tr key={item.id} className={!item.isActive ? "opacity-60" : undefined}><Cell>{item.name}</Cell><Cell>{mriSequencePresetLabel(item)}</Cell><Cell>{item.scannerAliases?.length ? `${item.scannerAliases.length} scanner name${item.scannerAliases.length === 1 ? "" : "s"}` : "Generic"}</Cell><Cell>{item.estimatedScanTimeMinutes ?? "-"}</Cell><Cell><StatusBadge active={item.isActive} /></Cell><Cell><RowActions onEdit={() => startMriSequenceEdit(item)} onToggle={() => updateMriSequenceMutation.mutate({ id: item.id, payload: { isActive: !item.isActive } })} active={item.isActive} /></Cell></tr>)}
         </SettingsTable>
       )}
     </section>
@@ -700,7 +725,10 @@ function MriProtocolRows({ detail, scanners, presets, draft, editingRowId, edita
           <tr key={row.id}>
             <Cell>{row.orderIndex}</Cell>
             <Cell>{row.scannerName ?? "Generic"}</Cell>
-            <Cell>{row.mriSequencePresetName ?? "-"}</Cell>
+            <Cell>
+              {mriSequenceRowLabel(row)}
+              {row.scannerName && row.scannerAliasVendorSequenceName ? <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Vendor name on {row.scannerName}: {row.scannerAliasVendorSequenceName}</span> : null}
+            </Cell>
             <Cell>{row.planeOverride ?? "-"}</Cell>
             <Cell>{row.coverageOverride ?? "-"}</Cell>
             <Cell>{row.bValuesOverride ?? "-"}</Cell>
@@ -715,12 +743,13 @@ function MriProtocolRows({ detail, scanners, presets, draft, editingRowId, edita
 }
 
 function MriProtocolRowForm({ draft, scanners, presets, setDraft, onSave, onCancel }: { draft: ProtocolLibraryMriSequenceRowPayload; scanners: ImagingScanner[]; presets: MriSequencePreset[]; setDraft: (draft: ProtocolLibraryMriSequenceRowPayload | null) => void; onSave: () => void; onCancel: () => void }) {
-  const filteredPresets = presets.filter((preset) => !draft.scannerId || preset.scannerId === null || preset.scannerId === draft.scannerId);
+  const filteredPresets = presets.filter((preset) => !draft.scannerId || preset.scannerId === null || preset.scannerId === draft.scannerId || (preset.scannerAliases ?? []).some((alias) => alias.scannerId === draft.scannerId));
   const selectedPreset = presets.find((preset) => preset.id === draft.mriSequencePresetId) ?? null;
+  const selectedAlias = selectedPreset?.scannerAliases?.find((alias) => alias.scannerId === draft.scannerId) ?? null;
   return (
     <tr><td colSpan={9} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
       <Field label="Scanner"><select aria-label="Scanner" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.scannerId ?? ""} onChange={(event) => setDraft({ ...draft, scannerId: event.target.value ? Number(event.target.value) : null, mriSequencePresetId: null })}><option value="">Generic / not scanner-specific</option>{scanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
-      <Field label="MRI sequence preset"><select aria-label="MRI sequence preset" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.mriSequencePresetId ?? ""} onChange={(event) => setDraft({ ...draft, mriSequencePresetId: event.target.value ? Number(event.target.value) : null })}><option value="">No preset</option>{filteredPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></Field>
+      <Field label="MRI sequence preset"><select aria-label="MRI sequence preset" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.mriSequencePresetId ?? ""} onChange={(event) => setDraft({ ...draft, mriSequencePresetId: event.target.value ? Number(event.target.value) : null })}><option value="">No preset</option>{filteredPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} - {mriSequencePresetLabel(preset)}</option>)}</select></Field>
       <Field label="Plane override"><input aria-label="Plane override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.planeOverride)} onChange={(event) => setDraft({ ...draft, planeOverride: editableText(event.target.value) })} /></Field>
       <Field label="Coverage override"><input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field>
       <Field label="b-values override"><input aria-label="b-values override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bValuesOverride)} onChange={(event) => setDraft({ ...draft, bValuesOverride: editableText(event.target.value) })} /></Field>
@@ -728,7 +757,8 @@ function MriProtocolRowForm({ draft, scanners, presets, setDraft, onSave, onCanc
       <Field label="Notes override"><input aria-label="Notes override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notesOverride)} onChange={(event) => setDraft({ ...draft, notesOverride: editableText(event.target.value) })} /></Field>
       <label className="flex items-end gap-2 text-sm font-medium"><input type="checkbox" checked={draft.isRequired} onChange={(event) => setDraft({ ...draft, isRequired: event.target.checked })} /> Required</label>
       <FormActions saving={false} saveLabel="Save sequence" canSave={Boolean(draft.mriSequencePresetId || draft.planeOverride?.trim() || draft.coverageOverride?.trim())} onSave={onSave} onCancel={onCancel} />
-      {selectedPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Preset reference: {selectedPreset.defaultPlane ?? "No default plane"} · {selectedPreset.defaultCoverage ?? "No default coverage"} · {selectedPreset.defaultBValues ?? "No b-values"}</p>}
+      {selectedPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Preset reference: {mriSequencePresetLabel(selectedPreset)} · {selectedPreset.defaultCoverage ?? "No default coverage"} · {selectedPreset.defaultBValues ?? "No b-values"}</p>}
+      {selectedAlias && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Vendor name on {selectedAlias.scannerName ?? "selected scanner"}: {selectedAlias.vendorSequenceName}</p>}
     </div></td></tr>
   );
 }
@@ -789,14 +819,57 @@ function CtPhaseForm({ draft, setDraft, saving, onSave, onCancel }: { draft: CtP
 }
 
 function MriSequenceForm({ draft, scanners, setDraft, saving, onSave, onCancel }: { draft: MriSequencePresetPayload; scanners: ImagingScanner[]; setDraft: (draft: MriSequencePresetPayload | null) => void; saving: boolean; onSave: () => void; onCancel: () => void }) {
+  const [showAdvanced, setShowAdvanced] = useState(Boolean(draft.defaultCoverage || draft.defaultBValues || draft.defaultDynamicTiming || draft.estimatedScanTimeMinutes));
+  const [showAliases, setShowAliases] = useState(Boolean(draft.scannerAliases?.length));
+  const aliases = draft.scannerAliases ?? [];
+  const mriScanners = scanners.filter((scanner) => scanner.modality === "MRI");
+  const aliasesValid = aliases.every((alias) => alias.scannerId > 0 && alias.vendorSequenceName.trim());
+  const updateAlias = (index: number, next: Partial<{ scannerId: number | null; vendorSequenceName: string | null; notes: string | null }>) => {
+    setDraft({
+      ...draft,
+      scannerAliases: aliases.map((alias, aliasIndex) => aliasIndex === index ? {
+        ...alias,
+        ...next,
+        scannerId: next.scannerId ?? alias.scannerId,
+        vendorSequenceName: next.vendorSequenceName ?? alias.vendorSequenceName,
+      } : alias),
+    });
+  };
   return (
-    <tr><td colSpan={7} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Scanner"><select aria-label="Scanner" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.scannerId ?? ""} onChange={(event) => setDraft({ ...draft, scannerId: event.target.value ? Number(event.target.value) : null })}><option value="">Generic / not scanner-specific</option>{scanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
-      <Field label="Name"><input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      {(["vendor", "vendorSequenceName", "genericFamily", "weighting", "defaultPlane", "contrastRelation", "defaultCoverage", "defaultBValues", "defaultDynamicTiming"] as const).map((key) => <Field key={key} label={key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase())}><input aria-label={key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase())} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft[key])} onChange={(event) => setDraft({ ...draft, [key]: editableText(event.target.value) })} /></Field>)}
-      <NumberField label="Estimated scan time minutes" value={draft.estimatedScanTimeMinutes} positive onChange={(value) => setDraft({ ...draft, estimatedScanTimeMinutes: nullableNumber(value, true) })} />
+    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
+      <Field label="Sequence name"><input aria-label="Sequence name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <Field label="Plane"><select aria-label="Plane" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.defaultPlane ?? ""} onChange={(event) => setDraft({ ...draft, defaultPlane: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_SEQUENCE_PLANES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Weighting / family"><select aria-label="Weighting / family" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.weighting ?? ""} onChange={(event) => setDraft({ ...draft, weighting: editableText(event.target.value), genericFamily: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_SEQUENCE_FAMILIES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Fat suppression"><select aria-label="Fat suppression" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.fatSuppression ?? ""} onChange={(event) => setDraft({ ...draft, fatSuppression: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_FAT_SUPPRESSION.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Acquisition type"><select aria-label="Acquisition type" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.acquisitionType ?? ""} onChange={(event) => setDraft({ ...draft, acquisitionType: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_ACQUISITION_TYPES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Contrast relation"><select aria-label="Contrast relation" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastRelation ?? ""} onChange={(event) => setDraft({ ...draft, contrastRelation: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_CONTRAST_RELATIONS.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
       <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: editableText(event.target.value) })} /></Field>
-      <FormActions saving={saving} saveLabel="Save MRI sequence" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
+      <div className="flex items-end gap-2">
+        <button type="button" className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setShowAdvanced(!showAdvanced)}>Advanced details</button>
+        <button type="button" className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setShowAliases(!showAliases)}>Scanner-specific names</button>
+      </div>
+      {showAdvanced && (
+        <div className="grid gap-3 rounded-lg border p-3 md:col-span-4 md:grid-cols-4" style={{ borderColor: "var(--border)" }}>
+          <Field label="Coverage"><input aria-label="Coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: editableText(event.target.value) })} /></Field>
+          <Field label="b-values"><input aria-label="b-values" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultBValues)} onChange={(event) => setDraft({ ...draft, defaultBValues: editableText(event.target.value) })} /></Field>
+          <Field label="Dynamic timing"><input aria-label="Dynamic timing" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultDynamicTiming)} onChange={(event) => setDraft({ ...draft, defaultDynamicTiming: editableText(event.target.value) })} /></Field>
+          <NumberField label="Estimated scan time minutes" value={draft.estimatedScanTimeMinutes} positive onChange={(value) => setDraft({ ...draft, estimatedScanTimeMinutes: nullableNumber(value, true) })} />
+        </div>
+      )}
+      {showAliases && (
+        <div className="grid gap-3 rounded-lg border p-3 md:col-span-4" style={{ borderColor: "var(--border)" }}>
+          {aliases.map((alias, index) => (
+            <div key={index} className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+              <Field label="Scanner"><select aria-label={`Scanner alias scanner ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={alias.scannerId} onChange={(event) => updateAlias(index, { scannerId: Number(event.target.value) })}>{mriScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
+              <Field label="Vendor sequence name"><input aria-label={`Vendor sequence name ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={alias.vendorSequenceName} onChange={(event) => updateAlias(index, { vendorSequenceName: event.target.value })} /></Field>
+              <Field label="Alias notes"><input aria-label={`Alias notes ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(alias.notes)} onChange={(event) => updateAlias(index, { notes: editableText(event.target.value) })} /></Field>
+              <button type="button" className="mt-6 h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setDraft({ ...draft, scannerAliases: aliases.filter((_, aliasIndex) => aliasIndex !== index) })}>Remove</button>
+            </div>
+          ))}
+          <button type="button" disabled={!mriScanners.length} className="h-10 w-fit rounded-lg border px-3 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} onClick={() => setDraft({ ...draft, scannerAliases: [...aliases, { scannerId: mriScanners[0].id, vendorSequenceName: "", notes: null }] })}>Add scanner name</button>
+        </div>
+      )}
+      <FormActions saving={saving} saveLabel="Save MRI sequence" canSave={Boolean(draft.name.trim()) && aliasesValid} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
 }
@@ -1222,8 +1295,11 @@ function ProtocolVersionPreview({
             <tr key={sequence.id}>
               <Cell>{sequence.orderIndex}</Cell>
               <Cell>{sequence.scannerName ?? "Generic"}</Cell>
-              <Cell>{sequence.mriSequencePresetName ?? "-"}</Cell>
-              <Cell>{sequence.planeOverride ?? "-"}</Cell>
+              <Cell>
+                {mriSequenceRowLabel(sequence)}
+                {sequence.scannerName && sequence.scannerAliasVendorSequenceName ? <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Vendor name on {sequence.scannerName}: {sequence.scannerAliasVendorSequenceName}</span> : null}
+              </Cell>
+              <Cell>{sequence.planeOverride ?? sequence.presetDefaultPlane ?? "-"}</Cell>
               <Cell>{sequence.coverageOverride ?? "-"}</Cell>
               <Cell>{sequence.bValuesOverride ?? sequence.timingOverride ?? "-"}</Cell>
               <Cell>{sequence.isRequired ? "Yes" : "No"}</Cell>
