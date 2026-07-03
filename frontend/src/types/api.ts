@@ -617,6 +617,47 @@ export interface ReportingBoardBulkAssignResult {
   skipped: Array<{ appointmentId?: number; comparisonRequestId?: number; reason: string }>;
 }
 
+export type ReportingBoardBulkAssignmentJobStatus = "scheduled" | "running" | "completed" | "failed" | "cancelled";
+
+export interface ReportingBoardBulkAssignmentJob {
+  id: number;
+  status: ReportingBoardBulkAssignmentJobStatus;
+  scheduledFor: string;
+  runStartedAt: string | null;
+  runCompletedAt: string | null;
+  cancelledAt: string | null;
+  lockedAt: string | null;
+  lockedBy: string | null;
+  targetDoctorId: number;
+  targetDoctorName: string | null;
+  caseCount: number;
+  filters: ReportingBoardFilters;
+  savedViewId: number | null;
+  savedViewName: string | null;
+  unassignedOnly: true;
+  reason: string | null;
+  result: ReportingBoardBulkAssignResult | null;
+  lastError: string | null;
+  attemptCount: number;
+  createdByUserId: number | null;
+  createdByDoctorId: number | null;
+  createdByName: string | null;
+  creatorUserActive: boolean | null;
+  creatorAppRole: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReportingBoardBulkAssignmentJobPayload {
+  scheduledFor: string;
+  doctorId: number;
+  count: number;
+  filters: ReportingBoardFilters;
+  savedViewId?: number | null;
+  savedViewName?: string | null;
+  reason?: string | null;
+}
+
 export interface ReportingBoardBulkUnassignResult {
   requestedCount: number;
   unassignedCount: number;

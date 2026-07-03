@@ -54,7 +54,9 @@ import type {
   DoctorCase,
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
+  CreateReportingBoardBulkAssignmentJobPayload,
   ReportingBoardBulkAssignResult,
+  ReportingBoardBulkAssignmentJob,
   ReportingBoardBulkReassignSelectedPayload,
   ReportingBoardBulkUnassignResult,
   ReportingBoardBulkUnassignSelectedPayload,
@@ -942,6 +944,37 @@ export async function bulkAssignNextReportingCases(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchReportingBoardBulkAssignmentJobs(): Promise<ReportingBoardBulkAssignmentJob[]> {
+  const raw = await api<{ jobs: ReportingBoardBulkAssignmentJob[] }>("/doctor/reporting-board/bulk-assignment-jobs");
+  return raw.jobs;
+}
+
+export async function createReportingBoardBulkAssignmentJob(payload: CreateReportingBoardBulkAssignmentJobPayload): Promise<ReportingBoardBulkAssignmentJob> {
+  const raw = await api<{ job: ReportingBoardBulkAssignmentJob }>("/doctor/reporting-board/bulk-assignment-jobs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.job;
+}
+
+export async function createReportingBoardBulkAssignmentJobs(payload: { jobs: CreateReportingBoardBulkAssignmentJobPayload[] }): Promise<ReportingBoardBulkAssignmentJob[]> {
+  const raw = await api<{ jobs: ReportingBoardBulkAssignmentJob[] }>("/doctor/reporting-board/bulk-assignment-jobs/batch", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.jobs;
+}
+
+export async function cancelReportingBoardBulkAssignmentJob(id: number): Promise<ReportingBoardBulkAssignmentJob> {
+  const raw = await api<{ job: ReportingBoardBulkAssignmentJob }>(`/doctor/reporting-board/bulk-assignment-jobs/${id}/cancel`, { method: "POST" });
+  return raw.job;
+}
+
+export async function runReportingBoardBulkAssignmentJobNow(id: number): Promise<ReportingBoardBulkAssignmentJob> {
+  const raw = await api<{ job: ReportingBoardBulkAssignmentJob }>(`/doctor/reporting-board/bulk-assignment-jobs/${id}/run-now`, { method: "POST" });
+  return raw.job;
 }
 
 export async function bulkReassignSelectedReportingCases(payload: ReportingBoardBulkReassignSelectedPayload): Promise<ReportingBoardBulkAssignResult> {

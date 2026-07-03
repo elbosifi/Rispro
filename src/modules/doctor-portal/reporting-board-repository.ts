@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import webPush, { type PushSubscription } from "web-push";
 import { pool } from "../../db/pool.js";
+import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { configurePatientWebPushVapid, getPatientWebPushSharedConfig } from "../../services/patient-web-push-service.js";
@@ -9,7 +10,9 @@ import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
   BrowserPushSubscriptionInput,
   BulkAssignNextCasesResult,
+  CreateReportingBoardBulkAssignmentJobInput,
   BulkUnassignSelectedCasesResult,
+  ReportingBoardBulkAssignmentJob,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardStatsBaseRow,
@@ -35,6 +38,11 @@ export const DEFAULT_REPORTING_BOARD_SETTINGS: ReportingBoardSettings = {
 interface AssignmentActor {
   userId: UserId;
   doctorId: number | null;
+}
+
+export interface ClaimedReportingBoardBulkAssignmentJob extends ReportingBoardBulkAssignmentJob {
+  creatorUserActive: boolean;
+  creatorAppRole: Role;
 }
 
 interface CaseQueryOptions {
@@ -79,6 +87,11 @@ function nullableIsoString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
   return String(value);
+}
+
+function nullableBoolean(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  return Boolean(value);
 }
 
 function normalizePushSubscription(input: BrowserPushSubscriptionInput): { endpoint: string; p256dh: string; auth: string } {
@@ -147,6 +160,84 @@ function savedView(row: {
     notificationSettings: cleanRecord(row.notificationSettings) as ReportingBoardNotificationSettings,
   };
 }
+
+function bulkAssignmentJob(row: {
+  id: number;
+  status: ReportingBoardBulkAssignmentJob["status"];
+  scheduledFor: string;
+  runStartedAt: string | null;
+  runCompletedAt: string | null;
+  cancelledAt: string | null;
+  lockedAt: string | null;
+  lockedBy: string | null;
+  targetDoctorId: number;
+  targetDoctorName: string | null;
+  caseCount: number;
+  filters: unknown;
+  savedViewId: number | null;
+  savedViewName: string | null;
+  unassignedOnly: boolean;
+  reason: string | null;
+  result: unknown;
+  lastError: string | null;
+  attemptCount: number;
+  createdByUserId: number | null;
+  createdByDoctorId: number | null;
+  createdByName: string | null;
+  creatorUserActive: boolean | null;
+  creatorAppRole: string | null;
+  createdAt: string;
+  updatedAt: string;
+}): ReportingBoardBulkAssignmentJob {
+  return {
+    ...row,
+    id: Number(row.id),
+    targetDoctorId: Number(row.targetDoctorId),
+    caseCount: Number(row.caseCount),
+    savedViewId: nullableNumber(row.savedViewId),
+    unassignedOnly: true,
+    filters: cleanRecord(row.filters) as ReportingBoardFilters,
+    result: row.result ? (cleanRecord(row.result) as unknown as BulkAssignNextCasesResult) : null,
+    attemptCount: Number(row.attemptCount),
+    createdByUserId: nullableNumber(row.createdByUserId),
+    createdByDoctorId: nullableNumber(row.createdByDoctorId),
+    creatorUserActive: nullableBoolean(row.creatorUserActive),
+  };
+}
+
+const BULK_ASSIGNMENT_JOB_SELECT = `
+  select
+    j.id,
+    j.status,
+    j.scheduled_for as "scheduledFor",
+    j.run_started_at as "runStartedAt",
+    j.run_completed_at as "runCompletedAt",
+    j.cancelled_at as "cancelledAt",
+    j.locked_at as "lockedAt",
+    j.locked_by as "lockedBy",
+    j.target_doctor_id as "targetDoctorId",
+    target_doctor.display_name as "targetDoctorName",
+    j.case_count as "caseCount",
+    j.filters_json as filters,
+    j.saved_view_id as "savedViewId",
+    j.saved_view_name as "savedViewName",
+    j.unassigned_only as "unassignedOnly",
+    j.reason,
+    j.result_json as result,
+    j.last_error as "lastError",
+    j.attempt_count as "attemptCount",
+    j.created_by_user_id as "createdByUserId",
+    j.created_by_doctor_id as "createdByDoctorId",
+    creator_doctor.display_name as "createdByName",
+    creator_user.is_active as "creatorUserActive",
+    creator_user.role as "creatorAppRole",
+    j.created_at as "createdAt",
+    j.updated_at as "updatedAt"
+  from doctor_portal.reporting_board_bulk_assignment_jobs j
+  left join doctor_portal.doctor_profiles target_doctor on target_doctor.id = j.target_doctor_id
+  left join doctor_portal.doctor_profiles creator_doctor on creator_doctor.id = j.created_by_doctor_id
+  left join users creator_user on creator_user.id = j.created_by_user_id
+`;
 
 export async function readReportingBoardSettings(): Promise<ReportingBoardSettings> {
   const result = await pool.query<{ setting_value: { value?: unknown } }>(
@@ -351,6 +442,246 @@ export async function findSavedViewById(id: number, ownerUserId: UserId): Promis
     [id, ownerUserId]
   );
   return result.rows[0] ? savedView(result.rows[0]) : null;
+}
+
+export async function createReportingBoardBulkAssignmentJob(
+  input: CreateReportingBoardBulkAssignmentJobInput,
+  actor: { userId: UserId; doctorId: number | null }
+): Promise<ReportingBoardBulkAssignmentJob> {
+  const result = await pool.query(
+    `
+      insert into doctor_portal.reporting_board_bulk_assignment_jobs (
+        scheduled_for,
+        target_doctor_id,
+        case_count,
+        filters_json,
+        saved_view_id,
+        saved_view_name,
+        unassigned_only,
+        reason,
+        created_by_user_id,
+        created_by_doctor_id
+      )
+      values ($1::timestamptz, $2, $3, $4::jsonb, $5, $6, true, $7, $8, $9)
+      returning id
+    `,
+    [
+      input.scheduledFor,
+      input.doctorId,
+      input.count,
+      JSON.stringify(input.filters ?? {}),
+      input.savedViewId ?? null,
+      input.savedViewName?.trim() || null,
+      input.reason?.trim() || null,
+      actor.userId,
+      actor.doctorId,
+    ]
+  );
+  const job = await findReportingBoardBulkAssignmentJobById(Number(result.rows[0].id));
+  if (!job) throw new HttpError(500, "Scheduled bulk assignment job was not created.");
+  return job;
+}
+
+export async function listReportingBoardBulkAssignmentJobs(limit = 25): Promise<ReportingBoardBulkAssignmentJob[]> {
+  const result = await pool.query(
+    `
+      ${BULK_ASSIGNMENT_JOB_SELECT}
+      order by
+        case j.status when 'scheduled' then 0 when 'running' then 1 when 'failed' then 2 else 3 end,
+        j.scheduled_for asc,
+        j.id asc
+      limit $1
+    `,
+    [Math.max(1, Math.min(limit, 100))]
+  );
+  return result.rows.map(bulkAssignmentJob);
+}
+
+export async function findReportingBoardBulkAssignmentJobById(id: number): Promise<ReportingBoardBulkAssignmentJob | null> {
+  const result = await pool.query(
+    `
+      ${BULK_ASSIGNMENT_JOB_SELECT}
+      where j.id = $1
+      limit 1
+    `,
+    [id]
+  );
+  return result.rows[0] ? bulkAssignmentJob(result.rows[0]) : null;
+}
+
+export async function cancelReportingBoardBulkAssignmentJob(input: {
+  id: number;
+  actorUserId: UserId;
+}): Promise<ReportingBoardBulkAssignmentJob | null> {
+  const result = await pool.query(
+    `
+      update doctor_portal.reporting_board_bulk_assignment_jobs
+      set
+        status = 'cancelled',
+        cancelled_at = now(),
+        cancelled_by_user_id = $2,
+        locked_at = null,
+        locked_by = null
+      where id = $1
+        and status = 'scheduled'
+      returning id
+    `,
+    [input.id, input.actorUserId]
+  );
+  if (!result.rows[0]) return null;
+  return findReportingBoardBulkAssignmentJobById(input.id);
+}
+
+export async function claimDueReportingBoardBulkAssignmentJobs(input: {
+  limit: number;
+  lockedBy: string;
+}): Promise<ClaimedReportingBoardBulkAssignmentJob[]> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const claimed = await client.query<{ id: number }>(
+      `
+        select id
+        from doctor_portal.reporting_board_bulk_assignment_jobs
+        where status = 'scheduled'
+          and scheduled_for <= now()
+        order by scheduled_for asc, id asc
+        limit $1
+        for update skip locked
+      `,
+      [Math.max(1, Math.min(input.limit, 25))]
+    );
+    const ids = claimed.rows.map((row) => Number(row.id));
+    if (ids.length === 0) {
+      await client.query("commit");
+      return [];
+    }
+    await client.query(
+      `
+        update doctor_portal.reporting_board_bulk_assignment_jobs
+        set
+          status = 'running',
+          run_started_at = now(),
+          run_completed_at = null,
+          locked_at = now(),
+          locked_by = $2,
+          attempt_count = attempt_count + 1,
+          last_error = null
+        where id = any($1::bigint[])
+      `,
+      [ids, input.lockedBy]
+    );
+    const result = await client.query(
+      `
+        ${BULK_ASSIGNMENT_JOB_SELECT}
+        where j.id = any($1::bigint[])
+        order by j.scheduled_for asc, j.id asc
+      `,
+      [ids]
+    );
+    await client.query("commit");
+    return result.rows.map(bulkAssignmentJob) as ClaimedReportingBoardBulkAssignmentJob[];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function claimReportingBoardBulkAssignmentJobForRunNow(input: {
+  id: number;
+  lockedBy: string;
+}): Promise<ClaimedReportingBoardBulkAssignmentJob | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const claimed = await client.query<{ id: number }>(
+      `
+        select id
+        from doctor_portal.reporting_board_bulk_assignment_jobs
+        where id = $1
+          and status in ('scheduled', 'failed')
+        for update skip locked
+      `,
+      [input.id]
+    );
+    if (!claimed.rows[0]) {
+      await client.query("commit");
+      return null;
+    }
+    await client.query(
+      `
+        update doctor_portal.reporting_board_bulk_assignment_jobs
+        set
+          status = 'running',
+          run_started_at = now(),
+          run_completed_at = null,
+          locked_at = now(),
+          locked_by = $2,
+          attempt_count = attempt_count + 1,
+          last_error = null
+        where id = $1
+      `,
+      [input.id, input.lockedBy]
+    );
+    const result = await client.query(
+      `
+        ${BULK_ASSIGNMENT_JOB_SELECT}
+        where j.id = $1
+        limit 1
+      `,
+      [input.id]
+    );
+    await client.query("commit");
+    return result.rows[0] ? (bulkAssignmentJob(result.rows[0]) as ClaimedReportingBoardBulkAssignmentJob) : null;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function completeReportingBoardBulkAssignmentJob(input: {
+  id: number;
+  result: BulkAssignNextCasesResult;
+}): Promise<void> {
+  await pool.query(
+    `
+      update doctor_portal.reporting_board_bulk_assignment_jobs
+      set
+        status = 'completed',
+        run_completed_at = now(),
+        locked_at = null,
+        locked_by = null,
+        result_json = $2::jsonb,
+        last_error = null
+      where id = $1
+        and status = 'running'
+    `,
+    [input.id, JSON.stringify(input.result)]
+  );
+}
+
+export async function failReportingBoardBulkAssignmentJob(input: {
+  id: number;
+  error: string;
+}): Promise<void> {
+  await pool.query(
+    `
+      update doctor_portal.reporting_board_bulk_assignment_jobs
+      set
+        status = 'failed',
+        run_completed_at = now(),
+        locked_at = null,
+        locked_by = null,
+        last_error = $2
+      where id = $1
+        and status = 'running'
+    `,
+    [input.id, input.error.slice(0, 2000)]
+  );
 }
 
 function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "offset">> & ReportingBoardFilters, values: unknown[]) {

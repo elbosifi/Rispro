@@ -12,14 +12,22 @@ import { insertDoctorAuditEvent } from "./profile-repository.js";
 import {
   bulkAssignReportingCases,
   bulkUnassignReportingCases,
+  cancelReportingBoardBulkAssignmentJob,
+  claimReportingBoardBulkAssignmentJobForRunNow,
+  claimDueReportingBoardBulkAssignmentJobs,
+  completeReportingBoardBulkAssignmentJob,
   createAssignedToMeNotifications,
+  createReportingBoardBulkAssignmentJob,
   createSavedView,
   doctorCanReportAllModalities,
   dismissReportingBoardNotification,
+  failReportingBoardBulkAssignmentJob,
   findActiveSavedViewByToken,
+  findReportingBoardBulkAssignmentJobById,
   findAssignableDoctorForReporting,
   findSavedViewById,
   findSavedViewByToken,
+  listReportingBoardBulkAssignmentJobs,
   listReportingBoardCasesByAppointmentIds,
   listReportingBoardCaseCandidates,
   listReportingBoardNotifications,
@@ -39,9 +47,12 @@ import type {
   BrowserPushSubscriptionInput,
   BulkAssignNextCasesInput,
   BulkAssignNextCasesResult,
+  CreateReportingBoardBulkAssignmentJobInput,
+  CreateReportingBoardBulkAssignmentJobsInput,
   BulkReassignSelectedCasesInput,
   BulkUnassignSelectedCasesInput,
   BulkUnassignSelectedCasesResult,
+  ReportingBoardBulkAssignmentJob,
   ReportingBoardCaseRow,
   ReportingBoardFilters,
   ReportingBoardDoctorStatsRow,
@@ -52,6 +63,7 @@ import type {
   ReportingBoardStatsResponse,
   ReportingBoardStatsSummary,
 } from "./reporting-board-types.js";
+import type { ClaimedReportingBoardBulkAssignmentJob } from "./reporting-board-repository.js";
 
 interface Actor {
   userId: UserId;
@@ -62,6 +74,7 @@ const MAX_CASE_LIST_LIMIT = 300;
 const MAX_UNIFIED_CANDIDATE_FETCH = 3000;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
+const MAX_SCHEDULED_BULK_ASSIGN_JOBS = 5;
 const REPORTING_BOARD_SORT_BY = new Set([
   "priority_study_date",
   "study_date",
@@ -985,6 +998,155 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
     skippedCount: result.skippedCount + preSkipped.length,
     skipped: [...result.skipped, ...preSkipped],
   };
+}
+
+function scheduledForIso(value: string): string {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) {
+    throw new HttpError(400, "scheduledFor must be a valid date/time.");
+  }
+  return date.toISOString();
+}
+
+function compactReportingBoardFilters(input: ReportingBoardFilters): ReportingBoardFilters {
+  const output: ReportingBoardFilters = {};
+  for (const [key, value] of Object.entries(input) as Array<[keyof ReportingBoardFilters, ReportingBoardFilters[keyof ReportingBoardFilters]]>) {
+    if (value !== null && value !== undefined && value !== "") output[key] = value as never;
+  }
+  return output;
+}
+
+function frozenScheduledFilters(input: ReportingBoardFilters): ReportingBoardFilters {
+  return compactReportingBoardFilters({
+    ...input,
+    caseSource: "appointments",
+    assignmentStatus: "unassigned",
+    limit: null,
+    offset: null,
+    appointmentId: null,
+    comparisonRequestId: null,
+    assignedDoctorId: null,
+  });
+}
+
+function normalizeScheduledJobInput(input: CreateReportingBoardBulkAssignmentJobInput): CreateReportingBoardBulkAssignmentJobInput {
+  if (!Number.isInteger(input.doctorId) || input.doctorId <= 0) throw new HttpError(400, "doctorId must be a positive integer.");
+  if (!Number.isInteger(input.count) || input.count <= 0 || input.count > MAX_BULK_ASSIGN_COUNT) {
+    throw new HttpError(400, `count must be between 1 and ${MAX_BULK_ASSIGN_COUNT}.`);
+  }
+  return {
+    scheduledFor: scheduledForIso(input.scheduledFor),
+    doctorId: input.doctorId,
+    count: input.count,
+    filters: frozenScheduledFilters(input.filters ?? {}),
+    savedViewId: input.savedViewId ?? null,
+    savedViewName: input.savedViewName?.trim() || null,
+    reason: input.reason?.trim() || null,
+  };
+}
+
+async function withSavedViewName(actor: Actor, input: CreateReportingBoardBulkAssignmentJobInput): Promise<CreateReportingBoardBulkAssignmentJobInput> {
+  if (!input.savedViewId) return input;
+  const view = await findSavedViewById(input.savedViewId, actor.userId);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return { ...input, savedViewName: view.name };
+}
+
+export async function createScheduledReportingBoardBulkAssignmentJob(
+  actor: Actor,
+  input: CreateReportingBoardBulkAssignmentJobInput
+): Promise<ReportingBoardBulkAssignmentJob> {
+  const me = await requireRosterManager(actor);
+  const normalized = normalizeScheduledJobInput(await withSavedViewName(actor, input));
+  return createReportingBoardBulkAssignmentJob(normalized, { userId: actor.userId, doctorId: me.profile!.id });
+}
+
+export async function createScheduledReportingBoardBulkAssignmentJobs(
+  actor: Actor,
+  input: CreateReportingBoardBulkAssignmentJobsInput
+): Promise<ReportingBoardBulkAssignmentJob[]> {
+  if (!Array.isArray(input.jobs) || input.jobs.length === 0) throw new HttpError(400, "jobs must be a non-empty array.");
+  if (input.jobs.length > MAX_SCHEDULED_BULK_ASSIGN_JOBS) throw new HttpError(400, `jobs must contain ${MAX_SCHEDULED_BULK_ASSIGN_JOBS} or fewer items.`);
+  const jobs: ReportingBoardBulkAssignmentJob[] = [];
+  for (const job of input.jobs) {
+    jobs.push(await createScheduledReportingBoardBulkAssignmentJob(actor, job));
+  }
+  return jobs;
+}
+
+export async function getScheduledReportingBoardBulkAssignmentJobs(actor: Actor): Promise<ReportingBoardBulkAssignmentJob[]> {
+  await requireRosterManager(actor);
+  return listReportingBoardBulkAssignmentJobs();
+}
+
+export async function cancelScheduledReportingBoardBulkAssignmentJob(actor: Actor, id: number): Promise<ReportingBoardBulkAssignmentJob> {
+  await requireRosterManager(actor);
+  const job = await cancelReportingBoardBulkAssignmentJob({ id, actorUserId: actor.userId });
+  if (!job) {
+    const existing = await findReportingBoardBulkAssignmentJobById(id);
+    if (!existing) throw new HttpError(404, "Scheduled bulk assignment job not found.");
+    throw new HttpError(409, "Only scheduled jobs can be cancelled.");
+  }
+  return job;
+}
+
+export async function executeClaimedReportingBoardBulkAssignmentJob(
+  job: ClaimedReportingBoardBulkAssignmentJob
+): Promise<ReportingBoardBulkAssignmentJob> {
+  try {
+    if (!job.createdByUserId || !job.creatorUserActive || !job.creatorAppRole) {
+      throw new HttpError(403, "Creator user is no longer active.");
+    }
+    await requireRosterManager({ userId: job.createdByUserId, appRole: job.creatorAppRole as Role });
+    const result = await bulkAssignNextReportingBoardCases(
+      { userId: job.createdByUserId, appRole: job.creatorAppRole as Role },
+      {
+        doctorId: job.targetDoctorId,
+        count: job.caseCount,
+        filters: frozenScheduledFilters(job.filters),
+        savedViewId: null,
+        token: null,
+        unassignedOnly: true,
+        reason: job.reason,
+      }
+    );
+    await completeReportingBoardBulkAssignmentJob({ id: job.id, result });
+  } catch (error) {
+    await failReportingBoardBulkAssignmentJob({ id: job.id, error: error instanceof Error ? error.message : String(error) });
+  }
+  const refreshed = await findReportingBoardBulkAssignmentJobById(job.id);
+  if (!refreshed) throw new HttpError(404, "Scheduled bulk assignment job not found.");
+  return refreshed;
+}
+
+export async function runDueScheduledReportingBoardBulkAssignmentJobs(options: {
+  limit?: number;
+  lockedBy: string;
+}): Promise<{ checked: number; completed: number; failed: number }> {
+  const claimed = await claimDueReportingBoardBulkAssignmentJobs({ limit: options.limit ?? 5, lockedBy: options.lockedBy });
+  let completed = 0;
+  let failed = 0;
+  for (const job of claimed) {
+    const result = await executeClaimedReportingBoardBulkAssignmentJob(job);
+    if (result.status === "completed") completed += 1;
+    if (result.status === "failed") failed += 1;
+  }
+  return { checked: claimed.length, completed, failed };
+}
+
+export async function runScheduledReportingBoardBulkAssignmentJobNow(
+  actor: Actor,
+  id: number,
+  lockedBy: string
+): Promise<ReportingBoardBulkAssignmentJob> {
+  await requireRosterManager(actor);
+  const claimed = await claimReportingBoardBulkAssignmentJobForRunNow({ id, lockedBy });
+  if (!claimed) {
+    const existing = await findReportingBoardBulkAssignmentJobById(id);
+    if (!existing) throw new HttpError(404, "Scheduled bulk assignment job not found.");
+    throw new HttpError(409, "Only scheduled or failed jobs can be run now.");
+  }
+  return executeClaimedReportingBoardBulkAssignmentJob(claimed);
 }
 
 function uniquePositiveAppointmentIds(appointmentIds: number[]): number[] {

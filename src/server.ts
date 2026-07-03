@@ -7,6 +7,7 @@ import type { OrthancMwlWorker } from "./services/orthanc-mwl-worker-service.js"
 import type { SanteWorklistWorker } from "./services/sante-worklist-worker-service.js";
 import type { AppointmentsV2PacsAutoCompletionWorker } from "./services/appointments-v2-pacs-auto-completion-worker.js";
 import type { PatientNotificationWorker } from "./services/patient-notification-worker.js";
+import type { ReportingBoardBulkAssignmentWorker } from "./services/reporting-board-bulk-assignment-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -16,6 +17,7 @@ let orthancMwlWorker: OrthancMwlWorker | null = null;
 let santeWorklistWorker: SanteWorklistWorker | null = null;
 let pacsAutoCompletionWorker: AppointmentsV2PacsAutoCompletionWorker | null = null;
 let patientNotificationWorker: PatientNotificationWorker | null = null;
+let reportingBoardBulkAssignmentWorker: ReportingBoardBulkAssignmentWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -67,6 +69,14 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
       await patientNotificationWorker.stop();
     } catch (error) {
       console.error("Failed to stop patient notification worker.", error);
+    }
+  }
+
+  if (reportingBoardBulkAssignmentWorker) {
+    try {
+      await reportingBoardBulkAssignmentWorker.stop();
+    } catch (error) {
+      console.error("Failed to stop Reporting Board bulk assignment worker.", error);
     }
   }
 
@@ -191,6 +201,16 @@ async function start(): Promise<void> {
     console.error("Patient Web Push worker initialization failed. Continuing; patient Web Push can be reconfigured from settings.");
     logError(error);
     startupSummary.patient_notifications = "initialization_failed";
+  }
+
+  try {
+    const { startReportingBoardBulkAssignmentWorker } = await import("./services/reporting-board-bulk-assignment-worker.js");
+    reportingBoardBulkAssignmentWorker = await startReportingBoardBulkAssignmentWorker();
+    startupSummary.reporting_board_bulk_assignments = "started";
+  } catch (error) {
+    console.error("Reporting Board bulk assignment worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.reporting_board_bulk_assignments = "initialization_failed";
   }
 
   try {

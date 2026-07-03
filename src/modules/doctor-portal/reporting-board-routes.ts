@@ -10,11 +10,15 @@ import {
   bulkAssignNextReportingBoardCases,
   bulkReassignSelectedReportingBoardCases,
   bulkUnassignSelectedReportingBoardCases,
+  cancelScheduledReportingBoardBulkAssignmentJob,
+  createScheduledReportingBoardBulkAssignmentJob,
+  createScheduledReportingBoardBulkAssignmentJobs,
   createReportingBoardSavedView,
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
   getReportingBoardPushConfig,
   getReportingBoardSonicDicomStudyRedirect,
+  getScheduledReportingBoardBulkAssignmentJobs,
   getReportingBoardSettings,
   getReportingBoardStats,
   getMyReportingBoardNotifications,
@@ -24,6 +28,7 @@ import {
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
+  runScheduledReportingBoardBulkAssignmentJobNow,
   sendReportingBoardSavedViewTestNotification,
   subscribeReportingBoardSavedViewPush,
   unassignReportingBoardCase,
@@ -351,6 +356,67 @@ router.post(
       reason: asOptionalString(body.reason) ?? null,
     });
     res.json(result);
+  })
+);
+
+function scheduledJobInput(value: unknown) {
+  const body = asUnknownRecord(value);
+  return {
+    scheduledFor: asString(body.scheduledFor),
+    doctorId: requiredPositiveInteger(body.doctorId, "doctorId"),
+    count: requiredPositiveInteger(body.count, "count"),
+    filters: filtersFromBody(body.filters ?? {}),
+    savedViewId: optionalPositiveInteger(body.savedViewId, "savedViewId"),
+    savedViewName: asOptionalString(body.savedViewName) ?? null,
+    reason: asOptionalString(body.reason) ?? null,
+  };
+}
+
+router.get(
+  "/bulk-assignment-jobs",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ jobs: await getScheduledReportingBoardBulkAssignmentJobs(actor(req)) });
+  })
+);
+
+router.post(
+  "/bulk-assignment-jobs",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const job = await createScheduledReportingBoardBulkAssignmentJob(actor(req), scheduledJobInput(req.body));
+    res.status(201).json({ job });
+  })
+);
+
+router.post(
+  "/bulk-assignment-jobs/batch",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    if (!Array.isArray(body.jobs)) throw new HttpError(400, "jobs must be an array.");
+    const jobs = await createScheduledReportingBoardBulkAssignmentJobs(actor(req), {
+      jobs: body.jobs.map((item) => scheduledJobInput(item)),
+    });
+    res.status(201).json({ jobs });
+  })
+);
+
+router.post(
+  "/bulk-assignment-jobs/:id/cancel",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const job = await cancelScheduledReportingBoardBulkAssignmentJob(actor(req), requiredPositiveInteger(req.params.id, "id"));
+    res.json({ job });
+  })
+);
+
+router.post(
+  "/bulk-assignment-jobs/:id/run-now",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const requestActor = actor(req);
+    const job = await runScheduledReportingBoardBulkAssignmentJobNow(
+      requestActor,
+      requiredPositiveInteger(req.params.id, "id"),
+      `api:${requestActor.userId}`
+    );
+    res.json({ job });
   })
 );
 

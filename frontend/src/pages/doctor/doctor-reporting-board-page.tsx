@@ -3,16 +3,20 @@ import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { AlertTriangle, Bell, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Minus, MoreVertical, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, FilePenLine, Minus, MoreVertical, Play, Printer, QrCode, RefreshCw, Save, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
 import {
   assignReportingBoardCase,
   assignComparisonRequest,
   bulkAssignNextReportingCases,
   bulkReassignSelectedReportingCases,
   bulkUnassignSelectedReportingCases,
+  cancelReportingBoardBulkAssignmentJob,
+  createReportingBoardBulkAssignmentJob,
+  createReportingBoardBulkAssignmentJobs,
   createReportingBoardSavedView,
   fetchAppointmentLookups,
   fetchReportingBoardCases,
+  fetchReportingBoardBulkAssignmentJobs,
   fetchReportingBoardPushConfig,
   fetchReportingBoardSavedViewByToken,
   fetchReportingBoardSavedViews,
@@ -22,6 +26,7 @@ import {
   finalizeComparisonRequest,
   markReportingBoardCaseDiscontinued,
   sendReportingBoardSavedViewTestPush,
+  runReportingBoardBulkAssignmentJobNow,
   subscribeReportingBoardSavedViewPush,
   unassignReportingBoardCase,
   unassignComparisonRequest,
@@ -31,7 +36,9 @@ import {
 import type {
   DoctorMe,
   DoctorProfile,
+  CreateReportingBoardBulkAssignmentJobPayload,
   ReportingBoardBulkAssignResult,
+  ReportingBoardBulkAssignmentJob,
   ReportingBoardBulkUnassignResult,
   ReportingBoardCaseRow,
   ReportingBoardCaseSource,
@@ -135,6 +142,73 @@ function buildSonicDicomRedirectPath(appointmentId: number, scope: "study" | "pa
 
 function compactFilters(filters: ReportingBoardFilters): ReportingBoardFilters {
   return Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== "" && value !== null && value !== undefined)) as ReportingBoardFilters;
+}
+
+const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
+
+function tripoliDateParts(date: Date): Record<string, string> {
+  return Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: TRIPOLI_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+}
+
+function tripoliNowInput(): string {
+  const parts = tripoliDateParts(new Date());
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function timeZoneOffsetMs(timeZone: string, utcMs: number): number {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(utcMs)).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second)) - utcMs;
+}
+
+function tripoliLocalInputToIso(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return "";
+  const [, year, month, day, hour, minute] = match;
+  const localAsUtc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  const firstPass = localAsUtc - timeZoneOffsetMs(TRIPOLI_TIME_ZONE, localAsUtc);
+  return new Date(localAsUtc - timeZoneOffsetMs(TRIPOLI_TIME_ZONE, firstPass)).toISOString();
+}
+
+function tripoliDisplay(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TRIPOLI_TIME_ZONE,
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
+function addDaysToDateString(date: string, days: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return next.toISOString().slice(0, 10);
+}
+
+function nextTripoliSunday(): string {
+  const parts = tripoliDateParts(new Date());
+  const today = `${parts.year}-${parts.month}-${parts.day}`;
+  const day = new Date(`${today}T00:00:00Z`).getUTCDay();
+  return addDaysToDateString(today, (7 - day) % 7);
 }
 
 export function buildReportingBoardPrintUrl(input: {
@@ -910,6 +984,191 @@ function BulkAssignModal({
   );
 }
 
+function scheduledFilters(filters: ReportingBoardFilters, modalityId: string): ReportingBoardFilters {
+  const scopedFilters = modalityId ? { ...filters, modalityId: Number(modalityId), modalityCode: null } : filters;
+  return compactFilters({
+    ...scopedFilters,
+    assignmentStatus: "unassigned",
+    caseSource: "appointments",
+    assignedDoctorId: null,
+    appointmentId: null,
+    limit: null,
+    offset: null,
+  });
+}
+
+function ScheduleBulkAssignModal({
+  open,
+  doctors,
+  modalities,
+  filters,
+  savedView,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  doctors: DoctorProfile[];
+  modalities: Array<{ id: number; code?: string; nameEn: string }>;
+  filters: ReportingBoardFilters;
+  savedView: ReportingBoardSavedView | null;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [doctorId, setDoctorId] = useState("");
+  const [count, setCount] = useState("5");
+  const [modalityId, setModalityId] = useState("");
+  const [mode, setMode] = useState<"single" | "week">("single");
+  const [scheduledAt, setScheduledAt] = useState(() => tripoliNowInput());
+  const [weekStart, setWeekStart] = useState(() => nextTripoliSunday());
+  const [weekTime, setWeekTime] = useState("09:00");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+
+  const buildPayload = (scheduledFor: string): CreateReportingBoardBulkAssignmentJobPayload => ({
+    scheduledFor,
+    doctorId: Number(doctorId),
+    count: Number(count),
+    filters: scheduledFilters(filters, modalityId),
+    savedViewId: savedView?.id ?? null,
+    savedViewName: savedView?.name ?? null,
+    reason: note.trim() || null,
+  });
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      if (mode === "week") {
+        const jobs = [0, 1, 2, 3, 4].map((offset) => buildPayload(tripoliLocalInputToIso(`${addDaysToDateString(weekStart, offset)}T${weekTime}`)));
+        return createReportingBoardBulkAssignmentJobs({ jobs });
+      }
+      return createReportingBoardBulkAssignmentJob(buildPayload(tripoliLocalInputToIso(scheduledAt))).then((job) => [job]);
+    },
+    onSuccess: () => {
+      onCreated();
+      onClose();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "Could not schedule bulk assignment."),
+  });
+
+  if (!open) return null;
+  const invalid = !doctorId || !Number.isInteger(Number(count)) || Number(count) <= 0 || (mode === "single" ? !scheduledAt : !weekStart || !weekTime);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+      <section className="w-full max-w-lg rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <h3 className="text-lg font-semibold text-foreground">Schedule auto-assign</h3>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>One-time jobs use frozen current filters, appointments only, unassigned only. Times are Africa/Tripoli.</p>
+        <div className="mt-4 grid gap-3">
+          <div className="inline-flex rounded-lg border p-1" style={{ borderColor: "var(--border)" }}>
+            <button type="button" onClick={() => setMode("single")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "single" ? "bg-teal-600 text-white" : ""}`}>Single</button>
+            <button type="button" onClick={() => setMode("week")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "week" ? "bg-teal-600 text-white" : ""}`}>Sun-Thu</button>
+          </div>
+          {mode === "single" ? (
+            <Field label="Scheduled time">
+              <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} className={inputClass()} />
+            </Field>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Sunday date">
+                <input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} className={inputClass()} />
+              </Field>
+              <Field label="Daily time">
+                <input type="time" value={weekTime} onChange={(event) => setWeekTime(event.target.value)} className={inputClass()} />
+              </Field>
+            </div>
+          )}
+          <Field label="Doctor">
+            <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className={inputClass()}>
+              <option value="">Select doctor</option>
+              {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+            </select>
+          </Field>
+          <Field label="Number of cases">
+            <input value={count} onChange={(event) => setCount(event.target.value)} type="number" min={1} className={inputClass()} />
+          </Field>
+          <Field label="Modality">
+            <select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className={inputClass()}>
+              <option value="">Configured CT/MR</option>
+              {modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.code ?? modality.nameEn}</option>)}
+            </select>
+          </Field>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" checked readOnly />
+            Unassigned only
+          </label>
+          <Field label="Notes for assigned doctor">
+            <textarea value={note} onChange={(event) => setNote(event.target.value)} className="min-h-20 w-full rounded-lg border px-3 py-2 text-sm" />
+          </Field>
+        </div>
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+          <button type="button" disabled={invalid || mutation.isPending} onClick={() => mutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-300">
+            Schedule
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ScheduledJobsPanel({
+  jobs,
+  loading,
+  onCancel,
+  onRunNow,
+  busyJobId,
+}: {
+  jobs: ReportingBoardBulkAssignmentJob[];
+  loading: boolean;
+  onCancel: (id: number) => void;
+  onRunNow: (id: number) => void;
+  busyJobId: number | null;
+}) {
+  return (
+    <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground"><CalendarClock size={16} /> Scheduled auto-assign jobs</h3>
+        {loading && <span className="text-xs" style={{ color: "var(--text-muted)" }}>Loading...</span>}
+      </div>
+      <div className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+        {jobs.length === 0 && <p className="py-2" style={{ color: "var(--text-muted)" }}>No scheduled jobs.</p>}
+        {jobs.map((job) => (
+          <div key={job.id} className="grid gap-2 py-3 lg:grid-cols-[1.2fr_1fr_0.8fr_1.3fr_auto] lg:items-center">
+            <div>
+              <p className="font-semibold text-foreground">{tripoliDisplay(job.scheduledFor)}</p>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Tripoli time</p>
+            </div>
+            <div>
+              <p>{job.targetDoctorName ?? `Doctor ${job.targetDoctorId}`}</p>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.caseCount} cases</p>
+            </div>
+            <div>
+              <span className="rounded-full border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{job.status}</span>
+            </div>
+            <div className="min-w-0">
+              <p className="truncate">{job.savedViewName ?? job.filters.modalityCode ?? (job.filters.modalityId ? `Modality ${job.filters.modalityId}` : "Frozen board filters")}</p>
+              {job.result && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{job.result.assignedCount}/{job.result.requestedCount} assigned, {job.result.skippedCount} skipped</p>}
+              {job.lastError && <p className="text-xs text-red-600">{job.lastError}</p>}
+            </div>
+            <div className="flex gap-2 lg:justify-end">
+              {job.status === "scheduled" && (
+                <button type="button" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+                  <X size={13} /> Cancel
+                </button>
+              )}
+              {(job.status === "scheduled" || job.status === "failed") && (
+                <button type="button" disabled={busyJobId === job.id} onClick={() => onRunNow(job.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>
+                  <Play size={13} /> Run now
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function BoardSettingsModal({
   open,
   settingsDraft,
@@ -980,7 +1239,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [saveName, setSaveName] = useState("");
   const [notifications, setNotifications] = useState<ReportingBoardNotificationSettings>(EMPTY_NOTIFICATIONS);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [scheduleBulkOpen, setScheduleBulkOpen] = useState(false);
   const [bulkResult, setBulkResult] = useState<ReportingBoardBulkAssignResult | ReportingBoardBulkUnassignResult | null>(null);
+  const [busyScheduledJobId, setBusyScheduledJobId] = useState<number | null>(null);
   const [selectedReassignDoctorId, setSelectedReassignDoctorId] = useState("");
   const [selectedReassignReason, setSelectedReassignReason] = useState("");
   const [selectedReassignConfirmOpen, setSelectedReassignConfirmOpen] = useState(false);
@@ -1019,6 +1280,39 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const savedViewsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "saved-views"], queryFn: fetchReportingBoardSavedViews });
   const doctorsQuery = useQuery({ queryKey: ["doctor", "roster", "doctors"], queryFn: fetchRosterDoctors });
   const lookupsQuery = useQuery({ queryKey: ["lookups"], queryFn: fetchAppointmentLookups, staleTime: 1000 * 60 * 5 });
+  const scheduledJobsQuery = useQuery({
+    queryKey: ["doctor", "reporting-board", "bulk-assignment-jobs"],
+    queryFn: fetchReportingBoardBulkAssignmentJobs,
+    enabled: isManager(me),
+    refetchInterval: 30_000,
+  });
+
+  const refreshScheduledJobsAndBoard = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "bulk-assignment-jobs"] }),
+      queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+      queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+    ]);
+  };
+
+  const cancelScheduledJobMutation = useMutation({
+    mutationFn: cancelReportingBoardBulkAssignmentJob,
+    onMutate: (id) => setBusyScheduledJobId(id),
+    onSuccess: refreshScheduledJobsAndBoard,
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not cancel scheduled job." }),
+    onSettled: () => setBusyScheduledJobId(null),
+  });
+
+  const runScheduledJobNowMutation = useMutation({
+    mutationFn: runReportingBoardBulkAssignmentJobNow,
+    onMutate: (id) => setBusyScheduledJobId(id),
+    onSuccess: async (job) => {
+      setBoardActionMessage({ tone: job.status === "failed" ? "error" : "success", text: job.status === "failed" ? "Scheduled job failed." : "Scheduled job ran.", detail: job.lastError });
+      await refreshScheduledJobsAndBoard();
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not run scheduled job." }),
+    onSettled: () => setBusyScheduledJobId(null),
+  });
   const tokenQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "saved-view-token", savedViewToken],
     queryFn: () => fetchReportingBoardSavedViewByToken(savedViewToken || ""),
@@ -1438,9 +1732,14 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             <Settings size={16} /> Board settings
           </button>
           {canManage && (
-            <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">
-              <Users size={16} /> Auto-assign next cases
-            </button>
+            <>
+              <button type="button" onClick={() => setBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">
+                <Users size={16} /> Auto-assign next cases
+              </button>
+              <button type="button" onClick={() => setScheduleBulkOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                <CalendarClock size={16} /> Schedule auto-assign
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1452,6 +1751,16 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <p className="font-semibold">{boardActionMessage.text}</p>
           {boardActionMessage.detail && <p className="mt-1 text-xs">{boardActionMessage.detail}</p>}
         </div>
+      )}
+
+      {canManage && (
+        <ScheduledJobsPanel
+          jobs={scheduledJobsQuery.data ?? []}
+          loading={scheduledJobsQuery.isLoading}
+          busyJobId={busyScheduledJobId}
+          onCancel={(id) => cancelScheduledJobMutation.mutate(id)}
+          onRunNow={(id) => runScheduledJobNowMutation.mutate(id)}
+        />
       )}
 
       <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
@@ -1884,6 +2193,18 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
             queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
             queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
           ]);
+        }}
+      />
+      <ScheduleBulkAssignModal
+        open={scheduleBulkOpen}
+        doctors={doctorsQuery.data ?? []}
+        modalities={lookupsQuery.data?.modalities ?? []}
+        filters={compactFilters(filters)}
+        savedView={loadedSavedView}
+        onClose={() => setScheduleBulkOpen(false)}
+        onCreated={async () => {
+          setBoardActionMessage({ tone: "success", text: "Scheduled auto-assign job created." });
+          await refreshScheduledJobsAndBoard();
         }}
       />
       <BoardSettingsModal

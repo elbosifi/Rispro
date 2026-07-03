@@ -182,6 +182,33 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /summaryAuditEventType/);
   });
 
+  it("adds one-time scheduled Reporting Board bulk assignment jobs without a new assignment algorithm", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/106_reporting_board_scheduled_bulk_assignments.sql`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const worker = readFileSync(`${root}/src/services/reporting-board-bulk-assignment-worker.ts`, "utf8");
+    const frontend = readFileSync(`${root}/frontend/src/pages/doctor/doctor-reporting-board-page.tsx`, "utf8");
+
+    assert.match(migration, /doctor_portal\.reporting_board_bulk_assignment_jobs/);
+    assert.match(migration, /scheduled_for timestamptz not null/);
+    assert.match(migration, /locked_at timestamptz/);
+    assert.match(migration, /locked_by text/);
+    assert.doesNotMatch(migration, /recurr/i);
+    assert.match(routes, /"\/bulk-assignment-jobs\/batch"/);
+    assert.match(routes, /"\/bulk-assignment-jobs\/:id\/run-now"/);
+    assert.match(routes, /"\/bulk-assignment-jobs\/:id\/cancel"/);
+    assert.match(service, /caseSource: "appointments"/);
+    assert.match(service, /assignmentStatus: "unassigned"/);
+    assert.match(service, /bulkAssignNextReportingBoardCases\(/);
+    assert.match(service, /unassignedOnly: true/);
+    assert.match(service, /creatorUserActive/);
+    assert.match(repo, /for update skip locked/);
+    assert.match(worker, /runDueScheduledReportingBoardBulkAssignmentJobs/);
+    assert.match(frontend, /TRIPOLI_TIME_ZONE = "Africa\/Tripoli"/);
+    assert.match(frontend, /Sun-Thu/);
+  });
+
   it("saved view tokens are active-only and owner scoped unless loaded by a manager", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
