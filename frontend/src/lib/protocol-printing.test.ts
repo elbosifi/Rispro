@@ -39,6 +39,7 @@ function mockPrintWindow() {
       write: vi.fn(),
       close: vi.fn(),
     },
+    opener: window,
     focus: vi.fn(),
     print: vi.fn(),
   };
@@ -50,8 +51,7 @@ describe("printProtocolSheet", () => {
     vi.restoreAllMocks();
   });
 
-  it("writes the protocol sheet into a writable print window before printing", () => {
-    vi.useFakeTimers();
+  it("writes a self-contained protocol sheet into a writable print window", () => {
     const printWindow = mockPrintWindow();
     const openSpy = vi.spyOn(window, "open").mockReturnValue(printWindow as unknown as Window);
 
@@ -61,13 +61,15 @@ describe("printProtocolSheet", () => {
     expect(printWindow.document.open).toHaveBeenCalledOnce();
     expect(printWindow.document.write).toHaveBeenCalledOnce();
     expect(printWindow.document.close).toHaveBeenCalledOnce();
-    expect(printWindow.document.write).toHaveBeenCalledWith(expect.stringContaining("NCCB / RISpro Protocol Sheet"));
+    const html = String(printWindow.document.write.mock.calls[0]?.[0] ?? "");
+    expect(html).toContain("NCCB / RISpro Protocol Sheet");
+    expect(html).toContain("window.print()");
+    expect(html).toContain("window.close()");
+    expect(html).toContain(">Print</button>");
+    expect(html).toContain(">Close</button>");
+    expect(html).toContain(".toolbar { display: none; }");
+    expect(printWindow.focus).not.toHaveBeenCalled();
     expect(printWindow.print).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(150);
-
-    expect(printWindow.focus).toHaveBeenCalledOnce();
-    expect(printWindow.print).toHaveBeenCalledOnce();
   });
 
   it("warns when the print window is blocked", () => {

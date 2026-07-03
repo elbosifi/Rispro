@@ -156,6 +156,9 @@ function html(sheet: ProtocolPrintSheet): string {
     h1 { margin: 0; font-size: 20px; }
     h2 { margin: 18px 0 8px; font-size: 14px; }
     .muted { color: #4b5563; }
+    .toolbar { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 16px; }
+    .toolbar button { border: 1px solid #9ca3af; border-radius: 6px; background: #fff; color: #111827; cursor: pointer; font: 700 12px Arial, sans-serif; padding: 7px 12px; }
+    .toolbar button:first-child { background: #0f766e; border-color: #0f766e; color: #fff; }
     dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
     dt { color: #4b5563; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
     dd { margin: 2px 0 0; font-weight: 700; }
@@ -167,11 +170,15 @@ function html(sheet: ProtocolPrintSheet): string {
     .empty { color: #6b7280; }
     @media print {
       body { margin: 16mm; }
-      button { display: none; }
+      .toolbar { display: none; }
     }
   </style>
 </head>
 <body>
+  <div class="toolbar" aria-label="Protocol print controls">
+    <button type="button" onclick="window.print()">Print</button>
+    <button type="button" onclick="window.close()">Close</button>
+  </div>
   <header>
     <h1>NCCB / RISpro Protocol Sheet</h1>
     <p class="muted">Printed ${text(printedAt)}</p>
@@ -218,12 +225,9 @@ export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
   printWindow.document.open();
   printWindow.document.write(html(sheet));
   printWindow.document.close();
-  window.setTimeout(() => {
-    try {
-      printWindow.focus();
-      printWindow.print();
-    } catch (error) {
-      console.warn("Unable to print protocol sheet.", error);
-    }
-  }, 150);
+  try {
+    printWindow.opener = null;
+  } catch {
+    // Some browsers make opener read-only. The print sheet remains self-contained.
+  }
 }
