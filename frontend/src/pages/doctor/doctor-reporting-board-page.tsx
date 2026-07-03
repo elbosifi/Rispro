@@ -201,9 +201,9 @@ function tripoliDisplay(value: string): string {
   }).format(new Date(value));
 }
 
-function weekdayLabel(date: string): string {
-  if (!date) return "-";
-  return new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+function formatTripoliPlanDateLabel(date: string): string {
+  if (!date) return "Date required";
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
 }
 
 function addDaysToDateString(date: string, days: number): string {
@@ -1118,7 +1118,7 @@ function ScheduleBulkAssignModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
-      <section className="w-full max-w-4xl rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <section className="max-h-[90vh] w-[min(95vw,1180px)] overflow-y-auto rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <h3 className="text-lg font-semibold text-foreground">Schedule auto-assign</h3>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>One-time jobs use frozen current filters, appointments only, unassigned only. Times are Africa/Tripoli.</p>
         <div className="mt-4 grid gap-3">
@@ -1150,59 +1150,48 @@ function ScheduleBulkAssignModal({
                   {planValidationSummary.map((message) => <p key={message}>{message}</p>)}
                 </div>
               )}
-              <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "rgba(148, 163, 184, 0.28)" }}>
-                <table className="w-full min-w-[980px] table-fixed text-sm">
-                  <colgroup>
-                    <col className="w-14" />
-                    <col className="w-28" />
-                    <col className="w-40" />
-                    <col className="w-32" />
-                    <col className="w-72" />
-                    <col className="w-24" />
-                    <col className="w-36" />
-                  </colgroup>
-                  <thead style={{ backgroundColor: "var(--background)" }}>
-                    <tr className="text-left">
-                      <th className="px-3 py-2">Use</th>
-                      <th className="px-3 py-2">Day</th>
-                      <th className="px-3 py-2">Date</th>
-                      <th className="px-3 py-2">Time</th>
-                      <th className="px-3 py-2">Doctor</th>
-                      <th className="px-3 py-2">Count</th>
-                      <th className="px-3 py-2">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y" style={{ borderColor: "rgba(148, 163, 184, 0.18)" }}>
-                    {planRows.length === 0 && (
-                      <tr><td colSpan={7} className="px-3 py-4" style={{ color: "var(--text-muted)" }}>Add rows or start from the Sunday-Thursday template.</td></tr>
-                    )}
-                    {planRows.map((row) => {
-                      const rowValidation = planValidationById.get(row.id);
-                      const invalidFieldClass = (isInvalid?: boolean) => `${inputClass()} ${isInvalid ? "border-red-400 text-red-900" : ""}`;
-                      return (
-                      <tr key={row.id} className="align-middle">
-                        <td className="px-3 py-2"><input type="checkbox" checked={row.enabled} onChange={(event) => setPlanRow(row.id, { enabled: event.target.checked })} /></td>
-                        <td className="px-3 py-2 font-semibold">{weekdayLabel(row.date)}</td>
-                        <td className="px-3 py-2"><input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { date: event.target.value })} className={invalidFieldClass(rowValidation?.missingDate)} /></td>
-                        <td className="px-3 py-2"><input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { time: event.target.value })} className={invalidFieldClass(rowValidation?.missingTime)} /></td>
-                        <td className="px-3 py-2">
-                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { doctorId: event.target.value })} className={`${invalidFieldClass(rowValidation?.missingDoctor)} min-w-64`}>
+              <div className="grid gap-2">
+                {planRows.length === 0 && (
+                  <div className="rounded-lg border px-3 py-4 text-sm" style={{ borderColor: "rgba(148, 163, 184, 0.24)", color: "var(--text-muted)" }}>Add rows or start from the Sunday-Thursday template.</div>
+                )}
+                {planRows.map((row) => {
+                  const rowValidation = planValidationById.get(row.id);
+                  const invalidFieldClass = (isInvalid?: boolean) => `${inputClass()} ${isInvalid ? "border-red-400 text-red-900" : ""}`;
+                  return (
+                    <div key={row.id} className="rounded-lg border px-3 py-3" style={{ borderColor: "rgba(148, 163, 184, 0.24)" }}>
+                      <div className="grid gap-3 lg:grid-cols-[2.5rem_minmax(11rem,1.1fr)_8rem_minmax(16rem,2fr)_6rem_auto] lg:items-start">
+                        <label className="flex items-center gap-2 text-xs font-semibold lg:pt-7" style={{ color: "var(--text-muted)" }}>
+                          <input type="checkbox" checked={row.enabled} onChange={(event) => setPlanRow(row.id, { enabled: event.target.checked })} />
+                          <span className="lg:hidden">Use</span>
+                        </label>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Date</label>
+                          <input type="date" value={row.date} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { date: event.target.value })} className={invalidFieldClass(rowValidation?.missingDate)} />
+                          <p className="mt-1 text-xs" style={{ color: rowValidation?.missingDate ? "#b91c1c" : "var(--text-muted)" }}>{formatTripoliPlanDateLabel(row.date)}</p>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Time</label>
+                          <input type="time" value={row.time} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { time: event.target.value })} className={invalidFieldClass(rowValidation?.missingTime)} />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Doctor</label>
+                          <select value={row.doctorId} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { doctorId: event.target.value })} className={invalidFieldClass(rowValidation?.missingDoctor)}>
                             <option value="">Select doctor</option>
                             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
                           </select>
-                        </td>
-                        <td className="px-3 py-2"><input value={row.count} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { count: event.target.value })} type="number" min={1} className={invalidFieldClass(rowValidation?.invalidCount)} /></td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-1">
-                            <button type="button" onClick={() => setPlanRows((current) => [...current, { ...row, id: `${Date.now()}-${Math.random()}` }])} className="rounded border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Duplicate</button>
-                            <button type="button" onClick={() => setPlanRows((current) => current.filter((item) => item.id !== row.id))} className="rounded border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Delete</button>
-                          </div>
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold" style={{ color: "var(--text-muted)" }}>Count</label>
+                          <input value={row.count} disabled={!row.enabled} onChange={(event) => setPlanRow(row.id, { count: event.target.value })} type="number" min={1} className={invalidFieldClass(rowValidation?.invalidCount)} />
+                        </div>
+                        <div className="flex gap-1 lg:pt-6">
+                          <button type="button" onClick={() => setPlanRows((current) => [...current, { ...row, id: `${Date.now()}-${Math.random()}` }])} className="rounded border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Duplicate</button>
+                          <button type="button" onClick={() => setPlanRows((current) => current.filter((item) => item.id !== row.id))} className="rounded border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
