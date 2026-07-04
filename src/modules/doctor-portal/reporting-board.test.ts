@@ -166,6 +166,36 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /updateBookingStatusManual\([\s\S]*"discontinued"/);
   });
 
+  it("adds appointment-only RISpro manual final overrides without SonicDICOM writes", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/112_reporting_board_manual_final_overrides.sql`, "utf8");
+    const types = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-types.ts`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+
+    assert.match(migration, /doctor_portal\.reporting_board_manual_final_overrides/);
+    assert.match(migration, /appointment_id bigint not null references appointments_v2\.bookings\(id\) on delete cascade/);
+    assert.match(migration, /where cleared_at is null/);
+    assert.doesNotMatch(migration, /final_text|sonicdicom|pdf/i);
+
+    assert.match(types, /reportStatusSource\?: "sonicdicom" \| "manual" \| "rispro" \| null/);
+    assert.match(types, /manualFinalOverrideId\?: number \| null/);
+    assert.match(repo, /markReportingBoardCaseManualFinal/);
+    assert.match(repo, /clearReportingBoardCaseManualFinal/);
+    assert.match(repo, /reporting_board_case_manual_final_marked/);
+    assert.match(repo, /reporting_board_case_manual_final_cleared/);
+    assert.match(repo, /source: "rispro_manual_final"/);
+    assert.match(service, /requireRosterManager\(actor\)/);
+    assert.match(service, /A reason is required to mark this case final in RISpro/);
+    assert.match(service, /Only completed Reporting Board cases can be manually marked final/);
+    assert.match(service, /exclusionReason: "manual_final"/);
+    assert.match(service, /reportStatusSource: "manual"/);
+    assert.match(service, /reportStatusSnapshot\.delete\(appointmentId\)/);
+    assert.match(routes, /"\/cases\/:appointmentId\/mark-final"/);
+    assert.match(routes, /"\/cases\/:appointmentId\/clear-manual-final"/);
+    assert.doesNotMatch(service, /finalText|create.*PDF|SonicDICOM.*manual final/i);
+  });
+
   it("bulk assign chooses next backend cases, accepts optional notes, skips assigned by default, and audits", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");

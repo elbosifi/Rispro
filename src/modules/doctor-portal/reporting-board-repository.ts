@@ -58,6 +58,19 @@ interface CandidateAssignment {
   appointmentId: number;
 }
 
+export interface ReportingBoardManualFinalOverride {
+  id: number;
+  appointmentId: number;
+  reason: string;
+  createdByUserId: number | null;
+  createdByDoctorId: number | null;
+  createdAt: string;
+  clearedByUserId: number | null;
+  clearedByDoctorId: number | null;
+  clearedAt: string | null;
+  clearReason: string | null;
+}
+
 interface NotificationTargetRow {
   savedViewId: number;
   token: string;
@@ -92,6 +105,21 @@ function nullableIsoString(value: unknown): string | null {
 function nullableBoolean(value: unknown): boolean | null {
   if (value === null || value === undefined) return null;
   return Boolean(value);
+}
+
+function manualFinalOverride(row: ReportingBoardManualFinalOverride): ReportingBoardManualFinalOverride {
+  return {
+    id: Number(row.id),
+    appointmentId: Number(row.appointmentId),
+    reason: row.reason,
+    createdByUserId: nullableNumber(row.createdByUserId),
+    createdByDoctorId: nullableNumber(row.createdByDoctorId),
+    createdAt: nullableIsoString(row.createdAt)!,
+    clearedByUserId: nullableNumber(row.clearedByUserId),
+    clearedByDoctorId: nullableNumber(row.clearedByDoctorId),
+    clearedAt: nullableIsoString(row.clearedAt),
+    clearReason: row.clearReason ?? null,
+  };
 }
 
 function normalizePushSubscription(input: BrowserPushSubscriptionInput): { endpoint: string; p256dh: string; auth: string } {
@@ -882,10 +910,16 @@ export async function listReportingBoardCaseCandidates(
         null::int as "completedUnassignedAgeMinutes",
         'unavailable'::text as "reportStatus",
         null::text as "reportStatusCheckedAt",
+        manual_final.id as "manualFinalOverrideId",
+        manual_final.created_at as "manualFinalAt",
+        manual_final_doctor.display_name as "manualFinalByName",
+        manual_final.reason as "manualFinalReason",
+        case when manual_final.id is null then null else 'manual' end as "reportStatusSource",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
         case
           when b.requires_report = false then 'report_not_required'
           when b.status <> 'completed' then 'study_not_completed'
+          when manual_final.id is not null then 'manual_final'
           else null
         end as "exclusionReason"
       from appointments_v2.bookings b
@@ -903,6 +937,8 @@ export async function listReportingBoardCaseCandidates(
       ) primary_identifier on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
         from doctor_portal.case_team_assignments history
@@ -938,6 +974,11 @@ function reportingBoardCaseRow(row: ReportingBoardCaseRow): ReportingBoardCaseRo
     firstAssignedAt: nullableIsoString(row.firstAssignedAt),
     reportFinalAt: nullableIsoString(row.reportFinalAt),
     reportStatusCheckedAt: nullableIsoString(row.reportStatusCheckedAt),
+    manualFinalOverrideId: nullableNumber(row.manualFinalOverrideId),
+    manualFinalAt: nullableIsoString(row.manualFinalAt),
+    manualFinalByName: row.manualFinalByName ?? null,
+    manualFinalReason: row.manualFinalReason ?? null,
+    reportStatusSource: row.reportStatusSource ?? null,
     dueAt: nullableIsoString(row.dueAt),
     completedToAssignedMinutes: nullableNumber(row.completedToAssignedMinutes),
     assignedToFinalMinutes: nullableNumber(row.assignedToFinalMinutes),
@@ -958,6 +999,8 @@ function reportingBoardStatsRow(row: ReportingBoardStatsBaseRow): ReportingBoard
     currentAssignedAt: nullableIsoString(row.currentAssignedAt),
     firstAssignedAt: nullableIsoString(row.firstAssignedAt),
     reportFinalAt: nullableIsoString(row.reportFinalAt),
+    reportStatusSource: row.reportStatusSource ?? null,
+    manualFinalOverrideId: nullableNumber(row.manualFinalOverrideId),
   };
 }
 
@@ -984,7 +1027,10 @@ export async function listReportingBoardStatsRows(
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
         first_assignment.first_assigned_at as "firstAssignedAt",
-        null::text as "reportFinalAt"
+        case when manual_final.id is not null then manual_final.created_at else null end as "reportFinalAt",
+        case when manual_final.id is not null then 'final' else null end as "reportStatus",
+        case when manual_final.id is not null then 'manual' else null end as "reportStatusSource",
+        manual_final.id as "manualFinalOverrideId"
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
@@ -992,6 +1038,7 @@ export async function listReportingBoardStatsRows(
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
         from doctor_portal.case_team_assignments history
@@ -1058,10 +1105,16 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         null::int as "completedUnassignedAgeMinutes",
         'unavailable'::text as "reportStatus",
         null::text as "reportStatusCheckedAt",
+        manual_final.id as "manualFinalOverrideId",
+        manual_final.created_at as "manualFinalAt",
+        manual_final_doctor.display_name as "manualFinalByName",
+        manual_final.reason as "manualFinalReason",
+        case when manual_final.id is null then null else 'manual' end as "reportStatusSource",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
         case
           when b.requires_report = false then 'report_not_required'
           when b.status <> 'completed' then 'study_not_completed'
+          when manual_final.id is not null then 'manual_final'
           else null
         end as "exclusionReason"
       from appointments_v2.bookings b
@@ -1079,6 +1132,8 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       ) primary_identifier on true
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+      left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
         from doctor_portal.case_team_assignments history
@@ -1091,6 +1146,208 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
     [appointmentIds]
   );
   return result.rows.map(reportingBoardCaseRow);
+}
+
+export async function findActiveManualFinalOverride(appointmentId: number): Promise<ReportingBoardManualFinalOverride | null> {
+  const result = await pool.query<ReportingBoardManualFinalOverride>(
+    `
+      select
+        id,
+        appointment_id as "appointmentId",
+        reason,
+        created_by_user_id as "createdByUserId",
+        created_by_doctor_id as "createdByDoctorId",
+        created_at as "createdAt",
+        cleared_by_user_id as "clearedByUserId",
+        cleared_by_doctor_id as "clearedByDoctorId",
+        cleared_at as "clearedAt",
+        clear_reason as "clearReason"
+      from doctor_portal.reporting_board_manual_final_overrides
+      where appointment_id = $1 and cleared_at is null
+      limit 1
+    `,
+    [appointmentId]
+  );
+  return result.rows[0] ? manualFinalOverride(result.rows[0]) : null;
+}
+
+export async function listActiveManualFinalOverridesByAppointmentIds(appointmentIds: number[]): Promise<ReportingBoardManualFinalOverride[]> {
+  if (appointmentIds.length === 0) return [];
+  const result = await pool.query<ReportingBoardManualFinalOverride>(
+    `
+      select
+        id,
+        appointment_id as "appointmentId",
+        reason,
+        created_by_user_id as "createdByUserId",
+        created_by_doctor_id as "createdByDoctorId",
+        created_at as "createdAt",
+        cleared_by_user_id as "clearedByUserId",
+        cleared_by_doctor_id as "clearedByDoctorId",
+        cleared_at as "clearedAt",
+        clear_reason as "clearReason"
+      from doctor_portal.reporting_board_manual_final_overrides
+      where appointment_id = any($1::bigint[]) and cleared_at is null
+      order by appointment_id asc
+    `,
+    [appointmentIds]
+  );
+  return result.rows.map(manualFinalOverride);
+}
+
+export async function markReportingBoardCaseManualFinal(input: {
+  appointmentId: number;
+  reason: string;
+  actor: AssignmentActor;
+}): Promise<ReportingBoardManualFinalOverride> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const booking = await client.query<{ id: number; status: string; accessionNumber: string }>(
+      `
+        select id, status, ('V2-' || lpad(id::text, 6, '0')) as "accessionNumber"
+        from appointments_v2.bookings
+        where id = $1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const row = booking.rows[0];
+    if (!row) throw new HttpError(404, "Case not found.");
+    if (row.status !== "completed") throw new HttpError(409, "Only completed Reporting Board cases can be manually marked final.");
+
+    const existing = await client.query<{ id: number }>(
+      `
+        select id
+        from doctor_portal.reporting_board_manual_final_overrides
+        where appointment_id = $1 and cleared_at is null
+        limit 1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    if (existing.rows[0]) throw new HttpError(409, "This Reporting Board case already has an active manual final override.");
+
+    const inserted = await client.query<ReportingBoardManualFinalOverride>(
+      `
+        insert into doctor_portal.reporting_board_manual_final_overrides (
+          appointment_id, reason, created_by_user_id, created_by_doctor_id
+        )
+        values ($1, $2, $3, $4)
+        returning
+          id,
+          appointment_id as "appointmentId",
+          reason,
+          created_by_user_id as "createdByUserId",
+          created_by_doctor_id as "createdByDoctorId",
+          created_at as "createdAt",
+          cleared_by_user_id as "clearedByUserId",
+          cleared_by_doctor_id as "clearedByDoctorId",
+          cleared_at as "clearedAt",
+          clear_reason as "clearReason"
+      `,
+      [input.appointmentId, input.reason, input.actor.userId, input.actor.doctorId]
+    );
+    const override = manualFinalOverride(inserted.rows[0]);
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_case_manual_final_marked",
+      targetType: "appointment",
+      targetId: input.appointmentId,
+      metadata: {
+        overrideId: override.id,
+        appointmentId: input.appointmentId,
+        accessionNumber: row.accessionNumber,
+        source: "rispro_manual_final",
+      },
+      reason: input.reason,
+    });
+    await client.query("commit");
+    return override;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function clearReportingBoardCaseManualFinal(input: {
+  appointmentId: number;
+  reason: string;
+  actor: AssignmentActor;
+}): Promise<ReportingBoardManualFinalOverride> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existing = await client.query<ReportingBoardManualFinalOverride>(
+      `
+        select
+          id,
+          appointment_id as "appointmentId",
+          reason,
+          created_by_user_id as "createdByUserId",
+          created_by_doctor_id as "createdByDoctorId",
+          created_at as "createdAt",
+          cleared_by_user_id as "clearedByUserId",
+          cleared_by_doctor_id as "clearedByDoctorId",
+          cleared_at as "clearedAt",
+          clear_reason as "clearReason"
+        from doctor_portal.reporting_board_manual_final_overrides
+        where appointment_id = $1 and cleared_at is null
+        limit 1
+        for update
+      `,
+      [input.appointmentId]
+    );
+    const current = existing.rows[0] ? manualFinalOverride(existing.rows[0]) : null;
+    if (!current) throw new HttpError(404, "No active manual final override was found for this Reporting Board case.");
+
+    const updated = await client.query<ReportingBoardManualFinalOverride>(
+      `
+        update doctor_portal.reporting_board_manual_final_overrides
+        set
+          cleared_by_user_id = $2,
+          cleared_by_doctor_id = $3,
+          cleared_at = now(),
+          clear_reason = $4
+        where id = $1
+        returning
+          id,
+          appointment_id as "appointmentId",
+          reason,
+          created_by_user_id as "createdByUserId",
+          created_by_doctor_id as "createdByDoctorId",
+          created_at as "createdAt",
+          cleared_by_user_id as "clearedByUserId",
+          cleared_by_doctor_id as "clearedByDoctorId",
+          cleared_at as "clearedAt",
+          clear_reason as "clearReason"
+      `,
+      [current.id, input.actor.userId, input.actor.doctorId, input.reason]
+    );
+    const override = manualFinalOverride(updated.rows[0]);
+    await insertDoctorAuditEvent(client, {
+      actorUserId: input.actor.userId,
+      actorDoctorId: input.actor.doctorId,
+      eventType: "reporting_board_case_manual_final_cleared",
+      targetType: "appointment",
+      targetId: input.appointmentId,
+      metadata: {
+        overrideId: override.id,
+        appointmentId: input.appointmentId,
+      },
+      reason: input.reason,
+    });
+    await client.query("commit");
+    return override;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function findAssignableDoctorForReporting(doctorId: number) {

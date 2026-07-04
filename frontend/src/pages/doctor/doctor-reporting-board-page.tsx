@@ -11,6 +11,7 @@ import {
   bulkReassignSelectedReportingCases,
   bulkUnassignSelectedReportingCases,
   cancelReportingBoardBulkAssignmentJob,
+  clearReportingBoardCaseManualFinal,
   createReportingBoardBulkAssignmentJob,
   createReportingBoardBulkAssignmentJobs,
   createReportingBoardSavedView,
@@ -24,6 +25,7 @@ import {
   fetchReportingBoardStats,
   fetchRosterDoctors,
   finalizeComparisonRequest,
+  markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
   resumeReportingBoardBulkAssignmentJob,
   sendReportingBoardSavedViewTestPush,
@@ -499,6 +501,10 @@ function reportStatusView(status: ReportingBoardCaseRow["reportStatus"]) {
   return views[status];
 }
 
+function reportStatusDisplay(row: ReportingBoardCaseRow): string {
+  return row.manualFinalOverrideId && row.reportStatus === "final" ? "Final · manual" : reportStatusView(row.reportStatus).label;
+}
+
 function rowStatusLabel(row: ReportingBoardCaseRow): string {
   if (row.caseType === "comparison") {
     return ["Comparison request", reportStatusView(row.reportStatus).label, labelStatus(row.appointmentStatus)].join(", ");
@@ -506,7 +512,7 @@ function rowStatusLabel(row: ReportingBoardCaseRow): string {
   const labels = [
     abnormalPriorityLabel(row),
     overdue(row) ? "Overdue" : null,
-    reportStatusView(row.reportStatus).label,
+    reportStatusDisplay(row),
     row.appointmentStatus !== "completed" ? `Appointment ${labelStatus(row.appointmentStatus)}` : null,
   ].filter(Boolean);
   return labels.join(", ");
@@ -522,7 +528,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
       `Linked previous study date: ${row.linkedPreviousStudyDate ?? "-"}`,
       `Pool: ${row.modalityCode}`,
       `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
-      `Report: ${reportStatusView(row.reportStatus).label}`,
+      `Report: ${reportStatusDisplay(row)}`,
       `Status: ${labelStatus(row.appointmentStatus)}`,
       `Ready at: ${formatTimestamp(row.completedAt)}`,
       `Current assigned at: ${formatTimestamp(row.currentAssignedAt)}`,
@@ -536,7 +542,7 @@ function rowDetailsTitle(row: ReportingBoardCaseRow): string {
     `Study: ${row.modalityCode}${row.examTypeName ? ` - ${row.examTypeName}` : ""}`,
     `Category: ${labelStatus(row.caseCategory)}`,
     `Assigned doctor: ${row.assignedDoctorName ?? "Unassigned"}`,
-    `Report: ${reportStatusView(row.reportStatus).label}`,
+    `Report: ${reportStatusDisplay(row)}`,
     `Appointment: ${labelStatus(row.appointmentStatus)}`,
     `Completed at: ${formatTimestamp(row.completedAt)}`,
     `Current assigned at: ${formatTimestamp(row.currentAssignedAt)}`,
@@ -614,6 +620,11 @@ function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
         <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600" title={`Appointment ${appointmentLabel}`}>
           <Clock3 size={12} aria-hidden="true" />
           {appointmentLabel}
+        </span>
+      )}
+      {row.manualFinalOverrideId && row.reportStatus === "final" && (
+        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700" title={row.manualFinalReason ?? "Manual final override"}>
+          Final · manual
         </span>
       )}
     </div>
@@ -726,6 +737,8 @@ function RowActionMenu({
   onAssign,
   onUnassign,
   onFinalize,
+  onMarkManualFinal,
+  onClearManualFinal,
   onDiscontinue,
 }: {
   row: ReportingBoardCaseRow;
@@ -734,6 +747,8 @@ function RowActionMenu({
   onAssign: (row: ReportingBoardCaseRow, doctorId: number, reason: string) => void;
   onUnassign: (row: ReportingBoardCaseRow, reason: string) => Promise<void>;
   onFinalize: (row: ReportingBoardCaseRow, finalText: string) => Promise<void>;
+  onMarkManualFinal: (row: ReportingBoardCaseRow) => void;
+  onClearManualFinal: (row: ReportingBoardCaseRow) => void;
   onDiscontinue: (row: ReportingBoardCaseRow) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -743,7 +758,7 @@ function RowActionMenu({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; minWidth: number } | null>(null);
-  const actionUnavailable = row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
+  const actionUnavailable = row.exclusionReason === "manual_final" ? "Manual final override" : row.exclusionReason ? labelStatus(row.exclusionReason) : "No assignment action";
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientDicomId = String(row.patientDicomId || "").trim();
   const showRadiantActions = isWindowsWorkstation();
@@ -840,6 +855,16 @@ function RowActionMenu({
       <Link role="menuitem" to={row.caseType === "comparison" && row.comparisonRequestId ? `/comparisons/${row.comparisonRequestId}` : `/registrations?appointmentId=${row.appointmentId}&patientId=${row.patientId}`} className="mt-2 block rounded-md border-t px-2 py-1.5 pt-2 text-xs font-semibold text-foreground hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
         {row.caseType === "comparison" ? "Open comparison request" : "View appointment"}
       </Link>
+      {canManage && row.caseType === "appointment" && !row.manualFinalOverrideId && row.reportStatus !== "final" && (
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onMarkManualFinal(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
+          Mark final in RISpro
+        </button>
+      )}
+      {canManage && row.caseType === "appointment" && row.manualFinalOverrideId && (
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onClearManualFinal(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50">
+          Clear manual final override
+        </button>
+      )}
       {canManage && row.caseType === "appointment" && (
         <button type="button" role="menuitem" onClick={() => { setOpen(false); onDiscontinue(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">
           Mark study as discontinued
@@ -1723,6 +1748,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [boardRefreshing, setBoardRefreshing] = useState(false);
   const [discontinueTarget, setDiscontinueTarget] = useState<ReportingBoardCaseRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
+  const [manualFinalTarget, setManualFinalTarget] = useState<ReportingBoardCaseRow | null>(null);
+  const [manualFinalMode, setManualFinalMode] = useState<"mark" | "clear">("mark");
+  const [manualFinalReason, setManualFinalReason] = useState("");
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
@@ -1943,6 +1971,30 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       ]);
     },
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not mark study as discontinued." }),
+  });
+  const manualFinalMutation = useMutation({
+    mutationFn: () => {
+      const appointmentId = manualFinalTarget!.appointmentId;
+      const payload = { reason: manualFinalReason.trim() };
+      return manualFinalMode === "mark"
+        ? markReportingBoardCaseManualFinal(appointmentId, payload)
+        : clearReportingBoardCaseManualFinal(appointmentId, payload);
+    },
+    onSuccess: async () => {
+      const appointmentId = manualFinalTarget?.appointmentId ?? null;
+      setManualFinalTarget(null);
+      setManualFinalReason("");
+      if (appointmentId !== null) setSelectedCaseKeys((current) => current.filter((key) => key !== `appointment:${appointmentId}`));
+      setBoardActionMessage({
+        tone: "success",
+        text: manualFinalMode === "mark" ? "Case marked final in RISpro." : "Manual final override cleared.",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "cases"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "stats"] }),
+      ]);
+    },
+    onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not update manual final override." }),
   });
   const finalizeComparisonMutation = useMutation({
     mutationFn: (payload: { row: ReportingBoardCaseRow; finalText: string }) => {
@@ -2524,6 +2576,18 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                             onFinalize={async (targetRow, finalText) => {
                               await finalizeComparisonMutation.mutateAsync({ row: targetRow, finalText });
                             }}
+                            onMarkManualFinal={(target) => {
+                              setBoardActionMessage(null);
+                              setManualFinalMode("mark");
+                              setManualFinalReason("");
+                              setManualFinalTarget(target);
+                            }}
+                            onClearManualFinal={(target) => {
+                              setBoardActionMessage(null);
+                              setManualFinalMode("clear");
+                              setManualFinalReason("");
+                              setManualFinalTarget(target);
+                            }}
                             onDiscontinue={(target) => {
                               setBoardActionMessage(null);
                               setDiscontinueReason("");
@@ -2705,6 +2769,50 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
         onChange={setSettingsDraft}
         onSave={() => updateSettingsMutation.mutate()}
       />
+      {manualFinalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <h3 className="text-lg font-semibold text-foreground">
+              {manualFinalMode === "mark" ? "Mark final in RISpro" : "Clear manual final override"}
+            </h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+              {manualFinalMode === "mark"
+                ? "This only marks the case final inside RISpro. It does not finalize or create a SonicDICOM report."
+                : "This clears only the RISpro manual final override. SonicDICOM status will be used again on next refresh."}
+            </p>
+            <label className="mt-4 block text-sm font-semibold text-foreground">
+              Reason
+              <textarea
+                value={manualFinalReason}
+                onChange={(event) => setManualFinalReason(event.target.value)}
+                placeholder={manualFinalMode === "mark" ? "Reason for marking final in RISpro" : "Reason for clearing manual final"}
+                className={`${inputClass()} mt-1 min-h-24`}
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualFinalTarget(null);
+                  setManualFinalReason("");
+                }}
+                className="rounded-lg border px-3 py-2 text-sm font-semibold"
+                style={{ borderColor: "var(--border)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={manualFinalMutation.isPending || !manualFinalReason.trim()}
+                onClick={() => manualFinalMutation.mutate()}
+                className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-300"
+              >
+                {manualFinalMode === "mark" ? "Mark final in RISpro" : "Clear manual final"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {discontinueTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
           <section className="w-full max-w-md rounded-lg border p-5 shadow-xl" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>

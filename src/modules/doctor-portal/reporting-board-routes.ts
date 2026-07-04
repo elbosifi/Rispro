@@ -24,6 +24,8 @@ import {
   getMyReportingBoardNotifications,
   listMyReportingBoardSavedViews,
   loadReportingBoardSavedViewByToken,
+  clearReportingBoardCaseManualFinal,
+  markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
   putReportingBoardSettings,
   readAllMyReportingBoardNotifications,
@@ -209,6 +211,30 @@ router.post(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
     res.json(await markReportingBoardCaseDiscontinued(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      asString(body.reason)
+    ));
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/mark-final",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await markReportingBoardCaseManualFinal(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      asString(body.reason)
+    ));
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/clear-manual-final",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await clearReportingBoardCaseManualFinal(
       actor(req),
       requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
       asString(body.reason)

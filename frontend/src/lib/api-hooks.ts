@@ -1030,6 +1030,26 @@ export async function markReportingBoardCaseDiscontinued(
   });
 }
 
+export async function markReportingBoardCaseManualFinal(
+  appointmentId: number,
+  payload: { reason: string }
+): Promise<{ ok: true; appointmentId: number; status: "manual_final" }> {
+  return api<{ ok: true; appointmentId: number; status: "manual_final" }>(`/doctor/reporting-board/cases/${appointmentId}/mark-final`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function clearReportingBoardCaseManualFinal(
+  appointmentId: number,
+  payload: { reason: string }
+): Promise<{ ok: true; appointmentId: number; status: "manual_final_cleared" }> {
+  return api<{ ok: true; appointmentId: number; status: "manual_final_cleared" }>(`/doctor/reporting-board/cases/${appointmentId}/clear-manual-final`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 function mapComparisonRequest(raw: RawRecord): ComparisonRequest {
   return {
     id: Number(raw.id ?? 0),

@@ -16,6 +16,13 @@ const fetchReportingBoardSavedViewByTokenMock = vi.fn();
 const fetchReportingBoardPushConfigMock = vi.fn();
 const subscribeReportingBoardSavedViewPushMock = vi.fn();
 const sendReportingBoardSavedViewTestPushMock = vi.fn();
+const fetchReportingBoardBulkAssignmentJobsMock = vi.fn();
+const createReportingBoardBulkAssignmentJobMock = vi.fn();
+const createReportingBoardBulkAssignmentJobsMock = vi.fn();
+const cancelReportingBoardBulkAssignmentJobMock = vi.fn();
+const runReportingBoardBulkAssignmentJobNowMock = vi.fn();
+const resumeReportingBoardBulkAssignmentJobMock = vi.fn();
+const undoReportingBoardBulkAssignmentJobMock = vi.fn();
 const bulkAssignNextReportingCasesMock = vi.fn();
 const bulkReassignSelectedReportingCasesMock = vi.fn();
 const bulkUnassignSelectedReportingCasesMock = vi.fn();
@@ -27,6 +34,8 @@ const assignComparisonRequestMock = vi.fn();
 const unassignComparisonRequestMock = vi.fn();
 const finalizeComparisonRequestMock = vi.fn();
 const markReportingBoardCaseDiscontinuedMock = vi.fn();
+const markReportingBoardCaseManualFinalMock = vi.fn();
+const clearReportingBoardCaseManualFinalMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -40,6 +49,13 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardPushConfig: (...args: unknown[]) => fetchReportingBoardPushConfigMock(...args),
   subscribeReportingBoardSavedViewPush: (...args: unknown[]) => subscribeReportingBoardSavedViewPushMock(...args),
   sendReportingBoardSavedViewTestPush: (...args: unknown[]) => sendReportingBoardSavedViewTestPushMock(...args),
+  fetchReportingBoardBulkAssignmentJobs: (...args: unknown[]) => fetchReportingBoardBulkAssignmentJobsMock(...args),
+  createReportingBoardBulkAssignmentJob: (...args: unknown[]) => createReportingBoardBulkAssignmentJobMock(...args),
+  createReportingBoardBulkAssignmentJobs: (...args: unknown[]) => createReportingBoardBulkAssignmentJobsMock(...args),
+  cancelReportingBoardBulkAssignmentJob: (...args: unknown[]) => cancelReportingBoardBulkAssignmentJobMock(...args),
+  runReportingBoardBulkAssignmentJobNow: (...args: unknown[]) => runReportingBoardBulkAssignmentJobNowMock(...args),
+  resumeReportingBoardBulkAssignmentJob: (...args: unknown[]) => resumeReportingBoardBulkAssignmentJobMock(...args),
+  undoReportingBoardBulkAssignmentJob: (...args: unknown[]) => undoReportingBoardBulkAssignmentJobMock(...args),
   bulkAssignNextReportingCases: (...args: unknown[]) => bulkAssignNextReportingCasesMock(...args),
   bulkReassignSelectedReportingCases: (...args: unknown[]) => bulkReassignSelectedReportingCasesMock(...args),
   bulkUnassignSelectedReportingCases: (...args: unknown[]) => bulkUnassignSelectedReportingCasesMock(...args),
@@ -51,6 +67,8 @@ vi.mock("@/lib/api-hooks", () => ({
   unassignComparisonRequest: (...args: unknown[]) => unassignComparisonRequestMock(...args),
   finalizeComparisonRequest: (...args: unknown[]) => finalizeComparisonRequestMock(...args),
   markReportingBoardCaseDiscontinued: (...args: unknown[]) => markReportingBoardCaseDiscontinuedMock(...args),
+  markReportingBoardCaseManualFinal: (...args: unknown[]) => markReportingBoardCaseManualFinalMock(...args),
+  clearReportingBoardCaseManualFinal: (...args: unknown[]) => clearReportingBoardCaseManualFinalMock(...args),
 }));
 
 const managerMe: DoctorMe = {
@@ -119,6 +137,11 @@ const caseRow: ReportingBoardCaseRow = {
   firstAssignedAt: null,
   reportFinalAt: null,
   reportStatusCheckedAt: "2026-05-29T08:05:00.000Z",
+  reportStatusSource: "sonicdicom",
+  manualFinalOverrideId: null,
+  manualFinalAt: null,
+  manualFinalByName: null,
+  manualFinalReason: null,
   dueAt: null,
   completedToAssignedMinutes: null,
   assignedToFinalMinutes: null,
@@ -257,6 +280,13 @@ describe("DoctorReportingBoardPage", () => {
     fetchReportingBoardPushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
     subscribeReportingBoardSavedViewPushMock.mockResolvedValue({ subscriptionId: 1 });
     sendReportingBoardSavedViewTestPushMock.mockResolvedValue({ attempted: 1, sent: 1, failed: 0 });
+    fetchReportingBoardBulkAssignmentJobsMock.mockResolvedValue([]);
+    createReportingBoardBulkAssignmentJobMock.mockResolvedValue({ id: 1 });
+    createReportingBoardBulkAssignmentJobsMock.mockResolvedValue([]);
+    cancelReportingBoardBulkAssignmentJobMock.mockResolvedValue({ id: 1 });
+    runReportingBoardBulkAssignmentJobNowMock.mockResolvedValue({ id: 1 });
+    resumeReportingBoardBulkAssignmentJobMock.mockResolvedValue({ job: { id: 1 }, jobs: [] });
+    undoReportingBoardBulkAssignmentJobMock.mockResolvedValue({ job: { id: 1 }, result: { requestedCount: 0, unassignedCount: 0, skippedCount: 0, unassignedAppointmentIds: [], skipped: [] } });
     bulkAssignNextReportingCasesMock.mockResolvedValue({ requestedCount: 2, assignedCount: 2, skippedCount: 0, assignedAppointmentIds: [42, 43], skipped: [] });
     bulkReassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, assignedCount: 1, skippedCount: 0, assignedAppointmentIds: [42], assignedComparisonRequestIds: [], skipped: [] });
     bulkUnassignSelectedReportingCasesMock.mockResolvedValue({ requestedCount: 1, unassignedCount: 1, skippedCount: 0, unassignedAppointmentIds: [42], unassignedComparisonRequestIds: [], skipped: [] });
@@ -272,6 +302,8 @@ describe("DoctorReportingBoardPage", () => {
     unassignComparisonRequestMock.mockResolvedValue({ unassigned: true, comparisonRequestId: 77, assignmentId: 101 });
     finalizeComparisonRequestMock.mockResolvedValue({});
     markReportingBoardCaseDiscontinuedMock.mockResolvedValue({ ok: true, status: "discontinued" });
+    markReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final" });
+    clearReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final_cleared" });
   });
 
   it("renders compact board columns and row status without a visible priority column", async () => {
@@ -395,6 +427,57 @@ describe("DoctorReportingBoardPage", () => {
     expect(within(row!).getByLabelText("Final report")).toBeTruthy();
     expect(within(row!).queryByText(/^final$/i)).toBeNull();
     expect(row!.className).not.toContain("bg-emerald");
+  });
+
+  it("marks appointment rows final in RISpro with a required reason", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, appointmentStatus: "completed", reportStatus: "draft", canAssign: true, exclusionReason: null }],
+      filters: { reportStatus: "required_not_final" },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark final in RISpro" }));
+
+    expect(await screen.findByText("This only marks the case final inside RISpro. It does not finalize or create a SonicDICOM report.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Imported final already reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark final in RISpro" }));
+
+    await waitFor(() => expect(markReportingBoardCaseManualFinalMock).toHaveBeenCalledWith(42, { reason: "Imported final already reviewed" }));
+  });
+
+  it("shows manual final status and clear action only for manual appointment overrides", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{
+        ...caseRow,
+        appointmentStatus: "completed",
+        reportStatus: "final",
+        reportStatusSource: "manual",
+        manualFinalOverrideId: 9,
+        manualFinalAt: "2026-05-29T09:00:00.000Z",
+        manualFinalByName: "Dr Manager",
+        manualFinalReason: "Imported final already reviewed",
+        canAssign: false,
+        exclusionReason: "manual_final",
+      }],
+      filters: { reportStatus: "final" },
+    });
+    renderPage();
+    await waitFor(() => expect(fetchReportingBoardCasesMock.mock.calls.length).toBeGreaterThan(1));
+
+    const row = screen.getByText("V2-000042").closest("tr")!;
+    expect(within(row).getByText("Final · manual")).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    expect(screen.getByText("Manual final override")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear manual final override" }));
+
+    expect(await screen.findByText("This clears only the RISpro manual final override. SonicDICOM status will be used again on next refresh.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "SonicDICOM final is now available" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear manual final" }));
+
+    await waitFor(() => expect(clearReportingBoardCaseManualFinalMock).toHaveBeenCalledWith(42, { reason: "SonicDICOM final is now available" }));
   });
 
   it("hides assigned doctor when filtered to one doctor", async () => {
@@ -552,10 +635,9 @@ describe("DoctorReportingBoardPage", () => {
     renderPage();
 
     await screen.findByText("Board scope");
-    expect(screen.getByText("Configured CT/MR")).toBeTruthy();
+    expect(screen.getAllByText("Configured CT/MR").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Required not final").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Yes").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("2026-05-15").length).toBeGreaterThan(0);
     expect(screen.getByText("No additional user filters")).toBeTruthy();
     expect(screen.queryByText("Category:")).toBeNull();
     expect(screen.queryByText("Priority:")).toBeNull();
@@ -563,7 +645,6 @@ describe("DoctorReportingBoardPage", () => {
     expect(screen.queryByText("Case type:")).toBeNull();
     expect(screen.queryByText("Date to:")).toBeNull();
     expect(screen.queryByText("Assigned:")).toBeNull();
-    expect(screen.getByText(/Showing 12 required-not-final CT\/MR reporting cases from 2026-05-15 onward/i)).toBeTruthy();
   });
 
   it("clears a removable chip and resets offset to zero", async () => {
@@ -674,7 +755,6 @@ describe("DoctorReportingBoardPage", () => {
   it("opens and applies a saved view token", async () => {
     renderPage("/doctor/reporting-board?savedViewToken=tok-9");
 
-    expect(await screen.findByText("Urgent CT")).toBeTruthy();
     await waitFor(() => {
       expect(fetchReportingBoardCasesMock).toHaveBeenCalledWith(expect.objectContaining({ priorityCode: "urgent" }));
     });

@@ -16,6 +16,7 @@ import {
   claimReportingBoardBulkAssignmentJobForRunNow,
   claimDueReportingBoardBulkAssignmentJobs,
   createAssignedToMeNotifications,
+  clearReportingBoardCaseManualFinal as clearReportingBoardCaseManualFinalRecord,
   createReportingBoardBulkAssignmentJob,
   createSavedView,
   doctorCanReportAllModalities,
@@ -32,6 +33,7 @@ import {
   listReportingBoardCaseCandidates,
   listReportingBoardNotifications,
   listReportingBoardStatsRows,
+  markReportingBoardCaseManualFinal as markReportingBoardCaseManualFinalRecord,
   listSavedViews,
   markAllReportingBoardNotificationsRead,
   markReportingBoardNotificationRead,
@@ -65,6 +67,7 @@ import type {
   ReportingBoardStatsSummary,
 } from "./reporting-board-types.js";
 import type { ClaimedReportingBoardBulkAssignmentJob } from "./reporting-board-repository.js";
+import type { ReportingBoardManualFinalOverride } from "./reporting-board-repository.js";
 
 interface Actor {
   userId: UserId;
@@ -265,6 +268,19 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
       }));
       continue;
     }
+    if (row.manualFinalOverrideId) {
+      reportStatusSnapshot.set(row.appointmentId, "final");
+      resolved.push(withTimelineMetrics({
+        ...row,
+        reportStatus: "final",
+        reportStatusSource: "manual",
+        reportFinalAt: row.manualFinalAt ?? null,
+        reportStatusCheckedAt: checkedAt,
+        canAssign: false,
+        exclusionReason: "manual_final",
+      }));
+      continue;
+    }
     let status: ReportingBoardCaseRow["reportStatus"] = "unavailable";
     try {
       const result = await reportStatusChecker(
@@ -288,6 +304,7 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
     resolved.push(withTimelineMetrics({
       ...row,
       reportStatus: status,
+      reportStatusSource: "sonicdicom",
       reportStatusCheckedAt: checkedAt,
       canAssign,
       exclusionReason: canAssign ? null : row.exclusionReason ?? (status === "final" ? "report_final" : null),
@@ -709,6 +726,60 @@ export async function markReportingBoardCaseDiscontinued(actor: Actor, appointme
     status: result.status,
     autoCompletionDisabledMessage: result.autoCompletionDisabledMessage,
   };
+}
+
+async function requireVisibleReportingBoardAppointment(appointmentId: number) {
+  const settings = await readReportingBoardSettings();
+  const filters = await effectiveFilters({ appointmentId, reportStatus: "all", limit: 1, offset: 0 });
+  const scopedFilters =
+    filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
+  const rows = await listReportingBoardCaseCandidates(scopedFilters);
+  const row = rows[0] ?? null;
+  if (!row) {
+    const existing = await listReportingBoardCasesByAppointmentIds([appointmentId]);
+    if (existing.length === 0) throw new HttpError(404, "Case not found.");
+    throw new HttpError(403, "This case is not visible on the Reporting Board.");
+  }
+  return row;
+}
+
+export async function markReportingBoardCaseManualFinal(
+  actor: Actor,
+  appointmentId: number,
+  reasonInput: string
+): Promise<{ ok: true; appointmentId: number; status: "manual_final"; override: ReportingBoardManualFinalOverride }> {
+  const manager = await requireRosterManager(actor);
+  const reason = String(reasonInput || "").trim();
+  if (!reason) throw new HttpError(400, "A reason is required to mark this case final in RISpro.");
+  const row = await requireVisibleReportingBoardAppointment(appointmentId);
+  if (row.appointmentStatus !== "completed") {
+    throw new HttpError(409, "Only completed Reporting Board cases can be manually marked final.");
+  }
+  const override = await markReportingBoardCaseManualFinalRecord({
+    appointmentId,
+    reason,
+    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+  });
+  reportStatusSnapshot.set(appointmentId, "final");
+  return { ok: true, appointmentId, status: "manual_final", override };
+}
+
+export async function clearReportingBoardCaseManualFinal(
+  actor: Actor,
+  appointmentId: number,
+  reasonInput: string
+): Promise<{ ok: true; appointmentId: number; status: "manual_final_cleared"; override: ReportingBoardManualFinalOverride }> {
+  const manager = await requireRosterManager(actor);
+  const reason = String(reasonInput || "").trim();
+  if (!reason) throw new HttpError(400, "A reason is required to clear the manual final override.");
+  await requireVisibleReportingBoardAppointment(appointmentId);
+  const override = await clearReportingBoardCaseManualFinalRecord({
+    appointmentId,
+    reason,
+    actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
+  });
+  reportStatusSnapshot.delete(appointmentId);
+  return { ok: true, appointmentId, status: "manual_final_cleared", override };
 }
 
 function mobileCase(row: ReportingBoardCaseRow) {

@@ -479,6 +479,11 @@ export interface ReportingBoardCaseRow {
   firstAssignedAt: string | null;
   reportFinalAt: string | null;
   reportStatusCheckedAt: string | null;
+  reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
+  manualFinalOverrideId?: number | null;
+  manualFinalAt?: string | null;
+  manualFinalByName?: string | null;
+  manualFinalReason?: string | null;
   dueAt: string | null;
   completedToAssignedMinutes: number | null;
   assignedToFinalMinutes: number | null;
