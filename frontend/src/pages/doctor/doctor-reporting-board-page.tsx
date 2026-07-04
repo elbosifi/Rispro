@@ -86,6 +86,10 @@ const CASE_SOURCE_OPTIONS: Array<{ value: ReportingBoardCaseSource; label: strin
   { value: "comparisons", label: "Comparisons" },
 ];
 
+type ManualFinalMutationResult =
+  | { ok: true; appointmentId: number; status: "manual_final" }
+  | { ok: true; appointmentId: number; status: "manual_final_cleared" };
+
 const UNASSIGN_VALUE = "__UNASSIGN__";
 
 const EMPTY_NOTIFICATIONS: ReportingBoardNotificationSettings = {
@@ -1972,7 +1976,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     },
     onError: (err) => setBoardActionMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not mark study as discontinued." }),
   });
-  const manualFinalMutation = useMutation({
+  const manualFinalMutation = useMutation<ManualFinalMutationResult>({
     mutationFn: () => {
       const appointmentId = manualFinalTarget!.appointmentId;
       const payload = { reason: manualFinalReason.trim() };
