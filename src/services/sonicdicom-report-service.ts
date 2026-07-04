@@ -53,6 +53,12 @@ export interface SonicDicomStudyNoteResult {
   source: "sonicdicom" | null;
 }
 
+export interface SonicDicomStudyNoteSqlRow {
+  AccessionNumber?: string | null;
+  StudyInstanceUID?: string | null;
+  Note?: string | null;
+}
+
 interface CacheEntry {
   expiresAt: number;
   result: ReportStatusResult;
@@ -68,12 +74,6 @@ interface SqlReadinessRow {
   FoundReport?: number;
   Status?: number | null;
   UpdatedAt?: Date | string | null;
-}
-
-interface SqlStudyNoteRow {
-  AccessionNumber?: string | null;
-  StudyInstanceUID?: string | null;
-  Note?: string | null;
 }
 
 interface SqlRequest {
@@ -208,7 +208,7 @@ async function queryStudyNotes(
   dicomDb: string,
   accessions: string[],
   studyInstanceUids: string[]
-): Promise<SqlStudyNoteRow[]> {
+): Promise<SonicDicomStudyNoteSqlRow[]> {
   const request = pool.request();
   const clauses: string[] = [];
   if (accessions.length > 0) {
@@ -221,7 +221,7 @@ async function queryStudyNotes(
   }
   if (clauses.length === 0) return [];
 
-  const result = await request.query<SqlStudyNoteRow>(
+  const result = await request.query<SonicDicomStudyNoteSqlRow>(
     `select s.AccessionNumber, s.StudyInstanceUID, s.Note
      from [${dicomDb}].[dbo].[Studies] s
      where ${clauses.join(" or ")}
@@ -437,11 +437,38 @@ function normalizeStudyNote(value: unknown): string | null {
 }
 
 function studyNoteCacheKey(context: SonicDicomStudyNoteLookupContext): string | null {
-  const accession = String(context.accessionNumber ?? "").trim();
-  if (accession) return `accession:${accession}`;
   const uid = String(context.studyInstanceUid ?? "").trim();
-  return uid ? `uid:${uid}` : null;
+  if (uid) return `uid:${uid}`;
+  const accession = String(context.accessionNumber ?? "").trim();
+  return accession ? `accession:${accession}` : null;
 }
+
+export function resolveSonicDicomStudyNotes(
+  contexts: SonicDicomStudyNoteLookupContext[],
+  rows: SonicDicomStudyNoteSqlRow[],
+  checkedAt: string
+): Map<number, SonicDicomStudyNoteResult> {
+  const byAccession = new Map<string, string | null>();
+  const byUid = new Map<string, string | null>();
+  for (const row of rows) {
+    const note = normalizeStudyNote(row.Note);
+    const accession = String(row.AccessionNumber ?? "").trim();
+    const uid = String(row.StudyInstanceUID ?? "").trim();
+    if (accession && !byAccession.has(accession)) byAccession.set(accession, note);
+    if (uid && !byUid.has(uid)) byUid.set(uid, note);
+  }
+
+  const results = new Map<number, SonicDicomStudyNoteResult>();
+  for (const context of contexts) {
+    const uid = String(context.studyInstanceUid ?? "").trim();
+    const accession = String(context.accessionNumber ?? "").trim();
+    const note = uid ? byUid.get(uid) ?? null : accession ? byAccession.get(accession) ?? null : null;
+    results.set(context.bookingId, { note, checkedAt, source: note ? "sonicdicom" : null });
+  }
+  return results;
+}
+
+export const __resolveSonicDicomStudyNotesForTest = resolveSonicDicomStudyNotes;
 
 export async function fetchSonicDicomStudyNotes(
   contexts: SonicDicomStudyNoteLookupContext[],
@@ -466,33 +493,28 @@ export async function fetchSonicDicomStudyNotes(
   if (pending.length === 0) return results;
 
   const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
-  const accessions = [...new Set(pending.map((context) => String(context.accessionNumber ?? "").trim()).filter(Boolean))];
   const studyInstanceUids = [
     ...new Set(
       pending
-        .filter((context) => !String(context.accessionNumber ?? "").trim())
         .map((context) => String(context.studyInstanceUid ?? "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  const accessions = [
+    ...new Set(
+      pending
+        .filter((context) => !String(context.studyInstanceUid ?? "").trim())
+        .map((context) => String(context.accessionNumber ?? "").trim())
         .filter(Boolean)
     ),
   ];
   const checkedAt = new Date().toISOString();
   const rows = await withSqlConnection(settings, ({ sql, pool }) => queryStudyNotes(pool, sql, dicomDb, accessions, studyInstanceUids));
-  const byAccession = new Map<string, string | null>();
-  const byUid = new Map<string, string | null>();
-  for (const row of rows) {
-    const note = normalizeStudyNote(row.Note);
-    const accession = String(row.AccessionNumber ?? "").trim();
-    const uid = String(row.StudyInstanceUID ?? "").trim();
-    if (accession && !byAccession.has(accession)) byAccession.set(accession, note);
-    if (uid && !byUid.has(uid)) byUid.set(uid, note);
-  }
+  const resolved = resolveSonicDicomStudyNotes(pending, rows, checkedAt);
 
   const ttlMs = Math.max(0, settings.sonicDicomStatusCacheTtlSeconds) * 1000;
   for (const context of pending) {
-    const accession = String(context.accessionNumber ?? "").trim();
-    const uid = String(context.studyInstanceUid ?? "").trim();
-    const note = accession ? byAccession.get(accession) ?? null : uid ? byUid.get(uid) ?? null : null;
-    const result: SonicDicomStudyNoteResult = { note, checkedAt, source: note ? "sonicdicom" : null };
+    const result = resolved.get(context.bookingId) ?? { note: null, checkedAt, source: null };
     results.set(context.bookingId, result);
     const key = studyNoteCacheKey(context);
     if (key && ttlMs > 0) studyNoteCache.set(key, { result, expiresAt: Date.now() + ttlMs });

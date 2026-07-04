@@ -257,6 +257,8 @@ export function mapAppointment(raw: RawRecord): Appointment {
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     requiresReport: bool(raw, 'requires_report', bool(raw, 'requiresReport', false)),
     studyInstanceUid: strOrNull(raw, 'study_instance_uid') ?? strOrNull(raw, 'studyInstanceUid'),
+    sonicDicomStudyNote: strOrNull(raw, "sonicDicomStudyNote") ?? strOrNull(raw, "sonic_dicom_study_note"),
+    sonicDicomStudyNoteCheckedAt: strOrNull(raw, "sonicDicomStudyNoteCheckedAt") ?? strOrNull(raw, "sonic_dicom_study_note_checked_at"),
     specialReasonCode: strOrNull(raw, 'special_reason_code') ?? strOrNull(raw, 'specialReasonCode'),
     specialReasonNote: strOrNull(raw, 'special_reason_note') ?? strOrNull(raw, 'specialReasonNote'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),

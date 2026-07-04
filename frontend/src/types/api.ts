@@ -1473,6 +1473,8 @@ export interface Appointment {
   accessionNumber: string;
   requiresReport?: boolean;
   studyInstanceUid?: string | null;
+  sonicDicomStudyNote?: string | null;
+  sonicDicomStudyNoteCheckedAt?: string | null;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
   appointmentDate: string;

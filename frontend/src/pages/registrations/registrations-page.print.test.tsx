@@ -866,6 +866,43 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("shows PACS note above report status in the appointment drawer Report tab only when a note exists", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      registrationAppointment({
+        sonicDicomStudyNote: "mwa prior study note with enough text to preview compactly",
+        sonicDicomStudyNoteCheckedAt: "2026-07-04T08:00:00.000Z",
+      }),
+    ]);
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    const row = getAppointmentRow("ACC-7");
+    await userEvent.click(within(row).getByRole("button", { name: "Report" }));
+
+    await waitFor(() => {
+      expect(fetchPublicAppointmentReportStatusMock).toHaveBeenCalledWith("sample-token");
+      expect(screen.getByText("Report is ready.")).toBeTruthy();
+    });
+    const pacsNote = screen.getByTitle("PACS note: mwa prior study note with enough text to preview compactly");
+    expect(within(pacsNote).getByText("PACS note")).toBeTruthy();
+    expect(pacsNote.textContent).toContain("mwa prior study note");
+
+  });
+
+  it("does not render an empty PACS note placeholder in the Report tab", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(within(getAppointmentRow("ACC-7")).getByRole("button", { name: "Report" }));
+    expect(screen.queryByTitle(/PACS note:/)).toBeNull();
+  });
+
   it("does not show open report when status cannot be viewed", async () => {
     fetchPublicAppointmentReportStatusMock.mockResolvedValueOnce({
       enabled: true,

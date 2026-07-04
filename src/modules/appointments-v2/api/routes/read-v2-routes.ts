@@ -8,6 +8,7 @@ import { createBooking } from "../../booking/services/create-booking.service.js"
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { buildWorkbookBuffer } from "../../../../services/workbook-service.js";
+import { fetchSonicDicomStudyNotes } from "../../../../services/sonicdicom-report-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
@@ -29,6 +30,12 @@ router.use(requireAuth);
 interface AuthedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
+
+type AppointmentReadRow = Record<string, unknown> & {
+  id: number | string;
+  accession_number?: string | null;
+  study_instance_uid?: string | null;
+};
 
 const PROTOCOL_ASSIGNMENT_SELECT = `
           protocol_assignment.assignment_id as protocol_assignment_id,
@@ -93,6 +100,44 @@ function safeBuildPublicAppointmentUrl(
       })
     );
     return null;
+  }
+}
+
+function withEmptySonicDicomStudyNote<T extends AppointmentReadRow>(row: T): T & {
+  sonicDicomStudyNote: null;
+  sonicDicomStudyNoteCheckedAt: null;
+} {
+  return {
+    ...row,
+    sonicDicomStudyNote: null,
+    sonicDicomStudyNoteCheckedAt: null,
+  };
+}
+
+async function attachSonicDicomStudyNotesToAppointments<T extends AppointmentReadRow>(
+  rows: T[]
+): Promise<Array<T & { sonicDicomStudyNote: string | null; sonicDicomStudyNoteCheckedAt: string | null }>> {
+  if (rows.length === 0) return [];
+  const withDefaults = rows.map(withEmptySonicDicomStudyNote);
+  try {
+    const notes = await fetchSonicDicomStudyNotes(
+      rows.map((row) => ({
+        bookingId: Number(row.id),
+        accessionNumber: row.accession_number ?? null,
+        studyInstanceUid: row.study_instance_uid ?? null,
+      })),
+      { useCache: true }
+    );
+    return withDefaults.map((row) => {
+      const note = notes.get(Number(row.id));
+      return {
+        ...row,
+        sonicDicomStudyNote: note?.note ?? null,
+        sonicDicomStudyNoteCheckedAt: note?.checkedAt ?? null,
+      };
+    });
+  } catch {
+    return rows.map(withEmptySonicDicomStudyNote);
   }
 }
 
@@ -407,7 +452,8 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    const appointments = await Promise.all(result.rows.map(async (row) => {
+    const rowsWithNotes = await attachSonicDicomStudyNotesToAppointments(result.rows);
+    const appointments = await Promise.all(rowsWithNotes.map(async (row) => {
       const publicCancelToken =
         patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
           ? await issuePublicCancelToken(Number(row.id))
@@ -515,6 +561,7 @@ router.get(
       return;
     }
 
+    const [appointmentWithNote] = await attachSonicDicomStudyNotesToAppointments([appointment]);
     const publicCancelToken =
       patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
         ? await issuePublicCancelToken(bookingId)
@@ -522,7 +569,7 @@ router.get(
 
     res.json({
       appointment: {
-        ...appointment,
+        ...appointmentWithNote,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
           ? safeBuildPublicAppointmentUrl(publicCancelToken, patientQrSettings, "read_v2_details")

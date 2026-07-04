@@ -2033,7 +2033,7 @@ export default function RegistrationsPage() {
 
               {manageTab === "report" ? (
                 <div className="rounded-2xl border border-border bg-muted/20 p-3">
-                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                  <div className="mb-3">
                     <div>
                       <h4 className="text-sm font-semibold">{t("registrations.report")}</h4>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -2041,6 +2041,28 @@ export default function RegistrationsPage() {
                         {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
                       </p>
                     </div>
+                  </div>
+                  {selectedAppointment.sonicDicomStudyNote?.trim() ? (
+                    <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-sm" title={`PACS note: ${selectedAppointment.sonicDicomStudyNote.trim()}`}>
+                      <p className="text-xs font-semibold uppercase text-amber-700">PACS note</p>
+                      <p
+                        className="mt-1 text-amber-900"
+                        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+                      >
+                        {selectedAppointment.sonicDicomStudyNote.trim()}
+                      </p>
+                    </div>
+                  ) : null}
+                  <div className="rounded-xl border border-border bg-background p-3 text-sm">
+                    {reportError ? (
+                      <p className="text-red-700">{reportError}</p>
+                    ) : reportStatus ? (
+                      <p className="text-muted-foreground">{reportStatus.message}</p>
+                    ) : (
+                      <p className="text-muted-foreground">{t("registrations.reportHint")}</p>
+                    )}
+                  </div>
+                  <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
                     <Button
                       type="button"
                       size="sm"
@@ -2056,15 +2078,6 @@ export default function RegistrationsPage() {
                         t("registrations.reportCheck")
                       )}
                     </Button>
-                  </div>
-                  <div className="rounded-xl border border-border bg-background p-3 text-sm">
-                    {reportError ? (
-                      <p className="text-red-700">{reportError}</p>
-                    ) : reportStatus ? (
-                      <p className="text-muted-foreground">{reportStatus.message}</p>
-                    ) : (
-                      <p className="text-muted-foreground">{t("registrations.reportHint")}</p>
-                    )}
                   </div>
                   {reportStatus?.canViewReport ? (
                     <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
