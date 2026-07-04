@@ -23,7 +23,7 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const commands = [
   ['run', 'db:test:check'],
   ['run', 'migrate'],
-  ['test'],
+  ['run', 'test:backend:db'],
 ];
 
 for (const args of commands) {

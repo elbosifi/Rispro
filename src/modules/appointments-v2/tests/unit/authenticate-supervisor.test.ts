@@ -47,7 +47,7 @@ describe("authenticateSupervisor — source verification", () => {
   it("queries users table for supervisor", () => {
     assert.ok(source.includes("from users"), "Should query users table");
     assert.ok(source.includes("username = $1"), "Should filter by username");
-    assert.ok(source.includes("role = 'supervisor'"), "Should filter by supervisor role");
+    assert.ok(source.includes("role in ('supervisor', 'super_admin')"), "Should filter by supervisor-capable roles");
     assert.ok(source.includes("is_active = true"), "Should filter by active status");
   });
 

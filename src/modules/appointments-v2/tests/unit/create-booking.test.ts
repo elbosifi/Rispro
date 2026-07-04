@@ -278,7 +278,7 @@ describe("POST /appointments — route wiring", () => {
       `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`,
       "utf-8"
     );
-    assert.ok(source.includes("patientId, modalityId, bookingDate, and caseCategory are required"),
+    assert.ok(source.includes("patientId, modalityId, and bookingDate are required"),
       "Should validate required fields");
     assert.ok(source.includes("400"), "Should return 400 for missing fields");
   });

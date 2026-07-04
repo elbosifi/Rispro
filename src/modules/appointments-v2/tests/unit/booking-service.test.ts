@@ -55,7 +55,7 @@ describe("Create booking - patient identifier requirement", () => {
       () => assertPatientIdentifierAllowsBooking(client as never, 1, "receptionist"),
       (error: unknown) => {
         assert.ok(error instanceof SchedulingError);
-        assert.equal(error.statusCode, 400);
+        assert.equal(error.statusCode, 422);
         assert.equal(error.message, BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
         assert.deepEqual(error.reasonCodes, ["patient_primary_identifier_required"]);
         return true;

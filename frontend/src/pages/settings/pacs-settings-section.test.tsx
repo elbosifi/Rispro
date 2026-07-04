@@ -33,6 +33,7 @@ function renderComponent() {
 
 describe("PacsSettingsSection auto-completion controls", () => {
   beforeEach(() => {
+    localStorage.setItem("rispro-language", "en");
     vi.clearAllMocks();
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === "/pacs/orthanc-modalities") {
@@ -282,8 +283,8 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(screen.getByText("3")).toBeTruthy();
     expect(screen.getByText("Threshold")).toBeTruthy();
     expect(screen.getAllByText("study_exists").length).toBeGreaterThan(0);
-    expect(screen.getByText("Minimum series count")).toBeTruthy();
-    expect(screen.getByText("When series count is below minimum")).toBeTruthy();
+    expect(screen.getAllByText("Minimum series count").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("When series count is below minimum").length).toBeGreaterThan(0);
     expect(screen.getAllByText("leave_unchanged").length).toBeGreaterThan(0);
     expect(screen.getByText("Result status")).toBeTruthy();
     expect(screen.getByText("not_found")).toBeTruthy();

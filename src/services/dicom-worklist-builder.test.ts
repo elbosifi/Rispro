@@ -32,11 +32,30 @@ async function withTempLayout<T>(fn: (layout: { rootDir: string; sourceDir: stri
   }
 }
 
-test("runCycle writes worklists into the gateway MWL AE directory", async () => {
-  await withTempLayout(async ({ sourceDir, outputDir }) => {
-    await fs.writeFile(path.join(sourceDir, "ACC-1--CT_ROOM_1.dump"), REQUIRED_DUMP, "utf8");
+async function writeFakeDump2Dcm(rootDir: string): Promise<string> {
+  const scriptPath = path.join(rootDir, process.platform === "win32" ? "fake-dump2dcm.cmd" : "fake-dump2dcm.sh");
+  const script = process.platform === "win32"
+    ? "@echo off\r\ncopy /Y \"%~1\" \"%~2\" >NUL\r\n"
+    : "#!/bin/sh\ncp \"$1\" \"$2\"\n";
 
-    await runCycle(sourceDir, outputDir, "cp", "RISPRO_MWL");
+  await fs.writeFile(scriptPath, script, "utf8");
+  if (process.platform !== "win32") {
+    await fs.chmod(scriptPath, 0o755);
+  }
+  return scriptPath;
+}
+
+test("runCycle writes worklists into the gateway MWL AE directory", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("execFile requires a native dump2dcm executable on Windows.");
+    return;
+  }
+
+  await withTempLayout(async ({ rootDir, sourceDir, outputDir }) => {
+    await fs.writeFile(path.join(sourceDir, "ACC-1--CT_ROOM_1.dump"), REQUIRED_DUMP, "utf8");
+    const fakeDump2Dcm = await writeFakeDump2Dcm(rootDir);
+
+    await runCycle(sourceDir, outputDir, fakeDump2Dcm, "RISPRO_MWL");
 
     const centralPath = path.join(outputDir, "RISPRO_MWL", "ACC-1--CT_ROOM_1.wl");
     const stationPath = path.join(outputDir, "CT_ROOM_1", "ACC-1--CT_ROOM_1.wl");

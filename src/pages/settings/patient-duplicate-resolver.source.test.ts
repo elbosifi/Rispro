@@ -37,12 +37,12 @@ test("duplicate resolver exposes matching controls and conflict review", async (
 
 test("patient merge workbench is available as a role-controlled page", async () => {
   const appSource = await readFile(new URL("../../../frontend/src/App.tsx", import.meta.url), "utf8");
-  const navSource = await readFile(new URL("../../../frontend/src/components/layout/navigation.tsx", import.meta.url), "utf8");
+  const routeRegistrySource = await readFile(new URL("../../../frontend/src/lib/route-registry.ts", import.meta.url), "utf8");
   const visibilitySource = await readFile(new URL("../../../frontend/src/lib/page-visibility.ts", import.meta.url), "utf8");
 
   assert.match(appSource, /patients\.merge/);
   assert.match(appSource, /PatientMergePage/);
-  assert.match(navSource, /nav\.patientMerge/);
+  assert.match(routeRegistrySource, /nav\.patientMerge/);
   assert.match(visibilitySource, /patients\.merge/);
 });
 
@@ -70,12 +70,12 @@ test("patient form not-allowed word errors use i18n keys", async () => {
 
 test("name dictionary is a role-controlled navigation page with advanced controls", async () => {
   const appSource = await readFile(new URL("../../../frontend/src/App.tsx", import.meta.url), "utf8");
-  const navSource = await readFile(new URL("../../../frontend/src/components/layout/navigation.tsx", import.meta.url), "utf8");
+  const routeRegistrySource = await readFile(new URL("../../../frontend/src/lib/route-registry.ts", import.meta.url), "utf8");
   const visibilitySource = await readFile(new URL("../../../frontend/src/lib/page-visibility.ts", import.meta.url), "utf8");
   const pageSource = await readFile(new URL("../../../frontend/src/pages/name-dictionary/name-dictionary-page.tsx", import.meta.url), "utf8");
 
   assert.match(appSource, /name\.dictionary/);
-  assert.match(navSource, /nav\.nameDictionary/);
+  assert.match(routeRegistrySource, /nav\.nameDictionary/);
   assert.match(visibilitySource, /name\.dictionary/);
   assert.match(pageSource, /sortMode/);
   assert.match(pageSource, /applyNameDictionaryToPatients/);
