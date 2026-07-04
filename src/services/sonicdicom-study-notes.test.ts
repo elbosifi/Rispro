@@ -29,6 +29,16 @@ describe("SonicDICOM study note lookup", () => {
     assert.equal(result.get(2)?.note, "accession note");
   });
 
+  it("falls back to AccessionNumber when StudyInstanceUID has no matching note", () => {
+    const result = __resolveSonicDicomStudyNotesForTest(
+      [{ bookingId: 4, accessionNumber: "ACC-4", studyInstanceUid: "stale-uid" }],
+      [{ AccessionNumber: "ACC-4", StudyInstanceUID: "sonic-uid", Note: "accession fallback note" }],
+      "2026-07-04T08:00:00.000Z"
+    );
+
+    assert.equal(result.get(4)?.note, "accession fallback note");
+  });
+
   it("converts empty or whitespace notes to null", () => {
     const result = __resolveSonicDicomStudyNotesForTest(
       [{ bookingId: 3, accessionNumber: "ACC-3", studyInstanceUid: "3.3.3" }],

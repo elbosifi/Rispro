@@ -462,7 +462,9 @@ export function resolveSonicDicomStudyNotes(
   for (const context of contexts) {
     const uid = String(context.studyInstanceUid ?? "").trim();
     const accession = String(context.accessionNumber ?? "").trim();
-    const note = uid ? byUid.get(uid) ?? null : accession ? byAccession.get(accession) ?? null : null;
+    const uidNote = uid ? byUid.get(uid) ?? null : null;
+    const accessionNote = accession ? byAccession.get(accession) ?? null : null;
+    const note = uidNote ?? accessionNote;
     results.set(context.bookingId, { note, checkedAt, source: note ? "sonicdicom" : null });
   }
   return results;
@@ -503,7 +505,6 @@ export async function fetchSonicDicomStudyNotes(
   const accessions = [
     ...new Set(
       pending
-        .filter((context) => !String(context.studyInstanceUid ?? "").trim())
         .map((context) => String(context.accessionNumber ?? "").trim())
         .filter(Boolean)
     ),
