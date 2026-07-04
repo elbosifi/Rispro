@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 // ---------------------------------------------------------------------------
 
 describe("StatusBadge — display logic", () => {
-  const statusBadgePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/status-badge.tsx";
+  const statusBadgePath = `${process.cwd()}/frontend/src/v2/appointments/components/status-badge.tsx`;
 
   it("accepts remainingStandardCapacity and remainingSpecialQuota props", async () => {
     const content = await readFile(statusBadgePath, "utf-8");
@@ -72,7 +72,7 @@ describe("StatusBadge — display logic", () => {
 // ---------------------------------------------------------------------------
 
 describe("Availability table — display logic", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+  const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
 
   it("column header says 'Availability' not 'Remaining'", async () => {
     const content = await readFile(pagePath, "utf-8");
@@ -129,7 +129,7 @@ describe("Availability table — display logic", () => {
 // ---------------------------------------------------------------------------
 
 describe("Booking date dropdown — display logic", () => {
-  const bookingFormPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/booking-form.tsx";
+  const bookingFormPath = `${process.cwd()}/frontend/src/v2/appointments/components/booking-form.tsx`;
 
   it("shows 'N standard' when no special quota", async () => {
     const content = await readFile(bookingFormPath, "utf-8");
@@ -249,7 +249,7 @@ describe("Display scenarios — edge cases", () => {
 // ---------------------------------------------------------------------------
 
 describe("Availability table — blocked date behavior", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+  const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
 
   it("blocked date shows 'Blocked' not numeric capacity", async () => {
     const content = await readFile(pagePath, "utf-8");
@@ -265,14 +265,14 @@ describe("Availability table — blocked date behavior", () => {
     // The StatusBadge component handles the restricted status display separately.
     assert.ok(content.includes("isBlocked"), "Should check isBlocked status");
     // Restricted status is handled by StatusBadge component, not the table cell
-    const badgePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/status-badge.tsx";
+    const badgePath = `${process.cwd()}/frontend/src/v2/appointments/components/status-badge.tsx`;
     const badgeContent = await readFile(badgePath, "utf-8");
     assert.ok(badgeContent.includes("isRestricted"), "StatusBadge should check isRestricted");
   });
 });
 
 describe("Booking form — blocked date in dropdown", () => {
-  const bookingFormPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/booking-form.tsx";
+  const bookingFormPath = `${process.cwd()}/frontend/src/v2/appointments/components/booking-form.tsx`;
 
   it("blocked date shows '(Blocked)' in dropdown", async () => {
     const content = await readFile(bookingFormPath, "utf-8");

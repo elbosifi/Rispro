@@ -64,7 +64,7 @@ describe("createBooking — source verification", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
   });
@@ -137,7 +137,7 @@ describe("createBooking — import wiring", () => {
   it("imports booking repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -149,7 +149,7 @@ describe("createBooking — import wiring", () => {
   it("imports bucket mutex repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -161,7 +161,7 @@ describe("createBooking — import wiring", () => {
   it("imports transaction util from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -173,7 +173,7 @@ describe("createBooking — import wiring", () => {
   it("imports SchedulingError from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -185,7 +185,7 @@ describe("createBooking — import wiring", () => {
   it("imports pureEvaluate from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -197,7 +197,7 @@ describe("createBooking — import wiring", () => {
   it("imports authenticateSupervisor from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -217,7 +217,7 @@ describe("createBooking — error codes", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
   });
@@ -263,7 +263,7 @@ describe("POST /appointments — route wiring", () => {
   it("imports createBooking from service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(
@@ -275,7 +275,7 @@ describe("POST /appointments — route wiring", () => {
   it("validates required fields", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("patientId, modalityId, bookingDate, and caseCategory are required"),
@@ -286,7 +286,7 @@ describe("POST /appointments — route wiring", () => {
   it("extracts userId from request user context", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("req.user?.sub"), "Should extract userId from user context");
@@ -295,7 +295,7 @@ describe("POST /appointments — route wiring", () => {
   it("passes optional fields with null fallbacks", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("body.examTypeId ?? null"), "Should fallback examTypeId to null");
@@ -306,7 +306,7 @@ describe("POST /appointments — route wiring", () => {
   it("returns 201 with booking, decision, and wasOverride", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("status(201)"), "Should return 201");

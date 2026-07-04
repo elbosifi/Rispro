@@ -34,7 +34,7 @@ describe("authenticateSupervisor — source verification", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts`,
       "utf-8"
     );
   });
@@ -83,7 +83,7 @@ describe("authenticateSupervisor — import wiring", () => {
   it("imports bcrypt from bcryptjs", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts`,
       "utf-8"
     );
     assert.ok(
@@ -95,7 +95,7 @@ describe("authenticateSupervisor — import wiring", () => {
   it("imports SchedulingError from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts`,
       "utf-8"
     );
     assert.ok(
@@ -115,7 +115,7 @@ describe("authenticateSupervisor — error codes", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/utils/authenticate-supervisor.ts`,
       "utf-8"
     );
   });
@@ -145,7 +145,7 @@ describe("authenticateSupervisor — integration wiring", () => {
   it("imported by create-booking service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -161,7 +161,7 @@ describe("authenticateSupervisor — integration wiring", () => {
   it("imported by reschedule-booking service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts`,
       "utf-8"
     );
     assert.ok(

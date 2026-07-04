@@ -149,7 +149,7 @@ describe("BookingForm — component structure", () => {
 });
 
 describe("BookingForm — special reason source", () => {
-  const bookingFormPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/booking-form.tsx";
+  const bookingFormPath = `${process.cwd()}/frontend/src/v2/appointments/components/booking-form.tsx`;
 
   it("loads special reasons from V2 API hook", async () => {
     const content = await readFile(bookingFormPath, "utf-8");
@@ -185,7 +185,7 @@ describe("BookingForm — special reason source", () => {
 
 describe("V2 appointments — barrel exports config", () => {
   // The frontend index.ts file path (absolute)
-  const frontendIndexPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/index.ts";
+  const frontendIndexPath = `${process.cwd()}/frontend/src/v2/appointments/index.ts`;
 
   it("index.ts includes PatientSearch export", async () => {
     const content = await readFile(frontendIndexPath, "utf-8");

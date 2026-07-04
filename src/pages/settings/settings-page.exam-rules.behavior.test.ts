@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const filePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/pages/settings/settings-page.tsx";
+const filePath = `${process.cwd()}/frontend/src/pages/settings/settings-page.tsx`;
 
 test("exam-rule modality change clears stale examTypeIds", async () => {
   const content = await readFile(filePath, "utf-8");

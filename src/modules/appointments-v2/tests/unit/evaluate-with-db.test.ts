@@ -93,7 +93,7 @@ describe("evaluateWithDb — source verification", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
   });
@@ -206,7 +206,7 @@ describe("evaluateWithDb — PureEvaluateInput construction", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
   });
@@ -264,7 +264,7 @@ describe("evaluateWithDb — no published policy return shape (source)", () => {
   it("returns isAllowed: false when no published policy exists", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     // The no-policy branch should set isAllowed: false
@@ -274,7 +274,7 @@ describe("evaluateWithDb — no published policy return shape (source)", () => {
   it("returns displayStatus: blocked when no published policy exists", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(source.includes('"blocked"'), 'Should set displayStatus to "blocked"');
@@ -283,7 +283,7 @@ describe("evaluateWithDb — no published policy return shape (source)", () => {
   it("includes policyVersionRef with versionId: 0 when no published policy", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(source.includes("versionId: 0"), "Should set versionId: 0");
@@ -294,7 +294,7 @@ describe("evaluateWithDb — no published policy return shape (source)", () => {
   it("includes decisionTrace with evaluatedAt timestamp", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(source.includes("decisionTrace"), "Should include decisionTrace");
@@ -310,7 +310,7 @@ describe("evaluateWithDb — integration wiring", () => {
   it("imports pureEvaluate from the correct module", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(
@@ -322,7 +322,7 @@ describe("evaluateWithDb — integration wiring", () => {
   it("imports policy version repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(
@@ -334,7 +334,7 @@ describe("evaluateWithDb — integration wiring", () => {
   it("imports policy rules repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(
@@ -346,7 +346,7 @@ describe("evaluateWithDb — integration wiring", () => {
   it("imports capacity repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(
@@ -358,7 +358,7 @@ describe("evaluateWithDb — integration wiring", () => {
   it("imports modality catalog from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(
@@ -370,7 +370,7 @@ describe("evaluateWithDb — integration wiring", () => {
   it("imports exam type catalog from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/evaluate-with-db.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/evaluate-with-db.ts`,
       "utf-8"
     );
     assert.ok(

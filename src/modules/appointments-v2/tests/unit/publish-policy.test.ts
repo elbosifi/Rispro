@@ -56,7 +56,7 @@ describe("publishPolicy — source verification", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/publish-policy.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/admin/services/publish-policy.service.ts`,
       "utf-8"
     );
   });
@@ -114,7 +114,7 @@ describe("publishPolicy — import wiring", () => {
   it("imports validatePolicyDraft from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/publish-policy.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/admin/services/publish-policy.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -126,7 +126,7 @@ describe("publishPolicy — import wiring", () => {
   it("imports admin policy repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/publish-policy.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/admin/services/publish-policy.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -138,7 +138,7 @@ describe("publishPolicy — import wiring", () => {
   it("imports transaction util from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/publish-policy.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/admin/services/publish-policy.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -150,7 +150,7 @@ describe("publishPolicy — import wiring", () => {
   it("imports SchedulingError from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/publish-policy.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/admin/services/publish-policy.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -170,7 +170,7 @@ describe("publishPolicy — error codes", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/admin/services/publish-policy.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/admin/services/publish-policy.service.ts`,
       "utf-8"
     );
   });
@@ -208,7 +208,7 @@ describe("POST /publish — route wiring", () => {
   it("imports publishPolicy from service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(
@@ -220,7 +220,7 @@ describe("POST /publish — route wiring", () => {
   it("parses versionId from route param", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("parseInt(String(req.params.versionId)"), "Should parse versionId from params");
@@ -230,7 +230,7 @@ describe("POST /publish — route wiring", () => {
   it("extracts userId from request user context", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("req.user?.sub"), "Should extract userId from user context");
@@ -239,7 +239,7 @@ describe("POST /publish — route wiring", () => {
   it("passes changeNote from request body", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(source.includes("body.changeNote"), "Should extract changeNote from body");

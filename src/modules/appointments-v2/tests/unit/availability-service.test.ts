@@ -145,7 +145,7 @@ describe("Modality catalog — SQL includes dailyCapacity", () => {
   it("FIND_BY_ID_SQL selects daily_capacity", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts",
+      `${process.cwd()}/src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts`,
       "utf-8"
     );
     assert.ok(content.includes('daily_capacity as "dailyCapacity"'));
@@ -154,7 +154,7 @@ describe("Modality catalog — SQL includes dailyCapacity", () => {
   it("LIST_ACTIVE_SQL selects daily_capacity", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts",
+      `${process.cwd()}/src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts`,
       "utf-8"
     );
     assert.ok(content.includes('daily_capacity as "dailyCapacity"'));
@@ -169,7 +169,7 @@ describe("Availability service — no hardcoded dailyCapacity default", () => {
   it("does not use hardcoded 20 as default", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/availability.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/scheduler/services/availability.service.ts`,
       "utf-8"
     );
     // Should NOT contain the old hardcoded default
@@ -182,7 +182,7 @@ describe("Availability service — exam mix summaries", () => {
   it("includes examMixQuotaSummaries in response shape", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/availability.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/scheduler/services/availability.service.ts`,
       "utf-8"
     );
     assert.ok(content.includes("examMixQuotaSummaries"), "Should include examMixQuotaSummaries");

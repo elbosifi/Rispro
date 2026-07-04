@@ -205,7 +205,7 @@ describe("Suggestion service — no longer a stub", () => {
   it("imports getAvailability from availability service", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/suggestion.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/scheduler/services/suggestion.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -218,7 +218,7 @@ describe("Suggestion service — no longer a stub", () => {
   it("filters based on decision.isAllowed and decision.requiresSupervisorOverride", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/suggestion.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/scheduler/services/suggestion.service.ts`,
       "utf-8"
     );
     assert.ok(content.includes("isAllowed"), "Should check isAllowed");
@@ -228,7 +228,7 @@ describe("Suggestion service — no longer a stub", () => {
   it("checks day.isFull to exclude fully booked dates", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/suggestion.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/scheduler/services/suggestion.service.ts`,
       "utf-8"
     );
     assert.ok(content.includes("isFull"), "Should check isFull");
@@ -237,7 +237,7 @@ describe("Suggestion service — no longer a stub", () => {
   it("does not return empty array stub", async () => {
     const fs = await import("node:fs/promises");
     const content = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/suggestion.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/scheduler/services/suggestion.service.ts`,
       "utf-8"
     );
     // The stub pattern was "return [];" with a TODO comment

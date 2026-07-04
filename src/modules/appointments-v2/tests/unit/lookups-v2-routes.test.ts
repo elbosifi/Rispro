@@ -11,7 +11,7 @@ describe("V2 lookups — frontend API wiring", () => {
   it("fetchV2Modalities calls /v2/lookups/modalities", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/api.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/api.ts`,
       "utf-8"
     );
     assert.ok(
@@ -23,7 +23,7 @@ describe("V2 lookups — frontend API wiring", () => {
   it("fetchV2ExamTypes calls /v2/lookups/modalities/:modalityId/exam-types", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/api.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/api.ts`,
       "utf-8"
     );
     assert.ok(
@@ -35,7 +35,7 @@ describe("V2 lookups — frontend API wiring", () => {
   it("does not call legacy /appointments/lookups", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/api.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/api.ts`,
       "utf-8"
     );
     assert.ok(
@@ -47,7 +47,7 @@ describe("V2 lookups — frontend API wiring", () => {
   it("fetchV2SpecialReasonCodes calls /v2/lookups/special-reason-codes", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/api.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/api.ts`,
       "utf-8"
     );
     assert.ok(
@@ -61,7 +61,7 @@ describe("V2 lookups backend — special reason codes query", () => {
   it("filters special reason codes to active rows only", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(
@@ -73,7 +73,7 @@ describe("V2 lookups backend — special reason codes query", () => {
   it("orders special reason codes deterministically by code asc", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(
@@ -87,7 +87,7 @@ describe("V2 lookups backend — priorities query", () => {
   it("uses actual reporting_priorities columns (id, code, name_ar, name_en, sort_order)", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(
@@ -99,7 +99,7 @@ describe("V2 lookups backend — priorities query", () => {
   it("does not query nonexistent columns name or is_active", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts`,
       "utf-8"
     );
     const prioritiesSection = source.match(/router\.get\(\s*"\/priorities"[\s\S]*?\n\);/);
@@ -113,7 +113,7 @@ describe("V2 lookups backend — priorities query", () => {
   it("orders priorities by sort_order asc, name_en asc", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts`,
       "utf-8"
     );
     assert.ok(
@@ -125,7 +125,7 @@ describe("V2 lookups backend — priorities query", () => {
   it("maps response to frontend DTO with id, name, nameAr, nameEn", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      `${process.cwd()}/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts`,
       "utf-8"
     );
     const prioritiesSection = source.match(/router\.get\(\s*"\/priorities"[\s\S]*?\n\);/);

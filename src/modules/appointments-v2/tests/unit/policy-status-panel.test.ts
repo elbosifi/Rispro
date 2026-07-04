@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 // ---------------------------------------------------------------------------
 
 describe("PolicyStatusPanel — countRules logic", () => {
-  const panelPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/policy-status-panel.tsx";
+  const panelPath = `${process.cwd()}/frontend/src/v2/appointments/components/policy-status-panel.tsx`;
 
   it("includes specialReasonCodes.length in count", async () => {
     const content = await readFile(panelPath, "utf-8");
@@ -168,7 +168,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
 // ---------------------------------------------------------------------------
 
 describe("PolicyStatusPanel — usage of countRules", () => {
-  const panelPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/policy-status-panel.tsx";
+  const panelPath = `${process.cwd()}/frontend/src/v2/appointments/components/policy-status-panel.tsx`;
 
   it("calls countRules for publishedSnapshot", async () => {
     const content = await readFile(panelPath, "utf-8");

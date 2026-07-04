@@ -86,7 +86,7 @@ describe("compilePolicy — source verification", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/compile-policy.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/compile-policy.ts`,
       "utf-8"
     );
   });
@@ -147,7 +147,7 @@ describe("compilePolicy — import wiring", () => {
   it("imports admin policy repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/compile-policy.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/compile-policy.ts`,
       "utf-8"
     );
     assert.ok(
@@ -159,7 +159,7 @@ describe("compilePolicy — import wiring", () => {
   it("imports policy rules repo from correct path", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/compile-policy.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/compile-policy.ts`,
       "utf-8"
     );
     assert.ok(
@@ -171,7 +171,7 @@ describe("compilePolicy — import wiring", () => {
   it("imports all rule loading functions", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/compile-policy.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/compile-policy.ts`,
       "utf-8"
     );
     assert.ok(source.includes("loadModalityBlockedRules,"), "Should import loadModalityBlockedRules");
@@ -190,7 +190,7 @@ describe("compilePolicy — error handling", () => {
   it("throws Error when version not found", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/compile-policy.ts",
+      `${process.cwd()}/src/modules/appointments-v2/rules/services/compile-policy.ts`,
       "utf-8"
     );
     assert.ok(source.includes("throw new Error"), "Should throw Error (not SchedulingError)");
@@ -200,7 +200,7 @@ describe("compilePolicy — error handling", () => {
   it("uses template literal for error message with versionId", () => {
     const fs = import("node:fs/promises").then(async (m) => {
       const source = await m.default.readFile(
-        "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/rules/services/compile-policy.ts",
+        `${process.cwd()}/src/modules/appointments-v2/rules/services/compile-policy.ts`,
         "utf-8"
       );
       assert.ok(source.includes("Policy version ${policyVersionId} not found"),

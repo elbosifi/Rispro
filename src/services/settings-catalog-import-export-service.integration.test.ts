@@ -18,7 +18,7 @@ async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<
 
 async function ensureCatalogSchema(): Promise<void> {
   const sql = await readFile(
-    "/Users/serajalsaifi/Nextcloud/RISpro/src/db/migrations/042_exam_type_codes_and_durations.sql",
+    `${process.cwd()}/src/db/migrations/042_exam_type_codes_and_durations.sql`,
     "utf8"
   );
   await pool.query(sql);

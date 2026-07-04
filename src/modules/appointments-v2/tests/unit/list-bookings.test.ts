@@ -200,7 +200,7 @@ describe("List bookings — frontend API params", () => {
 // ---------------------------------------------------------------------------
 
 describe("V2 appointments — barrel exports for list bookings", () => {
-  const frontendIndexPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/index.ts";
+  const frontendIndexPath = `${process.cwd()}/frontend/src/v2/appointments/index.ts`;
 
   it("index.ts exports useV2ListBookings", async () => {
     const fs = await import("node:fs/promises");
@@ -251,7 +251,7 @@ describe("List bookings — backend service exists", () => {
 describe("List bookings — route wiring", () => {
   it("appointments-v2-routes.ts includes GET route", async () => {
     const fs = await import("node:fs/promises");
-    const routePath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts";
+    const routePath = `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`;
     const content = await fs.readFile(routePath, "utf-8");
     assert.ok(content.includes("router.get"));
     assert.ok(content.includes("listBookingsService"));
@@ -265,7 +265,7 @@ describe("List bookings — route wiring", () => {
 describe("List bookings — includeCancelled", () => {
   it("repository SQL includes includeCancelled param", async () => {
     const fs = await import("node:fs/promises");
-    const repoPath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/repositories/booking.repo.ts";
+    const repoPath = `${process.cwd()}/src/modules/appointments-v2/booking/repositories/booking.repo.ts`;
     const content = await fs.readFile(repoPath, "utf-8");
     assert.ok(content.includes("includeCancelled: boolean"));
     assert.ok(content.includes("($4 = true or b.status not in ('cancelled', 'discontinued', 'voided'))"));
@@ -274,7 +274,7 @@ describe("List bookings — includeCancelled", () => {
 
   it("service passes includeCancelled through", async () => {
     const fs = await import("node:fs/promises");
-    const servicePath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/list-bookings.service.ts";
+    const servicePath = `${process.cwd()}/src/modules/appointments-v2/booking/services/list-bookings.service.ts`;
     const content = await fs.readFile(servicePath, "utf-8");
     assert.ok(content.includes("includeCancelled?: boolean"));
     assert.ok(content.includes("includeCancelled,"));
@@ -282,7 +282,7 @@ describe("List bookings — includeCancelled", () => {
 
   it("route parses includeCancelled query param", async () => {
     const fs = await import("node:fs/promises");
-    const routePath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts";
+    const routePath = `${process.cwd()}/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts`;
     const content = await fs.readFile(routePath, "utf-8");
     assert.ok(content.includes("includeCancelled"));
     assert.ok(content.includes("include cancelled and discontinued bookings in results"));
@@ -290,7 +290,7 @@ describe("List bookings — includeCancelled", () => {
 
   it("frontend API includes includeCancelled in params", async () => {
     const fs = await import("node:fs/promises");
-    const apiPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/api.ts";
+    const apiPath = `${process.cwd()}/frontend/src/v2/appointments/api.ts`;
     const content = await fs.readFile(apiPath, "utf-8");
     assert.ok(content.includes("includeCancelled?: boolean"));
     assert.ok(content.includes('searchParams.set("includeCancelled", "true")'));
@@ -298,7 +298,7 @@ describe("List bookings — includeCancelled", () => {
 
   it("frontend types include ListBookingsParams with includeCancelled", async () => {
     const fs = await import("node:fs/promises");
-    const typesPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts";
+    const typesPath = `${process.cwd()}/frontend/src/v2/appointments/types.ts`;
     const content = await fs.readFile(typesPath, "utf-8");
     assert.ok(content.includes("ListBookingsParams"));
     assert.ok(content.includes("includeCancelled?: boolean"));
@@ -306,7 +306,7 @@ describe("List bookings — includeCancelled", () => {
 
   it("page uses includeCancelled state and toggle UI", async () => {
     const fs = await import("node:fs/promises");
-    const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+    const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
     const content = await fs.readFile(pagePath, "utf-8");
     assert.ok(content.includes("includeCancelled"));
     assert.ok(content.includes("setIncludeCancelled"));
@@ -316,7 +316,7 @@ describe("List bookings — includeCancelled", () => {
 
   it("cancelled bookings rows have reduced opacity", async () => {
     const fs = await import("node:fs/promises");
-    const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+    const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
     const content = await fs.readFile(pagePath, "utf-8");
     assert.ok(content.includes('booking.status === "cancelled" || booking.status === "discontinued" || booking.status === "voided"'));
     assert.ok(content.includes("opacity"));

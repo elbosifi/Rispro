@@ -69,7 +69,7 @@ function makeDecision(overrides?: Record<string, unknown>) {
 describe("RescheduleDialog", () => {
   it("is a function component", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("export function RescheduleDialog"));
@@ -181,7 +181,7 @@ describe("RescheduleDialog — prop types", () => {
 describe("RescheduleDialog barrel export", () => {
   it("is exported from module entry point", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/index.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/index.ts`,
       "utf-8"
     );
     assert.ok(content.includes('export { RescheduleDialog }'));
@@ -195,7 +195,7 @@ describe("RescheduleDialog barrel export", () => {
 describe("RescheduleDialog — component file", () => {
   it("component file exists", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.length > 0);
@@ -203,7 +203,7 @@ describe("RescheduleDialog — component file", () => {
 
   it("component imports react", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("import { useState, useEffect, useRef } from \"react\""));
@@ -211,7 +211,7 @@ describe("RescheduleDialog — component file", () => {
 
   it("component uses evaluateV2Scheduling for pre-evaluation", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("evaluateV2Scheduling"));
@@ -219,7 +219,7 @@ describe("RescheduleDialog — component file", () => {
 
   it("component handles Escape key for dismissal", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("Escape"));
@@ -227,7 +227,7 @@ describe("RescheduleDialog — component file", () => {
 
   it("component has backdrop dismiss handler", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("e.target === e.currentTarget"));
@@ -235,7 +235,7 @@ describe("RescheduleDialog — component file", () => {
 
   it("surfaces backend evaluation failures clearly", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("setEvaluationError"));
@@ -244,7 +244,7 @@ describe("RescheduleDialog — component file", () => {
 
   it("surfaces backend submit failures clearly", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/components/reschedule-dialog.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("setSubmitError"));
@@ -259,7 +259,7 @@ describe("RescheduleDialog — component file", () => {
 describe("Reschedule status guard", () => {
   it("RESCHEDULABLE_STATUSES is imported from types in page", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/page.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("RESCHEDULABLE_STATUSES"));
@@ -269,7 +269,7 @@ describe("Reschedule status guard", () => {
 
   it("RESCHEDULABLE_STATUSES in frontend types includes scheduled, arrived, waiting", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/types.ts`,
       "utf-8"
     );
     assert.ok(content.includes("RESCHEDULABLE_STATUSES"));
@@ -280,7 +280,7 @@ describe("Reschedule status guard", () => {
 
   it("RESCHEDULABLE_STATUSES excludes completed, no-show, cancelled", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/types.ts`,
       "utf-8"
     );
     const guardLine = content.match(/RESCHEDULABLE_STATUSES.*?\[[\s\S]*?\]/);
@@ -293,7 +293,7 @@ describe("Reschedule status guard", () => {
 
   it("reschedule button has disabled state based on status", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/page.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("disabled={!RESCHEDULABLE_STATUSES.includes(booking.status)"));
@@ -302,7 +302,7 @@ describe("Reschedule status guard", () => {
 
   it("handleReschedule checks status before submitting", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/page.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("RESCHEDULABLE_STATUSES.includes(rescheduleTarget.status)"));
@@ -311,7 +311,7 @@ describe("Reschedule status guard", () => {
 
   it("BookingStatus type is imported in page", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/page.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("BookingStatus"));
@@ -319,7 +319,7 @@ describe("Reschedule status guard", () => {
 
   it("RESCHEDULABLE_STATUSES is barrel exported from frontend module", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/index.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/index.ts`,
       "utf-8"
     );
     assert.ok(content.includes("RESCHEDULABLE_STATUSES"));
@@ -327,11 +327,11 @@ describe("Reschedule status guard", () => {
 
   it("frontend and backend RESCHEDULABLE_STATUSES match", async () => {
     const frontendContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/types.ts`,
       "utf-8"
     );
     const backendContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/shared/types/common.ts",
+      `${process.cwd()}/src/modules/appointments-v2/shared/types/common.ts`,
       "utf-8"
     );
 
@@ -354,11 +354,11 @@ describe("Reschedule status guard", () => {
 
   it("frontend and backend CANCELLABLE_STATUSES match", async () => {
     const frontendContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/types.ts`,
       "utf-8"
     );
     const backendContent = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/shared/types/common.ts",
+      `${process.cwd()}/src/modules/appointments-v2/shared/types/common.ts`,
       "utf-8"
     );
 
@@ -386,7 +386,7 @@ describe("Reschedule status guard", () => {
 describe("Cancel status guard", () => {
   it("CANCELLABLE_STATUSES is imported from types in page", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/page.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("CANCELLABLE_STATUSES"));
@@ -395,7 +395,7 @@ describe("Cancel status guard", () => {
 
   it("CANCELLABLE_STATUSES in frontend types includes scheduled, arrived, waiting", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/types.ts`,
       "utf-8"
     );
     assert.ok(content.includes("CANCELLABLE_STATUSES"));
@@ -406,7 +406,7 @@ describe("Cancel status guard", () => {
 
   it("CANCELLABLE_STATUSES excludes completed, no-show, cancelled", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/types.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/types.ts`,
       "utf-8"
     );
     const guardLine = content.match(/CANCELLABLE_STATUSES.*?\[[\s\S]*?\]/);
@@ -419,7 +419,7 @@ describe("Cancel status guard", () => {
 
   it("cancel button has disabled state based on status", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx",
+      `${process.cwd()}/frontend/src/v2/appointments/page.tsx`,
       "utf-8"
     );
     assert.ok(content.includes("disabled={!CANCELLABLE_STATUSES.includes(booking.status)"));
@@ -428,7 +428,7 @@ describe("Cancel status guard", () => {
 
   it("CANCELLABLE_STATUSES is barrel exported from frontend module", async () => {
     const content = await readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/index.ts",
+      `${process.cwd()}/frontend/src/v2/appointments/index.ts`,
       "utf-8"
     );
     assert.ok(content.includes("CANCELLABLE_STATUSES"));

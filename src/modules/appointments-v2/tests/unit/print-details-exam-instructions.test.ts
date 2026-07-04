@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const routePath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/read-v2-routes.ts";
-const repoPath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/repositories/booking.repo.ts";
+const routePath = `${process.cwd()}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`;
+const repoPath = `${process.cwd()}/src/modules/appointments-v2/booking/repositories/booking.repo.ts`;
 
 test("V2 print details payload includes exam preparation fields", async () => {
   const [routeSource, repoSource] = await Promise.all([

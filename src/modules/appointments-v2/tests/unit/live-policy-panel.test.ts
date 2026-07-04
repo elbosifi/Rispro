@@ -17,7 +17,7 @@ import { readFile } from "node:fs/promises";
 // ---------------------------------------------------------------------------
 
 describe("LivePolicyPanel — component structure", () => {
-  const panelPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/live-policy-panel.tsx";
+  const panelPath = `${process.cwd()}/frontend/src/v2/appointments/components/live-policy-panel.tsx`;
 
   it("renders 'Live Policy' heading", async () => {
     const content = await readFile(panelPath, "utf-8");
@@ -83,7 +83,7 @@ describe("LivePolicyPanel — component structure", () => {
 // ---------------------------------------------------------------------------
 
 describe("SchedulingAdminV2Page — live policy integration", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/scheduling-admin-page.tsx";
+  const pagePath = `${process.cwd()}/frontend/src/v2/appointments/scheduling-admin-page.tsx`;
 
   it("imports LivePolicyPanel", async () => {
     const content = await readFile(pagePath, "utf-8");

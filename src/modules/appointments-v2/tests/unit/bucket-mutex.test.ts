@@ -77,7 +77,7 @@ describe("bucket-mutex — SQL queries", () => {
   before(async () => {
     const fs = await import("node:fs/promises");
     source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/repositories/bucket-mutex.repo.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/repositories/bucket-mutex.repo.ts`,
       "utf-8"
     );
   });
@@ -135,7 +135,7 @@ describe("bucket-mutex — concurrency safety", () => {
   it("uses row-level locking (not advisory locks)", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/repositories/bucket-mutex.repo.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/repositories/bucket-mutex.repo.ts`,
       "utf-8"
     );
     assert.ok(
@@ -151,7 +151,7 @@ describe("bucket-mutex — concurrency safety", () => {
   it("bucket_mutex table has composite primary key", async () => {
     const fs = await import("node:fs/promises");
     const migration = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/db/migrations/023_appointments_v2_schema.sql",
+      `${process.cwd()}/src/db/migrations/023_appointments_v2_schema.sql`,
       "utf-8"
     );
     assert.ok(
@@ -173,7 +173,7 @@ describe("bucket-mutex — integration wiring", () => {
   it("imported by create-booking service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/create-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/create-booking.service.ts`,
       "utf-8"
     );
     assert.ok(
@@ -189,7 +189,7 @@ describe("bucket-mutex — integration wiring", () => {
   it("imported by reschedule-booking service", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts",
+      `${process.cwd()}/src/modules/appointments-v2/booking/services/reschedule-booking.service.ts`,
       "utf-8"
     );
     assert.ok(

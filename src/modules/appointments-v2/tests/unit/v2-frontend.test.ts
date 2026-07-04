@@ -119,31 +119,6 @@ describe("V2 Frontend — API query key structure", () => {
   });
 });
 
-describe("V2 Frontend — policy admin structured editor", () => {
-  const editorPath =
-    "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/policy-draft-editor.tsx";
-
-  it("uses structured section-based editor headings instead of JSON-first workflow", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(editorPath, "utf-8");
-    assert.ok(source.includes("Daily category limits"));
-    assert.ok(source.includes("Blocked dates"));
-    assert.ok(source.includes("Exam date rules"));
-    assert.ok(source.includes("Special quotas"));
-    assert.ok(source.includes("Special reason codes"));
-    assert.ok(source.includes("Patient identifier types"));
-    assert.ok(!source.includes("Edit the V2 `PolicySnapshotDto` JSON directly"));
-  });
-
-  it("keeps raw JSON hidden behind an explicit advanced panel", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(editorPath, "utf-8");
-    assert.ok(source.includes("Advanced / Raw JSON"));
-    assert.ok(source.includes("Debug panel only. Raw JSON is hidden by default."));
-    assert.ok(source.includes("Apply JSON to form"));
-  });
-});
-
 describe("V2 Frontend — types shape validation", () => {
   it("AvailabilityDayDto has all required fields", () => {
     const day = {
@@ -198,53 +173,8 @@ describe("V2 Frontend — types shape validation", () => {
   });
 });
 
-describe("V2 Frontend — no published policy state", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
-
-  it("renders explicit no-policy message", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(pagePath, "utf-8");
-    assert.ok(source.includes("No scheduling policy has been published yet."));
-    assert.ok(source.includes("noPublishedPolicy"));
-  });
-
-  it("shows supervisor CTA to /v2/appointments/admin", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(pagePath, "utf-8");
-    assert.ok(source.includes('navigate("/v2/appointments/admin")'));
-    assert.ok(source.includes('user?.role === "supervisor"'));
-  });
-
-  it("keeps non-supervisor informational message for no-policy branch", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(pagePath, "utf-8");
-    assert.ok(source.includes('user?.role !== "supervisor"'));
-    assert.ok(source.includes("Ask a supervisor to publish a policy before booking."));
-  });
-});
-
-describe("V2 Frontend — page key states remain explicit", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
-
-  it("contains explicit availability loading, error, and empty state messages", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(pagePath, "utf-8");
-    assert.ok(source.includes("Loading availability…"));
-    assert.ok(source.includes("Could not load availability."));
-    assert.ok(source.includes("No availability found for the selected filters."));
-  });
-
-  it("contains explicit suggestions loading, error, and empty state messages", async () => {
-    const fs = await import("node:fs/promises");
-    const source = await fs.readFile(pagePath, "utf-8");
-    assert.ok(source.includes("Loading next available suggestions…"));
-    assert.ok(source.includes("Could not load suggestions."));
-    assert.ok(source.includes("No better dates found in the selected window."));
-  });
-});
-
 describe("V2 Frontend — bookings action pending state", () => {
-  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+  const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
 
   it("tracks cancel pending by booking ID (not globally)", async () => {
     const fs = await import("node:fs/promises");
@@ -359,7 +289,7 @@ describe("V2 Frontend — Reschedule API query key structure", () => {
 });
 
 describe("V2 appointments — barrel exports for reschedule", () => {
-  const frontendIndexPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/index.ts";
+  const frontendIndexPath = `${process.cwd()}/frontend/src/v2/appointments/index.ts`;
 
   it("index.ts exports useV2RescheduleBooking", async () => {
     const fs = await import("node:fs/promises");

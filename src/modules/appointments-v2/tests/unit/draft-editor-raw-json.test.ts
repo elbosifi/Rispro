@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 describe("PolicyDraftEditor — raw JSON safety", () => {
-  const editorPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/policy-draft-editor.tsx";
+  const editorPath = `${process.cwd()}/frontend/src/v2/appointments/components/policy-draft-editor.tsx`;
 
   it("applyRawJson preserves specialReasonCodes from current draft", async () => {
     const content = await readFile(editorPath, "utf-8");
