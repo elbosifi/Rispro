@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DoctorPage from "./doctor-page";
 import { LanguageProvider } from "@/providers/language-provider";
-import type { DoctorMe } from "@/types/api";
+import type { DoctorMe, ReportingBoardCaseRow } from "@/types/api";
 
 const fetchDoctorMeMock = vi.fn();
 const fetchMyDoctorRosterMock = vi.fn();
@@ -288,6 +288,65 @@ const normalDoctor: DoctorMe = {
   moduleCapabilities: ["doctor"],
   canAccessCoreWorkspace: true,
 };
+
+function reportingBoardCase(overrides: Partial<ReportingBoardCaseRow> = {}): ReportingBoardCaseRow {
+  return {
+    caseType: "appointment",
+    caseKey: "appointment:1",
+    appointmentId: 1,
+    comparisonRequestId: null,
+    patientId: 5,
+    patientMrn: "MRN-5",
+    patientDicomId: null,
+    patientEnglishName: "Case Patient",
+    patientArabicName: null,
+    accessionNumber: "V2-000001",
+    studyInstanceUid: "1.2.3",
+    bookingDate: "2026-05-15",
+    bookingTime: "09:00",
+    modalityId: 1,
+    modalityCode: "CT",
+    modalityName: "CT",
+    examTypeId: 2,
+    examTypeName: "CT Brain",
+    linkedPreviousBookingId: null,
+    linkedPreviousStudyDate: null,
+    linkedPreviousAccessionNumber: null,
+    caseCategory: "oncology",
+    appointmentStatus: "completed",
+    requiresReport: true,
+    reportingPriorityId: null,
+    reportingPriorityCode: null,
+    reportingPriorityName: null,
+    reportingPrioritySortOrder: null,
+    assignedDoctorId: null,
+    assignedDoctorName: null,
+    assignmentStatus: "unassigned",
+    completedAt: "2026-05-15T08:30:00.000Z",
+    currentAssignedAt: null,
+    firstAssignedAt: null,
+    reportFinalAt: null,
+    reportStatusCheckedAt: null,
+    reportStatusSource: null,
+    manualFinalOverrideId: null,
+    manualFinalAt: null,
+    manualFinalByName: null,
+    manualFinalReason: null,
+    dueAt: null,
+    completedToAssignedMinutes: null,
+    assignedToFinalMinutes: null,
+    completedToFinalMinutes: null,
+    currentAssignmentAgeMinutes: null,
+    completedUnassignedAgeMinutes: null,
+    reportStatus: "draft",
+    canAssign: true,
+    exclusionReason: null,
+    sonicDicomStudyNote: null,
+    sonicDicomStudyNoteCheckedAt: null,
+    sonicDicomStudyNoteSource: null,
+    ...overrides,
+  };
+}
 
 const protocolLibraryAdmin: DoctorMe = {
   ...normalDoctor,
@@ -1588,6 +1647,28 @@ describe("Doctor Portal shell", () => {
     expect(await screen.findByText("Reporting Assignment Board")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Assign next cases/i })).toBeTruthy();
     expect(screen.getByText("Saved views")).toBeTruthy();
+  });
+
+  it("shows PACS note indicator only for reporting board cases with a SonicDICOM note", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [
+        reportingBoardCase({ appointmentId: 77, caseKey: "appointment:77", accessionNumber: "V2-000077", patientEnglishName: "Note Patient", sonicDicomStudyNote: "mwa prior study note", sonicDicomStudyNoteCheckedAt: "2026-07-04T08:00:00.000Z", sonicDicomStudyNoteSource: "sonicdicom" }),
+        reportingBoardCase({ appointmentId: 78, caseKey: "appointment:78", accessionNumber: "V2-000078", patientEnglishName: "Plain Patient", sonicDicomStudyNote: null }),
+      ],
+      filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" },
+    });
+
+    renderDoctorPortal("/doctor/reporting-board");
+
+    expect(await screen.findByText("Note Patient")).toBeTruthy();
+    expect(screen.getAllByText("PACS note")).toHaveLength(1);
+    expect(screen.getByTitle("PACS note: mwa prior study note")).toBeTruthy();
+    expect(screen.queryByTitle(/Plain Patient.*PACS note/)).toBeNull();
   });
 
   it("normal doctor cannot open the Reporting Assignment Board route or assignment controls", async () => {

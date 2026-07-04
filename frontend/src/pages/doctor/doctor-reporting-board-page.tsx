@@ -583,6 +583,7 @@ function IdsCell({ row }: { row: ReportingBoardCaseRow }) {
 
 function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; showCategoryMarker: boolean }) {
   const studyLabel = `${row.modalityCode}${row.examTypeName ? ` · ${row.examTypeName}` : ""}`;
+  const pacsNote = row.sonicDicomStudyNote?.trim() || "";
   if (row.caseType === "comparison") {
     return (
       <div className="leading-tight" title={`Comparison request in ${row.modalityCode} pool; linked previous study ${row.linkedPreviousAccessionNumber ?? row.accessionNumber}`}>
@@ -599,6 +600,14 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
   return (
     <div className="leading-tight" title={`Modality ${row.modalityName || row.modalityCode}; Exam ${row.examTypeName ?? "-"}; Category ${labelStatus(row.caseCategory)}`}>
       <div className="font-medium text-foreground">{studyLabel}</div>
+      {pacsNote && (
+        <div className="mt-1 flex max-w-56 items-center gap-1 text-[11px]" title={`PACS note: ${pacsNote}`}>
+          <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-semibold uppercase text-amber-700">
+            PACS note
+          </span>
+          <span className="truncate text-amber-800">{pacsNote}</span>
+        </div>
+      )}
       {showCategoryMarker && (
         <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-slate-600">
           {categoryLabel(row.caseCategory)}

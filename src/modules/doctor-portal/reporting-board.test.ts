@@ -417,4 +417,113 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /lower\(coalesce\(p\.english_full_name/);
     assert.match(repo, /lower\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\)/);
   });
+
+  it("attaches SonicDICOM study notes to appointment rows only", async () => {
+    const service = await import("./reporting-board-service.js");
+    const rows = [
+      reportingBoardRow({ appointmentId: 11, accessionNumber: "ACC-11", caseKey: "appointment:11" }),
+      reportingBoardRow({ appointmentId: 12, accessionNumber: "ACC-12", caseKey: "appointment:12" }),
+      reportingBoardRow({ caseType: "comparison", caseKey: "comparison:9", appointmentId: 0, comparisonRequestId: 9, accessionNumber: "ACC-CMP" }),
+    ];
+
+    service.__setReportingBoardStudyNoteFetcherForTest(async (contexts) => {
+      assert.deepEqual(contexts.map((context) => context.accessionNumber), ["ACC-11", "ACC-12"]);
+      return new Map([
+        [11, { note: "mwa prior study note", checkedAt: "2026-07-04T08:00:00.000Z", source: "sonicdicom" }],
+        [12, { note: "   ", checkedAt: "2026-07-04T08:00:00.000Z", source: "sonicdicom" }],
+      ]);
+    });
+
+    try {
+      const resolved = await service.__attachSonicDicomStudyNotesForTest(rows);
+
+      assert.equal(resolved[0].sonicDicomStudyNote, "mwa prior study note");
+      assert.equal(resolved[0].sonicDicomStudyNoteCheckedAt, "2026-07-04T08:00:00.000Z");
+      assert.equal(resolved[0].sonicDicomStudyNoteSource, "sonicdicom");
+      assert.equal(resolved[1].sonicDicomStudyNote, null);
+      assert.equal(resolved[1].sonicDicomStudyNoteSource, null);
+      assert.equal(resolved[2].sonicDicomStudyNote, null);
+      assert.equal(resolved[2].sonicDicomStudyNoteCheckedAt, null);
+    } finally {
+      service.__setReportingBoardStudyNoteFetcherForTest(null);
+    }
+  });
+
+  it("keeps reporting board rows when SonicDICOM study-note lookup fails", async () => {
+    const service = await import("./reporting-board-service.js");
+    service.__setReportingBoardStudyNoteFetcherForTest(async () => {
+      throw new Error("SQL Server unavailable");
+    });
+
+    try {
+      const [resolved] = await service.__attachSonicDicomStudyNotesForTest([
+        reportingBoardRow({ appointmentId: 21, accessionNumber: "ACC-21", caseKey: "appointment:21" }),
+      ]);
+
+      assert.equal(resolved.sonicDicomStudyNote, null);
+      assert.equal(resolved.sonicDicomStudyNoteCheckedAt, null);
+      assert.equal(resolved.sonicDicomStudyNoteSource, null);
+    } finally {
+      service.__setReportingBoardStudyNoteFetcherForTest(null);
+    }
+  });
 });
+
+function reportingBoardRow(overrides: Partial<import("./reporting-board-types.js").ReportingBoardCaseRow> = {}): import("./reporting-board-types.js").ReportingBoardCaseRow {
+  return {
+    caseType: "appointment",
+    caseKey: "appointment:1",
+    appointmentId: 1,
+    comparisonRequestId: null,
+    patientId: 1,
+    patientMrn: "MRN-1",
+    patientDicomId: null,
+    patientEnglishName: "Patient One",
+    patientArabicName: null,
+    accessionNumber: "ACC-1",
+    studyInstanceUid: "1.2.3",
+    bookingDate: "2026-07-04",
+    bookingTime: "09:00",
+    modalityId: 1,
+    modalityCode: "CT",
+    modalityName: "CT",
+    examTypeId: 1,
+    examTypeName: "CT Brain",
+    linkedPreviousBookingId: null,
+    linkedPreviousStudyDate: null,
+    linkedPreviousAccessionNumber: null,
+    caseCategory: "oncology",
+    appointmentStatus: "completed",
+    requiresReport: true,
+    reportingPriorityId: null,
+    reportingPriorityCode: null,
+    reportingPriorityName: null,
+    reportingPrioritySortOrder: null,
+    assignedDoctorId: null,
+    assignedDoctorName: null,
+    assignmentStatus: "unassigned",
+    completedAt: "2026-07-04T08:30:00.000Z",
+    currentAssignedAt: null,
+    firstAssignedAt: null,
+    reportFinalAt: null,
+    reportStatusCheckedAt: null,
+    reportStatusSource: null,
+    manualFinalOverrideId: null,
+    manualFinalAt: null,
+    manualFinalByName: null,
+    manualFinalReason: null,
+    dueAt: null,
+    completedToAssignedMinutes: null,
+    assignedToFinalMinutes: null,
+    completedToFinalMinutes: null,
+    currentAssignmentAgeMinutes: null,
+    completedUnassignedAgeMinutes: null,
+    reportStatus: "unavailable",
+    canAssign: true,
+    exclusionReason: null,
+    sonicDicomStudyNote: null,
+    sonicDicomStudyNoteCheckedAt: null,
+    sonicDicomStudyNoteSource: null,
+    ...overrides,
+  };
+}

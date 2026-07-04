@@ -2,7 +2,13 @@ import { HttpError } from "../../utils/http-error.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { pool } from "../../db/pool.js";
-import { buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus, type SonicDicomReportState } from "../../services/sonicdicom-report-service.js";
+import {
+  buildSonicDicomStaffViewerUrl,
+  checkSonicDicomReportStatus,
+  fetchSonicDicomStudyNotes,
+  type SonicDicomReportState,
+  type SonicDicomStudyNoteResult,
+} from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
@@ -94,12 +100,17 @@ const REPORTING_BOARD_SORT_BY = new Set([
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 let reportStatusChecker = checkSonicDicomReportStatus;
+let studyNoteFetcher = fetchSonicDicomStudyNotes;
 const reportStatusSnapshot = new Map<number, ReportingBoardCaseRow["reportStatus"]>();
 type EffectiveReportingBoardFilters = Omit<ReportingBoardFilters, "limit" | "offset"> & { limit: number; offset: number };
 
 export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
   reportStatusChecker = checker ?? checkSonicDicomReportStatus;
   reportStatusSnapshot.clear();
+}
+
+export function __setReportingBoardStudyNoteFetcherForTest(fetcher: typeof fetchSonicDicomStudyNotes | null) {
+  studyNoteFetcher = fetcher ?? fetchSonicDicomStudyNotes;
 }
 
 function todayIso(): string {
@@ -318,6 +329,55 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
 
+function emptySonicDicomStudyNote(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
+  return {
+    ...row,
+    sonicDicomStudyNote: null,
+    sonicDicomStudyNoteCheckedAt: null,
+    sonicDicomStudyNoteSource: null,
+  };
+}
+
+function normalizeStudyNote(value: unknown): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+}
+
+function withSonicDicomStudyNote(row: ReportingBoardCaseRow, result: SonicDicomStudyNoteResult | undefined): ReportingBoardCaseRow {
+  if (!result) return emptySonicDicomStudyNote(row);
+  const note = normalizeStudyNote(result.note);
+  return {
+    ...row,
+    sonicDicomStudyNote: note,
+    sonicDicomStudyNoteCheckedAt: result.checkedAt ?? null,
+    sonicDicomStudyNoteSource: note ? "sonicdicom" : null,
+  };
+}
+
+async function applySonicDicomStudyNotes(rows: ReportingBoardCaseRow[]): Promise<ReportingBoardCaseRow[]> {
+  const withDefaults = rows.map(emptySonicDicomStudyNote);
+  const appointmentRows = withDefaults.filter((row) => row.caseType === "appointment");
+  if (appointmentRows.length === 0) return withDefaults;
+
+  try {
+    const notes = await studyNoteFetcher(
+      appointmentRows.map((row) => ({
+        bookingId: row.appointmentId,
+        accessionNumber: row.accessionNumber,
+        studyInstanceUid: row.studyInstanceUid,
+      })),
+      { useCache: true }
+    );
+    return withDefaults.map((row) => row.caseType === "appointment" ? withSonicDicomStudyNote(row, notes.get(row.appointmentId)) : row);
+  } catch {
+    return withDefaults;
+  }
+}
+
+export function __attachSonicDicomStudyNotesForTest(rows: ReportingBoardCaseRow[]) {
+  return applySonicDicomStudyNotes(rows);
+}
+
 function fetchLimitForUnifiedCandidates(filters: EffectiveReportingBoardFilters): number {
   const requestedWindow = filters.limit + filters.offset;
   const needsPostFilter = Boolean(filters.reportStatus && filters.reportStatus !== "all");
@@ -428,7 +488,10 @@ function compareReportingBoardRows(filters: EffectiveReportingBoardFilters) {
   };
 }
 
-async function listUnifiedReportingBoardCases(filters: EffectiveReportingBoardFilters): Promise<ReportingBoardCaseRow[]> {
+async function listUnifiedReportingBoardCases(
+  filters: EffectiveReportingBoardFilters,
+  options: { includeSonicDicomStudyNotes?: boolean } = {}
+): Promise<ReportingBoardCaseRow[]> {
   const fetchLimit = fetchLimitForUnifiedCandidates(filters);
   const sourceFilters = { ...filters, limit: fetchLimit, offset: 0 };
   const [appointmentRows, comparisonRows] = await Promise.all([
@@ -436,9 +499,10 @@ async function listUnifiedReportingBoardCases(filters: EffectiveReportingBoardFi
     sourceAllowsComparisons(filters.caseSource) ? listComparisonReportingBoardRows(sourceFilters) : Promise.resolve([]),
   ]);
   const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
-  return resolved
+  const visibleRows = resolved
     .sort(compareReportingBoardRows(filters))
     .slice(filters.offset, filters.offset + filters.limit);
+  return options.includeSonicDicomStudyNotes ? applySonicDicomStudyNotes(visibleRows) : visibleRows;
 }
 
 type ReportingBoardStatsInputRow = ReportingBoardStatsBaseRow & Partial<Pick<ReportingBoardCaseRow, "reportStatus">>;
@@ -604,7 +668,7 @@ export async function getReportingBoardCases(actor: Actor, input: ReportingBoard
   const settings = await readReportingBoardSettings();
   const scopedFilters =
     filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  const cases = await listUnifiedReportingBoardCases(scopedFilters);
+  const cases = await listUnifiedReportingBoardCases(scopedFilters, { includeSonicDicomStudyNotes: true });
   return { cases, filters };
 }
 

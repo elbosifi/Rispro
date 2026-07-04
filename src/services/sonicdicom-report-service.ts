@@ -41,9 +41,26 @@ export interface StudyExistenceResult {
   foundStudy: boolean;
 }
 
+export interface SonicDicomStudyNoteLookupContext {
+  bookingId: number;
+  accessionNumber: string | null;
+  studyInstanceUid: string | null;
+}
+
+export interface SonicDicomStudyNoteResult {
+  note: string | null;
+  checkedAt: string | null;
+  source: "sonicdicom" | null;
+}
+
 interface CacheEntry {
   expiresAt: number;
   result: ReportStatusResult;
+}
+
+interface StudyNoteCacheEntry {
+  expiresAt: number;
+  result: SonicDicomStudyNoteResult;
 }
 
 interface SqlReadinessRow {
@@ -51,6 +68,12 @@ interface SqlReadinessRow {
   FoundReport?: number;
   Status?: number | null;
   UpdatedAt?: Date | string | null;
+}
+
+interface SqlStudyNoteRow {
+  AccessionNumber?: string | null;
+  StudyInstanceUID?: string | null;
+  Note?: string | null;
 }
 
 interface SqlRequest {
@@ -70,6 +93,7 @@ type SqlModule = {
 };
 
 const statusCache = new Map<number, CacheEntry>();
+const studyNoteCache = new Map<string, StudyNoteCacheEntry>();
 
 function validateDatabaseName(name: string, fallback: string): string {
   const trimmed = String(name || "").trim() || fallback;
@@ -176,6 +200,34 @@ async function queryStudyUidByAccession(
      order by s.StudyDate desc, s.StudyTime desc`
   );
   return String(result.recordset?.[0]?.StudyInstanceUID || "").trim() || null;
+}
+
+async function queryStudyNotes(
+  pool: SqlConnectionPool,
+  sql: SqlModule,
+  dicomDb: string,
+  accessions: string[],
+  studyInstanceUids: string[]
+): Promise<SqlStudyNoteRow[]> {
+  const request = pool.request();
+  const clauses: string[] = [];
+  if (accessions.length > 0) {
+    accessions.forEach((accession, index) => request.input(`accession${index}`, sql.NVarChar(128), accession));
+    clauses.push(`s.AccessionNumber in (${accessions.map((_, index) => `@accession${index}`).join(", ")})`);
+  }
+  if (studyInstanceUids.length > 0) {
+    studyInstanceUids.forEach((uid, index) => request.input(`studyInstanceUid${index}`, sql.NVarChar(128), uid));
+    clauses.push(`s.StudyInstanceUID in (${studyInstanceUids.map((_, index) => `@studyInstanceUid${index}`).join(", ")})`);
+  }
+  if (clauses.length === 0) return [];
+
+  const result = await request.query<SqlStudyNoteRow>(
+    `select s.AccessionNumber, s.StudyInstanceUID, s.Note
+     from [${dicomDb}].[dbo].[Studies] s
+     where ${clauses.join(" or ")}
+     order by s.StudyDate desc, s.StudyTime desc`
+  );
+  return result.recordset ?? [];
 }
 
 async function querySqlReportReadinessByAccession(
@@ -377,6 +429,76 @@ export async function checkSonicDicomReportStatus(
   }
 
   return result;
+}
+
+function normalizeStudyNote(value: unknown): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+}
+
+function studyNoteCacheKey(context: SonicDicomStudyNoteLookupContext): string | null {
+  const accession = String(context.accessionNumber ?? "").trim();
+  if (accession) return `accession:${accession}`;
+  const uid = String(context.studyInstanceUid ?? "").trim();
+  return uid ? `uid:${uid}` : null;
+}
+
+export async function fetchSonicDicomStudyNotes(
+  contexts: SonicDicomStudyNoteLookupContext[],
+  options: { useCache?: boolean } = {}
+): Promise<Map<number, SonicDicomStudyNoteResult>> {
+  const results = new Map<number, SonicDicomStudyNoteResult>();
+  const settings = await readSonicDicomReportSettings();
+  if (!settings.sonicDicomReportsEnabled || settings.sonicDicomReadinessMode !== "sql_server") return results;
+
+  const pending: SonicDicomStudyNoteLookupContext[] = [];
+  const now = Date.now();
+  for (const context of contexts) {
+    const key = studyNoteCacheKey(context);
+    if (!key) continue;
+    const cached = options.useCache !== false ? studyNoteCache.get(key) : null;
+    if (cached && cached.expiresAt > now) {
+      results.set(context.bookingId, cached.result);
+    } else {
+      pending.push(context);
+    }
+  }
+  if (pending.length === 0) return results;
+
+  const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
+  const accessions = [...new Set(pending.map((context) => String(context.accessionNumber ?? "").trim()).filter(Boolean))];
+  const studyInstanceUids = [
+    ...new Set(
+      pending
+        .filter((context) => !String(context.accessionNumber ?? "").trim())
+        .map((context) => String(context.studyInstanceUid ?? "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  const checkedAt = new Date().toISOString();
+  const rows = await withSqlConnection(settings, ({ sql, pool }) => queryStudyNotes(pool, sql, dicomDb, accessions, studyInstanceUids));
+  const byAccession = new Map<string, string | null>();
+  const byUid = new Map<string, string | null>();
+  for (const row of rows) {
+    const note = normalizeStudyNote(row.Note);
+    const accession = String(row.AccessionNumber ?? "").trim();
+    const uid = String(row.StudyInstanceUID ?? "").trim();
+    if (accession && !byAccession.has(accession)) byAccession.set(accession, note);
+    if (uid && !byUid.has(uid)) byUid.set(uid, note);
+  }
+
+  const ttlMs = Math.max(0, settings.sonicDicomStatusCacheTtlSeconds) * 1000;
+  for (const context of pending) {
+    const accession = String(context.accessionNumber ?? "").trim();
+    const uid = String(context.studyInstanceUid ?? "").trim();
+    const note = accession ? byAccession.get(accession) ?? null : uid ? byUid.get(uid) ?? null : null;
+    const result: SonicDicomStudyNoteResult = { note, checkedAt, source: note ? "sonicdicom" : null };
+    results.set(context.bookingId, result);
+    const key = studyNoteCacheKey(context);
+    if (key && ttlMs > 0) studyNoteCache.set(key, { result, expiresAt: Date.now() + ttlMs });
+  }
+
+  return results;
 }
 
 export async function testSonicDicomSqlReadiness(input: {

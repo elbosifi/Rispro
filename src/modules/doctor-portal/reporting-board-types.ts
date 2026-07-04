@@ -116,6 +116,9 @@ export interface ReportingBoardCaseRow {
   reportFinalAt: string | null;
   reportStatusCheckedAt: string | null;
   reportStatusSource?: "sonicdicom" | "manual" | "rispro" | null;
+  sonicDicomStudyNote: string | null;
+  sonicDicomStudyNoteCheckedAt: string | null;
+  sonicDicomStudyNoteSource?: "sonicdicom" | null;
   manualFinalOverrideId?: number | null;
   manualFinalAt?: string | null;
   manualFinalByName?: string | null;
