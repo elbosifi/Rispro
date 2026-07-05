@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -337,6 +337,105 @@ describe("PatientForm workflow hardening", () => {
 
     const dobInput = screen.getByPlaceholderText(/dd\/mm\/yyyy/i) as HTMLInputElement;
     expect(dobInput.value).toBe("01/01/1990");
+  });
+
+  it("shows confirmation and obscures the primary National ID when a valid National ID is typed manually", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    const nationalIdInput = screen.getByLabelText(/National ID/i) as HTMLInputElement;
+    await user.type(nationalIdInput, "119900123456");
+
+    expect(screen.getByLabelText(/National ID Confirmation/i)).toBeTruthy();
+    expect(nationalIdInput.type).toBe("password");
+  });
+
+  it("blocks submit when manually typed National ID confirmation mismatches", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/National ID/i), "119900123456");
+    await user.type(screen.getByLabelText(/National ID Confirmation/i), "119900123455");
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/National ID confirmation does not match/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
+  });
+
+  it("submits when manually typed National ID confirmation matches", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/National ID/i), "119900123456");
+    await user.type(screen.getByLabelText(/National ID Confirmation/i), "119900123456");
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    await waitFor(() => expect(createPatient).toHaveBeenCalled());
+    const payload = vi.mocked(createPatient).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.nationalIdConfirmation).toBe("119900123456");
+  });
+
+  it("submits a pasted valid National ID without manual confirmation", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    const nationalIdInput = screen.getByLabelText(/National ID/i) as HTMLInputElement;
+    fireEvent.paste(nationalIdInput, {
+      clipboardData: { getData: () => "119-900-123-456" }
+    });
+
+    expect(nationalIdInput.value).toBe("119900123456");
+    expect(screen.queryByLabelText(/National ID Confirmation/i)).toBeNull();
+    expect(screen.getByText(/Confirmed from paste/i)).toBeTruthy();
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    await waitFor(() => expect(createPatient).toHaveBeenCalled());
+    const payload = vi.mocked(createPatient).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.nationalIdConfirmation).toBe("119900123456");
+  });
+
+  it("requires confirmation again when a pasted National ID is manually edited", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    const nationalIdInput = screen.getByLabelText(/National ID/i) as HTMLInputElement;
+    fireEvent.paste(nationalIdInput, {
+      clipboardData: { getData: () => "119900123456" }
+    });
+    await user.type(nationalIdInput, "{backspace}7");
+
+    expect(screen.getByLabelText(/National ID Confirmation/i)).toBeTruthy();
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/Please confirm the national ID/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
+  });
+
+  it("still blocks paste into the National ID confirmation field", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/National ID/i), "119900123456");
+    const confirmationInput = screen.getByLabelText(/National ID Confirmation/i) as HTMLInputElement;
+    fireEvent.paste(confirmationInput, {
+      clipboardData: { getData: () => "119900123456" }
+    });
+
+    expect(confirmationInput.value).toBe("");
   });
 
   it("blocks submit when auto-generated English transliteration has unresolved Arabic tokens", async () => {

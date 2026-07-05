@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -155,6 +155,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const [form, setForm] = useState<PatientFormState>(DEFAULT_FORM);
   // Track original national ID to know if it was edited (edit mode only)
   const [originalNationalId, setOriginalNationalId] = useState("");
+  const [nationalIdConfirmedByPaste, setNationalIdConfirmedByPaste] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
   const [duplicateFocusField, setDuplicateFocusField] = useState<FormFieldKey | null>(null);
   const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
@@ -223,6 +224,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       const formState = patientToForm(existingPatient);
       setForm(formState);
       setOriginalNationalId(formState.identifierType === "national_id" ? formState.identifierValue : "");
+      setNationalIdConfirmedByPaste(null);
       if (existingPatient.englishFullName) setEnglishNameManuallyEdited(true);
       prevArabicTokenCountRef.current = existingPatient.arabicFullName
         ? existingPatient.arabicFullName.trim().split(/\s+/).filter(Boolean).length
@@ -291,6 +293,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     mutationFn: createPatient,
     onSuccess: (patient) => {
       setForm(DEFAULT_FORM);
+      setNationalIdConfirmedByPaste(null);
       setEnglishNameManuallyEdited(false);
       setDuplicateFocusField(null);
       setMissingTokenInputs({});
@@ -364,6 +367,47 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
 
     return nextState;
+  };
+  const applyPrimaryIdentifierInputChange = (
+    current: PatientFormState,
+    index: number,
+    rawValue: string,
+    options: { confirmByPaste?: boolean } = {}
+  ) => {
+    const next = [...current.identifiers];
+    const nextType = next[index]?.typeCode || "other";
+    const nextValue = normalizeIdentifierForType(nextType, rawValue);
+    next[index] = { ...next[index], value: nextValue };
+
+    const nextState = next[index]?.isPrimary
+      ? applyPrimaryIdentifierState(current, next, nextType, nextValue)
+      : { ...current, identifiers: next };
+
+    if (next[index]?.isPrimary && nextType === "national_id" && options.confirmByPaste && isValidNationalId(nextValue)) {
+      setNationalIdConfirmedByPaste(nextValue);
+      return { ...nextState, nationalIdConfirmation: nextValue };
+    }
+
+    if (next[index]?.isPrimary && nextType === "national_id" && nationalIdConfirmedByPaste && nationalIdConfirmedByPaste !== nextValue) {
+      setNationalIdConfirmedByPaste(null);
+      return { ...nextState, nationalIdConfirmation: "" };
+    }
+
+    return nextState;
+  };
+  const handlePrimaryIdentifierPaste = (event: ClipboardEvent<HTMLInputElement>, index: number) => {
+    const entry = form.identifiers[index];
+    if (!entry?.isPrimary || entry.typeCode !== "national_id") return;
+
+    event.preventDefault();
+    const pastedValue = event.clipboardData.getData("text");
+    setDuplicateFocusField("identifierValue");
+    setForm((current) => applyPrimaryIdentifierInputChange(
+      current,
+      index,
+      pastedValue,
+      { confirmByPaste: isValidNationalId(normalizeIdentifierForType("national_id", pastedValue)) }
+    ));
   };
   const findPrimaryIdentifierIndex = (identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }>) => {
     const idx = identifiers.findIndex((entry) => entry.isPrimary);
@@ -625,7 +669,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
     const isNat = form.identifierType === "national_id";
     const isNationalIdComplete = isValidNationalId(form.identifierValue);
-    const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
+    const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete && !nationalIdIsPasteConfirmed;
     // Confirmation is mandatory when it's shown (create mode or national ID was edited)
     if (requiresNationalIdConfirmation && form.nationalIdConfirmation.length === 0) {
       showToast(language === "ar" ? "يرجى تأكيد الرقم الوطني." : "Please confirm the national ID.", "error");
@@ -673,7 +717,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const isNationalId = form.identifierType === "national_id";
   // Show confirmation only in create mode, or in edit mode when national ID was changed
   const nationalIdWasEdited = isEdit ? form.identifierValue !== originalNationalId : true;
-  const showConfirmation = isNationalId && nationalIdWasEdited && isValidNationalId(form.identifierValue);
+  const nationalIdIsPasteConfirmed = nationalIdConfirmedByPaste === form.identifierValue && isValidNationalId(form.identifierValue);
+  const showConfirmation = isNationalId && nationalIdWasEdited && isValidNationalId(form.identifierValue) && !nationalIdIsPasteConfirmed;
+  const showPasteConfirmedNote = isNationalId && nationalIdWasEdited && nationalIdIsPasteConfirmed;
   const submitLabel = mutation.isPending
     ? (isEdit ? (language === "ar" ? "جاري التحديث…" : "Updating…") : (language === "ar" ? "جاري التسجيل…" : "Registering…"))
     : (isEdit ? (language === "ar" ? "تحديث المريض" : "Update Patient") : (language === "ar" ? "تسجيل المريض" : "Register Patient"));
@@ -830,6 +876,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     const nextValue = normalizeIdentifierForType(nextType, next[idx]?.value || "");
                     next[idx] = { ...next[idx], typeCode: nextType, value: nextValue };
                     if (next[idx]?.isPrimary) {
+                      setNationalIdConfirmedByPaste(null);
                       return applyPrimaryIdentifierState(f, next, nextType, nextValue);
                     }
                     return { ...f, identifiers: next };
@@ -856,15 +903,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 onChange={(e) =>
                   setForm((f) => {
                     if (idx === 0) setDuplicateFocusField("identifierValue");
-                    const next = [...f.identifiers];
-                    const nextValue = normalizeIdentifierForType(next[idx]?.typeCode || "other", e.target.value);
-                    next[idx] = { ...next[idx], value: nextValue };
-                    if (next[idx]?.isPrimary) {
-                      return applyPrimaryIdentifierState(f, next, next[idx]?.typeCode || f.identifierType, nextValue);
-                    }
-                    return { ...f, identifiers: next };
+                    return applyPrimaryIdentifierInputChange(f, idx, e.target.value);
                   })
                 }
+                onPaste={(event) => handlePrimaryIdentifierPaste(event, idx)}
+                type={idx === 0 && entry.typeCode === "national_id" && showConfirmation ? "password" : "text"}
                 placeholder={language === "ar" ? "قيمة المعرف" : "Identifier value"}
                 className={`md:col-span-2 input-premium h-10 text-sm ${idx === 0 && isDuplicateField("identifierValue") ? duplicateFocusClass : ""}`}
               />
@@ -880,6 +923,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                           isPrimary: itemIdx === idx
                         }));
                         const primary = nextIdentifiers[idx] || nextIdentifiers[0];
+                        setNationalIdConfirmedByPaste(null);
                         return applyPrimaryIdentifierState(
                           f,
                           nextIdentifiers,
@@ -902,6 +946,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                           next[0] = { ...next[0], isPrimary: true };
                         }
                         const primary = next.find((x) => x.isPrimary) || next[0];
+                        setNationalIdConfirmedByPaste(null);
                         return applyPrimaryIdentifierState(
                           f,
                           next,
@@ -935,6 +980,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 className="input-premium input-ltr w-full"
               />
             </div>
+          )}
+          {showPasteConfirmedNote && (
+            <p className={helperTextClass}>
+              {language === "ar" ? "تم تأكيد الرقم الوطني من اللصق." : "Confirmed from paste."}
+            </p>
           )}
         </Card>
       </div>
