@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, type CSSProperties, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -195,6 +195,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const sectionTitleClass = "text-xl sm:text-2xl font-bold text-foreground";
   const fieldLabelClass = "block text-sm font-semibold mb-2 text-foreground";
   const helperTextClass = "mt-2 text-sm text-muted-foreground";
+  const requiredMark = " *";
 
   // Dictionary
   const { data: dictData } = useQuery({
@@ -388,7 +389,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       return { ...nextState, nationalIdConfirmation: nextValue };
     }
 
-    if (next[index]?.isPrimary && nextType === "national_id" && nationalIdConfirmedByPaste && nationalIdConfirmedByPaste !== nextValue) {
+    if (next[index]?.isPrimary && nextType === "national_id" && current.nationalIdConfirmation && current.nationalIdConfirmation !== nextValue) {
       setNationalIdConfirmedByPaste(null);
       return { ...nextState, nationalIdConfirmation: "" };
     }
@@ -647,7 +648,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       showToast(language === "ar" ? "يجب تحديد معرف أساسي واحد فقط." : "Exactly one primary identifier is required.", "error");
       return;
     }
-    if (patientRegistrationSettings?.national_id_required === "required" && !form.identifierValue.trim()) {
+    if (primaryIdentifierRequired && !form.identifierValue.trim()) {
       showToast(t("patients.primaryIdentifierRequired"), "error");
       identifierValueRef.current?.focus();
       return;
@@ -667,9 +668,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       dobRef.current?.focus();
       return;
     }
-    const isNat = form.identifierType === "national_id";
-    const isNationalIdComplete = isValidNationalId(form.identifierValue);
-    const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete && !nationalIdIsPasteConfirmed;
     // Confirmation is mandatory when it's shown (create mode or national ID was edited)
     if (requiresNationalIdConfirmation && form.nationalIdConfirmation.length === 0) {
       showToast(language === "ar" ? "يرجى تأكيد الرقم الوطني." : "Please confirm the national ID.", "error");
@@ -687,8 +685,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       identifierType: form.identifierType,
       identifierValue: form.identifierValue || undefined,
       category: form.category,
-      nationalId: isNat ? form.identifierValue : undefined,
-      nationalIdConfirmation: isNat ? form.nationalIdConfirmation : undefined,
+      nationalId: isNationalId ? form.identifierValue : undefined,
+      nationalIdConfirmation: isNationalId ? form.nationalIdConfirmation : undefined,
       sex: form.sex || undefined,
       demographicsEstimated: form.demographicsEstimated,
       estimatedDateOfBirth: form.estimatedDateOfBirth || undefined,
@@ -717,9 +715,26 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const isNationalId = form.identifierType === "national_id";
   // Show confirmation only in create mode, or in edit mode when national ID was changed
   const nationalIdWasEdited = isEdit ? form.identifierValue !== originalNationalId : true;
-  const nationalIdIsPasteConfirmed = nationalIdConfirmedByPaste === form.identifierValue && isValidNationalId(form.identifierValue);
-  const showConfirmation = isNationalId && nationalIdWasEdited && isValidNationalId(form.identifierValue) && !nationalIdIsPasteConfirmed;
-  const showPasteConfirmedNote = isNationalId && nationalIdWasEdited && nationalIdIsPasteConfirmed;
+  const isNationalIdComplete = isValidNationalId(form.identifierValue);
+  const nationalIdConfirmationHasValue = form.nationalIdConfirmation.length > 0;
+  const nationalIdConfirmationMatches = nationalIdConfirmationHasValue && form.nationalIdConfirmation === form.identifierValue;
+  const nationalIdConfirmationMismatch = nationalIdConfirmationHasValue && form.nationalIdConfirmation !== form.identifierValue;
+  const confirmationSatisfiedByPaste = nationalIdConfirmedByPaste === form.identifierValue && isNationalIdComplete;
+  const requiresNationalIdConfirmation = isNationalId && nationalIdWasEdited && isNationalIdComplete && !confirmationSatisfiedByPaste;
+  const showConfirmation = requiresNationalIdConfirmation;
+  const showPasteConfirmedNote = isNationalId && nationalIdWasEdited && confirmationSatisfiedByPaste;
+  const primaryIdentifierRequired = patientRegistrationSettings?.national_id_required === "required" || patientRegistrationSettings?.national_id_required === "required_with_confirmation";
+  const showNoPossibleMatches = !isEdit && dupQuery.length > 1 && !duplicatesLoading && duplicates.length === 0;
+  const nationalIdMaskStyle = {
+    WebkitTextSecurity: "disc",
+    color: "transparent",
+    textShadow: "0 0 8px rgba(15, 23, 42, 0.9)"
+  } as CSSProperties;
+  const confirmationInputClass = nationalIdConfirmationMatches
+    ? "input-premium input-ltr w-full border-emerald-500 bg-emerald-50/60"
+    : nationalIdConfirmationMismatch
+      ? "input-premium input-ltr w-full border-red-500 bg-red-50/60"
+      : "input-premium input-ltr w-full";
   const submitLabel = mutation.isPending
     ? (isEdit ? (language === "ar" ? "جاري التحديث…" : "Updating…") : (language === "ar" ? "جاري التسجيل…" : "Registering…"))
     : (isEdit ? (language === "ar" ? "تحديث المريض" : "Update Patient") : (language === "ar" ? "تسجيل المريض" : "Register Patient"));
@@ -748,11 +763,22 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       <div className="space-y-4">
         <div className="flex items-center gap-4">
           <h3 className={sectionTitleClass}>{language === "ar" ? "الهوية" : "Identity"}</h3>
-          <PatientCategoryBadge category={form.category || null} showWhenUnset />
+          {form.category ? (
+            <PatientCategoryBadge category={form.category} />
+          ) : (
+            <button
+              type="button"
+              aria-label={language === "ar" ? "تصنيف الحالة مطلوب" : "Category is required"}
+              onClick={() => categoryRef.current?.focus()}
+              className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800"
+            >
+              {language === "ar" ? "تصنيف الحالة مطلوب" : "Category is required"}
+            </button>
+          )}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <label className={`${fieldLabelClass} ${isDuplicateField("arabicFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم العربي" : "Arabic Full Name"}</label>
+            <label className={`${fieldLabelClass} ${isDuplicateField("arabicFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم العربي" : "Arabic Full Name"}{requiredMark}</label>
             <input
               aria-label={language === "ar" ? "الاسم العربي" : "Arabic Full Name"}
               value={form.arabicFullName}
@@ -805,6 +831,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             <p className="text-sm font-semibold">{duplicateWarningText}</p>
           </div>
         )}
+        {showNoPossibleMatches && (
+          <p className="text-sm text-muted-foreground">
+            {language === "ar" ? "لم يتم العثور على تطابقات محتملة" : "No possible matches found"}
+          </p>
+        )}
 
         {currentMissingTokens.length > 0 && (
           <Card className="p-3 sm:p-4 border-amber-200" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
@@ -836,7 +867,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         <Card className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">{language === "ar" ? "المعرف" : "Identifier"}</p>
+              <p className="text-sm font-semibold text-foreground">
+                {primaryIdentifierRequired
+                  ? (language === "ar" ? <>المعرف الأساسي{requiredMark}</> : <>Primary identifier{requiredMark}</>)
+                  : (language === "ar" ? "المعرف" : "Identifier")}
+              </p>
               {!isEdit && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   <span className="font-semibold">{t("patients.autoMrn")}:</span>{" "}
@@ -877,7 +912,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     next[idx] = { ...next[idx], typeCode: nextType, value: nextValue };
                     if (next[idx]?.isPrimary) {
                       setNationalIdConfirmedByPaste(null);
-                      return applyPrimaryIdentifierState(f, next, nextType, nextValue);
+                      const nextState = applyPrimaryIdentifierState(f, next, nextType, nextValue);
+                      return nextType === "national_id" ? nextState : { ...nextState, nationalIdConfirmation: "" };
                     }
                     return { ...f, identifiers: next };
                   })
@@ -907,7 +943,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   })
                 }
                 onPaste={(event) => handlePrimaryIdentifierPaste(event, idx)}
-                type={idx === 0 && entry.typeCode === "national_id" && showConfirmation ? "password" : "text"}
+                type="text"
+                inputMode={entry.typeCode === "national_id" ? "numeric" : undefined}
+                autoComplete={entry.typeCode === "national_id" ? "off" : undefined}
+                maxLength={entry.typeCode === "national_id" ? 12 : undefined}
+                style={entry.isPrimary && entry.typeCode === "national_id" && showConfirmation ? nationalIdMaskStyle : undefined}
                 placeholder={language === "ar" ? "قيمة المعرف" : "Identifier value"}
                 className={`md:col-span-2 input-premium h-10 text-sm ${idx === 0 && isDuplicateField("identifierValue") ? duplicateFocusClass : ""}`}
               />
@@ -923,13 +963,15 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                           isPrimary: itemIdx === idx
                         }));
                         const primary = nextIdentifiers[idx] || nextIdentifiers[0];
-                        setNationalIdConfirmedByPaste(null);
-                        return applyPrimaryIdentifierState(
+                        const keepConfirmation = primary?.typeCode === "national_id" && primary.value === f.nationalIdConfirmation && isValidNationalId(primary.value || "");
+                        setNationalIdConfirmedByPaste((current) => current === primary?.value ? current : null);
+                        const nextState = applyPrimaryIdentifierState(
                           f,
                           nextIdentifiers,
                           (primary?.typeCode || f.identifierType) as IdentifierType,
                           primary?.value || ""
                         );
+                        return keepConfirmation ? nextState : { ...nextState, nationalIdConfirmation: "" };
                       })
                     }
                   />
@@ -946,13 +988,15 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                           next[0] = { ...next[0], isPrimary: true };
                         }
                         const primary = next.find((x) => x.isPrimary) || next[0];
-                        setNationalIdConfirmedByPaste(null);
-                        return applyPrimaryIdentifierState(
+                        const keepConfirmation = primary?.typeCode === "national_id" && primary.value === f.nationalIdConfirmation && isValidNationalId(primary.value || "");
+                        setNationalIdConfirmedByPaste((current) => current === primary?.value ? current : null);
+                        const nextState = applyPrimaryIdentifierState(
                           f,
                           next,
                           (primary?.typeCode || "national_id") as IdentifierType,
                           primary?.value || ""
                         );
+                        return keepConfirmation ? nextState : { ...nextState, nationalIdConfirmation: "" };
                       })
                     }
                   >
@@ -965,6 +1009,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           {showConfirmation && (
             <div className="mt-3">
               <label className={fieldLabelClass}>{language === "ar" ? "تأكيد الرقم الوطني" : "Confirm National ID"}</label>
+              <p className="mb-2 text-xs text-muted-foreground">
+                {language === "ar" ? "أكد الرقم الوطني الأساسي أعلاه" : "Confirm the primary National ID above"}
+              </p>
               <input
                 aria-label={language === "ar" ? "تأكيد الرقم الوطني" : "National ID Confirmation"}
                 value={form.nationalIdConfirmation}
@@ -977,13 +1024,23 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 placeholder={language === "ar" ? "أعد كتابة الرقم الوطني" : "Re-type the National ID"}
                 required={nationalIdWasEdited}
-                className="input-premium input-ltr w-full"
+                className={confirmationInputClass}
               />
+              {nationalIdConfirmationMatches && (
+                <p className="mt-2 text-sm font-semibold text-emerald-700">
+                  {language === "ar" ? "تم تأكيد الرقم الوطني" : "National ID confirmed"}
+                </p>
+              )}
+              {nationalIdConfirmationMismatch && (
+                <p className="mt-2 text-sm font-semibold text-red-600">
+                  {language === "ar" ? "تأكيد الرقم الوطني لا يطابق" : "National ID does not match"}
+                </p>
+              )}
             </div>
           )}
           {showPasteConfirmedNote && (
-            <p className={helperTextClass}>
-              {language === "ar" ? "تم تأكيد الرقم الوطني من اللصق." : "Confirmed from paste."}
+            <p className="mt-2 text-sm font-semibold text-emerald-700">
+              {language === "ar" ? "تم تأكيد الرقم الوطني من القيمة الملصقة" : "National ID confirmed from pasted value"}
             </p>
           )}
         </Card>
@@ -996,7 +1053,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label className={fieldLabelClass}>{language === "ar" ? "الجنس" : "Sex"}</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "الجنس" : "Sex"}{requiredMark}</label>
             <select
               aria-label={language === "ar" ? "الجنس" : "Sex"}
               value={form.sex}
@@ -1020,6 +1077,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               inputRef={dobRef}
               name="estimatedDateOfBirth"
             />
+            <p className={helperTextClass}>{language === "ar" ? "أدخل تاريخ الميلاد أو العمر" : "Enter date of birth or age"}</p>
           </div>
           <div>
             <label className={fieldLabelClass}>{language === "ar" ? "العمر (سنوات)" : "Age (years)"}</label>
@@ -1037,7 +1095,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </div>
           <div>
             <label className={fieldLabelClass}>
-              {language === "ar" ? "تصنيف الحالة *" : "Patient Category *"}
+              {language === "ar" ? "تصنيف الحالة" : "Patient Category"}{requiredMark}
             </label>
             <select
               aria-label={language === "ar" ? "تصنيف الحالة" : "Patient Category"}
@@ -1079,7 +1137,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className={`${fieldLabelClass} ${isDuplicateField("phone1") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الهاتف 1 (مطلوب)" : "Phone 1 (Required)"}</label>
+            <label className={`${fieldLabelClass} ${isDuplicateField("phone1") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الهاتف 1" : "Phone 1"}{requiredMark}</label>
           <input
             aria-label={language === "ar" ? "الهاتف 1" : "Phone 1"}
             value={form.phone1}
@@ -1174,9 +1232,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // ============================================================
   if (!isEdit) {
     return (
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)] gap-4 xl:gap-5">
+      <div className={hasPotentialDuplicates ? "grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)] gap-4 xl:gap-5" : "grid grid-cols-1 gap-4"}>
         <Card className="p-4 sm:p-5">{formFields}</Card>
         <div className="space-y-4">
+          {hasPotentialDuplicates && (
           <Card className="p-4" style={{ background: "rgba(245, 158, 11, 0.05)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
             <h3 className="text-sm font-semibold text-amber-600 mb-4">
               {language === "ar" ? "التطابقات المحتملة" : "Possible Duplicates"} {dupQuery.length > 1 ? `(${duplicates.length})` : ""}
@@ -1225,6 +1284,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               </ul>
             )}
           </Card>
+          )}
 
           {/* Patient Preview Modal */}
           {previewPatient && (

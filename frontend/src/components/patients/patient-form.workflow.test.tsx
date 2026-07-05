@@ -15,6 +15,7 @@ import {
   fetchPatientById,
   fetchPatientMrnPreview,
   fetchPatientIdentifierTypes,
+  fetchSettings,
   updatePatient,
   deletePatient
 } from "@/lib/api-hooks";
@@ -32,6 +33,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPatientById: vi.fn(),
   fetchPatientMrnPreview: vi.fn(),
   fetchPatientIdentifierTypes: vi.fn(),
+  fetchSettings: vi.fn(),
   updatePatient: vi.fn(),
   deletePatient: vi.fn()
 }));
@@ -108,6 +110,7 @@ describe("PatientForm workflow hardening", () => {
     vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
     vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
     vi.mocked(fetchPatientIdentifierTypes).mockResolvedValue([]);
+    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "optional" } as any);
     vi.mocked(createPatient).mockResolvedValue(makePatient({ id: 100, arabicFullName: "مريض جديد ثالث", mrn: "MRN-100" }));
     vi.mocked(fetchPatientById).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: true }));
     vi.mocked(updatePatient).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: false }));
@@ -131,15 +134,28 @@ describe("PatientForm workflow hardening", () => {
     expect(screen.getByRole("button", { name: /^Close$/i })).toBeTruthy();
   });
 
-  it("renders possible matches panel states and displays matches", async () => {
+  it("hides the large possible matches panel until candidates exist", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    expect(screen.queryByText(/Possible Duplicates/i)).toBeNull();
+
+    await user.type(screen.getByLabelText(/Phone 1/i), "09");
+
+    await waitFor(() => expect(screen.getByText(/No possible matches found/i)).toBeTruthy());
+    expect(screen.queryByText(/Possible Duplicates/i)).toBeNull();
+  });
+
+  it("displays possible duplicate candidates when matches exist", async () => {
     const user = userEvent.setup();
     vi.mocked(searchPatients).mockResolvedValue([makePatient({ id: 77, arabicFullName: "مريض مطابق" })]);
     renderPatientForm({ mode: "create" });
 
-    expect(screen.getByText(/Type at least 2 characters/i)).toBeTruthy();
+    expect(screen.queryByText(/Possible Duplicates/i)).toBeNull();
 
     await user.type(screen.getByLabelText(/Phone 1/i), "09");
 
+    await waitFor(() => expect(screen.getByText(/Possible Duplicates/i)).toBeTruthy());
     await waitFor(() => expect(screen.getByText("مريض مطابق")).toBeTruthy());
   });
 
@@ -205,6 +221,44 @@ describe("PatientForm workflow hardening", () => {
     await user.click(screen.getByRole("button", { name: /Register Patient/i }));
 
     expect(await screen.findByText(/Patient category is required/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
+  });
+
+  it("shows category required state and focuses category when the unset badge is clicked", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    expect(screen.getByText(/Category is required/i)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Category is required/i }));
+
+    expect(document.activeElement).toBe(screen.getByLabelText(/Patient Category/i));
+  });
+
+  it("marks frontend-enforced required fields", async () => {
+    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "required_with_confirmation" } as any);
+    renderPatientForm({ mode: "create" });
+
+    expect(screen.getByText(/Arabic Full Name \*/i)).toBeTruthy();
+    expect(await screen.findByText(/Primary identifier \*/i)).toBeTruthy();
+    expect(screen.getByText(/Sex \*/i)).toBeTruthy();
+    expect(screen.getByText(/Patient Category \*/i)).toBeTruthy();
+    expect(screen.getByText(/Phone 1 \*/i)).toBeTruthy();
+    expect(screen.getByText(/Enter date of birth or age/i)).toBeTruthy();
+  });
+
+  it("treats required_with_confirmation as requiring the primary identifier on the frontend", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "required_with_confirmation" } as any);
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/Primary identifier is required/i)).toBeTruthy();
     expect(createPatient).not.toHaveBeenCalled();
   });
 
@@ -339,7 +393,7 @@ describe("PatientForm workflow hardening", () => {
     expect(dobInput.value).toBe("01/01/1990");
   });
 
-  it("shows confirmation and obscures the primary National ID when a valid National ID is typed manually", async () => {
+  it("shows confirmation and visually masks the primary National ID when a valid National ID is typed manually", async () => {
     const user = userEvent.setup();
     renderPatientForm({ mode: "create" });
 
@@ -347,7 +401,18 @@ describe("PatientForm workflow hardening", () => {
     await user.type(nationalIdInput, "119900123456");
 
     expect(screen.getByLabelText(/National ID Confirmation/i)).toBeTruthy();
-    expect(nationalIdInput.type).toBe("password");
+    expect(nationalIdInput.type).toBe("text");
+    expect(nationalIdInput.getAttribute("style")).toContain("color: transparent");
+  });
+
+  it("shows neither confirmation success nor mismatch text while confirmation is empty", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/National ID/i), "119900123456");
+
+    expect(screen.queryByText(/^National ID confirmed$/i)).toBeNull();
+    expect(screen.queryByText(/^National ID does not match$/i)).toBeNull();
   });
 
   it("blocks submit when manually typed National ID confirmation mismatches", async () => {
@@ -356,6 +421,7 @@ describe("PatientForm workflow hardening", () => {
 
     await user.type(screen.getByLabelText(/National ID/i), "119900123456");
     await user.type(screen.getByLabelText(/National ID Confirmation/i), "119900123455");
+    expect(screen.getByText(/^National ID does not match$/i)).toBeTruthy();
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
@@ -371,6 +437,7 @@ describe("PatientForm workflow hardening", () => {
 
     await user.type(screen.getByLabelText(/National ID/i), "119900123456");
     await user.type(screen.getByLabelText(/National ID Confirmation/i), "119900123456");
+    expect(screen.getByText(/^National ID confirmed$/i)).toBeTruthy();
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
@@ -392,7 +459,7 @@ describe("PatientForm workflow hardening", () => {
 
     expect(nationalIdInput.value).toBe("119900123456");
     expect(screen.queryByLabelText(/National ID Confirmation/i)).toBeNull();
-    expect(screen.getByText(/Confirmed from paste/i)).toBeTruthy();
+    expect(screen.getByText(/National ID confirmed from pasted value/i)).toBeTruthy();
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
@@ -436,6 +503,29 @@ describe("PatientForm workflow hardening", () => {
     });
 
     expect(confirmationInput.value).toBe("");
+  });
+
+  it("keeps confirmation tied to the selected primary National ID and clears when primary changes", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.click(screen.getByRole("button", { name: /Add identifier/i }));
+    const identifierTypes = screen.getAllByLabelText(/Identifier Type/i) as HTMLSelectElement[];
+    const nationalIdInputs = screen.getAllByLabelText(/National ID/i) as HTMLInputElement[];
+
+    await user.type(nationalIdInputs[0]!, "119900123456");
+    expect(screen.getByText(/Confirm the primary National ID above/i)).toBeTruthy();
+    await user.type(screen.getByLabelText(/National ID Confirmation/i), "119900123456");
+    expect(screen.getByText(/^National ID confirmed$/i)).toBeTruthy();
+
+    await user.selectOptions(identifierTypes[1]!, "passport");
+    const primaryRadios = screen.getAllByLabelText(/Primary/i) as HTMLInputElement[];
+    await user.click(primaryRadios[1]!);
+
+    expect(screen.queryByLabelText(/National ID Confirmation/i)).toBeNull();
+    await user.click(primaryRadios[0]!);
+    expect(screen.getByLabelText(/National ID Confirmation/i)).toBeTruthy();
+    expect((screen.getByLabelText(/National ID Confirmation/i) as HTMLInputElement).value).toBe("");
   });
 
   it("blocks submit when auto-generated English transliteration has unresolved Arabic tokens", async () => {
