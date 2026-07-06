@@ -259,8 +259,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
 
     it("manual close statuses preserve existing workflow timestamps", async () => {
       guard();
-      for (const targetStatus of ["cancelled", "no-show", "discontinued"] as const) {
-        const bookingId = await createBookingForStatusTest(`2026-06-${targetStatus === "cancelled" ? "19" : targetStatus === "no-show" ? "20" : "21"}`);
+      for (const targetStatus of ["no-show", "discontinued"] as const) {
+        const bookingId = await createBookingForStatusTest(`2026-06-${targetStatus === "no-show" ? "20" : "21"}`);
         assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
           method: "POST",
           body: { status: "waiting" },
@@ -282,6 +282,29 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         assert.deepEqual(after.waiting_started_at, before.waiting_started_at);
         assert.deepEqual(after.completed_at, before.completed_at);
       }
+    });
+
+    it("generic manual status path rejects cancellation", async () => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2026-06-19");
+      assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST",
+        body: { status: "waiting" },
+      })).status, 200);
+
+      const statusRes = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST",
+        body: {
+          status: "cancelled",
+          reason: "Workflow timestamp preservation test",
+        },
+      });
+
+      assert.equal(statusRes.status, 403);
+      assert.equal(
+        (statusRes.data as Record<string, unknown>).error,
+        "Appointment cancellation must use the dedicated cancellation workflow."
+      );
     });
   });
 

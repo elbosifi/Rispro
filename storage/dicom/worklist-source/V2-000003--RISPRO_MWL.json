@@ -1,0 +1,20 @@
+{
+  "appointmentId": "3",
+  "accessionNumber": "V2-000003",
+  "modalityId": "5",
+  "modalityCode": "BOOKING_808845ddCT",
+  "patientId": "1",
+  "patientMrn": "000001",
+  "patientNationalId": "1312534be23c",
+  "patientNameEnglish": "BOOKING_808845ddTest Patient",
+  "patientNameArabic": "BOOKING_808845ddمريض اختبار",
+  "appointmentDate": "2026-06-13",
+  "appointmentStatus": "arrived",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

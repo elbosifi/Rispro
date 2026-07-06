@@ -122,8 +122,8 @@ export async function seedTestData(
   // Create test patient with truly unique national ID (must be exactly 12 digits)
   const uniqueNationalId = `1${randomUUID().replace(/-/g, "").slice(0, 11)}`;
   const patientResult = await pool.query(
-    `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
-     values ($1, $2, $3, $4, 'M', 30, 'national_id', $5)
+    `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+     values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
      returning id`,
     [`${dataPrefix}${runSuffix}مريض اختبار`, `${dataPrefix}${runSuffix}Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
   );
@@ -269,6 +269,14 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
       where coalesce(booking_id, -1) = any($1::bigint[])
          or coalesce(requesting_user_id, -1) = any($2::bigint[])
          or coalesce(supervisor_user_id, -1) = any($2::bigint[])
+    `,
+    [bookingIds, userIds]
+  );
+  await pool.query(
+    `
+      delete from audit_log
+      where (entity_type = 'appointment_v2_booking' and coalesce(entity_id, -1) = any($1::bigint[]))
+         or coalesce(changed_by_user_id, -1) = any($2::bigint[])
     `,
     [bookingIds, userIds]
   );
