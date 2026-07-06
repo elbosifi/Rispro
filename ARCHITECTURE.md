@@ -21,7 +21,7 @@ RISpro is a Node.js, PostgreSQL, and React application for radiology reception, 
 
 - Primary database: PostgreSQL.
 - Migrations run through `npm run migrate`.
-- DB-backed tests must follow [docs/CODEX_DB_TESTING.md](docs/CODEX_DB_TESTING.md): run `npm run db:test:check` first and use `codex-db-test.env`.
+- DB-backed tests must follow [docs/CODEX_DB_TESTING.md](docs/CODEX_DB_TESTING.md): run `npm run db:test:up`, then `npm run db:test:check`, and use `codex-db-test.env`.
 
 ## Major Domains
 

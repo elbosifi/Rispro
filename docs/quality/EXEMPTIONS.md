@@ -15,6 +15,15 @@ Allowed for now:
 
 New production logging should use `src/observability/logger.ts` unless a domain-specific follow-up documents why not.
 
+## Route Aggregators
+
+Allowed route-to-route imports:
+
+- `src/modules/appointments-v2/api/routes/appointments-v2-routes.ts` mounts Appointments V2 route groups.
+- `src/modules/doctor-portal/roster-routes.ts` mounts `roster-template-routes.ts` under `/templates`.
+
+Add an allowlist entry in `scripts/harness/check-structure.mjs` only when the importing route is a documented aggregator that mounts a narrower child router.
+
 ## File Size
 
 Large existing files are reported but not failed by `npm run harness:quality`. Do not expand large files unless the task is local to that file and extraction would be riskier than a narrow edit.

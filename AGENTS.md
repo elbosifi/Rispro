@@ -23,7 +23,7 @@ Use this file as a table of contents. Detailed rules remain in [docs/agents.md](
 - Backend unit tests: `npm run test:backend:unit`
 - Frontend tests: `npm run test:frontend`
 - Harness checks: `npm run harness:all`
-- DB-backed tests: run `npm run db:test:check` first, then use `codex-db-test.env`; never guess DB credentials.
+- DB-backed tests: run `npm run db:test:up` and `npm run db:test:check`, then use `codex-db-test.env`; never guess DB credentials.
 
 ## Defaults
 

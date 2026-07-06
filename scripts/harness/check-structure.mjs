@@ -24,6 +24,7 @@ const requiredFiles = [
 ];
 
 const routeImportAllowlist = new Set([
+  "src/modules/doctor-portal/roster-routes.ts",
   "src/modules/appointments-v2/api/routes/appointments-v2-routes.ts"
 ]);
 

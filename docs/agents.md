@@ -18,7 +18,34 @@ For the concise repository map, start at the root `AGENTS.md`. Keep this file as
 7. Frontend pages live under `frontend/src/`. V2 pages are under `frontend/src/v2/`.
 8. Run `npm run typecheck`, `npm run typecheck:frontend`, and `npm run harness:all` before committing harness or cross-domain changes.
 9. Tests use Node's native `node:test`. Run with `npm test`.
-10. Legacy appointments code (outside `src/modules/appointments-v2/`) is maintained but not extended — see Legacy freeze policy below.
+10. Legacy appointments code outside `src/modules/appointments-v2/` is maintained but not extended. See Legacy freeze policy below.
+11. DB-backed validation uses the disposable Docker PostgreSQL flow in `docs/CODEX_DB_TESTING.md`; do not ask for or reset a local PostgreSQL admin password.
+
+---
+
+## Harness rules
+
+Run the harness with:
+
+```powershell
+npm run harness:all
+```
+
+Individual checks:
+
+- `npm run harness:structure`
+- `npm run harness:docs`
+- `npm run harness:quality`
+
+Hard failures include missing required agent/architecture/domain/plan files, absolute local paths in docs, broken markdown links, production source importing test files, route-to-route imports outside the documented aggregator allowlist, and script/runtime errors.
+
+Warnings and baseline reports include large files, existing `any` usage, TODO/FIXME/HACK comments, existing console usage, generated artifact path warnings, and legacy route/service naming drift.
+
+When the harness fails, fix harness breakage before product work. If the failure is an intentional exception, document it in `docs/quality/EXEMPTIONS.md` and add the smallest allowlist entry in the relevant harness script.
+
+To add a new domain doc, create `docs/domains/<domain-name>/README.md`, link it from `docs/domains/index.md`, and add it to `requiredFiles` in `scripts/harness/check-structure.mjs` if future agents should treat it as mandatory.
+
+To create a new execution plan, copy `docs/plans/templates/EXECUTION_PLAN_TEMPLATE.md` into `docs/plans/active/`, keep it updated during the task, then move the final plan or review summary into `docs/plans/completed/`.
 
 ---
 

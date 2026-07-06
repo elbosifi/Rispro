@@ -7,7 +7,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const largeFileLineThreshold = 1000;
 const codeRoots = ["src", "frontend/src", "scripts"];
 const productionRoots = ["src", "frontend/src"];
-const generatedPaths = ["dist", "build", "coverage", "frontend/dist", "frontend/build", "frontend/coverage"];
+const generatedPaths = ["dist", "build", "coverage", "dist-frontend", "frontend/dist", "frontend/build", "frontend/coverage"];
+const topLimit = 15;
 const consoleAllowlist = [
   "src/modules/appointments-v2/observability/shadow-diff.ts",
   "src/server.ts",
@@ -30,21 +31,23 @@ const consoleCounts = countPatternByFile(productionFiles, /\bconsole\.(?:log|war
 const allowedConsoleCounts = countPatternByFile(productionFiles, /\bconsole\.(?:log|warn|error)\s*\(/g)
   .filter((entry) => consoleAllowlist.includes(entry.file));
 
-const todoCounts = countPatternByFile(files, /\b(?:TODO|FIXME|HACK)\b/g);
+const todoCounts = countTodoCommentsByFile(files);
 const anyCounts = countPatternByFile(tsFiles, /(?::\s*any\b|\bas\s+any\b|Record<[^>\n]*\bany\b|<[^>\n]*\bany\b)/g);
 const generatedPresent = generatedPaths.filter((target) => existsSync(path.join(repoRoot, target)));
 
-printTable("Large TypeScript/TSX files", largeFiles, (entry) => `${entry.file} (${entry.lines} lines)`);
-printTable("Console usage in production source requiring review", consoleCounts, (entry) => `${entry.file} (${entry.count})`);
-printTable("Allowed console usage", allowedConsoleCounts, (entry) => `${entry.file} (${entry.count})`);
-printTable("TODO/FIXME/HACK comments", todoCounts, (entry) => `${entry.file} (${entry.count})`);
-printTable("Likely TypeScript any usage", anyCounts, (entry) => `${entry.file} (${entry.count})`);
+printSummary();
+printTable("Top large TypeScript/TSX files", largeFiles, (entry) => `${entry.file} (${entry.lines} lines)`, topLimit);
+printTable("Files with most likely TypeScript any usage", anyCounts, (entry) => `${entry.file} (${entry.count})`, topLimit);
+printTable("Files with console usage requiring review", consoleCounts, (entry) => `${entry.file} (${entry.count})`, topLimit);
+printTable("Allowed console usage", allowedConsoleCounts, (entry) => `${entry.file} (${entry.count})`, topLimit);
+printTable("TODO/FIXME/HACK counts", todoCounts, (entry) => `${entry.file} (${entry.count})`, topLimit);
 
 if (generatedPresent.length) {
   printTable("Generated/build artifact paths present", generatedPresent.map((file) => ({ file })), (entry) => entry.file);
 }
 
-console.log("OK: quality harness completed with non-blocking findings only.");
+console.log("\nResult: PASS with warnings/report-only baseline findings.");
+console.log("Hard failures: none.");
 
 function walk(dir) {
   if (!existsSync(dir)) return [];
@@ -89,6 +92,36 @@ function printTable(title, entries, format, limit = 40) {
     console.log(`- ${format(entry)}`);
   }
   if (entries.length > limit) console.log(`- ... ${entries.length - limit} more`);
+}
+
+function countTodoCommentsByFile(candidateFiles) {
+  const counts = [];
+  const commentPattern = /\/\/.*|\/\*[\s\S]*?\*\//g;
+  const markerPattern = /\b(?:TODO|FIXME|HACK)\b/g;
+
+  for (const file of candidateFiles) {
+    const content = readFileSync(file, "utf8");
+    let count = 0;
+    for (const comment of content.match(commentPattern) ?? []) {
+      count += comment.match(markerPattern)?.length ?? 0;
+    }
+    if (count > 0) counts.push({ file: relative(file), count });
+  }
+
+  return counts.sort((a, b) => b.count - a.count || a.file.localeCompare(b.file));
+}
+
+function printSummary() {
+  const todoTotal = todoCounts.reduce((total, entry) => total + entry.count, 0);
+  const anyTotal = anyCounts.reduce((total, entry) => total + entry.count, 0);
+  const consoleTotal = consoleCounts.reduce((total, entry) => total + entry.count, 0);
+
+  console.log("Quality harness summary");
+  console.log(`- Large files: ${largeFiles.length}`);
+  console.log(`- Files with likely any usage: ${anyCounts.length} (${anyTotal} matches)`);
+  console.log(`- Files with console usage requiring review: ${consoleCounts.length} (${consoleTotal} calls)`);
+  console.log(`- TODO/FIXME/HACK comments: ${todoTotal} across ${todoCounts.length} file(s)`);
+  console.log(`- Generated/build artifact path warnings: ${generatedPresent.length}`);
 }
 
 function relative(file) {

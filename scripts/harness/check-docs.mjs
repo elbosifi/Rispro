@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const docsRoots = ["README.md", "AGENTS.md", "ARCHITECTURE.md", "docs"];
-const absoluteLocalPathPattern = /\/Users\/(?:seraj|serajalsaifi)\b/g;
+const absoluteLocalPathPattern = /(?:[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s)]+|\/Users\/[^/\s)]+)/g;
 const errors = [];
 
 for (const target of docsRoots) {
@@ -45,6 +45,41 @@ function checkFile(file) {
     }
     absoluteLocalPathPattern.lastIndex = 0;
   });
+
+  for (const target of markdownLinks(content)) {
+    if (shouldSkipLink(target)) continue;
+
+    const targetWithoutAnchor = target.split("#")[0];
+    if (!targetWithoutAnchor) continue;
+
+    const resolved = path.resolve(path.dirname(file), decodeURIComponent(targetWithoutAnchor));
+    const rootPrefix = `${repoRoot}${path.sep}`;
+    if (resolved !== repoRoot && !resolved.startsWith(rootPrefix)) {
+      errors.push(`${rel} links outside the repository: ${target}`);
+      continue;
+    }
+
+    if (!existsSync(resolved)) {
+      errors.push(`${rel} has a broken markdown link: ${target}`);
+      continue;
+    }
+
+    if (targetWithoutAnchor.endsWith("/") && !statSync(resolved).isDirectory()) {
+      errors.push(`${rel} links to a non-directory with trailing slash: ${target}`);
+    }
+  }
+}
+
+function markdownLinks(content) {
+  const links = [];
+  const linkPattern = /(?<!!)\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  let match;
+  while ((match = linkPattern.exec(content))) links.push(match[1].trim());
+  return links;
+}
+
+function shouldSkipLink(target) {
+  return target.startsWith("#") || target.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(target);
 }
 
 function relative(file) {

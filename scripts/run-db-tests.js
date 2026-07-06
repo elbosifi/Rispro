@@ -19,15 +19,14 @@ for (const rawLine of text.split(/\r?\n/)) {
   env[line.slice(0, equalsIndex).trim()] = line.slice(equalsIndex + 1).trim();
 }
 
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const commands = [
   ['run', 'db:test:check'],
-  ['run', 'migrate'],
   ['run', 'test:backend:db'],
 ];
 
 for (const args of commands) {
-  const result = spawnSync(npmCommand, args, {
+  const command = npmScriptCommand(args);
+  const result = spawnSync(command.command, command.args, {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
@@ -36,4 +35,11 @@ for (const args of commands) {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function npmScriptCommand(args) {
+  if (process.env.npm_execpath) {
+    return { command: process.execPath, args: [process.env.npm_execpath, ...args] };
+  }
+  return { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args };
 }

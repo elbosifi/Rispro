@@ -1,5 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -143,7 +142,7 @@ async function up() {
   const values = loadEnvFile(envPath);
   const database = values.PGDATABASE || 'rispro_test';
   const user = values.PGUSER || 'rispro_test';
-  const password = values.PGPASSWORD || `rispro_test_${randomBytes(18).toString('base64url')}`;
+  const password = values.PGPASSWORD || 'rispro_test_password';
   validateTarget(database, user);
 
   const dockerVersion = runDocker(['version', '--format', '{{.Server.Version}}']);
