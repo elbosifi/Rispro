@@ -26,8 +26,8 @@ The best long-term setup for this project is:
 
 This repository now includes:
 
-- a server deployment script at `/Users/seraj/Nextcloud/RISpro/deploy.sh`
-- a GitHub Actions workflow at `/Users/seraj/Nextcloud/RISpro/.github/workflows/deploy.yml`
+- a server deployment script at `deploy.sh`
+- a GitHub Actions workflow at `.github/workflows/deploy.yml`
 
 The script is the real deployment logic.
 The GitHub workflow simply checks the code first and then tells the server to run that script.

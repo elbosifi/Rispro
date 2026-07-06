@@ -3,6 +3,8 @@
 This document provides working rules for all contributors and coding agents in this repository.
 Appointments V2 rules are a scoped subsection below.
 
+For the concise repository map, start at the root `AGENTS.md`. Keep this file as the detailed rules document.
+
 ---
 
 ## General repo rules
@@ -14,7 +16,7 @@ Appointments V2 rules are a scoped subsection below.
 5. Database is PostgreSQL. Use the shared pool from `src/db/pool.ts`.
 6. New feature modules go under `src/modules/<feature-name>/`.
 7. Frontend pages live under `frontend/src/`. V2 pages are under `frontend/src/v2/`.
-8. Run `npm run typecheck` and `cd frontend && npx tsc --noEmit` before committing.
+8. Run `npm run typecheck`, `npm run typecheck:frontend`, and `npm run harness:all` before committing harness or cross-domain changes.
 9. Tests use Node's native `node:test`. Run with `npm test`.
 10. Legacy appointments code (outside `src/modules/appointments-v2/`) is maintained but not extended — see Legacy freeze policy below.
 

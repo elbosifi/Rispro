@@ -102,7 +102,7 @@ docker run --env-file .env -p 3000:3000 rispro-reception
 - run `npm run migrate` during deployment before starting the app
 - verify `/api/ready` returns `{ "ok": true }`
 
-Detailed rollout steps are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
+Detailed rollout steps are in `docs/production-rollout.md`.
 
 ## Validation
 
@@ -149,14 +149,14 @@ The recommended production deployment method is:
 
 1. push updates to GitHub
 2. let GitHub Actions validate the code
-3. let the server run `/Users/seraj/Nextcloud/RISpro/deploy.sh`
+3. let the server run `deploy.sh`
 
 This repository includes:
 
-- `/Users/seraj/Nextcloud/RISpro/deploy.sh` for server deployment
-- `/Users/seraj/Nextcloud/RISpro/.github/workflows/deploy.yml` for GitHub-based deployment automation
+- `deploy.sh` for server deployment
+- `.github/workflows/deploy.yml` for GitHub-based deployment automation
 
-Setup details are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
+Setup details are in `docs/production-rollout.md`.
 
 ## DICOM MWL Gateway
 

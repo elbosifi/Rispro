@@ -117,7 +117,7 @@ This is the compatibility/default path. The RISpro app container includes the so
 
 The deployment scripts add an `orthanc` container automatically, generate its config at `docker/orthanc/generated/orthanc.json`, disable the embedded RISpro MWL listener, and point RISpro at `http://orthanc:8042`.
 
-The internal Orthanc image is now pinned through [docker/orthanc/Dockerfile](/Users/serajalsaifi/Nextcloud/RISpro/docker/orthanc/Dockerfile), which builds from `orthancteam/orthanc:26.4.0`. The Orthanc Team image explicitly documents that its default `26.4.0` image includes the Worklists plugin, which makes it a safer MWL target than the old unpinned `jodogne/orthanc-plugins:latest` setup.
+The internal Orthanc image is now pinned through [docker/orthanc/Dockerfile](../docker/orthanc/Dockerfile), which builds from `orthancteam/orthanc:26.4.0`. The Orthanc Team image explicitly documents that its default `26.4.0` image includes the Worklists plugin, which makes it a safer MWL target than the old unpinned `jodogne/orthanc-plugins:latest` setup.
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
@@ -138,7 +138,7 @@ Before RISpro considers the stack healthy, the internal Orthanc deployment now v
 - the configured worklist directory exists
 - the runtime `/worklists` route responds without `404` or `405`
 
-This readiness probe lives in [docker/orthanc/check-worklists-ready.sh](/Users/serajalsaifi/Nextcloud/RISpro/docker/orthanc/check-worklists-ready.sh), is wired into the Orthanc container healthcheck, and is also run explicitly by setup/update after `docker compose up -d --build`.
+This readiness probe lives in [docker/orthanc/check-worklists-ready.sh](../docker/orthanc/check-worklists-ready.sh), is wired into the Orthanc container healthcheck, and is also run explicitly by setup/update after `docker compose up -d --build`.
 
 ### Mode 3: External Orthanc
 
