@@ -14,6 +14,7 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { pool } from "../../../../db/pool.js";
 import {
   isDatabaseAvailable,
@@ -73,11 +74,22 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     if (!testData) throw new Error("Test setup failed — database unreachable");
   }
 
-  async function createBookingForStatusTest(date: string): Promise<number> {
+  async function createPatientForStatusTest(label: string): Promise<number> {
+    const uniqueNationalId = `2${randomUUID().replace(/-/g, "").slice(0, 11)}`;
+    const patientResult = await pool.query(
+      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+       values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
+       returning id`,
+      [`${TEST_PREFIX}${label} مريض اختبار`, `${TEST_PREFIX}${label} Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
+    );
+    return Number(patientResult.rows[0].id);
+  }
+
+  async function createBookingForStatusTest(date: string, patientId: number = testData.patientId): Promise<number> {
     const createResult = await fetch("/api/v2/appointments", {
       method: "POST",
       body: {
-        patientId: testData.patientId,
+        patientId,
         modalityId: testData.modalityId,
         examTypeId: testData.examTypeId,
         bookingDate: date,
@@ -260,7 +272,13 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     it("manual close statuses preserve existing workflow timestamps", async () => {
       guard();
       for (const targetStatus of ["no-show", "discontinued"] as const) {
-        const bookingId = await createBookingForStatusTest(`2026-06-${targetStatus === "no-show" ? "20" : "21"}`);
+        const patientId = targetStatus === "no-show"
+          ? await createPatientForStatusTest("NoShowTimestamp")
+          : testData.patientId;
+        const bookingId = await createBookingForStatusTest(
+          `2026-06-${targetStatus === "no-show" ? "20" : "21"}`,
+          patientId
+        );
         assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
           method: "POST",
           body: { status: "waiting" },

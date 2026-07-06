@@ -6,9 +6,9 @@
 (0010,0040) CS [M]
 (0040,0100) SQ (Sequence with undefined length)
 (fffe,e000) na (Item with undefined length)
-  (0008,0050) SH [V2-000039]
+  (0008,0050) SH [V2-000011]
   (0008,0060) CS [BOOKING_1AD08900CT]
-  (0040,0002) DA [20260612]
+  (0040,0002) DA [20260618]
   (0040,0007) LO [BOOKING_1ad08900 CT Head]
 (fffe,e00d) na (ItemDelimitationItem)
 (fffe,e0dd) na (SequenceDelimitationItem)

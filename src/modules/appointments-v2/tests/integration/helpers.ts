@@ -280,10 +280,30 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
     `,
     [bookingIds, userIds]
   );
+  await pool.query(
+    `
+      delete from patient_no_show_events
+      where coalesce(patient_id, -1) = any($1::bigint[])
+         or coalesce(appointment_id, -1) = any($2::bigint[])
+         or coalesce(created_by, -1) = any($3::bigint[])
+    `,
+    [patientIds, bookingIds, userIds]
+  );
   await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [bookingIds]);
 
   await pool.query(`delete from appointments_v2.policy_sets where id = any($1::bigint[])`, [policySetIds]);
 
+  await pool.query(
+    `
+      update patients
+      set updated_by_user_id = null,
+          no_show_block_reset_by = null
+      where id = any($1::bigint[])
+         or updated_by_user_id = any($2::bigint[])
+         or no_show_block_reset_by = any($2::bigint[])
+    `,
+    [patientIds, userIds]
+  );
   await pool.query(
     `update system_settings set updated_by_user_id = null where updated_by_user_id = any($1::bigint[])`,
     [userIds]
