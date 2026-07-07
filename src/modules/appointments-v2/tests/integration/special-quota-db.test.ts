@@ -86,16 +86,18 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
          normalized_arabic_name,
          sex,
          age_years,
+         phone_1,
          identifier_type,
          identifier_value
        )
-       values ($1, $2, $3, $4, 'M', 34, 'national_id', $5)
+       values ($1, $2, $3, $4, 'M', 34, $5, 'national_id', $6)
        returning id`,
       [
         `${TEST_PREFIX}${suffix}مريض`,
         `${TEST_PREFIX}${suffix} Patient`,
         nationalId,
         `${TEST_PREFIX}${suffix}مريض`,
+        "0912345678",
         nationalId,
       ]
     );
@@ -154,6 +156,19 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
        on conflict do nothing`,
       [quotaId, testData.userId]
     );
+  }
+
+  async function supervisorOverride(reason = "approved") {
+    const pool = await db();
+    const supervisorRow = await pool.query<{ username: string }>(
+      `select username from users where id = $1`,
+      [testData.userId]
+    );
+    return {
+      supervisorUsername: supervisorRow.rows[0]?.username ?? "",
+      supervisorPassword: "test_password",
+      reason,
+    };
   }
 
   async function createBooking(params: {
@@ -216,6 +231,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       bookingDate: date,
       caseCategory: "non_oncology",
       capacityResolutionMode: "category_override",
+      override: await supervisorOverride("category capacity approved"),
     });
     assert.equal(second.status, 201);
 
@@ -224,11 +240,11 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(booking.usesSpecialQuota, false);
   });
 
-  it("total full + special quota available -> special_quota_extra succeeds and persists uses_special_quota=true", async () => {
+  it("category full + special quota available -> special_quota_extra succeeds and persists uses_special_quota=true", async () => {
     guard();
     const date = uniqueDate();
-    await setModalityCapacity(1);
-    await setCategoryLimits(null, null);
+    await setModalityCapacity(2);
+    await setCategoryLimits(null, 1);
     await setSpecialQuota(1);
 
     const p1 = await createPatient();
@@ -267,11 +283,11 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(row.rows[0]?.capacity_resolution_mode, "special_quota_extra");
   });
 
-  it("total full + no special quota -> special_quota_extra blocked", async () => {
+  it("category full + no special quota -> special_quota_extra blocked", async () => {
     guard();
     const date = uniqueDate();
-    await setModalityCapacity(1);
-    await setCategoryLimits(null, null);
+    await setModalityCapacity(2);
+    await setCategoryLimits(null, 1);
     await setSpecialQuota(0);
 
     const p1 = await createPatient();
@@ -364,8 +380,8 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
   it("assigned receptionist API request with special_quota_extra is allowed", async () => {
     guard();
     const date = uniqueDate();
-    await setModalityCapacity(1);
-    await setCategoryLimits(null, null);
+    await setModalityCapacity(2);
+    await setCategoryLimits(null, 1);
     await setSpecialQuota(2);
 
     const base = await createBooking({
