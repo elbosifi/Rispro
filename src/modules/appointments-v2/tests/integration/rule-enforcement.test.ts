@@ -102,6 +102,50 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
     return `${y}-${m}-${d}`;
   }
 
+  function daysUntilIso(targetDate: string): number {
+    const [year, month, day] = targetDate.split("-").map(Number);
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const targetUtc = Date.UTC(year, month - 1, day);
+    return Math.floor((targetUtc - todayUtc) / (24 * 60 * 60 * 1000));
+  }
+
+  function nextMonthDayIso(month: number, day: number): string {
+    const now = new Date();
+    let year = now.getUTCFullYear();
+    let target = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (daysUntilIso(target) < 0) {
+      year += 1;
+      target = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+    return target;
+  }
+
+  async function fetchAvailabilityDay(
+    targetDate: string,
+    extraParams: Record<string, string | number | boolean> = {}
+  ) {
+    const offset = daysUntilIso(targetDate);
+    assert.ok(
+      offset >= 0 && offset <= 365,
+      `Availability target ${targetDate} must be within the route offset window`
+    );
+
+    const params = new URLSearchParams({
+      modalityId: String(testData.modalityId),
+      days: "1",
+      offset: String(offset),
+      caseCategory: "non_oncology",
+    });
+    for (const [key, value] of Object.entries(extraParams)) {
+      params.set(key, String(value));
+    }
+
+    const result = await fetch(`/api/v2/scheduling/availability?${params.toString()}`);
+    const data = result.data as any;
+    return (data.items ?? []).find((d: any) => d.date === targetDate);
+  }
+
   // ---------------------------------------------------------------------------
   // Helper: create isolated policy set and publish rules to it.
   // Each test uses a unique policySetKey so tests don't interfere.
@@ -221,7 +265,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
     it("date with raw spare capacity shows blocked, not bookable", async (t) => {
       if (guard(t)) return;
 
-      const futureDate = "2027-03-15";
+      const futureDate = addDaysIso(120);
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -248,12 +292,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         ],
       }, "RE_ps01");
 
-      // Check availability
-      const availResult = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
-      );
-      const availData = availResult.data as any;
-      const blockedDay = (availData.items ?? []).find((d: any) => d.date === futureDate);
+      const blockedDay = await fetchAvailabilityDay(futureDate);
 
       assert.ok(blockedDay, `Should have entry for ${futureDate}`);
       assert.strictEqual(
@@ -306,20 +345,15 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         ],
       }, "RE_ps02");
 
-      const availResult = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
-      );
-      const availData = availResult.data as any;
-      const inRange = (availData.items ?? []).find((d: any) => d.date === blockedDate);
+      const inRange = await fetchAvailabilityDay(blockedDate);
 
       assert.ok(inRange, `Should have entry for ${blockedDate}`);
       assert.strictEqual(inRange.decision.displayStatus, "blocked");
 
       // Date outside range should NOT be blocked
-      const outOfRange = (availData.items ?? []).find((d: any) => d.date === outOfRangeDate);
-      if (outOfRange) {
-        assert.notStrictEqual(outOfRange.decision.displayStatus, "blocked");
-      }
+      const outOfRange = await fetchAvailabilityDay(outOfRangeDate);
+      assert.ok(outOfRange, `Should have entry for ${outOfRangeDate}`);
+      assert.notStrictEqual(outOfRange.decision.displayStatus, "blocked");
     });
   });
 
@@ -357,14 +391,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         ],
       }, "RE_ps03");
 
-      const availResult = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
-      );
-      const availData = availResult.data as any;
-
-      // Find Dec 25, 2026 (should be blocked)
-      const christmas = (availData.items ?? []).find((d: any) => d.date === "2026-12-25");
-      assert.ok(christmas, "Should have entry for 2026-12-25");
+      const christmasDate = nextMonthDayIso(12, 25);
+      const christmas = await fetchAvailabilityDay(christmasDate);
+      assert.ok(christmas, `Should have entry for ${christmasDate}`);
       assert.strictEqual(
         christmas.decision.displayStatus,
         "blocked",
@@ -406,11 +435,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         ],
       }, "RE_ps04");
 
-      const availResult = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
-      );
-      const availData = availResult.data as any;
-      const softBlocked = (availData.items ?? []).find((d: any) => d.date === softBlockedDate);
+      const softBlocked = await fetchAvailabilityDay(softBlockedDate);
 
       assert.ok(softBlocked, `Should have entry for ${softBlockedDate}`);
       assert.strictEqual(
@@ -462,11 +487,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       }, "RE_ps05");
 
       // Query WITH examTypeId — should be blocked
-      const withExam = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&examTypeId=${testData.examTypeId}&caseCategory=non_oncology`
-      );
-      const withExamData = withExam.data as any;
-      const restrictedDay = (withExamData.items ?? []).find((d: any) => d.date === restrictedDate);
+      const restrictedDay = await fetchAvailabilityDay(restrictedDate, {
+        examTypeId: testData.examTypeId,
+      });
 
       assert.ok(restrictedDay, `Should have entry for ${restrictedDate}`);
       assert.strictEqual(
@@ -485,11 +508,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       );
 
       // Query WITHOUT examTypeId — should NOT be blocked by exam rule
-      const noExam = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
-      );
-      const noExamData = noExam.data as any;
-      const freeDay = (noExamData.items ?? []).find((d: any) => d.date === restrictedDate);
+      const freeDay = await fetchAvailabilityDay(restrictedDate);
 
       assert.ok(freeDay, `Should have entry for ${restrictedDate} (no exam type)`);
       assert.notStrictEqual(
@@ -536,11 +555,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         ],
       }, "RE_ps06");
 
-      const withExam = await fetch(
-        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&examTypeId=${testData.examTypeId}&caseCategory=non_oncology`
-      );
-      const withExamData = withExam.data as any;
-      const day = (withExamData.items ?? []).find((d: any) => d.date === restrictedDate);
+      const day = await fetchAvailabilityDay(restrictedDate, {
+        examTypeId: testData.examTypeId,
+      });
 
       assert.ok(day, `Should have entry for ${restrictedDate}`);
       assert.strictEqual(
@@ -665,8 +682,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         );
         assert.strictEqual(
           today.rowDisplayStatus,
-          "full",
-          "Capacity-exhausted row should be marked as full for UI rendering"
+          "restricted",
+          "Category-capacity exhaustion should be marked as restricted because override is possible"
         );
         assert.strictEqual(
           today.decision.remainingStandardCapacity,
