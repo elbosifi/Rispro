@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { pool } from "../db/pool.js";
+import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 import { syncBookingWorklistSources } from "./dicom-service.js";
 
 interface FixtureContext {
@@ -199,21 +200,21 @@ async function createFixture(): Promise<FixtureContext> {
 
     const ctExamType = await pool.query<{ id: number }>(
       `
-        insert into exam_types (modality_id, name_ar, name_en, is_active)
-        values ($1, $2, $3, true)
+        insert into exam_types (modality_id, code, name_ar, name_en, is_active)
+        values ($1, $2, $3, $4, true)
         returning id
       `,
-      [ctModalityId, `فحص CT ${suffix}`, `CT Exam ${suffix}`]
+      [ctModalityId, `CTEX${suffix.slice(-8)}`, `فحص CT ${suffix}`, `CT Exam ${suffix}`]
     );
     ctExamTypeId = Number(ctExamType.rows[0]?.id);
 
     const mriExamType = await pool.query<{ id: number }>(
       `
-        insert into exam_types (modality_id, name_ar, name_en, is_active)
-        values ($1, $2, $3, true)
+        insert into exam_types (modality_id, code, name_ar, name_en, is_active)
+        values ($1, $2, $3, $4, true)
         returning id
       `,
-      [mriModalityId, `فحص MRI ${suffix}`, `MRI Exam ${suffix}`]
+      [mriModalityId, `MREX${suffix.slice(-8)}`, `فحص MRI ${suffix}`, `MRI Exam ${suffix}`]
     );
     mriExamTypeId = Number(mriExamType.rows[0]?.id);
 
@@ -437,7 +438,9 @@ test("syncBookingWorklistSources creates V2 MWL dumps and removes files for term
     assert.ok(dumps.every((dump) => !dump.includes("(0040,0001)")), "Expected SPS station AE to be excluded by default.");
     assert.ok(dumps.every((dump) => !dump.includes("(0040,0003)")), "Expected SPS start time to be excluded by default.");
     assert.ok(dumps.every((dump) => !dump.includes("(0040,0009)")), "Expected SPS ID to be excluded by default.");
-    assert.ok(dumps.every((dump) => !dump.includes("(0008,0050)")), "Expected accession number to be excluded by default.");
+    assert.equal(extractTagValue(dumps[0], "(0008,0050"), formatV2AccessionNumber(ctCentralId), "Expected CT accession number to match the booking.");
+    assert.equal(extractTagValue(dumps[1], "(0008,0050"), formatV2AccessionNumber(mriCentralId), "Expected MRI accession number to match the booking.");
+    assert.equal(extractTagValue(dumps[2], "(0008,0050"), formatV2AccessionNumber(ctThirdId), "Expected third accession number to match the booking.");
     assert.ok(dumps.every((dump) => !dump.includes("(0032,1060)")), "Expected requested procedure description to be excluded by default.");
     assert.ok(dumps.every((dump) => !dump.includes("(0040,1001)")), "Expected requested procedure ID to be excluded by default.");
 
