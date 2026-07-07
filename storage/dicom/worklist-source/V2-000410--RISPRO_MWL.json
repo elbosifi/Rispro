@@ -1,0 +1,20 @@
+{
+  "appointmentId": "410",
+  "accessionNumber": "V2-000410",
+  "modalityId": "17",
+  "modalityCode": "OVREQ_f6ce3fe6CT",
+  "patientId": "363",
+  "patientMrn": "000362",
+  "patientNationalId": "723558497116",
+  "patientNameEnglish": "OVREQ_ Patient",
+  "patientNameArabic": "OVREQ_مريض",
+  "appointmentDate": "2042-02-14",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

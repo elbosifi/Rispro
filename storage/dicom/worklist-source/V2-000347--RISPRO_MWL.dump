@@ -1,14 +1,14 @@
 # RISpro generated Modality Worklist source file
 (0008,0005) CS [ISO_IR 192]
-(0010,0010) PN [MIXRS_ Patient]
-(0010,0020) LO [897529859679]
+(0010,0010) PN [OVREQ_ Patient]
+(0010,0020) LO [782264738757]
 (0010,0030) DA []
 (0010,0040) CS [M]
 (0040,0100) SQ (Sequence with undefined length)
 (fffe,e000) na (Item with undefined length)
   (0008,0050) SH [V2-000347]
-  (0008,0060) CS [MIXRS_C5694159CT]
-  (0040,0002) DA [20420120]
-  (0040,0007) LO [MIXRS_c5694159 CT Head]
+  (0008,0060) CS [OVREQ_F6CE3FE6CT]
+  (0040,0002) DA [20420303]
+  (0040,0007) LO [OVREQ_f6ce3fe6 CT Head]
 (fffe,e00d) na (ItemDelimitationItem)
 (fffe,e0dd) na (SequenceDelimitationItem)

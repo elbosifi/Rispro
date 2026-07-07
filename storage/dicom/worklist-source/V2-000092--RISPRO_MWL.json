@@ -1,0 +1,20 @@
+{
+  "appointmentId": "92",
+  "accessionNumber": "V2-000092",
+  "modalityId": "12",
+  "modalityCode": "QUEUEARR_6bb506ebCT",
+  "patientId": "27",
+  "patientMrn": "000026",
+  "patientNationalId": "259594896340",
+  "patientNameEnglish": "QUEUEARR_fdcfcd3f5b Patient",
+  "patientNameArabic": "QUEUEARR_fdcfcd3f5bمريض",
+  "appointmentDate": "2026-07-07",
+  "appointmentStatus": "arrived",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

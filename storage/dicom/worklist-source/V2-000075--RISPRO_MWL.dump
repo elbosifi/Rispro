@@ -1,0 +1,14 @@
+# RISpro generated Modality Worklist source file
+(0008,0005) CS [ISO_IR 192]
+(0010,0010) PN [PUBCANCEL_Other Patient]
+(0010,0020) LO [383435477782]
+(0010,0030) DA []
+(0010,0040) CS [M]
+(0040,0100) SQ (Sequence with undefined length)
+(fffe,e000) na (Item with undefined length)
+  (0008,0050) SH [V2-000075]
+  (0008,0060) CS [PUBCANCEL_E8799B28CT]
+  (0040,0002) DA [20400906]
+  (0040,0007) LO [PUBCANCEL_e8799b28 CT Head]
+(fffe,e00d) na (ItemDelimitationItem)
+(fffe,e0dd) na (SequenceDelimitationItem)
