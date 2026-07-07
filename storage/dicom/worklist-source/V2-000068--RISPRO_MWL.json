@@ -1,0 +1,20 @@
+{
+  "appointmentId": "68",
+  "accessionNumber": "V2-000068",
+  "modalityId": "10",
+  "modalityCode": "PUBCANCEL_efadcaecCT",
+  "patientId": "19",
+  "patientMrn": "000018",
+  "patientNationalId": "1bccab972ec1",
+  "patientNameEnglish": "PUBCANCEL_efadcaecTest Patient",
+  "patientNameArabic": "PUBCANCEL_efadcaecمريض اختبار",
+  "appointmentDate": "2026-08-10",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

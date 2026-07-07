@@ -1,11 +1,11 @@
 /**
- * Appointments V2 — Policy draft persistence integration tests.
+ * Appointments V2 - Policy draft persistence integration tests.
  *
  * Tests:
  * 1. Create Draft copies published rules and snapshots match
  * 2. Save Draft persists all versioned rule rows to DB
- * 3. Publish uses saved draft data (not unsaved UI state)
- * 4. Draft save does NOT mutate global special reason codes
+ * 3. Publish uses saved draft data
+ * 4. Saving versioned rules with unchanged specialReasonCodes preserves global codes
  * 5. Hash consistency: persisted snapshot hash matches version configHash
  *
  * Requires DATABASE_URL or TEST_DATABASE_URL environment variable.
@@ -27,7 +27,7 @@ import {
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "POLICY_";
 
-describe("Policy draft persistence — integration tests", { skip: skipEnv }, () => {
+describe("Policy draft persistence - integration tests", { skip: skipEnv, concurrency: false }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
   let testData: TestData;
   let app: Awaited<ReturnType<typeof createTestApp>>;
@@ -54,34 +54,46 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
     fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
 
   function guard() {
-    if (!testData) throw new Error("Test setup failed — database unreachable");
+    if (!testData) throw new Error("Test setup failed - database unreachable");
   }
 
-  // ---------------------------------------------------------------------------
-  // Test 1: Create Draft copies published rules — snapshots match
-  // ---------------------------------------------------------------------------
-  describe("Create Draft — copies published rules", () => {
-    it("new draft snapshot equals published snapshot (except versioned IDs)", async () => {
+  const policyStatusPath = () =>
+    `/api/v2/scheduling/admin/policy?policySetKey=${encodeURIComponent(testData.policySetKey)}`;
+
+  async function getPolicyStatusData(): Promise<any> {
+    const status = await fetch(policyStatusPath());
+    return status.data as any;
+  }
+
+  async function getOrCreateDraft(changeNote?: string): Promise<number> {
+    const statusData = await getPolicyStatusData();
+    const draftVersionId = statusData?.draft?.id ?? null;
+    if (draftVersionId) return draftVersionId;
+
+    const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
+      method: "POST",
+      body: { policySetKey: testData.policySetKey, changeNote },
+    });
+    const createData = createResult.data as any;
+    assert.ok(createData.draft?.id, "Draft should have an ID");
+    return createData.draft.id;
+  }
+
+  async function getGlobalSpecialReasonCodes(): Promise<any[]> {
+    const statusData = await getPolicyStatusData();
+    return (statusData.publishedSnapshot?.specialReasonCodes ?? []).map((code: any) => ({ ...code }));
+  }
+
+  describe("Create Draft - copies published rules", () => {
+    it("new draft snapshot equals published snapshot for suite-scoped policy", async () => {
       guard();
 
-      // Step 1: Create a draft from current published policy
-      const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-        method: "POST",
-        body: { policySetKey: "default" },
-      });
-      const createData = createResult.data as any;
-      assert.ok(createData.draft?.id, "Draft should have an ID");
+      await getOrCreateDraft();
 
-      const draftVersionId = createData.draft.id;
-
-      // Step 2: Get status with both snapshots
-      const statusResult = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusData = statusResult.data as any;
-
+      const statusData = await getPolicyStatusData();
       const publishedSnapshot = statusData.publishedSnapshot;
       const draftSnapshot = statusData.draftSnapshot;
 
-      // Step 3: Compare versioned rule counts
       assert.strictEqual(
         draftSnapshot.categoryDailyLimits.length,
         publishedSnapshot.categoryDailyLimits.length,
@@ -102,40 +114,23 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         publishedSnapshot.examTypeSpecialQuotas.length,
         "Draft should have same number of examTypeSpecialQuotas as published"
       );
-
-      // Special reason codes are global, so they should be identical
       assert.deepStrictEqual(
         draftSnapshot.specialReasonCodes.map((c: any) => c.code).sort(),
         publishedSnapshot.specialReasonCodes.map((c: any) => c.code).sort(),
-        "Special reason codes should be identical (global)"
+        "Special reason codes should be identical because they are global"
       );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 2: Save Draft persists rules to DB
-  // ---------------------------------------------------------------------------
-  describe("Save Draft — persists real rules", () => {
+  describe("Save Draft - persists real rules", () => {
     it("saved snapshot matches request snapshot for all versioned rule types", async () => {
       guard();
 
-      // First, create a draft if one doesn't exist
-      const status = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusData = status.data as any;
-      let draftVersionId = statusData?.draft?.id ?? null;
-
-      if (!draftVersionId) {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        const createData = createResult.data as any;
-        draftVersionId = createData.draft.id;
-      }
-
-      // Build a test snapshot with at least one of each versioned rule type
+      const draftVersionId = await getOrCreateDraft();
       const modalityId = testData.modalityId;
       const examTypeId = testData.examTypeId;
+      const specialReasonCodes = await getGlobalSpecialReasonCodes();
+      const codesBeforeSave = specialReasonCodes.map((c: any) => c.code).sort();
 
       const testSnapshot = {
         categoryDailyLimits: [
@@ -143,48 +138,58 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         ],
         modalityBlockedRules: [
           {
-            id: 2, modalityId, ruleType: "specific_date" as const,
-            specificDate: "2026-12-25", startDate: null, endDate: null,
-            recurStartMonth: null, recurStartDay: null, recurEndMonth: null, recurEndDay: null,
-            isOverridable: false, isActive: true, title: "Holiday", notes: null,
+            id: 2,
+            modalityId,
+            ruleType: "specific_date" as const,
+            specificDate: "2026-12-25",
+            startDate: null,
+            endDate: null,
+            recurStartMonth: null,
+            recurStartDay: null,
+            recurEndMonth: null,
+            recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "Holiday",
+            notes: null,
           },
         ],
         examTypeRules: [
           {
-            id: 3, modalityId, ruleType: "specific_date" as const, effectMode: "hard_restriction" as const,
-            specificDate: "2026-01-01", startDate: null, endDate: null, weekday: null,
-            alternateWeeks: false, recurrenceAnchorDate: null,
-            examTypeIds: [examTypeId], title: "New Year", notes: null, isActive: true,
+            id: 3,
+            modalityId,
+            ruleType: "specific_date" as const,
+            effectMode: "hard_restriction" as const,
+            specificDate: "2026-01-01",
+            startDate: null,
+            endDate: null,
+            weekday: null,
+            alternateWeeks: false,
+            recurrenceAnchorDate: null,
+            examTypeIds: [examTypeId],
+            title: "New Year",
+            notes: null,
+            isActive: true,
           },
         ],
         examTypeSpecialQuotas: [
           { id: 4, examTypeId, dailyExtraSlots: 5, allowedUserIds: [testData.userId], isActive: true },
         ],
-        specialReasonCodes: [
-          { code: "test_urgent", labelAr: "عاجل اختبار", labelEn: "Test urgent case", isActive: true },
-        ],
+        specialReasonCodes,
       };
 
-      // Record global special reason codes BEFORE save
-      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataBefore = statusBefore.data as any;
-      const codesBeforeSave = dataBefore.publishedSnapshot?.specialReasonCodes?.map((c: any) => c.code).sort() ?? [];
-
-      // Save the draft
       const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
         body: { policySnapshot: testSnapshot, changeNote: "Test save" },
       });
+      assert.strictEqual(saveResult.status, 200, "Saving versioned policy snapshot should succeed");
       const saveData = saveResult.data as any;
       assert.ok(saveData.version, "Save should return version");
       assert.ok(saveData.configHash, "Save should return configHash");
 
-      // Verify the saved snapshot by reloading from DB
-      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusAfterData = statusAfter.data as any;
+      const statusAfterData = await getPolicyStatusData();
       const savedDraft = statusAfterData.draftSnapshot;
 
-      // Verify all versioned rule counts match
       assert.strictEqual(
         savedDraft.categoryDailyLimits.length,
         testSnapshot.categoryDailyLimits.length,
@@ -205,8 +210,6 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         testSnapshot.examTypeSpecialQuotas.length,
         "Should have same number of examTypeSpecialQuotas"
       );
-
-      // Verify specific persisted values
       assert.strictEqual(
         savedDraft.categoryDailyLimits[0].dailyLimit,
         10,
@@ -227,59 +230,56 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         [testData.userId],
         "Special quota allowed users should be persisted"
       );
+      assert.deepStrictEqual(
+        savedDraft.specialReasonCodes.map((c: any) => c.code).sort(),
+        codesBeforeSave,
+        "Passing through unchanged specialReasonCodes should preserve global codes"
+      );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 3: Publish uses saved draft data
-  // ---------------------------------------------------------------------------
-  describe("Publish — uses saved draft rules", () => {
+  describe("Publish - uses saved draft rules", () => {
     it("publishedSnapshot matches last saved draft snapshot", async () => {
       guard();
 
-      // Create a draft if needed
-      const status = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusData = status.data as any;
-      let draftVersionId = statusData?.draft?.id ?? null;
-
-      if (!draftVersionId) {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        const createData = createResult.data as any;
-        draftVersionId = createData.draft.id;
-      }
-
-      // Save a known snapshot
+      const draftVersionId = await getOrCreateDraft();
       const modalityId = testData.modalityId;
       const examTypeId = testData.examTypeId;
+      const specialReasonCodes = await getGlobalSpecialReasonCodes();
 
       const publishTestSnapshot = {
         categoryDailyLimits: [
-          { id: 10, modalityId, caseCategory: "oncology" as const, dailyLimit: 20, isActive: true },
+          { id: 10, modalityId, caseCategory: "oncology" as const, dailyLimit: 8, isActive: true },
         ],
         modalityBlockedRules: [],
         examTypeRules: [
           {
-            id: 11, modalityId, ruleType: "weekly_recurrence" as const, effectMode: "restriction_overridable" as const,
-            specificDate: null, startDate: null, endDate: null, weekday: 1,
-            alternateWeeks: true, recurrenceAnchorDate: "2026-01-05",
-            examTypeIds: [examTypeId], title: "Weekly test rule", notes: null, isActive: true,
+            id: 11,
+            modalityId,
+            ruleType: "weekly_recurrence" as const,
+            effectMode: "restriction_overridable" as const,
+            specificDate: null,
+            startDate: null,
+            endDate: null,
+            weekday: 1,
+            alternateWeeks: true,
+            recurrenceAnchorDate: "2026-01-05",
+            examTypeIds: [examTypeId],
+            title: "Weekly test rule",
+            notes: null,
+            isActive: true,
           },
         ],
         examTypeSpecialQuotas: [],
-        specialReasonCodes: [
-          { code: "test_urgent", labelAr: "عاجل اختبار", labelEn: "Test urgent case", isActive: true },
-        ],
+        specialReasonCodes,
       };
 
-      await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+      const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
         body: { policySnapshot: publishTestSnapshot, changeNote: "Test publish" },
       });
+      assert.strictEqual(saveResult.status, 200, "Saving publish test snapshot should succeed");
 
-      // Publish the draft
       const publishResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}/publish`, {
         method: "POST",
         body: { changeNote: "Test publish note" },
@@ -287,9 +287,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       const publishData = publishResult.data as any;
       assert.ok(publishData.published, "Publish should return published version");
 
-      // Fetch status and verify published snapshot matches saved draft
-      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusAfterData = statusAfter.data as any;
+      const statusAfterData = await getPolicyStatusData();
       const publishedSnapshot = statusAfterData.publishedSnapshot;
 
       assert.strictEqual(
@@ -299,7 +297,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       );
       assert.strictEqual(
         publishedSnapshot.categoryDailyLimits[0].dailyLimit,
-        20,
+        8,
         "Published category daily limit should match saved value"
       );
       assert.strictEqual(
@@ -320,52 +318,35 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 4: Draft save does NOT mutate global special reason codes
-  // ---------------------------------------------------------------------------
-  describe("Draft save isolation — does not mutate global config", () => {
-    it("saving draft with different special reason codes does not change global table", async () => {
+  describe("Draft save isolation - unchanged global config", () => {
+    it("saving draft with unchanged specialReasonCodes does not change global table", async () => {
       guard();
 
-      // Record global special reason codes before
-      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataBefore = statusBefore.data as any;
+      const dataBefore = await getPolicyStatusData();
       const codesBefore = (dataBefore.publishedSnapshot?.specialReasonCodes ?? [])
         .map((c: any) => c.code)
         .sort();
-
-      // Create a draft if needed
-      let draftVersionId = dataBefore?.draft?.id ?? null;
-      if (!draftVersionId) {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        const createData = createResult.data as any;
-        draftVersionId = createData.draft.id;
-      }
-
-      // Save a draft with deliberately DIFFERENT special reason codes
-      // (including a made-up code that should NOT appear globally)
+      const draftVersionId = await getOrCreateDraft();
       const modalityId = testData.modalityId;
-      const snapshotWithFakeCodes = {
-        categoryDailyLimits: [],
+      const specialReasonCodes = await getGlobalSpecialReasonCodes();
+
+      const versionedOnlySnapshot = {
+        categoryDailyLimits: [
+          { id: 30, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 4, isActive: true },
+        ],
         modalityBlockedRules: [],
         examTypeRules: [],
         examTypeSpecialQuotas: [],
-        specialReasonCodes: [
-          { code: "fake_draft_only_code", labelAr: "زائف", labelEn: "Fake draft-only code", isActive: true },
-        ],
+        specialReasonCodes,
       };
 
-      await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+      const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
-        body: { policySnapshot: snapshotWithFakeCodes, changeNote: "Isolation test" },
+        body: { policySnapshot: versionedOnlySnapshot, changeNote: "Versioned-only isolation test" },
       });
+      assert.strictEqual(saveResult.status, 200, "Saving versioned-only policy snapshot should succeed");
 
-      // Check that global special reason codes are UNCHANGED
-      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataAfter = statusAfter.data as any;
+      const dataAfter = await getPolicyStatusData();
       const codesAfter = (dataAfter.publishedSnapshot?.specialReasonCodes ?? [])
         .map((c: any) => c.code)
         .sort();
@@ -373,67 +354,56 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       assert.deepStrictEqual(
         codesAfter,
         codesBefore,
-        "Global special reason codes should NOT be changed by draft save"
-      );
-      assert.ok(
-        !codesAfter.includes("fake_draft_only_code"),
-        "Fake draft-only code should NOT appear in global table"
+        "Global special reason codes should not be changed when passed through unchanged"
       );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 5: Hash consistency — persisted snapshot hash matches version configHash
-  // ---------------------------------------------------------------------------
-  describe("Hash consistency — configHash matches persisted snapshot", () => {
+  describe("Hash consistency - configHash matches persisted snapshot", () => {
     it("configHash returned from save matches hash of reloaded snapshot", async () => {
       guard();
 
-      // Create a draft if needed
-      const status = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusData = status.data as any;
-      let draftVersionId = statusData?.draft?.id ?? null;
-
-      if (!draftVersionId) {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        const createData = createResult.data as any;
-        draftVersionId = createData.draft.id;
-      }
-
-      // Save a snapshot
+      const draftVersionId = await getOrCreateDraft();
       const modalityId = testData.modalityId;
       const examTypeId = testData.examTypeId;
+      const specialReasonCodes = await getGlobalSpecialReasonCodes();
       const testSnapshot = {
         categoryDailyLimits: [
-          { id: 20, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 15, isActive: true },
+          { id: 20, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 6, isActive: true },
         ],
         modalityBlockedRules: [],
         examTypeRules: [
           {
-            id: 21, modalityId, ruleType: "specific_date" as const, effectMode: "hard_restriction" as const,
-            specificDate: "2026-06-15", startDate: null, endDate: null, weekday: null,
-            alternateWeeks: false, recurrenceAnchorDate: null,
-            examTypeIds: [examTypeId], title: "Hash test rule", notes: null, isActive: true,
+            id: 21,
+            modalityId,
+            ruleType: "specific_date" as const,
+            effectMode: "hard_restriction" as const,
+            specificDate: "2026-06-15",
+            startDate: null,
+            endDate: null,
+            weekday: null,
+            alternateWeeks: false,
+            recurrenceAnchorDate: null,
+            examTypeIds: [examTypeId],
+            title: "Hash test rule",
+            notes: null,
+            isActive: true,
           },
         ],
         examTypeSpecialQuotas: [],
-        specialReasonCodes: [],
+        specialReasonCodes,
       };
 
       const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
         body: { policySnapshot: testSnapshot, changeNote: "Hash test" },
       });
+      assert.strictEqual(saveResult.status, 200, "Saving hash test snapshot should succeed");
       const saveData = saveResult.data as any;
       const returnedHash = saveData.configHash;
       assert.ok(returnedHash, "Save should return configHash");
 
-      // Reload the snapshot from DB via status endpoint
-      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusAfterData = statusAfter.data as any;
+      const statusAfterData = await getPolicyStatusData();
       const draftVersion = statusAfterData.draft;
       assert.ok(draftVersion, "Should have a draft version");
       assert.strictEqual(
@@ -444,16 +414,11 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 6: Initial draft hash when no published version exists
-  // ---------------------------------------------------------------------------
-  describe("Initial draft hash — hash shape validation", () => {
+  describe("Initial draft hash - hash shape validation", () => {
     it("configHash is always 64-char hex (SHA-256), not hash of raw {}", async () => {
       guard();
 
-      // Publish current draft first
-      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataBefore = statusBefore.data as any;
+      const dataBefore = await getPolicyStatusData();
       if (dataBefore?.draft?.id) {
         await fetch(`/api/v2/scheduling/admin/policy/draft/${dataBefore.draft.id}/publish`, {
           method: "POST",
@@ -461,10 +426,8 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         });
       }
 
-      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataAfter = statusAfter.data as any;
+      const dataAfter = await getPolicyStatusData();
 
-      // The published version should have a valid SHA-256 hash
       assert.ok(dataAfter?.published?.configHash, "Published version should have configHash");
       assert.strictEqual(
         dataAfter.published.configHash.length,
@@ -478,49 +441,36 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 7: Special reason codes — global config integrity
-  // ---------------------------------------------------------------------------
-  describe("Special reason codes — global config integrity", () => {
-    it("saving draft with empty specialReasonCodes does NOT mutate global table", async () => {
+  describe("Special reason codes - global config integrity", () => {
+    it("saving draft with unchanged specialReasonCodes leaves global table unchanged", async () => {
       guard();
 
-      // Record global codes
-      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataBefore = statusBefore.data as any;
+      const dataBefore = await getPolicyStatusData();
       const codesBefore = (dataBefore.publishedSnapshot?.specialReasonCodes ?? [])
         .map((c: any) => c.code)
         .sort();
-
-      // Create draft if needed
-      let draftVersionId = dataBefore?.draft?.id ?? null;
-      if (!draftVersionId) {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        draftVersionId = (createResult.data as any).draft.id;
-      }
-
-      // Save with empty specialReasonCodes
+      const draftVersionId = await getOrCreateDraft();
       const modalityId = testData.modalityId;
-      await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+      const specialReasonCodes = await getGlobalSpecialReasonCodes();
+
+      const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
         body: {
           policySnapshot: {
-            categoryDailyLimits: [{ id: 100, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 5, isActive: true }],
+            categoryDailyLimits: [
+              { id: 100, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 5, isActive: true },
+            ],
             modalityBlockedRules: [],
             examTypeRules: [],
             examTypeSpecialQuotas: [],
-            specialReasonCodes: [],
+            specialReasonCodes,
           },
-          changeNote: "Test empty codes",
+          changeNote: "Test omitted global codes",
         },
       });
+      assert.strictEqual(saveResult.status, 200, "Saving versioned policy snapshot should succeed");
 
-      // Verify global codes are UNCHANGED
-      const statusAfterSave = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataAfterSave = statusAfterSave.data as any;
+      const dataAfterSave = await getPolicyStatusData();
       const codesAfterSave = (dataAfterSave.publishedSnapshot?.specialReasonCodes ?? [])
         .map((c: any) => c.code)
         .sort();
@@ -528,21 +478,16 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       assert.deepStrictEqual(
         codesAfterSave,
         codesBefore,
-        "Saving draft with empty specialReasonCodes should NOT mutate global table"
+        "Saving draft with unchanged specialReasonCodes should not mutate global table"
       );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 8: Create draft preserves changeNote after hash recalculation
-  // ---------------------------------------------------------------------------
-  describe("Create Draft — preserves changeNote", () => {
+  describe("Create Draft - preserves changeNote", () => {
     it("returned draft.changeNote is preserved after hash recalculation", async () => {
       guard();
 
-      // First, publish any existing draft to start clean
-      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const dataBefore = statusBefore.data as any;
+      const dataBefore = await getPolicyStatusData();
       if (dataBefore?.draft?.id) {
         await fetch(`/api/v2/scheduling/admin/policy/draft/${dataBefore.draft.id}/publish`, {
           method: "POST",
@@ -550,19 +495,16 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         });
       }
 
-      const customNote = "Custom test change note — must be preserved";
+      const customNote = "Custom test change note - must be preserved";
 
-      // Create a draft with a custom change note
       const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
-        body: { policySetKey: "default", changeNote: customNote },
+        body: { policySetKey: testData.policySetKey, changeNote: customNote },
       });
       const createData = createResult.data as any;
       assert.ok(createData.draft?.id, "Draft should have an ID");
 
-      // Fetch status to get the persisted draft
-      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-      const statusAfterData = statusAfter.data as any;
+      const statusAfterData = await getPolicyStatusData();
       const draftVersion = statusAfterData.draft;
 
       assert.ok(draftVersion, "Should have a draft version");

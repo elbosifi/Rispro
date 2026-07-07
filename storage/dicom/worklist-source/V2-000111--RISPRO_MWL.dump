@@ -1,0 +1,14 @@
+# RISpro generated Modality Worklist source file
+(0008,0005) CS [ISO_IR 192]
+(0010,0010) PN [BOOKING_a005b845Test Patient]
+(0010,0020) LO [1b1a2a4a2b8c]
+(0010,0030) DA []
+(0010,0040) CS [M]
+(0040,0100) SQ (Sequence with undefined length)
+(fffe,e000) na (Item with undefined length)
+  (0008,0050) SH [V2-000111]
+  (0008,0060) CS [BOOKING_A005B845CT]
+  (0040,0002) DA [20270227]
+  (0040,0007) LO [BOOKING_a005b845 CT Head]
+(fffe,e00d) na (ItemDelimitationItem)
+(fffe,e0dd) na (SequenceDelimitationItem)

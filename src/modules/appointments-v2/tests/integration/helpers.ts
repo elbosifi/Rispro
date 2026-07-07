@@ -291,6 +291,43 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
   );
   await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [bookingIds]);
 
+  await pool.query(
+    `
+      delete from appointments_v2.exam_type_rule_items
+      where rule_id in (
+        select id from appointments_v2.exam_type_rules where policy_version_id = any($1::bigint[])
+      )
+    `,
+    [policyVersionIds]
+  );
+  await pool.query(
+    `
+      delete from appointments_v2.exam_mix_quota_rule_items
+      where rule_id in (
+        select id from appointments_v2.exam_mix_quota_rules where policy_version_id = any($1::bigint[])
+      )
+    `,
+    [policyVersionIds]
+  );
+  await pool.query(
+    `
+      delete from appointments_v2.exam_type_special_quota_users
+      where quota_id in (
+        select id from appointments_v2.exam_type_special_quotas where policy_version_id = any($1::bigint[])
+      )
+    `,
+    [policyVersionIds]
+  );
+  await pool.query(`delete from appointments_v2.exam_type_rules where policy_version_id = any($1::bigint[])`, [policyVersionIds]);
+  await pool.query(`delete from appointments_v2.exam_mix_quota_rules where policy_version_id = any($1::bigint[])`, [policyVersionIds]);
+  await pool.query(`delete from appointments_v2.exam_type_special_quotas where policy_version_id = any($1::bigint[])`, [policyVersionIds]);
+  await pool.query(`delete from appointments_v2.modality_blocked_rules where policy_version_id = any($1::bigint[])`, [policyVersionIds]);
+  await pool.query(`delete from appointments_v2.category_daily_limits where policy_version_id = any($1::bigint[])`, [policyVersionIds]);
+  await pool.query(
+    `update appointments_v2.policy_versions set based_on_version_id = null where policy_set_id = any($1::bigint[])`,
+    [policySetIds]
+  );
+  await pool.query(`delete from appointments_v2.policy_versions where policy_set_id = any($1::bigint[])`, [policySetIds]);
   await pool.query(`delete from appointments_v2.policy_sets where id = any($1::bigint[])`, [policySetIds]);
 
   await pool.query(
