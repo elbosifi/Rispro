@@ -101,10 +101,11 @@ describe("Option-1 capacity semantics — DB-backed proof", { skip: skipEnv }, (
          normalized_arabic_name,
          sex,
          age_years,
+         phone_1,
          identifier_type,
          identifier_value
        )
-       values ($1, $2, $3, $4, 'M', 30, 'national_id', $5)
+       values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
        returning id`,
       [
         `${TEST_PREFIX}${suffix}مريض`,
@@ -182,7 +183,7 @@ describe("Option-1 capacity semantics — DB-backed proof", { skip: skipEnv }, (
 
       assert.equal(r1.status, 201);
       assert.equal(r2.status, 201);
-      assert.equal(r3.status, 409);
+      assert.equal(r3.status, 403);
 
       const booked = await pool.query<{ count: string }>(
         `select count(*)::text as count
@@ -245,7 +246,7 @@ describe("Option-1 capacity semantics — DB-backed proof", { skip: skipEnv }, (
       ]);
 
       const statuses = [oncologyResult.status, nonOncologyResult.status].sort();
-      assert.deepEqual(statuses, [201, 409]);
+      assert.deepEqual(statuses, [201, 403]);
 
       const booked = await pool.query<{ count: string }>(
         `select count(*)::text as count
