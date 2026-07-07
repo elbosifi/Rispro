@@ -1837,7 +1837,11 @@ test("resendDicomRemapJobToPacs resends an existing remapped study and marks the
 });
 
 test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with technical details", async () => {
-  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEntries.push(entry as unknown as Record<string, unknown>);
+    return {} as never;
+  });
   __dicomRemapTestables.setPacsNodeGetterForTests(async () => ({
     id: 1,
     called_ae_title: "DEST_AE",
@@ -1845,15 +1849,14 @@ test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with techni
     port: 104,
     is_active: true,
   } as never));
-  queueQueryResults([
+  const queryCalls = queueQueryResults([
     { rows: [remapJob({ id: 22, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
     { rows: [remapJob({ id: 22, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
-    { rows: [] },
+    { rows: [remapJob({ id: 22, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", error_message: "Orthanc could not send the remapped study to PACS. Please verify the destination and try resend." })] },
   ]);
 
   queueOrthancResults([
     orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "modified-study" } }),
-    orthancResult({ status: 200, ok: true, text: "{}", json: { ok: true } }),
     orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
     orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
     orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
@@ -1873,6 +1876,13 @@ test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with techni
       return true;
     }
   );
+  const failedUpdateCall = queryCalls.find((call) =>
+    call.sql.includes("update dicom_remap_jobs") &&
+    call.sql.includes("set status = 'failed'")
+  );
+  assert.ok(failedUpdateCall, "Resend failure should mark the job as failed");
+  assert.match(String(failedUpdateCall?.params?.[1] ?? ""), /could not send the remapped study to PACS/i);
+  assert.equal(auditEntries.some((entry) => entry.actionType === "resend_to_pacs_failed"), true);
 });
 
 test("dicom helper: status transition guard throws on unexpected status", () => {
