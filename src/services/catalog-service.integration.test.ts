@@ -82,6 +82,7 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
       },
       userId
     );
+    const activeExamId = Number(activeExam.id);
 
     const inactiveExamWithActiveModality = await createExamType(
       {
@@ -93,6 +94,7 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
       userId
     );
     await deleteExamType(inactiveExamWithActiveModality.id, userId);
+    const inactiveExamWithActiveModalityId = Number(inactiveExamWithActiveModality.id);
 
     const inactiveExamWithInactiveModality = await createExamType(
       {
@@ -104,10 +106,16 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
       userId
     );
     await deleteExamType(inactiveExamWithInactiveModality.id, userId);
+    const inactiveExamWithInactiveModalityId = Number(inactiveExamWithInactiveModality.id);
 
     const activeOnly = await listExamTypesForSettings();
+    const activeOnlyModality = activeOnly.modalities.find((row) => row.id === activeModalityId);
+    const activeOnlyExam = activeOnly.examTypes.find((row) => row.id === activeExamId);
+    assert.equal(typeof activeOnlyModality?.id, "number");
+    assert.equal(typeof activeOnlyExam?.id, "number");
+    assert.equal(typeof activeOnlyExam?.modality_id, "number");
     assert.ok(
-      activeOnly.examTypes.some((row) => row.id === activeExam.id),
+      activeOnly.examTypes.some((row) => row.id === activeExamId),
       "Active exam linked to an active modality should still be returned in active-only mode"
     );
     assert.ok(
@@ -115,11 +123,11 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
       "Active modality should still be returned in active-only mode"
     );
     assert.ok(
-      !activeOnly.examTypes.some((row) => row.id === inactiveExamWithActiveModality.id),
+      !activeOnly.examTypes.some((row) => row.id === inactiveExamWithActiveModalityId),
       "Active-only mode should continue hiding inactive exam types"
     );
     assert.ok(
-      !activeOnly.examTypes.some((row) => row.id === inactiveExamWithInactiveModality.id),
+      !activeOnly.examTypes.some((row) => row.id === inactiveExamWithInactiveModalityId),
       "Active-only mode should continue hiding inactive exam types even when their modality is inactive"
     );
     assert.ok(
@@ -128,8 +136,13 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
     );
 
     const withInactive = await listExamTypesForSettings({ includeInactive: true });
+    const inactiveExamWithInactiveParent = withInactive.examTypes.find(
+      (row) => row.id === inactiveExamWithInactiveModalityId
+    );
+    assert.equal(typeof inactiveExamWithInactiveParent?.id, "number");
+    assert.equal(typeof inactiveExamWithInactiveParent?.modality_id, "number");
     assert.ok(
-      withInactive.examTypes.some((row) => row.id === activeExam.id),
+      withInactive.examTypes.some((row) => row.id === activeExamId),
       "Active exam linked to an active modality should be returned when includeInactive=true"
     );
     assert.ok(
@@ -137,7 +150,7 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
       "Active modality should be included when includeInactive=true"
     );
     assert.ok(
-      withInactive.examTypes.some((row) => row.id === inactiveExamWithActiveModality.id && row.is_active === false),
+      withInactive.examTypes.some((row) => row.id === inactiveExamWithActiveModalityId && row.is_active === false),
       "Inactive exam with an active modality should be returned when includeInactive=true"
     );
     assert.ok(
@@ -145,7 +158,7 @@ test("listExamTypesForSettings keeps modality labels available for inactive exam
       "Inactive exam with an active modality should still have its active parent modality available"
     );
     assert.ok(
-      withInactive.examTypes.some((row) => row.id === inactiveExamWithInactiveModality.id && row.is_active === false),
+      withInactive.examTypes.some((row) => row.id === inactiveExamWithInactiveModalityId && row.is_active === false),
       "Inactive exam with an inactive modality should be returned when includeInactive=true"
     );
     assert.ok(

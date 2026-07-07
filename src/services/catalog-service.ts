@@ -98,6 +98,43 @@ function normalizeDurationMinutes(value: unknown): number | null {
   return parsed;
 }
 
+function toModalityRow(row: Record<string, unknown>): ModalityRow {
+  return {
+    id: Number(row.id),
+    code: String(row.code),
+    name_ar: String(row.name_ar),
+    name_en: String(row.name_en),
+    daily_capacity: row.daily_capacity === null ? null : Number(row.daily_capacity),
+    general_instruction_ar: row.general_instruction_ar === null ? null : String(row.general_instruction_ar),
+    general_instruction_en: row.general_instruction_en === null ? null : String(row.general_instruction_en),
+    is_active: Boolean(row.is_active),
+    safety_warning_ar:
+      "safety_warning_ar" in row && row.safety_warning_ar !== null
+        ? String(row.safety_warning_ar)
+        : (undefined as unknown as null),
+    safety_warning_en:
+      "safety_warning_en" in row && row.safety_warning_en !== null
+        ? String(row.safety_warning_en)
+        : (undefined as unknown as null),
+    safety_warning_enabled:
+      "safety_warning_enabled" in row ? Boolean(row.safety_warning_enabled) : (undefined as unknown as boolean)
+  };
+}
+
+function toExamTypeRow(row: Record<string, unknown>): ExamTypeRow {
+  return {
+    id: Number(row.id),
+    modality_id: Number(row.modality_id),
+    code: String(row.code),
+    name_ar: String(row.name_ar),
+    name_en: String(row.name_en),
+    specific_instruction_ar: row.specific_instruction_ar === null ? null : String(row.specific_instruction_ar),
+    specific_instruction_en: row.specific_instruction_en === null ? null : String(row.specific_instruction_en),
+    duration_minutes: row.duration_minutes === null ? null : Number(row.duration_minutes),
+    is_active: Boolean(row.is_active)
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Exam Type functions
 // ---------------------------------------------------------------------------
@@ -127,8 +164,8 @@ export async function listExamTypesForSettings({
   ]);
 
   return {
-    modalities: modalitiesResult.rows as unknown as ModalityRow[],
-    examTypes: examTypesResult.rows as unknown as ExamTypeRow[]
+    modalities: modalitiesResult.rows.map((row) => toModalityRow(row)),
+    examTypes: examTypesResult.rows.map((row) => toExamTypeRow(row))
   };
 }
 
