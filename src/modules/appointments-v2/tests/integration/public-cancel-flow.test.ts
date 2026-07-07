@@ -64,13 +64,43 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     }
   }
 
-  async function createBooking(bookingDate: string): Promise<number> {
+  async function createPatient(label: string, nationalIdPrefix: string = "2"): Promise<number> {
+    guard();
+    const uniqueNationalId = `${nationalIdPrefix}${Date.now().toString().slice(-11)}`;
+    const result = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          arabic_full_name,
+          english_full_name,
+          national_id,
+          normalized_arabic_name,
+          sex,
+          age_years,
+          phone_1,
+          identifier_type,
+          identifier_value
+        )
+        values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
+        returning id
+      `,
+      [
+        `${TEST_PREFIX}${label} مريض`,
+        `${TEST_PREFIX}${label} Patient`,
+        uniqueNationalId,
+        `${label}مريض`,
+        uniqueNationalId,
+      ]
+    );
+    return Number(result.rows[0]?.id);
+  }
+
+  async function createBooking(bookingDate: string, patientId: number = testData.patientId): Promise<number> {
     guard();
     const createResult = await fetchJson<{ booking: { id: number | string } }>(app.baseUrl, "/api/v2/appointments", {
       method: "POST",
       cookie: authCookie,
       body: {
-        patientId: testData.patientId,
+        patientId,
         modalityId: testData.modalityId,
         examTypeId: testData.examTypeId,
         reportingPriorityId: 1,
@@ -143,25 +173,19 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   });
 
   it("ensures public tokens and returns only public-safe appointments for the same patient", async () => {
-    const currentBookingId = await createBooking("2026-09-01");
-    const samePatientOtherId = await createBooking("2040-09-02");
-    const samePatientNoTokenId = await createBooking("2040-09-03");
-    const samePatientVoidedId = await createBooking("2040-09-04");
-    const samePatientRevokedId = await createBooking("2040-09-05");
+    const samePatientId = await createPatient("PublicSafeSame", "2");
+    const currentBookingId = await createBooking("2026-09-01", samePatientId);
+    const samePatientOtherId = await createBooking("2040-09-02", samePatientId);
+    const samePatientNoTokenId = await createBooking("2040-09-03", samePatientId);
+    const samePatientVoidedId = await createBooking("2040-09-04", samePatientId);
+    const samePatientRevokedId = await createBooking("2040-09-05", samePatientId);
 
-    const otherPatientResult = await pool.query<{ id: number }>(
-      `
-        insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
-        values ($1, $2, $3, $4, 'M', 30, 'national_id', $3)
-        returning id
-      `,
-      [`${TEST_PREFIX}مريض آخر`, `${TEST_PREFIX}Other Patient`, `2${Date.now().toString().slice(-11)}`, "مريضآخر"]
-    );
+    const otherPatientId = await createPatient("Other", "3");
     const otherPatientBooking = await fetchJson<{ booking: { id: number | string } }>(app.baseUrl, "/api/v2/appointments", {
       method: "POST",
       cookie: authCookie,
       body: {
-        patientId: Number(otherPatientResult.rows[0]?.id),
+        patientId: otherPatientId,
         modalityId: testData.modalityId,
         examTypeId: testData.examTypeId,
         reportingPriorityId: 1,
@@ -223,13 +247,20 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
       ]
     );
 
-    const serialized = JSON.stringify(response.data);
-    assert.equal(serialized.includes(String(currentBookingId)), true);
+    const otherAppointments = response.data.otherAppointments ?? [];
+    const exposedBookingIds = [
+      Number(response.data.preview.bookingId),
+      ...otherAppointments
+        .map((appointment) => Number((appointment as Record<string, unknown>).bookingId))
+        .filter((id) => Number.isFinite(id)),
+    ];
+    assert.deepEqual(exposedBookingIds, [currentBookingId]);
     assert.equal((response.data.otherAppointments ?? []).some((appointment) => String(appointment.publicUrl || "").includes(currentToken)), false);
-    assert.equal(serialized.includes(String(samePatientNoTokenId)), false);
-    assert.equal(serialized.includes(String(samePatientVoidedId)), false);
-    assert.equal(serialized.includes(String(samePatientRevokedId)), false);
-    assert.equal(serialized.includes(String(otherPatientBooking.data.booking.id)), false);
+    assert.equal(exposedBookingIds.includes(samePatientNoTokenId), false);
+    assert.equal(exposedBookingIds.includes(samePatientVoidedId), false);
+    assert.equal(exposedBookingIds.includes(samePatientRevokedId), false);
+    assert.equal(exposedBookingIds.includes(Number(otherPatientBooking.data.booking.id)), false);
+    const serialized = JSON.stringify(response.data);
     for (const sensitiveKey of ["nationalId", "national_id", "phone", "accession", "studyInstanceUid", "study_instance_uid", "notes"]) {
       assert.equal(serialized.includes(sensitiveKey), false, `${sensitiveKey} should not be exposed`);
     }

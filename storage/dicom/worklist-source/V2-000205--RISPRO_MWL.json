@@ -1,0 +1,20 @@
+{
+  "appointmentId": "205",
+  "accessionNumber": "V2-000205",
+  "modalityId": "19",
+  "modalityCode": "PUBCANCEL_97773637CT",
+  "patientId": "46",
+  "patientMrn": "000044",
+  "patientNationalId": "1a2bb8cd845e",
+  "patientNameEnglish": "PUBCANCEL_97773637Test Patient",
+  "patientNameArabic": "PUBCANCEL_97773637مريض اختبار",
+  "appointmentDate": "2026-08-07",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

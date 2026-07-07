@@ -1,0 +1,20 @@
+{
+  "appointmentId": "184",
+  "accessionNumber": "V2-000184",
+  "modalityId": "17",
+  "modalityCode": "OPT1PROOF_af342ed6CT",
+  "patientId": "37",
+  "patientMrn": "000035",
+  "patientNationalId": "98fdac9447c0",
+  "patientNameEnglish": "OPT1PROOF_1783433153759_47390 Patient",
+  "patientNameArabic": "OPT1PROOF_1783433153759_47390مريض",
+  "appointmentDate": "2026-07-20",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}
