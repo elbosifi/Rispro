@@ -18,6 +18,27 @@ The preflight reports:
 
 The preflight does not start containers, run migrations, or edit env files. If Docker is unavailable, start Docker Desktop and rerun the preflight. Do not route around Docker by using a production or personal PostgreSQL database.
 
+## Docker Classification
+
+`npm run agent:preflight` prints a machine-readable Docker line:
+
+```text
+DOCKER_STATUS=<classification>
+```
+
+Classifications:
+
+- `DOCKER_OK`: Docker command execution and daemon access worked.
+- `DOCKER_NOT_INSTALLED`: Docker is not installed or is not on PATH.
+- `DOCKER_DAEMON_NOT_RUNNING`: Docker is installed, but Docker Desktop or the daemon is not running.
+- `DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT`: the shell, sandbox, or permissions blocked Docker execution. Examples include `spawnSync docker EPERM` and permission denied when connecting to the Docker socket.
+- `DOCKER_CREDENTIAL_HELPER_BROKEN`: Docker credential helper is missing or broken. On Mac this often appears as a missing `docker-credential-desktop` or keychain helper error.
+- `DOCKER_UNKNOWN_FAILURE`: Docker failed in a way the preflight cannot classify yet.
+
+When Docker is `DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT`, stop debugging RISpro code. Run the same command on the host machine or in a shell with Docker access. Do not route around Docker unless explicitly approved.
+
+`npm run db:test:check` is separate. It may pass if a disposable DB is already running on the configured port, even when preflight could not execute Docker. In that case, report both facts: Docker command execution was not verified, and the already-running DB connection check passed.
+
 ## Windows and Mac Handoff
 
 1. Commit or create a patch before switching machines.
@@ -25,3 +46,10 @@ The preflight does not start containers, run migrations, or edit env files. If D
 3. Run `npm run agent:preflight`.
 4. Run `npm run db:test:up` and `npm run db:test:check`.
 5. Run targeted DB tests with `npm run test:db:one -- <test-file>`.
+
+## Stop or Continue
+
+- Stop when Docker is not installed, Docker Desktop is not running, Docker execution is blocked, or the credential helper is broken. Fix the environment first.
+- Continue to targeted non-DB checks when the task does not need DB-backed validation.
+- Continue to DB-backed tests only after `npm run db:test:up` and `npm run db:test:check` confirm the disposable DB target.
+- Never use a production or personal PostgreSQL database to bypass the portable Docker test DB flow.

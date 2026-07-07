@@ -14,6 +14,7 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 8. Never ask for a local PostgreSQL admin password. Do not touch production DBs.
 9. Do not claim skipped, blocked, or failed tests as passing.
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
+11. Docker EPERM during preflight means the environment blocked Docker execution, not a RISpro test failure.
 
 ## Repo Map
 

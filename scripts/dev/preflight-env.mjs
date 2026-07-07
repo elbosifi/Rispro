@@ -30,25 +30,26 @@ for (const script of ["db:test:up", "db:test:check"]) {
 
 section("Docker");
 const dockerVersion = run("docker", ["version", "--format", "{{.Server.Version}}"]);
-if (dockerVersion.status === 0) {
+const dockerStatus = classifyDockerResult(dockerVersion);
+console.log(`DOCKER_STATUS=${dockerStatus.code}`);
+if (dockerStatus.code === "DOCKER_OK") {
   ok(`Docker engine: ${dockerVersion.stdout.trim()}`);
   const imageInspect = run("docker", ["image", "inspect", "postgres:16-alpine", "--format", "{{.Id}}"]);
-  if (imageInspect.status === 0) {
+  const imageStatus = classifyDockerResult(imageInspect);
+  if (imageStatus.code === "DOCKER_OK") {
     ok("postgres:16-alpine image present locally");
   } else {
-    warn("postgres:16-alpine image not present locally; `npm run db:test:up` may pull it when Docker/network are available");
+    warn(`postgres:16-alpine image check did not pass (${imageStatus.code}); \`npm run db:test:up\` may pull it when Docker/network are available`);
     const detail = combined(imageInspect);
-    if (isMacCredentialHelperFailure(detail)) {
-      fail("Detected common Mac Docker credential-helper failure while checking postgres:16-alpine.");
-    }
+    if (imageStatus.code === "DOCKER_CREDENTIAL_HELPER_BROKEN") fail(dockerFailureMessage(imageStatus, detail));
   }
 } else {
   const detail = combined(dockerVersion);
-  fail(`Docker unavailable or blocked: ${detail || dockerVersion.error?.message || "docker version failed"}`);
-  if (isMacCredentialHelperFailure(detail)) {
-    fail("Detected common Mac Docker credential-helper failure. Fix Docker credential helper or Docker Desktop, then rerun preflight.");
-  }
+  fail(dockerFailureMessage(dockerStatus, detail));
 }
+
+console.log("DB_TEST_CHECK_STATUS=not_run_by_preflight");
+console.log("DB_TEST_CHECK_NOTE=db:test:check is intentionally separate; run npm run db:test:check to verify an already-running disposable DB.");
 
 section("codex-db-test.env");
 if (!existsSync(envPath)) {
@@ -180,6 +181,51 @@ function masked(value) {
 
 function isMacCredentialHelperFailure(text) {
   return /docker-credential-(?:osxkeychain|desktop)|credentials store|error getting credentials|executable file not found/i.test(text || "");
+}
+
+function classifyDockerResult(result) {
+  const detail = combined(result);
+
+  if (result.status === 0) return { code: "DOCKER_OK" };
+  if (result.error?.code === "ENOENT" || /not recognized|command not found|no such file or directory/i.test(detail)) {
+    return { code: "DOCKER_NOT_INSTALLED" };
+  }
+  if (result.error?.code === "EPERM" || /spawnSync docker EPERM|operation not permitted/i.test(detail)) {
+    return { code: "DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT" };
+  }
+  if (/permission denied.*(?:docker|docker\.sock)|docker\.sock.*permission denied|connect.*docker.*permission denied/i.test(detail)) {
+    return { code: "DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT" };
+  }
+  if (isMacCredentialHelperFailure(detail)) {
+    return { code: "DOCKER_CREDENTIAL_HELPER_BROKEN" };
+  }
+  if (/cannot connect to the docker daemon|docker daemon is not running|is the docker daemon running|open \/\/\.\/pipe\/docker/i.test(detail)) {
+    return { code: "DOCKER_DAEMON_NOT_RUNNING" };
+  }
+  return { code: "DOCKER_UNKNOWN_FAILURE" };
+}
+
+function dockerFailureMessage(status, detail) {
+  const suffix = detail ? ` Detail: ${detail}` : "";
+  switch (status.code) {
+    case "DOCKER_NOT_INSTALLED":
+      return "Docker is not installed or not on PATH. Install Docker Desktop, then rerun npm run agent:preflight.";
+    case "DOCKER_DAEMON_NOT_RUNNING":
+      return `Docker is installed but the daemon is not running. Start Docker Desktop, then rerun npm run agent:preflight.${suffix}`;
+    case "DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT":
+      return [
+        "Docker execution is blocked by the current environment or sandbox.",
+        "This is an environment/sandbox limitation, not a RISpro code or test failure.",
+        "Do not debug RISpro code for this failure.",
+        "Run the same command on the host machine or in a shell with Docker access.",
+        "Do not route around Docker unless explicitly approved.",
+        suffix.trim(),
+      ].filter(Boolean).join(" ");
+    case "DOCKER_CREDENTIAL_HELPER_BROKEN":
+      return `Docker credential helper is broken, commonly on Mac after Docker Desktop/account changes. Fix the Docker credential helper or Docker Desktop, then rerun npm run agent:preflight.${suffix}`;
+    default:
+      return `Docker failed with an unknown error. Treat this as an environment blocker until Docker access is confirmed.${suffix}`;
+  }
 }
 
 function walkFiles(dir) {
