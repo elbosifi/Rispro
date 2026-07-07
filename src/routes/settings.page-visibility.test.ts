@@ -2,17 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 
 process.env.DATABASE_URL ||= "postgresql://127.0.0.1/rispro_test";
 process.env.JWT_SECRET ||= "test-secret";
 
-function createAuthCookie(cookieName: string, userId: number, role: string): string {
+const TEST_PREFIX = "PVIS_";
+const PAGE_VISIBILITY_CATEGORY = "users_and_roles";
+const PAGE_VISIBILITY_KEY = "page_visibility_by_role";
+const TEST_PASSWORD_HASH = "$2a$10$ztv9Kx3klEC1wiHttYuwUeCN9KMI3yHuGjvRVEGFFVnbRu7YSfTyS";
+
+function createAuthCookie(cookieName: string, userId: number, role: string, username: string): string {
   const token = jwt.sign(
     {
       sub: userId,
       role,
-      username: "test_user",
-      fullName: "Test User",
+      username,
+      fullName: `${TEST_PREFIX}${role}`,
     },
     process.env.JWT_SECRET as string,
     { expiresIn: "1h" }
@@ -20,12 +26,12 @@ function createAuthCookie(cookieName: string, userId: number, role: string): str
   return `${cookieName}=${token}`;
 }
 
-function createSupervisorReauthCookie(cookieName: string, userId: number, role: string): string {
+function createSupervisorReauthCookie(cookieName: string, userId: number, role: string, username: string): string {
   const token = jwt.sign(
     {
       sub: userId,
       role,
-      username: "test_user",
+      username,
       purpose: "supervisor-reauth",
     },
     process.env.JWT_SECRET as string,
@@ -95,9 +101,45 @@ test("settings page visibility route permissions", async () => {
 
   const cookieName = envModule.env.cookieName;
   const reauthCookieName = envModule.env.reauthCookieName;
-  const modalityStaffCookie = createAuthCookie(cookieName, 101, "modality_staff");
-  const superAdminCookie = createAuthCookie(cookieName, 102, "super_admin");
-  const superAdminReauthCookie = `${superAdminCookie}; ${createSupervisorReauthCookie(reauthCookieName, 102, "super_admin")}`;
+  const runSuffix = randomUUID().replace(/-/g, "").slice(0, 12);
+  const createdUsernames: string[] = [];
+  const createTestUser = async (role: string): Promise<{ id: number; username: string; cookie: string }> => {
+    const username = `${TEST_PREFIX.toLowerCase()}${role}_${runSuffix}`;
+    const result = await pool.query<{ id: string }>(
+      `
+        insert into users (username, full_name, password_hash, role, is_active)
+        values ($1, $2, $3, $4, true)
+        returning id::text as id
+      `,
+      [username, `${TEST_PREFIX}${role}`, TEST_PASSWORD_HASH, role]
+    );
+    createdUsernames.push(username);
+    const id = Number(result.rows[0].id);
+    return { id, username, cookie: createAuthCookie(cookieName, id, role, username) };
+  };
+
+  const [{ rows: originalSettingRows }, modalityStaff, superAdmin] = await Promise.all([
+    pool.query<{ setting_value: unknown; updated_by_user_id: string | null }>(
+      `
+        select setting_value, updated_by_user_id::text as updated_by_user_id
+        from system_settings
+        where category = $1 and setting_key = $2
+        limit 1
+      `,
+      [PAGE_VISIBILITY_CATEGORY, PAGE_VISIBILITY_KEY]
+    ),
+    createTestUser("modality_staff"),
+    createTestUser("super_admin"),
+  ]);
+  const originalSetting = originalSettingRows[0] ?? null;
+  const modalityStaffCookie = modalityStaff.cookie;
+  const superAdminCookie = superAdmin.cookie;
+  const superAdminReauthCookie = `${superAdminCookie}; ${createSupervisorReauthCookie(
+    reauthCookieName,
+    superAdmin.id,
+    "super_admin",
+    superAdmin.username
+  )}`;
 
   const server = await startTestServer(appModule.createApp);
   let originalMatrix: Record<string, unknown> | null = null;
@@ -219,6 +261,34 @@ test("settings page visibility route permissions", async () => {
           body: { matrix: originalMatrix },
         }
       ).catch(() => undefined);
+    }
+    if (originalSetting) {
+      await pool.query(
+        `
+          update system_settings
+          set setting_value = $1::jsonb,
+              updated_by_user_id = $2,
+              updated_at = now()
+          where category = $3 and setting_key = $4
+        `,
+        [
+          JSON.stringify(originalSetting.setting_value),
+          originalSetting.updated_by_user_id,
+          PAGE_VISIBILITY_CATEGORY,
+          PAGE_VISIBILITY_KEY,
+        ]
+      );
+    } else {
+      await pool.query("delete from system_settings where category = $1 and setting_key = $2", [
+        PAGE_VISIBILITY_CATEGORY,
+        PAGE_VISIBILITY_KEY,
+      ]);
+    }
+    if (createdUsernames.length > 0) {
+      await pool.query("delete from users where username = any($1::text[]) and username like $2", [
+        createdUsernames,
+        `${TEST_PREFIX.toLowerCase()}%`,
+      ]);
     }
     await server.close();
   }
