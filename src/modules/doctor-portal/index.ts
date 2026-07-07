@@ -167,13 +167,17 @@ router.post(
   })
 );
 
+function hasLinkedDoctorUser(profiles: Awaited<ReturnType<typeof listProfilesForAdmin>>, targetUserId: number): boolean {
+  return profiles.some((profile) => Number(profile.userId) === targetUserId);
+}
+
 router.post(
   "/admin/doctors/:userId/reset-password",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const user = currentUser(req);
     const targetUserId = asPositiveInteger(req.params.userId, "user id");
     const profiles = await listProfilesForAdmin(user.sub, user.role);
-    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+    if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
     const body = asUnknownRecord(req.body);
@@ -188,7 +192,7 @@ router.post(
     const user = currentUser(req);
     const targetUserId = asPositiveInteger(req.params.userId, "user id");
     const profiles = await listProfilesForAdmin(user.sub, user.role);
-    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+    if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
     const updatedUser = await setUserMustChangePassword(targetUserId, user.sub);
@@ -202,7 +206,7 @@ router.post(
     const user = currentUser(req);
     const targetUserId = asPositiveInteger(req.params.userId, "user id");
     const profiles = await listProfilesForAdmin(user.sub, user.role);
-    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+    if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
     const updatedUser = await updateUserActiveState(targetUserId, true, { userId: user.sub, role: user.role });
@@ -216,7 +220,7 @@ router.post(
     const user = currentUser(req);
     const targetUserId = asPositiveInteger(req.params.userId, "user id");
     const profiles = await listProfilesForAdmin(user.sub, user.role);
-    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+    if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
     const updatedUser = await updateUserActiveState(targetUserId, false, { userId: user.sub, role: user.role });

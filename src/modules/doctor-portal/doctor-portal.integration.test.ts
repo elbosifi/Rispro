@@ -94,12 +94,12 @@ async function createPatient(name: string): Promise<number> {
     `
       insert into patients (
         arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years,
-        identifier_type, identifier_value
+        phone_1, identifier_type, identifier_value
       )
-      values ($1, $2, $3::varchar, $4, 'F', 40, 'national_id', $3::text)
+      values ($1, $2, $3, $4, 'F', 40, $5, 'national_id', $6)
       returning id::text as id
     `,
-    [`${TEST_PREFIX}${name} Arabic`, `${TEST_PREFIX}${name}`, nationalId, `${TEST_PREFIX}${name}`]
+    [`${TEST_PREFIX}${name} Arabic`, `${TEST_PREFIX}${name}`, nationalId, `${TEST_PREFIX}${name}`, "0912345678", nationalId]
   );
   return Number(result.rows[0].id);
 }
@@ -167,6 +167,16 @@ async function seedDoctorPortalTestData(): Promise<TestData> {
       values ($1, $2, 'oncology', 10, true)
     `,
     [policyVersionId, modalityId]
+  );
+  await pool.query(
+    `
+      insert into doctor_portal.workload_unit_catalog (
+        modality_id, exam_type_id, case_category, assignment_type, base_units,
+        report_required_multiplier, no_report_units, effective_from, created_by
+      )
+      values ($1, $2, 'oncology', 'reporting', 1, 1, 0, current_date, $3)
+    `,
+    [modalityId, examTypeId, userId]
   );
 
   return { userId, modalityId, examTypeId, patientId, policySetId, policySetKey: policyKey, policyVersionId, schemaName: "appointments_v2" };
@@ -657,7 +667,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(createdData.user.is_active, true);
     assert.equal(createdData.profile.active, true);
     assert.equal(createdData.profile.canSupervise, true);
-    assert.equal(createdData.modalities.some((permission) => permission.modalityId === testData.modalityId && permission.active && permission.canProtocol && permission.canReport), true);
+    assert.equal(createdData.modalities.some((permission) => Number(permission.modalityId) === testData.modalityId && permission.active && permission.canProtocol && permission.canReport), true);
 
     const userCookie = createTestAuthCookie(createdData.user.id, "doctor");
     assert.equal((await api(userCookie, "/api/doctor/me")).status, 200);
