@@ -63,10 +63,10 @@ describe("V2 queue same-day arrival", { skip: skipEnv }, () => {
           identifier_type,
           identifier_value
         )
-        values ($1, $2, $3, $4, 'M', 30, $5, 'national_id', $3)
+        values ($1, $2, $3, $4, 'M', 30, $5, 'national_id', $6)
         returning id::text
       `,
-      [`${TEST_PREFIX}${suffix}مريض`, `${TEST_PREFIX}${suffix} Patient`, nationalId, `${TEST_PREFIX}${suffix}`, phone1]
+      [`${TEST_PREFIX}${suffix}مريض`, `${TEST_PREFIX}${suffix} Patient`, nationalId, `${TEST_PREFIX}${suffix}`, phone1, nationalId]
     );
     return Number(result.rows[0].id);
   }

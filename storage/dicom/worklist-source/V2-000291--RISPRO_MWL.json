@@ -1,0 +1,20 @@
+{
+  "appointmentId": "291",
+  "accessionNumber": "V2-000291",
+  "modalityId": "27",
+  "modalityCode": "PUBCANCEL_a7569c84CT",
+  "patientId": "80",
+  "patientMrn": "000077",
+  "patientNationalId": "283433510178",
+  "patientNameEnglish": "PUBCANCEL_PublicSafeSame Patient",
+  "patientNameArabic": "PUBCANCEL_PublicSafeSame مريض",
+  "appointmentDate": "2026-09-01",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

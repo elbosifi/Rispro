@@ -1,0 +1,20 @@
+{
+  "appointmentId": "248",
+  "accessionNumber": "V2-000248",
+  "modalityId": "23",
+  "modalityCode": "BOOKING_b6b2fba1CT",
+  "patientId": "62",
+  "patientMrn": "000060",
+  "patientNationalId": "13d61bd988e3",
+  "patientNameEnglish": "BOOKING_b6b2fba1Test Patient",
+  "patientNameArabic": "BOOKING_b6b2fba1مريض اختبار",
+  "appointmentDate": "2026-05-29",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}
