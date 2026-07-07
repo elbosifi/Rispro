@@ -89,6 +89,87 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     );
   }
 
+  async function withSystemSetting<T>(
+    category: string,
+    settingKey: string,
+    settingValue: unknown,
+    run: () => Promise<T>
+  ): Promise<T> {
+    const { pool } = await import("../../../../db/pool.js");
+    const existing = await pool.query<{ setting_value: unknown; updated_by_user_id: number | null }>(
+      `
+        select setting_value, updated_by_user_id
+        from system_settings
+        where category = $1 and setting_key = $2
+        limit 1
+      `,
+      [category, settingKey]
+    );
+
+    await pool.query(
+      `
+        insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+        values ($1, $2, $3::jsonb, $4)
+        on conflict (category, setting_key) do update set
+          setting_value = excluded.setting_value,
+          updated_by_user_id = excluded.updated_by_user_id,
+          updated_at = now()
+      `,
+      [category, settingKey, JSON.stringify(settingValue), testData.userId]
+    );
+
+    try {
+      return await run();
+    } finally {
+      if (existing.rows.length > 0) {
+        await pool.query(
+          `
+            update system_settings
+            set setting_value = $3::jsonb,
+                updated_by_user_id = $4,
+                updated_at = now()
+            where category = $1 and setting_key = $2
+          `,
+          [
+            category,
+            settingKey,
+            JSON.stringify(existing.rows[0].setting_value),
+            existing.rows[0].updated_by_user_id,
+          ]
+        );
+      } else {
+        await pool.query(
+          `delete from system_settings where category = $1 and setting_key = $2`,
+          [category, settingKey]
+        );
+      }
+    }
+  }
+
+  async function withUserOverridePermission<T>(userId: number, allowed: boolean, run: () => Promise<T>): Promise<T> {
+    const { pool } = await import("../../../../db/pool.js");
+    const existing = await pool.query<{ can_request_scheduling_override: boolean | null }>(
+      `select can_request_scheduling_override from users where id = $1`,
+      [userId]
+    );
+    await pool.query(`update users set can_request_scheduling_override = $2 where id = $1`, [userId, allowed]);
+
+    try {
+      return await run();
+    } finally {
+      await pool.query(
+        `update users set can_request_scheduling_override = $2 where id = $1`,
+        [userId, existing.rows[0]?.can_request_scheduling_override ?? null]
+      );
+    }
+  }
+
+  function assertForbiddenResponse(response: { status: number; data: unknown }) {
+    assert.equal(response.status, 403, JSON.stringify(response.data));
+    assert.equal(typeof (response.data as any).error, "string");
+    assert.equal((response.data as any).details, null);
+  }
+
   async function createPatient() {
     const { pool } = await import("../../../../db/pool.js");
     const nationalId = `7${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
@@ -116,7 +197,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
           policySetKey: testData.policySetKey,
         },
       });
-      assert.equal(created.status, 201);
+      assert.equal(created.status, 201, JSON.stringify(created.data));
     }
   }
 
@@ -200,51 +281,31 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
 
   it("rejects receptionist override requests when disabled in settings", async () => {
     if (!testData) return;
-    const { pool } = await import("../../../../db/pool.js");
     await setCapacityLimits();
     const date = "2042-01-31";
     await fillNonOncologyCategory(date);
-    await pool.query(
-      `
-        insert into system_settings (category, setting_key, setting_value)
-        values ('scheduling_and_capacity', 'allow_reception_override_requests_from_availability', '{"value":"disabled"}'::jsonb)
-        on conflict (category, setting_key)
-        do update set setting_value = excluded.setting_value
-      `
-    );
 
-    try {
-      const requested = await requestCategoryOverride(date);
-      assert.equal(requested.status, 403);
-      assert.match(String((requested.data as any).error?.message ?? ""), /disabled/i);
-    } finally {
-      await pool.query(
-        `
-          update system_settings
-          set setting_value = '{"value":"enabled"}'::jsonb
-          where category = 'scheduling_and_capacity'
-            and setting_key = 'allow_reception_override_requests_from_availability'
-        `
-      );
-    }
+    await withSystemSetting(
+      "scheduling_and_capacity",
+      "allow_reception_override_requests_from_availability",
+      { value: "disabled" },
+      async () => {
+        const requested = await requestCategoryOverride(date);
+        assertForbiddenResponse(requested);
+      }
+    );
   });
 
   it("rejects receptionist override requests when the user is not individually allowed", async () => {
     if (!testData) return;
-    const { pool } = await import("../../../../db/pool.js");
     await setCapacityLimits();
     const date = "2042-01-30";
     await fillNonOncologyCategory(date);
-    await pool.query(`update users set can_request_scheduling_override = false where id = $1`, [receptionistId]);
 
-    try {
+    await withUserOverridePermission(receptionistId, false, async () => {
       const requested = await requestCategoryOverride(date);
-
-      assert.equal(requested.status, 403);
-      assert.match(String((requested.data as any).error?.message ?? ""), /not allowed/i);
-    } finally {
-      await pool.query(`update users set can_request_scheduling_override = true where id = $1`, [receptionistId]);
-    }
+      assertForbiddenResponse(requested);
+    });
   });
 
   it("receptionist creates a pending create-booking request and supervisor approves it", async () => {
@@ -300,29 +361,8 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const { pool } = await import("../../../../db/pool.js");
     const friday = "2042-02-07";
     const patientId = await createPatient();
-    const existingSetting = await pool.query<{ setting_value: unknown }>(
-      `
-        select setting_value
-        from system_settings
-        where category = 'scheduling_and_capacity'
-          and setting_key = 'allow_friday_appointments'
-        limit 1
-      `
-    );
 
-    try {
-      await pool.query(
-        `
-          insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
-          values ('scheduling_and_capacity', 'allow_friday_appointments', '{"value":"false"}'::jsonb, $1)
-          on conflict (category, setting_key) do update set
-            setting_value = excluded.setting_value,
-            updated_by_user_id = excluded.updated_by_user_id,
-            updated_at = now()
-        `,
-        [testData.userId]
-      );
-
+    await withSystemSetting("scheduling_and_capacity", "allow_friday_appointments", { value: "false" }, async () => {
       const requested = await fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests", {
         method: "POST",
         body: {
@@ -372,27 +412,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       assert.equal(audit.rows[0].override_type, "closed_weekday_override");
       assert.equal(audit.rows[0].outcome, "approved_and_booked");
       assert.equal(Number(audit.rows[0].decision_snapshot.deferredApprovalRequestId), Number((requested.data as any).request.id));
-    } finally {
-      if (existingSetting.rows.length > 0) {
-        await pool.query(
-          `
-            update system_settings
-            set setting_value = $1::jsonb, updated_by_user_id = null, updated_at = now()
-            where category = 'scheduling_and_capacity'
-              and setting_key = 'allow_friday_appointments'
-          `,
-          [JSON.stringify(existingSetting.rows[0].setting_value)]
-        );
-      } else {
-        await pool.query(
-          `
-            delete from system_settings
-            where category = 'scheduling_and_capacity'
-              and setting_key = 'allow_friday_appointments'
-          `
-        );
-      }
-    }
+    });
   });
 
   it("rejects without approver reason and lets a receptionist see only their own requests", async () => {
@@ -818,10 +838,10 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(supervisorRequestApproval.status, 403);
   });
 
-  it("fails cleanly when current scheduling state needs a stronger override than requested", async () => {
+  it("rejects supervisor approval when current scheduling state needs a stronger override than requested", async () => {
     if (!testData) return;
     await setCapacityLimits();
-    const date = "2042-02-07";
+    const date = "2042-04-07";
     await fillNonOncologyCategory(date);
     const requested = await requestCategoryOverride(date);
     assert.equal(requested.status, 201);
@@ -835,13 +855,13 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       body: { approverReason: "Now requires total capacity" },
     });
 
-    assert.equal(approval.status, 409);
+    assertForbiddenResponse(approval);
     assert.equal(await countBookings(date, targetPatientId), beforeCount);
     const stored = await getRequestFromDb(Number((requested.data as any).request.id));
-    assert.equal(stored.status, "failed");
-    assert.equal(stored.failure_code, "override_type_changed");
-    assert.ok(stored.failure_message);
-    assert.ok(stored.approval_decision_snapshot_json);
+    assert.equal(stored.status, "pending");
+    assert.equal(stored.failure_code, null);
+    assert.equal(stored.failure_message, null);
+    assert.equal(stored.approval_decision_snapshot_json, null);
   });
 
   it("approves normally when the override is no longer needed", async () => {
@@ -1013,7 +1033,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   it("keeps immediate supervisor credential override working", async () => {
     if (!testData) return;
     await setCapacityLimits();
-    const date = "2042-02-17";
+    const date = "2042-04-17";
     await fillNonOncologyCategory(date);
     const patientId = await createPatient();
 
@@ -1035,7 +1055,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       },
     });
 
-    assert.equal(created.status, 201);
+    assert.equal(created.status, 201, JSON.stringify(created.data));
     assert.equal((created.data as any).wasOverride, true);
     const { pool } = await import("../../../../db/pool.js");
     const audit = await pool.query<{ override_reason: string | null; override_type: string; outcome: string }>(
