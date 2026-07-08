@@ -161,7 +161,7 @@ describe("mpps bridge end-to-end", () => {
     await pool.query(`
       alter table appointments_v2.bookings
       add constraint bookings_status_check
-      check (status in ('scheduled', 'arrived', 'waiting', 'completed', 'no-show', 'cancelled', 'discontinued'))
+      check (status in ('scheduled', 'arrived', 'waiting', 'completed', 'no-show', 'cancelled', 'discontinued', 'voided'))
     `);
     await pool.query(`
       create table if not exists mpps_event_log (
