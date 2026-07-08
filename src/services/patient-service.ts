@@ -1429,6 +1429,8 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
   } catch (error) {
     await client.query("rollback");
     throw error;
+  } finally {
+    client.release();
   }
 }
 
