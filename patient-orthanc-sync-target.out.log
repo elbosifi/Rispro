@@ -1,0 +1,3 @@
+✖ updatePatient enqueues Orthanc upsert for active V2 booking (5288.6157ms)
+✔ mergePatients enqueues Orthanc upsert for active source bookings only (361.6642ms)
+✔ markOrthancOutboxSuccess persists Orthanc success without parameter-type errors (105.3156ms)

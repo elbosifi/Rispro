@@ -5,6 +5,10 @@ import { pool } from "../db/pool.js";
 import { markOrthancOutboxSuccess } from "./mwl-sync-service.js";
 import { mergePatients, updatePatient, type PatientPayload } from "./patient-service.js";
 
+test.after(async () => {
+  await pool.end();
+});
+
 interface OrthancSettingRow {
   setting_key: string;
   setting_value: { value?: unknown } | null;
@@ -170,10 +174,10 @@ test("updatePatient enqueues Orthanc upsert for active V2 booking", async (t) =>
           normalized_arabic_name, age_years, estimated_date_of_birth, sex, phone_1, address,
           created_by_user_id, updated_by_user_id
         )
-        values ($1, 'national_id', $1, $2, $3, $4, 35, '1991-01-01', 'M', '0912345678', 'City', $5, $5)
+        values ($1, 'national_id', $2, $3, $4, $5, 35, '1991-01-01', 'M', '0912345678', 'City', $6, $6)
         returning id
       `,
-      [nationalId, `مريض ${suffix}`, `Patient ${suffix}`, `مريض${suffix}`, userId]
+      [nationalId, nationalId, `مريض ${suffix}`, `Patient ${suffix}`, `مريض${suffix}`, userId]
     );
     patientId = Number(patientRes.rows[0]?.id);
 
@@ -183,7 +187,7 @@ test("updatePatient enqueues Orthanc upsert for active V2 booking", async (t) =>
           patient_id, modality_id, exam_type_id, reporting_priority_id, booking_date, booking_time,
           case_category, status, notes, policy_version_id, created_by_user_id, updated_by_user_id
         )
-        values ($1, $2, null, null, current_date, '09:00:00', 'non_oncology', 'scheduled', 'sync test', $3, $4, $4)
+        values ($1, $2, null, null, current_date, '09:00:00', 'non_oncology', 'arrived', 'sync test', $3, $4, $4)
         returning id
       `,
       [patientId, modalityId, policyVersionId, userId]
@@ -265,10 +269,10 @@ test("mergePatients enqueues Orthanc upsert for active source bookings only", as
           normalized_arabic_name, age_years, estimated_date_of_birth, sex, phone_1, address,
           created_by_user_id, updated_by_user_id
         )
-        values ($1, 'national_id', $1, $2, $3, $4, 40, '1986-01-01', 'F', '0923456789', 'City', $5, $5)
+        values ($1, 'national_id', $2, $3, $4, $5, 40, '1986-01-01', 'F', '0923456789', 'City', $6, $6)
         returning id
       `,
-      [sourceNationalId, `مصدر ${suffix}`, `Source ${suffix}`, `مصدر${suffix}`, userId]
+      [sourceNationalId, sourceNationalId, `مصدر ${suffix}`, `Source ${suffix}`, `مصدر${suffix}`, userId]
     );
     sourcePatientId = Number(sourceRes.rows[0]?.id);
 
@@ -279,10 +283,10 @@ test("mergePatients enqueues Orthanc upsert for active source bookings only", as
           normalized_arabic_name, age_years, estimated_date_of_birth, sex, phone_1, address,
           created_by_user_id, updated_by_user_id
         )
-        values ($1, 'national_id', $1, $2, $3, $4, 41, '1985-01-01', 'M', '0934567890', 'City', $5, $5)
+        values ($1, 'national_id', $2, $3, $4, $5, 41, '1985-01-01', 'M', '0934567890', 'City', $6, $6)
         returning id
       `,
-      [targetNationalId, `هدف ${suffix}`, `Target ${suffix}`, `هدف${suffix}`, userId]
+      [targetNationalId, targetNationalId, `هدف ${suffix}`, `Target ${suffix}`, `هدف${suffix}`, userId]
     );
     targetPatientId = Number(targetRes.rows[0]?.id);
 
