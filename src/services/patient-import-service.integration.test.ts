@@ -29,6 +29,23 @@ async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<
   }
 }
 
+async function seedImportTestDictionary(): Promise<void> {
+  await pool.query(
+    `
+      insert into name_dictionary (arabic_text, english_text, is_active)
+      values
+        ('محمد', 'Mohamed', true),
+        ('علي', 'Ali', true),
+        ('مكرر', 'Duplicate', true),
+        ('مريض', 'Patient', true),
+        ('ترحيل', 'Migration', true),
+        ('سباق', 'Race', true)
+      on conflict (arabic_text)
+      do update set english_text = excluded.english_text, is_active = true
+    `
+  );
+}
+
 test("patient import staging: creates valid/invalid/duplicate rows and derives demographics", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
 
@@ -47,14 +64,7 @@ test("patient import staging: creates valid/invalid/duplicate rows and derives d
   const duplicateNationalId = uniqueNationalId("1");
   const freshNationalId = uniqueNationalId("2");
 
-  await pool.query(
-    `
-      insert into name_dictionary (arabic_text, english_text, is_active)
-      values ('محمد', 'Mohamed', true)
-      on conflict (arabic_text)
-      do update set english_text = excluded.english_text, is_active = true
-    `
-  );
+  await seedImportTestDictionary();
 
   const duplicatePatientRes = await pool.query<{ id: number }>(
     `
@@ -185,6 +195,8 @@ test("patient import confirm: migrates selected valid rows and skips race duplic
   let racePatientId = 0;
 
   try {
+    await seedImportTestDictionary();
+
     const staged = await createImportBatchFromParsedRows(
       {
         sourceFilename: `import-confirm-${suffix}.xlsx`,
