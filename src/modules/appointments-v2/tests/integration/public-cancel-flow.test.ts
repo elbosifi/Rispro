@@ -15,6 +15,70 @@ import { issueLegacyPublicCancelToken, issuePublicCancelToken } from "../../publ
 
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "PUBCANCEL_";
+const WEEKEND_APPOINTMENT_SETTING_KEYS = ["allow_friday_appointments", "allow_saturday_appointments"] as const;
+
+type WeekendAppointmentSettingKey = typeof WEEKEND_APPOINTMENT_SETTING_KEYS[number];
+
+interface WeekendAppointmentSettingRow {
+  setting_key: WeekendAppointmentSettingKey;
+  setting_value: unknown;
+  updated_by_user_id: number | string | null;
+}
+
+async function enableWeekendAppointmentsForSuite(userId: number): Promise<() => Promise<void>> {
+  const previous = await pool.query<WeekendAppointmentSettingRow>(
+    `
+      select setting_key, setting_value, updated_by_user_id
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key = any($1::text[])
+    `,
+    [WEEKEND_APPOINTMENT_SETTING_KEYS]
+  );
+  const previousByKey = new Map(previous.rows.map((row) => [row.setting_key, row]));
+
+  for (const settingKey of WEEKEND_APPOINTMENT_SETTING_KEYS) {
+    await pool.query(
+      `
+        insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+        values ('scheduling_and_capacity', $1, '{"value":"enabled"}'::jsonb, $2)
+        on conflict (category, setting_key) do update set
+          setting_value = excluded.setting_value,
+          updated_by_user_id = excluded.updated_by_user_id,
+          updated_at = now()
+      `,
+      [settingKey, userId]
+    );
+  }
+
+  return async () => {
+    for (const settingKey of WEEKEND_APPOINTMENT_SETTING_KEYS) {
+      const prior = previousByKey.get(settingKey);
+      if (prior) {
+        await pool.query(
+          `
+            update system_settings
+            set setting_value = $2::jsonb,
+                updated_by_user_id = $3,
+                updated_at = now()
+            where category = 'scheduling_and_capacity'
+              and setting_key = $1
+          `,
+          [settingKey, JSON.stringify(prior.setting_value), prior.updated_by_user_id]
+        );
+      } else {
+        await pool.query(
+          `
+            delete from system_settings
+            where category = 'scheduling_and_capacity'
+              and setting_key = $1
+          `,
+          [settingKey]
+        );
+      }
+    }
+  };
+}
 
 describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
@@ -23,6 +87,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
   let authCookie: string;
   let originalSecret: string | undefined;
   let originalServiceUserId: string | undefined;
+  let restoreWeekendAppointmentSettings: (() => Promise<void>) | undefined;
 
   before(async () => {
     if (!(await canReachDatabase())) {
@@ -32,6 +97,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
 
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
+    restoreWeekendAppointmentSettings = await enableWeekendAppointmentsForSuite(testData.userId);
     app = await createTestApp();
     authCookie = createTestAuthCookie(testData.userId, "supervisor");
 
@@ -54,6 +120,7 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
       process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = originalServiceUserId;
     }
 
+    await restoreWeekendAppointmentSettings?.();
     if (app) await app.close();
     if (testDb) await testDb.cleanup();
   });
