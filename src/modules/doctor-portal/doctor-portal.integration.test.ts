@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { getTripoliToday } from "../../utils/date.js";
 
 if (!process.env.DATABASE_URL && process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -273,7 +274,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedDoctorPortalTestData();
     app = await createDoctorPortalTestApp();
-    today = String((await pool.query<{ today: string }>(`select current_date::text as today`)).rows[0].today);
+    today = getTripoliToday();
     normal = await createDoctorUser("normal", "doctor", { canAssignProtocols: true, canSupervise: false });
     supervisor = await createDoctorUser("supervisor", "supervisor", { canAssignProtocols: true, canSupervise: true });
     admin = await createDoctorUser("admin", "super_admin", { canAssignProtocols: true, canSupervise: true });
