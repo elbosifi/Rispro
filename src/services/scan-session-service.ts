@@ -292,17 +292,17 @@ export async function getScanSessionContextByToken(token: string): Promise<{
   const appointment = await getAppointmentContext(appointmentId, session.appointment_ref_type);
 
   return {
-    sessionId: session.id,
+    sessionId: Number(session.id),
     status: session.status,
     expiresAt: session.expires_at,
     documentType: session.document_type,
     patient: {
-      id: session.patient_id,
+      id: Number(session.patient_id),
       arabicFullName: appointment.arabic_full_name,
       englishFullName: appointment.english_full_name,
     },
     appointment: {
-      id: appointment.id,
+      id: Number(appointment.id),
       refType: session.appointment_ref_type,
       accessionNumber: appointment.accession_number,
       appointmentDate: appointment.appointment_date,
@@ -419,7 +419,7 @@ export async function uploadScanSessionDocument(token: string, input: UploadScan
     changedByUserId: session.requested_by_user_id,
   });
 
-  return { sessionId: session.id, document };
+  return { sessionId: Number(session.id), document };
 }
 
 export async function cancelScanSession(

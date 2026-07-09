@@ -13,6 +13,7 @@ import {
 let userId = 0;
 let patientId = 0;
 let appointmentId = 0;
+let modalityId = 0;
 
 function tokenFromLaunchUrl(launchUrl: string): string {
   const url = new URL(launchUrl);
@@ -59,6 +60,9 @@ before(async () => {
     `,
     [`SCT${suffix}`]
   );
+  modalityId = Number(modality.rows[0].id);
+
+  const legacySlotNumber = 9000 + (Number(suffix) % 900);
 
   const appointment = await pool.query(
     `
@@ -68,12 +72,13 @@ before(async () => {
         accession_number,
         appointment_date,
         daily_sequence,
+        modality_slot_number,
         created_by_user_id
       )
-      values ($1, $2, $3, current_date, $4, $5)
+      values ($1, $2, $3, current_date, $4, $4, $5)
       returning id
     `,
-    [patientId, modality.rows[0].id, `SCAN-${suffix}`, 9000 + (Number(suffix) % 900), userId]
+    [patientId, modalityId, `SCAN-${suffix}`, legacySlotNumber, userId]
   );
   appointmentId = Number(appointment.rows[0].id);
 });
@@ -82,7 +87,9 @@ after(async () => {
   await pool.query("delete from documents where patient_id = $1", [patientId]);
   await pool.query("delete from scan_sessions where patient_id = $1", [patientId]);
   await pool.query("delete from appointments where id = $1", [appointmentId]);
+  await pool.query("delete from modalities where id = $1", [modalityId]);
   await pool.query("delete from patients where id = $1", [patientId]);
+  await pool.query("delete from audit_log where changed_by_user_id = $1", [userId]);
   await pool.query("delete from users where id = $1", [userId]);
   await pool.end();
 });
@@ -121,8 +128,8 @@ describe("scan session service", () => {
       appVersion: "0.1.0-test",
     });
 
-    assert.equal(upload.document.patient_id, patientId);
-    assert.equal(upload.document.appointment_id, appointmentId);
+    assert.equal(Number(upload.document.patient_id), patientId);
+    assert.equal(Number(upload.document.appointment_id), appointmentId);
     assert.equal(upload.document.source, "scanner_app");
     assert.equal(upload.document.page_count, 1);
 
