@@ -1,0 +1,20 @@
+{
+  "appointmentId": "3120",
+  "accessionNumber": "V2-003120",
+  "modalityId": "289",
+  "modalityCode": "MPPS_9f9d747fCT",
+  "patientId": "3023",
+  "patientMrn": "003008",
+  "patientNationalId": "1099511262bf",
+  "patientNameEnglish": "MPPS_9f9d747fTest Patient",
+  "patientNameArabic": "MPPS_9f9d747fمريض اختبار",
+  "appointmentDate": "2026-07-09",
+  "appointmentStatus": "waiting",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

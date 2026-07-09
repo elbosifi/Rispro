@@ -1,0 +1,20 @@
+{
+  "appointmentId": "2503",
+  "accessionNumber": "V2-002503",
+  "modalityId": "227",
+  "modalityCode": "RULE_ENF_6e9ed99dCT",
+  "patientId": "2384",
+  "patientMrn": "002371",
+  "patientNationalId": "10f338fc4a60",
+  "patientNameEnglish": "RULE_ENF_6e9ed99dTest Patient",
+  "patientNameArabic": "RULE_ENF_6e9ed99dمريض اختبار",
+  "appointmentDate": "2027-07-15",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

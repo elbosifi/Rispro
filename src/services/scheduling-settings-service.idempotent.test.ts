@@ -101,6 +101,9 @@ async function createFixture(): Promise<FixtureContext> {
     await pool.query(`delete from exam_types where id = any($1::bigint[])`, [[examTypeId, examTypeId2]]);
     await pool.query(`delete from modalities where id = $1`, [modalityId]);
     await pool.query(`delete from special_reason_codes where code like 'TEST_%'`);
+    await pool.query(`delete from audit_log where entity_type = 'scheduling_configuration' and changed_by_user_id = $1`, [adminUserId]);
+    await pool.query(`update patient_identifier_types set created_by_user_id = null, updated_by_user_id = null where created_by_user_id = $1 or updated_by_user_id = $1`, [adminUserId]);
+    await pool.query(`update special_reason_codes set created_by_user_id = null, updated_by_user_id = null where created_by_user_id = $1 or updated_by_user_id = $1`, [adminUserId]);
     await pool.query(`delete from users where id = $1`, [adminUserId]);
   };
 

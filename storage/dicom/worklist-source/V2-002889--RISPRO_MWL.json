@@ -1,0 +1,20 @@
+{
+  "appointmentId": "2889",
+  "accessionNumber": "V2-002889",
+  "modalityId": "273",
+  "modalityCode": "MIXRS_78f17a09CT",
+  "patientId": "2775",
+  "patientMrn": "002760",
+  "patientNationalId": "878363998943",
+  "patientNameEnglish": "MIXRS_ Patient",
+  "patientNameArabic": "MIXRS_مريض",
+  "appointmentDate": "2042-01-25",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

@@ -1,0 +1,20 @@
+{
+  "appointmentId": "2729",
+  "accessionNumber": "V2-002729",
+  "modalityId": "242",
+  "modalityCode": "ORTH1_2169",
+  "patientId": "2630",
+  "patientMrn": "002617",
+  "patientNationalId": "338931617799",
+  "patientNameEnglish": "Updated 1783600389241_2169",
+  "patientNameArabic": "مريض محدث 1783600389241_2169",
+  "appointmentDate": "2026-07-09",
+  "appointmentStatus": "arrived",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

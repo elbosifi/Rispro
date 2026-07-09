@@ -1,0 +1,14 @@
+# RISpro generated Modality Worklist source file
+(0008,0005) CS [ISO_IR 192]
+(0010,0010) PN [OPT1PROOF_1783600173160_22120 Patient]
+(0010,0020) LO [948539314913]
+(0010,0030) DA []
+(0010,0040) CS [M]
+(0040,0100) SQ (Sequence with undefined length)
+(fffe,e000) na (Item with undefined length)
+  (0008,0050) SH [V2-002396]
+  (0008,0060) CS [OPT1PROOF_D35971E7CT]
+  (0040,0002) DA [20260727]
+  (0040,0007) LO [OPT1PROOF_d35971e7 CT Head]
+(fffe,e00d) na (ItemDelimitationItem)
+(fffe,e0dd) na (SequenceDelimitationItem)

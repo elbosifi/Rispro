@@ -12,7 +12,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import type { UnknownRecord, UserId } from "../types/http.js";
-import { normalizePositiveInteger } from "../utils/normalize.js";
+import { formatDateForSql, normalizePositiveInteger } from "../utils/normalize.js";
 import { validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 
@@ -34,6 +34,19 @@ function toNullableDate(value: unknown): string | null {
 
 function asRecordArray(value: unknown): UnknownRecord[] {
   return Array.isArray(value) ? (value as UnknownRecord[]) : [];
+}
+
+function normalizeDbId(value: unknown): number {
+  return Number(value);
+}
+
+function normalizeDateOutput(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return formatDateForSql(value);
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+  return raw.slice(0, 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +88,7 @@ async function syncCategoryLimits(
       throw new HttpError(400, "caseCategory must be oncology or non_oncology.");
     }
 
-    const existingId = normalizePositiveInteger(row.id, "id") as number | null;
+    const existingId = normalizePositiveInteger(row.id, "id", { required: false }) as number | null;
 
     if (existingId) {
       const result = await client.query<{ id: number }>(
@@ -135,7 +148,7 @@ async function syncBlockedRules(
   for (const row of rows) {
     const modalityId = normalizePositiveInteger(row.modalityId ?? row.modality_id, "modalityId") as number;
     const ruleType = String(row.ruleType ?? row.rule_type ?? "").trim();
-    const existingId = normalizePositiveInteger(row.id, "id") as number | null;
+    const existingId = normalizePositiveInteger(row.id, "id", { required: false }) as number | null;
 
     if (existingId) {
       const result = await client.query<{ id: number }>(
@@ -226,7 +239,7 @@ async function syncExamRules(
   for (const row of rows) {
     const modalityId = normalizePositiveInteger(row.modalityId ?? row.modality_id, "modalityId") as number;
     const ruleType = String(row.ruleType ?? row.rule_type ?? "").trim();
-    const existingId = normalizePositiveInteger(row.id, "id") as number | null;
+    const existingId = normalizePositiveInteger(row.id, "id", { required: false }) as number | null;
 
     let ruleId: number;
 
@@ -332,7 +345,7 @@ async function syncSpecialQuotas(
   for (const row of rows) {
     const examTypeId = normalizePositiveInteger(row.examTypeId ?? row.exam_type_id, "examTypeId") as number;
     const dailyExtraSlots = Math.max(0, Math.floor(Number(row.dailyExtraSlots ?? row.daily_extra_slots ?? 0)));
-    const existingId = normalizePositiveInteger(row.id, "id") as number | null;
+    const existingId = normalizePositiveInteger(row.id, "id", { required: false }) as number | null;
 
     if (existingId) {
       const result = await client.query<{ id: number }>(
@@ -545,15 +558,41 @@ export async function getSchedulingEngineConfiguration(): Promise<Record<string,
   );
 
   return {
-    categoryLimits: categoryLimits.rows,
-    blockedRules: blockedRules.rows,
+    categoryLimits: categoryLimits.rows.map((row) => ({
+      ...row,
+      id: normalizeDbId(row.id),
+      modality_id: normalizeDbId(row.modality_id),
+      daily_limit: Number(row.daily_limit)
+    })),
+    blockedRules: blockedRules.rows.map((row) => ({
+      ...row,
+      id: normalizeDbId(row.id),
+      modality_id: normalizeDbId(row.modality_id),
+      specific_date: normalizeDateOutput(row.specific_date),
+      start_date: normalizeDateOutput(row.start_date),
+      end_date: normalizeDateOutput(row.end_date)
+    })),
     examRules: examRules.rows.map((rule) => ({
       ...rule,
+      id: normalizeDbId(rule.id),
+      modality_id: normalizeDbId(rule.modality_id),
+      specific_date: normalizeDateOutput(rule.specific_date),
+      start_date: normalizeDateOutput(rule.start_date),
+      end_date: normalizeDateOutput(rule.end_date),
+      recurrence_anchor_date: normalizeDateOutput(rule.recurrence_anchor_date),
       exam_type_ids: itemsByRuleId[String((rule as { id: number }).id)] || []
     })),
-    specialQuotas: specialQuotas.rows,
+    specialQuotas: specialQuotas.rows.map((row) => ({
+      ...row,
+      id: normalizeDbId(row.id),
+      exam_type_id: normalizeDbId(row.exam_type_id),
+      daily_extra_slots: Number(row.daily_extra_slots)
+    })),
     specialReasons: specialReasons.rows,
-    identifierTypes: identifierTypes.rows
+    identifierTypes: identifierTypes.rows.map((row) => ({
+      ...row,
+      id: normalizeDbId(row.id)
+    }))
   };
 }
 
