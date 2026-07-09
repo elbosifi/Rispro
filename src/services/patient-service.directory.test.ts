@@ -49,9 +49,9 @@ test("patient directory sex filter matches both male/female and stored sex codes
       `,
       [
         nationalId,
-        `${sex === "M" ? "Male" : "Female"} Arabic ${seed}`,
-        `${sex === "M" ? "Male" : "Female"} English ${seed}`,
-        `${sex === "M" ? "Male" : "Female"} Arabic ${seed}`,
+        `${sex === "M" ? "Male" : "Female"} Arabic ${suffix} ${seed}`,
+        `${sex === "M" ? "Male" : "Female"} English ${suffix} ${seed}`,
+        `${sex === "M" ? "Male" : "Female"} Arabic ${suffix} ${seed}`,
         sex,
         `09${String(seed).padStart(8, "0").slice(-8)}`,
         userId,
@@ -64,13 +64,11 @@ test("patient directory sex filter matches both male/female and stored sex codes
   const femaleId = await insertPatient("F", "2");
 
   try {
-    const maleDirectory = await getPatientDirectory({ sex: "male", page: 1, pageSize: 25 });
-    assert.equal(maleDirectory.patients.length, 1);
-    assert.equal(maleDirectory.patients[0]?.id, maleId);
+    const maleDirectory = await getPatientDirectory({ search: suffix, sex: "male", page: 1, pageSize: 25 });
+    assert.deepEqual(maleDirectory.patients.map((patient) => patient.id), [maleId]);
 
-    const femaleDirectory = await getPatientDirectory({ sex: "female", page: 1, pageSize: 25 });
-    assert.equal(femaleDirectory.patients.length, 1);
-    assert.equal(femaleDirectory.patients[0]?.id, femaleId);
+    const femaleDirectory = await getPatientDirectory({ search: suffix, sex: "female", page: 1, pageSize: 25 });
+    assert.deepEqual(femaleDirectory.patients.map((patient) => patient.id), [femaleId]);
   } finally {
     await pool.query(`delete from patients where id = any($1::bigint[])`, [[maleId, femaleId]]).catch(() => undefined);
     await pool.query(`delete from audit_log where changed_by_user_id = $1`, [userId]).catch(() => undefined);
