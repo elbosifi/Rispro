@@ -102,6 +102,33 @@ test("patient directory summary composes patient details and appointments withou
       };
     }
 
+    if (
+      normalizedSql.includes("p.no_show_count") &&
+      normalizedSql.includes("p.no_show_booking_blocked") &&
+      normalizedSql.includes("last_no_show") &&
+      normalizedSql.includes("where p.id = $1")
+    ) {
+      assert.deepEqual(params, [17]);
+      return {
+        rows: [
+          {
+            no_show_count: 0,
+            no_show_booking_blocked: false,
+            no_show_block_reset_at: null,
+            no_show_block_reset_reason: null,
+            reset_user_id: null,
+            reset_full_name: null,
+            reset_username: null,
+            last_no_show_id: null,
+            last_no_show_date: null,
+            last_no_show_status: null,
+            last_no_show_modality_name: null,
+            last_no_show_exam_type_name: null
+          }
+        ]
+      };
+    }
+
     if (normalizedSql.includes("select exists") && normalizedSql.includes("p2.phone_1 = $2")) {
       assert.deepEqual(params, [17, "0911111111", "NAT-17"]);
       return { rows: [{ is_dupe: true }] };
@@ -188,6 +215,14 @@ test("patient directory summary composes patient details and appointments withou
         examTypeName: "Abdomen"
       }
     ]);
+    assert.deepEqual(summary.noShow, {
+      noShowCount: 0,
+      bookingRestricted: false,
+      lastNoShowAppointment: null,
+      lastAuthorizationUser: null,
+      lastAuthorizationDate: null,
+      lastAuthorizationReason: null
+    });
   } finally {
     poolWithQuery.query = originalQuery;
   }
