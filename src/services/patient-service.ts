@@ -52,6 +52,12 @@ export interface PatientRegistrationRules {
 const PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
   "Primary identifier is required. Enter a National ID, passport number, or other identifier before saving this patient.";
 
+type LegacyPatientIdentifierType = "national_id" | "passport" | "other";
+
+function toLegacyPatientIdentifierType(typeCode: string): LegacyPatientIdentifierType {
+  return typeCode === "national_id" || typeCode === "passport" || typeCode === "other" ? typeCode : "other";
+}
+
 export interface PatientRow {
   id: number;
   mrn: string | null;
@@ -753,10 +759,10 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
           and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) <> ''
           and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) = $13 then 2
         when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 2
-        when p.normalized_arabic_name like $7 then 4
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 4
-        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 5
-        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 5
+        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 4
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 4
+        when p.normalized_arabic_name like $7 then 5
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 5
         when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 6
         when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 6
         when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 7
@@ -960,6 +966,7 @@ async function syncPatientPrimaryIdentifierColumns(
   if (!primary) return;
 
   const typeCode = String(primary.type_code || "national_id");
+  const legacyTypeCode = toLegacyPatientIdentifierType(typeCode);
   const value = String(primary.value || "");
 
   await client.query(
@@ -973,7 +980,7 @@ async function syncPatientPrimaryIdentifierColumns(
         updated_at = now()
       where id = $1
     `,
-    [patientId, typeCode, value, actingUserId]
+    [patientId, legacyTypeCode, value, actingUserId]
   );
 }
 
@@ -1035,7 +1042,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
         [
           allocatedMrn,
           validated.cleanNationalId,
-          validated.identifierType,
+          toLegacyPatientIdentifierType(validated.identifierType),
           validated.cleanIdentifierValue,
           validated.arabicFullName,
           validated.englishFullName,
@@ -1136,7 +1143,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
       [
         cleanPatientId,
         validated.cleanNationalId,
-        validated.identifierType,
+        toLegacyPatientIdentifierType(validated.identifierType),
         validated.cleanIdentifierValue,
         validated.arabicFullName,
         validated.englishFullName,

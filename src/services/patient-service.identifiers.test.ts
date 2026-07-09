@@ -260,6 +260,24 @@ test("createPatient: required identifier setting accepts non-national primary id
     );
     createdIds.push(Number(created.id));
     assert.equal(created.identifier_value, `PASS-${suffix}`);
+
+    const fetched = await getPatientById(Number(created.id));
+    assert.equal(fetched.identifier_type, fx.identifierTypeCode);
+    assert.equal(fetched.identifier_value, `PASS-${suffix}`);
+    assert.equal(fetched.identifiers?.find((identifier) => identifier.is_primary)?.type_code, fx.identifierTypeCode);
+    assert.equal(fetched.identifiers?.find((identifier) => identifier.is_primary)?.value, `PASS-${suffix}`);
+
+    const legacyColumns = await pool.query<{ identifier_type: string; identifier_value: string | null; national_id: string | null }>(
+      `
+        select identifier_type, identifier_value, national_id
+        from patients
+        where id = $1
+      `,
+      [created.id]
+    );
+    assert.equal(legacyColumns.rows[0]?.identifier_type, "other");
+    assert.equal(legacyColumns.rows[0]?.identifier_value, `PASS-${suffix}`);
+    assert.equal(legacyColumns.rows[0]?.national_id, null);
   } finally {
     await setIdentifierRequiredRule(previousRule);
     if (createdIds.length > 0) {
