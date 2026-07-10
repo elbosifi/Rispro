@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, type FormEvent } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink, RefreshCw, Search, UserRound } from "lucide-react";
-import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, confirmAllOldNoShows, cancelAppointment, searchPatients, fetchAppointmentLookups, fetchSettings } from "@/lib/api-hooks";
+import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, cancelAppointment, searchPatients, fetchAppointmentLookups, fetchSettings } from "@/lib/api-hooks";
 import type { QueueEntry, QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
@@ -80,7 +80,6 @@ export default function QueuePage() {
   const [queueSearch, setQueueSearch] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("all");
   const [queueModalityId, setQueueModalityId] = useState("");
-  const [showOldNoShows, setShowOldNoShows] = useState(false);
   const [scanWarning, setScanWarning] = useState<string | null>(null);
   const [patientRequirementAlert, setPatientRequirementAlert] = useState<PatientRequirementAlert | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,26 +204,6 @@ export default function QueuePage() {
     }
   });
 
-  const noShowMutation = useMutation({
-    mutationFn: ({ appointmentId, reason }: { appointmentId: number; reason: string }) =>
-      confirmNoShow(appointmentId, reason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-    }
-  });
-  const oldNoShowBulkMutation = useMutation({
-    mutationFn: (reason: string) => confirmAllOldNoShows(reason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-      queryClient.invalidateQueries({ queryKey: ["calendar"] });
-      queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      pushToast({
-        type: "success",
-        title: chooseLocalized(language, "تم تأكيد الغياب", "No-shows confirmed"),
-        message: chooseLocalized(language, "تم تحديث مواعيد الغياب القديمة.", "Old no-show candidates were updated.")
-      });
-    }
-  });
   const cancelMutation = useMutation({
     mutationFn: ({ appointmentId }: { appointmentId: number }) =>
       cancelAppointment(appointmentId, "Cancelled from queue"),
@@ -298,7 +277,7 @@ export default function QueuePage() {
   };
 
   const handleNoShow = (appointmentId: number) => {
-    noShowMutation.mutate({ appointmentId, reason: t("queue.noShowReason") });
+    navigate(`/queue/no-shows?appointmentId=${appointmentId}`);
   };
 
   const handleCancel = (appointmentId: number) => {
@@ -335,7 +314,7 @@ export default function QueuePage() {
   const enteredCount = queueEntries.filter((entry) => entry.appointmentStatus !== "scheduled").length;
   const notEnteredCount = queueEntries.filter((entry) => entry.appointmentStatus === "scheduled").length;
   const walkInCount = queueEntries.filter((entry) => entry.isWalkIn).length;
-  const oldNoShowCandidates = queue?.oldNoShowCandidates ?? [];
+  const oldNoShowCandidates: QueueSnapshot["oldNoShowCandidates"] = [];
   const hasActiveFilters = !!queueSearch || queueView !== "all" || !!queueModalityId;
   const lastUpdatedLabel = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en", { hour: "2-digit", minute: "2-digit" })
@@ -479,14 +458,13 @@ export default function QueuePage() {
               {scanMutation.isPending ? t("common.loading") : t("queue.enterToQueue")}
             </Button>
           )}
-          {queue?.reviewActive && entry.appointmentStatus === "scheduled" && (
+          {queue?.reviewActive && !queue?.autoNoShowEnabled && entry.appointmentStatus === "scheduled" && (
             <Button
               size="sm"
               variant="secondary"
               onClick={() => handleNoShow(entry.appointmentId)}
-              style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
             >
-              {t("queue.markNoShow")}
+              Review no-show
             </Button>
           )}
           {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
@@ -523,15 +501,8 @@ export default function QueuePage() {
       </div>
       <Button
         size="sm"
-        variant="secondary"
-        onClick={() => noShowMutation.mutate({
-          appointmentId: candidate.appointmentId,
-          reason: oldCandidate
-            ? chooseLocalized(language, "تأكيد غياب قديم من قائمة التنظيف", "Old no-show cleanup confirmation")
-            : t("queue.noShowReason"),
-        })}
-        disabled={noShowMutation.isPending}
-        style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
+        variant="destructive"
+        onClick={() => navigate(`/queue/no-shows?appointmentId=${candidate.appointmentId}`)}
       >
         {t("queue.markNoShow")}
       </Button>
@@ -572,6 +543,22 @@ export default function QueuePage() {
         <QueueStat label={notEnteredQueueLabel} value={notEnteredCount} />
         <QueueStat label={walkInLabel} value={walkInCount} tone="sky" />
       </div>
+
+      <Card className="p-4" role="region" aria-label="No-show review status">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold">No-show review</h2>
+            <p className="text-sm text-muted-foreground">
+              {!queue?.reviewActive
+                ? `Review has not opened yet. It opens at ${queue?.reviewTime ?? "17:00"} Africa/Tripoli time.`
+                : queue.autoNoShowEnabled
+                  ? "Automatic processing is active; the server worker runs even when this page is closed."
+                  : "Manual confirmation is active. Review eligible appointments in the dedicated workspace."}
+            </p>
+          </div>
+          <Button type="button" variant="secondary" onClick={() => navigate("/queue/no-shows")}>Open review workspace</Button>
+        </div>
+      </Card>
 
       <Card className="p-4 sm:p-5" role="region" aria-label={t("queue.scanAccession")}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
@@ -767,10 +754,8 @@ export default function QueuePage() {
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={oldNoShowBulkMutation.isPending}
                 onClick={() => {
-                  if (!window.confirm(chooseLocalized(language, "تأكيد كل المواعيد القديمة كغياب؟", "Mark all old candidates as no-show?"))) return;
-                  oldNoShowBulkMutation.mutate(chooseLocalized(language, "تأكيد جماعي للغياب القديم", "Bulk old no-show cleanup confirmation"));
+                  navigate("/queue/no-shows");
                 }}
                 style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
               >

@@ -459,6 +459,22 @@ body::before {
     0 0 0 4px var(--accent);
 }
 
+.btn-destructive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, #dc2626 58%, var(--border));
+  background: color-mix(in srgb, #dc2626 12%, var(--card));
+  color: #b91c1c;
+  font-weight: 600;
+  transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+.btn-destructive:hover:not(:disabled) { background: color-mix(in srgb, #dc2626 20%, var(--card)); border-color: #dc2626; }
+.btn-destructive:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-destructive:focus-visible { outline: 2px solid color-mix(in srgb, #dc2626 60%, transparent); outline-offset: 2px; }
+
 /* Ghost — flat label button */
 .btn-ghost {
   background: transparent;

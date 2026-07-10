@@ -8,6 +8,7 @@ import type { SanteWorklistWorker } from "./services/sante-worklist-worker-servi
 import type { AppointmentsV2PacsAutoCompletionWorker } from "./services/appointments-v2-pacs-auto-completion-worker.js";
 import type { PatientNotificationWorker } from "./services/patient-notification-worker.js";
 import type { ReportingBoardBulkAssignmentWorker } from "./services/reporting-board-bulk-assignment-worker.js";
+import type { NoShowWorker } from "./services/no-show-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -18,6 +19,7 @@ let santeWorklistWorker: SanteWorklistWorker | null = null;
 let pacsAutoCompletionWorker: AppointmentsV2PacsAutoCompletionWorker | null = null;
 let patientNotificationWorker: PatientNotificationWorker | null = null;
 let reportingBoardBulkAssignmentWorker: ReportingBoardBulkAssignmentWorker | null = null;
+let noShowWorker: NoShowWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -78,6 +80,10 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
     } catch (error) {
       console.error("Failed to stop Reporting Board bulk assignment worker.", error);
     }
+  }
+
+  if (noShowWorker) {
+    try { await noShowWorker.stop(); } catch (error) { console.error("Failed to stop no-show worker.", error); }
   }
 
   server.close(async (serverError?: Error) => {
@@ -149,6 +155,16 @@ async function start(): Promise<void> {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.dicom_gateway = "initialization_failed";
+  }
+
+  try {
+    const { startNoShowWorker } = await import("./services/no-show-worker.js");
+    noShowWorker = await startNoShowWorker();
+    startupSummary.no_show_worker = "started";
+  } catch (error) {
+    console.error("No-show worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.no_show_worker = "initialization_failed";
   }
 
   try {

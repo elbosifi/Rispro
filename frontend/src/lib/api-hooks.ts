@@ -3334,11 +3334,22 @@ export async function updateAppointmentStatus(
   });
 }
 
-export async function confirmAllOldNoShows(reason: string) {
-  return api<{ ok: true; markedIds: number[]; count: number }>("/v2/read/queue/old-no-shows/confirm-all", {
-    method: "POST",
-    body: JSON.stringify({ reason })
-  });
+export async function fetchNoShowSummary(): Promise<import("@/types/api").NoShowSummary> {
+  const raw = await api<RawRecord>("/v2/read/queue/no-show-summary");
+  return { mode: String(raw.mode || "disabled") as import("@/types/api").NoShowSummary["mode"], reviewTime: String(raw.reviewTime || "17:00"), reviewActive: Boolean(raw.reviewActive), pendingCount: Number(raw.pendingCount || 0), oldCleanupCount: Number(raw.oldCleanupCount || 0), autoNoShowEnabled: Boolean(raw.autoNoShowEnabled), manualConfirmationRequired: Boolean(raw.manualConfirmationRequired), lastAutomaticRunAt: typeof raw.lastAutomaticRunAt === "string" ? raw.lastAutomaticRunAt : null, lastAutomaticProcessedCount: Number(raw.lastAutomaticProcessedCount || 0) };
+}
+function mapNoShowReviewCandidate(raw: RawRecord): import("@/types/api").NoShowReviewCandidate {
+  return { appointmentId: Number(raw.appointment_id || raw.appointmentId || 0), accessionNumber: String(raw.accession_number || raw.accessionNumber || ""), appointmentDate: String(raw.appointment_date || raw.appointmentDate || ""), bookingTime: typeof (raw.booking_time ?? raw.bookingTime) === "string" ? String(raw.booking_time ?? raw.bookingTime) : null, patientId: Number(raw.patient_id || raw.patientId || 0), arabicFullName: String(raw.arabic_full_name || raw.arabicFullName || ""), englishFullName: typeof (raw.english_full_name ?? raw.englishFullName) === "string" ? String(raw.english_full_name ?? raw.englishFullName) : null, phone1: typeof (raw.phone_1 ?? raw.phone1) === "string" ? String(raw.phone_1 ?? raw.phone1) : null, modalityNameAr: String(raw.modality_name_ar || raw.modalityNameAr || ""), modalityNameEn: String(raw.modality_name_en || raw.modalityNameEn || ""), examNameAr: typeof (raw.exam_name_ar ?? raw.examNameAr) === "string" ? String(raw.exam_name_ar ?? raw.examNameAr) : null, examNameEn: typeof (raw.exam_name_en ?? raw.examNameEn) === "string" ? String(raw.exam_name_en ?? raw.examNameEn) : null, arrivalStatus: String(raw.arrival_status || raw.arrivalStatus || "not_checked_in"), eligibility: String(raw.eligibility || ""), eligible: Boolean(raw.eligible) };
+}
+export async function fetchNoShowReviewSnapshot(): Promise<import("@/types/api").NoShowReviewSnapshot> {
+  const raw = await api<RawRecord>("/v2/read/queue/no-shows");
+  return { mode: String(raw.mode || "disabled") as import("@/types/api").NoShowReviewSnapshot["mode"], reviewTime: String(raw.review_time || "17:00"), reviewActive: Boolean(raw.review_active), graceMinutes: Number(raw.grace_minutes || 0), pendingCount: Number(raw.pending_count || 0), oldCleanupCount: Number(raw.old_cleanup_count || 0), candidates: ((raw.candidates as RawRecord[]) || []).map(mapNoShowReviewCandidate), deferredCandidates: ((raw.deferred_candidates as RawRecord[]) || []).map(mapNoShowReviewCandidate), oldCleanupCandidates: ((raw.old_cleanup_candidates as RawRecord[]) || []).map(mapNoShowReviewCandidate), lastAutomaticRunAt: typeof raw.last_automatic_run_at === "string" ? raw.last_automatic_run_at : null, lastAutomaticProcessedCount: Number(raw.last_automatic_processed_count || 0) };
+}
+export async function confirmNoShowBulk(appointmentIds: number[], reason: string) {
+  return api<{ results: Array<{ bookingId: number; status: string; reason: string }> }>("/v2/read/queue/no-shows/confirm-bulk", { method: "POST", body: JSON.stringify({ appointmentIds, reason }) });
+}
+export async function confirmOldNoShows(appointmentIds: number[], reason: string) {
+  return api<{ results: Array<{ bookingId: number; status: string; reason: string }> }>("/v2/read/queue/old-no-shows/confirm", { method: "POST", body: JSON.stringify({ appointmentIds, reason }) });
 }
 
 // -- Modality --

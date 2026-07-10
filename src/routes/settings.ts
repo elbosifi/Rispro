@@ -85,6 +85,17 @@ import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/p
 import { getUserSchedulingOverridePermission } from "../services/user-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
+function validateNoShowSettings(entries: Array<{ key: string; value?: unknown }>): void {
+  const values = new Map(entries.map((entry) => [entry.key, String(entry.value ?? "").trim().toLowerCase()]));
+  const manual = values.get("no_show_confirmation_required");
+  const automatic = values.get("auto_no_show_enabled");
+  if (manual === "enabled" && automatic === "enabled") {
+    throw new Error("Manual confirmation and automatic no-show cannot both be enabled. Select one operating mode.");
+  }
+  const grace = values.get("no_show_grace_minutes");
+  if (grace !== undefined && (!/^\d+$/.test(grace) || Number(grace) > 720)) throw new Error("No-show grace minutes must be between 0 and 720.");
+}
+
 interface SettingsRequest {
   query?: { includeInactive?: string; q?: string };
   user: AuthenticatedUserContext;
@@ -749,6 +760,16 @@ settingsRouter.put(
 
     if (category === SANTE_HL7_CATEGORY) {
       validateSanteSettingsEntries(entries);
+    }
+    if (category === "queue_and_arrival") {
+      const existing = await getSettingsByCategory(category);
+      const existingEntries = existing.map((setting) => ({
+        key: setting.setting_key,
+        value: setting.setting_value && typeof setting.setting_value === "object" && "value" in (setting.setting_value as Record<string, unknown>)
+          ? (setting.setting_value as Record<string, unknown>).value
+          : setting.setting_value,
+      }));
+      validateNoShowSettings([...existingEntries, ...entries]);
     }
 
     const settings = await upsertSettings(category, entries, request.user.sub as UserId);

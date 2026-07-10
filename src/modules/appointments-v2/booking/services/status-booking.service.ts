@@ -543,6 +543,8 @@ export async function updateBookingStatusManual(
 }
 
 export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings, today: string): Promise<{ autoMarkedIds: number[] }> {
+  // Compatibility export retained for older callers. Automatic processing now runs only in no-show-worker.
+  // A Queue GET must never invoke this legacy helper.
   const autoMarkedIds: number[] = [];
   if (!settings.reviewActive || !settings.autoNoShowEnabled) {
     return { autoMarkedIds };

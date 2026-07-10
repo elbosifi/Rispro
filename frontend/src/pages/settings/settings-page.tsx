@@ -1806,6 +1806,7 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "disabled", label: "غير مفعل" }
   ]},
   auto_no_show_cleanup_days: { label: "Old no-show cleanup days / تنظيف مواعيد الغياب القديمة", type: "number", min: "0", max: "30" }
+  , no_show_grace_minutes: { label: "No-show booking-time grace (minutes)", type: "number", min: "0", max: "720" },
 };
 
 function inferSettingControl(key: string, value: any): SettingControl {

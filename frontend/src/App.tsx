@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Clock3 } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
@@ -19,6 +19,7 @@ import RegistrationsPage from "@/pages/registrations/registrations-page";
 import SchedulingOverrideRequestsPage from "@/pages/scheduling-override-requests/scheduling-override-requests-page";
 import QueuePage from "@/pages/queue/queue-page";
 import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
+import NoShowReviewPage from "@/pages/queue/no-show-review-page";
 import ModalityPage from "@/pages/modality/modality-page";
 import ComparisonsPage from "@/pages/comparisons/comparisons-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
@@ -39,12 +40,13 @@ import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
-import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { fetchDoctorMe, fetchNoShowSummary, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import { APP_PATH_TO_ROUTE, APP_ROUTE_PATHS, APP_ROUTE_TITLE_KEYS } from "@/lib/route-registry";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,
   getDefaultLandingRouteForRole,
   normalizePageVisibilityMatrix,
+  canRoleAccessRoute,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
 
@@ -61,6 +63,14 @@ function LoadingScreen() {
       <div className="spinner-industrial h-12 w-12" />
     </div>
   );
+}
+
+function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
+  const navigate = useNavigate();
+  const { data } = useQuery({ queryKey: ["queue", "no-show-summary"], queryFn: fetchNoShowSummary, enabled, refetchInterval: 30_000, staleTime: 15_000, retry: false });
+  if (!enabled || !data || (!data.pendingCount && !(data.mode === "automatic" && data.lastAutomaticProcessedCount > 0))) return null;
+  const label = data.mode === "manual" ? `No-show review · ${data.pendingCount}` : `No-shows processed · ${data.lastAutomaticProcessedCount}`;
+  return <button type="button" onClick={() => navigate("/queue/no-shows")} className="inline-flex max-w-[11rem] items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/30 dark:text-amber-100" aria-label={label}><Clock3 size={14}/><span className="truncate">{label}</span></button>;
 }
 
 function QueueCheckInAccessRoute() {
@@ -242,6 +252,7 @@ function AppContent() {
         ) : undefined}
         extraActions={(
           <>
+            <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
             <SchedulingOverrideApprovalCenter user={user} />
             <ActionPinSettingsButton />
           </>
@@ -279,6 +290,7 @@ function AppContent() {
             <Route path="/calendar" element={guardedPage("calendar", <CalendarPage />)} />
             <Route path="/registrations" element={guardedPage("registrations", <RegistrationsPage />)} />
             <Route path="/queue" element={guardedPage("queue", <QueuePage />)} />
+            <Route path="/queue/no-shows" element={guardedPage("queue", <NoShowReviewPage />)} />
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
             <Route path="/comparisons" element={guardedPage("comparisons", <ComparisonsPage />)} />
             <Route path="/comparisons/:id" element={guardedPage("comparisons", <ComparisonsPage />)} />

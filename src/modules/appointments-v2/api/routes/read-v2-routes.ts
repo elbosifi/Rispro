@@ -16,12 +16,16 @@ import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public
 import {
   arriveSameDayQueueBookings,
   cleanupActiveQueuePatientRequirementViolations,
-  finalizeAutoNoShowsForQueue,
-  getQueueNoShowSettings,
-  getTripoliToday,
-  markOldNoShowCandidates,
   updateBookingStatusManual,
 } from "../../booking/services/status-booking.service.js";
+import {
+  confirmManualNoShow,
+  confirmManualNoShowBulk,
+  confirmOldNoShowCleanup,
+  getNoShowReviewSnapshot,
+  getNoShowSettings,
+  getTripoliToday,
+} from "../../booking/services/no-show-review.service.js";
 import { getModalityProtocolAssignment } from "../../modality/protocol-assignment.service.js";
 
 const router = Router();
@@ -786,37 +790,9 @@ router.get(
       today,
       Number((req as AuthedRequest).user?.sub ?? 0) || null
     );
-    const noShowSettings = await getQueueNoShowSettings();
-    const autoNoShowResult = await finalizeAutoNoShowsForQueue(noShowSettings, today);
+    const noShowSettings = await getNoShowSettings();
 
-    const oldNoShowCandidatesQuery =
-      noShowSettings.cleanupDays > 0
-        ? pool.query(
-            `
-              select
-                b.id as appointment_id,
-                ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
-                b.booking_date::text as appointment_date,
-                b.notes,
-                p.id as patient_id,
-                p.arabic_full_name,
-                p.english_full_name,
-                p.phone_1,
-                m.name_ar as modality_name_ar,
-                m.name_en as modality_name_en
-              from appointments_v2.bookings b
-              join patients p on p.id = b.patient_id
-              join modalities m on m.id = b.modality_id
-              where b.booking_date < ($1::date - ($2::int * interval '1 day'))
-                and b.status = 'scheduled'
-              order by b.booking_date asc, b.created_at asc, b.id asc
-              limit 200
-            `,
-            [today, noShowSettings.cleanupDays]
-          )
-        : Promise.resolve({ rows: [] });
-
-    const [entries, summary, oldNoShowCandidates] = await Promise.all([
+    const [entries, summary] = await Promise.all([
       pool.query(
         `
           with active_same_day as (
@@ -906,7 +882,6 @@ router.get(
         `,
         [today]
       ),
-      oldNoShowCandidatesQuery,
     ]);
 
     const summaryRow = summary.rows[0] ?? {
@@ -923,40 +898,56 @@ router.get(
       review_active: noShowSettings.reviewActive,
       auto_no_show_enabled: noShowSettings.autoNoShowEnabled,
       no_show_confirmation_required: noShowSettings.manualConfirmationRequired,
-      auto_no_show_count: autoNoShowResult.autoMarkedIds.length,
+      no_show_grace_minutes: noShowSettings.graceMinutes,
+      no_show_mode: noShowSettings.mode,
+      auto_no_show_count: 0,
       auto_no_show_cleanup_days: noShowSettings.cleanupDays,
       patient_requirement_cleanup_count: patientRequirementCleanupResult.cleanedIds.length,
       summary: summaryRow,
       queue_entries: entries.rows,
-      no_show_candidates:
-        noShowSettings.reviewActive && noShowSettings.manualConfirmationRequired && !noShowSettings.autoNoShowEnabled
-          ? entries.rows
-              .filter((r) => r.appointment_status === "scheduled")
-              .map((r) => ({
-                appointment_id: r.appointment_id,
-                accession_number: r.accession_number,
-                appointment_date: today,
-                notes: r.notes,
-                patient_id: r.patient_id,
-                arabic_full_name: r.arabic_full_name,
-                english_full_name: r.english_full_name,
-                phone_1: r.phone_1,
-                modality_name_ar: r.modality_name_ar,
-                modality_name_en: r.modality_name_en,
-              }))
-          : [],
-      old_no_show_candidates: oldNoShowCandidates.rows,
+      no_show_candidates: [],
+      old_no_show_candidates: [],
     });
   })
 );
 
-router.post(
-  "/queue/old-no-shows/confirm-all",
+router.get(
+  "/queue/no-show-summary",
   requirePageAccess("queue"),
+  asyncRoute(async (_req: Request, res: Response) => {
+    const snapshot = await getNoShowReviewSnapshot();
+    res.json({
+      mode: snapshot.mode, reviewTime: snapshot.review_time, reviewActive: snapshot.review_active,
+      pendingCount: snapshot.pending_count, oldCleanupCount: snapshot.old_cleanup_count,
+      autoNoShowEnabled: snapshot.auto_no_show_enabled, manualConfirmationRequired: snapshot.no_show_confirmation_required,
+      lastAutomaticRunAt: snapshot.last_automatic_run_at, lastAutomaticProcessedCount: snapshot.last_automatic_processed_count,
+    });
+  })
+);
+
+router.get(
+  "/queue/no-shows",
+  requirePageAccess("queue"),
+  asyncRoute(async (_req: Request, res: Response) => res.json(await getNoShowReviewSnapshot()))
+);
+
+router.post(
+  "/queue/no-shows/confirm-bulk",
+  requirePageAccess("queue"),
+  requireActionPin("queue_confirm_no_show"),
   asyncRoute(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const result = await markOldNoShowCandidates(String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0));
-    res.json({ ok: true, markedIds: result.markedIds, count: result.markedIds.length });
+    res.json(await confirmManualNoShowBulk(body.appointmentIds, String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0)));
+  })
+);
+
+router.post(
+  "/queue/old-no-shows/confirm",
+  requirePageAccess("queue"),
+  requireActionPin("queue_confirm_no_show"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    res.json(await confirmOldNoShowCleanup(body.appointmentIds, String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0)));
   })
 );
 
@@ -1041,6 +1032,7 @@ router.post(
 
 router.post(
   "/appointments/:id/no-show",
+  requirePageAccess("queue"),
   requireActionPin("queue_confirm_no_show"),
   asyncRoute(async (req: Request, res: Response) => {
     const bookingId = Number(req.params.id);
@@ -1050,14 +1042,7 @@ router.post(
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>;
-    await updateBookingStatusManual(
-      bookingId,
-      "no-show",
-      String(body.reason || "Manual no-show"),
-      Number((req as AuthedRequest).user?.sub ?? 0),
-      (req as AuthedRequest).user?.role
-    );
-    res.json({ ok: true });
+    res.json(await confirmManualNoShow(bookingId, String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0)));
   })
 );
 

@@ -1603,6 +1603,22 @@ export interface QueueSnapshot {
   }[];
 }
 
+export interface NoShowReviewCandidate {
+  appointmentId: number; accessionNumber: string; appointmentDate: string; bookingTime: string | null;
+  patientId: number; arabicFullName: string; englishFullName: string | null; phone1: string | null;
+  modalityNameAr: string; modalityNameEn: string; examNameAr: string | null; examNameEn: string | null;
+  arrivalStatus: string; eligibility: string; eligible: boolean;
+}
+export interface NoShowReviewSnapshot {
+  mode: "manual" | "automatic" | "disabled"; reviewTime: string; reviewActive: boolean; graceMinutes: number;
+  pendingCount: number; oldCleanupCount: number; candidates: NoShowReviewCandidate[]; deferredCandidates: NoShowReviewCandidate[];
+  oldCleanupCandidates: NoShowReviewCandidate[]; lastAutomaticRunAt: string | null; lastAutomaticProcessedCount: number;
+}
+export interface NoShowSummary {
+  mode: "manual" | "automatic" | "disabled"; reviewTime: string; reviewActive: boolean; pendingCount: number; oldCleanupCount: number;
+  autoNoShowEnabled: boolean; manualConfirmationRequired: boolean; lastAutomaticRunAt: string | null; lastAutomaticProcessedCount: number;
+}
+
 export interface AppointmentStatisticsSummary {
   totalRegisteredPatients: number;
   oncologyPatients: number;
