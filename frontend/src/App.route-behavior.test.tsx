@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 
 import { App } from "./App";
@@ -12,6 +13,7 @@ const testState = vi.hoisted(() => ({
   fetchDoctorMe: vi.fn(),
   fetchPageVisibilityMatrix: vi.fn(),
   logout: vi.fn(),
+  language: "en" as "en" | "ar",
   user: {
     id: 1,
     username: "reception",
@@ -41,11 +43,11 @@ vi.mock("@/providers/language-provider", async () => {
   return {
     LanguageProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
     useLanguage: () => ({
-      language: "en",
-      isArabic: false,
+      language: testState.language,
+      isArabic: testState.language === "ar",
       setLanguage: vi.fn(),
       toggleLanguage: vi.fn(),
-      t: (key: Parameters<typeof t>[1], params?: Record<string, string | number>) => t("en", key, params),
+      t: (key: Parameters<typeof t>[1], params?: Record<string, string | number>) => t(testState.language, key, params),
     }),
   };
 });
@@ -178,6 +180,7 @@ describe("App route behavior", () => {
     testState.fetchDoctorMe.mockReset();
     testState.fetchPageVisibilityMatrix.mockReset();
     localStorage.setItem("rispro-language", "en");
+    testState.language = "en";
   });
 
   afterEach(() => {
@@ -247,9 +250,29 @@ describe("App route behavior", () => {
 
     expect(await screen.findByTestId("dashboard-page")).toBeTruthy();
     for (const item of APP_NAV_ITEMS) {
-      const expectedLabel = item.route === "appointments" ? "New appointment" : translate("en", item.labelKey);
-      expect(screen.getAllByText(expectedLabel).length).toBeGreaterThan(0);
+      if (item.route === "appointments") {
+        await userEvent.click(screen.getByRole("button", { name: "New" }));
+        expect(screen.getByRole("menuitem", { name: "New appointment" })).toBeTruthy();
+      } else {
+        expect(screen.getAllByText(translate("en", item.labelKey)).length).toBeGreaterThan(0);
+      }
     }
+  });
+
+  it("places the sidebar left in LTR and right of the main content in RTL", async () => {
+    renderAppAt("/dashboard");
+    await screen.findByTestId("dashboard-page");
+    const ltrNav = screen.getByRole("navigation");
+    expect(ltrNav.parentElement?.firstElementChild).toBe(ltrNav);
+
+    cleanup();
+    testState.language = "ar";
+    renderAppAt("/dashboard");
+    await screen.findByTestId("dashboard-page");
+    const rtlNav = screen.getByRole("navigation");
+    expect(rtlNav.getAttribute("dir")).toBe("rtl");
+    expect(rtlNav.parentElement?.parentElement?.getAttribute("dir")).toBe("rtl");
+    expect(rtlNav.style.borderLeft).toContain("1px");
   });
 
   it("hides and blocks a route denied by page visibility", async () => {

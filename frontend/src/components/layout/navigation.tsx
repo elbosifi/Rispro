@@ -30,6 +30,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Plus,
   Undo2,
   Redo2,
   Languages,
@@ -187,7 +188,7 @@ function NavButton({
   );
 }
 
-type SidebarGroupKey = "quick" | "overview" | "reception" | "clinical" | "reporting" | "administration" | "systems" | "other";
+type SidebarGroupKey = "quick" | "reception" | "clinical" | "reporting" | "administration" | "systems" | "other";
 type SidebarItem = AppNavItem & { accessRoute?: PageVisibilityRouteKey };
 
 const NAV_BY_ROUTE = new Map(NAV_ITEMS.map((item) => [item.route, item]));
@@ -210,17 +211,44 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
   });
   return [
     group("quick", "navGroup.quickActions", [["patients.new"], ["appointments", "nav.newAppointment"]], true),
-    group("overview", "navGroup.overview", [["dashboard"]], true),
-    group("reception", "navGroup.reception", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["queue"]], true),
+    group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["queue"]], true),
     group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["doctor"], ["queue.checkin"]], true),
     group("reporting", "navGroup.reporting", [["print"], ["statistics"]], false),
-    group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"]], false),
+    group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["settings"]], false),
     group("systems", "navGroup.systems", [["pacs"], ["worklist.monitor"]], false),
-    group("other", "navGroup.other", [["legacy"], ["settings"]], false),
+    group("other", "navGroup.legacyFallback", [["legacy"]], false),
   ];
 }
 
 const SIDEBAR_GROUPS = buildSidebarGroups();
+const DASHBOARD_ITEM = sidebarItem("dashboard");
+
+function QuickActionsSection({ items, collapsed, currentRoute, isRtl, language, onNavigate }: {
+  items: SidebarItem[];
+  collapsed: boolean;
+  currentRoute: string;
+  isRtl: boolean;
+  language: Language;
+  onNavigate: (route: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!items.length) return null;
+  const menuId = "sidebar-quick-actions-menu";
+  return (
+    <section className="space-y-1 border-b pb-3" style={{ borderColor: "var(--border)" }} aria-labelledby="sidebar-quick-actions-label">
+      {!collapsed ? <span id="sidebar-quick-actions-label" className="block px-3 py-1 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground">{t(language, "navGroup.quickActions")}</span> : null}
+      <div className="relative">
+        <button type="button" className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${collapsed ? "justify-center px-2" : "justify-between"}`} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls={menuId} aria-label={t(language, "nav.newAction")} title={collapsed ? t(language, "nav.newAction") : undefined}>
+          <span className="flex items-center gap-2"><Plus className="h-4 w-4" aria-hidden="true" /><span className={collapsed ? "sr-only" : ""}>{t(language, "nav.newAction")}</span></span>
+          {!collapsed ? <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-90" : isRtl ? "rotate-180" : ""}`} aria-hidden="true" /> : null}
+        </button>
+        {open ? <div id={menuId} className={`${collapsed ? `absolute top-0 z-20 w-44 rounded-lg border bg-background p-1 shadow-lg ${isRtl ? "right-full me-2" : "left-full ms-2"}` : "mt-1 space-y-1 rounded-lg bg-muted/40 p-1"}`} role="menu">
+          {items.map((item) => <button key={item.route} type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-start text-sm font-medium text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onNavigate(item.route); setOpen(false); }} aria-current={currentRoute === item.route ? "page" : undefined}><span className="flex h-5 w-5 shrink-0 items-center justify-center text-accent"><NavIconGlyph icon={item.icon} size={15} /></span><span className="truncate">{t(language, item.labelKey)}</span></button>)}
+        </div> : null}
+      </div>
+    </section>
+  );
+}
 
 function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl, language, onToggle, onNavigate }: {
   group: (typeof SIDEBAR_GROUPS)[number];
@@ -233,10 +261,10 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
   onToggle: () => void;
   onNavigate: (route: string) => void;
 }) {
-  if (!items.length) return null;
+  if (!items.length || group.key === "quick") return null;
   const sectionId = `sidebar-section-${group.key}`;
   return (
-    <section className="space-y-1" aria-labelledby={collapsed ? undefined : `${sectionId}-label`} aria-label={collapsed ? t(language, group.labelKey) : undefined}>
+    <section className="space-y-1 pt-2 first:pt-0" aria-labelledby={collapsed ? undefined : `${sectionId}-label`} aria-label={collapsed ? t(language, group.labelKey) : undefined}>
       {collapsed ? (
         <div className="my-2 border-t" style={{ borderColor: "var(--border)" }} aria-hidden="true" />
       ) : (
@@ -248,7 +276,7 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
           aria-controls={sectionId}
         >
           <span id={`${sectionId}-label`}>{t(language, group.labelKey)}</span>
-          {expanded ? <ChevronLeft className={`h-3.5 w-3.5 ${isRtl ? "-rotate-90" : "rotate-90"}`} aria-hidden="true" /> : <ChevronRight className={`h-3.5 w-3.5 ${isRtl ? "rotate-180" : ""}`} aria-hidden="true" />}
+          {expanded ? <ChevronRight className="h-3.5 w-3.5 rotate-90" aria-hidden="true" /> : <ChevronRight className={`h-3.5 w-3.5 ${isRtl ? "rotate-180" : ""}`} aria-hidden="true" />}
         </button>
       )}
       <div id={sectionId} className={`${collapsed || expanded ? "space-y-0.5" : "hidden"}`}>
@@ -465,6 +493,7 @@ export function SideNav({
     ...group,
     items: group.items.filter((item) => canAccess({ route: item.accessRoute ?? item.route }, user, matrix)),
   })).filter((group) => group.items.length > 0);
+  const visibleDashboard = DASHBOARD_ITEM && canAccess(DASHBOARD_ITEM, user, matrix) ? DASHBOARD_ITEM : null;
   const reportingPreferenceKey = "rispro-sidebar-section-reporting";
   const [expandedGroups, setExpandedGroups] = useState<Record<SidebarGroupKey, boolean>>(() => {
     const savedReporting = localStorage.getItem(reportingPreferenceKey);
@@ -500,19 +529,17 @@ export function SideNav({
       }}
       dir={isRtl ? "rtl" : "ltr"}
     >
-      <div className="flex h-14 shrink-0 items-center justify-between border-b px-3" style={{ borderColor: "var(--border)" }}>
-        {!collapsed ? <span className="truncate text-sm font-semibold text-foreground">{t(language, "shell.reception")}</span> : <span className="mx-auto text-sm font-semibold text-accent">R</span>}
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
         <div className="space-y-2">
-          {visibleGroups.map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => toggleGroup(group.key)} onNavigate={onNavigate} />)}
+          {visibleGroups.find((group) => group.key === "quick") ? <QuickActionsSection items={visibleGroups.find((group) => group.key === "quick")!.items} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onNavigate={onNavigate} /> : null}
+          {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} isRtl={isRtl} collapsed={collapsed} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
+          {visibleGroups.filter((group) => group.key !== "quick").map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => toggleGroup(group.key)} onNavigate={onNavigate} />)}
         </div>
       </div>
 
       <div className={`shrink-0 border-t p-2.5 ${collapsed ? "space-y-2" : "flex items-center justify-between gap-2"}`} style={{ borderColor: "var(--border)", backgroundColor: "var(--muted)" }}>
         {!collapsed ? <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" /><span className="truncate">{t(language, "shell.systemOnline")}</span></div> : null}
-        {onToggleCollapsed ? <button type="button" className="flex h-8 items-center justify-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground" onClick={onToggleCollapsed} aria-label={t(language, "shell.toggleNav")} title={t(language, "shell.toggleNav")}>
+        {onToggleCollapsed ? <button type="button" className="flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={onToggleCollapsed} aria-label={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")} title={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")}>
           {isRtl ? (collapsed ? <ChevronLeft size={17} /> : <ChevronRight size={17} />) : (collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />)}
         </button> : null}
       </div>

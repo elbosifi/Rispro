@@ -270,7 +270,7 @@ function AppContent() {
         onRegistrationSearchSelect={(appointment) => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`)}
       />
 
-      <div className={`flex flex-1 overflow-hidden ${isArabic ? "flex-row-reverse" : ""}`}>
+      <div className="flex flex-1 overflow-hidden">
         <SideNav
           currentRoute={currentRoute}
           user={user}

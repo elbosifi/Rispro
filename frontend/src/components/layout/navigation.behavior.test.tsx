@@ -34,6 +34,7 @@ vi.mock("lucide-react", () => {
     UserRound: Icon,
     ChevronLeft: Icon,
     ChevronRight: Icon,
+    Plus: Icon,
   };
 });
 
@@ -80,8 +81,37 @@ describe("Navigation governance", () => {
       />
     );
 
-    await userEvent.click(screen.getByText("New appointment"));
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "New appointment" }));
     expect(onNavigate).toHaveBeenCalledWith("appointments");
+  });
+
+  it("keeps quick actions distinct and permission-filtered", async () => {
+    matrixState.value = { ...DEFAULT_PAGE_VISIBILITY_MATRIX, patients: [] };
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    const newButton = screen.getByRole("button", { name: "New" });
+    expect(newButton.className).toContain("border");
+    await userEvent.click(newButton);
+    expect(screen.queryByRole("menuitem", { name: "New patient" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "New appointment" })).toBeTruthy();
+  });
+
+  it("keeps both quick-action routes available when authorized", async () => {
+    const onNavigate = vi.fn();
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(<SideNav currentRoute="dashboard" user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }} language="en" isRtl={false} onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "New patient" }));
+    expect(onNavigate).toHaveBeenCalledWith("patients.new");
   });
 
   it("renders top-bar extra actions without adding navigation entries", () => {
@@ -181,7 +211,7 @@ describe("Navigation governance", () => {
           onNavigate={() => {}}
         />
       );
-      expect(screen.queryByText("Override Requests")).toBeNull();
+      expect(screen.queryByText("Override requests")).toBeNull();
       unmount();
     }
   });
@@ -238,7 +268,7 @@ describe("Navigation governance", () => {
       />
     );
 
-    expect(screen.queryByText("Doctor home")).toBeNull();
+    expect(screen.queryByText("Doctor workspace")).toBeNull();
     expect(screen.queryByText("Modality board")).toBeNull();
     expect(screen.queryByText("Statistics")).toBeNull();
     expect(screen.queryByText("Settings")).toBeNull();
@@ -287,7 +317,7 @@ describe("Navigation governance", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /Toggle navigation/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Collapse navigation" }));
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -302,8 +332,53 @@ describe("Navigation governance", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /Toggle navigation/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Expand navigation" }));
     expect(onToggleCollapsed).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the intentional legacy fallback label and keeps Settings in Administration", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="settings"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByText("Other")).toBeNull();
+    expect(screen.getByText("Legacy / fallback")).toBeTruthy();
+    expect(screen.getByText("Settings")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Administration" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps Legacy Reception restricted and avoids mixed locale labels", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    const { unmount } = render(
+      <SideNav
+        currentRoute="legacy"
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Legacy Reception")).toBeNull();
+    unmount();
+
+    render(
+      <SideNav
+        currentRoute="legacy"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="ar"
+        isRtl
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.getByText("النظام السابق / الاحتياطي")).toBeTruthy();
+    expect(screen.queryByText("Legacy / fallback")).toBeNull();
   });
 
   it("shows Patients when the fetched matrix grants modality_staff access", () => {
@@ -385,7 +460,7 @@ describe("Navigation governance", () => {
         onNavigate={() => {}}
       />
     );
-    expect(screen.queryByText("Doctor home")).toBeNull();
+    expect(screen.queryByText("Doctor workspace")).toBeNull();
     expect(screen.queryByText("Statistics")).toBeNull();
   });
 
@@ -433,6 +508,7 @@ describe("Navigation governance", () => {
     );
 
     expect(screen.getByText("Clinical workflow")).toBeTruthy();
+    expect(screen.queryByText("Overview")).toBeNull();
     expect(screen.getByText("PACS remap")).toBeTruthy();
     expect(screen.getByRole("button", { name: "PACS remap" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("button", { name: "Clinical workflow" }).getAttribute("aria-expanded")).toBe("true");
@@ -497,5 +573,14 @@ describe("Navigation governance", () => {
     expect(item.getAttribute("title")).toBe("PACS remap");
     expect(item.getAttribute("aria-current")).toBe("page");
     expect(screen.queryByText("Clinical workflow")).toBeNull();
+  });
+
+  it("mirrors active accent and collapse edge in RTL", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(<SideNav currentRoute="pacs.remap" user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }} language="ar" isRtl collapsed={false} onToggleCollapsed={() => {}} onNavigate={() => {}} />);
+    const active = screen.getByRole("button", { name: "إعادة ربط PACS" });
+    expect(active.querySelector("[aria-hidden='true']")?.className).toContain("right-0");
+    expect(screen.getByRole("button", { name: "طي القائمة" })).toBeTruthy();
+    expect(screen.getByText("سير العمل السريري")).toBeTruthy();
   });
 });
