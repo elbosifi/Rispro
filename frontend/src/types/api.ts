@@ -1612,7 +1612,8 @@ export interface NoShowReviewCandidate {
 export interface NoShowReviewSnapshot {
   mode: "manual" | "automatic" | "disabled"; reviewTime: string; reviewActive: boolean; graceMinutes: number;
   pendingCount: number; oldCleanupCount: number; candidates: NoShowReviewCandidate[]; deferredCandidates: NoShowReviewCandidate[];
-  oldCleanupCandidates: NoShowReviewCandidate[]; lastAutomaticRunAt: string | null; lastAutomaticProcessedCount: number;
+  oldCleanupCandidates: NoShowReviewCandidate[]; cleanupDays: number; historicalCutoffDate: string | null; oldestOldCleanupDate: string | null;
+  lastAutomaticRunAt: string | null; lastAutomaticTodayProcessedCount: number; lastAutomaticHistoricalProcessedCount: number; lastAutomaticSkippedCount: number; lastAutomaticError: string | null;
 }
 export interface NoShowSummary {
   mode: "manual" | "automatic" | "disabled"; reviewTime: string; reviewActive: boolean; pendingCount: number; oldCleanupCount: number;

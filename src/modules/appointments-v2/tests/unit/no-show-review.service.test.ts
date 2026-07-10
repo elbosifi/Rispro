@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { evaluateNoShowEligibility, normalizeNoShowMode, type NoShowSettings } from "../../booking/services/no-show-review.service.js";
+import { evaluateNoShowEligibility, historicalNoShowCutoff, normalizeNoShowMode, type NoShowSettings } from "../../booking/services/no-show-review.service.js";
 
 const settings: NoShowSettings = { reviewTime: "17:00", reviewActive: true, graceMinutes: 30, cleanupDays: 1, mode: "manual", autoNoShowEnabled: false, manualConfirmationRequired: true };
 const now = new Date("2026-07-10T16:45:00.000Z"); // 18:45 Africa/Tripoli in July.
@@ -21,5 +21,16 @@ describe("no-show review eligibility", () => {
     assert.equal(normalizeNoShowMode(true, true), "manual");
     assert.equal(normalizeNoShowMode(false, true), "automatic");
     assert.equal(normalizeNoShowMode(false, false), "disabled");
+  });
+  it("includes yesterday at cleanupDays=1 and never relies on audit history", () => {
+    const historical = evaluateNoShowEligibility(booking({ booking_date: "2026-07-09" }), settings, now);
+    assert.equal(historical.eligible, true);
+    assert.equal(historical.scope, "historical");
+    assert.equal(historicalNoShowCutoff("2026-07-10", 1), "2026-07-09");
+  });
+  it("excludes a historical date newer than the inclusive cutoff and future dates", () => {
+    const cleanupTwoDays = { ...settings, cleanupDays: 2 };
+    assert.equal(evaluateNoShowEligibility(booking({ booking_date: "2026-07-09" }), cleanupTwoDays, now).reasonCode, "cleanup_age_not_elapsed");
+    assert.equal(evaluateNoShowEligibility(booking({ booking_date: "2026-07-11" }), settings, now).reasonCode, "booking_in_future");
   });
 });

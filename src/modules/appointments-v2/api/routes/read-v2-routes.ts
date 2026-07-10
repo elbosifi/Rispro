@@ -25,6 +25,7 @@ import {
   getNoShowReviewSnapshot,
   getNoShowSettings,
   getTripoliToday,
+  runManualOldNoShowCleanup,
 } from "../../booking/services/no-show-review.service.js";
 import { getModalityProtocolAssignment } from "../../modality/protocol-assignment.service.js";
 
@@ -920,7 +921,8 @@ router.get(
       mode: snapshot.mode, reviewTime: snapshot.review_time, reviewActive: snapshot.review_active,
       pendingCount: snapshot.pending_count, oldCleanupCount: snapshot.old_cleanup_count,
       autoNoShowEnabled: snapshot.auto_no_show_enabled, manualConfirmationRequired: snapshot.no_show_confirmation_required,
-      lastAutomaticRunAt: snapshot.last_automatic_run_at, lastAutomaticProcessedCount: snapshot.last_automatic_processed_count,
+      lastAutomaticRunAt: snapshot.last_automatic_run_at,
+      lastAutomaticProcessedCount: snapshot.last_automatic_today_processed_count + snapshot.last_automatic_historical_processed_count,
     });
   })
 );
@@ -948,6 +950,16 @@ router.post(
   asyncRoute(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     res.json(await confirmOldNoShowCleanup(body.appointmentIds, String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0)));
+  })
+);
+
+router.post(
+  "/queue/no-shows/run-old-cleanup",
+  requirePageAccess("queue"),
+  requireActionPin("queue_confirm_no_show"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    res.json(await runManualOldNoShowCleanup(String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0)));
   })
 );
 

@@ -343,36 +343,14 @@ describe("QueuePage command center layout", () => {
     expect(screen.getByText(/No scheduled patients are waiting for check-in/i)).toBeTruthy();
   });
 
-  it("keeps old no-show cleanup quiet when empty and visible when candidates exist", async () => {
+  it("keeps old no-show cleanup in the dedicated review workspace", async () => {
     fetchQueueSnapshotMock.mockResolvedValue(queueSnapshot);
     const { unmount } = renderPage();
 
     await screen.findByText("Patient Name");
     expect(screen.queryByRole("region", { name: /Old no-show cleanup/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Open review workspace/i })).toBeTruthy();
     unmount();
-
-    fetchQueueSnapshotMock.mockResolvedValue({
-      ...queueSnapshot,
-      oldNoShowCandidates: [
-        {
-          appointmentId: 55,
-          accessionNumber: "V2-000055",
-          appointmentDate: "2026-06-17",
-          patientId: 77,
-          arabicFullName: "Old Patient",
-          englishFullName: "Old Patient",
-          phone1: "0910000000",
-          modalityNameAr: "CT",
-          modalityNameEn: "CT",
-        },
-      ],
-    });
-
-    renderPage();
-
-    const cleanupRegion = await screen.findByRole("region", { name: /Old no-show cleanup/i });
-    expect(within(cleanupRegion).getByText(/1 old scheduled appointment/i)).toBeTruthy();
-    expect(within(cleanupRegion).getByRole("button", { name: /Review/i })).toBeTruthy();
   });
 
   it("filters queue rows and shows a filtered empty state", async () => {
