@@ -271,7 +271,7 @@ describe("App route behavior", () => {
     await screen.findByTestId("dashboard-page");
     const rtlNav = screen.getByRole("navigation");
     expect(rtlNav.getAttribute("dir")).toBe("rtl");
-    expect(rtlNav.parentElement?.parentElement?.getAttribute("dir")).toBe("rtl");
+    expect(rtlNav.parentElement?.getAttribute("dir")).toBe("rtl");
     expect(rtlNav.style.borderLeft).toContain("1px");
   });
 

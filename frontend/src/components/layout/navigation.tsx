@@ -161,6 +161,7 @@ function NavButton({
   label,
   isRtl,
   collapsed = false,
+  showTooltip = true,
   index,
   onClick
 }: {
@@ -169,6 +170,7 @@ function NavButton({
   label: string;
   isRtl: boolean;
   collapsed?: boolean;
+  showTooltip?: boolean;
   index: number;
   onClick: () => void;
 }) {
@@ -190,7 +192,7 @@ function NavButton({
       aria-current={isActive ? "page" : undefined}
       onClick={onClick}
       aria-label={label}
-      title={collapsed ? label : undefined}
+      title={collapsed && showTooltip ? label : undefined}
     >
       {isActive ? <span className={`absolute inset-y-1 ${isRtl ? "right-0" : "left-0"} w-0.5 rounded-full bg-accent`} aria-hidden="true" /> : null}
       <span className="flex h-5 w-5 shrink-0 items-center justify-center text-accent transition-colors group-hover:text-foreground" style={{ color: isActive ? "var(--accent)" : "var(--muted-foreground)" }}>
@@ -238,22 +240,25 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
 const SIDEBAR_GROUPS = buildSidebarGroups();
 const DASHBOARD_ITEM = sidebarItem("dashboard");
 
-function QuickActionsSection({ items, collapsed, currentRoute, isRtl, language, onNavigate }: {
+function QuickActionsSection({ items, collapsed, currentRoute, isRtl, language, onNavigate, showTooltips = true, idPrefix = "sidebar" }: {
   items: SidebarItem[];
   collapsed: boolean;
   currentRoute: string;
   isRtl: boolean;
   language: Language;
   onNavigate: (route: string) => void;
+  showTooltips?: boolean;
+  idPrefix?: string;
 }) {
   const [open, setOpen] = useState(false);
   if (!items.length) return null;
-  const menuId = "sidebar-quick-actions-menu";
+  const menuId = `${idPrefix}-quick-actions-menu`;
+  const labelId = `${idPrefix}-quick-actions-label`;
   return (
-    <section className="space-y-1 border-b pb-3" style={{ borderColor: "var(--border)" }} aria-labelledby="sidebar-quick-actions-label">
-      {!collapsed ? <span id="sidebar-quick-actions-label" className="block px-3 py-1 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground">{t(language, "navGroup.quickActions")}</span> : null}
+    <section className="space-y-1 border-b pb-3" style={{ borderColor: "var(--border)" }} aria-labelledby={collapsed ? undefined : labelId} aria-label={collapsed ? t(language, "navGroup.quickActions") : undefined}>
+      {!collapsed ? <span id={labelId} className="block px-3 py-1 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground">{t(language, "navGroup.quickActions")}</span> : null}
       <div className="relative">
-        <button type="button" className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${collapsed ? "justify-center px-2" : "justify-between"}`} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls={menuId} aria-label={t(language, "nav.newAction")} title={collapsed ? t(language, "nav.newAction") : undefined}>
+        <button type="button" className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${collapsed ? "justify-center px-2" : "justify-between"}`} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls={menuId} aria-label={t(language, "nav.newAction")} title={collapsed && showTooltips ? t(language, "nav.newAction") : undefined}>
           <span className="flex items-center gap-2"><Plus className="h-4 w-4" aria-hidden="true" /><span className={collapsed ? "sr-only" : ""}>{t(language, "nav.newAction")}</span></span>
           {!collapsed ? <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-90" : isRtl ? "rotate-180" : ""}`} aria-hidden="true" /> : null}
         </button>
@@ -265,7 +270,7 @@ function QuickActionsSection({ items, collapsed, currentRoute, isRtl, language, 
   );
 }
 
-function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl, language, onToggle, onNavigate }: {
+function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl, language, onToggle, onNavigate, showTooltips = true, idPrefix = "sidebar" }: {
   group: (typeof SIDEBAR_GROUPS)[number];
   items: SidebarItem[];
   expanded: boolean;
@@ -275,9 +280,11 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
   language: Language;
   onToggle: () => void;
   onNavigate: (route: string) => void;
+  showTooltips?: boolean;
+  idPrefix?: string;
 }) {
   if (!items.length || group.key === "quick") return null;
-  const sectionId = `sidebar-section-${group.key}`;
+  const sectionId = `${idPrefix}-section-${group.key}`;
   return (
     <section className="space-y-1 pt-2 first:pt-0" aria-labelledby={collapsed ? undefined : `${sectionId}-label`} aria-label={collapsed ? t(language, group.labelKey) : undefined}>
       {collapsed ? (
@@ -296,7 +303,7 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
       )}
       <div id={sectionId} className={`${collapsed || expanded ? "space-y-0.5" : "hidden"}`}>
         {items.map((item, index) => (
-          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} isRtl={isRtl} collapsed={collapsed} index={index} onClick={() => onNavigate(item.route)} />
+          <NavButton key={`${group.key}-${item.route}`} item={item} isActive={currentRoute === item.route} label={t(language, item.labelKey)} isRtl={isRtl} collapsed={collapsed} showTooltip={showTooltips} index={index} onClick={() => onNavigate(item.route)} />
         ))}
       </div>
     </section>
@@ -312,6 +319,29 @@ function useCloseOnOutside(ref: RefObject<HTMLElement | null>, onClose: () => vo
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [enabled, onClose, ref]);
+}
+
+function SidebarNavigationContent({ visibleGroups, visibleDashboard, expandedGroups, collapsed, currentRoute, isRtl, language, onToggleGroup, onNavigate, showTooltips, idPrefix }: {
+  visibleGroups: Array<(typeof SIDEBAR_GROUPS)[number] & { items: SidebarItem[] }>;
+  visibleDashboard: SidebarItem | null;
+  expandedGroups: Record<SidebarGroupKey, boolean>;
+  collapsed: boolean;
+  currentRoute: string;
+  isRtl: boolean;
+  language: Language;
+  onToggleGroup: (groupKey: SidebarGroupKey) => void;
+  onNavigate: (route: string) => void;
+  showTooltips: boolean;
+  idPrefix: string;
+}) {
+  const quickGroup = visibleGroups.find((group) => group.key === "quick");
+  return (
+    <div className="space-y-2">
+      {quickGroup ? <QuickActionsSection items={quickGroup.items} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} /> : null}
+      {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} isRtl={isRtl} collapsed={collapsed} showTooltip={showTooltips} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
+      {visibleGroups.filter((group) => group.key !== "quick").map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => onToggleGroup(group.key)} onNavigate={onNavigate} showTooltips={showTooltips} idPrefix={idPrefix} />)}
+    </div>
+  );
 }
 
 function HistoryMenu({ language, onUndo, onRedo }: { language: Language; onUndo: () => void; onRedo: () => void }) {
@@ -478,32 +508,116 @@ export function SideNav({
     });
   };
 
-  return (
-    <nav
-      className={`nav-shell hidden h-full min-h-full flex-col transition-[width] duration-200 lg:flex ${collapsed ? "w-[68px]" : "w-[240px]"}`}
-      style={{
-        backgroundImage: "linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--background)) 0%, var(--background) 18%, var(--background) 100%)",
-        backgroundColor: "var(--background)",
-        borderRight: isRtl ? "none" : "1px solid var(--border)",
-        borderLeft: isRtl ? "1px solid var(--border)" : "none"
-      }}
-      dir={isRtl ? "rtl" : "ltr"}
-    >
-      <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-        <div className="space-y-2">
-          {visibleGroups.find((group) => group.key === "quick") ? <QuickActionsSection items={visibleGroups.find((group) => group.key === "quick")!.items} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onNavigate={onNavigate} /> : null}
-          {visibleDashboard ? <NavButton item={visibleDashboard} isActive={currentRoute === visibleDashboard.route} label={t(language, visibleDashboard.labelKey)} isRtl={isRtl} collapsed={collapsed} index={0} onClick={() => onNavigate(visibleDashboard.route)} /> : null}
-          {visibleGroups.filter((group) => group.key !== "quick").map((group) => <SidebarSection key={group.key} group={group} items={group.items} expanded={expandedGroups[group.key]} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggle={() => toggleGroup(group.key)} onNavigate={onNavigate} />)}
-        </div>
-      </div>
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [finePointer, setFinePointer] = useState(() => window.matchMedia?.("(pointer: fine)")?.matches ?? false);
+  const railRef = useRef<HTMLDivElement>(null);
+  const openTimerRef = useRef<number | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
 
-      <div className={`shrink-0 border-t p-2.5 ${collapsed ? "space-y-2" : "flex items-center justify-between gap-2"}`} style={{ borderColor: "var(--border)", backgroundColor: "var(--muted)" }}>
-        {!collapsed ? <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" /><span className="truncate">{t(language, "shell.systemOnline")}</span></div> : null}
-        {onToggleCollapsed ? <button type="button" className="flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={onToggleCollapsed} aria-label={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")} title={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")}>
-          {isRtl ? (collapsed ? <ChevronLeft size={17} /> : <ChevronRight size={17} />) : (collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />)}
-        </button> : null}
-      </div>
-    </nav>
+  const clearPreviewTimers = () => {
+    if (openTimerRef.current != null) window.clearTimeout(openTimerRef.current);
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+    openTimerRef.current = null;
+    closeTimerRef.current = null;
+  };
+
+  const closePreview = () => {
+    clearPreviewTimers();
+    setPreviewOpen(false);
+  };
+
+  const schedulePreviewOpen = () => {
+    if (!collapsed || !finePointer || previewOpen) return;
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+    if (openTimerRef.current != null) window.clearTimeout(openTimerRef.current);
+    openTimerRef.current = window.setTimeout(() => {
+      openTimerRef.current = null;
+      setPreviewOpen(true);
+    }, 250);
+  };
+
+  const schedulePreviewClose = () => {
+    if (!collapsed) return;
+    if (openTimerRef.current != null) window.clearTimeout(openTimerRef.current);
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setPreviewOpen(false);
+    }, 400);
+  };
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(pointer: fine)");
+    if (!media) return;
+    const update = () => setFinePointer(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (!collapsed) closePreview();
+    return clearPreviewTimers;
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePreview();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [previewOpen]);
+
+  return (
+    <div
+      ref={railRef}
+      className="relative hidden h-full min-h-full shrink-0 lg:flex"
+      data-testid="desktop-sidebar-rail"
+      dir={isRtl ? "rtl" : "ltr"}
+      onPointerEnter={schedulePreviewOpen}
+      onPointerLeave={schedulePreviewClose}
+      onMouseEnter={schedulePreviewOpen}
+      onMouseLeave={schedulePreviewClose}
+      onFocusCapture={() => {
+        if (collapsed) setPreviewOpen(true);
+      }}
+      onBlurCapture={(event) => {
+        if (!railRef.current?.contains(event.relatedTarget as Node | null)) schedulePreviewClose();
+      }}
+    >
+      <nav
+        className={`nav-shell flex h-full min-h-full flex-col transition-[width] duration-200 motion-reduce:transition-none ${collapsed ? "w-[68px]" : "w-[240px]"}`}
+        style={{
+          backgroundImage: "linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--background)) 0%, var(--background) 18%, var(--background) 100%)",
+          backgroundColor: "var(--background)",
+          borderRight: isRtl ? "none" : "1px solid var(--border)",
+          borderLeft: isRtl ? "1px solid var(--border)" : "none"
+        }}
+        dir={isRtl ? "rtl" : "ltr"}
+        aria-label={t(language, "shell.menu")}
+      >
+        {onToggleCollapsed ? <div className={`shrink-0 p-2 ${isRtl ? "flex justify-start" : "flex justify-end"}`}>
+          <button type="button" className="flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:scale-95" onClick={onToggleCollapsed} aria-label={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")} aria-expanded={!collapsed} aria-controls="desktop-sidebar-navigation" title={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")}>
+            {isRtl ? (collapsed ? <ChevronLeft size={18} /> : <ChevronRight size={18} />) : (collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />)}
+          </button>
+        </div> : null}
+        <div id="desktop-sidebar-navigation" className="min-h-0 flex-1 overflow-y-auto p-2.5">
+          <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={expandedGroups} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={!previewOpen} idPrefix="sidebar" />
+        </div>
+        <div className={`shrink-0 border-t p-2.5 ${collapsed ? "flex justify-center" : "flex items-center justify-between gap-2"}`} style={{ borderColor: "var(--border)", backgroundColor: "var(--muted)" }}>
+          <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />{!collapsed ? <span className="truncate">{t(language, "shell.systemOnline")}</span> : null}</div>
+        </div>
+      </nav>
+
+      {collapsed && previewOpen ? <aside data-testid="desktop-sidebar-preview" className={`absolute inset-y-0 z-40 w-[240px] border bg-background shadow-xl motion-safe:transition-[opacity,transform] motion-safe:duration-200 motion-reduce:transition-none ${isRtl ? "end-full me-2" : "start-full ms-2"}`} style={{ borderColor: "var(--border)" }} aria-label={t(language, "shell.menu")} onPointerEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onPointerLeave={schedulePreviewClose} onMouseEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onMouseLeave={schedulePreviewClose}>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+            <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={expandedGroups} collapsed={false} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={false} idPrefix="sidebar-preview" />
+          </div>
+        </div>
+      </aside> : null}
+    </div>
   );
 }
 

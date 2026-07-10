@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -41,6 +41,20 @@ vi.mock("lucide-react", () => {
 });
 
 const matrixState: { value: unknown } = { value: DEFAULT_PAGE_VISIBILITY_MATRIX };
+
+function mockPointerMode(fine: boolean) {
+  const matchMedia = vi.fn(() => ({
+    matches: fine,
+    media: "(pointer: fine)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    onchange: null,
+    dispatchEvent: vi.fn(),
+  }));
+  Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: matchMedia });
+}
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual("@tanstack/react-query");
@@ -136,6 +150,7 @@ describe("Navigation governance", () => {
   });
 
   it("keeps only menu and global search as the normal mobile controls", () => {
+    const onMobileNavToggle = vi.fn();
     render(
       <TopBar
         user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
@@ -145,15 +160,18 @@ describe("Navigation governance", () => {
         onRedo={() => {}}
         onToggleLanguage={() => {}}
         onLogout={() => {}}
-        onMobileNavToggle={() => {}}
+        onMobileNavToggle={onMobileNavToggle}
       />
     );
 
     expect(screen.getByRole("button", { name: "Toggle navigation" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Toggle navigation" }).className).toContain("lg:hidden");
     expect(screen.getByRole("button", { name: "Search patients or registrations" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "History" }).parentElement?.className).toContain("hidden");
     expect(screen.queryByRole("button", { name: "Manage Security PIN" })).toBeNull();
     expect(screen.getByRole("button", { name: "Switch language to Arabic" }).className).toContain("hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle navigation" }));
+    expect(onMobileNavToggle).toHaveBeenCalledOnce();
   });
 
   it("places the localized page identity at the start and keeps the global search separate", () => {
@@ -436,6 +454,148 @@ describe("Navigation governance", () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the collapsed expand control fixed outside the scrolling navigation region", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 3, username: "tech", fullName: "Tech", role: "modality_staff" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onToggleCollapsed={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+
+    const control = screen.getByRole("button", { name: "Expand navigation" });
+    expect(control.getAttribute("aria-expanded")).toBe("false");
+    expect(control.closest("nav")?.querySelector("#desktop-sidebar-navigation")?.contains(control)).toBe(false);
+    expect(control.parentElement?.className).toContain("justify-end");
+  });
+
+  it("opens a delayed fine-pointer preview without changing the persisted collapse state", () => {
+    vi.useFakeTimers();
+    mockPointerMode(true);
+    const onToggleCollapsed = vi.fn();
+    render(
+      <SideNav
+        currentRoute="pacs.remap"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onToggleCollapsed={onToggleCollapsed}
+        onNavigate={() => {}}
+      />
+    );
+
+    const rail = screen.getByTestId("desktop-sidebar-rail");
+    fireEvent.mouseEnter(rail);
+    act(() => vi.advanceTimersByTime(249));
+    expect(screen.queryByTestId("desktop-sidebar-preview")).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByTestId("desktop-sidebar-preview")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Menu" }).className).toContain("motion-reduce:transition-none");
+    expect(screen.getByTestId("desktop-sidebar-preview").className).toContain("start-full");
+    expect(screen.getByTestId("desktop-sidebar-preview").className).toContain("motion-reduce:transition-none");
+    expect(screen.getAllByText("PACS remap").length).toBeGreaterThanOrEqual(2);
+    expect(onToggleCollapsed).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("does not flicker on incidental hover and closes after leaving the rail", () => {
+    vi.useFakeTimers();
+    mockPointerMode(true);
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onToggleCollapsed={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+
+    const rail = screen.getByTestId("desktop-sidebar-rail");
+    fireEvent.mouseEnter(rail);
+    fireEvent.mouseLeave(rail);
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByTestId("desktop-sidebar-preview")).toBeNull();
+    fireEvent.mouseEnter(rail);
+    act(() => vi.advanceTimersByTime(250));
+    const preview = screen.getByTestId("desktop-sidebar-preview");
+    fireEvent.mouseLeave(rail);
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent.mouseEnter(preview);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByTestId("desktop-sidebar-preview")).toBeTruthy();
+    fireEvent.mouseLeave(preview);
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.queryByTestId("desktop-sidebar-preview")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("opens the preview from keyboard focus and closes it with Escape", () => {
+    mockPointerMode(false);
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onToggleCollapsed={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+
+    fireEvent.focusIn(screen.getByRole("button", { name: "Patients" }));
+    expect(screen.getByTestId("desktop-sidebar-preview")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("desktop-sidebar-preview")).toBeNull();
+  });
+
+  it("does not use hover preview for coarse pointers and mirrors the RTL rail", () => {
+    vi.useFakeTimers();
+    mockPointerMode(false);
+    const { unmount } = render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onToggleCollapsed={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+    fireEvent.mouseEnter(screen.getByTestId("desktop-sidebar-rail"));
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByTestId("desktop-sidebar-preview")).toBeNull();
+    unmount();
+    mockPointerMode(true);
+    render(
+      <SideNav
+        currentRoute="pacs.remap"
+        user={{ id: 5, username: "sa", fullName: "مدير", role: "super_admin" }}
+        language="ar"
+        isRtl
+        collapsed
+        onToggleCollapsed={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+    const rail = screen.getByTestId("desktop-sidebar-rail");
+    expect(screen.getByRole("button", { name: "توسيع قائمة التنقل" }).parentElement?.className).toContain("justify-start");
+    fireEvent.mouseEnter(rail);
+    act(() => vi.advanceTimersByTime(250));
+    expect(screen.getByTestId("desktop-sidebar-preview").className).toContain("end-full");
+    vi.useRealTimers();
+  });
+
   it("uses the intentional legacy fallback label and keeps Settings in Administration", () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     render(
@@ -680,7 +840,7 @@ describe("Navigation governance", () => {
     render(<SideNav currentRoute="pacs.remap" user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }} language="ar" isRtl collapsed={false} onToggleCollapsed={() => {}} onNavigate={() => {}} />);
     const active = screen.getByRole("button", { name: "إعادة ربط PACS" });
     expect(active.querySelector("[aria-hidden='true']")?.className).toContain("right-0");
-    expect(screen.getByRole("button", { name: "طي القائمة" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "طي قائمة التنقل" })).toBeTruthy();
     expect(screen.getByText("سير العمل السريري")).toBeTruthy();
   });
 });
