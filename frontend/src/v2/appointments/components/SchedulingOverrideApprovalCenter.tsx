@@ -62,20 +62,22 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
 
   return (
     <>
-      <button
-        type="button"
-        className={`${actionableCount > 0 ? "btn-ghost relative" : "hidden lg:inline-flex btn-ghost relative"}`}
-        onClick={() => setOpen(true)}
-        aria-label={t(language, "overrideRequests.title")}
-        title={t(language, "overrideRequests.title")}
-      >
-        <Bell className="h-4 w-4" />
-        {actionableCount > 0 ? (
-          <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-            {actionableCount}
-          </span>
-        ) : null}
-      </button>
+      <span className={actionableCount > 0 ? "inline-flex" : "hidden lg:inline-flex"}>
+        <button
+          type="button"
+          className="btn-ghost relative"
+          onClick={() => setOpen(true)}
+          aria-label={t(language, "overrideRequests.title")}
+          title={t(language, "overrideRequests.title")}
+        >
+          <Bell className="h-4 w-4" />
+          {actionableCount > 0 ? (
+            <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+              {actionableCount}
+            </span>
+          ) : null}
+        </button>
+      </span>
 
       {open ? (
         <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true">

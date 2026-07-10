@@ -363,7 +363,7 @@ function HistoryMenu({ language, onUndo, onRedo }: { language: Language; onUndo:
 }
 
 function LanguageControl({ language, isRtl, onToggle }: { language: Language; isRtl: boolean; onToggle: () => void }) {
-  return <button type="button" className="btn-ghost hidden gap-1.5 text-xs lg:inline-flex" onClick={onToggle} aria-label={t(language, language === "ar" ? "topbar.switchToEnglish" : "topbar.switchToArabic")} title={t(language, language === "ar" ? "topbar.switchToEnglish" : "topbar.switchToArabic")}><Globe2 className="h-4 w-4" /><span>{isRtl ? "العربية" : "English"}</span></button>;
+  return <div className="hidden lg:block"><button type="button" className="btn-ghost gap-1.5 text-xs" onClick={onToggle} aria-label={t(language, language === "ar" ? "topbar.switchToEnglish" : "topbar.switchToArabic")} title={t(language, language === "ar" ? "topbar.switchToEnglish" : "topbar.switchToArabic")}><Globe2 className="h-4 w-4" /><span>{isRtl ? "العربية" : "English"}</span></button></div>;
 }
 
 function AccountMenu({ user, language, accountActions, canAccessSettings, onSettings, onLogout }: { user: User; language: Language; accountActions?: ReactNode; canAccessSettings: boolean; onSettings: () => void; onLogout: () => void }) {
@@ -431,7 +431,7 @@ export function TopBar({
     <header className="sticky top-0 z-50 border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>
       <div className="flex min-h-[3.5rem] items-center gap-3 px-4 lg:px-6">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <button type="button" className="lg:hidden btn-ghost" onClick={onMobileNavToggle} aria-label={t(language, "shell.toggleNav")} title={t(language, "shell.toggleNav")}><Menu className="h-5 w-5" /></button>
+          <button type="button" className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-transparent px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 lg:hidden" onClick={onMobileNavToggle} aria-label={t(language, "shell.toggleNav")} title={t(language, "shell.toggleNav")}><Menu className="h-5 w-5" /></button>
           <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-xs font-bold text-white sm:flex">R</div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-foreground">{pageTitle || t(language, "shell.reception")}</p>

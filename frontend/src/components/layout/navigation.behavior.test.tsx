@@ -169,7 +169,7 @@ describe("Navigation governance", () => {
     expect(screen.getByRole("button", { name: "Search patients or registrations" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "History" }).parentElement?.className).toContain("hidden");
     expect(screen.queryByRole("button", { name: "Manage Security PIN" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Switch language to Arabic" }).className).toContain("hidden");
+    expect(screen.getByRole("button", { name: "Switch language to Arabic" }).parentElement?.className).toContain("hidden");
     fireEvent.click(screen.getByRole("button", { name: "Toggle navigation" }));
     expect(onMobileNavToggle).toHaveBeenCalledOnce();
   });
