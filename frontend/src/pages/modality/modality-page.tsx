@@ -918,7 +918,7 @@ export default function ModalityPage() {
                           <th scope="col" className="w-[90px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
                           <th scope="col" className="w-[118px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
                           <th scope="col" className="w-[92px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
-                          <th scope="col" className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
+                          <th scope="col" className="w-[270px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
@@ -1068,7 +1068,7 @@ export default function ModalityPage() {
                                       type="button"
                                       variant={appointment.status === "scheduled" ? "primary" : "secondary"}
                                       size="sm"
-                                      className="h-10 w-10 shrink-0 p-0 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                                      className="h-10 min-w-[40px] shrink-0 px-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
                                       title={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
                                       disabled={statusMutation.isPending}
@@ -1078,7 +1078,7 @@ export default function ModalityPage() {
                                       }}
                                     >
                                       <BadgeCheck size={14} />
-                                      <span className="sr-only">{chooseLocalized(language, "وصول", "Arrived")}</span>
+                                      <span>{chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}</span>
                                     </Button>
                                   ) : null}
                                   {canCompleteRow ? (
@@ -1088,7 +1088,7 @@ export default function ModalityPage() {
                                       size="sm"
                                       aria-label={chooseLocalized(language, "إكمال", "Complete")}
                                       title={chooseLocalized(language, "إكمال", "Complete")}
-                                      className="h-10 w-10 shrink-0 p-0 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                                      className="h-10 min-w-[40px] shrink-0 px-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       disabled={completeMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -1096,7 +1096,7 @@ export default function ModalityPage() {
                                       }}
                                     >
                                       {completeMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                                      <span className="sr-only">{chooseLocalized(language, "إكمال", "Complete")}</span>
+                                      <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
                                     </Button>
                                   ) : null}
                                   {canAct || appointment.status === "completed" ? (

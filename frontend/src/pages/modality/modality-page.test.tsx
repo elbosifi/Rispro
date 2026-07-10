@@ -274,6 +274,9 @@ describe("ModalityPage modality board", () => {
     const scheduledRow = screen.getByTestId("modality-board-row-2");
     expect(within(scheduledRow).getByText("Scheduled Patient")).toBeTruthy();
     expect(within(scheduledRow).getByText("Scheduled")).toBeTruthy();
+    const markArrived = within(scheduledRow).getByRole("button", { name: "Mark arrived" });
+    expect(markArrived.textContent).toContain("Mark arrived");
+    expect(markArrived.querySelector("svg")).toBeTruthy();
   });
 
   it("shows same-day sibling appointments as compact patient metadata", async () => {
