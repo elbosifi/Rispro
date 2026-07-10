@@ -32,6 +32,8 @@ vi.mock("lucide-react", () => {
     Search: Icon,
     Loader2: Icon,
     UserRound: Icon,
+    ChevronLeft: Icon,
+    ChevronRight: Icon,
   };
 });
 
@@ -78,7 +80,7 @@ describe("Navigation governance", () => {
       />
     );
 
-    await userEvent.click(screen.getByText("Create appointment"));
+    await userEvent.click(screen.getByText("New appointment"));
     expect(onNavigate).toHaveBeenCalledWith("appointments");
   });
 
@@ -162,7 +164,7 @@ describe("Navigation governance", () => {
           onNavigate={() => {}}
         />
       );
-      expect(screen.queryByText("Override Requests")).not.toBeNull();
+      expect(screen.queryByText("Override requests")).not.toBeNull();
       unmount();
     }
   });
@@ -198,7 +200,7 @@ describe("Navigation governance", () => {
         onNavigate={() => {}}
       />
     );
-    expect(screen.queryByText("Override Requests")).not.toBeNull();
+    expect(screen.queryByText("Override requests")).not.toBeNull();
   });
 
   it("guards Override Requests route with page access config", () => {
@@ -253,7 +255,7 @@ describe("Navigation governance", () => {
         onNavigate={() => {}}
       />
     );
-    expect(screen.queryByText("Doctor home")).not.toBeNull();
+    expect(screen.queryByText("Doctor workspace")).not.toBeNull();
   });
 
   it("modality_staff sees modality page by default", () => {
@@ -319,7 +321,7 @@ describe("Navigation governance", () => {
       />
     );
 
-    expect(screen.queryByText("Register patient")).not.toBeNull();
+    expect(screen.queryByText("Patients")).not.toBeNull();
   });
 
   it("hides Patients when the fetched matrix excludes modality_staff", () => {
@@ -337,7 +339,7 @@ describe("Navigation governance", () => {
       />
     );
 
-    expect(screen.queryByText("Register patient")).toBeNull();
+    expect(screen.queryByText("Patients")).toBeNull();
   });
 
   it("administrative sees statistics by default", () => {
@@ -398,7 +400,7 @@ describe("Navigation governance", () => {
         onNavigate={() => {}}
       />
     );
-    expect(screen.queryByText("Doctor home")).not.toBeNull();
+    expect(screen.queryByText("Doctor workspace")).not.toBeNull();
   });
 
   it("settings access cannot be removed from super_admin", () => {
@@ -416,5 +418,84 @@ describe("Navigation governance", () => {
       />
     );
     expect(screen.queryByText("Settings")).not.toBeNull();
+  });
+
+  it("places PACS remap in Clinical workflow and auto-expands the active group", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="pacs.remap"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByText("Clinical workflow")).toBeTruthy();
+    expect(screen.getByText("PACS remap")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "PACS remap" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "Clinical workflow" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("hides empty groups and keeps administration and systems collapsed by default", () => {
+    matrixState.value = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      "scheduling.override.requests": [],
+      "v2.appointments.admin": [],
+      "patients.merge": [],
+      "name.dictionary": [],
+      pacs: [],
+      "pacs.remap": [],
+      "worklist.monitor": [],
+      legacy: [],
+      settings: [],
+    };
+    const { unmount: unmountReception } = render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByText("Administration")).toBeNull();
+    expect(screen.queryByText("Systems")).toBeNull();
+    unmountReception();
+
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    const { unmount } = render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Administration" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Systems" }).getAttribute("aria-expanded")).toBe("false");
+    unmount();
+  });
+
+  it("keeps collapsed links usable with accessible labels and active state", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="pacs.remap"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        collapsed
+        onNavigate={() => {}}
+      />
+    );
+
+    const item = screen.getByRole("button", { name: "PACS remap" });
+    expect(item.getAttribute("title")).toBe("PACS remap");
+    expect(item.getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByText("Clinical workflow")).toBeNull();
   });
 });

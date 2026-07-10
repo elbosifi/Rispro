@@ -58,7 +58,7 @@ vi.mock("@/providers/action-pin-provider", () => ({
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: testState.fetchDoctorMe,
   fetchPageVisibilityMatrix: testState.fetchPageVisibilityMatrix,
-  fetchNoShowSummary: vi.fn(),
+  fetchNoShowSummary: vi.fn().mockResolvedValue({ pendingCount: 0, mode: "manual", lastAutomaticProcessedCount: 0 }),
   searchPatients: vi.fn(),
   fetchAppointments: vi.fn(),
 }));
@@ -247,7 +247,8 @@ describe("App route behavior", () => {
 
     expect(await screen.findByTestId("dashboard-page")).toBeTruthy();
     for (const item of APP_NAV_ITEMS) {
-      expect(screen.getAllByText(translate("en", item.labelKey)).length).toBeGreaterThan(0);
+      const expectedLabel = item.route === "appointments" ? "New appointment" : translate("en", item.labelKey);
+      expect(screen.getAllByText(expectedLabel).length).toBeGreaterThan(0);
     }
   });
 
