@@ -378,9 +378,11 @@ async function createDoctorPortalTestApp() {
   const cookieParser = (await import("cookie-parser")).default;
   const http = await import("node:http");
   const { createDoctorPortalRouter } = await import("./index.js");
+  const { reportingBoardPublicRouter } = await import("./reporting-board-public-routes.js");
   const appInstance = express();
   appInstance.use(express.json({ limit: "10mb" }));
   appInstance.use(cookieParser());
+  appInstance.use("/api/reporting", reportingBoardPublicRouter);
   appInstance.use("/api/doctor", createDoctorPortalRouter());
   appInstance.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     res.status((err as { statusCode?: number }).statusCode ?? 500).json({ error: err.message });
@@ -611,6 +613,37 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(loadedCaseSourceView.data.savedView.filters.caseSource, "comparisons");
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${ownerView.id}`, { method: "PATCH", body: { active: false } })).status, 200);
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 404);
+  });
+
+  it("keeps valid token-scoped mobile views public while enforcing lifecycle and mutation authority", async () => {
+    guard();
+    const view = await createSavedView(doctor, false, {});
+    const publicPath = `/api/reporting/saved-views/public/${view.token}/mobile?limit=1`;
+    const anonymous = await api<{ allowedActions: { authenticated: boolean; readOnly: boolean; batchReassign: boolean }; pagination: { limit: number; offset: number }; totalCount: number }>("", publicPath);
+    assert.equal(anonymous.status, 200);
+    assert.equal(anonymous.data.allowedActions.authenticated, false);
+    assert.equal(anonymous.data.allowedActions.readOnly, true);
+    assert.equal(anonymous.data.allowedActions.batchReassign, false);
+    assert.equal(anonymous.data.pagination.limit, 1);
+    assert.equal(anonymous.data.pagination.offset, 0);
+    assert.ok(anonymous.data.totalCount >= 0);
+    assert.equal((await pool.query(`select last_accessed_at from doctor_portal.reporting_board_saved_views where id = $1`, [view.id])).rows[0].last_accessed_at === null, false);
+    assert.equal((await api("", "/api/reporting/saved-views/public/not-a-token/mobile")).status, 404);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${view.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: 1 } })).status, 401);
+    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${view.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: 1 } })).status, 403);
+
+    const rotated = await api<{ savedView: { token: string } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/rotate-token`, { method: "POST" });
+    assert.equal(rotated.status, 200);
+    assert.notEqual(rotated.data.savedView.token, view.token);
+    assert.equal((await api("", publicPath)).status, 404);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${rotated.data.savedView.token}/mobile`)).status, 200);
+
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/revoke`, { method: "POST" })).status, 200);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${rotated.data.savedView.token}/mobile`)).status, 404);
+
+    const expired = await createSavedView(doctor, false, {});
+    await pool.query(`update doctor_portal.reporting_board_saved_views set expires_at = now() - interval '1 minute' where id = $1`, [expired.id]);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${expired.token}/mobile`)).status, 404);
   });
 
   it("applies default case-list scope, SonicDICOM status filtering, and normalized statuses", async () => {

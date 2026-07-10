@@ -28,6 +28,8 @@ import {
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
   resumeReportingBoardBulkAssignmentJob,
+  revokeReportingBoardSavedView,
+  rotateReportingBoardSavedViewToken,
   sendReportingBoardSavedViewTestPush,
   runReportingBoardBulkAssignmentJobNow,
   undoReportingBoardBulkAssignmentJob,
@@ -1895,6 +1897,26 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     },
     onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not update view." }),
   });
+  const rotateViewMutation = useMutation({
+    mutationFn: () => rotateReportingBoardSavedViewToken(loadedSavedView!.id),
+    onSuccess: async (view) => {
+      setLoadedSavedView(view);
+      setSavedViewQr(null);
+      setSavedViewMessage({ tone: "success", text: "Mobile link rotated. Previous QR codes no longer work." });
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
+    },
+    onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not rotate the saved-view link." }),
+  });
+  const revokeViewMutation = useMutation({
+    mutationFn: () => revokeReportingBoardSavedView(loadedSavedView!.id),
+    onSuccess: async (view) => {
+      setLoadedSavedView(null);
+      setSavedViewQr(null);
+      setSavedViewMessage({ tone: "success", text: `${view.name} was revoked.` });
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] });
+    },
+    onError: (err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not revoke the saved-view link." }),
+  });
   const pushSubscribeMutation = useMutation({
     mutationFn: async () => {
       if (!loadedSavedView) throw new Error("Open or save a view first.");
@@ -2676,7 +2698,9 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                       setSavedViewQr(null);
                       setSavedViewMessage({ tone: "success", text: `Loaded saved view: ${view.name}.` });
                     }} className="block w-full rounded-lg border px-3 py-2 text-left text-sm" style={{ borderColor: loadedSavedView?.id === view.id ? "var(--accent)" : "var(--border)" }}>
-                      {view.name}
+                      <span className="flex items-center justify-between gap-2"><span>{view.name}</span><span className={view.active && !view.revokedAt ? "rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700" : "rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"}>{view.active && !view.revokedAt ? "Active" : "Inactive"}</span></span>
+                      <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>{view.matchingCaseCount ?? "-"} matching cases · Last opened {view.lastAccessedAt ? new Date(view.lastAccessedAt).toLocaleString() : "never"}</span>
+                      {view.expiresAt && <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Expires {new Date(view.expiresAt).toLocaleDateString()}</span>}
                     </button>
                   ))}
                 </div>
@@ -2702,11 +2726,15 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                   </button>
                   {loadedSavedView && (
                     <>
-                      <button type="button" disabled={updateViewMutation.isPending} onClick={() => updateViewMutation.mutate(true)} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Update current view</button>
+                      <button type="button" disabled={updateViewMutation.isPending} onClick={() => { if (window.confirm("Update this saved view from the current board filters?")) updateViewMutation.mutate(true); }} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Update from current filters</button>
                       <button type="button" disabled={updateViewMutation.isPending} onClick={() => updateViewMutation.mutate(false)} className="h-9 rounded-lg border px-3 text-sm font-semibold text-red-700" style={{ borderColor: "var(--border)" }}>Deactivate view</button>
                       <button type="button" onClick={() => void copySavedViewLink()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-                        <Copy size={14} /> Copy authenticated link
+                        <Copy size={14} /> Copy mobile link
                       </button>
+                      <a href={mobileSavedViewLink} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Open mobile preview</a>
+                      <button type="button" disabled={saveViewMutation.isPending} onClick={() => createReportingBoardSavedView({ name: `${loadedSavedView.name} copy`, filters: compactFilters(loadedSavedView.filters), notificationSettings: loadedSavedView.notificationSettings }).then(async (view) => { setLoadedSavedView(view); await queryClient.invalidateQueries({ queryKey: ["doctor", "reporting-board", "saved-views"] }); }).catch((err) => setSavedViewMessage({ tone: "error", text: err instanceof Error ? err.message : "Could not duplicate saved view." }))} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Duplicate view</button>
+                      <button type="button" disabled={rotateViewMutation.isPending} onClick={() => { if (window.confirm("Rotate this link? Old QR codes will stop working immediately.")) rotateViewMutation.mutate(); }} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Rotate link</button>
+                      <button type="button" disabled={revokeViewMutation.isPending} onClick={() => { if (window.confirm("Revoke this public mobile link? It cannot be opened again.")) revokeViewMutation.mutate(); }} className="h-9 rounded-lg border px-3 text-sm font-semibold text-red-700" style={{ borderColor: "var(--border)" }}>Revoke link</button>
                       <button type="button" onClick={() => void showSavedViewQr()} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                         <QrCode size={14} /> Show mobile QR
                       </button>

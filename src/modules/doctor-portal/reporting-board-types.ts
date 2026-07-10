@@ -37,6 +37,7 @@ export interface ReportingBoardFilters {
   requiresReport?: boolean | null;
   reportStatus?: ReportingBoardReportStatus | null;
   priorityCode?: string | null;
+  urgentOrStat?: boolean | null;
   q?: string | null;
   caseSource?: ReportingBoardCaseSource | null;
   appointmentId?: number | null;
@@ -44,6 +45,7 @@ export interface ReportingBoardFilters {
   sortBy?: ReportingBoardSortBy | null;
   sortDirection?: ReportingBoardSortDirection | null;
   pinUrgentToTop?: boolean | null;
+  overdue?: boolean | null;
   limit?: number | null;
   offset?: number | null;
 }
@@ -74,6 +76,11 @@ export interface ReportingBoardSavedView {
   filters: ReportingBoardFilters;
   notificationSettings: ReportingBoardNotificationSettings;
   active: boolean;
+  lastAccessedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  accessMode: "public_readonly";
+  matchingCaseCount?: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -67,11 +67,11 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const comparisonService = readFileSync(`${root}/src/services/comparison-request-service.ts`, "utf8");
     const migration = readFileSync(`${root}/src/db/migrations/104_comparison_reporting_board_notifications.sql`, "utf8");
 
-    assert.match(service, /listUnifiedReportingBoardCases\(scopedFilters\)/);
+    assert.match(service, /listUnifiedReportingBoardCases\(scopedFilters, \{ fullScope: true \}\)/);
     assert.match(service, /caseKey: row\.caseKey/);
     assert.match(service, /comparisonRequestId: row\.comparisonRequestId/);
     assert.match(publicRoutes, /caseIdentity\(body\)/);
-    assert.match(repository, /Comparison case assigned/);
+    assert.match(repository, /RISpro comparison request update/);
     assert.match(repository, /comparisonRequestIds/);
     assert.match(repository, /\/comparisons\/\$\{caseRow\.comparisonRequestId\}/);
     assert.match(comparisonService, /createAssignedToMeNotifications/);
@@ -416,6 +416,32 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /\/mobile\/reporting-view\/\$\{view\.token\}/);
     assert.match(repo, /lower\(coalesce\(p\.english_full_name/);
     assert.match(repo, /lower\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\)/);
+  });
+
+  it("adds token lifecycle, authoritative mobile pagination, and explicit public access state", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/116_reporting_board_saved_view_lifecycle.sql`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-routes.ts`, "utf8");
+    const publicRoutes = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-public-routes.ts`, "utf8");
+
+    assert.match(migration, /last_accessed_at timestamptz/);
+    assert.match(migration, /expires_at timestamptz/);
+    assert.match(migration, /revoked_at timestamptz/);
+    assert.match(repository, /randomBytes\(32\)\.toString\("base64url"\)/);
+    assert.match(repository, /revoked_at is null/);
+    assert.match(repository, /expires_at is null or expires_at > now\(\)/);
+    assert.match(repository, /touchSavedViewLastAccessed/);
+    assert.match(routes, /"\/saved-views\/:id\/rotate-token"/);
+    assert.match(routes, /"\/saved-views\/:id\/revoke"/);
+    assert.match(publicRoutes, /optionalAuth/);
+    assert.match(publicRoutes, /offset: optionalNonNegativeInteger/);
+    assert.match(service, /totalCount: allCases\.length/);
+    assert.match(service, /hasMore:/);
+    assert.match(service, /batchReassign: false/);
+    assert.match(service, /accessLevel/);
+    assert.match(service, /canAssignToMe/);
+    assert.match(service, /completedToAssignedMinutes/);
   });
 
   it("attaches SonicDICOM study notes to appointment rows only", async () => {

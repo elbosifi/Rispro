@@ -12,6 +12,8 @@ const reassignReportingBoardMobileCaseMock = vi.fn();
 const unassignReportingBoardMobileCaseMock = vi.fn();
 const fetchReportingBoardMobilePushConfigMock = vi.fn();
 const subscribeReportingBoardMobilePushMock = vi.fn();
+const unsubscribeReportingBoardMobilePushMock = vi.fn();
+const sendReportingBoardMobileTestPushMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardMobileView: (...args: unknown[]) => fetchReportingBoardMobileViewMock(...args),
@@ -21,14 +23,20 @@ vi.mock("@/lib/api-hooks", () => ({
   unassignReportingBoardMobileCase: (...args: unknown[]) => unassignReportingBoardMobileCaseMock(...args),
   fetchReportingBoardMobilePushConfig: (...args: unknown[]) => fetchReportingBoardMobilePushConfigMock(...args),
   subscribeReportingBoardMobilePush: (...args: unknown[]) => subscribeReportingBoardMobilePushMock(...args),
+  unsubscribeReportingBoardMobilePush: (...args: unknown[]) => unsubscribeReportingBoardMobilePushMock(...args),
+  sendReportingBoardMobileTestPush: (...args: unknown[]) => sendReportingBoardMobileTestPushMock(...args),
 }));
 
 const mobileResponse: ReportingBoardMobileResponse = {
   savedView: { id: 9, name: "Seraj", token: "tok-9" },
+  lockedFilters: { reportStatus: "required_not_final", modalityCodes: ["CT", "MR"] },
+  currentDoctorId: null,
   filters: { reportStatus: "required_not_final", modalityCodes: ["CT", "MR"] },
   filterSummary: ["required not final", "CT/MR"],
   counters: { total: 2, assignedToMe: null, unassigned: 1, urgent: 1, requiredNotFinal: 2, overdue: 0 },
-  allowedActions: { readOnly: true, assignToMe: false, reassign: false, batchReassign: false, copyAccession: false },
+  totalCount: 3,
+  pagination: { limit: 40, offset: 0, hasMore: false, nextOffset: null },
+  allowedActions: { authenticated: false, accessLevel: "public", readOnly: true, readOnlyReason: "Open RISpro in this browser to manage assignments.", assignToMe: false, reassign: false, unassign: false, batchReassign: false, copyAccession: true, copyMrn: true },
   refreshedAt: "2026-05-29T12:32:00.000Z",
   cases: [
     {
@@ -52,6 +60,9 @@ const mobileResponse: ReportingBoardMobileResponse = {
       assignmentStatus: "assigned",
       canAssign: true,
       exclusionReason: null,
+      completedAt: "2026-05-25T10:24:00.000Z", firstAssignedAt: null, currentAssignedAt: "2026-05-25T11:00:00.000Z", reportFinalAt: null,
+      completedToAssignedMinutes: null, currentAssignmentAgeMinutes: 20, completedUnassignedAgeMinutes: null, completedAgeMinutes: 30, overdue: false,
+      canAssignToMe: false, canReassign: false, canUnassign: false, actionDisabledReason: "Open RISpro in this browser with supervisor access to manage assignments.",
     },
     {
       caseType: "appointment",
@@ -74,6 +85,9 @@ const mobileResponse: ReportingBoardMobileResponse = {
       assignmentStatus: "unassigned",
       canAssign: true,
       exclusionReason: null,
+      completedAt: "2026-05-25T12:18:00.000Z", firstAssignedAt: null, currentAssignedAt: null, reportFinalAt: null,
+      completedToAssignedMinutes: null, currentAssignmentAgeMinutes: null, completedUnassignedAgeMinutes: 20, completedAgeMinutes: 30, overdue: false,
+      canAssignToMe: false, canReassign: false, canUnassign: false, actionDisabledReason: "Open RISpro in this browser with supervisor access to manage assignments.",
     },
     {
       caseType: "comparison",
@@ -96,6 +110,9 @@ const mobileResponse: ReportingBoardMobileResponse = {
       assignmentStatus: "unassigned",
       canAssign: true,
       exclusionReason: null,
+      completedAt: "2026-06-22T12:18:00.000Z", firstAssignedAt: null, currentAssignedAt: null, reportFinalAt: null,
+      completedToAssignedMinutes: null, currentAssignmentAgeMinutes: null, completedUnassignedAgeMinutes: 20, completedAgeMinutes: 30, overdue: false,
+      canAssignToMe: false, canReassign: false, canUnassign: false, actionDisabledReason: "Open RISpro in this browser with supervisor access to manage assignments.",
       linkedPreviousStudyDate: "2026-05-20",
       linkedPreviousAccessionNumber: "V2-000620",
     },
@@ -140,14 +157,15 @@ describe("ReportingBoardMobilePage", () => {
     expect(screen.queryByText("Reporting Assignment Board")).toBeNull();
     expect(screen.queryByText("Saved views")).toBeNull();
     expect(screen.queryByText("Board settings")).toBeNull();
-    expect(screen.getByText("Read-only via QR.")).toBeTruthy();
+    expect(screen.getByText("Read-only saved view.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Assign to me" })).toBeNull();
   });
 
   it("uses comparison identity for mobile saved-view actions", async () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue({
       ...mobileResponse,
-      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true, reassign: true },
+      allowedActions: { ...mobileResponse.allowedActions, authenticated: true, accessLevel: "supervisor", readOnly: false, readOnlyReason: null, assignToMe: true, reassign: true, unassign: true },
+      cases: mobileResponse.cases.map((row) => ({ ...row, canAssignToMe: true, canReassign: true, canUnassign: row.assignmentStatus === "assigned", actionDisabledReason: null })),
     });
     renderPage();
 
@@ -184,7 +202,7 @@ describe("ReportingBoardMobilePage", () => {
     renderPage();
 
     fireEvent.change(await screen.findByPlaceholderText("Search patient, MRN, accession, exam..."), { target: { value: "005279" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply mobile filters" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("Search patient, MRN, accession, exam..."), { key: "Enter" });
 
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ q: "005279" })));
     fireEvent.click(await screen.findByRole("button", { name: /Refresh/i }));
@@ -205,20 +223,21 @@ describe("ReportingBoardMobilePage", () => {
   it("does not show read-only copy when authenticated actions are available", async () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue({
       ...mobileResponse,
-      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true },
+      allowedActions: { ...mobileResponse.allowedActions, authenticated: true, accessLevel: "supervisor", readOnly: false, readOnlyReason: null, assignToMe: true },
     });
 
     renderPage();
 
     expect(await screen.findByRole("button", { name: /Enable notifications/i })).toBeTruthy();
-    expect(screen.queryByText("Read-only via QR.")).toBeNull();
-    expect(screen.getByText("Authenticated actions are available for your account.")).toBeTruthy();
+    expect(screen.queryByText("Read-only saved view.")).toBeNull();
+    expect(screen.getByText("Assignment actions are available for your account.")).toBeTruthy();
   });
 
   it("returns an assigned mobile case to the waiting pool only for authenticated actions", async () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue({
       ...mobileResponse,
-      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true, reassign: true },
+      allowedActions: { ...mobileResponse.allowedActions, authenticated: true, accessLevel: "supervisor", readOnly: false, readOnlyReason: null, assignToMe: true, reassign: true, unassign: true },
+      cases: mobileResponse.cases.map((row) => ({ ...row, canAssignToMe: true, canReassign: true, canUnassign: row.assignmentStatus === "assigned", actionDisabledReason: null })),
     });
     renderPage();
 
@@ -248,7 +267,8 @@ describe("ReportingBoardMobilePage", () => {
 
     fetchReportingBoardMobileViewMock.mockResolvedValue({
       ...mobileResponse,
-      allowedActions: { ...mobileResponse.allowedActions, readOnly: false, assignToMe: true, reassign: true },
+      allowedActions: { ...mobileResponse.allowedActions, authenticated: true, accessLevel: "supervisor", readOnly: false, readOnlyReason: null, assignToMe: true, reassign: true, unassign: true },
+      cases: mobileResponse.cases.map((row) => ({ ...row, canAssignToMe: true, canReassign: true, canUnassign: row.assignmentStatus === "assigned", actionDisabledReason: null })),
     });
     renderPage();
     fireEvent.click(await screen.findByText("Abeer Farhat Salem Al-Sadeq"));

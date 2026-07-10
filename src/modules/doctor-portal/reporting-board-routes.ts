@@ -31,6 +31,8 @@ import {
   readAllMyReportingBoardNotifications,
   readMyReportingBoardNotification,
   resumeScheduledReportingBoardBulkAssignmentJob,
+  revokeReportingBoardSavedView,
+  rotateReportingBoardSavedViewToken,
   runScheduledReportingBoardBulkAssignmentJobNow,
   sendReportingBoardSavedViewTestNotification,
   subscribeReportingBoardSavedViewPush,
@@ -281,6 +283,20 @@ router.patch(
       active: body.active === undefined ? undefined : asOptionalBoolean(body.active),
     });
     res.json({ savedView: view });
+  })
+);
+
+router.post(
+  "/saved-views/:id/rotate-token",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ savedView: await rotateReportingBoardSavedViewToken(actor(req), requiredPositiveInteger(req.params.id, "id")) });
+  })
+);
+
+router.post(
+  "/saved-views/:id/revoke",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ savedView: await revokeReportingBoardSavedView(actor(req), requiredPositiveInteger(req.params.id, "id")) });
   })
 );
 

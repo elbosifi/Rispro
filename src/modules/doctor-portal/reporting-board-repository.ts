@@ -179,11 +179,19 @@ function savedView(row: {
   filters: unknown;
   notificationSettings: unknown;
   active: boolean;
+  lastAccessedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  accessMode: string | null;
   createdAt: string;
   updatedAt: string;
 }): ReportingBoardSavedView {
   return {
     ...row,
+    lastAccessedAt: nullableIsoString(row.lastAccessedAt),
+    expiresAt: nullableIsoString(row.expiresAt),
+    revokedAt: nullableIsoString(row.revokedAt),
+    accessMode: "public_readonly",
     filters: cleanRecord(row.filters) as ReportingBoardFilters,
     notificationSettings: cleanRecord(row.notificationSettings) as ReportingBoardNotificationSettings,
   };
@@ -309,12 +317,15 @@ export async function listSavedViews(ownerUserId: UserId, ownerDoctorId: number 
         filters_json as filters,
         notification_settings_json as "notificationSettings",
         active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
       where owner_user_id = $1
         and ($2::bigint is null or owner_doctor_id = $2)
-        and active = true
       order by created_at desc, id desc
     `,
     [ownerUserId, ownerDoctorId]
@@ -344,6 +355,10 @@ export async function createSavedView(input: {
         filters_json as filters,
         notification_settings_json as "notificationSettings",
         active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
@@ -390,6 +405,10 @@ export async function updateSavedView(input: {
         filters_json as filters,
         notification_settings_json as "notificationSettings",
         active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
@@ -418,6 +437,10 @@ export async function findSavedViewByToken(token: string, ownerUserId: UserId): 
         filters_json as filters,
         notification_settings_json as "notificationSettings",
         active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
@@ -441,10 +464,17 @@ export async function findActiveSavedViewByToken(token: string): Promise<Reporti
         filters_json as filters,
         notification_settings_json as "notificationSettings",
         active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
-      where token = $1 and active = true
+      where token = $1
+        and active = true
+        and revoked_at is null
+        and (expires_at is null or expires_at > now())
       limit 1
     `,
     [token]
@@ -464,13 +494,78 @@ export async function findSavedViewById(id: number, ownerUserId: UserId): Promis
         filters_json as filters,
         notification_settings_json as "notificationSettings",
         active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
-      where id = $1 and owner_user_id = $2 and active = true
+      where id = $1 and owner_user_id = $2
       limit 1
     `,
     [id, ownerUserId]
+  );
+  return result.rows[0] ? savedView(result.rows[0]) : null;
+}
+
+export async function touchSavedViewLastAccessed(id: number): Promise<void> {
+  await pool.query(
+    `update doctor_portal.reporting_board_saved_views set last_accessed_at = now() where id = $1`,
+    [id]
+  );
+}
+
+export async function rotateSavedViewToken(input: { id: number; ownerUserId: UserId; ownerDoctorId: number | null }): Promise<ReportingBoardSavedView | null> {
+  const result = await pool.query(
+    `
+      update doctor_portal.reporting_board_saved_views
+      set token = $4, updated_by_user_id = $2, updated_at = now()
+      where id = $1 and owner_user_id = $2 and ($3::bigint is null or owner_doctor_id = $3)
+      returning
+        id,
+        owner_user_id as "ownerUserId",
+        owner_doctor_id as "ownerDoctorId",
+        name,
+        token,
+        filters_json as filters,
+        notification_settings_json as "notificationSettings",
+        active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+    `,
+    [input.id, input.ownerUserId, input.ownerDoctorId, randomBytes(32).toString("base64url")]
+  );
+  return result.rows[0] ? savedView(result.rows[0]) : null;
+}
+
+export async function revokeSavedView(input: { id: number; ownerUserId: UserId; ownerDoctorId: number | null }): Promise<ReportingBoardSavedView | null> {
+  const result = await pool.query(
+    `
+      update doctor_portal.reporting_board_saved_views
+      set active = false, revoked_at = now(), updated_by_user_id = $2, updated_at = now()
+      where id = $1 and owner_user_id = $2 and ($3::bigint is null or owner_doctor_id = $3)
+      returning
+        id,
+        owner_user_id as "ownerUserId",
+        owner_doctor_id as "ownerDoctorId",
+        name,
+        token,
+        filters_json as filters,
+        notification_settings_json as "notificationSettings",
+        active,
+        last_accessed_at as "lastAccessedAt",
+        expires_at as "expiresAt",
+        revoked_at as "revokedAt",
+        access_mode as "accessMode",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+    `,
+    [input.id, input.ownerUserId, input.ownerDoctorId]
   );
   return result.rows[0] ? savedView(result.rows[0]) : null;
 }
@@ -1892,6 +1987,35 @@ export async function upsertReportingBoardPushSubscription(input: {
   return { subscriptionId: Number(result.rows[0].id) };
 }
 
+export async function disableReportingBoardPushSubscription(input: {
+  savedViewId: number;
+  subscription: BrowserPushSubscriptionInput;
+}): Promise<{ disabled: boolean }> {
+  const normalized = normalizePushSubscription(input.subscription);
+  const result = await pool.query(
+    `
+      update doctor_portal.reporting_board_web_push_subscriptions
+      set enabled = false, disabled_at = now(), updated_at = now()
+      where saved_view_id = $1 and subscription_hash = $2
+    `,
+    [input.savedViewId, hashPushSubscription(normalized)]
+  );
+  return { disabled: (result.rowCount ?? 0) > 0 };
+}
+
+export async function getReportingBoardPushSubscriptionStatus(input: {
+  savedViewId: number;
+  subscription: BrowserPushSubscriptionInput;
+}): Promise<{ enabled: boolean; lastSuccessAt: string | null }> {
+  const normalized = normalizePushSubscription(input.subscription);
+  const result = await pool.query<{ enabled: boolean; last_success_at: Date | null }>(
+    `select enabled, last_success_at from doctor_portal.reporting_board_web_push_subscriptions where saved_view_id = $1 and subscription_hash = $2 limit 1`,
+    [input.savedViewId, hashPushSubscription(normalized)]
+  );
+  const row = result.rows[0];
+  return { enabled: Boolean(row?.enabled), lastSuccessAt: nullableIsoString(row?.last_success_at) };
+}
+
 function reportingCaseNotificationText(row: ReportingBoardCaseRow | null): { title: string; body: string } {
   if (!row) {
     return {
@@ -1899,36 +2023,9 @@ function reportingCaseNotificationText(row: ReportingBoardCaseRow | null): { tit
       body: "Test notification for Reporting Board saved view alerts.",
     };
   }
-  const patient = row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`;
-  if (row.caseType === "comparison") {
-    const prior = [
-      row.modalityCode,
-      row.linkedPreviousAccessionNumber ? `prior ${row.linkedPreviousAccessionNumber}` : null,
-      row.linkedPreviousStudyDate ?? null,
-    ].filter(Boolean).join(" ");
-    return {
-      title: "Comparison case assigned",
-      body: [
-        `Comparison request for ${patient}`,
-        row.patientMrn ? `MRN ${row.patientMrn}` : null,
-        prior || row.modalityCode,
-        row.assignedDoctorName ? `Assigned to ${row.assignedDoctorName}` : "Assigned to you",
-      ].filter(Boolean).join(" - "),
-    };
-  }
-  const exam = row.examTypeName ? `${row.modalityCode} ${row.examTypeName}` : row.modalityCode;
-  const appointmentTime = row.bookingTime ? `${row.bookingDate} ${row.bookingTime}` : row.bookingDate;
-  const priority = row.reportingPriorityName || row.reportingPriorityCode;
   return {
-    title: `Reporting case assigned: ${row.accessionNumber}`,
-    body: [
-      patient,
-      row.patientMrn ? `MRN ${row.patientMrn}` : null,
-      exam,
-      appointmentTime,
-      priority ? `Priority ${priority}` : null,
-      row.assignedDoctorName ? `Assigned to ${row.assignedDoctorName}` : "Assigned to you",
-    ].filter(Boolean).join(" - "),
+    title: row.caseType === "comparison" ? "RISpro comparison request update" : "RISpro reporting case update",
+    body: "Open the saved reporting view to review this update.",
   };
 }
 

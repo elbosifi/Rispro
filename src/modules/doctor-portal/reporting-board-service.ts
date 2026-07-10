@@ -25,6 +25,7 @@ import {
   clearReportingBoardCaseManualFinal as clearReportingBoardCaseManualFinalRecord,
   createReportingBoardBulkAssignmentJob,
   createSavedView,
+  disableReportingBoardPushSubscription,
   doctorCanReportAllModalities,
   dismissReportingBoardNotification,
   failReportingBoardBulkAssignmentJob,
@@ -34,6 +35,7 @@ import {
   findAssignableDoctorForReporting,
   findSavedViewById,
   findSavedViewByToken,
+  getReportingBoardPushSubscriptionStatus,
   listReportingBoardBulkAssignmentJobs,
   listReportingBoardCasesByAppointmentIds,
   listReportingBoardCaseCandidates,
@@ -45,7 +47,10 @@ import {
   markReportingBoardNotificationRead,
   readReportingBoardSettings,
   readReportingBoardPushConfig,
+  revokeSavedView,
+  rotateSavedViewToken,
   sendReportingBoardSavedViewTestPush,
+  touchSavedViewLastAccessed,
   unassignReportingCase,
   updateSavedView,
   updateReportingBoardSettings,
@@ -243,12 +248,14 @@ export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, 
     "caseCategory",
     "reportStatus",
     "priorityCode",
+    "urgentOrStat",
     "modalityId",
     "modalityCode",
     "assignmentStatus",
     "sortBy",
     "sortDirection",
     "pinUrgentToTop",
+    "overdue",
     "caseSource",
   ];
   for (const key of keys) {
@@ -490,15 +497,36 @@ function compareReportingBoardRows(filters: EffectiveReportingBoardFilters) {
 
 async function listUnifiedReportingBoardCases(
   filters: EffectiveReportingBoardFilters,
-  options: { includeSonicDicomStudyNotes?: boolean } = {}
+  options: { includeSonicDicomStudyNotes?: boolean; fullScope?: boolean } = {}
 ): Promise<ReportingBoardCaseRow[]> {
+  if (options.fullScope) {
+    const fetchAll = async (fetcher: typeof listReportingBoardCaseCandidates | typeof listComparisonReportingBoardRows) => {
+      const rows: ReportingBoardCaseRow[] = [];
+      for (let offset = 0; ; offset += MAX_CASE_LIST_LIMIT) {
+        const page = await fetcher({ ...filters, limit: MAX_CASE_LIST_LIMIT, offset });
+        rows.push(...page);
+        if (page.length < MAX_CASE_LIST_LIMIT) return rows;
+      }
+    };
+    const [appointmentRows, comparisonRows] = await Promise.all([
+      sourceAllowsAppointments(filters.caseSource) ? fetchAll(listReportingBoardCaseCandidates) : Promise.resolve([]),
+      sourceAllowsComparisons(filters.caseSource) ? fetchAll(listComparisonReportingBoardRows) : Promise.resolve([]),
+    ]);
+    const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
+    return resolved
+      .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()))
+      .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()))
+      .sort(compareReportingBoardRows(filters));
+  }
   const fetchLimit = fetchLimitForUnifiedCandidates(filters);
   const sourceFilters = { ...filters, limit: fetchLimit, offset: 0 };
   const [appointmentRows, comparisonRows] = await Promise.all([
     sourceAllowsAppointments(filters.caseSource) ? listReportingBoardCaseCandidates(sourceFilters) : Promise.resolve([]),
     sourceAllowsComparisons(filters.caseSource) ? listComparisonReportingBoardRows(sourceFilters) : Promise.resolve([]),
   ]);
-  const resolved = await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus);
+  const resolved = (await applyReportStatuses([...appointmentRows, ...comparisonRows], filters.reportStatus))
+    .filter((row) => !filters.overdue || (row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso()))
+    .filter((row) => !filters.urgentOrStat || ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
   const visibleRows = resolved
     .sort(compareReportingBoardRows(filters))
     .slice(filters.offset, filters.offset + filters.limit);
@@ -847,6 +875,7 @@ export async function clearReportingBoardCaseManualFinal(
 }
 
 function mobileCase(row: ReportingBoardCaseRow) {
+  const overdue = row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso();
   return {
     caseType: row.caseType,
     caseKey: row.caseKey,
@@ -868,8 +897,31 @@ function mobileCase(row: ReportingBoardCaseRow) {
     assignmentStatus: row.assignmentStatus,
     canAssign: row.canAssign,
     exclusionReason: row.exclusionReason,
+    completedAt: row.completedAt,
+    firstAssignedAt: row.firstAssignedAt,
+    currentAssignedAt: row.currentAssignedAt,
+    reportFinalAt: row.reportFinalAt,
+    completedToAssignedMinutes: row.completedToAssignedMinutes,
+    currentAssignmentAgeMinutes: row.currentAssignmentAgeMinutes,
+    completedUnassignedAgeMinutes: row.completedUnassignedAgeMinutes,
+    completedAgeMinutes: minutesSince(row.completedAt, Date.now()),
+    overdue,
     linkedPreviousStudyDate: row.linkedPreviousStudyDate,
     linkedPreviousAccessionNumber: row.linkedPreviousAccessionNumber,
+  };
+}
+
+function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean) {
+  const actionDisabledReason = !canManage
+    ? "Open RISpro in this browser with supervisor access to manage assignments."
+    : !row.canAssign
+      ? row.exclusionReason ?? "This case is not eligible for assignment changes."
+      : null;
+  return {
+    canAssignToMe: canManage && row.canAssign && row.assignmentStatus === "unassigned",
+    canReassign: canManage && row.canAssign,
+    canUnassign: canManage && row.canAssign && row.assignmentStatus === "assigned",
+    actionDisabledReason,
   };
 }
 
@@ -911,8 +963,10 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
   const settings = await readReportingBoardSettings();
   const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
-  const cases = await listUnifiedReportingBoardCases(scopedFilters);
+  const allCases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
+  const cases = allCases.slice(filters.offset, filters.offset + filters.limit);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
+  const accessLevel = !actor ? "public" : !identity ? "public" : identity.moduleCapabilities.includes("doctor_admin") ? "admin" : identity.moduleCapabilities.includes("doctor_supervisor") ? "supervisor" : "doctor";
 
   await insertDoctorAuditEvent(pool, {
     actorUserId: actor?.userId ?? null,
@@ -923,19 +977,34 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     metadata: { tokenScoped: true },
     reason: null,
   }).catch(() => undefined);
+  await touchSavedViewLastAccessed(view.id).catch(() => undefined);
 
   return {
     savedView: { id: view.id, name: view.name, token: view.token },
+    lockedFilters: view.filters,
+    currentDoctorId: identity?.profile?.id ?? null,
     filters,
     filterSummary: filterSummary(filters),
-    counters: mobileCounters(cases, identity?.profile?.id ?? null),
-    cases: cases.map(mobileCase),
+    counters: mobileCounters(allCases, identity?.profile?.id ?? null),
+    totalCount: allCases.length,
+    pagination: {
+      limit: filters.limit,
+      offset: filters.offset,
+      hasMore: filters.offset + cases.length < allCases.length,
+      nextOffset: filters.offset + cases.length < allCases.length ? filters.offset + cases.length : null,
+    },
+    cases: cases.map((row) => ({ ...mobileCase(row), ...mobileCaseActions(row, canManage) })),
     allowedActions: {
+      authenticated: Boolean(actor),
+      accessLevel,
       readOnly: !canManage,
+      readOnlyReason: canManage ? null : actor ? "Doctor supervisor access is required to manage assignments." : "Open RISpro in this browser to manage assignments.",
       assignToMe: canManage,
       reassign: canManage,
-      batchReassign: canManage,
-      copyAccession: Boolean(identity),
+      unassign: canManage,
+      batchReassign: false,
+      copyAccession: true,
+      copyMrn: true,
     },
     refreshedAt: new Date().toISOString(),
   };
@@ -1008,7 +1077,14 @@ export async function unassignReportingBoardMobileCase(actor: Actor, token: stri
 
 export async function listMyReportingBoardSavedViews(actor: Actor) {
   const me = await requireRosterDoctor(actor);
-  return listSavedViews(actor.userId, me.profile!.id);
+  const views = await listSavedViews(actor.userId, me.profile!.id);
+  const settings = await readReportingBoardSettings();
+  return Promise.all(views.map(async (view) => {
+    const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { limit: 1, offset: 0 }));
+    const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
+    const matchingCaseCount = (await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true })).length;
+    return { ...view, matchingCaseCount };
+  }));
 }
 
 export async function createReportingBoardSavedView(
@@ -1047,6 +1123,20 @@ export async function updateReportingBoardSavedView(
     notificationSettings: input.notificationSettings,
     active: input.active,
   });
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return view;
+}
+
+export async function rotateReportingBoardSavedViewToken(actor: Actor, id: number) {
+  const me = await requireRosterDoctor(actor);
+  const view = await rotateSavedViewToken({ id, ownerUserId: actor.userId, ownerDoctorId: me.profile!.id });
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return view;
+}
+
+export async function revokeReportingBoardSavedView(actor: Actor, id: number) {
+  const me = await requireRosterDoctor(actor);
+  const view = await revokeSavedView({ id, ownerUserId: actor.userId, ownerDoctorId: me.profile!.id });
   if (!view) throw new HttpError(404, "Saved view not found.");
   return view;
 }
@@ -1640,6 +1730,27 @@ export async function subscribePublicReportingBoardMobilePush(
     doctorId: null,
     subscription: input.subscription,
     userAgent: input.userAgent,
+  });
+}
+
+export async function unsubscribePublicReportingBoardMobilePush(token: string, subscription: BrowserPushSubscriptionInput) {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return disableReportingBoardPushSubscription({ savedViewId: view.id, subscription });
+}
+
+export async function getPublicReportingBoardMobilePushStatus(token: string, subscription: BrowserPushSubscriptionInput) {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return getReportingBoardPushSubscriptionStatus({ savedViewId: view.id, subscription });
+}
+
+export async function sendPublicReportingBoardMobileTestPush(token: string) {
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  return sendReportingBoardSavedViewTestPush({
+    savedViewId: view.id,
+    actionUrl: `/mobile/reporting-view/${view.token}`,
   });
 }
 

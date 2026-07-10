@@ -388,12 +388,14 @@ export interface ReportingBoardFilters {
   requiresReport?: boolean | null;
   reportStatus?: ReportingBoardReportStatus | null;
   priorityCode?: string | null;
+  urgentOrStat?: boolean | null;
   q?: string | null;
   caseSource?: ReportingBoardCaseSource | null;
   appointmentId?: number | null;
   sortBy?: ReportingBoardSortBy | null;
   sortDirection?: ReportingBoardSortDirection | null;
   pinUrgentToTop?: boolean | null;
+  overdue?: boolean | null;
   limit?: number | null;
   offset?: number | null;
 }
@@ -438,6 +440,11 @@ export interface ReportingBoardSavedView {
   filters: ReportingBoardFilters;
   notificationSettings: ReportingBoardNotificationSettings;
   active: boolean;
+  lastAccessedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  accessMode: "public_readonly";
+  matchingCaseCount?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -496,6 +503,19 @@ export interface ReportingBoardCaseRow {
   reportStatus: "final" | "draft" | "no_report" | "study_not_found" | "unavailable";
   canAssign: boolean;
   exclusionReason: string | null;
+  completedAt: string | null;
+  firstAssignedAt: string | null;
+  currentAssignedAt: string | null;
+  reportFinalAt: string | null;
+  completedToAssignedMinutes: number | null;
+  currentAssignmentAgeMinutes: number | null;
+  completedUnassignedAgeMinutes: number | null;
+  completedAgeMinutes: number | null;
+  overdue: boolean;
+  canAssignToMe: boolean;
+  canReassign: boolean;
+  canUnassign: boolean;
+  actionDisabledReason: string | null;
 }
 
 export interface ReportingBoardStatsSummary {
@@ -738,6 +758,8 @@ export interface ReportingBoardMobileCase {
 
 export interface ReportingBoardMobileResponse {
   savedView: { id: number; name: string; token: string };
+  lockedFilters: ReportingBoardFilters;
+  currentDoctorId: number | null;
   filters: ReportingBoardFilters;
   filterSummary: string[];
   counters: {
@@ -748,13 +770,20 @@ export interface ReportingBoardMobileResponse {
     requiredNotFinal: number;
     overdue: number;
   };
+  totalCount: number;
+  pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null };
   cases: ReportingBoardMobileCase[];
   allowedActions: {
+    authenticated: boolean;
+    accessLevel: "public" | "doctor" | "supervisor" | "admin";
     readOnly: boolean;
+    readOnlyReason: string | null;
     assignToMe: boolean;
     reassign: boolean;
+    unassign: boolean;
     batchReassign: boolean;
     copyAccession: boolean;
+    copyMrn: boolean;
   };
   refreshedAt: string;
 }

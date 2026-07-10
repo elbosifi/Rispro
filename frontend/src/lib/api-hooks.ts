@@ -870,6 +870,24 @@ export async function subscribeReportingBoardMobilePush(token: string, subscript
   });
 }
 
+export async function unsubscribeReportingBoardMobilePush(token: string, subscription: PushSubscriptionJSON): Promise<{ disabled: boolean }> {
+  return api<{ disabled: boolean }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/push-unsubscribe`, {
+    method: "POST",
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export async function fetchReportingBoardMobilePushStatus(token: string, subscription: PushSubscriptionJSON): Promise<{ enabled: boolean; lastSuccessAt: string | null }> {
+  return api<{ enabled: boolean; lastSuccessAt: string | null }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/push-status`, {
+    method: "POST",
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export async function sendReportingBoardMobileTestPush(token: string): Promise<{ attempted: number; sent: number; failed: number }> {
+  return api<{ attempted: number; sent: number; failed: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/test-push`, { method: "POST" });
+}
+
 type ReportingBoardMobileCaseIdentity =
   | { caseType: "appointment"; appointmentId: number }
   | { caseType: "comparison"; comparisonRequestId: number };
@@ -3337,6 +3355,16 @@ export async function updateAppointmentStatus(
 export async function fetchNoShowSummary(): Promise<import("@/types/api").NoShowSummary> {
   const raw = await api<RawRecord>("/v2/read/queue/no-show-summary");
   return { mode: String(raw.mode || "disabled") as import("@/types/api").NoShowSummary["mode"], reviewTime: String(raw.reviewTime || "17:00"), reviewActive: Boolean(raw.reviewActive), pendingCount: Number(raw.pendingCount || 0), oldCleanupCount: Number(raw.oldCleanupCount || 0), autoNoShowEnabled: Boolean(raw.autoNoShowEnabled), manualConfirmationRequired: Boolean(raw.manualConfirmationRequired), lastAutomaticRunAt: typeof raw.lastAutomaticRunAt === "string" ? raw.lastAutomaticRunAt : null, lastAutomaticProcessedCount: Number(raw.lastAutomaticProcessedCount || 0) };
+}
+
+export async function rotateReportingBoardSavedViewToken(id: number): Promise<ReportingBoardSavedView> {
+  const raw = await api<{ savedView: ReportingBoardSavedView }>(`/doctor/reporting-board/saved-views/${id}/rotate-token`, { method: "POST" });
+  return raw.savedView;
+}
+
+export async function revokeReportingBoardSavedView(id: number): Promise<ReportingBoardSavedView> {
+  const raw = await api<{ savedView: ReportingBoardSavedView }>(`/doctor/reporting-board/saved-views/${id}/revoke`, { method: "POST" });
+  return raw.savedView;
 }
 function mapNoShowReviewCandidate(raw: RawRecord): import("@/types/api").NoShowReviewCandidate {
   return { appointmentId: Number(raw.appointment_id || raw.appointmentId || 0), accessionNumber: String(raw.accession_number || raw.accessionNumber || ""), appointmentDate: String(raw.appointment_date || raw.appointmentDate || ""), bookingTime: typeof (raw.booking_time ?? raw.bookingTime) === "string" ? String(raw.booking_time ?? raw.bookingTime) : null, patientId: Number(raw.patient_id || raw.patientId || 0), arabicFullName: String(raw.arabic_full_name || raw.arabicFullName || ""), englishFullName: typeof (raw.english_full_name ?? raw.englishFullName) === "string" ? String(raw.english_full_name ?? raw.englishFullName) : null, phone1: typeof (raw.phone_1 ?? raw.phone1) === "string" ? String(raw.phone_1 ?? raw.phone1) : null, modalityNameAr: String(raw.modality_name_ar || raw.modalityNameAr || ""), modalityNameEn: String(raw.modality_name_en || raw.modalityNameEn || ""), examNameAr: typeof (raw.exam_name_ar ?? raw.examNameAr) === "string" ? String(raw.exam_name_ar ?? raw.examNameAr) : null, examNameEn: typeof (raw.exam_name_en ?? raw.examNameEn) === "string" ? String(raw.exam_name_en ?? raw.examNameEn) : null, arrivalStatus: String(raw.arrival_status || raw.arrivalStatus || "not_checked_in"), eligibility: String(raw.eligibility || ""), eligible: Boolean(raw.eligible) };
