@@ -262,7 +262,7 @@ describe("ModalityPage modality board", () => {
     expect(within(screen.getByTestId("modality-board-row-4")).getByText("10:20")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-1")).getByText("#3")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-1")).getByText("10:30")).toBeTruthy();
-    expect(screen.getByTestId("modality-board-row-2").querySelector("td")?.textContent?.trim()).toBe("—");
+    expect(screen.getByTestId("modality-board-row-2").querySelector("td")?.textContent?.trim()).toBe("Not recorded");
   });
 
   it("keeps scheduled not-arrived patients visible in the board", async () => {
@@ -276,7 +276,7 @@ describe("ModalityPage modality board", () => {
     expect(within(scheduledRow).getByText("Scheduled")).toBeTruthy();
   });
 
-  it("shows same-day sibling appointment modality badges with hover details", async () => {
+  it("shows same-day sibling appointments as compact patient metadata", async () => {
     await openBoard([
       appointment({
         id: 1,
@@ -309,11 +309,8 @@ describe("ModalityPage modality board", () => {
     ]);
 
     const row = screen.getByTestId("modality-board-row-1");
-    const badge = within(row).getByText("MRI");
-    expect(badge).toBeTruthy();
-    expect(badge.getAttribute("title")).toContain("MRI Brain");
-    expect(badge.getAttribute("title")).toContain("ACC-MRI");
-    expect(badge.getAttribute("title")).toContain("Scheduled");
+    expect(within(row).getByText(/1 related/)).toBeTruthy();
+    expect(within(row).queryByText("MRI")).toBeNull();
   });
 
   it("shows Mark Arrived instead of Complete as the scheduled row action", async () => {
@@ -455,7 +452,7 @@ describe("ModalityPage modality board", () => {
     expect(boardAccessions()).toEqual(["ACC-WAIT"]);
   });
 
-  it("shows active filter strip when date is not today", async () => {
+  it("does not repeat the selected date in the compact status-filter strip", async () => {
     const user = await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
     ]);
@@ -464,17 +461,17 @@ describe("ModalityPage modality board", () => {
     await user.type(screen.getByLabelText("Date"), "17/06/2026");
     await user.tab();
 
-    expect(screen.getByTestId("modality-active-filters").textContent).toContain("2026-06-17");
+    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
   });
 
-  it("shows active filter strip when all dates scope is selected", async () => {
+  it("does not repeat all-dates scope in the compact status-filter strip", async () => {
     const user = await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
     ]);
 
     await user.click(screen.getByRole("button", { name: "All Dates" }));
 
-    expect(screen.getByTestId("modality-active-filters").textContent).toContain("All Dates");
+    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
   });
 
   it("reset view returns to operational today scope while preserving selected modality", async () => {
@@ -610,7 +607,7 @@ describe("ModalityPage modality board", () => {
     expect(menu.className).toContain("text-end");
   });
 
-  it("shows elapsed waiting duration from arrivedAt and fallback when missing", async () => {
+  it("shows elapsed waiting duration from arrivedAt and a visible reason when missing", async () => {
     const arrivedAt = new Date(Date.now() - 70 * 60_000).toISOString();
     await openBoard([
       appointment({ id: 10, accessionNumber: "ACC-ELAPSED", status: "arrived", arrivedAt, englishFullName: "Elapsed Patient" }),
@@ -618,7 +615,7 @@ describe("ModalityPage modality board", () => {
     ]);
 
     expect(within(screen.getByTestId("modality-board-row-10")).getByText(/1h (9|10)m/)).toBeTruthy();
-    expect(within(screen.getByTestId("modality-board-row-11")).getAllByText("—").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("modality-board-row-11")).getByText("Arrival time not recorded")).toBeTruthy();
   });
 
   it("marks active waiting rows over 30 minutes with mild warning", async () => {
@@ -668,7 +665,7 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-15");
     expect(row.getAttribute("data-waiting-warning")).toBeNull();
-    expect(within(row).getByText("2h 30m")).toBeTruthy();
+    expect(within(row).getByText("Waited 2h 30m")).toBeTruthy();
   });
 
   it("shows frozen PACS study-start waiting duration for completed auto-completion rows", async () => {
@@ -688,11 +685,11 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-20");
-    expect(within(row).getByText("45m")).toBeTruthy();
+    expect(within(row).getByText("Waited 45m")).toBeTruthy();
     expect(within(row).getByText("PACS study start")).toBeTruthy();
   });
 
-  it("falls back to PACS first seen and marks approximate", async () => {
+  it("shows PACS first seen as approximate duration provenance", async () => {
     const user = await openBoard([
       appointment({
         id: 21,
@@ -708,10 +705,9 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-21");
-    expect(within(row).getByText("35m")).toBeTruthy();
+    expect(within(row).getByText("Waited 35m")).toBeTruthy();
     expect(within(row).getByText("PACS first seen / approximate")).toBeTruthy();
-    expect(within(row).getByText("Approx")).toBeTruthy();
-    expect(within(row).getByText("Approx").getAttribute("title")).toContain("PACS first seen is approximate");
+    expect(within(row).queryByText("Approx")).toBeNull();
   });
 
   it("falls back to autoCompletedAt before completedAt for auto-completion rows without PACS timing", async () => {
@@ -730,8 +726,9 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-22");
-    expect(within(row).getByText("1h 0m")).toBeTruthy();
-    expect(within(row).getAllByText("Auto-completion fallback")).toHaveLength(2);
+    expect(within(row).getByText("Waited 1h 0m")).toBeTruthy();
+    expect(within(row).getByText("Estimated from completion")).toBeTruthy();
+    expect(within(row).queryByText("Auto-completion fallback")).toBeNull();
     expect(within(row).queryByText("Timing missing")).toBeNull();
   });
 
@@ -750,12 +747,11 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-28");
-    expect(within(row).getByText("1h 10m")).toBeTruthy();
-    expect(within(row).getByText("Manual complete fallback")).toBeTruthy();
-    expect(within(row).getByText("Manual fallback")).toBeTruthy();
+    expect(within(row).getByText("Waited 1h 10m")).toBeTruthy();
+    expect(within(row).getByText("Estimated from completion")).toBeTruthy();
   });
 
-  it("marks completed auto-completion rows with missing PACS timing and endpoint", async () => {
+  it("shows a visible missing-duration reason when PACS completion timing is absent", async () => {
     const user = await openBoard([
       appointment({
         id: 29,
@@ -770,8 +766,8 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-29");
-    expect(within(row).getByText("Timing missing")).toBeTruthy();
-    expect(within(row).getByText("Timing missing").getAttribute("title")).toContain("PACS timing missing");
+    expect(within(row).getByTestId("modality-board-waiting-duration").textContent).toContain("Not recorded");
+    expect(within(row).getByText("PACS completion timing unavailable")).toBeTruthy();
   });
 
   it("uses manual completed_at for completed non-auto-completion rows", async () => {
@@ -789,7 +785,7 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-23");
-    expect(within(row).getByText("25m")).toBeTruthy();
+    expect(within(row).getByText("Waited 25m")).toBeTruthy();
     expect(within(row).getByText("Manual complete")).toBeTruthy();
   });
 
@@ -811,7 +807,7 @@ describe("ModalityPage modality board", () => {
     expect(within(row).queryByText(/-\d+m/)).toBeNull();
   });
 
-  it("shows live waiting source for active arrived rows and dash without arrived_at", async () => {
+  it("shows live waiting source and visible missing-arrival duration reason", async () => {
     const arrivedAt = new Date(Date.now() - 70 * 60_000).toISOString();
     await openBoard([
       appointment({ id: 24, accessionNumber: "ACC-LIVE", status: "waiting", arrivedAt, englishFullName: "Live Waiting" }),
@@ -819,12 +815,13 @@ describe("ModalityPage modality board", () => {
     ]);
 
     const liveRow = screen.getByTestId("modality-board-row-24");
-    expect(within(liveRow).getByText(/1h (9|10)m/)).toBeTruthy();
+    expect(within(liveRow).getByText(/Waiting 1h (9|10)m/)).toBeTruthy();
     expect(within(liveRow).getByText("Live waiting")).toBeTruthy();
 
     const missingRow = screen.getByTestId("modality-board-row-25");
     expect(within(missingRow).queryByText("Live waiting")).toBeNull();
-    expect(within(missingRow).getAllByText("—").length).toBeGreaterThan(0);
+    expect(within(missingRow).getByTestId("modality-board-waiting-duration").textContent).toContain("Not recorded");
+    expect(within(missingRow).getByText("Arrival time not recorded")).toBeTruthy();
   });
 
   it("renders both Arabic and English patient names in the board row", async () => {
@@ -841,6 +838,54 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-26");
     expect(within(row).getByText("أحمد علي")).toBeTruthy();
     expect(within(row).getByText("Ahmed Ali")).toBeTruthy();
+  });
+
+  it("keeps one non-wrapping workflow badge separate from case metadata and duration provenance", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 32,
+        accessionNumber: "ACC-STATUS-SEPARATION",
+        status: "completed",
+        caseCategory: "non_oncology",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        autoCompletedAt: "2026-06-18T09:00:00Z",
+        pacsAutoCompletionEnabled: true,
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-32");
+    const status = within(row).getByTestId("modality-board-status");
+    expect(status.textContent).toContain("Completed");
+    expect(status.textContent).not.toContain("Non-Oncology");
+    expect(status.textContent).not.toContain("Estimated from completion");
+    expect(status.querySelector(".state-chip")?.className).toContain("whitespace-nowrap");
+    expect(within(row).getByTestId("modality-board-case-category").textContent).toContain("Non-Oncology");
+    expect(within(row).getByTestId("modality-board-waiting-duration").textContent).toContain("Estimated from completion");
+  });
+
+  it("uses language-specific direction spans for Arabic, English, identifiers, and duration", async () => {
+    languageState.language = "ar";
+    await openBoard([
+      appointment({
+        id: 33,
+        accessionNumber: "ACC-BIDI-33",
+        status: "completed",
+        arabicFullName: "أحمد علي",
+        englishFullName: "Ahmed Ali",
+        examNameAr: "تصوير الدماغ",
+        examNameEn: "CT Brain",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T09:00:00Z",
+      }),
+    ]);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "مكتمل" }));
+    const row = screen.getByTestId("modality-board-row-33");
+    expect(within(row).getByText("أحمد علي").getAttribute("dir")).toBe("rtl");
+    expect(within(row).getByText("Ahmed Ali").getAttribute("dir")).toBe("ltr");
+    expect(within(row).getByTestId("modality-board-accession").getAttribute("dir")).toBe("ltr");
+    expect(within(row).getByTestId("modality-board-waiting-duration").querySelector("[dir=rtl]")).toBeTruthy();
   });
 
   it("shows Primary ID and renders passport identifier instead of MRN or National ID", async () => {
@@ -939,7 +984,7 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("Needs interpreter")).toBeTruthy();
   });
 
-  it("shows assigned protocol summary on the board row", async () => {
+  it("shows assigned protocol as one compact board-row line", async () => {
     await openBoard([
       appointment({
         id: 7,
@@ -958,9 +1003,9 @@ describe("ModalityPage modality board", () => {
     ]);
 
     const row = screen.getByTestId("modality-board-row-7");
-    expect(within(row).getByText("Protocol: MRI Rectum Primary Staging v1.2")).toBeTruthy();
-    expect(within(row).getByText("Scanner: Philips Ingenia Elition 3T")).toBeTruthy();
-    expect(within(row).getByText("Notes available")).toBeTruthy();
+    expect(within(row).getByText("MRI Rectum Primary Staging v1.2")).toBeTruthy();
+    expect(within(row).queryByText("Scanner: Philips Ingenia Elition 3T")).toBeNull();
+    expect(within(row).queryByText("Notes available")).toBeNull();
   });
 
   it("renders Assigned CT Protocol with CT phase terminology", async () => {

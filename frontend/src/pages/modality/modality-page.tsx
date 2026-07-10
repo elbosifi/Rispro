@@ -55,17 +55,13 @@ type MoreMenuState = {
 };
 type WaitingDurationInfo = {
   value: string;
+  displayValue: string;
   source: string;
   title: string;
 };
 type WaitingWarningInfo = {
   level: "mild" | "strong";
   title: string;
-};
-type RowFlag = {
-  label: string;
-  title: string;
-  variant: "warning" | "info" | "neutral";
 };
 
 function isActiveStatus(status: AppointmentStatus): boolean {
@@ -217,7 +213,7 @@ function formatArrivalColumn(language: Language, appointment: AppointmentWithDet
   if (appointment.status === "scheduled" && appointment.bookingTime) {
     return `${chooseLocalized(language, "محجوز", "Booked")} ${formatClockValue(language, appointment.bookingTime)}`;
   }
-  return EMPTY_VALUE;
+  return chooseLocalized(language, "غير مسجل", "Not recorded");
 }
 
 function notesIndicator(language: Language, appointment: AppointmentWithDetails): string {
@@ -274,11 +270,11 @@ function waitingSourceLabel(language: Language, source: "live" | "pacs_start" | 
     case "pacs_first_seen":
       return chooseLocalized(language, "أول ظهور في PACS / تقريبي", "PACS first seen / approximate");
     case "auto_completion_fallback":
-      return chooseLocalized(language, "احتياطي الإكمال التلقائي", "Auto-completion fallback");
+      return chooseLocalized(language, "تقدير من وقت الإكمال", "Estimated from completion");
     case "manual":
       return chooseLocalized(language, "إكمال يدوي", "Manual complete");
     case "manual_fallback":
-      return chooseLocalized(language, "إكمال يدوي احتياطي", "Manual complete fallback");
+      return chooseLocalized(language, "تقدير من وقت الإكمال", "Estimated from completion");
   }
 }
 
@@ -322,8 +318,30 @@ function waitingDurationInfo(language: Language, appointment: AppointmentWithDet
   const value = formatDurationMinutes(language, elapsedMinutes);
   return {
     value,
+    displayValue: appointment.status === "completed"
+      ? chooseLocalized(language, `انتظر ${value}`, `Waited ${value}`)
+      : chooseLocalized(language, `انتظار ${value}`, `Waiting ${value}`),
     source,
     title: `${value} - ${source}`,
+  };
+}
+
+function missingWaitingDurationInfo(language: Language, appointment: AppointmentWithDetails): { label: string; reason: string } {
+  if (timestampValue(appointment.arrivedAt) == null) {
+    return {
+      label: chooseLocalized(language, "غير مسجل", "Not recorded"),
+      reason: chooseLocalized(language, "وقت الوصول غير مسجل", "Arrival time not recorded"),
+    };
+  }
+  if (appointment.status === "completed" && appointment.pacsAutoCompletionEnabled) {
+    return {
+      label: chooseLocalized(language, "غير مسجل", "Not recorded"),
+      reason: chooseLocalized(language, "توقيت الإكمال عبر PACS غير متاح", "PACS completion timing unavailable"),
+    };
+  }
+  return {
+    label: chooseLocalized(language, "غير مسجل", "Not recorded"),
+    reason: chooseLocalized(language, "وقت الإكمال غير مسجل", "Completion time not recorded"),
   };
 }
 
@@ -346,45 +364,6 @@ function waitingWarningInfo(language: Language, appointment: AppointmentWithDeta
     };
   }
   return null;
-}
-
-function timingFlags(language: Language, appointment: AppointmentWithDetails): RowFlag[] {
-  if (appointment.status !== "completed" || !appointment.pacsAutoCompletionEnabled) return [];
-  if (timestampValue(appointment.pacsStudyStartedAt) != null) return [];
-  if (timestampValue(appointment.pacsFirstSeenAt) != null) {
-    return [{
-      label: chooseLocalized(language, "تقريبي", "Approx"),
-      title: chooseLocalized(language, "أول ظهور في PACS تقريبي", "PACS first seen is approximate"),
-      variant: "info",
-    }];
-  }
-  if (timestampValue(appointment.autoCompletedAt) != null) {
-    return [{
-      label: chooseLocalized(language, "احتياطي الإكمال التلقائي", "Auto-completion fallback"),
-      title: chooseLocalized(
-        language,
-        "تم استخدام وقت الإكمال التلقائي لأن توقيت PACS غير متاح",
-        "Auto-completion time used because PACS timing was unavailable"
-      ),
-      variant: "warning",
-    }];
-  }
-  if (timestampValue(appointment.completedAt) != null) {
-    return [{
-      label: chooseLocalized(language, "إكمال يدوي احتياطي", "Manual fallback"),
-      title: chooseLocalized(
-        language,
-        "تم استخدام الإكمال اليدوي لأن توقيت بداية الدراسة من PACS غير متاح",
-        "Manual complete fallback used because PACS study-start timing was unavailable"
-      ),
-      variant: "warning",
-    }];
-  }
-  return [{
-    label: chooseLocalized(language, "توقيت مفقود", "Timing missing"),
-    title: chooseLocalized(language, "توقيت PACS مفقود", "PACS timing missing"),
-    variant: "warning",
-  }];
 }
 
 function priorityDisplay(language: Language, appointment: Pick<AppointmentWithDetails, "priorityNameAr" | "priorityNameEn">): string {
@@ -469,7 +448,7 @@ function rowStatusClass(status: AppointmentStatus, selected: boolean): string {
     case "scheduled":
       return `border-s-4 border-s-slate-300 bg-slate-50/70 text-slate-700 hover:bg-slate-100 ${selectedClass}`.trim();
     case "completed":
-      return `border-s-4 border-s-emerald-300 bg-emerald-50/45 text-slate-600 hover:bg-emerald-50/70 ${selectedClass}`.trim();
+      return `border-s-4 border-s-slate-200 bg-white text-slate-700 hover:bg-slate-50 ${selectedClass}`.trim();
     case "no-show":
       return `border-s-4 border-s-amber-400 bg-amber-50/70 text-slate-700 hover:bg-amber-50 ${selectedClass}`.trim();
     case "cancelled":
@@ -733,12 +712,8 @@ export default function ModalityPage() {
   const currentModalityLabel = currentModality
     ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
     : "";
-  const activeFilterParts = [
-    currentModalityLabel,
-    scope === "all" ? t(language, "modality.scopeAll") : date !== today ? date : "",
-    boardFilter !== "operational" ? boardFilterLabel(language, boardFilter) : "",
-  ].filter(Boolean);
-  const hasActiveFilters = boardFilter !== "operational" || scope !== "day" || date !== today;
+  const activeFilterParts = [boardFilter !== "operational" ? boardFilterLabel(language, boardFilter) : ""].filter(Boolean);
+  const hasActiveFilters = boardFilter !== "operational";
   const lastRefreshedText = dataUpdatedAt > 0
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     : EMPTY_VALUE;
@@ -897,7 +872,8 @@ export default function ModalityPage() {
                       variant={boardFilter === filter ? "primary" : "secondary"}
                       size="sm"
                       onClick={() => setBoardFilter(filter)}
-                      className="h-7 px-2 text-[11px]"
+                      aria-pressed={boardFilter === filter}
+                      className="h-7 px-2 text-[11px] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                     >
                       {label}
                     </Button>
@@ -908,10 +884,10 @@ export default function ModalityPage() {
               {hasActiveFilters ? (
                 <div
                   data-testid="modality-active-filters"
-                  className={`flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-amber-50/70 px-3 py-2 text-xs ${isArabic ? "flex-row-reverse" : ""}`}
+                  className={`flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs ${isArabic ? "flex-row-reverse" : ""}`}
                 >
-                  <div className={`flex flex-wrap items-center gap-2 font-medium text-amber-900 ${isArabic ? "flex-row-reverse" : ""}`}>
-                    <span className="uppercase tracking-[0.12em] text-amber-700">{chooseLocalized(language, "الفلاتر النشطة", "Active filters")}:</span>
+                  <div className={`flex flex-wrap items-center gap-2 font-medium text-slate-700 ${isArabic ? "flex-row-reverse" : ""}`}>
+                    <span className="uppercase tracking-[0.12em] text-slate-500">{chooseLocalized(language, "تصفية", "Filtered")}:</span>
                     <span>{activeFilterParts.join(" • ")}</span>
                   </div>
                   <div className={`flex flex-wrap items-center gap-1.5 ${isArabic ? "flex-row-reverse" : ""}`}>
@@ -946,22 +922,22 @@ export default function ModalityPage() {
                   </div>
                 ) : (
                   <div data-testid="modality-board-table-wrap" dir={isArabic ? "rtl" : "ltr"} className="overflow-x-auto">
-                    <table data-testid="modality-board" dir={isArabic ? "rtl" : "ltr"} className="min-w-[1400px] table-fixed text-start text-[11px]">
+                    <table data-testid="modality-board" dir={isArabic ? "rtl" : "ltr"} className="min-w-[1280px] table-fixed text-start text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
-                          <th className="w-[84px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
-                          <th className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
-                          <th className="w-[112px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
-                          <th className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "مدة الانتظار", "Waiting duration")}</th>
-                          <th className="w-[220px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
-                          <th className="w-[170px] px-2 py-2 font-semibold">{chooseLocalized(language, "المعرف الأساسي", "Primary ID")}</th>
-                          <th className="w-[115px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
-                          <th className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
-                          <th className="w-[190px] px-2 py-2 font-semibold">Protocol</th>
-                          <th className="w-[110px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
-                          <th className="w-[130px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
-                          <th className="w-[80px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
-                          <th className="w-[160px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
+                          <th scope="col" className="w-[64px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
+                          <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
+                          <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
+                          <th scope="col" className="w-[142px] px-2 py-2 font-semibold">{chooseLocalized(language, "مدة الانتظار", "Waiting duration")}</th>
+                          <th scope="col" className="w-[240px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
+                          <th scope="col" className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "المعرف الأساسي", "Primary ID")}</th>
+                          <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
+                          <th scope="col" className="w-[220px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
+                          <th scope="col" className="w-[150px] px-2 py-2 font-semibold">Protocol</th>
+                          <th scope="col" className="w-[90px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
+                          <th scope="col" className="w-[118px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
+                          <th scope="col" className="w-[92px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
+                          <th scope="col" className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
@@ -975,7 +951,7 @@ export default function ModalityPage() {
                       const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
                       const waitingInfo = waitingDurationInfo(language, appointment, elapsedNow);
                       const waitingWarning = waitingWarningInfo(language, appointment, elapsedNow);
-                      const rowFlags = timingFlags(language, appointment);
+                      const missingWaitingInfo = waitingInfo ? null : missingWaitingDurationInfo(language, appointment);
                       const missingPrimaryIdentifier = !hasPrimaryIdentifier(appointment);
                       const englishName = appointment.englishFullName?.trim();
                       const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
@@ -997,61 +973,43 @@ export default function ModalityPage() {
                                   setSelectedAppointmentId(appointment.id);
                                 }
                               }}
-                              className={`cursor-pointer align-top transition-colors ${rowStatusClass(appointment.status, selected)} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
+                              className={`h-16 cursor-pointer align-middle transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${rowStatusClass(appointment.status, selected)} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
                             >
-                              <td className="px-2 py-1 font-mono text-xs font-semibold text-foreground">
-                                {arrivalNumber ? `#${arrivalNumber}` : "—"}
+                              <td className="px-2 py-1.5 font-mono text-xs font-semibold text-foreground" dir="ltr">
+                                {arrivalNumber ? `#${arrivalNumber}` : chooseLocalized(language, "غير مسجل", "Not recorded")}
                               </td>
-                              <td className="px-2 py-1">
-                                <div className="flex flex-wrap items-center gap-1">
-                                  <Badge variant={statusVariant(appointment.status)} size="sm">
+                              <td className="px-2 py-1.5">
+                                <div data-testid="modality-board-status" className="flex items-center">
+                                  <Badge variant={statusVariant(appointment.status)} size="sm" className="max-w-full whitespace-nowrap">
                                     {normalizeStatusLabel(language, appointment.status)}
                                   </Badge>
-                                  <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
-                                  {rowFlags.map((flag) => (
-                                    <Badge key={flag.label} variant={flag.variant} size="sm" title={flag.title} className="text-[10px]">
-                                      {flag.label}
-                                    </Badge>
-                                  ))}
                                 </div>
                               </td>
-                              <td className="px-2 py-1 font-mono text-[11px] text-slate-700">
-                                <p>{formatArrivalColumn(language, appointment)}</p>
+                              <td className="px-2 py-1.5 font-mono text-[11px] text-slate-700" dir="ltr">
+                                <p className="whitespace-nowrap">{formatArrivalColumn(language, appointment)}</p>
                               </td>
-                              <td className="px-2 py-1 text-slate-700">
+                              <td data-testid="modality-board-waiting-duration" className="px-2 py-1.5 text-slate-700">
                                 {waitingInfo ? (
                                   <div title={waitingInfo.title} className="leading-tight">
-                                    <p className="font-mono text-xs font-semibold text-slate-900">{waitingInfo.value}</p>
+                                    <p dir={isArabic ? "rtl" : "ltr"} className="whitespace-nowrap font-mono text-sm font-bold tabular-nums text-slate-950">{waitingInfo.displayValue}</p>
                                     <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">{waitingInfo.source}</p>
                                   </div>
                                 ) : (
-                                  <span className="font-mono text-[11px] text-muted-foreground">{EMPTY_VALUE}</span>
+                                  <div className="leading-tight">
+                                    <p className="text-xs font-semibold text-slate-700">{missingWaitingInfo?.label}</p>
+                                    <p className="mt-0.5 text-[10px] text-muted-foreground">{missingWaitingInfo?.reason}</p>
+                                  </div>
                                 )}
                               </td>
-                              <td className="px-2 py-1">
-                                <p className="text-sm font-bold leading-snug text-foreground">{appointment.arabicFullName}</p>
-                                {showEnglishName ? (
-                                  <p className="text-xs font-medium leading-snug text-slate-600">{englishName}</p>
-                                ) : null}
-                                <p className="text-[10px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)}</p>
-                                {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? (
-                                  <div className="mt-1 flex flex-wrap gap-1">
-                                    {relatedAppointments.slice(0, 3).map((related) => (
-                                      <Badge
-                                        key={related.appointmentId}
-                                        variant="info"
-                                        size="sm"
-                                        title={relatedAppointmentTitle(language, related)}
-                                        aria-label={relatedAppointmentTitle(language, related)}
-                                        className="text-[10px]"
-                                      >
-                                        {relatedAppointmentBadgeText(language, related)}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                ) : null}
+                              <td className="px-2 py-1.5">
+                                <p lang="ar" dir="rtl" className="truncate text-sm font-bold leading-5 text-foreground">{appointment.arabicFullName}</p>
+                                <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-xs leading-4 text-slate-600">
+                                  {showEnglishName ? <span lang="en" dir="ltr">{englishName}</span> : null}
+                                  {appointment.caseCategory ? <span data-testid="modality-board-case-category" className="ms-1 text-[10px] text-slate-500">• {appointment.caseCategory === "oncology" ? chooseLocalized(language, "أورام", "Oncology") : chooseLocalized(language, "غير أورام", "Non-Oncology")}</span> : null}
+                                  {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <span className="ms-1 text-[10px] text-slate-500">• {chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</span> : null}
+                                </p>
                               </td>
-                              <td className="px-2 py-1 text-xs font-medium text-slate-800">
+                              <td className="px-2 py-1.5 text-xs font-medium text-slate-800">
                                 {missingPrimaryIdentifier ? (
                                   <Badge
                                     variant="warning"
@@ -1062,50 +1020,44 @@ export default function ModalityPage() {
                                     {chooseLocalized(language, "لا يوجد معرف أساسي", "No primary ID")}
                                   </Badge>
                                 ) : (
-                                  primaryIdentifierText(language, appointment)
+                                  <span dir="ltr">{primaryIdentifierText(language, appointment)}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1 text-xs font-medium text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), EMPTY_VALUE)}</td>
-                              <td className="px-2 py-1 text-xs font-semibold leading-snug text-slate-800">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || EMPTY_VALUE}</td>
-                              <td className="px-2 py-1 text-[11px] text-slate-700">
+                              <td className="px-2 py-1.5 text-xs font-medium text-slate-700">{formatAgeSex(language, appointment).replace(t(language, "common.na"), chooseLocalized(language, "غير مسجل", "Not recorded"))}</td>
+                              <td className="px-2 py-1.5 text-xs font-semibold text-slate-800">
+                                <span lang={isArabic ? "ar" : "en"} dir={isArabic ? "rtl" : "ltr"} className="block truncate leading-5">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || chooseLocalized(language, "غير مسجل", "Not recorded")}</span>
+                              </td>
+                              <td className="px-2 py-1.5 text-[11px] text-slate-700">
                                 {appointment.protocolAssignmentSummary ? (
-                                  <div className="space-y-0.5">
-                                    <Badge variant="info" size="sm">
-                                      Protocol: {protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}
-                                    </Badge>
-                                    {appointment.protocolAssignmentSummary.scannerName ? (
-                                      <p className="text-[10px] text-muted-foreground">Scanner: {appointment.protocolAssignmentSummary.scannerName}</p>
-                                    ) : null}
-                                    {appointment.protocolAssignmentSummary.protocolNotes || appointment.protocolAssignmentSummary.contrastNotes ? (
-                                      <p className="text-[10px] text-muted-foreground">Notes available</p>
-                                    ) : null}
-                                  </div>
+                                  <span className="block truncate" title={protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}>
+                                    {protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}
+                                  </span>
                                 ) : isProtocolModality(appointment) ? (
                                   <span className="text-[10px] text-muted-foreground">No protocol assigned</span>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">{EMPTY_VALUE}</span>
+                                  <span className="text-xs text-muted-foreground">{chooseLocalized(language, "غير مسجل", "Not recorded")}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1 text-[11px] font-semibold text-slate-700">{priorityDisplay(language, appointment)}</td>
-                              <td className="px-2 py-1">
-                                <code data-testid="modality-board-accession" className="font-mono text-[11px] text-foreground">
+                              <td className="px-2 py-1.5 text-[11px] font-semibold text-slate-700">{priorityDisplay(language, appointment)}</td>
+                              <td className="px-2 py-1.5">
+                                <code data-testid="modality-board-accession" dir="ltr" className="font-mono text-[11px] text-foreground">
                                   {appointment.accessionNumber}
                                 </code>
                               </td>
-                              <td className="px-2 py-1">
+                              <td className="px-2 py-1.5">
                                 {appointment.notes?.trim() || appointment.specialReasonNote?.trim() ? (
                                   <Badge variant="info" size="sm" title={appointment.notes ?? appointment.specialReasonNote ?? undefined}>
                                     {notesIndicator(language, appointment)}
                                   </Badge>
                                 ) : edited ? (
-                                  <Badge variant="warning" size="sm">
+                                  <span className="text-[10px] font-medium text-slate-500">
                                     {t(language, "appointmentEditor.edited")}
-                                  </Badge>
+                                  </span>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">{EMPTY_VALUE}</span>
+                                  <span className="text-xs text-muted-foreground">{chooseLocalized(language, "غير مسجل", "Not recorded")}</span>
                                 )}
                               </td>
-                              <td className="px-2 py-1">
+                              <td className="px-2 py-1.5">
                                 <div className="relative flex items-center gap-1 whitespace-nowrap">
                                   <Button
                                     type="button"
@@ -1113,21 +1065,21 @@ export default function ModalityPage() {
                                     size="sm"
                                     aria-label={t(language, "common.print")}
                                     title={t(language, "common.print")}
-                                    className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
+                                    className="h-10 w-10 shrink-0 border border-slate-300 bg-white p-0 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       handlePrint(appointment.id);
                                     }}
                                   >
                                     <Printer size={14} />
-                                    <span>{t(language, "common.print")}</span>
+                                    <span className="sr-only">{t(language, "common.print")}</span>
                                   </Button>
                                   {canMarkArrived ? (
                                     <Button
                                       type="button"
                                       variant={appointment.status === "scheduled" ? "primary" : "secondary"}
                                       size="sm"
-                                      className="h-8 px-2 text-[11px]"
+                                      className="h-10 w-10 shrink-0 p-0 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
                                       title={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
                                       disabled={statusMutation.isPending}
@@ -1137,7 +1089,7 @@ export default function ModalityPage() {
                                       }}
                                     >
                                       <BadgeCheck size={14} />
-                                      <span>{chooseLocalized(language, "وصول", "Arrived")}</span>
+                                      <span className="sr-only">{chooseLocalized(language, "وصول", "Arrived")}</span>
                                     </Button>
                                   ) : null}
                                   {canCompleteRow ? (
@@ -1145,7 +1097,9 @@ export default function ModalityPage() {
                                       type="button"
                                       variant="primary"
                                       size="sm"
-                                      className="h-8 px-2 text-[11px]"
+                                      aria-label={chooseLocalized(language, "إكمال", "Complete")}
+                                      title={chooseLocalized(language, "إكمال", "Complete")}
+                                      className="h-10 w-10 shrink-0 p-0 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       disabled={completeMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -1153,7 +1107,7 @@ export default function ModalityPage() {
                                       }}
                                     >
                                       {completeMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                                      <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
+                                      <span className="sr-only">{chooseLocalized(language, "إكمال", "Complete")}</span>
                                     </Button>
                                   ) : null}
                                   {canAct || appointment.status === "completed" ? (
@@ -1163,12 +1117,12 @@ export default function ModalityPage() {
                                       size="sm"
                                       aria-label={chooseLocalized(language, "إجراءات إضافية", "More actions")}
                                       title={chooseLocalized(language, "إجراءات إضافية", "More actions")}
-                                      className="h-8 border border-slate-300 bg-white px-2 text-[11px] text-slate-800"
+                                      className="h-10 w-10 shrink-0 border border-slate-300 bg-white p-0 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => handleOpenMoreMenu(event, appointment)}
                                     >
                                       <MoreHorizontal size={14} />
-                                      <span>{chooseLocalized(language, "المزيد", "More")}</span>
+                                      <span className="sr-only">{chooseLocalized(language, "المزيد", "More")}</span>
                                     </Button>
                                   ) : null}
                                 </div>
