@@ -124,14 +124,14 @@ function normalizeDateFilter(value: unknown, fieldName: string): string | null {
   return validateIsoDate(clean, fieldName);
 }
 
-function buildAuditFilterQuery(
+export function buildAuditFilterQuery(
   filters: AuditFilters = {},
   { includeLimit = true }: { includeLimit?: boolean } = {}
 ): { params: unknown[]; whereClause: string; limitClause: string } {
   const cleanLimit = includeLimit ? Math.min(Math.max(Number(filters.limit) || 100, 1), 5000) : null;
   const entityType = normalizeStringFilter(filters.entityType);
   const actionType = normalizeStringFilter(filters.actionType);
-  const changedByUserId = normalizePositiveInteger(filters.changedByUserId, "changedByUserId");
+  const changedByUserId = normalizePositiveInteger(filters.changedByUserId, "changedByUserId", { required: false });
   const dateFrom = normalizeDateFilter(filters.dateFrom, "dateFrom");
   const dateTo = normalizeDateFilter(filters.dateTo, "dateTo");
 

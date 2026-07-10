@@ -62,6 +62,7 @@ import PatientQrSettingsSection from "./patient-qr-settings-section";
 import PatientDuplicateResolverSection from "./patient-duplicate-resolver-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import ActionPinPolicySection from "./action-pin-policy-section";
+import SystemDiagnosticsSection from "./system-diagnostics-section";
 import ExamTypesSection from "./exam-types-section";
 import type {
   User,
@@ -208,7 +209,8 @@ type SettingsSection =
   | "patient_qr_self_service"
   | "sonicdicom_reports"
   | "documents_and_uploads"
-  | "backup_restore";
+  | "backup_restore"
+  | "system_diagnostics";
 
 const SECTION_KEYS: SettingsSection[] = [
   "patient_registration",
@@ -234,7 +236,8 @@ const SECTION_KEYS: SettingsSection[] = [
   "patient_qr_self_service",
   "sonicdicom_reports",
   "documents_and_uploads",
-  "backup_restore"
+  "backup_restore",
+  "system_diagnostics"
 ];
 
 type SettingsMenuSection = Exclude<SettingsSection, "menu">;
@@ -266,6 +269,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   audit_log: "admin",
   documents_and_uploads: "system",
   backup_restore: "system",
+  system_diagnostics: "system",
 };
 
 const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
@@ -293,6 +297,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   if (section === "sante_worklist_hl7") {
     return "Sante Worklist Server";
   }
+  if (section === "system_diagnostics") {
+    return "System Diagnostics";
+  }
   return _t(`settings.section.${section}` as TranslationKey);
 }
 
@@ -309,6 +316,7 @@ export default function SettingsPage() {
   const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[][]>([]);
   const [reauthVersion, setReauthVersion] = useState(0);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const backupRestoreRef = useRef<{ onReAuthSuccess: () => void }>(null);
 
   const handleReAuthSuccess = async () => {
@@ -334,6 +342,7 @@ export default function SettingsPage() {
   };
 
   const visibleSections = SETTINGS_MENU_SECTIONS.filter((key) => {
+    if (key === "system_diagnostics" && user?.role !== "super_admin") return false;
     const label = sectionLabel(t, key);
     const query = settingsQuery.trim().toLowerCase();
     const matchesGroup = settingsGroup === "all" || SECTION_GROUPS[key] === settingsGroup;
@@ -470,6 +479,7 @@ export default function SettingsPage() {
             {section === "orthanc_mwl_sync" && <OrthancMwlSection onReAuthRequired={requestReAuth} />}
             {section === "sante_worklist_hl7" && <SanteWorklistSection onReAuthRequired={requestReAuth} />}
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
+            {section === "system_diagnostics" && user?.role === "super_admin" && <SystemDiagnosticsSection onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
           </Card>
@@ -686,7 +696,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
 function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const limit = 50;
-  const { data, isLoading, error } = useQuery({ queryKey: ["audit", limit], queryFn: () => fetchAuditEntries(limit) });
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ["audit", limit], queryFn: () => fetchAuditEntries(limit) });
 
   const handleExport = async () => {
     try {
@@ -699,7 +709,7 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["audit", String(limit)])} />;
-    return <QueryError message={msg} />;
+    return <div className="space-y-2"><h4 className="font-semibold text-red-700">Failed to load audit log</h4><p className="description-center">{msg}</p><Button variant="secondary" onClick={() => void refetch()}>Retry</Button></div>;
   }
   return (
     <div>
@@ -709,16 +719,16 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
           Export CSV
         </Button>
       </div>
-      {isLoading ? <p className="description-center">{t("settings.loading")}</p> : (
+      {isLoading ? <p className="description-center">Loading audit log…</p> : data?.entries?.length ? (
         <ul className="space-y-2">
-          {data?.entries?.slice(0, 10).map((entry: any) => (
+          {data.entries.map((entry: any) => (
             <li key={entry.id} className="p-3 bg-stone-50 dark:bg-stone-700 rounded-lg text-sm">
               <p className="text-stone-900 dark:text-white font-medium">{entry.actionType} - {entry.entityType}</p>
               <p className="description-center text-xs mt-1">{formatDateTimeLy(entry.createdAt)}</p>
             </li>
           ))}
         </ul>
-      )}
+      ) : <p className="description-center">No audit log entries found.</p>}
     </div>
   );
 }

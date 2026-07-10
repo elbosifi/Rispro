@@ -3546,6 +3546,19 @@ export async function exportAuditCSV() {
   URL.revokeObjectURL(url);
 }
 
+export async function fetchSystemDiagnosticsSummary() {
+  return api<Record<string, unknown>>("/admin/system-diagnostics/summary");
+}
+
+export async function fetchSystemDiagnosticEvents(params: Record<string, string | number | undefined> = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== "").map(([key, value]) => [key, String(value)])).toString();
+  return api<{ events: RawRecord[]; page: number; pageSize: number; total: number }>(`/admin/system-diagnostics/events${query ? `?${query}` : ""}`);
+}
+
+export async function fetchSystemDiagnosticEvent(eventId: string) {
+  return api<{ event: RawRecord }>(`/admin/system-diagnostics/events/${encodeURIComponent(eventId)}`);
+}
+
 export async function fetchExamTypes(includeInactive = false): Promise<{ modalities: RawRecord[]; examTypes: RawRecord[] }> {
   const query = includeInactive ? "?includeInactive=true" : "";
   const raw = await api<{ modalities: RawRecord[]; examTypes: RawRecord[] }>(`/settings/exam-types${query}`);

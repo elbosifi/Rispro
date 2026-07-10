@@ -28,8 +28,11 @@ import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/ro
 import { reportingBoardPublicRouter } from "./modules/doctor-portal/reporting-board-public-routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
+import { requestIdMiddleware } from "./middleware/request-id.js";
 import { blockForcedPasswordChange } from "./middleware/auth.js";
 import { cleanupStaleDicomRemapUploadTempDirs } from "./services/dicom-remap-service.js";
+import { cleanupExpiredDiagnosticEvents } from "./services/system-diagnostics-service.js";
+import { systemDiagnosticsRouter } from "./routes/system-diagnostics.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,11 +56,15 @@ export function createApp(): Application {
   void cleanupStaleDicomRemapUploadTempDirs().catch((error) => {
     console.error("Failed to clean stale DICOM remap upload temp directories.", error);
   });
+  void cleanupExpiredDiagnosticEvents().catch((error) => {
+    console.error("System diagnostics retention cleanup failed.", error);
+  });
 
   app.disable("x-powered-by");
   app.set("trust proxy", env.trustProxy);
 
   app.use(securityHeaders);
+  app.use(requestIdMiddleware);
 
   // ---- Conditional JSON parser ------------------------------------------
   // Some upload endpoints accept base64-encoded files that can exceed the
@@ -128,6 +135,7 @@ export function createApp(): Application {
   app.use("/api/scan-sessions", scanSessionsRouter);
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/admin", adminRouter);
+  app.use("/api/admin/system-diagnostics", systemDiagnosticsRouter);
   app.use("/api/modality", modalityRouter);
   app.use("/api/audit", auditRouter);
   app.use("/api/comparisons", comparisonsRouter);

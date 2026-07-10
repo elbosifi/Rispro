@@ -20,6 +20,7 @@ import {
   moveDocumentsToConfiguredStorage,
   testConfiguredStorageConnectivity,
 } from "../services/document-service.js";
+import { recordDiagnosticEvent } from "../services/system-diagnostics-service.js";
 
 export const adminRouter = express.Router();
 
@@ -84,7 +85,12 @@ adminRouter.get(
     const createdAt = new Date().toISOString();
     const backupName = `rispro-backup-${createdAt.replace(/[:.]/g, "-")}.rispro.zip`;
     setBackupV3DownloadHeaders(res, backupName);
-    await streamBackupV3Archive({ currentUserId: req.user!.sub, passphrase, output: res, backupName });
+    try {
+      await streamBackupV3Archive({ currentUserId: req.user!.sub, passphrase, output: res, backupName });
+    } catch (error) {
+      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "v3_backup", operation: "generate", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 backup generation failed.", technicalDetails: error instanceof Error ? error.stack : error });
+      throw error;
+    }
   })
 );
 
@@ -101,10 +107,15 @@ adminRouter.get(
 adminRouter.post(
   "/restore/v3/preview",
   asyncRoute(async (req: Request, res: Response) => {
+    recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "v3_preview", operation: "started", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 restore preview started." });
     const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-preview-");
     try {
       const result = await previewBackupV3RestoreFromArchive(staged.archivePath, staged.stagingDir, staged.passphrase);
+      recordDiagnosticEvent({ severity: result.ok ? "info" : "warning", source: "backup_restore", component: "v3_preview", operation: result.ok ? "succeeded" : "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: result.ok ? "V3 restore preview succeeded." : "V3 restore preview failed validation." });
       res.json(result);
+    } catch (error) {
+      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "v3_preview", operation: "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 restore preview failed.", technicalDetails: error instanceof Error ? error.stack : error });
+      throw error;
     } finally {
       await cleanupBackupV3StagedUpload(staged).catch(() => undefined);
     }
@@ -148,6 +159,7 @@ adminRouter.post(
     if (process.env.RESTORE_V3_FULL_ENABLED !== "true") {
       throw new HttpError(403, "V3 full restore is disabled by configuration.");
     }
+    recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "full_restore", operation: "started", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 full restore started." });
     const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-full-");
     try {
       requireBackupV3RestoreConfirmation(staged.confirmation);
@@ -161,7 +173,11 @@ adminRouter.post(
         passphrase: staged.passphrase,
         stagingDir: staged.stagingDir,
       });
+      recordDiagnosticEvent({ severity: result.ok ? "info" : "error", source: "backup_restore", component: "full_restore", operation: result.ok ? "succeeded" : "partial_failure", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: result.ok ? "V3 full restore succeeded." : "V3 full restore completed with a partial failure.", metadata: { partialComponent: result.partialFailure?.component } });
       res.json(result);
+    } catch (error) {
+      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "full_restore", operation: "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 full restore failed.", technicalDetails: error instanceof Error ? error.stack : error });
+      throw error;
     } finally {
       await cleanupBackupV3StagedUpload(staged).catch(() => undefined);
     }
@@ -191,7 +207,11 @@ adminRouter.post(
 adminRouter.post(
   "/system/restart",
   asyncRoute(async (req: Request, res: Response) => {
-    const result = await scheduleSystemRestart(req.user!.sub);
+    let result;
+    try { result = await scheduleSystemRestart(req.user!.sub); } catch (error) {
+      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "restart_scheduling", operation: "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Restart scheduling failed.", technicalDetails: error instanceof Error ? error.stack : error });
+      throw error;
+    }
     res.json(result);
   })
 );
