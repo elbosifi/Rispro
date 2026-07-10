@@ -503,19 +503,6 @@ export interface ReportingBoardCaseRow {
   reportStatus: "final" | "draft" | "no_report" | "study_not_found" | "unavailable";
   canAssign: boolean;
   exclusionReason: string | null;
-  completedAt: string | null;
-  firstAssignedAt: string | null;
-  currentAssignedAt: string | null;
-  reportFinalAt: string | null;
-  completedToAssignedMinutes: number | null;
-  currentAssignmentAgeMinutes: number | null;
-  completedUnassignedAgeMinutes: number | null;
-  completedAgeMinutes: number | null;
-  overdue: boolean;
-  canAssignToMe: boolean;
-  canReassign: boolean;
-  canUnassign: boolean;
-  actionDisabledReason: string | null;
 }
 
 export interface ReportingBoardStatsSummary {
@@ -752,6 +739,19 @@ export interface ReportingBoardMobileCase {
   assignmentStatus: "assigned" | "unassigned";
   canAssign: boolean;
   exclusionReason: string | null;
+  completedAt: string | null;
+  firstAssignedAt: string | null;
+  currentAssignedAt: string | null;
+  reportFinalAt: string | null;
+  completedToAssignedMinutes: number | null;
+  currentAssignmentAgeMinutes: number | null;
+  completedUnassignedAgeMinutes: number | null;
+  completedAgeMinutes: number | null;
+  overdue: boolean;
+  canAssignToMe: boolean;
+  canReassign: boolean;
+  canUnassign: boolean;
+  actionDisabledReason: string | null;
   linkedPreviousStudyDate?: string | null;
   linkedPreviousAccessionNumber?: string | null;
 }
