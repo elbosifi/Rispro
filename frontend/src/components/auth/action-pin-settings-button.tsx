@@ -19,7 +19,7 @@ function friendlyError(error: unknown): string {
   return message === "Invalid username or password." ? "Account password is incorrect." : message;
 }
 
-export function ActionPinSettingsButton() {
+export function ActionPinSettingsButton({ variant = "icon" }: { variant?: "icon" | "drawer" }) {
   const { language } = useLanguage();
   const isArabic = language === "ar";
   const [isOpen, setIsOpen] = useState(false);
@@ -125,12 +125,15 @@ export function ActionPinSettingsButton() {
     <>
       <button
         type="button"
-        className="btn-ghost text-xs"
+        className={variant === "drawer"
+          ? "flex w-full items-center justify-start gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+          : "btn-ghost text-xs"}
         onClick={() => setIsOpen(true)}
         aria-label={isArabic ? "إدارة PIN الأمان" : "Manage Security PIN"}
         title={isArabic ? "PIN الأمان" : "Manage Security PIN"}
       >
         <ShieldCheck className="h-4 w-4" />
+        {variant === "drawer" ? (isArabic ? "إدارة PIN الأمان" : "Manage Security PIN") : null}
       </button>
 
       {isOpen && (

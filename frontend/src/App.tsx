@@ -71,7 +71,7 @@ function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
   const { data } = useQuery({ queryKey: ["queue", "no-show-summary"], queryFn: fetchNoShowSummary, enabled, refetchInterval: 30_000, staleTime: 15_000, retry: false });
   if (!enabled || !data || (!data.pendingCount && !(data.mode === "automatic" && data.lastAutomaticProcessedCount > 0))) return null;
   const label = data.mode === "manual" ? `No-show review · ${data.pendingCount}` : `No-shows processed · ${data.lastAutomaticProcessedCount}`;
-  return <button type="button" onClick={() => navigate("/queue/no-shows")} className="inline-flex max-w-[11rem] items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/30 dark:text-amber-100" aria-label={label}><Clock3 size={14}/><span className="truncate">{label}</span></button>;
+  return <button type="button" onClick={() => navigate("/queue/no-shows")} className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/30 dark:text-amber-100" aria-label={label} title={label}><Clock3 size={14}/><span className="hidden max-w-[11rem] truncate sm:inline">{label}</span></button>;
 }
 
 function QueueCheckInAccessRoute() {
@@ -241,7 +241,7 @@ function AppContent() {
             type="button"
             onClick={() => navigate("/patients")}
             aria-label={language === "ar" ? "رجوع" : "Back"}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-full border px-3 text-xs font-medium whitespace-nowrap shadow-sm transition-all hover:shadow-md active:scale-95 flex-shrink-0"
+            className="inline-flex h-8 flex-shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium whitespace-nowrap shadow-sm transition-all hover:shadow-md active:scale-95 lg:h-10 lg:gap-2 lg:px-3 lg:text-xs"
             style={{
               backgroundColor: "var(--accent)",
               borderColor: "var(--accent)",
@@ -256,7 +256,7 @@ function AppContent() {
           <>
             <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
             <SchedulingOverrideApprovalCenter user={user} />
-            <ActionPinSettingsButton />
+            <span className="hidden lg:inline-flex"><ActionPinSettingsButton /></span>
           </>
         )}
         onUndo={() => navigate(-1)}
@@ -329,6 +329,9 @@ function AppContent() {
         isRtl={language === "ar"}
         onNavigate={handleNavigate}
         onClose={() => setMobileNavOpen(false)}
+        onToggleLanguage={toggleLanguage}
+        onLogout={logout}
+        accountActions={<ActionPinSettingsButton variant="drawer" />}
       />
 
       <ToastViewport />

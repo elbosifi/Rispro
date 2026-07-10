@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
-import { NAV_ITEMS, SideNav, TopBar } from "./navigation";
+import { NAV_ITEMS, MobileDrawer, SideNav, TopBar } from "./navigation";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX, type PageVisibilityMatrix } from "@/lib/page-visibility";
 
 vi.mock("lucide-react", () => {
@@ -99,6 +99,55 @@ describe("Navigation governance", () => {
 
     expect(screen.getByRole("button", { name: "Override requests" })).toBeTruthy();
     expect(NAV_ITEMS.some((item) => item.route === "scheduling.override.requests")).toBe(true);
+  });
+
+  it("keeps only menu and global search as the normal mobile controls", () => {
+    render(
+      <TopBar
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Toggle navigation" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search patients or registrations" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo" }).className).toContain("hidden");
+    expect(screen.getByRole("button", { name: "Redo" }).className).toContain("hidden");
+    expect(screen.queryByRole("button", { name: "Manage Security PIN" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "عربي" })?.className).toContain("hidden");
+  });
+
+  it("renders signed-in account actions in the mobile drawer", async () => {
+    const onToggleLanguage = vi.fn();
+    const onLogout = vi.fn();
+    render(
+      <MobileDrawer
+        isOpen
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception User", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+        onClose={() => {}}
+        onToggleLanguage={onToggleLanguage}
+        onLogout={onLogout}
+        accountActions={<button type="button">Manage Security PIN</button>}
+      />
+    );
+
+    expect(screen.getByText("Reception User")).toBeTruthy();
+    expect(screen.getByText("receptionist")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "العربية" }));
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(onToggleLanguage).toHaveBeenCalledOnce();
+    expect(onLogout).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Manage Security PIN" })).toBeTruthy();
   });
 
   it("shows Override Requests nav for receptionist, supervisor, and superadmin by default", () => {

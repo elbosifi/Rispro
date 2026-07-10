@@ -263,7 +263,7 @@ export function TopBar({
               <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
               <span className="text-xs font-bold">R</span>
             </div>
-            <div className="min-w-0">
+            <div className="hidden min-w-0 lg:block">
               <h1 className="truncate text-base font-display" style={{ color: "var(--foreground)" }}>
                 {t(language, "shell.reception")}
               </h1>
@@ -299,7 +299,7 @@ export function TopBar({
           {!pageAction && (
             <>
               <button
-                className="btn-ghost"
+                className="btn-ghost hidden lg:inline-flex"
                 onClick={onUndo}
                 aria-label={t(language, "navPanel.undo")}
               >
@@ -307,7 +307,7 @@ export function TopBar({
               </button>
 
               <button
-                className="btn-ghost"
+                className="btn-ghost hidden lg:inline-flex"
                 onClick={onRedo}
                 aria-label={t(language, "navPanel.redo")}
               >
@@ -318,7 +318,7 @@ export function TopBar({
 
           {/* Language toggle */}
           <button
-            className="btn-ghost text-xs font-mono"
+            className="btn-ghost hidden text-xs font-mono lg:inline-flex"
             onClick={onToggleLanguage}
           >
             <Languages className="w-4 h-4" />
@@ -328,7 +328,7 @@ export function TopBar({
           {/* User badge */}
           {user && (
             <div
-              className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-xl border"
+              className="hidden items-center gap-3 rounded-xl border px-3 py-1.5 md:flex"
               style={{
                 backgroundColor: "var(--card)",
                 borderColor: "var(--border)",
@@ -357,7 +357,7 @@ export function TopBar({
 
           {/* Logout */}
           <button
-            className="btn-ghost text-xs"
+            className="btn-ghost hidden text-xs lg:inline-flex"
             style={{ color: "var(--accent)" }}
             onClick={onLogout}
           >
@@ -474,7 +474,10 @@ export function MobileDrawer({
   language,
   isRtl,
   onNavigate,
-  onClose
+  onClose,
+  onToggleLanguage,
+  onLogout,
+  accountActions
 }: {
   isOpen: boolean;
   currentRoute: string;
@@ -483,6 +486,9 @@ export function MobileDrawer({
   isRtl: boolean;
   onNavigate: (route: string) => void;
   onClose: () => void;
+  onToggleLanguage: () => void;
+  onLogout: () => void;
+  accountActions?: ReactNode;
 }) {
   const { data: pageVisibilityMatrix } = useQuery({
     queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
@@ -542,6 +548,29 @@ export function MobileDrawer({
               }}
             />
           ))}
+        </div>
+
+        <div className="mt-2 space-y-2 border-t p-3" style={{ borderColor: "var(--border)" }}>
+          {user ? (
+            <div className="flex items-center gap-3 rounded-xl border bg-card px-3 py-2" style={{ borderColor: "var(--border)" }}>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white" style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))" }}>
+                {user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U"}
+              </div>
+              <div className="min-w-0 text-start">
+                <p className="truncate text-sm font-medium text-foreground">{user.fullName}</p>
+                <p className="truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{user.role}</p>
+              </div>
+            </div>
+          ) : null}
+          <button type="button" className="flex w-full items-center justify-start rounded-lg border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted" style={{ borderColor: "var(--border)" }} onClick={onToggleLanguage}>
+            <Languages className="me-2 h-4 w-4" />
+            {isRtl ? "English" : "العربية"}
+          </button>
+          {accountActions}
+          <button type="button" className="flex w-full items-center justify-start rounded-lg border px-3 py-2 text-sm font-medium text-accent transition-colors hover:bg-muted" style={{ borderColor: "var(--border)" }} onClick={onLogout}>
+            <LogOut className="me-2 h-4 w-4" />
+            {t(language, "common.signOut")}
+          </button>
         </div>
 
         {/* Footer */}
