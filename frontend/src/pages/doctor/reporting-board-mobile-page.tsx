@@ -32,6 +32,10 @@ function chipClass(tone: "teal" | "blue" | "purple" | "orange" | "red" | "slate"
   return `inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${tones[tone]}`;
 }
 
+function tabClass(tone: "teal" | "blue" | "orange" | "red" | "slate", active: boolean) {
+  return `${chipClass(tone)} ${active ? "ring-2 ring-offset-2 ring-teal-600 shadow-sm" : "opacity-80"}`;
+}
+
 function priorityTone(code: string | null): "red" | "orange" | "slate" {
   const normalized = String(code || "").toLowerCase();
   if (normalized === "stat" || normalized === "urgent") return normalized === "stat" ? "red" : "orange";
@@ -136,6 +140,7 @@ export function ReportingBoardMobilePage() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLastSuccessAt, setPushLastSuccessAt] = useState<string | null>(null);
   const refreshInFlight = useRef(false);
+  const loadedOffsets = useRef<number[]>([0]);
 
   const viewQuery = useQuery({
     queryKey: ["reporting-board", "mobile", token, filters],
@@ -147,6 +152,25 @@ export function ReportingBoardMobilePage() {
     queryFn: fetchRosterDoctors,
     enabled: Boolean(viewQuery.data?.allowedActions.reassign),
   });
+
+  const refreshLoadedPages = async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    try {
+      const offsets = [...new Set(loadedOffsets.current)].sort((left, right) => left - right);
+      const pages = await Promise.all(offsets.map(async (offset) => ({
+        offset,
+        page: await fetchReportingBoardMobileView(token, { ...filters, offset }),
+      })));
+      const currentPage = pages.find((item) => item.offset === (filters.offset ?? 0))?.page;
+      if (currentPage) queryClient.setQueryData(["reporting-board", "mobile", token, filters], currentPage);
+      const deduplicated = new Map<string, ReportingBoardMobileCase>();
+      pages.sort((left, right) => left.offset - right.offset).forEach(({ page }) => page.cases.forEach((row) => deduplicated.set(row.caseKey, row)));
+      setLoadedCases([...deduplicated.values()]);
+    } finally {
+      refreshInFlight.current = false;
+    }
+  };
 
   useEffect(() => {
     if (!viewQuery.data) return;
@@ -172,13 +196,8 @@ export function ReportingBoardMobilePage() {
 
   useEffect(() => {
     const refreshVisible = async () => {
-      if (document.visibilityState !== "visible" || refreshInFlight.current) return;
-      refreshInFlight.current = true;
-      try {
-        await viewQuery.refetch({ cancelRefetch: false });
-      } finally {
-        refreshInFlight.current = false;
-      }
+      if (document.visibilityState !== "visible") return;
+      await refreshLoadedPages();
     };
     const onVisibilityChange = () => { if (document.visibilityState === "visible") void refreshVisible(); };
     const interval = window.setInterval(() => void refreshVisible(), 50_000);
@@ -187,21 +206,23 @@ export function ReportingBoardMobilePage() {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [viewQuery.refetch]);
+  }, [filters, token]);
 
-  const refresh = () => viewQuery.refetch({ cancelRefetch: false });
+  const refresh = () => refreshLoadedPages();
   const updateTemporaryFilters = (updater: (current: ReportingBoardFilters) => ReportingBoardFilters) => {
     setLoadedCases([]);
+    loadedOffsets.current = [0];
     setFilters((current) => ({ ...updater(current), limit: 40, offset: 0 }));
   };
   const resetTemporaryFilters = () => {
     setSearch("");
     setLoadedCases([]);
+    loadedOffsets.current = [0];
     setFilters({ limit: 40, offset: 0 });
   };
   const applySearch = () => updateTemporaryFilters((current) => ({ ...current, q: search.trim() || null }));
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["reporting-board", "mobile", token] });
+    await refreshLoadedPages();
   };
   const assignMutation = useMutation({
     mutationFn: (row: ReportingBoardMobileCase) => assignReportingBoardMobileCaseToMe(token, mobileCaseIdentity(row)),
@@ -269,7 +290,13 @@ export function ReportingBoardMobilePage() {
     onError: (error) => setPushMessage(error instanceof Error ? error.message : "Could not disable notifications."),
   });
   const pushTestMutation = useMutation({
-    mutationFn: () => sendReportingBoardMobileTestPush(token),
+    mutationFn: async () => {
+      if (!pushSupported()) throw new Error("Browser notifications are not supported on this device.");
+      const registration = await navigator.serviceWorker.getRegistration("/rispro-push-sw.js");
+      const subscription = await registration?.pushManager.getSubscription();
+      if (!subscription) throw new Error("Enable notifications on this device before sending a test.");
+      return sendReportingBoardMobileTestPush(token, subscription.toJSON());
+    },
     onSuccess: (result) => setPushMessage(result.sent > 0 ? "Test notification sent." : "No active subscription is available for a test notification."),
     onError: (error) => setPushMessage(error instanceof Error ? error.message : "Could not send a test notification."),
   });
@@ -287,6 +314,11 @@ export function ReportingBoardMobilePage() {
   if (viewQuery.isError || !data) {
     return <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-5 text-slate-950">Saved view is unavailable.</main>;
   }
+
+  const myCasesLocked = Boolean(data.lockedFilters.assignedDoctorId && data.lockedFilters.assignedDoctorId !== data.currentDoctorId);
+  const unassignedLocked = data.lockedFilters.assignmentStatus === "assigned" || Boolean(data.lockedFilters.assignedDoctorId);
+  const urgentLocked = Boolean(data.lockedFilters.priorityCode && !["urgent", "stat"].includes(String(data.lockedFilters.priorityCode).toLowerCase()));
+  const overdueLocked = ["final", "no_report"].includes(String(data.lockedFilters.reportStatus ?? "").toLowerCase());
 
   return (
     <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-5 text-slate-950">
@@ -331,11 +363,11 @@ export function ReportingBoardMobilePage() {
           </button>
         </div>
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {data.currentDoctorId && <button type="button" aria-pressed={filters.assignedDoctorId === data.currentDoctorId} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignedDoctorId: data.currentDoctorId, assignmentStatus: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={chipClass("teal")}>My cases {data.counters.assignedToMe}</button>}
-          <button type="button" aria-pressed={filters.assignmentStatus === "unassigned"} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={chipClass("slate")}>Unassigned {data.counters.unassigned}</button>
-          <button type="button" aria-pressed={filters.urgentOrStat === true} onClick={() => updateTemporaryFilters((current) => ({ ...current, urgentOrStat: true, priorityCode: null, assignmentStatus: null, assignedDoctorId: null, overdue: false, reportStatus: null }))} className={chipClass("orange")}>Urgent {data.counters.urgent}</button>
-          <button type="button" aria-pressed={filters.overdue === true} onClick={() => updateTemporaryFilters((current) => ({ ...current, overdue: true, urgentOrStat: false, priorityCode: null, reportStatus: "required_not_final" }))} className={chipClass("red")}>Overdue {data.counters.overdue}</button>
-          <button type="button" aria-pressed={!filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat} onClick={resetTemporaryFilters} className={chipClass("blue")}>All {data.counters.total}</button>
+          {data.currentDoctorId && <button type="button" aria-pressed={filters.assignedDoctorId === data.currentDoctorId} disabled={myCasesLocked} title={myCasesLocked ? "This saved view is locked to another assigned doctor." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignedDoctorId: data.currentDoctorId, assignmentStatus: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("teal", filters.assignedDoctorId === data.currentDoctorId)}>My cases {data.counters.assignedToMe}</button>}
+          <button type="button" aria-pressed={filters.assignmentStatus === "unassigned"} disabled={unassignedLocked} title={unassignedLocked ? "This saved view is locked to assigned cases." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("slate", filters.assignmentStatus === "unassigned")}>Unassigned {data.counters.unassigned}</button>
+          <button type="button" aria-pressed={filters.urgentOrStat === true} disabled={urgentLocked} title={urgentLocked ? "This saved view is locked to a non-urgent priority." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, urgentOrStat: true, priorityCode: null, assignmentStatus: null, assignedDoctorId: null, overdue: false, reportStatus: null }))} className={tabClass("orange", filters.urgentOrStat === true)}>Urgent {data.counters.urgent}</button>
+          <button type="button" aria-pressed={filters.overdue === true} disabled={overdueLocked} title={overdueLocked ? "This saved view is locked to a report state that cannot be overdue." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, overdue: true, urgentOrStat: false, priorityCode: null, reportStatus: "required_not_final" }))} className={tabClass("red", filters.overdue === true)}>Overdue {data.counters.overdue}</button>
+          <button type="button" aria-pressed={!filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat} onClick={resetTemporaryFilters} className={tabClass("blue", !filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat)}>All {data.counters.total}</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="font-semibold text-slate-500">Saved scope:</span>
@@ -361,7 +393,7 @@ export function ReportingBoardMobilePage() {
         {loadedCases.map((row) => <CaseCard key={row.caseKey} row={row} onOpen={() => setSelectedCase(row)} />)}
         {loadedCases.length === 0 && <p className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-sm text-slate-500">No cases match this saved view.</p>}
         <p className="text-center text-xs text-slate-500">Loaded {loadedCases.length} of {data.totalCount} cases</p>
-        {data.pagination.hasMore && <button type="button" disabled={viewQuery.isFetching} onClick={() => setFilters((current) => ({ ...current, offset: data.pagination.nextOffset ?? current.offset }))} className="h-11 rounded-xl border border-slate-300 bg-white text-sm font-bold disabled:opacity-50">{viewQuery.isFetching ? "Loading..." : "Load more"}</button>}
+        {data.pagination.hasMore && <button type="button" disabled={viewQuery.isFetching} onClick={() => { const nextOffset = data.pagination.nextOffset; if (nextOffset === null) return; loadedOffsets.current = [...new Set([...loadedOffsets.current, nextOffset])]; setFilters((current) => ({ ...current, offset: nextOffset })); }} className="h-11 rounded-xl border border-slate-300 bg-white text-sm font-bold disabled:opacity-50">{viewQuery.isFetching ? "Loading..." : "Load more"}</button>}
       </section>
 
       {filterDrawerOpen && (

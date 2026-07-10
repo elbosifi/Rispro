@@ -14,6 +14,7 @@ const fetchReportingBoardMobilePushConfigMock = vi.fn();
 const subscribeReportingBoardMobilePushMock = vi.fn();
 const unsubscribeReportingBoardMobilePushMock = vi.fn();
 const sendReportingBoardMobileTestPushMock = vi.fn();
+const fetchReportingBoardMobilePushStatusMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardMobileView: (...args: unknown[]) => fetchReportingBoardMobileViewMock(...args),
@@ -25,6 +26,7 @@ vi.mock("@/lib/api-hooks", () => ({
   subscribeReportingBoardMobilePush: (...args: unknown[]) => subscribeReportingBoardMobilePushMock(...args),
   unsubscribeReportingBoardMobilePush: (...args: unknown[]) => unsubscribeReportingBoardMobilePushMock(...args),
   sendReportingBoardMobileTestPush: (...args: unknown[]) => sendReportingBoardMobileTestPushMock(...args),
+  fetchReportingBoardMobilePushStatus: (...args: unknown[]) => fetchReportingBoardMobilePushStatusMock(...args),
 }));
 
 const mobileResponse: ReportingBoardMobileResponse = {
@@ -142,6 +144,7 @@ describe("ReportingBoardMobilePage", () => {
     unassignReportingBoardMobileCaseMock.mockResolvedValue({ unassigned: true, appointmentId: 42, assignmentId: 2 });
     fetchReportingBoardMobilePushConfigMock.mockResolvedValue({ enabled: true, publicKey: "AAAA" });
     subscribeReportingBoardMobilePushMock.mockResolvedValue({ subscriptionId: 7 });
+    fetchReportingBoardMobilePushStatusMock.mockResolvedValue({ enabled: false, lastSuccessAt: null });
   });
 
   it("renders a mobile read-only saved view without desktop navigation", async () => {
@@ -289,5 +292,33 @@ describe("ReportingBoardMobilePage", () => {
     await waitFor(() => expect(fetchReportingBoardMobilePushConfigMock).toHaveBeenCalledWith("tok-9"));
     await waitFor(() => expect(subscribeReportingBoardMobilePushMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ endpoint: "https://push.example/sub" })));
     expect(await screen.findByText("Notifications enabled for this saved view.")).toBeTruthy();
+  });
+
+  it("shows an active quick tab and disables a tab that conflicts with locked saved-view criteria", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      lockedFilters: { assignmentStatus: "assigned" },
+    });
+    renderPage();
+
+    const unassigned = await screen.findByRole("button", { name: /Unassigned/i });
+    expect(unassigned).toBeDisabled();
+    expect(unassigned.getAttribute("title")).toMatch(/locked to assigned cases/i);
+    const all = screen.getByRole("button", { name: /^All 2$/i });
+    expect(all.getAttribute("class")).toContain("ring-2");
+  });
+
+  it("refreshes every retained page after load more", async () => {
+    const pageOne = { ...mobileResponse, pagination: { limit: 40, offset: 0, hasMore: true, nextOffset: 40 }, totalCount: 4, cases: [mobileResponse.cases[0]] };
+    const pageTwo = { ...mobileResponse, pagination: { limit: 40, offset: 40, hasMore: false, nextOffset: null }, totalCount: 4, cases: [mobileResponse.cases[1]] };
+    fetchReportingBoardMobileViewMock.mockImplementation((_token: string, filters: { offset?: number }) => Promise.resolve(filters.offset === 40 ? pageTwo : pageOne));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await screen.findByText("Abeer Farhat Salem Al-Sadeq");
+
+    const updatedPageOne = { ...pageOne, cases: [{ ...mobileResponse.cases[0], patientName: "Updated first page patient" }] };
+    fetchReportingBoardMobileViewMock.mockImplementation((_token: string, filters: { offset?: number }) => Promise.resolve(filters.offset === 40 ? pageTwo : updatedPageOne));
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+    expect(await screen.findByText("Updated first page patient")).toBeTruthy();
   });
 });

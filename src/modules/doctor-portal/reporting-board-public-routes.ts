@@ -170,7 +170,8 @@ router.post(
   "/saved-views/public/:token/mobile/test-push",
   mobileLimiter,
   asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
-    res.json(await sendPublicReportingBoardMobileTestPush(String(req.params.token || "")));
+    const body = asUnknownRecord(req.body);
+    res.json(await sendPublicReportingBoardMobileTestPush(String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
   })
 );
 

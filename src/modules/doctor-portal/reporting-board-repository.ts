@@ -25,6 +25,16 @@ import type {
 
 const SETTINGS_CATEGORY = "doctor_portal_reporting_board";
 const SETTINGS_KEY = "config";
+let reportingBoardPushVapidConfigurer = configurePatientWebPushVapid;
+let reportingBoardPushSender: (subscription: PushSubscription, payload: string) => Promise<unknown> = (subscription, payload) => webPush.sendNotification(subscription, payload);
+
+export function __setReportingBoardPushDeliveryForTest(options: {
+  configure?: typeof configurePatientWebPushVapid;
+  send?: (subscription: PushSubscription, payload: string) => Promise<unknown>;
+} | null): void {
+  reportingBoardPushVapidConfigurer = options?.configure ?? configurePatientWebPushVapid;
+  reportingBoardPushSender = options?.send ?? ((subscription, payload) => webPush.sendNotification(subscription, payload));
+}
 
 export const DEFAULT_REPORTING_BOARD_SETTINGS: ReportingBoardSettings = {
   cutoffMode: "days_back",
@@ -382,6 +392,7 @@ export async function updateSavedView(input: {
   filters?: ReportingBoardFilters;
   notificationSettings?: ReportingBoardNotificationSettings;
   active?: boolean;
+  expiresAt?: string | null;
 }): Promise<ReportingBoardSavedView | null> {
   const result = await pool.query(
     `
@@ -391,6 +402,7 @@ export async function updateSavedView(input: {
         filters_json = coalesce($5::jsonb, filters_json),
         notification_settings_json = coalesce($6::jsonb, notification_settings_json),
         active = coalesce($7, active),
+        expires_at = case when $8::boolean then $9::timestamptz else expires_at end,
         updated_by_user_id = $2,
         updated_at = now()
       where id = $1
@@ -420,6 +432,8 @@ export async function updateSavedView(input: {
       input.filters ? JSON.stringify(input.filters) : null,
       input.notificationSettings ? JSON.stringify(input.notificationSettings) : null,
       input.active ?? null,
+      input.expiresAt !== undefined,
+      input.expiresAt ?? null,
     ]
   );
   return result.rows[0] ? savedView(result.rows[0]) : null;
@@ -522,6 +536,7 @@ export async function rotateSavedViewToken(input: { id: number; ownerUserId: Use
       update doctor_portal.reporting_board_saved_views
       set token = $4, updated_by_user_id = $2, updated_at = now()
       where id = $1 and owner_user_id = $2 and ($3::bigint is null or owner_doctor_id = $3)
+        and active = true and revoked_at is null
       returning
         id,
         owner_user_id as "ownerUserId",
@@ -2029,14 +2044,16 @@ function reportingCaseNotificationText(row: ReportingBoardCaseRow | null): { tit
   };
 }
 
-async function sendSavedViewPushNotifications(notification: CreatedNotificationRow): Promise<PushDeliveryResult> {
-  if (!(await configurePatientWebPushVapid())) return { attempted: 0, sent: 0, failed: 0 };
-  const subscriptions = await pool.query<{
-    id: number;
-    endpoint: string;
-    p256dh: string;
-    auth: string;
-  }>(
+interface PushSubscriptionDeliveryRow {
+  id: number;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+async function sendSavedViewPushNotifications(notification: CreatedNotificationRow, targetSubscriptions?: PushSubscriptionDeliveryRow[]): Promise<PushDeliveryResult> {
+  if (!(await reportingBoardPushVapidConfigurer())) return { attempted: 0, sent: 0, failed: 0 };
+  const subscriptions = targetSubscriptions ?? (await pool.query<PushSubscriptionDeliveryRow>(
     `
       select id, endpoint, p256dh, auth
       from doctor_portal.reporting_board_web_push_subscriptions
@@ -2044,15 +2061,15 @@ async function sendSavedViewPushNotifications(notification: CreatedNotificationR
         and enabled = true
     `,
     [notification.savedViewId]
-  );
+  )).rows;
   let sent = 0;
   let failed = 0;
-  for (const row of subscriptions.rows) {
+  for (const row of subscriptions) {
     const subscription: PushSubscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
     const clickUrl = notification.actionUrl?.replace(/^\/doctor\/reporting-board\/saved\//, "/mobile/reporting-view/")
       ?? "/doctor/reporting-board";
     try {
-      await webPush.sendNotification(subscription, JSON.stringify({
+      await reportingBoardPushSender(subscription, JSON.stringify({
         eventType: "reporting_case_assigned_to_me",
         title: notification.title,
         body: notification.body,
@@ -2071,22 +2088,38 @@ async function sendSavedViewPushNotifications(notification: CreatedNotificationR
       failed += 1;
     }
   }
-  return { attempted: subscriptions.rows.length, sent, failed };
+  return { attempted: subscriptions.length, sent, failed };
 }
 
 export async function sendReportingBoardSavedViewTestPush(input: {
   savedViewId: number;
   actionUrl: string;
   caseRow?: ReportingBoardCaseRow | null;
+  subscription?: BrowserPushSubscriptionInput;
 }): Promise<PushDeliveryResult> {
   const text = reportingCaseNotificationText(input.caseRow ?? null);
+  let targetSubscriptions: PushSubscriptionDeliveryRow[] | undefined;
+  if (input.subscription) {
+    const normalized = normalizePushSubscription(input.subscription);
+    const result = await pool.query<PushSubscriptionDeliveryRow>(
+      `
+        select id, endpoint, p256dh, auth
+        from doctor_portal.reporting_board_web_push_subscriptions
+        where saved_view_id = $1 and subscription_hash = $2 and enabled = true
+        limit 1
+      `,
+      [input.savedViewId, hashPushSubscription(normalized)]
+    );
+    if (!result.rows[0]) throw new HttpError(404, "Active notification subscription not found for this saved view.");
+    targetSubscriptions = result.rows;
+  }
   return sendSavedViewPushNotifications({
     id: 0,
     savedViewId: input.savedViewId,
     title: text.title,
     body: text.body,
     actionUrl: input.actionUrl,
-  });
+  }, targetSubscriptions);
 }
 
 export async function createAssignedToMeNotifications(input: {

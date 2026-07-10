@@ -406,12 +406,14 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(publicRoutes, /reassign/);
     assert.match(publicRoutes, /push-config/);
     assert.match(publicRoutes, /push-subscribe/);
+    assert.match(publicRoutes, /test-push/);
     assert.match(service, /findActiveSavedViewByToken\(token\)/);
     assert.match(service, /narrowSavedViewFilters/);
     assert.match(service, /savedViewFilters\[key\]/);
     assert.match(service, /insertDoctorAuditEvent/);
     assert.match(service, /assignReportingBoardCaseToDoctor/);
     assert.match(service, /subscribePublicReportingBoardMobilePush/);
+    assert.match(service, /subscription: BrowserPushSubscriptionInput/);
     assert.match(publicPushMigration, /alter column user_id drop not null/);
     assert.match(service, /\/mobile\/reporting-view\/\$\{view\.token\}/);
     assert.match(repo, /lower\(coalesce\(p\.english_full_name/);
@@ -442,6 +444,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /accessLevel/);
     assert.match(service, /canAssignToMe/);
     assert.match(service, /completedToAssignedMinutes/);
+    assert.match(repository, /and active = true and revoked_at is null/);
+    assert.match(repository, /subscription_hash = \$2 and enabled = true/);
   });
 
   it("attaches SonicDICOM study notes to appointment rows only", async () => {

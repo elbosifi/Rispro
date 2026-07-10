@@ -884,8 +884,8 @@ export async function fetchReportingBoardMobilePushStatus(token: string, subscri
   });
 }
 
-export async function sendReportingBoardMobileTestPush(token: string): Promise<{ attempted: number; sent: number; failed: number }> {
-  return api<{ attempted: number; sent: number; failed: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/test-push`, { method: "POST" });
+export async function sendReportingBoardMobileTestPush(token: string, subscription: PushSubscriptionJSON): Promise<{ attempted: number; sent: number; failed: number }> {
+  return api<{ attempted: number; sent: number; failed: number }>(`/reporting/saved-views/public/${encodeURIComponent(token)}/mobile/test-push`, { method: "POST", body: JSON.stringify({ subscription }) });
 }
 
 type ReportingBoardMobileCaseIdentity =
@@ -937,6 +937,7 @@ export async function updateReportingBoardSavedView(
     filters?: ReportingBoardFilters;
     notificationSettings?: ReportingBoardNotificationSettings;
     active?: boolean;
+    expiresAt?: string | null;
   }
 ): Promise<ReportingBoardSavedView> {
   const raw = await api<{ savedView: ReportingBoardSavedView }>(`/doctor/reporting-board/saved-views/${id}`, {

@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 if (!process.env.DATABASE_URL && process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -640,10 +640,48 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
     assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/revoke`, { method: "POST" })).status, 200);
     assert.equal((await api("", `/api/reporting/saved-views/public/${rotated.data.savedView.token}/mobile`)).status, 404);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/rotate-token`, { method: "POST" })).status, 409);
 
     const expired = await createSavedView(doctor, false, {});
+    const futureExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const setExpiry = await api<{ savedView: { expiresAt: string | null } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: futureExpiry } });
+    assert.equal(setExpiry.status, 200);
+    assert.ok(setExpiry.data.savedView.expiresAt);
+    const clearExpiry = await api<{ savedView: { expiresAt: string | null } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: null } });
+    assert.equal(clearExpiry.status, 200);
+    assert.equal(clearExpiry.data.savedView.expiresAt, null);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: "not-a-timestamp" } })).status, 400);
     await pool.query(`update doctor_portal.reporting_board_saved_views set expires_at = now() - interval '1 minute' where id = $1`, [expired.id]);
     assert.equal((await api("", `/api/reporting/saved-views/public/${expired.token}/mobile`)).status, 404);
+  });
+
+  it("delivers a public saved-view test notification only to the requesting subscription", async () => {
+    guard();
+    const view = await createSavedView(doctor, false, {});
+    const subscriptionA = { endpoint: "https://push.example/device-a", keys: { p256dh: "device-a-key", auth: "device-a-auth" } };
+    const subscriptionB = { endpoint: "https://push.example/device-b", keys: { p256dh: "device-b-key", auth: "device-b-auth" } };
+    const hash = (subscription: typeof subscriptionA) => createHash("sha256").update(`${subscription.endpoint}|${subscription.keys.p256dh}`).digest("hex");
+    for (const subscription of [subscriptionA, subscriptionB]) {
+      await pool.query(
+        `insert into doctor_portal.reporting_board_web_push_subscriptions (saved_view_id, user_id, doctor_id, endpoint, p256dh, auth, subscription_hash, enabled) values ($1, null, null, $2, $3, $4, $5, true)`,
+        [view.id, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth, hash(subscription)]
+      );
+    }
+    const repository = await import("./reporting-board-repository.js");
+    const deliveredEndpoints: string[] = [];
+    repository.__setReportingBoardPushDeliveryForTest({
+      configure: async () => true,
+      send: async (subscription) => { deliveredEndpoints.push(subscription.endpoint); },
+    });
+    try {
+      const response = await api<{ attempted: number; sent: number }>("", `/api/reporting/saved-views/public/${view.token}/mobile/test-push`, { method: "POST", body: { subscription: subscriptionA } });
+      assert.equal(response.status, 200);
+      assert.equal(response.data.attempted, 1);
+      assert.equal(response.data.sent, 1);
+      assert.deepEqual(deliveredEndpoints, [subscriptionA.endpoint]);
+    } finally {
+      repository.__setReportingBoardPushDeliveryForTest(null);
+    }
   });
 
   it("applies default case-list scope, SonicDICOM status filtering, and normalized statuses", async () => {

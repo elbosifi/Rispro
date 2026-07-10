@@ -89,6 +89,7 @@ const MAX_CASE_LIST_LIMIT = 300;
 const MAX_UNIFIED_CANDIDATE_FETCH = 3000;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
+const MOBILE_FULL_SCOPE_WARNING_MS = 2_000;
 const MAX_SCHEDULED_BULK_ASSIGN_JOBS = 5;
 const REPORTING_BOARD_SORT_BY = new Set([
   "priority_study_date",
@@ -963,7 +964,18 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
   const settings = await readReportingBoardSettings();
   const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
+  const fullScopeStartedAt = Date.now();
   const allCases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
+  const fullScopeListingDurationMs = Date.now() - fullScopeStartedAt;
+  const timing = {
+    type: "reporting_board_mobile_full_scope_timing",
+    fullScopeRowsProcessed: allCases.length,
+    fullScopeListingDurationMs,
+  };
+  console.info(JSON.stringify(timing));
+  if (fullScopeListingDurationMs > MOBILE_FULL_SCOPE_WARNING_MS) {
+    console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
+  }
   const cases = allCases.slice(filters.offset, filters.offset + filters.limit);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
   const accessLevel = !actor ? "public" : !identity ? "public" : identity.moduleCapabilities.includes("doctor_admin") ? "admin" : identity.moduleCapabilities.includes("doctor_supervisor") ? "supervisor" : "doctor";
@@ -1080,9 +1092,16 @@ export async function listMyReportingBoardSavedViews(actor: Actor) {
   const views = await listSavedViews(actor.userId, me.profile!.id);
   const settings = await readReportingBoardSettings();
   return Promise.all(views.map(async (view) => {
+    const startedAt = Date.now();
     const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { limit: 1, offset: 0 }));
     const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
     const matchingCaseCount = (await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true })).length;
+    console.info(JSON.stringify({
+      type: "reporting_board_saved_view_matching_count_timing",
+      savedViewId: view.id,
+      matchingCaseCount,
+      matchingCountDurationMs: Date.now() - startedAt,
+    }));
     return { ...view, matchingCaseCount };
   }));
 }
@@ -1111,9 +1130,11 @@ export async function updateReportingBoardSavedView(
     filters?: ReportingBoardFilters;
     notificationSettings?: ReportingBoardNotificationSettings;
     active?: boolean;
+    expiresAt?: string | null;
   }
 ) {
   const me = await requireRosterDoctor(actor);
+  const expiresAt = normalizeSavedViewExpiresAt(input.expiresAt);
   const view = await updateSavedView({
     id: input.id,
     ownerUserId: actor.userId,
@@ -1122,13 +1143,25 @@ export async function updateReportingBoardSavedView(
     filters: input.filters,
     notificationSettings: input.notificationSettings,
     active: input.active,
+    expiresAt,
   });
   if (!view) throw new HttpError(404, "Saved view not found.");
   return view;
 }
 
+function normalizeSavedViewExpiresAt(value: string | null | undefined): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) throw new HttpError(400, "expiresAt must be a valid ISO timestamp.");
+  if (timestamp <= Date.now()) throw new HttpError(400, "expiresAt must be in the future.");
+  return new Date(timestamp).toISOString();
+}
+
 export async function rotateReportingBoardSavedViewToken(actor: Actor, id: number) {
   const me = await requireRosterDoctor(actor);
+  const current = await findSavedViewById(id, actor.userId);
+  if (!current) throw new HttpError(404, "Saved view not found.");
+  if (!current.active || current.revokedAt) throw new HttpError(409, "Inactive or revoked saved views cannot be rotated.");
   const view = await rotateSavedViewToken({ id, ownerUserId: actor.userId, ownerDoctorId: me.profile!.id });
   if (!view) throw new HttpError(404, "Saved view not found.");
   return view;
@@ -1745,12 +1778,13 @@ export async function getPublicReportingBoardMobilePushStatus(token: string, sub
   return getReportingBoardPushSubscriptionStatus({ savedViewId: view.id, subscription });
 }
 
-export async function sendPublicReportingBoardMobileTestPush(token: string) {
+export async function sendPublicReportingBoardMobileTestPush(token: string, subscription: BrowserPushSubscriptionInput) {
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
   return sendReportingBoardSavedViewTestPush({
     savedViewId: view.id,
     actionUrl: `/mobile/reporting-view/${view.token}`,
+    subscription,
   });
 }
 

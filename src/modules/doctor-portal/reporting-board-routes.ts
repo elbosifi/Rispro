@@ -281,6 +281,7 @@ router.patch(
       filters: body.filters === undefined ? undefined : filtersFromBody(body.filters),
       notificationSettings: body.notificationSettings === undefined ? undefined : notificationSettings(body.notificationSettings),
       active: body.active === undefined ? undefined : asOptionalBoolean(body.active),
+      expiresAt: body.expiresAt === undefined ? undefined : body.expiresAt === null ? null : asString(body.expiresAt),
     });
     res.json({ savedView: view });
   })
