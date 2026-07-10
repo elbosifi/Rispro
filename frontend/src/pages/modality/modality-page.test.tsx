@@ -248,7 +248,7 @@ describe("ModalityPage modality board", () => {
     expect(boardAccessions()).toEqual(["ACC-PROGRESS", "ACC-EARLY", "ACC-LATE"]);
   });
 
-  it("numbers arrived and waiting rows by arrivedAt order and leaves scheduled rows unnumbered", async () => {
+  it("removes the unavailable Arrival # column and preserves useful arrival time semantics", async () => {
     await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-LATE", dailySequence: 2, modalitySlotNumber: 2, status: "arrived", arrivedAt: "2026-06-18T08:30:00Z", englishFullName: "Late Arrival" }),
       appointment({ id: 2, accessionNumber: "ACC-SCHEDULED", dailySequence: 1, modalitySlotNumber: 1, status: "scheduled", bookingTime: "09:00", englishFullName: "Scheduled Patient" }),
@@ -256,13 +256,13 @@ describe("ModalityPage modality board", () => {
       appointment({ id: 4, accessionNumber: "ACC-WAIT", dailySequence: 4, modalitySlotNumber: 4, status: "waiting", arrivedAt: "2026-06-18T08:20:00Z", englishFullName: "Waiting Arrival" }),
     ]);
 
-    expect(within(screen.getByTestId("modality-board-row-3")).getByText("#1")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-3")).getByText("10:05")).toBeTruthy();
-    expect(within(screen.getByTestId("modality-board-row-4")).getByText("#2")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-4")).getByText("10:20")).toBeTruthy();
-    expect(within(screen.getByTestId("modality-board-row-1")).getByText("#3")).toBeTruthy();
     expect(within(screen.getByTestId("modality-board-row-1")).getByText("10:30")).toBeTruthy();
-    expect(screen.getByTestId("modality-board-row-2").querySelector("td")?.textContent?.trim()).toBe("Not recorded");
+    expect(screen.queryByText("Arrival #")).toBeNull();
+    expect(screen.queryByText("رقم الوصول")).toBeNull();
+    expect(screen.getByText("Arrival time")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-2")).getByText("Not arrived")).toBeTruthy();
   });
 
   it("keeps scheduled not-arrived patients visible in the board", async () => {
@@ -550,7 +550,13 @@ describe("ModalityPage modality board", () => {
     ]);
 
     const row = screen.getByTestId("modality-board-row-8");
-    expect(within(row).getByRole("button", { name: /Print/i })).toBeTruthy();
+    const printButton = within(row).getByRole("button", { name: /Print/i });
+    const moreButton = within(row).getByRole("button", { name: /More actions/i });
+    expect(printButton.textContent).toContain("Print");
+    expect(printButton.querySelector("svg") || printButton.textContent?.trim()).toBeTruthy();
+    expect(moreButton.textContent).toContain("More");
+    expect(moreButton.querySelector("svg") || moreButton.textContent?.trim()).toBeTruthy();
+    expect(within(row).getAllByRole("button").every((button) => Boolean(button.textContent?.trim() || button.querySelector("svg")))).toBe(true);
     expect(within(row).getByRole("button", { name: /Complete/i })).toBeTruthy();
     expect(within(row).queryByRole("button", { name: /Discontinue/i })).toBeNull();
     expect(within(row).queryByRole("button", { name: /Cancel/i })).toBeNull();
@@ -861,7 +867,22 @@ describe("ModalityPage modality board", () => {
     expect(status.textContent).not.toContain("Estimated from completion");
     expect(status.querySelector(".state-chip")?.className).toContain("whitespace-nowrap");
     expect(within(row).getByTestId("modality-board-case-category").textContent).toContain("Non-Oncology");
+    expect(within(row).getByTestId("modality-board-case-category").getAttribute("aria-label")).toBe("Case category: Non-Oncology");
+    expect(within(row).getByTestId("modality-board-case-category").querySelector(".bg-blue-700")).toBeTruthy();
     expect(within(row).getByTestId("modality-board-waiting-duration").textContent).toContain("Estimated from completion");
+  });
+
+  it("renders oncology as a visible rose category marker outside workflow status", async () => {
+    await openBoard([
+      appointment({ id: 34, accessionNumber: "ACC-ONC", status: "waiting", caseCategory: "oncology", englishFullName: "Oncology Patient" }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-34");
+    const category = within(row).getByTestId("modality-board-case-category");
+    expect(category.textContent).toContain("Oncology");
+    expect(category.getAttribute("aria-label")).toBe("Case category: Oncology");
+    expect(category.querySelector(".bg-rose-600")).toBeTruthy();
+    expect(within(row).getByTestId("modality-board-status").textContent).not.toContain("Oncology");
   });
 
   it("uses language-specific direction spans for Arabic, English, identifiers, and duration", async () => {
@@ -877,6 +898,7 @@ describe("ModalityPage modality board", () => {
         examNameEn: "CT Brain",
         arrivedAt: "2026-06-18T08:00:00Z",
         completedAt: "2026-06-18T09:00:00Z",
+        caseCategory: "oncology",
       }),
     ]);
 
@@ -886,6 +908,8 @@ describe("ModalityPage modality board", () => {
     expect(within(row).getByText("Ahmed Ali").getAttribute("dir")).toBe("ltr");
     expect(within(row).getByTestId("modality-board-accession").getAttribute("dir")).toBe("ltr");
     expect(within(row).getByTestId("modality-board-waiting-duration").querySelector("[dir=rtl]")).toBeTruthy();
+    expect(within(row).getByTestId("modality-board-case-category").getAttribute("aria-label")).toBe("فئة الحالة: أورام");
+    expect(within(row).getByTestId("modality-board-case-category").querySelector(".bg-rose-600")).toBeTruthy();
   });
 
   it("shows Primary ID and renders passport identifier instead of MRN or National ID", async () => {

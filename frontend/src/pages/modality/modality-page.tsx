@@ -170,12 +170,6 @@ function compareBoardAppointments(a: AppointmentWithDetails, b: AppointmentWithD
   return getSequenceNumber(a) - getSequenceNumber(b) || a.id - b.id || a.accessionNumber.localeCompare(b.accessionNumber);
 }
 
-function compareArrivalOrder(a: AppointmentWithDetails, b: AppointmentWithDetails): number {
-  const arrivalOrder = compareNullableAsc(timestampValue(a.arrivedAt), timestampValue(b.arrivedAt));
-  if (arrivalOrder !== 0) return arrivalOrder;
-  return getSequenceNumber(a) - getSequenceNumber(b) || a.id - b.id;
-}
-
 function matchesBoardFilter(appointment: AppointmentWithDetails, filter: BoardFilter): boolean {
   switch (filter) {
     case "operational":
@@ -209,10 +203,8 @@ function formatClockValue(language: Language, value: string | null | undefined):
 }
 
 function formatArrivalColumn(language: Language, appointment: AppointmentWithDetails): string {
-  if (appointment.arrivedAt) return formatClockValue(language, appointment.arrivedAt);
-  if (appointment.status === "scheduled" && appointment.bookingTime) {
-    return `${chooseLocalized(language, "محجوز", "Booked")} ${formatClockValue(language, appointment.bookingTime)}`;
-  }
+  if (timestampValue(appointment.arrivedAt) != null) return formatClockValue(language, appointment.arrivedAt);
+  if (appointment.status === "scheduled") return chooseLocalized(language, "لم يصل", "Not arrived");
   return chooseLocalized(language, "غير مسجل", "Not recorded");
 }
 
@@ -600,14 +592,6 @@ export default function ModalityPage() {
     () => boardAppointments.filter((appointment) => matchesBoardFilter(appointment, boardFilter)),
     [boardAppointments, boardFilter]
   );
-  const arrivalNumberById = useMemo(() => {
-    const entries = boardAppointments
-      .filter((appointment) => appointment.status === "arrived" || appointment.status === "waiting")
-      .slice()
-      .sort(compareArrivalOrder);
-    return new Map(entries.map((appointment, index) => [appointment.id, index + 1]));
-  }, [boardAppointments]);
-
   const statusCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const row of statistics?.statusBreakdown ?? []) {
@@ -923,19 +907,18 @@ export default function ModalityPage() {
                     <table data-testid="modality-board" dir={isArabic ? "rtl" : "ltr"} className="min-w-[1280px] table-fixed text-start text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
-                          <th scope="col" className="w-[64px] px-2 py-2 font-semibold">{chooseLocalized(language, "رقم الوصول", "Arrival #")}</th>
                           <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
                           <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "وقت الوصول", "Arrival time")}</th>
                           <th scope="col" className="w-[142px] px-2 py-2 font-semibold">{chooseLocalized(language, "مدة الانتظار", "Waiting duration")}</th>
-                          <th scope="col" className="w-[240px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
+                          <th scope="col" className="w-[260px] px-2 py-2 font-semibold">{chooseLocalized(language, "المريض", "Patient")}</th>
                           <th scope="col" className="w-[150px] px-2 py-2 font-semibold">{chooseLocalized(language, "المعرف الأساسي", "Primary ID")}</th>
                           <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "العمر / الجنس", "Age / sex")}</th>
-                          <th scope="col" className="w-[220px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
+                          <th scope="col" className="w-[240px] px-2 py-2 font-semibold">{chooseLocalized(language, "الفحص", "Exam")}</th>
                           <th scope="col" className="w-[150px] px-2 py-2 font-semibold">Protocol</th>
                           <th scope="col" className="w-[90px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
                           <th scope="col" className="w-[118px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
                           <th scope="col" className="w-[92px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
-                          <th scope="col" className="w-[132px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
+                          <th scope="col" className="w-[190px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
@@ -945,7 +928,6 @@ export default function ModalityPage() {
                       const canAct = isActiveStatus(appointment.status);
                       const canCompleteRow = canAct && appointment.status !== "scheduled";
                       const canMarkArrived = appointment.status === "scheduled" || appointment.status === "waiting";
-                      const arrivalNumber = arrivalNumberById.get(appointment.id);
                       const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
                       const waitingInfo = waitingDurationInfo(language, appointment, elapsedNow);
                       const waitingWarning = waitingWarningInfo(language, appointment, elapsedNow);
@@ -973,9 +955,6 @@ export default function ModalityPage() {
                               }}
                               className={`h-16 cursor-pointer align-middle transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${rowStatusClass(appointment.status, selected)} ${waitingWarningClass(waitingWarning?.level ?? null)}`}
                             >
-                              <td className="px-2 py-1.5 font-mono text-xs font-semibold text-foreground" dir="ltr">
-                                {arrivalNumber ? `#${arrivalNumber}` : chooseLocalized(language, "غير مسجل", "Not recorded")}
-                              </td>
                               <td className="px-2 py-1.5">
                                 <div data-testid="modality-board-status" className="flex items-center">
                                   <Badge variant={statusVariant(appointment.status)} size="sm" className="max-w-full whitespace-nowrap">
@@ -1001,11 +980,23 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1.5">
                                 <p lang="ar" dir="rtl" className="truncate text-sm font-bold leading-5 text-foreground">{appointment.arabicFullName}</p>
-                                <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-xs leading-4 text-slate-600">
-                                  {showEnglishName ? <span lang="en" dir="ltr">{englishName}</span> : null}
-                                  {appointment.caseCategory ? <span data-testid="modality-board-case-category" className="ms-1 text-[10px] text-slate-500">• {appointment.caseCategory === "oncology" ? chooseLocalized(language, "أورام", "Oncology") : chooseLocalized(language, "غير أورام", "Non-Oncology")}</span> : null}
-                                  {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <span className="ms-1 text-[10px] text-slate-500">• {chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</span> : null}
-                                </p>
+                                {showEnglishName ? <p lang="en" dir="ltr" className="truncate text-xs leading-4 text-slate-600">{englishName}</p> : null}
+                                {appointment.caseCategory ? (
+                                  <div
+                                    data-testid="modality-board-case-category"
+                                    role="group"
+                                    aria-label={chooseLocalized(
+                                      language,
+                                      `فئة الحالة: ${t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}`,
+                                      `Case category: ${t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}`
+                                    )}
+                                    className={`mt-0.5 inline-flex max-w-full items-center gap-1 whitespace-nowrap text-[11px] font-medium leading-4 ${appointment.caseCategory === "oncology" ? "text-rose-700" : "text-blue-700"}`}
+                                  >
+                                    <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${appointment.caseCategory === "oncology" ? "bg-rose-600" : "bg-blue-700"}`} />
+                                    <span className="truncate">{t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}</span>
+                                  </div>
+                                ) : null}
+                                {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-[10px] leading-4 text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</p> : null}
                               </td>
                               <td className="px-2 py-1.5 text-xs font-medium text-slate-800">
                                 {missingPrimaryIdentifier ? (
@@ -1063,14 +1054,14 @@ export default function ModalityPage() {
                                     size="sm"
                                     aria-label={t(language, "common.print")}
                                     title={t(language, "common.print")}
-                                    className="h-10 w-10 shrink-0 border border-slate-300 bg-white p-0 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                                    className="h-10 min-w-[40px] shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       handlePrint(appointment.id);
                                     }}
                                   >
                                     <Printer size={14} />
-                                    <span className="sr-only">{t(language, "common.print")}</span>
+                                    <span>{t(language, "common.print")}</span>
                                   </Button>
                                   {canMarkArrived ? (
                                     <Button
@@ -1115,12 +1106,12 @@ export default function ModalityPage() {
                                       size="sm"
                                       aria-label={chooseLocalized(language, "إجراءات إضافية", "More actions")}
                                       title={chooseLocalized(language, "إجراءات إضافية", "More actions")}
-                                      className="h-10 w-10 shrink-0 border border-slate-300 bg-white p-0 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                                      className="h-10 min-w-[40px] shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => handleOpenMoreMenu(event, appointment)}
                                     >
                                       <MoreHorizontal size={14} />
-                                      <span className="sr-only">{chooseLocalized(language, "المزيد", "More")}</span>
+                                      <span>{chooseLocalized(language, "المزيد", "More")}</span>
                                     </Button>
                                   ) : null}
                                 </div>
