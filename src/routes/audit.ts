@@ -4,7 +4,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { getTripoliToday } from "../utils/date.js";
 import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
-import { exportAuditEntriesCsv, listAuditEntries, listAuditFilterOptions, logAuditEntry } from "../services/audit-service.js";
+import { listAuditPage, logAuditEntry, streamAuditEntriesCsv } from "../services/audit-service.js";
 import type { UserId } from "../types/http.js";
 
 export const auditRouter = express.Router();
@@ -15,14 +15,21 @@ auditRouter.get(
   "/export",
   asyncRoute(async (req: Request, res: Response) => {
     const query = asUnknownRecord(req.query);
-    const csv = await exportAuditEntriesCsv({
+    const filters = {
       limit: asOptionalUserId(query.limit),
       entityType: asOptionalString(query.entityType),
       actionType: asOptionalString(query.actionType),
       changedByUserId: asOptionalUserId(query.changedByUserId),
       dateFrom: asOptionalString(query.dateFrom),
-      dateTo: asOptionalString(query.dateTo)
-    });
+      dateTo: asOptionalString(query.dateTo),
+      category: asOptionalString(query.category),
+      search: asOptionalString(query.search),
+      outcome: asOptionalString(query.outcome)
+    };
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="rispro-audit-${getTripoliToday()}.csv"`);
+    await streamAuditEntriesCsv(filters, (chunk) => { res.write(chunk); });
 
     await logAuditEntry({
       entityType: "audit_log",
@@ -34,15 +41,16 @@ auditRouter.get(
           actionType: asOptionalString(query.actionType) || "",
           changedByUserId: asOptionalString(query.changedByUserId) || "",
           dateFrom: asOptionalString(query.dateFrom) || "",
-          dateTo: asOptionalString(query.dateTo) || ""
+          dateTo: asOptionalString(query.dateTo) || "",
+          category: asOptionalString(query.category) || "",
+          search: asOptionalString(query.search) || "",
+          outcome: asOptionalString(query.outcome) || ""
         }
       },
       changedByUserId: req.user!.sub as UserId
     });
 
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="rispro-audit-${getTripoliToday()}.csv"`);
-    res.send(csv);
+    res.end();
   })
 );
 
@@ -50,17 +58,17 @@ auditRouter.get(
   "/",
   asyncRoute(async (req: Request, res: Response) => {
     const query = asUnknownRecord(req.query);
-    const [entries, meta] = await Promise.all([
-      listAuditEntries({
-        limit: asOptionalUserId(query.limit),
-        entityType: asOptionalString(query.entityType),
-        actionType: asOptionalString(query.actionType),
-        changedByUserId: asOptionalUserId(query.changedByUserId),
-        dateFrom: asOptionalString(query.dateFrom),
-        dateTo: asOptionalString(query.dateTo)
-      }),
-      listAuditFilterOptions()
-    ]);
-    res.json({ entries, meta });
+    res.json(await listAuditPage({
+      page: asOptionalString(query.page),
+      pageSize: asOptionalString(query.pageSize),
+      entityType: asOptionalString(query.entityType),
+      actionType: asOptionalString(query.actionType),
+      changedByUserId: asOptionalUserId(query.changedByUserId),
+      dateFrom: asOptionalString(query.dateFrom),
+      dateTo: asOptionalString(query.dateTo),
+      category: asOptionalString(query.category),
+      search: asOptionalString(query.search),
+      outcome: asOptionalString(query.outcome)
+    }));
   })
 );

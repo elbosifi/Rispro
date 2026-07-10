@@ -45,5 +45,23 @@ export interface ExamTypesListResponse {
 
 export interface AuditEntriesResponse {
   entries: AuditEvent[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+    hasPreviousPage: boolean;
+    hasNextPage: boolean;
+    rangeStart: number;
+    rangeEnd: number;
+  };
+  summary?: {
+    total: number;
+    important: number;
+    security: number;
+    automated: number;
+    other: number;
+    failed: number;
+  };
   meta?: unknown;
 }

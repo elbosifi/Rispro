@@ -5,7 +5,6 @@ import { ApiError } from "@/lib/api-client";
 import {
   fetchUsers,
   fetchDoctorProfilesForAdmin,
-  fetchAuditEntries,
   fetchExamTypes,
   fetchModalitiesSettings,
   fetchNameDictionary,
@@ -16,7 +15,6 @@ import {
   createUser,
   updateUserSchedulingOverridePermission,
   updateUserPassword,
-  exportAuditCSV,
   deleteNameDictionaryEntry,
   deletePatientNotAllowedNameWord,
   importNameDictionary,
@@ -62,6 +60,7 @@ import PatientQrSettingsSection from "./patient-qr-settings-section";
 import PatientDuplicateResolverSection from "./patient-duplicate-resolver-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import ActionPinPolicySection from "./action-pin-policy-section";
+import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import ExamTypesSection from "./exam-types-section";
 import type {
@@ -457,7 +456,7 @@ export default function SettingsPage() {
             {section === "users" && <UsersSection onReAuthRequired={requestReAuth} />}
             {section === "action_pin_policy" && <ActionPinPolicySection onReAuthRequired={requestReAuth} />}
             {section === "role_page_access" && <RolePageAccessSection onReAuthRequired={requestReAuth} />}
-            {section === "audit_log" && <AuditSection onReAuthRequired={requestReAuth} />}
+            {section === "audit_log" && <AuditLogSection onReAuthRequired={requestReAuth} />}
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
@@ -689,46 +688,6 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
           );
         })}
       </ul>
-    </div>
-  );
-}
-
-function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
-  const { t } = useLanguage();
-  const limit = 50;
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ["audit", limit], queryFn: () => fetchAuditEntries(limit) });
-
-  const handleExport = async () => {
-    try {
-      await exportAuditCSV();
-    } catch {
-      // Browser handles errors naturally
-    }
-  };
-
-  if (error) {
-    const msg = (error as Error).message;
-    if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["audit", String(limit)])} />;
-    return <div className="space-y-2"><h4 className="font-semibold text-red-700">Failed to load audit log</h4><p className="description-center">{msg}</p><Button variant="secondary" onClick={() => void refetch()}>Retry</Button></div>;
-  }
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm description-center">{t("settings.showingLastEntries", { count: limit })}</p>
-        <Button variant="secondary" onClick={handleExport} className="text-xs">
-          Export CSV
-        </Button>
-      </div>
-      {isLoading ? <p className="description-center">Loading audit log…</p> : data?.entries?.length ? (
-        <ul className="space-y-2">
-          {data.entries.map((entry: any) => (
-            <li key={entry.id} className="p-3 bg-stone-50 dark:bg-stone-700 rounded-lg text-sm">
-              <p className="text-stone-900 dark:text-white font-medium">{entry.actionType} - {entry.entityType}</p>
-              <p className="description-center text-xs mt-1">{formatDateTimeLy(entry.createdAt)}</p>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="description-center">No audit log entries found.</p>}
     </div>
   );
 }

@@ -1667,13 +1667,60 @@ export interface AppointmentStatistics {
 
 export interface AuditEntry {
   id: number;
+  changedByName: string | null;
+  changedByUsername: string | null;
+  changedByUserId: number | string | null;
   entityType: string;
-  entityId?: number | string | null;
+  entityId: number | string | null;
   actionType: string;
-  oldValues?: unknown;
-  newValues?: unknown;
-  changedByUserId?: number | string | null;
-  createdAt?: string;
+  oldValues: unknown;
+  newValues: unknown;
+  createdAt: string;
+  category: "important" | "security" | "automated" | "other";
+  outcome: "successful" | "failed" | "rejected" | "cancelled" | "pending" | "informational" | "unknown";
+  importance: "high" | "medium" | "low";
+  title: string;
+  summary: string;
+  actorLabel: string;
+  targetLabel: string;
+}
+
+export type AuditCategory = AuditEntry["category"];
+export type AuditOutcome = AuditEntry["outcome"];
+
+export interface AuditPagination {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+  rangeStart: number;
+  rangeEnd: number;
+}
+
+export interface AuditSummary {
+  total: number;
+  important: number;
+  security: number;
+  automated: number;
+  other: number;
+  failed: number;
+}
+
+export interface AuditFilterMeta {
+  entityTypes: string[];
+  actionTypes: string[];
+  users: Array<{ id: number | string; full_name?: string | null; username?: string | null; fullName?: string | null }>;
+  categories: AuditCategory[];
+  outcomes: AuditOutcome[];
+}
+
+export interface AuditEntriesResponse {
+  entries: AuditEntry[];
+  pagination: AuditPagination;
+  summary: AuditSummary;
+  meta: AuditFilterMeta;
 }
 
 export interface DicomDevice {

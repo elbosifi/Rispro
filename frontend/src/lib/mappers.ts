@@ -656,13 +656,22 @@ export function mapNameDictionary(rawArray: RawRecord[]): DictionaryEntry[] {
 export function mapAuditEntry(raw: RawRecord): AuditEntry {
   return {
     id: num(raw, 'id'),
+    changedByName: strOrNull(raw, 'changed_by_name') ?? strOrNull(raw, 'changedByName'),
+    changedByUsername: strOrNull(raw, 'changed_by_username') ?? strOrNull(raw, 'changedByUsername'),
+    changedByUserId: strOrNull(raw, 'changed_by_user_id') ?? strOrNull(raw, 'changedByUserId') ?? numOrNull(raw, 'changed_by_user_id') ?? numOrNull(raw, 'changedByUserId'),
     entityType: str(raw, 'entity_type') || str(raw, 'entityType'),
     entityId: strOrNull(raw, 'entity_id') ?? strOrNull(raw, 'entityId') ?? numOrNull(raw, 'entity_id') ?? numOrNull(raw, 'entityId'),
     actionType: str(raw, 'action_type') || str(raw, 'actionType'),
     oldValues: raw.old_values ?? raw.oldValues ?? null,
     newValues: raw.new_values ?? raw.newValues ?? null,
-    changedByUserId: strOrNull(raw, 'changed_by_user_id') ?? strOrNull(raw, 'changedByUserId') ?? numOrNull(raw, 'changed_by_user_id') ?? numOrNull(raw, 'changedByUserId'),
-    createdAt: strOrUndefined(raw, 'created_at') ?? strOrUndefined(raw, 'createdAt')
+    createdAt: strOrUndefined(raw, 'created_at') ?? strOrUndefined(raw, 'createdAt') ?? '',
+    category: (str(raw, 'category') || 'other') as AuditEntry['category'],
+    outcome: (str(raw, 'outcome') || 'unknown') as AuditEntry['outcome'],
+    importance: (str(raw, 'importance') || 'medium') as AuditEntry['importance'],
+    title: str(raw, 'title'),
+    summary: str(raw, 'summary'),
+    actorLabel: str(raw, 'actorLabel') || str(raw, 'actor_label'),
+    targetLabel: str(raw, 'targetLabel') || str(raw, 'target_label')
   };
 }
 

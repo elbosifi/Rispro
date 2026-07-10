@@ -25,6 +25,7 @@ import type {
   AppointmentStatistics,
   DicomDevice,
   AuditEntry,
+  AuditEntriesResponse,
   SchedulingEngineConfig,
   PatientImportBatch,
   PatientImportStagingRow,
@@ -3525,17 +3526,42 @@ export async function updateUserPassword(userId: number, password: string) {
   });
 }
 
-export async function fetchAuditEntries(limit: number): Promise<{ entries: AuditEntry[]; meta: RawRecord }> {
-  const raw = await api<{ entries: RawRecord[]; meta: RawRecord }>(`/audit?limit=${limit}`);
+export interface AuditQueryParams {
+  page?: number;
+  pageSize?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  changedByUserId?: number | string;
+  entityType?: string;
+  actionType?: string;
+  category?: string;
+  search?: string;
+  outcome?: string;
+}
+
+function auditQueryString(filters: AuditQueryParams): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function fetchAuditEntries(filters: AuditQueryParams | number = {}): Promise<AuditEntriesResponse> {
+  const params = typeof filters === "number" ? { pageSize: filters } : filters;
+  const raw = await api<{ entries: RawRecord[]; pagination: RawRecord; summary: RawRecord; meta: RawRecord }>(`/audit${auditQueryString(params)}`);
   return {
     entries: mapAuditEntries(raw.entries ?? []),
-    meta: raw.meta ?? {}
+    pagination: raw.pagination as unknown as AuditEntriesResponse["pagination"],
+    summary: raw.summary as unknown as AuditEntriesResponse["summary"],
+    meta: raw.meta as unknown as AuditEntriesResponse["meta"]
   };
 }
 
-export async function exportAuditCSV() {
+export async function exportAuditCSV(filters: AuditQueryParams = {}) {
   // Use fetch directly for blob download
-  const response = await fetch(`/api/audit/export`, { credentials: "include" });
+  const response = await fetch(`/api/audit/export${auditQueryString(filters)}`, { credentials: "include" });
   if (!response.ok) throw new Error("Audit export failed");
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
