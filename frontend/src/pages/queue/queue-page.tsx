@@ -80,6 +80,7 @@ export default function QueuePage() {
   const [queueSearch, setQueueSearch] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("all");
   const [queueModalityId, setQueueModalityId] = useState("");
+  const [showOldNoShows, setShowOldNoShows] = useState(false);
   const [scanWarning, setScanWarning] = useState<string | null>(null);
   const [patientRequirementAlert, setPatientRequirementAlert] = useState<PatientRequirementAlert | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
