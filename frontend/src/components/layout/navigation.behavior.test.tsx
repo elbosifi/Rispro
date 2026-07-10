@@ -35,6 +35,8 @@ vi.mock("lucide-react", () => {
     ChevronLeft: Icon,
     ChevronRight: Icon,
     Plus: Icon,
+    ChevronDown: Icon,
+    Globe2: Icon,
   };
 });
 
@@ -149,10 +151,108 @@ describe("Navigation governance", () => {
 
     expect(screen.getByRole("button", { name: "Toggle navigation" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search patients or registrations" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Undo" }).className).toContain("hidden");
-    expect(screen.getByRole("button", { name: "Redo" }).className).toContain("hidden");
+    expect(screen.getByRole("button", { name: "History" }).parentElement?.className).toContain("hidden");
     expect(screen.queryByRole("button", { name: "Manage Security PIN" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "عربي" })?.className).toContain("hidden");
+    expect(screen.getByRole("button", { name: "Switch language to Arabic" }).className).toContain("hidden");
+  });
+
+  it("places the localized page identity at the start and keeps the global search separate", () => {
+    render(
+      <TopBar
+        user={{ id: 1, username: "sa", fullName: "Sam User", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        pageTitle="Patients"
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    expect(screen.getByText("Patients")).toBeTruthy();
+    expect(screen.queryByText("SUPER_ADMIN")).toBeNull();
+    expect(screen.getByRole("button", { name: "Search patients or registrations" })).toBeTruthy();
+    expect(screen.queryByText("Patients")?.closest("header")?.querySelector(".rounded-full")).toBeNull();
+  });
+
+  it("uses a readable role and functional account menu actions", async () => {
+    const onSettings = vi.fn();
+    const onLogout = vi.fn();
+    render(
+      <TopBar
+        user={{ id: 1, username: "sa", fullName: "Sam User", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        accountMenuActions={<button type="button" role="menuitem">Manage Security PIN</button>}
+        canAccessSettings
+        onSettings={onSettings}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={onLogout}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    expect(screen.getByText("Super administrator")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Open account menu" }));
+    expect(screen.getByRole("menuitem", { name: "Manage Security PIN" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+    expect(onSettings).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Open account menu" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(onLogout).toHaveBeenCalledOnce();
+  });
+
+  it("keeps history and language controls accessible on desktop", async () => {
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    const onToggleLanguage = vi.fn();
+    render(
+      <TopBar
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onUndo={onUndo}
+        onRedo={onRedo}
+        onToggleLanguage={onToggleLanguage}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Undo" }));
+    expect(onUndo).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Redo" }));
+    expect(onRedo).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Switch language to Arabic" }));
+    expect(onToggleLanguage).toHaveBeenCalledOnce();
+  });
+
+  it("mirrors the top-bar shell for RTL without changing the search contract", () => {
+    render(
+      <TopBar
+        user={{ id: 1, username: "sa", fullName: "مستخدم", role: "super_admin" }}
+        language="ar"
+        isRtl
+        pageTitle="المرضى"
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    const header = screen.getByRole("banner");
+    expect(header.getAttribute("dir")).toBe("rtl");
+    expect(screen.getByText("المرضى")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "البحث عن المرضى أو التسجيلات" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "فتح قائمة الحساب" })).toBeTruthy();
   });
 
   it("renders signed-in account actions in the mobile drawer", async () => {

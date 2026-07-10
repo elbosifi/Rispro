@@ -1,7 +1,7 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { User } from "@/types/api";
-import { t, type Language } from "@/lib/i18n";
+import type { Role, User } from "@/types/api";
+import { t, type Language, type TranslationKey } from "@/lib/i18n";
 import {
   canRoleAccessRoute,
   DEFAULT_PAGE_VISIBILITY_MATRIX,
@@ -31,6 +31,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  ChevronDown,
+  Globe2,
   Undo2,
   Redo2,
   Languages,
@@ -49,6 +51,19 @@ function canAccess(item: Pick<AppNavItem, "route">, user: User | null, matrix: P
   }
 
   return canRoleAccessRoute(matrix, item.route, user.role);
+}
+
+const ROLE_LABEL_KEYS: Record<Role, TranslationKey> = {
+  receptionist: "role.receptionist",
+  supervisor: "role.supervisor",
+  super_admin: "role.superAdministrator",
+  modality_staff: "role.modalityStaff",
+  doctor: "role.doctor",
+  administrative: "role.administrative",
+};
+
+function readableRole(language: Language, role: Role): string {
+  return t(language, ROLE_LABEL_KEYS[role]);
 }
 
 const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
@@ -288,6 +303,61 @@ function SidebarSection({ group, items, expanded, collapsed, currentRoute, isRtl
   );
 }
 
+function useCloseOnOutside(ref: RefObject<HTMLElement | null>, onClose: () => void, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [enabled, onClose, ref]);
+}
+
+function HistoryMenu({ language, onUndo, onRedo }: { language: Language; onUndo: () => void; onRedo: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(ref, () => setOpen(false), open);
+  return (
+    <div ref={ref} className="relative hidden lg:block">
+      <button type="button" className="btn-ghost" onClick={() => setOpen((value) => !value)} aria-label={t(language, "topbar.history")} aria-expanded={open} aria-haspopup="menu" title={t(language, "topbar.history")}>
+        <History className="h-4 w-4" />
+        <ChevronDown className="h-3 w-3" aria-hidden="true" />
+      </button>
+      {open ? <div role="menu" className="absolute end-0 top-full z-50 mt-2 min-w-40 rounded-xl border bg-card p-1 shadow-xl" style={{ borderColor: "var(--border)" }}>
+        <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-start hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onUndo(); setOpen(false); }}><Undo2 className="h-4 w-4" />{t(language, "navPanel.undo")}</button>
+        <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-start hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onRedo(); setOpen(false); }}><Redo2 className="h-4 w-4" />{t(language, "navPanel.redo")}</button>
+      </div> : null}
+    </div>
+  );
+}
+
+function LanguageControl({ language, isRtl, onToggle }: { language: Language; isRtl: boolean; onToggle: () => void }) {
+  return <button type="button" className="btn-ghost hidden gap-1.5 text-xs lg:inline-flex" onClick={onToggle} aria-label={t(language, language === "ar" ? "topbar.switchToEnglish" : "topbar.switchToArabic")} title={t(language, language === "ar" ? "topbar.switchToEnglish" : "topbar.switchToArabic")}><Globe2 className="h-4 w-4" /><span>{isRtl ? "العربية" : "English"}</span></button>;
+}
+
+function AccountMenu({ user, language, accountActions, canAccessSettings, onSettings, onLogout }: { user: User; language: Language; accountActions?: ReactNode; canAccessSettings: boolean; onSettings: () => void; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(ref, () => setOpen(false), open);
+  const initials = user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U";
+  return (
+    <div ref={ref} className="relative hidden lg:block">
+      <button type="button" className="flex items-center gap-2 rounded-xl border px-2 py-1.5 text-start transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" style={{ borderColor: "var(--border)" }} onClick={() => setOpen((value) => !value)} aria-label={t(language, "topbar.accountMenu")} aria-expanded={open} aria-haspopup="menu">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold text-white" style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))" }}>{initials}</span>
+        <span className="hidden max-w-32 min-w-0 md:block"><span className="block truncate text-sm font-medium text-foreground">{user.fullName}</span><span className="block truncate text-[10px] text-muted-foreground">{readableRole(language, user.role)}</span></span>
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+      </button>
+      {open ? <div role="menu" className="absolute end-0 top-full z-50 mt-2 min-w-60 rounded-xl border bg-card p-2 shadow-xl" style={{ borderColor: "var(--border)" }}>
+        <div className="border-b px-3 pb-2 text-start" style={{ borderColor: "var(--border)" }}><p className="truncate text-sm font-semibold text-foreground">{user.fullName}</p><p className="text-xs text-muted-foreground">{readableRole(language, user.role)}</p></div>
+        {accountActions}
+        {canAccessSettings ? <button type="button" role="menuitem" className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-start hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onSettings(); setOpen(false); }}><Settings className="h-4 w-4" />{t(language, "common.settings")}</button> : null}
+        <button type="button" role="menuitem" className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-start text-accent hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => { onLogout(); setOpen(false); }}><LogOut className="h-4 w-4" />{t(language, "common.signOut")}</button>
+      </div> : null}
+    </div>
+  );
+}
+
 export function TopBar({
   user,
   language,
@@ -295,6 +365,9 @@ export function TopBar({
   pageTitle,
   pageAction,
   extraActions,
+  accountMenuActions,
+  canAccessSettings = false,
+  onSettings = () => {},
   onUndo,
   onRedo,
   onToggleLanguage,
@@ -311,6 +384,9 @@ export function TopBar({
   pageTitle?: string;
   pageAction?: ReactNode;
   extraActions?: ReactNode;
+  accountMenuActions?: ReactNode;
+  canAccessSettings?: boolean;
+  onSettings?: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onToggleLanguage: () => void;
@@ -322,143 +398,27 @@ export function TopBar({
   onRegistrationSearchSelect?: (appointment: AppointmentWithDetails) => void;
 }) {
   return (
-    <header
-      className="sticky top-0 z-50 border-b"
-      style={{
-        backgroundColor: "var(--background)",
-        borderColor: "var(--border)",
-        boxShadow: "var(--shadow-sm)"
-      }}
-    >
-      <div className={`relative flex items-center justify-between h-12 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
-        <div className={`flex min-w-0 flex-1 items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
-          {/* Mobile menu button */}
-          <button
-            className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
-            style={{
-              color: "var(--foreground)",
-              backgroundColor: "transparent",
-              borderColor: "var(--border)"
-            }}
-            onClick={onMobileNavToggle}
-            aria-label={t(language, "shell.toggleNav")}
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-
-          {/* Brand */}
-          <div className={`flex min-w-0 items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
-            <div
-              className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white relative"
-              style={{
-                background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
-                boxShadow: "var(--shadow-accent)"
-              }}
-            >
-              {/* Power LED */}
-              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
-              <span className="text-xs font-bold">R</span>
-            </div>
-            <div className="hidden min-w-0 lg:block">
-              <h1 className="truncate text-base font-display" style={{ color: "var(--foreground)" }}>
-                {t(language, "shell.reception")}
-              </h1>
-            </div>
+    <header className="sticky top-0 z-50 border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>
+      <div className="flex min-h-[3.5rem] items-center gap-3 px-4 lg:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <button type="button" className="lg:hidden btn-ghost" onClick={onMobileNavToggle} aria-label={t(language, "shell.toggleNav")} title={t(language, "shell.toggleNav")}><Menu className="h-5 w-5" /></button>
+          <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-xs font-bold text-white sm:flex">R</div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-foreground">{pageTitle || t(language, "shell.reception")}</p>
+            {pageTitle ? <p className="hidden truncate text-[10px] text-muted-foreground sm:block">{t(language, "shell.reception")}</p> : null}
           </div>
+          {pageAction ? <div className="shrink-0">{pageAction}</div> : null}
+        </div>
 
+        <div className="flex min-w-0 flex-1 justify-center">
           <GlobalSearch language={language} isRtl={isRtl} canSearchPatients={canSearchPatients} canSearchRegistrations={canSearchRegistrations} onPatientSelect={onPatientSearchSelect} onRegistrationSelect={onRegistrationSearchSelect} />
         </div>
 
-        {/* Center page banner */}
-        {pageTitle && (
-          <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 lg:block">
-            <div
-              className="max-w-[88vw] overflow-hidden rounded-full border px-3 py-1 text-center shadow-sm sm:max-w-[42vw] sm:px-4"
-              style={{
-                backgroundColor: "var(--card)",
-                borderColor: "var(--border)"
-              }}
-            >
-              <span className="block truncate text-sm font-semibold text-foreground">
-                {pageTitle}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className={`flex flex-shrink-0 items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
-          {pageAction && <div className="pointer-events-auto">{pageAction}</div>}
+        <div className="flex shrink-0 items-center gap-1">
           {extraActions}
-
-          {/* Undo */}
-          {!pageAction && (
-            <>
-              <button
-                className="btn-ghost hidden lg:inline-flex"
-                onClick={onUndo}
-                aria-label={t(language, "navPanel.undo")}
-              >
-                <Undo2 className="w-4 h-4" />
-              </button>
-
-              <button
-                className="btn-ghost hidden lg:inline-flex"
-                onClick={onRedo}
-                aria-label={t(language, "navPanel.redo")}
-              >
-                <Redo2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-
-          {/* Language toggle */}
-          <button
-            className="btn-ghost hidden text-xs font-mono lg:inline-flex"
-            onClick={onToggleLanguage}
-          >
-            <Languages className="w-4 h-4" />
-            {isRtl ? "EN" : "عربي"}
-          </button>
-
-          {/* User badge */}
-          {user && (
-            <div
-              className="hidden items-center gap-3 rounded-xl border px-3 py-1.5 md:flex"
-              style={{
-                backgroundColor: "var(--card)",
-                borderColor: "var(--border)",
-                boxShadow: "var(--shadow-sm)"
-              }}
-            >
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-white text-xs font-bold relative"
-                style={{
-                  background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
-                  boxShadow: "var(--shadow-accent-sm)"
-                }}
-              >
-                {user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U"}
-              </div>
-              <div className="leading-tight">
-                <span className="block text-sm font-medium" style={{ color: "var(--foreground)" }}>
-                  {user.fullName}
-                </span>
-                <span className="block text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
-                  {user.role}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Logout */}
-          <button
-            className="btn-ghost hidden text-xs lg:inline-flex"
-            style={{ color: "var(--accent)" }}
-            onClick={onLogout}
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}
+          <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} />
+          {user ? <AccountMenu user={user} language={language} accountActions={accountMenuActions} canAccessSettings={canAccessSettings} onSettings={onSettings} onLogout={onLogout} /> : null}
         </div>
       </div>
     </header>

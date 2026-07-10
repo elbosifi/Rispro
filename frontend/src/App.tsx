@@ -256,9 +256,11 @@ function AppContent() {
           <>
             <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
             <SchedulingOverrideApprovalCenter user={user} />
-            <span className="hidden lg:inline-flex"><ActionPinSettingsButton /></span>
           </>
         )}
+        accountMenuActions={<ActionPinSettingsButton variant="drawer" />}
+        canAccessSettings={canRoleAccessRoute(normalizedMatrix, "settings", user.role)}
+        onSettings={() => navigate("/settings")}
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}

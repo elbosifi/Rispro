@@ -67,6 +67,7 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
         className={`${actionableCount > 0 ? "btn-ghost relative" : "hidden lg:inline-flex btn-ghost relative"}`}
         onClick={() => setOpen(true)}
         aria-label={t(language, "overrideRequests.title")}
+        title={t(language, "overrideRequests.title")}
       >
         <Bell className="h-4 w-4" />
         {actionableCount > 0 ? (
