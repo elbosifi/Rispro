@@ -265,7 +265,7 @@ function formatDurationMinutes(language: Language, elapsedMinutes: number): stri
   return language === "ar" ? `${minutes}د` : `${minutes}m`;
 }
 
-function waitingSourceLabel(language: Language, source: "live" | "pacs_start" | "pacs_first_seen" | "manual" | "manual_fallback"): string {
+function waitingSourceLabel(language: Language, source: "live" | "pacs_start" | "pacs_first_seen" | "auto_completion_fallback" | "manual" | "manual_fallback"): string {
   switch (source) {
     case "live":
       return chooseLocalized(language, "انتظار مباشر", "Live waiting");
@@ -273,6 +273,8 @@ function waitingSourceLabel(language: Language, source: "live" | "pacs_start" | 
       return chooseLocalized(language, "بداية الدراسة من PACS", "PACS study start");
     case "pacs_first_seen":
       return chooseLocalized(language, "أول ظهور في PACS / تقريبي", "PACS first seen / approximate");
+    case "auto_completion_fallback":
+      return chooseLocalized(language, "احتياطي الإكمال التلقائي", "Auto-completion fallback");
     case "manual":
       return chooseLocalized(language, "إكمال يدوي", "Manual complete");
     case "manual_fallback":
@@ -294,6 +296,7 @@ function waitingDurationInfo(language: Language, appointment: AppointmentWithDet
     if (appointment.pacsAutoCompletionEnabled) {
       const pacsStartedAt = timestampValue(appointment.pacsStudyStartedAt);
       const pacsFirstSeenAt = timestampValue(appointment.pacsFirstSeenAt);
+      const autoCompletedAt = timestampValue(appointment.autoCompletedAt);
       const completedAt = timestampValue(appointment.completedAt);
       if (pacsStartedAt != null) {
         endpoint = pacsStartedAt;
@@ -301,6 +304,9 @@ function waitingDurationInfo(language: Language, appointment: AppointmentWithDet
       } else if (pacsFirstSeenAt != null) {
         endpoint = pacsFirstSeenAt;
         source = waitingSourceLabel(language, "pacs_first_seen");
+      } else if (autoCompletedAt != null) {
+        endpoint = autoCompletedAt;
+        source = waitingSourceLabel(language, "auto_completion_fallback");
       } else if (completedAt != null) {
         endpoint = completedAt;
         source = waitingSourceLabel(language, "manual_fallback");
@@ -350,6 +356,17 @@ function timingFlags(language: Language, appointment: AppointmentWithDetails): R
       label: chooseLocalized(language, "تقريبي", "Approx"),
       title: chooseLocalized(language, "أول ظهور في PACS تقريبي", "PACS first seen is approximate"),
       variant: "info",
+    }];
+  }
+  if (timestampValue(appointment.autoCompletedAt) != null) {
+    return [{
+      label: chooseLocalized(language, "احتياطي الإكمال التلقائي", "Auto-completion fallback"),
+      title: chooseLocalized(
+        language,
+        "تم استخدام وقت الإكمال التلقائي لأن توقيت PACS غير متاح",
+        "Auto-completion time used because PACS timing was unavailable"
+      ),
+      variant: "warning",
     }];
   }
   if (timestampValue(appointment.completedAt) != null) {

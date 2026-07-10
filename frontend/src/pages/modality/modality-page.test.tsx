@@ -74,6 +74,7 @@ function appointment(overrides: Partial<AppointmentWithDetails> = {}): Appointme
     cancelReason: null,
     arrivedAt: null,
     completedAt: null,
+    autoCompletedAt: null,
     createdAt: "2026-06-18T08:00:00Z",
     updatedAt: "2026-06-18T08:00:00Z",
     caseCategory: "oncology",
@@ -713,7 +714,7 @@ describe("ModalityPage modality board", () => {
     expect(within(row).getByText("Approx").getAttribute("title")).toContain("PACS first seen is approximate");
   });
 
-  it("falls back to completed_at and marks manual fallback for auto-completion rows without PACS timing", async () => {
+  it("falls back to autoCompletedAt before completedAt for auto-completion rows without PACS timing", async () => {
     const user = await openBoard([
       appointment({
         id: 22,
@@ -721,6 +722,7 @@ describe("ModalityPage modality board", () => {
         status: "completed",
         arrivedAt: "2026-06-18T08:00:00Z",
         completedAt: "2026-06-18T09:10:00Z",
+        autoCompletedAt: "2026-06-18T09:00:00Z",
         pacsAutoCompletionEnabled: true,
         englishFullName: "PACS Fallback",
       }),
@@ -728,10 +730,29 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-22");
+    expect(within(row).getByText("1h 0m")).toBeTruthy();
+    expect(within(row).getAllByText("Auto-completion fallback")).toHaveLength(2);
+    expect(within(row).queryByText("Timing missing")).toBeNull();
+  });
+
+  it("uses completedAt as the manual fallback when autoCompletedAt is absent", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 28,
+        accessionNumber: "ACC-PACS-MANUAL-FALLBACK",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        completedAt: "2026-06-18T09:10:00Z",
+        pacsAutoCompletionEnabled: true,
+        englishFullName: "PACS Manual Fallback",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-28");
     expect(within(row).getByText("1h 10m")).toBeTruthy();
     expect(within(row).getByText("Manual complete fallback")).toBeTruthy();
     expect(within(row).getByText("Manual fallback")).toBeTruthy();
-    expect(within(row).getByText("Manual fallback").getAttribute("title")).toContain("PACS study-start timing was unavailable");
   });
 
   it("marks completed auto-completion rows with missing PACS timing and endpoint", async () => {
@@ -770,6 +791,24 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-23");
     expect(within(row).getByText("25m")).toBeTruthy();
     expect(within(row).getByText("Manual complete")).toBeTruthy();
+  });
+
+  it("does not render a negative completed waiting duration", async () => {
+    const user = await openBoard([
+      appointment({
+        id: 30,
+        accessionNumber: "ACC-EARLY-ENDPOINT",
+        status: "completed",
+        arrivedAt: "2026-06-18T08:00:00Z",
+        autoCompletedAt: "2026-06-18T07:50:00Z",
+        pacsAutoCompletionEnabled: true,
+        englishFullName: "Early Endpoint",
+      }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-30");
+    expect(within(row).queryByText(/-\d+m/)).toBeNull();
   });
 
   it("shows live waiting source for active arrived rows and dash without arrived_at", async () => {

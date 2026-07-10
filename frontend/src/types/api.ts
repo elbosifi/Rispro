@@ -1494,6 +1494,7 @@ export interface Appointment {
   arrivedAt?: string | null;
   waitingStartedAt?: string | null;
   completedAt?: string | null;
+  autoCompletedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
   sameDayAppointmentCount?: number;

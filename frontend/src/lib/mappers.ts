@@ -276,6 +276,7 @@ export function mapAppointment(raw: RawRecord): Appointment {
     arrivedAt: strOrNull(raw, 'arrived_at') ?? strOrNull(raw, 'arrivedAt'),
     waitingStartedAt: strOrNull(raw, 'waiting_started_at') ?? strOrNull(raw, 'waitingStartedAt'),
     completedAt: strOrNull(raw, 'completed_at') ?? strOrNull(raw, 'completedAt'),
+    autoCompletedAt: strOrNull(raw, 'auto_completed_at') ?? strOrNull(raw, 'autoCompletedAt'),
     createdAt: strOrUndefined(raw, 'created_at') ?? strOrUndefined(raw, 'createdAt'),
     updatedAt: strOrUndefined(raw, 'updated_at') ?? strOrUndefined(raw, 'updatedAt')
   };

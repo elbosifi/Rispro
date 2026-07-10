@@ -17,11 +17,13 @@ describe("workflow timestamp mapping", () => {
       arrived_at: "2026-06-18T08:15:00Z",
       waiting_started_at: "2026-06-18T08:20:00Z",
       completed_at: "2026-06-18T09:30:00Z",
+      auto_completed_at: "2026-06-18T09:29:00Z",
     });
 
     expect(appointment.arrivedAt).toBe("2026-06-18T08:15:00Z");
     expect(appointment.waitingStartedAt).toBe("2026-06-18T08:20:00Z");
     expect(appointment.completedAt).toBe("2026-06-18T09:30:00Z");
+    expect(appointment.autoCompletedAt).toBe("2026-06-18T09:29:00Z");
   });
 
   it("maps modality worklist PACS timing and primary identifier fields", () => {
@@ -45,6 +47,7 @@ describe("workflow timestamp mapping", () => {
       pacs_first_seen_at: "2026-06-18T08:27:00Z",
       pacs_timing_source: "instance_acquisition_datetime",
       pacs_timing_confidence: "high",
+      autoCompletedAt: "2026-06-18T08:28:00Z",
     });
 
     expect(appointment.patientPrimaryIdentifierType).toBe("passport");
@@ -56,6 +59,7 @@ describe("workflow timestamp mapping", () => {
     expect(appointment.pacsFirstSeenAt).toBe("2026-06-18T08:27:00Z");
     expect(appointment.pacsTimingSource).toBe("instance_acquisition_datetime");
     expect(appointment.pacsTimingConfidence).toBe("high");
+    expect(appointment.autoCompletedAt).toBe("2026-06-18T08:28:00Z");
   });
 
   it("maps queue workflow timestamps while preserving scannedAt", () => {

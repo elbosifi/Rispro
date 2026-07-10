@@ -1168,6 +1168,7 @@ router.get(
         coalesce(b.arrived_at, status_times.arrived_at) as arrived_at,
         b.waiting_started_at,
         coalesce(b.completed_at, status_times.completed_at) as completed_at,
+        b.auto_completed_at,
         coalesce(pacs_settings.enabled, false) as pacs_auto_completion_enabled,
         b.pacs_study_started_at,
         b.pacs_first_seen_at,
@@ -1300,7 +1301,7 @@ router.get(
           ) as arrived_at,
           max(audit_log.created_at) filter (where audit_log.new_values->>'status' = 'completed') as completed_at
         from audit_log
-        where audit_log.entity_type = 'appointment_v2_booking'
+        where audit_log.entity_type in ('appointment_v2_booking', 'appointments_v2_booking')
           and audit_log.entity_id = b.id
           and audit_log.new_values->>'status' in ('arrived', 'waiting', 'completed')
       ) status_times on true

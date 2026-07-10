@@ -607,7 +607,7 @@ async function discontinueBookingForBelowMinimumSeries({
 
     await logAuditEntry(
       {
-        entityType: "appointments_v2_booking",
+        entityType: "appointment_v2_booking",
         entityId: bookingId,
         actionType: "orthanc_auto_discontinue_below_minimum_series",
         oldValues: { status: current.status },
@@ -690,6 +690,7 @@ async function completeBookingIfStillEligible({
           status = 'completed',
           auto_completed_by = 'orthanc_pacs_auto_completion',
           auto_completed_at = now(),
+          completed_at = coalesce(completed_at, now()),
           auto_completion_check_id = $2,
           pacs_study_started_at = $3::timestamptz,
           pacs_first_seen_at = $4::timestamptz,
@@ -714,7 +715,7 @@ async function completeBookingIfStillEligible({
 
     await logAuditEntry(
       {
-        entityType: "appointments_v2_booking",
+        entityType: "appointment_v2_booking",
         entityId: bookingId,
         actionType: "orthanc_auto_complete",
         oldValues: { status: current.status },

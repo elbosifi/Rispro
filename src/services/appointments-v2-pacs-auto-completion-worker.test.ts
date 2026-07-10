@@ -31,9 +31,11 @@ test("worker excludes bookings after manual PACS auto-completion override", () =
   assert.match(source, /current\.pacs_auto_completion_disabled_at/);
 });
 
-test("worker writes orthanc_auto_complete audit payload", () => {
+test("worker writes completed_at without overwriting an existing value and uses the canonical audit entity", () => {
   assert.match(source, /actionType: "orthanc_auto_complete"/);
-  assert.match(source, /entityType: "appointments_v2_booking"/);
+  assert.match(source, /completed_at = coalesce\(completed_at, now\(\)\)/);
+  assert.match(source, /entityType: "appointment_v2_booking"/);
+  assert.doesNotMatch(source, /entityType: "appointments_v2_booking"/);
   assert.match(source, /verificationCheckId: historyId/);
 });
 

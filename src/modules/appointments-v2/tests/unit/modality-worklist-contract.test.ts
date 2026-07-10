@@ -20,9 +20,14 @@ test("modality worklist returns PACS timing fields and PACS auto-completion enab
   assert.match(source, /pacs_auto_completion_enabled/);
   assert.match(source, /b\.pacs_study_started_at/);
   assert.match(source, /b\.pacs_first_seen_at/);
+  assert.match(source, /b\.auto_completed_at/);
   assert.match(source, /b\.pacs_timing_source/);
   assert.match(source, /b\.pacs_timing_confidence/);
   assert.match(source, /pacs_auto_completion_settings/);
+});
+
+test("modality worklist recovers historical status timestamps from both audit entity names", () => {
+  assert.match(source, /entity_type in \('appointment_v2_booking', 'appointments_v2_booking'\)/);
 });
 
 test("modality worklist returns Routine display for missing reporting priority", () => {
