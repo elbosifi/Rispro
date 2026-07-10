@@ -32,6 +32,8 @@ import {
   Languages,
   LogOut
 } from "lucide-react";
+import { GlobalSearch } from "@/components/search/global-search";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 
 export const NAV_ITEMS = APP_NAV_ITEMS;
 
@@ -99,33 +101,6 @@ function useLiveStatusTime(language: Language) {
   }).format(now);
 
   return { date, time };
-}
-
-function StatusChip({ language }: { language: Language }) {
-  const { date, time } = useLiveStatusTime(language);
-
-  return (
-    <div
-      className="hidden xl:inline-flex items-center gap-2.5 max-w-[30vw] min-w-0 shrink-0 px-3 py-1.5 rounded-xl border"
-      style={{
-        backgroundColor: "var(--card)",
-        borderColor: "var(--border)",
-        boxShadow: "var(--shadow-sm)"
-      }}
-    >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--accent) 12%, var(--muted))", color: "var(--accent)" }}>
-        <CalendarDays className="h-4 w-4" />
-      </div>
-      <div className="min-w-0 leading-tight">
-        <span className="block truncate text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
-          {language === "ar" ? "الوقت والتاريخ" : "Date & time"}
-        </span>
-        <span className="block truncate text-[11px] font-medium text-foreground">
-          {date} <span className="mx-1 text-muted-foreground">•</span> {time}
-        </span>
-      </div>
-    </div>
-  );
 }
 
 function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }) {
@@ -228,7 +203,11 @@ export function TopBar({
   onRedo,
   onToggleLanguage,
   onLogout,
-  onMobileNavToggle
+  onMobileNavToggle,
+  canSearchPatients = false,
+  canSearchRegistrations = false,
+  onPatientSearchSelect = () => {},
+  onRegistrationSearchSelect = () => {}
 }: {
   user: User | null;
   language: Language;
@@ -241,6 +220,10 @@ export function TopBar({
   onToggleLanguage: () => void;
   onLogout: () => void;
   onMobileNavToggle: () => void;
+  canSearchPatients?: boolean;
+  canSearchRegistrations?: boolean;
+  onPatientSearchSelect?: (patientId: number) => void;
+  onRegistrationSearchSelect?: (appointment: AppointmentWithDetails) => void;
 }) {
   return (
     <header
@@ -287,7 +270,7 @@ export function TopBar({
             </div>
           </div>
 
-          <StatusChip language={language} />
+          <GlobalSearch language={language} isRtl={isRtl} canSearchPatients={canSearchPatients} canSearchRegistrations={canSearchRegistrations} onPatientSelect={onPatientSearchSelect} onRegistrationSelect={onRegistrationSearchSelect} />
         </div>
 
         {/* Center page banner */}

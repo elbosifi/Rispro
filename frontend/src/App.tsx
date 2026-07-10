@@ -37,6 +37,7 @@ import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page"
 import { AppointmentCreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
@@ -131,6 +132,7 @@ function AppContent() {
   const { language, toggleLanguage, t } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [globalPatientId, setGlobalPatientId] = useState<number | null>(null);
   const { data: pageVisibilityMatrix, isLoading: isPageVisibilityLoading } = useQuery({
     queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
     queryFn: fetchPageVisibilityMatrix,
@@ -262,6 +264,10 @@ function AppContent() {
         onToggleLanguage={toggleLanguage}
         onLogout={logout}
         onMobileNavToggle={() => setMobileNavOpen(true)}
+        canSearchPatients={canRoleAccessRoute(normalizedMatrix, "patients", user.role)}
+        canSearchRegistrations={canRoleAccessRoute(normalizedMatrix, "registrations", user.role)}
+        onPatientSearchSelect={setGlobalPatientId}
+        onRegistrationSearchSelect={(appointment) => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`)}
       />
 
       <div className={`flex flex-1 overflow-hidden ${isArabic ? "flex-row-reverse" : ""}`}>
@@ -326,6 +332,7 @@ function AppContent() {
       />
 
       <ToastViewport />
+      {globalPatientId != null ? <PatientDrawer patientId={globalPatientId} onClose={() => setGlobalPatientId(null)} /> : null}
     </div>
   );
 }

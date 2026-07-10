@@ -58,6 +58,9 @@ vi.mock("@/providers/action-pin-provider", () => ({
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: testState.fetchDoctorMe,
   fetchPageVisibilityMatrix: testState.fetchPageVisibilityMatrix,
+  fetchNoShowSummary: vi.fn(),
+  searchPatients: vi.fn(),
+  fetchAppointments: vi.fn(),
 }));
 
 vi.mock("@/components/auth/action-pin-settings-button", () => ({

@@ -29,6 +29,9 @@ vi.mock("lucide-react", () => {
     Redo2: Icon,
     Languages: Icon,
     LogOut: Icon,
+    Search: Icon,
+    Loader2: Icon,
+    UserRound: Icon,
   };
 });
 
