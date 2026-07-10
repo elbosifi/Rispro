@@ -891,11 +891,9 @@ export default function ModalityPage() {
                     <span>{activeFilterParts.join(" • ")}</span>
                   </div>
                   <div className={`flex flex-wrap items-center gap-1.5 ${isArabic ? "flex-row-reverse" : ""}`}>
-                    {boardFilter !== "operational" ? (
-                      <Button type="button" variant="secondary" size="sm" onClick={handleClearStatusFilter} className="h-7 px-2 text-[11px]">
-                        {chooseLocalized(language, "مسح الحالة", "Clear status")}
-                      </Button>
-                    ) : null}
+                    <Button type="button" variant="secondary" size="sm" onClick={handleClearStatusFilter} className="h-7 px-2 text-[11px]">
+                      {chooseLocalized(language, "مسح الحالة", "Clear status")}
+                    </Button>
                     <Button type="button" variant="secondary" size="sm" onClick={handleResetView} className="h-7 px-2 text-[11px]">
                       {chooseLocalized(language, "إعادة العرض", "Reset view")}
                     </Button>
