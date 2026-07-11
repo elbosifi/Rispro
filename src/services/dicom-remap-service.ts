@@ -2890,8 +2890,8 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
   } catch (error) {
     const code = processingErrorCode(error);
     const updated = await queryDicomRemapDb<DicomRemapJobRow>(
-      `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3, processing_error_details = jsonb_build_object('code', $3), error_message = $4, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
-      [job.id, leaseOwner, code, processingErrorMessage(code)]
+      `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3::text, processing_error_details = $4::jsonb, error_message = $5::text, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+      [job.id, leaseOwner, code, JSON.stringify({ code }), processingErrorMessage(code)]
     );
     if (updated.rows[0]) await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_processing_failed", oldValues: { status: "processing" }, newValues: { status: "failed", processingStage: "failed", errorCode: code }, changedByUserId: null });
     throw error;
@@ -4013,6 +4013,7 @@ export const __dicomRemapTestables = {
   verifyModifiedStudyAfterTimeout,
   verifySendCompletionAfterTimeout,
   enqueueOrthancAsyncStore,
+  uploadPersistedRemappedInstance,
   sendExistingDicomRemapJobToDestination,
   isDestinationVerificationRequired,
   sanitizeOrthancSendJobResult,

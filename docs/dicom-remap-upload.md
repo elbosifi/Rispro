@@ -11,8 +11,6 @@ Deployment proxy requirements for large CT/MR studies:
 - The proxy does not need to remain open for DICOM rewriting, Orthanc ingestion/verification, or PACS C-STORE; those continue through background workers after the response.
 - For Nginx-style proxies, configure `client_max_body_size` for the expected study size (for example `20g`), use `proxy_request_buffering off` where streaming is desired, and use `proxy_read_timeout`/`proxy_send_timeout` high enough for ingestion (for example `600s`).
 
-Worker recovery and failed sends:
-
 ## Durable staging and processing deployment
 
 - `DICOM_REMAP_STAGING_DIR` defaults to `storage/dicom/remap-staging`. It must be a private, persistent, non-public filesystem location. The standard Docker `/app/storage` volume already covers the default path.

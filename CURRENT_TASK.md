@@ -2,24 +2,24 @@
 
 ## Task
 
-- One sentence: Move DICOM remap upload processing out of the browser request into durable staging and a restart-safe background processing worker.
-- Scope: persistent staged DICOM storage, processing state and lease persistence, worker lifecycle and recovery, persistent UID plans, Orthanc idempotency/verification, handoff to the existing async PACS-send worker, safe cleanup, frontend progress polling, migration, documentation, and focused tests.
-- Out of scope: resumable or direct-to-Orthanc uploads, S3/object storage, PACS configuration redesign, dcmjs replacement, MWL/auto-completion work, production data migration, UI redesign, and automatic ambiguous-send resend.
+- One sentence: Complete host-side database and fake-Orthanc validation for durable DICOM-remap processing.
+- Scope: migration 119 verification, DB-backed staging/claim/recovery/send-handoff integration, worker coverage, temporary-directory race classification, and disposable Docker validation.
+- Out of scope: product feature expansion, UI redesign, DICOM identity-policy changes, production databases, production Orthanc/PACS, and deployment.
 
 ## Inspection
 
-- Files checked: Pending: existing remap route/service/send worker/server, frontend page/tests, migrations, storage conventions, and deployment mounts.
-- Current behavior: The multipart route rewrites and ingests DICOM synchronously before returning; only C-STORE monitoring is asynchronous.
-- Root cause: CPU-heavy parsing/rewriting and Orthanc ingestion remain coupled to the browser request and use a non-persistent UID plan.
+- Files checked: migration 119, remap processing service/worker/send worker, PACS route, server lifecycle, Docker compose, deployment docs, and existing focused tests.
+- Current behavior: Durable staging and lease-based processing existed; host DB/fake-Orthanc coverage was missing, the worker suite only covered idle processing, and the route test observed service-test temp directories by prefix.
+- Root cause: Validation fixtures and test isolation did not cover the real DB locking, lease expiry, UID-plan reuse, partial Orthanc upload, or send-handoff crash boundary.
 
 ## Plan
 
-- Minimal change: Stage multipart files durably, persist an uploaded/queued job, claim it under a database lease in a processing worker, persist and reuse the UID plan, verify Orthanc, then idempotently hand off to the existing send flow.
-- Targeted tests: remap service/route/processing/send worker tests, frontend remap page test, portable-DB migration/integration tests, then typechecks/build and diff check.
-- Stop conditions: Treat Docker EPERM as an environment blocker. Do not proceed only if inspection proves persistent storage cannot be supported by current deployment; otherwise use a configurable durable storage root.
+- Minimal change: Add a disposable DB/fake-Orthanc integration test, expand worker tests through dependency injection, narrow route temp-dir assertions to exact production names, and correct any failures found by the host run.
+- Targeted tests: migration/integration DB test, processing worker, remap service, send worker, PACS route, frontend remap page, typechecks, build, and diff check.
+- Stop conditions: Never use production data. Docker/DB failures are environment blockers only when the host daemon/database cannot be made available.
 
 ## Result
 
-- Files changed: durable-processing migration; remap staging/processing service and worker; multipart route; server lifecycle; remap UI status/progress; environment example; deployment/domain docs; focused tests.
-- Validation run: agent contract, backend and frontend typechecks, frontend production build, isolated remap route/processing-worker/service-focused tests, frontend remap-page test, and diff check passed.
-- Blockers or skipped checks: Docker is blocked by the sandbox (`DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT`), so the portable DB migration/integration run could not be performed. The broader remap service test file has existing audit tests that attempt a blocked local PostgreSQL connection and a concurrent temporary-directory assertion race; those were not changed.
+- Files changed: durable DB/fake-Orthanc integration test, worker test coverage/hooks, remap failure persistence, conflicting-instance test, route temp-dir isolation, docs cleanup, and this task record.
+- Validation run: Docker disposable PostgreSQL, migration 119, DB/fake-Orthanc integration (2/2), full remap service tests (80/80), worker/send/route tests (9/9), frontend remap test (14/14), typechecks, production build, and diff check passed.
+- Blockers or skipped checks: Full RISpro compose startup was not executed because the repository has no `.env` and the stack requires deployment-specific settings. Compose inspection plus a temporary `rispro-storage` volume/sentinel across two containers verified `/app/storage` persistence; no production services were used.

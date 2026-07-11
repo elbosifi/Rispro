@@ -13,7 +13,9 @@ const TEMP_PREFIX = "rispro-dicom-remap-";
 async function listRemapTempDirs(): Promise<string[]> {
   const entries = await readdir(os.tmpdir(), { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith(TEMP_PREFIX))
+    // Service tests use `rispro-dicom-remap-test-*`; only observe the exact
+    // production route prefix so parallel test files cannot appear as leaks.
+    .filter((entry) => entry.isDirectory() && new RegExp(`^${TEMP_PREFIX}[A-Za-z0-9]{6}$`).test(entry.name))
     .map((entry) => entry.name)
     .sort();
 }

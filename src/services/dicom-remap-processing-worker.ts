@@ -4,6 +4,7 @@ import {
   cleanupExpiredFailedDicomRemapStaging,
   processClaimedDicomRemapJob,
 } from "./dicom-remap-service.js";
+import type { DicomRemapJobRow } from "./dicom-remap-service.js";
 
 export interface DicomRemapProcessingWorker {
   stop(): Promise<void>;
@@ -13,6 +14,10 @@ let intervalHandle: NodeJS.Timeout | null = null;
 let tickRunning = false;
 let stopped = false;
 const workerId = `dicom-remap-processing-${process.pid}-${randomUUID()}`;
+type ClaimJob = { job: DicomRemapJobRow; recovered: boolean } | null;
+let claimJob = claimNextDicomRemapProcessingJob;
+let processJob = processClaimedDicomRemapJob;
+let cleanupFailedStaging = cleanupExpiredFailedDicomRemapStaging;
 
 export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: number; leaseSeconds?: number; owner?: string } = {}): Promise<{ claimed: number; completed: number; failed: number }> {
   if (tickRunning || stopped) return { claimed: 0, completed: 0, failed: 0 };
@@ -24,13 +29,13 @@ export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: n
   let completed = 0;
   let failed = 0;
   try {
-    await cleanupExpiredFailedDicomRemapStaging(Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72))).catch(() => 0);
+    await cleanupFailedStaging(Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72))).catch(() => 0);
     for (let index = 0; index < batchSize && !stopped; index += 1) {
-      const claim = await claimNextDicomRemapProcessingJob(owner, leaseSeconds);
+      const claim = await claimJob(owner, leaseSeconds);
       if (!claim) break;
       claimed += 1;
       try {
-        await processClaimedDicomRemapJob({ job: claim.job, leaseOwner: owner, leaseSeconds });
+        await processJob({ job: claim.job, leaseOwner: owner, leaseSeconds });
         completed += 1;
       } catch (error) {
         failed += 1;
@@ -46,6 +51,24 @@ export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: n
     tickRunning = false;
   }
 }
+
+export const __dicomRemapProcessingWorkerTestables = {
+  setDependencies(dependencies: {
+    claim?: (owner: string, leaseSeconds: number) => Promise<ClaimJob>;
+    process?: typeof processClaimedDicomRemapJob;
+    cleanup?: (retentionHours: number) => Promise<number>;
+  }): void {
+    claimJob = dependencies.claim || claimNextDicomRemapProcessingJob;
+    processJob = dependencies.process || processClaimedDicomRemapJob;
+    cleanupFailedStaging = dependencies.cleanup || cleanupExpiredFailedDicomRemapStaging;
+  },
+  resetDependencies(): void {
+    claimJob = claimNextDicomRemapProcessingJob;
+    processJob = processClaimedDicomRemapJob;
+    cleanupFailedStaging = cleanupExpiredFailedDicomRemapStaging;
+    stopped = false;
+  },
+};
 
 export async function startDicomRemapProcessingWorker(options?: { intervalMs?: number; batchSize?: number; leaseSeconds?: number }): Promise<DicomRemapProcessingWorker> {
   const intervalMs = Math.max(1_000, options?.intervalMs ?? Number(process.env.DICOM_REMAP_PROCESSING_WORKER_INTERVAL_MS || 5_000));

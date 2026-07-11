@@ -228,6 +228,14 @@ test("processing claim uses a skip-locked lease claim", async () => {
   assert.match(calls[0]!.sql, /processing_lease_owner/i);
 });
 
+test("persisted remap upload rejects a conflicting duplicate instance safely", async () => {
+  queueOrthancResults([orthancResult({ status: 409, ok: false, json: { OrthancStatus: 17, Message: "different content" } })]);
+  await assert.rejects(
+    () => __dicomRemapTestables.uploadPersistedRemappedInstance(Buffer.from("conflicting"), 1),
+    (error: unknown) => (error as { details?: { code?: string } }).details?.code === "DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT"
+  );
+});
+
 test("assertDicomRemapRouteAccess enforces authenticated user id", async () => {
   await assert.rejects(
     () => assertDicomRemapRouteAccess(null),
