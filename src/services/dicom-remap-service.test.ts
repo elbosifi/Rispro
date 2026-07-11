@@ -11,6 +11,8 @@ import {
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
+  failStaleDicomRemapSendEnqueues,
+  monitorDicomRemapSendJob,
   previewDicomRemapMultipartUpload,
   resendDicomRemapJobToPacs,
   validateDicomRemapUploadFilesInput,
@@ -38,6 +40,14 @@ function remapJob(overrides: Partial<DicomRemapJobRow> = {}): DicomRemapJobRow {
     replacement_patient_sex: null,
     replacement_patient_birth_date: null,
     send_result: null,
+    orthanc_send_job_id: null,
+    send_attempt_count: 0,
+    send_started_at: null,
+    send_completed_at: null,
+    send_last_checked_at: null,
+    send_last_heartbeat_at: null,
+    send_error_code: null,
+    send_error_details: null,
     error_message: null,
     cancellation_reason: null,
     created_at: "2026-04-30T00:00:00.000Z",
@@ -200,6 +210,70 @@ test("dicom helper: DICOM file checks are strict but predictable", () => {
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("MEDIAVIE.PRO"), true);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("CDVIEWER.JAR"), true);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("image.dcm"), false);
+});
+
+test("asynchronous Orthanc C-STORE uses the documented payload and requires a job ID", async () => {
+  const calls = queueOrthancResults([
+    orthancResult({ status: 202, ok: true, text: "{\"ID\":\"orthanc-send-1\"}", json: { ID: "orthanc-send-1" } }),
+  ]);
+  const result = await __dicomRemapTestables.enqueueOrthancAsyncStore("study-1", "PACS_MAIN");
+  assert.equal(result.orthancJobId, "orthanc-send-1");
+  assert.deepEqual(calls[0], {
+    path: "/modalities/PACS_MAIN/store",
+    method: "POST",
+    body: { Resources: ["study-1"], Synchronous: false },
+  });
+
+  queueOrthancResults([orthancResult({ status: 202, ok: true, text: "{}", json: {} })]);
+  await assert.rejects(
+    () => __dicomRemapTestables.enqueueOrthancAsyncStore("study-1", "PACS_MAIN"),
+    /did not return a resolvable job ID/i
+  );
+});
+
+test("Orthanc asynchronous job ID parser accepts documented response variants", () => {
+  assert.equal(__dicomRemapTestables.parseOrthancSendJobId({ ID: "one" }), "one");
+  assert.equal(__dicomRemapTestables.parseOrthancSendJobId({ result: { id: "two" } }), "two");
+  assert.equal(__dicomRemapTestables.parseOrthancSendJobId({ Path: "/jobs/three" }), "three");
+});
+
+test("send monitor keeps running jobs in sending and completes only after Orthanc success", async () => {
+  const runningJob = remapJob({ status: "sending", orthanc_send_job_id: "job-running", send_attempt_count: 1, destination_pacs_key: "PACS_MAIN" });
+  const runningCalls = queueQueryResults([{ rows: [] }]);
+  queueOrthancResults([orthancResult({ json: { ID: "job-running", State: "Running", Type: "DicomModalityStore" } })]);
+  assert.equal(await monitorDicomRemapSendJob(runningJob), null);
+  assert.match(runningCalls[0]!.sql, /send_last_heartbeat_at/i);
+  assert.doesNotMatch(runningCalls[0]!.sql, /status = 'sent'/i);
+
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { auditEntries.push(entry as unknown as Record<string, unknown>); return {} as never; });
+  const sentJob = remapJob({ ...runningJob, status: "sent", send_completed_at: "2026-07-11T00:00:00.000Z" });
+  queueQueryResults([{ rows: [sentJob] }]);
+  queueOrthancResults([orthancResult({ json: { ID: "job-running", State: "Success", Type: "DicomModalityStore" } })]);
+  const result = await monitorDicomRemapSendJob(runningJob);
+  assert.equal(result?.status, "sent");
+  assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_send_completed"), true);
+});
+
+test("send monitor sanitizes failure classification and missing Orthanc jobs safely", async () => {
+  const job = remapJob({ status: "sending", orthanc_send_job_id: "job-failed", send_attempt_count: 2, destination_pacs_key: "PACS_MAIN" });
+  const failed = remapJob({ ...job, status: "failed", send_error_code: "PACS_DIMSE_REJECTED" });
+  queueQueryResults([{ rows: [failed] }]);
+  queueOrthancResults([orthancResult({ json: { State: "Failure", Type: "DicomModalityStore", DIMSEStatus: "0xA700", ErrorDescription: "association rejected" } })]);
+  const result = await monitorDicomRemapSendJob(job);
+  assert.equal(result?.status, "failed");
+  assert.equal(result?.send_error_code, "PACS_DIMSE_REJECTED");
+
+  const missing = remapJob({ ...job, status: "failed", send_error_code: "ORTHANC_SEND_JOB_NOT_FOUND" });
+  queueQueryResults([{ rows: [missing] }]);
+  queueOrthancResults([orthancResult({ status: 404, ok: false, json: { HttpStatus: 404 } })]);
+  assert.equal((await monitorDicomRemapSendJob(job))?.send_error_code, "ORTHANC_SEND_JOB_NOT_FOUND");
+});
+
+test("stale sending rows without an Orthanc job ID become recoverable failed rows", async () => {
+  const stale = remapJob({ status: "failed", orthanc_send_job_id: null, send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS" });
+  queueQueryResults([{ rows: [stale] }]);
+  assert.equal(await failStaleDicomRemapSendEnqueues(10), 1);
 });
 
 test("dicom helper: Orthanc invalid-DICOM upload rejection detection is narrow", () => {
@@ -1800,7 +1874,7 @@ test("confirmDicomRemapAndSend claim failure rejects non-sent jobs before Orthan
   }
 });
 
-test("resendDicomRemapJobToPacs resends an existing remapped study and marks the job sent", async () => {
+test("resendDicomRemapJobToPacs atomically enqueues an asynchronous Orthanc job", async () => {
   const auditEntries: Array<Record<string, unknown>> = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
     auditEntries.push(entry as unknown as Record<string, unknown>);
@@ -1816,15 +1890,13 @@ test("resendDicomRemapJobToPacs resends an existing remapped study and marks the
 
   queueQueryResults([
     { rows: [remapJob({ id: 21, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
-    { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
-    { rows: [remapJob({ id: 21, status: "sent", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", send_result: { ok: true } })] },
+    { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", send_attempt_count: 1 })] },
+    { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", orthanc_send_job_id: "orthanc-send-21", send_attempt_count: 1 })] },
   ]);
 
   queueOrthancResults([
     orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "modified-study" } }),
-    orthancResult({ status: 200, ok: true, text: "{}", json: { ok: true } }),
-    orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
-    orthancResult({ status: 200, ok: true, text: "{}", json: { StoredInstances: 5 } }),
+    orthancResult({ status: 202, ok: true, text: "{}", json: { ID: "orthanc-send-21" } }),
   ]);
 
   const result = await resendDicomRemapJobToPacs({
@@ -1832,11 +1904,12 @@ test("resendDicomRemapJobToPacs resends an existing remapped study and marks the
     currentUserId: 42,
   });
 
-  assert.equal(result.job.status, "sent");
-  assert.equal(auditEntries.some((entry) => entry.actionType === "resend_to_pacs"), true);
+  assert.equal(result.job.status, "sending");
+  assert.equal(result.job.orthanc_send_job_id, "orthanc-send-21");
+  assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_resend_enqueued"), true);
 });
 
-test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with technical details", async () => {
+test("resendDicomRemapJobToPacs records asynchronous enqueue failures without a fallback send", async () => {
   const auditEntries: Array<Record<string, unknown>> = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
     auditEntries.push(entry as unknown as Record<string, unknown>);
@@ -1857,7 +1930,7 @@ test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with techni
 
   queueOrthancResults([
     orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "modified-study" } }),
-    orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
+    orthancResult({ status: 500, ok: false, text: "store failed", json: { Message: "store failed" } }),
     orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
     orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
     orthancResult({ status: 500, ok: false, text: "store failed", json: { Message: "store failed" } }),
@@ -1871,8 +1944,7 @@ test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with techni
     }),
     (error: unknown) => {
       assert.ok(error instanceof HttpError);
-      assert.match(error.message, /could not send the remapped study to PACS/i);
-      assert.equal(Array.isArray((error.details as { attempts?: unknown[] } | undefined)?.attempts), true);
+      assert.match(error.message, /rejected asynchronous PACS send enqueue/i);
       return true;
     }
   );
@@ -1881,8 +1953,8 @@ test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with techni
     call.sql.includes("set status = 'failed'")
   );
   assert.ok(failedUpdateCall, "Resend failure should mark the job as failed");
-  assert.match(String(failedUpdateCall?.params?.[1] ?? ""), /could not send the remapped study to PACS/i);
-  assert.equal(auditEntries.some((entry) => entry.actionType === "resend_to_pacs_failed"), true);
+  assert.match(String(failedUpdateCall?.params?.[1] ?? ""), /rejected asynchronous PACS send enqueue/i);
+  assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_send_failed"), true);
 });
 
 test("dicom helper: status transition guard throws on unexpected status", () => {

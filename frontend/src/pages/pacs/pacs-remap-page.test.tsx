@@ -42,6 +42,7 @@ vi.mock("@/lib/dicom-study-scan", () => ({
 }));
 
 class FakeXHR {
+  static DONE = 4;
   static instances: FakeXHR[] = [];
   static fireUploadLoad = true;
   static fireUploadLoadEnd = false;
@@ -73,8 +74,8 @@ class FakeXHR {
     if (FakeXHR.fireUploadLoad) this.upload.onload?.();
     if (FakeXHR.fireUploadLoadEnd) this.upload.onloadend?.();
     if (!FakeXHR.respondInSend) return;
-    this.status = 201;
-    this.responseText = JSON.stringify({ job: { id: 88, status: "sent" }, skippedFilesCount: 0 });
+    this.status = 202;
+    this.responseText = JSON.stringify({ job: { id: 88, status: "sending" }, skippedFilesCount: 0 });
     this.readyState = 4;
     this.onreadystatechange?.();
   }
@@ -125,7 +126,7 @@ describe("PacsRemapPage wizard", () => {
       if (path === "/pacs/remap/replacement-preview") {
         return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
       }
-      if (String(path).includes("/jobs/88")) return Promise.resolve({ job: { id: 88, status: "sent" }, comparison: null });
+      if (String(path).includes("/jobs/88")) return Promise.resolve({ job: { id: 88, status: "sending" }, comparison: null });
       if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
@@ -263,6 +264,7 @@ describe("PacsRemapPage wizard", () => {
     expect((sent?.get("risproPatientId") as string) || "").toBe("10");
     expect((sent?.get("destinationPacsKey") as string) || "").toBe("1");
     expect((sent?.get("confirm") as string) || "").toBe("true");
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/88"));
   });
 
   it("final confirmed action still posts full files to process-multipart after fast preview", async () => {

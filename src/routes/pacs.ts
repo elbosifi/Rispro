@@ -625,7 +625,8 @@ pacsRouter.post(
       currentUserId,
     });
 
-    res.status(201).json(result);
+    // Upload/remap is complete, but PACS C-STORE is now an Orthanc background job.
+    res.status(202).json(result);
   })
 );
 
@@ -834,7 +835,7 @@ pacsRouter.post(
       currentUserId,
     });
 
-    res.json(result);
+    res.status(202).json(result);
   })
 );
 

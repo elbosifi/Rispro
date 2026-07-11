@@ -2,24 +2,26 @@
 
 ## Task
 
-- One sentence: Repair Audit Log optional filtering and add super-admin System Diagnostics.
-- Scope: Audit Log, diagnostics persistence/API/error correlation/backup instrumentation, bounded Settings section, documentation.
-- Out of scope: Unrelated Settings redesigns and production data.
+- One sentence: Make DICOM remap PACS C-STORE durable and asynchronous through Orthanc jobs monitored by a RISpro background worker.
+- Scope: remap send-state persistence, Orthanc asynchronous C-STORE enqueue, duplicate-safe resend, worker monitoring/recovery, route and frontend status behavior, audits, migration, documentation, and focused tests.
+- Out of scope: background upload/remap processing, direct browser-to-Orthanc access, local rewriting replacement, PACS settings redesign, MWL work, source-study deletion, automatic retry after ambiguous enqueue, and production data.
 
-## Inspection
+## Inspection and Plan
 
-- Files checked: Audit route/service, Express app/error handler/auth, admin backup routes, Settings page, API hooks.
-- Current behavior: Audit page asks for 50 records but renders 10; omitted changedByUserId is rejected.
-- Root cause: Audit filter call site used a required positive-integer normalization for an optional route filter.
+- Inspect the current service, routes, migrations, frontend polling, audit conventions, Orthanc client behavior, and worker lifecycle before patching.
+- Preserve existing identity confirmation, validation, access controls, destination choice, and audit policy.
+- Implement the smallest durable transition: browser upload/rewrite/Orthanc ingestion/validation, asynchronous C-STORE acceptance with persisted Orthanc job ID and RISpro `sending`, then worker-owned monitoring to terminal `sent` or `failed`.
+- Validate with the requested focused backend, route, worker, frontend, typecheck, build, and portable database commands where environment access permits.
 
-## Plan
+## Stop Conditions
 
-- Minimal change: Add a backend-authoritative paginated audit contract, deterministic classifier/presentation/redaction helpers, bounded CSV streaming, justified indexes, and a dedicated Settings Audit Log component. Preserve the existing separate System Diagnostics surface.
-- Targeted tests: `src/services/audit-service.test.ts`, `src/services/audit-event-classifier.test.ts`, and existing diagnostics redaction tests.
-- Stop conditions: Stop on unrelated test failures or Docker/database environment failures; do not modify unrelated Settings or Statistics behavior.
+- Stop and report if the configured Orthanc cannot support `POST /modalities/{key}/store` with `{ Resources, Synchronous: false }`; do not fall back to synchronous transmission.
+- Treat Docker EPERM as environment-blocked, not a product failure. Do not touch production data or commit generated DICOM worklist files.
 
 ## Result
 
-- Files changed: Audit route/service/classifier/tests, audit API types/mappers/hooks, dedicated `audit-log-section.tsx`, Settings wiring, migration `115_audit_log_explorer_indexes.sql`, and `docs/AUDIT_LOG.md`.
-- Validation run: Agent contract passed; targeted audit/classifier/diagnostics tests passed 7/7; backend unit suite passed 834/834; backend typecheck passed; frontend typecheck and production build passed; `git diff --check` passed.
-- Blockers or skipped checks: `npm run agent:preflight` reports Docker execution blocked by the environment, so portable DB startup and DB-backed audit validation were not run. Full frontend suite reached unrelated existing Statistics failures (8 failed, 633 passed, 7 skipped); no Statistics changes were made. Manual browser verification was unavailable because the required in-app browser execution tool was not exposed.
+- Added durable asynchronous Orthanc send fields and partial monitoring indexes in migration `118_dicom_remap_async_send_jobs.sql`.
+- Replaced synchronous/legacy PACS store fallbacks with `POST /modalities/{key}/store` using `{ Resources: [studyId], Synchronous: false }`; RISpro persists the returned Orthanc job ID and returns `sending`/HTTP 202.
+- Added a restart-safe DICOM remap send worker with exact-job polling, sanitized terminal diagnostics, stale enqueue recovery, and lifecycle integration.
+- Added duplicate-safe send claims, explicit resend enqueue, status-aware frontend polling, migration/unit/worker/frontend coverage, and updated deployment documentation.
+- Validation: agent contract, targeted service/route/worker/frontend tests, disposable-DB migration test, backend/frontend typechecks, frontend production build, and diff check passed.

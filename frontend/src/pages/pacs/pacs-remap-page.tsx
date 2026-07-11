@@ -38,6 +38,10 @@ interface RemapJob {
   replacement_patient_name: string | null;
   replacement_patient_sex: string | null;
   replacement_patient_birth_date: string | null;
+  orthanc_send_job_id: string | null;
+  send_attempt_count: number;
+  send_error_code: string | null;
+  send_error_details: unknown;
   error_message: string | null;
   cancellation_reason: string | null;
 }
@@ -432,9 +436,10 @@ export default function PacsRemapPage() {
       setJobId(uploadResult.job.id);
       return { uploadResult };
     },
-    onSuccess: () => {
-      setProcessingStage("sent");
-      setSuccessMessage(language === "ar" ? "تمت إعادة الربط والإرسال بنجاح." : "Study remapped and sent successfully.");
+    onSuccess: ({ uploadResult }) => {
+      setJobId(uploadResult.job.id);
+      setProcessingStage(uploadResult.job.status === "sending" ? "sending" : uploadResult.job.status === "sent" ? "sent" : "failed");
+      setSuccessMessage("");
       setErrorMessage("");
       setErrorDetails("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
@@ -504,8 +509,8 @@ export default function PacsRemapPage() {
     },
     onSuccess: (data) => {
       setJobId(data.job.id);
-      setProcessingStage("sent");
-      setSuccessMessage(t(language, "pacs.remap.resendSuccess"));
+      setProcessingStage(data.job.status === "sending" ? "sending" : data.job.status === "sent" ? "sent" : "failed");
+      setSuccessMessage("");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
@@ -588,8 +593,10 @@ export default function PacsRemapPage() {
 
   const wizardStep: RemapWizardStep = useMemo(() => {
     if (processMutation.isPending) return processingStage;
+    if (currentJob?.status === "sending") return "sending";
     if (currentJob?.status === "sent") return "sent";
     if (currentJob?.status === "failed" || currentJob?.status === "cancelled") return "failed";
+    if (processingStage === "sending") return "sending";
     if (processingStage === "sent") return "sent";
     if (processingStage === "failed") return "failed";
     if (scanMutation.isPending) return "scanning";
@@ -633,6 +640,7 @@ export default function PacsRemapPage() {
     wizardStep === "sent"
       ? ""
       : errorMessage || currentJob?.error_message || "";
+  const visibleErrorDetails = errorDetails || (currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
   const visibleSuccessMessage =
     wizardStep === "failed"
       ? ""
@@ -1213,10 +1221,10 @@ export default function PacsRemapPage() {
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-red-700">{visibleErrorMessage || t(language, "pacs.remap.failure")}</p>
-                  {errorDetails && (
+                  {visibleErrorDetails && (
                     <details className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
                       <summary className="cursor-pointer font-medium">Technical details</summary>
-                      <pre className="mt-2 whitespace-pre-wrap break-words">{errorDetails}</pre>
+                      <pre className="mt-2 whitespace-pre-wrap break-words">{visibleErrorDetails}</pre>
                     </details>
                   )}
                 </div>
