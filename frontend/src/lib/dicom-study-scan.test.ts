@@ -5,6 +5,7 @@ import {
   isSkippableDicomSidecarFile,
   previewDicomStudiesFromFiles,
   scanDicomStudiesFromFiles,
+  selectPreviewSampleFiles,
   type DicomStudyScanResult,
 } from "./dicom-study-scan";
 
@@ -143,9 +144,9 @@ describe("dicom study scan", () => {
     expect(selectedPlan.files).toHaveLength(1);
     expect(selectedPlan.selectedStudyInstanceUid).toBe("1.2.3.a");
 
-    const fallbackPlan = buildDicomUploadSelectionPlan(scanResult, "", true);
-    expect(fallbackPlan.usesFallback).toBe(true);
-    expect(fallbackPlan.files).toHaveLength(2);
+    const noFallbackPlan = buildDicomUploadSelectionPlan(scanResult, "", true);
+    expect(noFallbackPlan.usesFallback).toBe(false);
+    expect(noFallbackPlan.files).toHaveLength(0);
   });
 
   it("marks backend sidecar patterns as skippable", () => {
@@ -155,6 +156,43 @@ describe("dicom study scan", () => {
     expect(isSkippableDicomSidecarFile("viewer.exe")).toBe(true);
     expect(isSkippableDicomSidecarFile("CDVIEWER.JAR")).toBe(true);
     expect(isSkippableDicomSidecarFile("scan1.dcm")).toBe(false);
+  });
+
+  it("distributes the fast preview sample across beginning, middle, and end", () => {
+    const files = Array.from({ length: 100 }, (_, index) => makeFile(`image-${index}.dcm`));
+    const sample = selectPreviewSampleFiles(files, 16);
+    const indexes = sample.map((file) => Number(file.name.match(/(\d+)/)?.[1]));
+    expect(indexes.some((index) => index < 10)).toBe(true);
+    expect(indexes.some((index) => index >= 40 && index <= 60)).toBe(true);
+    expect(indexes.some((index) => index > 89)).toBe(true);
+  });
+
+  it("reports batched progress and finds a second study at the end of a folder", async () => {
+    const parseMock = vi.mocked(dicomParser.parseDicom);
+    parseMock.mockImplementation((_bytes: unknown) => {
+      const callIndex = parseMock.mock.calls.length;
+      return mockDataSet({ x0020000d: callIndex > 100 ? "study-b" : "study-a" }) as never;
+    });
+    const progress: number[] = [];
+    const result = await scanDicomStudiesFromFiles(
+      Array.from({ length: 101 }, (_, index) => makeFile(`image-${index}.dcm`)),
+      { batchSize: 20, onProgress: (update) => progress.push(update.processedFileCount) },
+    );
+    expect(result.studies.map((study) => study.studyInstanceUid).sort()).toEqual(["study-a", "study-b"]);
+    expect(progress).toEqual([0, 20, 40, 60, 80, 100, 101]);
+  });
+
+  it("stops scheduling later batches when cancelled", async () => {
+    const parseMock = vi.mocked(dicomParser.parseDicom);
+    parseMock.mockReturnValue(mockDataSet({ x0020000d: "study-a" }) as never);
+    const controller = new AbortController();
+    const scan = scanDicomStudiesFromFiles(Array.from({ length: 8 }, (_, index) => makeFile(`image-${index}.dcm`)), {
+      batchSize: 2,
+      signal: controller.signal,
+      onProgress: ({ processedFileCount }) => { if (processedFileCount === 2) controller.abort(); },
+    });
+    await expect(scan).rejects.toMatchObject({ name: "DicomStudyScanCancelledError" });
+    expect(parseMock).toHaveBeenCalledTimes(2);
   });
 
   it("preview upload sends bounded header slices instead of full files", async () => {

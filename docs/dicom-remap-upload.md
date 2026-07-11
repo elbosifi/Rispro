@@ -2,6 +2,12 @@
 
 RISpro uses `POST /api/pacs/remap/jobs/process-multipart` for the active DICOM remap workflow. The browser sends `multipart/form-data` to RISpro; RISpro streams those bytes to private durable job staging, writes a versioned manifest with byte counts and SHA-256 values, and returns `202 Accepted` once staging and the queued job commit are complete.
 
+## Folder study detection
+
+Folder selection first sends a bounded, distributed header-only preview so the study chooser can appear quickly. RISpro then scans every DICOM-like browser file locally in batches, reading header bytes only and replacing the preliminary result when the complete scan finishes. A completed scan uploads only the files belonging to the explicitly selected Study Instance UID.
+
+If the complete scan is taking too long, it can be skipped only after a one-study preliminary result and a separate acknowledgement. That mode uploads every DICOM-like candidate with `uploadMode=single_study_folder_unverified` and the provisional selected Study Instance UID. The durable worker parses every valid staged DICOM before it creates a UID plan, rewrites data, uploads to Orthanc, verifies Orthanc, or enqueues PACS send. Any mixed-study folder fails safely with `DICOM_REMAP_MULTIPLE_STUDIES_DETECTED`; diagnostics contain only the stable error code and sanitized counts.
+
 The request does not parse, rewrite, upload, validate, or transmit DICOM after the upload bytes have completed. The restart-safe processing worker claims the queued job under a database lease, validates staged files, persists a UID replacement plan, rewrites and uploads to Orthanc, verifies one study and replacement identity, then invokes the existing asynchronous C-STORE flow. The frontend polls RISpro job status through `uploaded`, `processing`, `sending`, `sent`, or `failed`.
 
 Deployment proxy requirements for large CT/MR studies:

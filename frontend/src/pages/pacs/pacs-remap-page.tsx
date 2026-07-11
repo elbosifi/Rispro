@@ -4,7 +4,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { statusLabel, t } from "@/lib/i18n";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useLanguage } from "@/providers/language-provider";
-import { buildDicomUploadSelectionPlan, buildSkipPreviewScanResult, previewDicomStudiesFromFiles, type DicomScanFileEntry, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
+import { buildDicomUploadSelectionPlan, DicomStudyScanCancelledError, isLikelyDicomCandidate, previewDicomStudiesFromFiles, scanDicomStudiesFromFiles, type DicomScanFileEntry, type DicomStudyScanProgress, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 type JobStatus = "uploaded" | "processing" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
 type RemapWizardStep =
@@ -285,7 +285,9 @@ export default function PacsRemapPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [enableFallbackUpload, setEnableFallbackUpload] = useState(false);
+  const [completeScanStatus, setCompleteScanStatus] = useState<"idle" | "running" | "complete" | "skipped">("idle");
+  const [scanProgress, setScanProgress] = useState<DicomStudyScanProgress | null>(null);
+  const [skipAcknowledged, setSkipAcknowledged] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
   const [destinationCheckedForResend, setDestinationCheckedForResend] = useState(false);
   const [uploadLoaded, setUploadLoaded] = useState(0);
@@ -296,6 +298,8 @@ export default function PacsRemapPage() {
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
   const stepCardRefs = useRef<Partial<Record<RemapWizardStep, HTMLDivElement | null>>>({});
+  const fullScanControllerRef = useRef<AbortController | null>(null);
+  const scanRunIdRef = useRef(0);
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
 
@@ -387,23 +391,59 @@ export default function PacsRemapPage() {
     },
   });
 
+  const cancelActiveFullScan = (): void => {
+    scanRunIdRef.current += 1;
+    fullScanControllerRef.current?.abort();
+    fullScanControllerRef.current = null;
+  };
+
+  const startCompleteScan = (sourceFiles: File[], runId: number): void => {
+    const controller = new AbortController();
+    fullScanControllerRef.current = controller;
+    setCompleteScanStatus("running");
+    setScanProgress(null);
+    void scanDicomStudiesFromFiles(sourceFiles, {
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (runId === scanRunIdRef.current && !controller.signal.aborted) setScanProgress(progress);
+      },
+    }).then((result) => {
+      if (runId !== scanRunIdRef.current || controller.signal.aborted) return;
+      setScanResult(result);
+      setCompleteScanStatus("complete");
+      setScanProgress({ candidateFileCount: result.dicomLikeFileCount, processedFileCount: result.dicomLikeFileCount, parsedDicomFileCount: result.parsedDicomFileCount, unparsedCount: result.unparsedCount, studyCount: result.studies.length });
+      setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
+      setProcessingStage("choose_study");
+      setFocusStepOverride("choose_study");
+    }).catch((error: unknown) => {
+      if (error instanceof DicomStudyScanCancelledError || controller.signal.aborted || runId !== scanRunIdRef.current) return;
+      setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
+      setProcessingStage("failed");
+    });
+  };
+
   const scanMutation = useMutation({
-    mutationFn: async () => {
-      return previewDicomStudiesFromFiles(files);
-    },
+    mutationFn: async (sourceFiles: File[]) => previewDicomStudiesFromFiles(sourceFiles),
     onMutate: () => {
+      cancelActiveFullScan();
+      const runId = ++scanRunIdRef.current;
       setProcessingStage("scanning");
       setFocusStepOverride(null);
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
+      setCompleteScanStatus("idle");
+      setScanProgress(null);
+      setSkipAcknowledged(false);
+      setSelectedStudyInstanceUid("");
+      return { runId };
     },
-    onSuccess: (result) => {
+    onSuccess: (result, sourceFiles, context) => {
+      if (context?.runId !== scanRunIdRef.current) return;
       setScanResult(result);
-      setEnableFallbackUpload(false);
-      setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0].studyInstanceUid : "");
       setProcessingStage("choose_study");
       setFocusStepOverride("choose_study");
+      startCompleteScan(sourceFiles, context.runId);
     },
     onError: (error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
@@ -412,22 +452,19 @@ export default function PacsRemapPage() {
     },
   });
 
-  const skipPreview = (): void => {
-    const result = buildSkipPreviewScanResult(files);
-    if (result.fallbackUploadFiles.length === 0) {
-      setErrorMessage(language === "ar" ? "لم يتم العثور على ملفات تشبه DICOM للرفع." : "No DICOM-like files were found for upload.");
-      setErrorDetails("");
-      return;
-    }
-    setScanResult(result);
-    setEnableFallbackUpload(true);
-    setSelectedStudyInstanceUid("");
-    setConfirmChecked(false);
-    setErrorMessage("");
-    setErrorDetails("");
-    setSuccessMessage("");
-    setProcessingStage("choose_patient");
-    setFocusStepOverride("choose_patient");
+  const canSkipCompleteScan = completeScanStatus === "running"
+    && scanResult?.previewOnly === true
+    && scanResult.studies.length === 1
+    && scanResult.parsedDicomFileCount > 0
+    && scanResult.unparsedCount === 0;
+
+  const skipCompleteScan = (): void => {
+    if (!canSkipCompleteScan || !skipAcknowledged) return;
+    cancelActiveFullScan();
+    setCompleteScanStatus("skipped");
+    setSelectedStudyInstanceUid(scanResult?.studies[0]?.studyInstanceUid || "");
+    setProcessingStage("choose_study");
+    setFocusStepOverride("choose_study");
   };
 
   const processMutation = useMutation({
@@ -438,10 +475,8 @@ export default function PacsRemapPage() {
     },
     mutationFn: async () => {
       if (!selectedPatientId || !selectedDestinationKey) throw new Error("Patient and destination are required.");
-      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, enableFallbackUpload);
-      const uploadFiles = scanResult?.previewOnly
-        ? buildSkipPreviewScanResult(files).fallbackUploadFiles
-        : plan.files.length > 0 ? plan.files : files;
+      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, false);
+      const uploadFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : plan.files;
       if (uploadFiles.length === 0) throw new Error("No uploadable files were selected.");
 
       setProcessingStage("uploading");
@@ -450,9 +485,9 @@ export default function PacsRemapPage() {
 
       const formData = new FormData();
       uploadFiles.forEach((file) => formData.append("files", file, file.name));
-      const selectedUidForUpload = plan.selectedStudyInstanceUid || selectedStudyInstanceUid;
+      const selectedUidForUpload = skippedScanMode ? selectedStudyInstanceUid : plan.selectedStudyInstanceUid;
       if (selectedUidForUpload) formData.append("selectedStudyInstanceUID", selectedUidForUpload);
-      if (!selectedUidForUpload) formData.append("uploadMode", "fallback_all_candidates");
+      if (skippedScanMode) formData.append("uploadMode", "single_study_folder_unverified");
       formData.append("risproPatientId", selectedPatientId);
       formData.append("destinationPacsKey", selectedDestinationKey);
       formData.append("confirm", "true");
@@ -616,14 +651,14 @@ export default function PacsRemapPage() {
       : selectedDirectoryPatient
         ? formatDirectoryPatientName(language, selectedDirectoryPatient)
         : null;
-  const canContinueStudy = !!selectedStudy || (scanResult?.studies.length === 0 && enableFallbackUpload);
+  const canContinueStudy = completeScanStatus === "skipped"
+    ? Boolean(selectedStudy && skipAcknowledged)
+    : completeScanStatus === "complete" && Boolean(selectedStudy);
   const canContinuePatient = !!selectedPatientId;
   const canContinueDestination = !!selectedDestinationKey;
   const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
-  const skipPreviewMode = Boolean(scanResult && scanResult.studies.length === 0 && enableFallbackUpload);
-  const reviewFiles = scanResult?.previewOnly || skipPreviewMode
-    ? buildSkipPreviewScanResult(files).fallbackUploadFiles
-    : selectedStudy?.files || [];
+  const skippedScanMode = completeScanStatus === "skipped";
+  const reviewFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : selectedStudy?.files || [];
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
   const wizardStep: RemapWizardStep = useMemo(() => {
@@ -635,13 +670,13 @@ export default function PacsRemapPage() {
     if (processingStage === "sending") return "sending";
     if (processingStage === "sent") return "sent";
     if (processingStage === "failed") return "failed";
-    if (scanMutation.isPending) return "scanning";
+    if (scanMutation.isPending || completeScanStatus === "running") return "scanning";
     if (!scanResult) return "select_files";
     if (!canContinueStudy) return "choose_study";
     if (!canContinuePatient) return "choose_patient";
     if (!canContinueDestination) return "choose_destination";
     return "review";
-  }, [processMutation.isPending, processingStage, currentJob?.status, scanMutation.isPending, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
+  }, [processMutation.isPending, processingStage, currentJob?.status, scanMutation.isPending, completeScanStatus, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
   const focusedWizardStep = focusStepOverride || wizardStep;
 
   useEffect(() => {
@@ -672,6 +707,10 @@ export default function PacsRemapPage() {
     return () => window.clearTimeout(handle);
   }, [wizardStep]);
 
+  useEffect(() => () => {
+    fullScanControllerRef.current?.abort();
+  }, []);
+
   const visibleErrorMessage =
     wizardStep === "sent"
       ? ""
@@ -683,6 +722,7 @@ export default function PacsRemapPage() {
       : successMessage;
 
   const resetWorkflow = (): void => {
+    cancelActiveFullScan();
     setFiles([]);
     setScanResult(null);
     setSelectedStudyInstanceUid("");
@@ -690,7 +730,9 @@ export default function PacsRemapPage() {
     setSelectedDestinationKey("");
     setPatientLookupMode("filtered_appointments");
     setPatientSearch("");
-    setEnableFallbackUpload(false);
+    setCompleteScanStatus("idle");
+    setScanProgress(null);
+    setSkipAcknowledged(false);
     setConfirmChecked(false);
     setUploadLoaded(0);
     setUploadTotal(0);
@@ -780,12 +822,17 @@ export default function PacsRemapPage() {
                   type="file"
                   multiple
                   onChange={(event) => {
-                    setFiles(Array.from(event.target.files || []));
+                    const selectedFiles = Array.from(event.target.files || []);
+                    cancelActiveFullScan();
+                    setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
-                    setEnableFallbackUpload(false);
+                    setCompleteScanStatus("idle");
+                    setScanProgress(null);
+                    setSkipAcknowledged(false);
                     setConfirmChecked(false);
                     setProcessingStage("select_files");
+                    if (selectedFiles.length > 0) scanMutation.mutate(selectedFiles);
                   }}
                   className="input-premium w-full px-3 py-2"
                 />
@@ -798,12 +845,17 @@ export default function PacsRemapPage() {
                   type="file"
                   multiple
                   onChange={(event) => {
-                    setFiles(Array.from(event.target.files || []));
+                    const selectedFiles = Array.from(event.target.files || []);
+                    cancelActiveFullScan();
+                    setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
-                    setEnableFallbackUpload(false);
+                    setCompleteScanStatus("idle");
+                    setScanProgress(null);
+                    setSkipAcknowledged(false);
                     setConfirmChecked(false);
                     setProcessingStage("select_files");
+                    if (selectedFiles.length > 0) scanMutation.mutate(selectedFiles);
                   }}
                   className="input-premium w-full px-3 py-2"
                   {...({ webkitdirectory: "true", directory: "true", mozdirectory: "true" } as Record<string, string>)}
@@ -818,22 +870,22 @@ export default function PacsRemapPage() {
                 {t(language, "pacs.remap.estimatedSize")}: <strong>{formatBytes(files.reduce((sum, file) => sum + file.size, 0))}</strong>
               </span>
             </div>
+            {scanResult && (
+              <div className={`rounded-xl border px-3 py-2 text-xs ${completeScanStatus === "skipped" ? "border-amber-300 bg-amber-50 text-amber-900" : completeScanStatus === "complete" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                <p className="font-semibold">
+                  {completeScanStatus === "running" ? t(language, "pacs.remap.completeScanRunning") : completeScanStatus === "complete" ? t(language, "pacs.remap.completeScanComplete") : completeScanStatus === "skipped" ? t(language, "pacs.remap.completeScanSkipped") : t(language, "pacs.remap.quickPreviewComplete")}
+                </p>
+                {scanProgress && <p>{t(language, "pacs.remap.scanProgress", { processed: scanProgress.processedFileCount, total: scanProgress.candidateFileCount, parsed: scanProgress.parsedDicomFileCount, unparsed: scanProgress.unparsedCount, studies: scanProgress.studyCount })}</p>}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => scanMutation.mutate()}
+                onClick={() => scanMutation.mutate(files)}
                 disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
                 className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
               >
                 {scanMutation.isPending ? t(language, "pacs.remap.scanningFiles") : t(language, "pacs.remap.scanSelected")}
-              </button>
-              <button
-                type="button"
-                onClick={skipPreview}
-                disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
-                className="btn-secondary px-4 py-2 rounded-lg disabled:opacity-50"
-              >
-                {t(language, "pacs.remap.skipPreview")}
               </button>
               <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">
                 {t(language, "pacs.remap.resetWorkflow")}
@@ -856,16 +908,25 @@ export default function PacsRemapPage() {
               {scanResult.studies.length > 1 && (
                 <p className="text-xs text-amber-700">{t(language, "pacs.remap.multipleStudiesWarning")}</p>
               )}
-              {scanResult.studies.length === 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs text-amber-700">
-                    {skipPreviewMode ? t(language, "pacs.remap.previewSkippedNotice") : t(language, "pacs.remap.unreliableStudyDetection")}
-                  </p>
-                  <label className="flex items-start gap-2 text-xs">
-                    <input type="checkbox" checked={enableFallbackUpload} onChange={(e) => setEnableFallbackUpload(e.target.checked)} />
-                    <span>{t(language, "pacs.remap.fallbackUploadAll")}</span>
-                  </label>
+              {scanResult.previewOnly && completeScanStatus === "running" && (
+                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <p>{t(language, "pacs.remap.preliminaryScanNotice")}</p>
+                  {canSkipCompleteScan && (
+                    <>
+                      <label className="flex items-start gap-2">
+                        <input type="checkbox" checked={skipAcknowledged} onChange={(event) => setSkipAcknowledged(event.target.checked)} />
+                        <span>{t(language, "pacs.remap.skipCompleteScanAcknowledgement")}</span>
+                      </label>
+                      <button type="button" onClick={skipCompleteScan} disabled={!skipAcknowledged} className="btn-secondary px-3 py-2 rounded-lg disabled:opacity-50">
+                        {t(language, "pacs.remap.skipCompleteScan")}
+                      </button>
+                    </>
+                  )}
                 </div>
+              )}
+              {completeScanStatus === "skipped" && <p className="text-xs font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</p>}
+              {scanResult.studies.length === 0 && (
+                <p className="text-xs text-amber-700">{t(language, "pacs.remap.unreliableStudyDetection")}</p>
               )}
               <div className="grid grid-cols-1 gap-3">
                 {scanResult.studies.map((study) => {
@@ -1109,12 +1170,12 @@ export default function PacsRemapPage() {
                   <tbody>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "المريض" : "Patient"}</th>
-                      <td className="px-3 py-2 font-mono">{skipPreviewMode ? t(language, "pacs.remap.previewSkipped") : selectedStudy?.patientName || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{skippedScanMode ? t(language, "pacs.remap.folderNotFullyScanned") : selectedStudy?.patientName || "—"}</td>
                       <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientName || selectedPatientLabel || "—"}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">PatientID</th>
-                      <td className="px-3 py-2 font-mono">{skipPreviewMode ? t(language, "pacs.remap.previewSkipped") : selectedStudy?.patientId || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{skippedScanMode ? t(language, "pacs.remap.folderNotFullyScanned") : selectedStudy?.patientId || "—"}</td>
                       <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientId || "—"}</td>
                     </tr>
                     <tr className="border-t">
@@ -1129,8 +1190,8 @@ export default function PacsRemapPage() {
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.studyLabel")}</th>
-                      <td className="px-3 py-2">{skipPreviewMode ? t(language, "pacs.remap.previewSkipped") : `${selectedStudy?.studyDescription || "—"} • ${selectedStudy?.studyDate || "—"} • ${selectedStudy?.modality || "—"}`}</td>
-                      <td className="px-3 py-2">{skipPreviewMode ? t(language, "pacs.remap.backendValidatedOneStudy") : (language === "ar" ? "نفس الدراسة المختارة" : "Selected study only")}</td>
+                      <td className="px-3 py-2">{skippedScanMode ? selectedStudyInstanceUid : `${selectedStudy?.studyDescription || "—"} • ${selectedStudy?.studyDate || "—"} • ${selectedStudy?.modality || "—"}`}</td>
+                      <td className="px-3 py-2">{skippedScanMode ? t(language, "pacs.remap.backendValidatedOneStudy") : (language === "ar" ? "نفس الدراسة المختارة" : "Selected study only")}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.destinationLabel")}</th>
@@ -1141,15 +1202,15 @@ export default function PacsRemapPage() {
                 </table>
               </div>
               <p className="text-xs text-amber-700">
-                {skipPreviewMode ? t(language, "pacs.remap.skipPreviewUploadWarning") : t(language, "pacs.remap.selectedStudyOnly")}
+                {skippedScanMode ? t(language, "pacs.remap.skipCompleteScanUploadWarning") : t(language, "pacs.remap.selectedStudyOnly")}
               </p>
               <div className="rounded-2xl border border-slate-200 bg-white text-xs">
                 <div className="flex flex-col gap-1 border-b border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h4 className="font-semibold">{language === "ar" ? "محتويات الدراسة من القرص" : "CD study contents"}</h4>
                     <p className="text-slate-500">
-                      {skipPreviewMode
-                        ? t(language, "pacs.remap.skipPreviewFilesNote")
+                      {skippedScanMode
+                        ? t(language, "pacs.remap.skipCompleteScanFilesNote")
                         : language === "ar"
                         ? "هذه هي ملفات الدراسة التي سيتم رفعها بعد التأكيد."
                         : "These are the selected study files that will be uploaded after confirmation."}
@@ -1331,8 +1392,8 @@ export default function PacsRemapPage() {
             </div>
             <div className="space-y-2">
               {[
-                { label: t(language, "pacs.remap.selectedStudy"), value: skipPreviewMode ? t(language, "pacs.remap.previewSkipped") : selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedStudy || skipPreviewMode },
-                { label: t(language, "pacs.remap.originalDICOMPatient"), value: skipPreviewMode ? t(language, "pacs.remap.previewSkipped") : `${selectedStudy?.patientName || "—"} (${selectedStudy?.patientId || "—"})`, ready: !!selectedStudy?.patientName || !!selectedStudy?.patientId || skipPreviewMode },
+                { label: t(language, "pacs.remap.selectedStudy"), value: skippedScanMode ? selectedStudyInstanceUid : selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedStudy },
+                { label: t(language, "pacs.remap.originalDICOMPatient"), value: skippedScanMode ? t(language, "pacs.remap.folderNotFullyScanned") : `${selectedStudy?.patientName || "—"} (${selectedStudy?.patientId || "—"})`, ready: !!selectedStudy?.patientName || !!selectedStudy?.patientId || skippedScanMode },
                 { label: t(language, "pacs.remap.selectedRISProPatient"), value: selectedPatientLabel || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedPatientLabel },
                 { label: t(language, "pacs.remap.destinationLabel"), value: selectedDestinationKey || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedDestinationKey },
                 { label: t(language, "pacs.remap.currentJobStatus"), value: currentJob?.status ? statusLabel(language, currentJob.status) : t(language, "pacs.remap.noCurrentJob"), ready: !!currentJob?.status },

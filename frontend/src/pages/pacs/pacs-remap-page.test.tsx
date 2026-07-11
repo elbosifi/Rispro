@@ -7,7 +7,6 @@ const apiMock = vi.fn();
 const previewMock = vi.fn();
 const scanMock = vi.fn();
 const buildPlanMock = vi.fn();
-const buildSkipPreviewMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => {
   class ApiError extends Error {
@@ -35,10 +34,11 @@ vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
 }));
 
 vi.mock("@/lib/dicom-study-scan", () => ({
+  DicomStudyScanCancelledError: class DicomStudyScanCancelledError extends Error {},
   previewDicomStudiesFromFiles: (...args: unknown[]) => previewMock(...args),
   scanDicomStudiesFromFiles: (...args: unknown[]) => scanMock(...args),
   buildDicomUploadSelectionPlan: (...args: unknown[]) => buildPlanMock(...args),
-  buildSkipPreviewScanResult: (...args: unknown[]) => buildSkipPreviewMock(...args),
+  isLikelyDicomCandidate: () => true,
 }));
 
 class FakeXHR {
@@ -101,16 +101,6 @@ describe("PacsRemapPage wizard", () => {
     FakeXHR.fireUploadLoadEnd = false;
     FakeXHR.respondInSend = true;
     previewMock.mockImplementation((...args: unknown[]) => scanMock(...args));
-    buildSkipPreviewMock.mockImplementation((inputFiles: File[]) => ({
-      studies: [],
-      skippedSidecarCount: 0,
-      unparsedCount: 0,
-      totalFileCount: inputFiles.length,
-      dicomLikeFileCount: inputFiles.length,
-      parsedDicomFileCount: 0,
-      fallbackUploadFiles: inputFiles,
-      unparsedFiles: [],
-    }));
     vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
@@ -343,16 +333,22 @@ describe("PacsRemapPage wizard", () => {
     await screen.findByText("Waiting for Orthanc study stability and remapping demographics");
   });
 
-  it("skip preview uploads all selected DICOM-like files without scan or selectedStudyInstanceUID", async () => {
+  it("skips a running complete scan only after acknowledgement and uploads all candidates with the provisional UID", async () => {
     const selectedFiles = [new File(["1"], "a1.dcm"), new File(["2"], "a2.dcm")];
-    buildPlanMock.mockReturnValue({ files: selectedFiles, selectedStudyInstanceUid: null, usesFallback: true });
+    previewMock.mockResolvedValue({
+      studies: [{ studyInstanceUid: "1.2.3", studyDescription: "Preview", studyDate: "", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [selectedFiles[0]] }],
+      skippedSidecarCount: 0, unparsedCount: 0, totalFileCount: 2, dicomLikeFileCount: 2, parsedDicomFileCount: 1, fallbackUploadFiles: selectedFiles, unparsedFiles: [], previewOnly: true,
+    });
+    scanMock.mockReturnValue(new Promise(() => undefined));
     renderPage();
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: selectedFiles } });
-    const skipButton = screen.getByRole("button", { name: "Skip preview" }) as HTMLButtonElement;
-    await waitFor(() => expect(skipButton.disabled).toBe(false));
+    await screen.findByText(/Complete folder scan is still running/i);
+    const skipButton = screen.getByRole("button", { name: "Skip complete scan" }) as HTMLButtonElement;
+    expect(skipButton.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this folder is expected/i }));
+    expect(skipButton.disabled).toBe(false);
     fireEvent.click(skipButton);
-    expect(previewMock).not.toHaveBeenCalled();
-    expect(scanMock).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Folder not fully scanned/i)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
     const comboBoxes = screen.getAllByRole("combobox");
     fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
@@ -362,8 +358,8 @@ describe("PacsRemapPage wizard", () => {
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
     const sent = FakeXHR.instances[0]?.sentBody;
     expect(sent?.getAll("files")).toHaveLength(2);
-    expect(sent?.get("selectedStudyInstanceUID")).toBeNull();
-    expect(sent?.get("uploadMode")).toBe("fallback_all_candidates");
+    expect(sent?.get("selectedStudyInstanceUID")).toBe("1.2.3");
+    expect(sent?.get("uploadMode")).toBe("single_study_folder_unverified");
   });
 
   it("preselects the default PACS destination", async () => {

@@ -199,12 +199,14 @@ function dicomRemapStagingFailureCode(error: unknown): string {
 async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<ReturnType<typeof createDicomRemapStagingContext>>): Promise<{
   files: Awaited<ReturnType<typeof writeDicomRemapStagedFile>>[];
   selectedStudyInstanceUID: string | null;
+  uploadMode: string | null;
   risproPatientId: string | null;
   destinationPacsKey: string | null;
   confirm: string | null;
 }> {
   const files: Awaited<ReturnType<typeof writeDicomRemapStagedFile>>[] = [];
   let selectedStudyInstanceUID: string | null = null;
+  let uploadMode: string | null = null;
   let risproPatientId: string | null = null;
   let destinationPacsKey: string | null = null;
   let confirm: string | null = null;
@@ -242,6 +244,7 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
     busboy.on("field", (fieldName, value) => {
       const clean = String(value || "").trim() || null;
       if (fieldName === "selectedStudyInstanceUID") selectedStudyInstanceUID = clean;
+      if (fieldName === "uploadMode") uploadMode = clean;
       if (fieldName === "risproPatientId") risproPatientId = clean;
       if (fieldName === "destinationPacsKey") destinationPacsKey = clean;
       if (fieldName === "confirm") confirm = clean;
@@ -253,7 +256,7 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
       Promise.all(writes).then(() => {
         if (settled) return;
         settled = true;
-        resolve({ files: files.sort((a, b) => a.id.localeCompare(b.id)), selectedStudyInstanceUID, risproPatientId, destinationPacsKey, confirm });
+        resolve({ files: files.sort((a, b) => a.id.localeCompare(b.id)), selectedStudyInstanceUID, uploadMode, risproPatientId, destinationPacsKey, confirm });
       }).catch(fail);
     });
     req.pipe(busboy);

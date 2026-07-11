@@ -94,6 +94,27 @@ export interface DicomUploadSelectionPlan {
   usesFallback: boolean;
 }
 
+export interface DicomStudyScanProgress {
+  candidateFileCount: number;
+  processedFileCount: number;
+  parsedDicomFileCount: number;
+  unparsedCount: number;
+  studyCount: number;
+}
+
+export interface DicomStudyScanOptions {
+  batchSize?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: DicomStudyScanProgress) => void;
+}
+
+export class DicomStudyScanCancelledError extends Error {
+  constructor() {
+    super("DICOM study scan cancelled.");
+    this.name = "DicomStudyScanCancelledError";
+  }
+}
+
 function sanitizeFileName(fileName: string): string {
   return String(fileName || "").split(/[\\/]/).pop()?.trim() || "dicom.dcm";
 }
@@ -147,16 +168,11 @@ function getFilePath(file: File): string {
   return String(withRelativePath.webkitRelativePath || file.name || "").trim() || sanitizeFileName(file.name);
 }
 
-function selectPreviewSampleFiles(candidateFiles: File[], maxFiles = MAX_PREVIEW_SAMPLE_FILES): File[] {
+export function selectPreviewSampleFiles(candidateFiles: File[], maxFiles = MAX_PREVIEW_SAMPLE_FILES): File[] {
   if (candidateFiles.length <= maxFiles) return candidateFiles;
   const selectedIndexes = new Set<number>();
-  const leadingCount = Math.min(24, maxFiles);
-  for (let index = 0; index < leadingCount; index += 1) {
-    selectedIndexes.add(index);
-  }
-  const remainingSlots = maxFiles - selectedIndexes.size;
-  for (let slot = 0; slot < remainingSlots; slot += 1) {
-    const index = Math.floor((slot * (candidateFiles.length - 1)) / Math.max(1, remainingSlots - 1));
+  for (let slot = 0; slot < maxFiles; slot += 1) {
+    const index = Math.round((slot * (candidateFiles.length - 1)) / Math.max(1, maxFiles - 1));
     selectedIndexes.add(index);
   }
   return Array.from(selectedIndexes)
@@ -329,7 +345,7 @@ function summarizeStudies(entries: DicomScanFileEntry[]): DicomScanStudySummary[
 
 export async function scanDicomStudiesFromFiles(
   files: File[],
-  options: { batchSize?: number } = {}
+  options: DicomStudyScanOptions = {}
 ): Promise<DicomStudyScanResult> {
   const allFiles = Array.isArray(files) ? files : [];
   const batchSize = Math.max(1, Number(options.batchSize || DEFAULT_BATCH_SIZE));
@@ -350,7 +366,24 @@ export async function scanDicomStudiesFromFiles(
   const parsedEntries: DicomScanFileEntry[] = [];
   const unparsedEntries: DicomScanUnparsedEntry[] = [];
 
+  const assertNotCancelled = () => {
+    if (options.signal?.aborted) throw new DicomStudyScanCancelledError();
+  };
+  const emitProgress = (processedFileCount: number) => {
+    options.onProgress?.({
+      candidateFileCount: candidateFiles.length,
+      processedFileCount,
+      parsedDicomFileCount: parsedEntries.length,
+      unparsedCount: unparsedEntries.length,
+      studyCount: summarizeStudies(parsedEntries).length,
+    });
+  };
+
+  assertNotCancelled();
+  emitProgress(0);
+
   for (let index = 0; index < candidateFiles.length; index += batchSize) {
+    assertNotCancelled();
     const batch = candidateFiles.slice(index, index + batchSize);
     const parsedBatch = await Promise.all(batch.map(async (file) => {
       const parsed = await parseDicomHeader(file);
@@ -372,10 +405,13 @@ export async function scanDicomStudiesFromFiles(
       }
     }
 
+    emitProgress(index + batch.length);
+
     // Yield to the event loop for large folders.
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
+    assertNotCancelled();
   }
 
   const studies = summarizeStudies(parsedEntries)
@@ -408,7 +444,7 @@ export function buildDicomUploadSelectionPlan(
     };
   }
 
-  if (fallbackEnabled) {
+  if (fallbackEnabled && (!scanResult?.studies || scanResult.studies.length === 0)) {
     return {
       files: scanResult?.fallbackUploadFiles || [],
       selectedStudyInstanceUid: null,

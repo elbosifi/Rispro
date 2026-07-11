@@ -598,6 +598,45 @@ test("dicom preview: parses bounded headers without Orthanc upload, rewrite, or 
   assert.equal(result.studies[0]?.studyDescription, "Preview Study");
 });
 
+test("unverified single-study folder validation scans every staged DICOM before rejecting a mixed study", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const files = [
+    { id: "valid-file-one", relativePath: "files/one.dcm", displayName: "one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+    { id: "valid-file-two", relativePath: "files/two.dcm", displayName: "two.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "b".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer());
+  await writeFile(path.join(directory, files[1]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: "2.25.200" }));
+
+  await assert.rejects(
+    () => __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+      directory,
+      manifest: { version: 1, selectedStudyInstanceUID: "1.2.840.113619.2.55.3.604688433.1234.1456789012.1", uploadMode: "single_study_folder_unverified", fileCount: 2, totalBytes: 2, files },
+    }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? (error.details as { code?: string } | null)?.code : null, "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED");
+      assert.deepEqual(error instanceof HttpError ? error.details : null, { code: "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED", parsedDicomFileCount: 2, uniqueStudyCount: 2 });
+      return true;
+    },
+  );
+  assert.equal((await readdir(directory)).includes("uid-plan.json"), false);
+});
+
+test("unverified single-study folder validation accepts one matching staged study", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const uid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const files = [{ id: "valid-file-one", relativePath: "files/one.dcm", displayName: "one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) }];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: uid }));
+
+  const result = await __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+    directory,
+    manifest: { version: 1, selectedStudyInstanceUID: uid, uploadMode: "single_study_folder_unverified", fileCount: 1, totalBytes: 1, files },
+  });
+  assert.equal(result.validFiles.length, 1);
+  assert.equal(result.originalSummary.studyInstanceUid, uid);
+});
+
 test("dicom helper: Orthanc resource id parser supports common response shapes", () => {
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({ ParentStudy: "abc-study" }), "abc-study");
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({ ID: "new-id" }), "new-id");
