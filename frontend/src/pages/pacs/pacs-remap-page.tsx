@@ -7,18 +7,19 @@ import { useLanguage } from "@/providers/language-provider";
 import { buildDicomUploadSelectionPlan, DicomStudyScanCancelledError, isLikelyDicomCandidate, previewDicomStudiesFromFiles, scanDicomStudiesFromFiles, type DicomScanFileEntry, type DicomStudyScanProgress, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 type JobStatus = "uploaded" | "processing" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
-type RemapWizardStep =
-  | "select_files"
-  | "scanning"
-  | "choose_study"
-  | "choose_patient"
-  | "choose_destination"
-  | "review"
+type RemapWizardUiStep = "source" | "patient" | "destination" | "review" | "processing";
+type RemapProcessingStage =
+  | "idle"
   | "uploading"
-  | "orthanc_processing"
-  | "remapping"
-  | "sending"
-  | "sent"
+  | "staging"
+  | "queued"
+  | "validating"
+  | "building_uid_plan"
+  | "rewriting"
+  | "uploading_to_orthanc"
+  | "verifying_orthanc"
+  | "enqueueing_send"
+  | "completed"
   | "failed";
 
 type PatientLookupMode = "filtered_appointments" | "all_appointments" | "all_patients";
@@ -134,24 +135,6 @@ function formatFallbackModalityLabel(language: string, id: number): string {
   return language === "ar" ? `موداليتي #${id}` : `Modality #${id}`;
 }
 
-function wizardStepLabel(language: string, step: RemapWizardStep): string {
-  const map: Record<RemapWizardStep, string> = {
-    select_files: t(language as "ar" | "en", "pacs.remap.step1"),
-    scanning: t(language as "ar" | "en", "pacs.remap.scanningFiles"),
-    choose_study: t(language as "ar" | "en", "pacs.remap.step2"),
-    choose_patient: t(language as "ar" | "en", "pacs.remap.step3"),
-    choose_destination: t(language as "ar" | "en", "pacs.remap.step4"),
-    review: t(language as "ar" | "en", "pacs.remap.step5"),
-    uploading: t(language as "ar" | "en", "pacs.remap.processStep"),
-    orthanc_processing: t(language as "ar" | "en", "pacs.remap.processStep"),
-    remapping: t(language as "ar" | "en", "pacs.remap.processStep"),
-    sending: t(language as "ar" | "en", "pacs.remap.processStep"),
-    sent: t(language as "ar" | "en", "pacs.remap.resultStep"),
-    failed: t(language as "ar" | "en", "pacs.remap.resultStep"),
-  };
-  return map[step];
-}
-
 function isCancellableJobStatus(status: JobStatus): boolean {
   return ["uploaded", "awaiting_confirmation"].includes(status);
 }
@@ -188,14 +171,13 @@ function processingStageLabel(language: string, stage: string | null | undefined
   return labels[stage || ""]?.[language === "ar" ? 1 : 0] || (language === "ar" ? "قيد المعالجة" : "Processing");
 }
 
-function oneLineReason(message: string | null | undefined): string {
-  return String(message || "").replace(/\s+/g, " ").trim();
+function compactUid(value: string): string {
+  if (value.length <= 28) return value;
+  return `${value.slice(0, 12)}…${value.slice(-12)}`;
 }
 
-function stepTone(index: number, activeIndex: number): string {
-  if (index < activeIndex) return "border-teal-500 bg-teal-50 text-teal-800";
-  if (index === activeIndex) return "border-teal-600 bg-teal-600 text-white shadow-sm";
-  return "border-slate-200 bg-white/70 text-slate-500";
+function oneLineReason(message: string | null | undefined): string {
+  return String(message || "").replace(/\s+/g, " ").trim();
 }
 
 function toIsoDate(value: Date): string {
@@ -292,12 +274,13 @@ export default function PacsRemapPage() {
   const [destinationCheckedForResend, setDestinationCheckedForResend] = useState(false);
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
-  const [processingStage, setProcessingStage] = useState<RemapWizardStep>("select_files");
-  const [focusStepOverride, setFocusStepOverride] = useState<RemapWizardStep | null>(null);
+  const [uiStep, setUiStep] = useState<RemapWizardUiStep>("source");
+  const [processingStage, setProcessingStage] = useState<RemapProcessingStage>("idle");
   const [fileInputVersion, setFileInputVersion] = useState(0);
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
-  const stepCardRefs = useRef<Partial<Record<RemapWizardStep, HTMLDivElement | null>>>({});
+  const mainHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const focusHeadingAfterNavigationRef = useRef(false);
   const fullScanControllerRef = useRef<AbortController | null>(null);
   const scanRunIdRef = useRef(0);
 
@@ -312,6 +295,7 @@ export default function PacsRemapPage() {
     queryKey: ["v2", "lookups", "modalities"],
     queryFn: () => api<{ items: Array<{ id: number; nameEn?: string; nameAr?: string; code?: string }> }>("/v2/lookups/modalities"),
     retry: 0,
+    enabled: uiStep === "patient",
   });
 
   const studyDateForFilter = useMemo(() => {
@@ -333,7 +317,7 @@ export default function PacsRemapPage() {
       if (trimmedPatientSearch) params.set("q", trimmedPatientSearch);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: patientLookupMode === "filtered_appointments",
+    enabled: uiStep === "patient" && patientLookupMode === "filtered_appointments",
     retry: 0,
   });
 
@@ -345,7 +329,7 @@ export default function PacsRemapPage() {
       if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: patientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
+    enabled: uiStep === "patient" && patientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
@@ -358,7 +342,7 @@ export default function PacsRemapPage() {
       const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(trimmedPatientSearch)}&page=1&pageSize=25`);
       return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
     },
-    enabled: patientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
+    enabled: uiStep === "patient" && patientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
@@ -377,7 +361,7 @@ export default function PacsRemapPage() {
       });
       return response.replacement;
     },
-    enabled: !!selectedPatientId,
+    enabled: uiStep === "patient" && !!selectedPatientId,
     retry: 0,
   });
 
@@ -413,12 +397,10 @@ export default function PacsRemapPage() {
       setCompleteScanStatus("complete");
       setScanProgress({ candidateFileCount: result.dicomLikeFileCount, processedFileCount: result.dicomLikeFileCount, parsedDicomFileCount: result.parsedDicomFileCount, unparsedCount: result.unparsedCount, studyCount: result.studies.length });
       setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
-      setProcessingStage("choose_study");
-      setFocusStepOverride("choose_study");
     }).catch((error: unknown) => {
       if (error instanceof DicomStudyScanCancelledError || controller.signal.aborted || runId !== scanRunIdRef.current) return;
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
-      setProcessingStage("failed");
+      setUiStep("source");
     });
   };
 
@@ -427,8 +409,7 @@ export default function PacsRemapPage() {
     onMutate: () => {
       cancelActiveFullScan();
       const runId = ++scanRunIdRef.current;
-      setProcessingStage("scanning");
-      setFocusStepOverride(null);
+      setUiStep("source");
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
@@ -441,14 +422,12 @@ export default function PacsRemapPage() {
     onSuccess: (result, sourceFiles, context) => {
       if (context?.runId !== scanRunIdRef.current) return;
       setScanResult(result);
-      setProcessingStage("choose_study");
-      setFocusStepOverride("choose_study");
       startCompleteScan(sourceFiles, context.runId);
     },
     onError: (error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
-      setProcessingStage("failed");
+      setUiStep("source");
     },
   });
 
@@ -463,12 +442,13 @@ export default function PacsRemapPage() {
     cancelActiveFullScan();
     setCompleteScanStatus("skipped");
     setSelectedStudyInstanceUid(scanResult?.studies[0]?.studyInstanceUid || "");
-    setProcessingStage("choose_study");
-    setFocusStepOverride("choose_study");
+    setUiStep("source");
   };
 
   const processMutation = useMutation({
     onMutate: () => {
+      focusHeadingAfterNavigationRef.current = true;
+      setUiStep("processing");
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
@@ -497,14 +477,14 @@ export default function PacsRemapPage() {
         setUploadTotal(total || uploadTotal);
       }, () => {
         setUploadLoaded((current) => Math.max(current, uploadTotal));
-        setProcessingStage("orthanc_processing");
+        setProcessingStage("queued");
       });
       setJobId(uploadResult.job.id);
       return { uploadResult };
     },
     onSuccess: ({ uploadResult }) => {
       setJobId(uploadResult.job.id);
-      setProcessingStage(uploadResult.job.status === "sending" ? "sending" : uploadResult.job.status === "sent" ? "sent" : "orthanc_processing");
+      setProcessingStage(uploadResult.job.status === "sending" ? "enqueueing_send" : uploadResult.job.status === "sent" ? "completed" : "queued");
       setSuccessMessage("");
       setErrorMessage("");
       setErrorDetails("");
@@ -571,7 +551,8 @@ export default function PacsRemapPage() {
       });
     },
     onMutate: () => {
-      setProcessingStage("sending");
+      setUiStep("processing");
+      setProcessingStage("enqueueing_send");
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
@@ -579,7 +560,7 @@ export default function PacsRemapPage() {
     onSuccess: (data) => {
       setJobId(data.job.id);
       setDestinationCheckedForResend(false);
-      setProcessingStage(data.job.status === "sending" ? "sending" : data.job.status === "sent" ? "sent" : "failed");
+      setProcessingStage(data.job.status === "sending" ? "enqueueing_send" : data.job.status === "sent" ? "completed" : "failed");
       setSuccessMessage("");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
@@ -614,8 +595,8 @@ export default function PacsRemapPage() {
     },
   });
 
-  const currentJob = currentJobQuery.data?.job || null;
-  const comparison = currentJobQuery.data?.comparison || null;
+  const currentJob = (currentJobQuery.data?.job || null) as RemapJob;
+  const comparison = (currentJobQuery.data?.comparison || null) as RemapComparison;
   const destinations = destinationsQuery.data?.destinations || [];
   const effectiveOrthancStudyId = currentJob?.modified_orthanc_study_id || currentJob?.source_orthanc_study_id || null;
   const directoryPatients = patientQuery.data?.patients || [];
@@ -654,70 +635,61 @@ export default function PacsRemapPage() {
   const canContinueStudy = completeScanStatus === "skipped"
     ? Boolean(selectedStudy && skipAcknowledged)
     : completeScanStatus === "complete" && Boolean(selectedStudy);
-  const canContinuePatient = !!selectedPatientId;
+  const canContinuePatient = !!selectedPatientId
+    && !replacementPreviewQuery.isLoading
+    && !replacementPreviewQuery.isError
+    && !!replacementPreviewQuery.data;
   const canContinueDestination = !!selectedDestinationKey;
   const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
   const skippedScanMode = completeScanStatus === "skipped";
   const reviewFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : selectedStudy?.files || [];
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
-  const wizardStep: RemapWizardStep = useMemo(() => {
-    if (processMutation.isPending) return processingStage;
-    if (currentJob?.status === "sending") return "sending";
-    if (currentJob?.status === "uploaded" || currentJob?.status === "processing" || currentJob?.status === "remapped") return "orthanc_processing";
-    if (currentJob?.status === "sent") return "sent";
-    if (currentJob?.status === "failed" || currentJob?.status === "cancelled") return "failed";
-    if (processingStage === "sending") return "sending";
-    if (processingStage === "sent") return "sent";
-    if (processingStage === "failed") return "failed";
-    if (scanMutation.isPending || completeScanStatus === "running") return "scanning";
-    if (!scanResult) return "select_files";
-    if (!canContinueStudy) return "choose_study";
-    if (!canContinuePatient) return "choose_patient";
-    if (!canContinueDestination) return "choose_destination";
-    return "review";
-  }, [processMutation.isPending, processingStage, currentJob?.status, scanMutation.isPending, completeScanStatus, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
-  const focusedWizardStep = focusStepOverride || wizardStep;
+  const effectiveProcessingStage: RemapProcessingStage = currentJob?.status === "sent"
+    ? "completed"
+    : currentJob?.status === "sending"
+      ? "enqueueing_send"
+      : currentJob?.status === "failed" || currentJob?.status === "cancelled"
+        ? "failed"
+        : currentJob?.processing_stage && currentJob.processing_stage in {
+          staging: true, queued: true, validating: true, building_uid_plan: true, rewriting: true,
+          uploading_to_orthanc: true, verifying_orthanc: true, enqueueing_send: true, completed: true, failed: true,
+        }
+          ? currentJob.processing_stage as RemapProcessingStage
+          : processingStage;
+  const isTerminalSuccess = effectiveProcessingStage === "completed" || currentJob?.status === "sent";
+  const isTerminalFailure = effectiveProcessingStage === "failed" || currentJob?.status === "failed" || currentJob?.status === "cancelled";
+
+  const navigateTo = (nextStep: RemapWizardUiStep): void => {
+    focusHeadingAfterNavigationRef.current = true;
+    setUiStep(nextStep);
+  };
+
+  const openRecentJob = (id: number): void => {
+    const hasDraft = files.length > 0 || !!selectedPatientId || !!selectedDestinationKey;
+    if (uiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
+    setJobId(id);
+    navigateTo("processing");
+  };
 
   useEffect(() => {
-    if (!focusStepOverride) return;
-    if (focusStepOverride === "choose_study" && (selectedPatientId || processingStage !== "choose_study")) {
-      setFocusStepOverride(null);
-    }
-  }, [focusStepOverride, selectedPatientId, processingStage]);
-
-  useEffect(() => {
-    const activeElement = stepCardRefs.current[focusedWizardStep];
-    if (!activeElement) return;
-    const rect = activeElement.getBoundingClientRect();
-    const isOutsideViewport = rect.top < 0 || rect.bottom > window.innerHeight;
-    if (!isOutsideViewport) return;
-    const handle = window.requestAnimationFrame(() => {
-      activeElement.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
-      activeElement.focus({ preventScroll: true });
-    });
+    if (!focusHeadingAfterNavigationRef.current) return;
+    focusHeadingAfterNavigationRef.current = false;
+    const handle = window.requestAnimationFrame(() => mainHeadingRef.current?.focus({ preventScroll: true }));
     return () => window.cancelAnimationFrame(handle);
-  }, [focusedWizardStep]);
-
-  useEffect(() => {
-    if (wizardStep !== "sent") return;
-    const handle = window.setTimeout(() => {
-      resetWorkflow();
-    }, 5000);
-    return () => window.clearTimeout(handle);
-  }, [wizardStep]);
+  }, [uiStep]);
 
   useEffect(() => () => {
     fullScanControllerRef.current?.abort();
   }, []);
 
   const visibleErrorMessage =
-    wizardStep === "sent"
+    isTerminalSuccess
       ? ""
       : errorMessage || currentJob?.error_message || "";
   const visibleErrorDetails = errorDetails || (currentJob?.processing_error_details ? formatTechnicalDetails(currentJob.processing_error_details) : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
   const visibleSuccessMessage =
-    wizardStep === "failed"
+    isTerminalFailure
       ? ""
       : successMessage;
 
@@ -740,39 +712,23 @@ export default function PacsRemapPage() {
     setErrorMessage("");
     setErrorDetails("");
     setSuccessMessage("");
-    setProcessingStage("select_files");
-    setFocusStepOverride(null);
+    setProcessingStage("idle");
+    setUiStep("source");
+    focusHeadingAfterNavigationRef.current = false;
     setFileInputVersion((v) => v + 1);
     scanMutation.reset();
     processMutation.reset();
   };
 
-  const stepLabels = [
-    t(language, "pacs.remap.step1"),
-    t(language, "pacs.remap.step2"),
-    t(language, "pacs.remap.step3"),
-    t(language, "pacs.remap.step4"),
-    t(language, "pacs.remap.step5"),
-    t(language, "pacs.remap.processStep"),
-    t(language, "pacs.remap.resultStep"),
-  ];
-  const canonicalWizardOrder: RemapWizardStep[] = ["select_files", "choose_study", "choose_patient", "choose_destination", "review", "uploading", "sent"];
-  const currentStepIndex = Math.max(0, canonicalWizardOrder.findIndex((step) => (
-    step === focusedWizardStep ||
-    (step === "uploading" && ["scanning", "orthanc_processing", "remapping", "sending"].includes(focusedWizardStep)) ||
-    (step === "sent" && focusedWizardStep === "failed")
-  )));
-
-  const activeCardClassName = "border-teal-500 ring-2 ring-teal-100 shadow-md shadow-teal-900/5";
-  const inactiveCardClassName = "border-slate-200/70";
-  const stepCardProps = (step: RemapWizardStep, active: boolean) => ({
-    ref: (node: HTMLDivElement | null) => {
-      stepCardRefs.current[step] = node;
-    },
-    tabIndex: -1,
-    "data-active-step": active ? "true" : "false",
-    className: `card-shell p-5 space-y-4 border transition-all duration-200 ${active ? activeCardClassName : inactiveCardClassName}`,
-  } as const);
+  const stepLabels = language === "ar"
+    ? ["المصدر", "المريض", "الوجهة", "المراجعة", "المعالجة"]
+    : ["Source", "Patient", "Destination", "Review", "Processing"];
+  const uiStepOrder: RemapWizardUiStep[] = ["source", "patient", "destination", "review", "processing"];
+  const currentStepIndex = uiStepOrder.indexOf(uiStep);
+  const activeCardProps = {
+    className: "card-shell min-h-[28rem] border border-teal-500 p-5 shadow-md shadow-teal-900/5",
+    "aria-busy": uiStep === "source" && (scanMutation.isPending || completeScanStatus === "running"),
+  } as const;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -792,22 +748,47 @@ export default function PacsRemapPage() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 border-t border-slate-200/70 bg-white/80 p-3 text-xs md:grid-cols-7">
-          {stepLabels.map((label, index) => (
-            <div key={label} className={`rounded-xl border px-3 py-2 text-center font-medium transition-colors ${stepTone(index, currentStepIndex)}`}>
-              <span className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-current/10 text-[10px]">
-                {index + 1}
-              </span>
-              {label}
-            </div>
-          ))}
+        <div className="flex gap-2 overflow-x-auto border-t border-slate-200/70 bg-white/80 p-3 text-xs" aria-label={language === "ar" ? "مراحل إعادة الربط" : "Remap steps"}>
+          {stepLabels.map((label, index) => {
+            const completed = index < currentStepIndex;
+            const current = index === currentStepIndex;
+            return (
+              <div
+                key={label}
+                className={`min-w-[5.5rem] flex-1 rounded-xl border px-3 py-2 text-center font-medium ${completed ? "border-teal-500 bg-teal-50 text-teal-800" : current ? "border-teal-600 bg-teal-600 text-white shadow-sm" : "border-slate-200 bg-white/70 text-slate-500"}`}
+                aria-current={current ? "step" : undefined}
+                aria-label={`${label}${completed ? (language === "ar" ? " مكتملة" : " complete") : current ? (language === "ar" ? " الحالية" : " current") : ""}`}
+              >
+                <span className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-current/10 text-[10px]">
+                  {completed ? "✓" : index + 1}
+                </span>
+                <span className="whitespace-nowrap">{label}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 space-y-4">
-          <div {...stepCardProps("select_files", focusedWizardStep === "select_files" || focusedWizardStep === "scanning")}>
+      <div className="mx-auto max-w-5xl space-y-4">
+        <section className="card-shell flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-xs" aria-label={language === "ar" ? "ملخص الاختيارات" : "Selection summary"}>
+          <strong className="w-full text-sm sm:w-auto">{language === "ar" ? "ملخص الاختيارات" : "Selected context"}</strong>
+          <span className={!selectedStudy ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.studyLabel")}:</b> {selectedStudy?.studyDescription || (selectedStudy ? selectedStudy.modality : "—") || (language === "ar" ? "غير مكتملة" : "Not selected")}{selectedStudy ? ` • ${selectedStudy.fileCount} ${language === "ar" ? "ملف" : "files"}` : ""}</span>
+          <span className={!selectedPatientLabel ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.selectedRISProPatient")}:</b> {selectedPatientLabel || (language === "ar" ? "غير مكتمل" : "Not selected")}</span>
+          <span className={!selectedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === selectedDestinationKey)?.name || selectedDestinationKey || (language === "ar" ? "غير مكتملة" : "Not selected")}</span>
+          {skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
+        </section>
+
+        <div {...activeCardProps}>
+          {uiStep === "source" && <>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <h3 ref={mainHeadingRef} id="remap-active-step" tabIndex={-1} className="text-lg font-semibold" style={{ color: "var(--text)" }}>
+                {stepLabels[0]}
+              </h3>
+              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
+                {language === "ar" ? "معاينة سريعة أولاً" : "Fast preview first"}
+              </span>
+            </div>
+            <div className="hidden" aria-hidden="true">
               <h3 className="text-base font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
               <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
                 {language === "ar" ? "معاينة سريعة أولا" : "Fast preview first"}
@@ -815,9 +796,13 @@ export default function PacsRemapPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-4">
-                <label htmlFor="remap-file-input" className="text-xs block mb-1">{t(language, "pacs.remap.selectDicomFiles")}</label>
+                <label htmlFor="remap-file-input" className="flex min-h-24 cursor-pointer flex-col justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:border-teal-400 focus-within:ring-2 focus-within:ring-teal-500">
+                  <span>{language === "ar" ? "اختيار الملفات" : "Choose files"}</span>
+                  <span className="mt-1 text-xs font-normal text-slate-500">{t(language, "pacs.remap.selectDicomFiles")}</span>
+                </label>
                 <input
                   id="remap-file-input"
+                  aria-label={t(language, "pacs.remap.selectDicomFiles")}
                   key={`files-${fileInputVersion}`}
                   type="file"
                   multiple
@@ -827,20 +812,26 @@ export default function PacsRemapPage() {
                     setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
+                    setSelectedPatientId("");
+                    setSelectedDestinationKey("");
                     setCompleteScanStatus("idle");
                     setScanProgress(null);
                     setSkipAcknowledged(false);
                     setConfirmChecked(false);
-                    setProcessingStage("select_files");
+                    setUiStep("source");
                     if (selectedFiles.length > 0) scanMutation.mutate(selectedFiles);
                   }}
-                  className="input-premium w-full px-3 py-2"
+                  className="sr-only"
                 />
               </div>
               <div className="rounded-2xl border border-dashed border-teal-300 bg-teal-50/50 p-4">
-                <label htmlFor="remap-folder-input" className="text-xs block mb-1">{t(language, "pacs.remap.selectFolder")}</label>
+                <label htmlFor="remap-folder-input" className="flex min-h-24 cursor-pointer flex-col justify-center rounded-xl border border-teal-300 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500">
+                  <span>{language === "ar" ? "اختيار مجلد" : "Choose folder"}</span>
+                  <span className="mt-1 text-xs font-normal text-slate-500">{t(language, "pacs.remap.selectFolder")}</span>
+                </label>
                 <input
                   id="remap-folder-input"
+                  aria-label={t(language, "pacs.remap.selectFolder")}
                   key={`folder-${fileInputVersion}`}
                   type="file"
                   multiple
@@ -850,14 +841,16 @@ export default function PacsRemapPage() {
                     setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
+                    setSelectedPatientId("");
+                    setSelectedDestinationKey("");
                     setCompleteScanStatus("idle");
                     setScanProgress(null);
                     setSkipAcknowledged(false);
                     setConfirmChecked(false);
-                    setProcessingStage("select_files");
+                    setUiStep("source");
                     if (selectedFiles.length > 0) scanMutation.mutate(selectedFiles);
                   }}
-                  className="input-premium w-full px-3 py-2"
+                  className="sr-only"
                   {...({ webkitdirectory: "true", directory: "true", mozdirectory: "true" } as Record<string, string>)}
                 />
               </div>
@@ -872,7 +865,7 @@ export default function PacsRemapPage() {
             </div>
             {scanResult && (
               <div className={`rounded-xl border px-3 py-2 text-xs ${completeScanStatus === "skipped" ? "border-amber-300 bg-amber-50 text-amber-900" : completeScanStatus === "complete" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-                <p className="font-semibold">
+                <p className="font-semibold" aria-live="polite">
                   {completeScanStatus === "running" ? t(language, "pacs.remap.completeScanRunning") : completeScanStatus === "complete" ? t(language, "pacs.remap.completeScanComplete") : completeScanStatus === "skipped" ? t(language, "pacs.remap.completeScanSkipped") : t(language, "pacs.remap.quickPreviewComplete")}
                 </p>
                 {scanProgress && <p>{t(language, "pacs.remap.scanProgress", { processed: scanProgress.processedFileCount, total: scanProgress.candidateFileCount, parsed: scanProgress.parsedDicomFileCount, unparsed: scanProgress.unparsedCount, studies: scanProgress.studyCount })}</p>}
@@ -890,13 +883,19 @@ export default function PacsRemapPage() {
               <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">
                 {t(language, "pacs.remap.resetWorkflow")}
               </button>
+              {completeScanStatus === "running" && (
+                <button type="button" onClick={() => { cancelActiveFullScan(); setCompleteScanStatus("idle"); }} className="btn-secondary px-4 py-2 rounded-lg">
+                  {language === "ar" ? "إيقاف الفحص الكامل" : "Cancel complete scan"}
+                </button>
+              )}
             </div>
-          </div>
+
+            {visibleErrorMessage && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{visibleErrorMessage}</div>}
 
           {scanResult && (
-            <div {...stepCardProps("choose_study", focusedWizardStep === "choose_study")}>
+            <div className="mt-6 space-y-4 border-t border-slate-200 pt-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step2")}</h3>
+                <h4 className="text-base font-semibold">{language === "ar" ? "الدراسات المكتشفة" : "Detected studies"}</h4>
                 <p className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
                   {t(language, "pacs.remap.detectedStudiesSummary", {
                     count: scanResult.studies.length,
@@ -924,7 +923,12 @@ export default function PacsRemapPage() {
                   )}
                 </div>
               )}
-              {completeScanStatus === "skipped" && <p className="text-xs font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</p>}
+              {completeScanStatus === "skipped" && (
+                <div className="space-y-1 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900" role="status">
+                  <p className="font-semibold">{t(language, "pacs.remap.folderNotFullyScanned")}</p>
+                  <p>{t(language, "pacs.remap.skipCompleteScanUploadWarning")}</p>
+                </div>
+              )}
               {scanResult.studies.length === 0 && (
                 <p className="text-xs text-amber-700">{t(language, "pacs.remap.unreliableStudyDetection")}</p>
               )}
@@ -946,7 +950,7 @@ export default function PacsRemapPage() {
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>{study.studyDescription || study.modality || "—"}</p>
-                            <p className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>{study.studyInstanceUid}</p>
+                            <p className="font-mono text-[11px]" title={study.studyInstanceUid} style={{ color: "var(--text-muted)" }}>{compactUid(study.studyInstanceUid)}</p>
                           </div>
                           {isSelected && <span className="rounded-full bg-teal-600 px-2 py-1 text-[11px] font-medium text-white">{language === "ar" ? "مختارة" : "Selected"}</span>}
                         </div>
@@ -964,11 +968,25 @@ export default function PacsRemapPage() {
               </div>
             </div>
           )}
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-slate-500">
+                {scanMutation.isPending || completeScanStatus === "running"
+                  ? (language === "ar" ? "ابقَ في المصدر حتى يكتمل الفحص أو يتم تأكيد التخطي." : "Stay in Source until scanning completes or the skip is acknowledged.")
+                  : !canContinueStudy
+                    ? (language === "ar" ? "اختر دراسة صالحة بعد اكتمال الفحص للمتابعة." : "Select a valid study after the scan completes to continue.")
+                    : ""}
+              </p>
+              {selectedStudy && <p className="text-xs text-slate-600">{language === "ar" ? "السلاسل" : "Series"}: {selectedStudy.seriesCount}</p>}
+              <button type="button" onClick={() => navigateTo("patient")} disabled={!canContinueStudy} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">
+                {language === "ar" ? "متابعة إلى المريض" : "Continue to Patient"}
+              </button>
+            </div>
+          </>}
 
-          {scanResult && (
-            <div {...stepCardProps("choose_patient", focusedWizardStep === "choose_patient")}>
+          {uiStep === "patient" && scanResult && (
+            <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step3")}</h3>
+                <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[1]}</h3>
                 {selectedPatientLabel && (
                   <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
                     {language === "ar" ? "مريض RISPro محدد" : "RISPro patient selected"}
@@ -1124,13 +1142,19 @@ export default function PacsRemapPage() {
                   <p><strong>{t(language, "pacs.remap.directoryPatientBadge")}:</strong> {selectedDirectoryPatient.national_id || selectedDirectoryPatient.mrn || "—"}</p>
                 </div>
               )}
+              {replacementPreviewQuery.isError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700" role="alert">{language === "ar" ? "تعذر تحميل معاينة الاستبدال. أصلح الخطأ قبل المتابعة." : "Replacement preview failed. Resolve the error before continuing."}</p>}
+              {replacementPreviewQuery.isLoading && selectedPatientId && <p className="text-xs text-slate-500" aria-live="polite">{language === "ar" ? "جارٍ تحميل معاينة الاستبدال…" : "Loading replacement preview…"}</p>}
+              <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <button type="button" onClick={() => navigateTo("source")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
+                <button type="button" onClick={() => navigateTo("destination")} disabled={!canContinuePatient} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى الوجهة" : "Continue to Destination"}</button>
+              </div>
             </div>
           )}
 
-          {scanResult && (
-            <div {...stepCardProps("choose_destination", focusedWizardStep === "choose_destination")}>
+          {uiStep === "destination" && scanResult && (
+            <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step4")}</h3>
+                <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[2]}</h3>
                 {selectedDestinationKey && (
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                     {selectedDestinationKey}
@@ -1147,13 +1171,17 @@ export default function PacsRemapPage() {
                   ))}
                 </select>
               </div>
+              <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <button type="button" onClick={() => navigateTo("patient")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
+                <button type="button" onClick={() => navigateTo("review")} disabled={!canContinueDestination} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى المراجعة" : "Continue to Review"}</button>
+              </div>
             </div>
           )}
 
-          {scanResult && (
-            <div {...stepCardProps("review", focusedWizardStep === "review")}>
+          {uiStep === "review" && scanResult && (
+            <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step5")}</h3>
+                <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[3]}</h3>
                 <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
                   {language === "ar" ? "نقطة تحقق نهائية" : "Final safety checkpoint"}
                 </span>
@@ -1204,8 +1232,8 @@ export default function PacsRemapPage() {
               <p className="text-xs text-amber-700">
                 {skippedScanMode ? t(language, "pacs.remap.skipCompleteScanUploadWarning") : t(language, "pacs.remap.selectedStudyOnly")}
               </p>
-              <div className="rounded-2xl border border-slate-200 bg-white text-xs">
-                <div className="flex flex-col gap-1 border-b border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <details className="rounded-2xl border border-slate-200 bg-white text-xs">
+                <summary className="flex cursor-pointer list-none flex-col gap-1 border-b border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h4 className="font-semibold">{language === "ar" ? "محتويات الدراسة من القرص" : "CD study contents"}</h4>
                     <p className="text-slate-500">
@@ -1219,7 +1247,7 @@ export default function PacsRemapPage() {
                   <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
                     {reviewFiles.length} {language === "ar" ? "ملفات" : "files"}
                   </span>
-                </div>
+                </summary>
                 {reviewFiles.length ? (
                   <div className="max-h-72 overflow-auto">
                     <table className="w-full min-w-[720px] border-collapse">
@@ -1262,35 +1290,50 @@ export default function PacsRemapPage() {
                     {language === "ar" ? "لم يتم العثور على ملفات للدراسة المختارة." : "No files found for the selected study."}
                   </p>
                 )}
-              </div>
+              </details>
               <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 space-y-3">
                 <label className="flex items-start gap-2 text-xs font-medium text-amber-950">
                   <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} className="mt-0.5" />
                   <span>{t(language, "pacs.remap.confirmIdentity")}</span>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => processMutation.mutate()}
-                  disabled={!canSubmit}
-                  className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
-                >
-                  {t(language, "pacs.remap.uploadSelectedStudy")}
-                </button>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <button type="button" onClick={() => navigateTo("destination")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
+                  <button type="button" onClick={() => processMutation.mutate()} disabled={!canSubmit} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">
+                    {t(language, "pacs.remap.uploadSelectedStudy")}
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {(wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending") && (
-            <div {...stepCardProps(wizardStep === "sending" ? "sending" : "uploading", wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending")}>
-              <h3 className="text-base font-semibold">{t(language, "pacs.remap.processStep")}</h3>
-              <div className="grid grid-cols-3 gap-2 text-xs">
+          {uiStep === "processing" && !isTerminalSuccess && !isTerminalFailure && (
+            <div {...activeCardProps}>
+              <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[4]}</h3>
+              <ol className="space-y-2 text-xs" aria-label={language === "ar" ? "مراحل المعالجة" : "Processing stages"}>
+                {[
+                  ["uploading", language === "ar" ? "رفع المتصفح إلى RISpro" : "Uploading to RISpro"],
+                  ["queued", language === "ar" ? "في الانتظار" : "Queued"],
+                  ["validating", language === "ar" ? "التحقق من الدراسة" : "Validating study"],
+                  ["building_uid_plan", language === "ar" ? "تحضير خطة UID" : "Preparing UID remap"],
+                  ["rewriting", language === "ar" ? "إعادة كتابة DICOM" : "Rewriting DICOM"],
+                  ["uploading_to_orthanc", language === "ar" ? "الرفع إلى Orthanc" : "Uploading to Orthanc"],
+                  ["verifying_orthanc", language === "ar" ? "التحقق في Orthanc" : "Verifying in Orthanc"],
+                  ["enqueueing_send", language === "ar" ? "الإرسال إلى PACS" : "Sending to PACS"],
+                ].map(([key, label], index, stages) => {
+                  const activeIndex = stages.findIndex(([stageKey]) => stageKey === effectiveProcessingStage);
+                  const complete = index < activeIndex;
+                  const current = index === activeIndex;
+                  return <li key={key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${complete ? "border-teal-200 bg-teal-50 text-teal-800" : current ? "border-teal-500 bg-white text-teal-900" : "border-slate-200 bg-white text-slate-500"}`}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold">{complete ? "✓" : index + 1}</span><span>{label}</span>{current && <span className="ms-auto">{language === "ar" ? "جارٍ" : "Active"}</span>}</li>;
+                })}
+              </ol>
+              <div className="hidden">
                 {[
                   { key: "uploading", label: language === "ar" ? "رفع" : "Upload" },
                   { key: "orthanc_processing", label: language === "ar" ? "معالجة" : "Rewrite" },
                   { key: "sending", label: language === "ar" ? "إرسال" : "Send" },
                 ].map((stage) => {
                   const activeStages = ["uploading", "orthanc_processing", "sending"];
-                  const currentIndex = activeStages.indexOf(wizardStep);
+                  const currentIndex = activeStages.indexOf(effectiveProcessingStage);
                   const stageIndex = activeStages.indexOf(stage.key);
                   return (
                     <div key={stage.key} className={`rounded-xl border px-3 py-2 text-center font-medium ${stageIndex <= currentIndex ? "border-teal-500 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-500"}`}>
@@ -1299,22 +1342,19 @@ export default function PacsRemapPage() {
                   );
                 })}
               </div>
-              <div className="h-2 w-full rounded bg-black/10 overflow-hidden">
-                <div className="h-full bg-teal-600 transition-all duration-200" style={{ width: `${wizardStep === "uploading" ? uploadPercent : wizardStep === "orthanc_processing" ? 75 : 90}%` }} />
-              </div>
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                {wizardStep === "uploading" && t(language, "pacs.remap.uploadingSelectedStudy", { percent: uploadPercent })}
-                {wizardStep === "orthanc_processing" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
-                {wizardStep === "sending" && t(language, "pacs.remap.sendingToPacs")}
+              <p className="text-xs" style={{ color: "var(--text-muted)" }} aria-live="polite">
+                {effectiveProcessingStage === "uploading" && t(language, "pacs.remap.uploadingSelectedStudy", { percent: uploadPercent })}
+                {effectiveProcessingStage !== "uploading" && effectiveProcessingStage !== "enqueueing_send" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
+                {effectiveProcessingStage === "enqueueing_send" && t(language, "pacs.remap.sendingToPacs")}
               </p>
-              {wizardStep === "orthanc_processing" && currentJob && (
+              {currentJob && (
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                   {language === "ar" ? "الملفات المعالجة" : "Processed files"}: {currentJob.processed_file_count || 0}/{currentJob.staged_file_count || "—"}
                   {currentJob.processing_skipped_file_count ? ` • ${language === "ar" ? "تم تجاوز" : "Skipped"}: ${currentJob.processing_skipped_file_count}` : ""}
                   {currentJob.processing_attempt_count ? ` • ${language === "ar" ? "المحاولة" : "Attempt"}: ${currentJob.processing_attempt_count}` : ""}
                 </p>
               )}
-              {wizardStep === "sending" && currentJob?.send_error_code && (
+              {effectiveProcessingStage === "enqueueing_send" && currentJob?.send_error_code && (
                 <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
                   {currentJob.send_error_code}: {oneLineReason(currentJob.error_message) || "RISpro is continuing to monitor this PACS send."}
                 </p>
@@ -1322,10 +1362,10 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {(wizardStep === "sent" || wizardStep === "failed") && (
-            <div {...stepCardProps(wizardStep, focusedWizardStep === "sent" || focusedWizardStep === "failed")}>
-              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.resultStep")}</h3>
-              {wizardStep === "sent" ? (
+          {uiStep === "processing" && (isTerminalSuccess || isTerminalFailure) && (
+            <div {...activeCardProps}>
+              <h3 ref={mainHeadingRef} tabIndex={-1} className="text-lg font-semibold">{stepLabels[4]}</h3>
+              {isTerminalSuccess ? (
                 <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>
               ) : (
                 <div className="space-y-2">
@@ -1385,10 +1425,10 @@ export default function PacsRemapPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="card-shell sticky top-4 p-4 space-y-3 text-xs">
+          {comparison && false && <div className="card-shell sticky top-4 p-4 space-y-3 text-xs">
             <div>
               <h4 className="font-semibold text-sm">{t(language, "pacs.remap.summary")}</h4>
-              <p style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.currentStep")}: {wizardStepLabel(language, wizardStep)}</p>
+              <p style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.currentStep")}: {stepLabels[currentStepIndex]}</p>
             </div>
             <div className="space-y-2">
               {[
@@ -1413,9 +1453,9 @@ export default function PacsRemapPage() {
                 <p><strong>{t(language, "pacs.remap.replacementPatientName")}:</strong> {comparison.replacement.patientName || "—"}</p>
               </div>
             )}
-          </div>
+          </div>}
 
-          {currentJob && (
+          {currentJob && false && (
             <div className="card-shell p-4 space-y-2 text-xs">
               <h4 className="font-semibold text-sm">{t(language, "pacs.remap.currentUpload")}</h4>
               <p>{t(language, "pacs.remap.job")} #{currentJob.id}</p>
@@ -1453,7 +1493,8 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          <div className="card-shell p-4 space-y-2 text-xs">
+          {false && <details className="card-shell p-4 space-y-2 text-xs">
+            <summary className="cursor-pointer font-semibold text-sm">{t(language, "pacs.remap.maintenance")}</summary>
             <h4 className="font-semibold text-sm">{t(language, "pacs.remap.maintenance")}</h4>
             <button
               type="button"
@@ -1463,16 +1504,16 @@ export default function PacsRemapPage() {
             >
               {t(language, "pacs.remap.clearFailedStudies")}
             </button>
-          </div>
+          </details>}
 
-          <div className="card-shell p-4 space-y-2 text-xs">
-            <h4 className="font-semibold text-sm">{t(language, "pacs.remap.viewRecentJobs")}</h4>
+          <details className="card-shell p-4 space-y-2 text-xs">
+            <summary className="cursor-pointer font-semibold text-sm">{t(language, "pacs.remap.viewRecentJobs")}</summary>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {(jobsQuery.data?.jobs || []).map((job) => (
                 <div key={job.id} className="rounded border p-2 space-y-2">
                   <button
                     type="button"
-                    onClick={() => setJobId(job.id)}
+                    onClick={() => openRecentJob(job.id)}
                     className="w-full text-left hover:bg-black/5"
                   >
                     <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
@@ -1496,16 +1537,25 @@ export default function PacsRemapPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </details>
+          <details className="card-shell p-4 text-xs">
+            <summary className="cursor-pointer font-semibold">{language === "ar" ? "صيانة المشرف" : "Supervisor maintenance"}</summary>
+            <div className="mt-3 space-y-2">
+              <p className="text-slate-500">{language === "ar" ? "إجراء مشرف للصيانة فقط." : "Supervisor-only maintenance action."}</p>
+              <button type="button" onClick={() => clearFailedStudiesMutation.mutate()} disabled={clearFailedStudiesMutation.isPending} className="btn-secondary rounded-lg px-3 py-2 text-xs">
+                {t(language, "pacs.remap.clearFailedStudies")}
+              </button>
+            </div>
+          </details>
         </div>
       </div>
 
-      {visibleErrorMessage && wizardStep !== "failed" && wizardStep !== "sent" && (
+      {visibleErrorMessage && uiStep !== "processing" && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {visibleErrorMessage}
         </div>
       )}
-      {visibleSuccessMessage && wizardStep !== "failed" && wizardStep !== "sent" && (
+      {visibleSuccessMessage && uiStep !== "processing" && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
           {visibleSuccessMessage}
         </div>
