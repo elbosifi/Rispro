@@ -302,7 +302,7 @@ describe("ReportingBoardMobilePage", () => {
     renderPage();
 
     const unassigned = await screen.findByRole("button", { name: /Unassigned/i });
-    expect(unassigned).toBeDisabled();
+    expect((unassigned as HTMLButtonElement).disabled).toBe(true);
     expect(unassigned.getAttribute("title")).toMatch(/locked to assigned cases/i);
     const all = screen.getByRole("button", { name: /^All 2$/i });
     expect(all.getAttribute("class")).toContain("ring-2");
