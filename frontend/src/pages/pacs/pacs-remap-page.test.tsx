@@ -420,4 +420,31 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Jane Roe/i }));
     expect(await screen.findByText(/Selected without appointment/i)).toBeTruthy();
   });
+
+  it("requires destination-check confirmation before resending an ambiguous PACS send", async () => {
+    const ambiguousJob = {
+      id: 91, status: "failed", source_orthanc_study_id: "study-91", modified_orthanc_study_id: "study-91",
+      destination_pacs_key: "1", original_patient_name: null, original_patient_id: null,
+      replacement_patient_name: null, replacement_patient_id: null,
+      send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS",
+      error_message: "RISpro could not confirm whether Orthanc accepted the PACS transfer.",
+      send_error_details: { code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS" },
+    };
+    apiMock.mockImplementation((path: string, options?: { body?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [ambiguousJob] });
+      if (path === "/pacs/remap/jobs/91") return Promise.resolve({ job: ambiguousJob, comparison: null });
+      if (path === "/pacs/remap/jobs/91/resend") return Promise.resolve({ job: { ...ambiguousJob, status: "sending", send_error_code: null }, received: options?.body });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(await screen.findByText(/#91/i));
+    expect(await screen.findByText(/could not confirm whether PACS received this study/i)).toBeTruthy();
+    const resendButton = screen.getByRole("button", { name: "Resend to PACS" }) as HTMLButtonElement;
+    expect(resendButton.disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText(/I checked the destination PACS/i));
+    expect(resendButton.disabled).toBe(false);
+    fireEvent.click(resendButton);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/91/resend", expect.objectContaining({ body: JSON.stringify({ confirmDestinationChecked: true }) })));
+  });
 });

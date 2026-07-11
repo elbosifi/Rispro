@@ -150,7 +150,18 @@ function isCancellableJobStatus(status: JobStatus): boolean {
 function canResendJob(job: RemapJob | null | undefined): boolean {
   if (!job) return false;
   if (!["failed", "remapped", "sent"].includes(job.status)) return false;
+  if (requiresDestinationCheck(job)) return false;
   return Boolean(job.destination_pacs_key && (job.modified_orthanc_study_id || job.source_orthanc_study_id));
+}
+
+function requiresDestinationCheck(job: RemapJob | null | undefined): boolean {
+  return Boolean(job && [
+    "ORTHANC_SEND_ENQUEUE_AMBIGUOUS",
+    "ORTHANC_SEND_MONITOR_UNREACHABLE",
+    "ORTHANC_SEND_MONITOR_NETWORK_FAILURE",
+    "ORTHANC_SEND_STATE_UNKNOWN",
+    "ORTHANC_SEND_JOB_NOT_FOUND",
+  ].includes(job.send_error_code || ""));
 }
 
 function isSendFailedJob(job: RemapJob | null | undefined): boolean {
@@ -257,6 +268,7 @@ export default function PacsRemapPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [enableFallbackUpload, setEnableFallbackUpload] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
+  const [destinationCheckedForResend, setDestinationCheckedForResend] = useState(false);
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [processingStage, setProcessingStage] = useState<RemapWizardStep>("select_files");
@@ -496,10 +508,13 @@ export default function PacsRemapPage() {
   });
 
   const resendJobMutation = useMutation({
-    mutationFn: async (targetJobId?: number) => {
-      const resolvedJobId = targetJobId ?? jobId;
+    mutationFn: async (input: { targetJobId?: number; confirmDestinationChecked?: boolean } = {}) => {
+      const resolvedJobId = input.targetJobId ?? jobId;
       if (!resolvedJobId) throw new Error("Missing job ID.");
-      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${resolvedJobId}/resend`, { method: "POST" });
+      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${resolvedJobId}/resend`, {
+        method: "POST",
+        body: JSON.stringify({ confirmDestinationChecked: input.confirmDestinationChecked === true }),
+      });
     },
     onMutate: () => {
       setProcessingStage("sending");
@@ -509,6 +524,7 @@ export default function PacsRemapPage() {
     },
     onSuccess: (data) => {
       setJobId(data.job.id);
+      setDestinationCheckedForResend(false);
       setProcessingStage(data.job.status === "sending" ? "sending" : data.job.status === "sent" ? "sent" : "failed");
       setSuccessMessage("");
       void currentJobQuery.refetch();
@@ -1210,6 +1226,11 @@ export default function PacsRemapPage() {
                 {wizardStep === "orthanc_processing" && t(language, "pacs.remap.waitingOrthanc")}
                 {wizardStep === "sending" && t(language, "pacs.remap.sendingToPacs")}
               </p>
+              {wizardStep === "sending" && currentJob?.send_error_code && (
+                <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                  {currentJob.send_error_code}: {oneLineReason(currentJob.error_message) || "RISpro is continuing to monitor this PACS send."}
+                </p>
+              )}
             </div>
           )}
 
@@ -1233,10 +1254,27 @@ export default function PacsRemapPage() {
                 <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
                 {jobId && (
                   <>
+                    {requiresDestinationCheck(currentJob) && (
+                      <div className="w-full rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 space-y-2">
+                        <p>RISpro could not confirm whether PACS received this study. Check the destination PACS before resending to avoid a duplicate study.</p>
+                        <label className="flex items-start gap-2">
+                          <input type="checkbox" checked={destinationCheckedForResend} onChange={(event) => setDestinationCheckedForResend(event.target.checked)} />
+                          <span>I checked the destination PACS and confirmed this study is not already present.</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => resendJobMutation.mutate({ targetJobId: jobId, confirmDestinationChecked: true })}
+                          disabled={!destinationCheckedForResend || resendJobMutation.isPending}
+                          className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
+                        >
+                          {t(language, "pacs.remap.resendToPacs")}
+                        </button>
+                      </div>
+                    )}
                     {canResendJob(currentJob) && (
                       <button
                         type="button"
-                        onClick={() => resendJobMutation.mutate(jobId)}
+                        onClick={() => resendJobMutation.mutate({ targetJobId: jobId })}
                         disabled={resendJobMutation.isPending}
                         className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                       >
@@ -1314,7 +1352,7 @@ export default function PacsRemapPage() {
               {canResendJob(currentJob) && (
                 <button
                   type="button"
-                  onClick={() => resendJobMutation.mutate(currentJob.id)}
+                  onClick={() => resendJobMutation.mutate({ targetJobId: currentJob.id })}
                   disabled={resendJobMutation.isPending}
                   className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
                 >
@@ -1356,7 +1394,7 @@ export default function PacsRemapPage() {
                   {canResendJob(job) && (
                     <button
                       type="button"
-                      onClick={() => resendJobMutation.mutate(job.id)}
+                      onClick={() => resendJobMutation.mutate({ targetJobId: job.id })}
                       disabled={resendJobMutation.isPending}
                       className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
                     >

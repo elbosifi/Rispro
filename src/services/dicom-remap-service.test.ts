@@ -237,6 +237,71 @@ test("Orthanc asynchronous job ID parser accepts documented response variants", 
   assert.equal(__dicomRemapTestables.parseOrthancSendJobId({ Path: "/jobs/three" }), "three");
 });
 
+test("ambiguous asynchronous enqueue remains sending and does not expose ordinary resend", async () => {
+  const job = remapJob({ status: "remapped", destination_pacs_key: "PACS_MAIN", modified_orthanc_study_id: "study-1" });
+  const ambiguous = remapJob({ ...job, status: "sending", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", error_message: "RISpro could not confirm whether Orthanc accepted the PACS transfer." });
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const calls = queueQueryResults([{ rows: [job] }, { rows: [ambiguous] }]);
+  __dicomRemapTestables.setOrthancFetchForTests(async (path) => {
+    if (path.includes("/studies/")) return orthancResult({ json: { ID: "study-1" } });
+    throw new HttpError(504, "Orthanc request timed out after 60000ms.");
+  });
+  const result = await __dicomRemapTestables.sendExistingDicomRemapJobToDestination({ job, currentUserId: 42, auditActionType: "pacs_send_enqueued" });
+  assert.equal(result.job.status, "sending");
+  assert.equal(result.job.orthanc_send_job_id, null);
+  assert.equal(result.job.send_error_code, "ORTHANC_SEND_ENQUEUE_AMBIGUOUS");
+  assert.equal(__dicomRemapTestables.isDestinationVerificationRequired(result.job.send_error_code), true);
+  assert.match(calls[1]!.sql, /set status = 'sending'/i);
+});
+
+test("ambiguous failed resend requires explicit destination verification and audits confirmation", async () => {
+  const ambiguous = remapJob({ id: 44, status: "failed", destination_pacs_key: "PACS_MAIN", modified_orthanc_study_id: "study-44", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS" });
+  queueQueryResults([{ rows: [ambiguous] }]);
+  await assert.rejects(() => resendDicomRemapJobToPacs({ jobId: 44, currentUserId: 42 }), /Check the destination PACS/i);
+
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => { auditEntries.push(entry as unknown as Record<string, unknown>); return {} as never; });
+  const sending = remapJob({ ...ambiguous, status: "sending" });
+  const accepted = remapJob({ ...sending, orthanc_send_job_id: "orthanc-44", send_attempt_count: 1, send_error_code: null });
+  queueQueryResults([{ rows: [ambiguous] }, { rows: [sending] }, { rows: [accepted] }]);
+  queueOrthancResults([
+    orthancResult({ json: { ID: "study-44" } }),
+    orthancResult({ status: 202, ok: true, json: { ID: "orthanc-44" } }),
+  ]);
+  const result = await resendDicomRemapJobToPacs({ jobId: 44, currentUserId: 42, confirmDestinationChecked: true });
+  assert.equal(result.job.status, "sending");
+  assert.equal((auditEntries.find((entry) => entry.actionType === "pacs_resend_enqueued")?.newValues as { confirmDestinationChecked?: boolean }).confirmDestinationChecked, true);
+});
+
+test("monitor transport and Orthanc errors remain sending with specific diagnostics", async () => {
+  const job = remapJob({ status: "sending", orthanc_send_job_id: "monitor-1", destination_pacs_key: "PACS_MAIN" });
+  const timeoutCalls = queueQueryResults([{ rows: [] }]);
+  __dicomRemapTestables.setOrthancFetchForTests(async () => { throw new HttpError(504, "Orthanc request timed out"); });
+  assert.equal(await monitorDicomRemapSendJob(job), null);
+  assert.match(String(timeoutCalls[0]!.params?.[1]), /ORTHANC_SEND_MONITOR_TIMEOUT/);
+  assert.match(timeoutCalls[0]!.sql, /orthanc_send_job_id = \$6/i);
+
+  const authCalls = queueQueryResults([{ rows: [] }]);
+  queueOrthancResults([orthancResult({ status: 401, ok: false, json: { HttpStatus: 401 } })]);
+  assert.equal(await monitorDicomRemapSendJob(job), null);
+  assert.equal(authCalls[0]!.params?.[1], "ORTHANC_SEND_MONITOR_AUTH_FAILED");
+});
+
+test("monitor marks unknown job state without heartbeat and keeps recognized running state live", async () => {
+  const job = remapJob({ status: "sending", orthanc_send_job_id: "monitor-2", destination_pacs_key: "PACS_MAIN" });
+  const unknownCalls = queueQueryResults([{ rows: [] }]);
+  queueOrthancResults([orthancResult({ json: { ID: "monitor-2", State: "MysteryState", Type: "DicomModalityStore" } })]);
+  assert.equal(await monitorDicomRemapSendJob(job), null);
+  assert.equal(unknownCalls[0]!.params?.[1], "ORTHANC_SEND_STATE_UNKNOWN");
+  assert.equal(unknownCalls[0]!.params?.[4], false);
+
+  const runningCalls = queueQueryResults([{ rows: [] }]);
+  queueOrthancResults([orthancResult({ json: { ID: "monitor-2", State: "Running", Type: "DicomModalityStore" } })]);
+  assert.equal(await monitorDicomRemapSendJob(job), null);
+  assert.equal(runningCalls[0]!.params?.[1], "ORTHANC_SEND_ACTIVE");
+  assert.equal(runningCalls[0]!.params?.[4], true);
+});
+
 test("send monitor keeps running jobs in sending and completes only after Orthanc success", async () => {
   const runningJob = remapJob({ status: "sending", orthanc_send_job_id: "job-running", send_attempt_count: 1, destination_pacs_key: "PACS_MAIN" });
   const runningCalls = queueQueryResults([{ rows: [] }]);

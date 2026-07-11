@@ -823,7 +823,7 @@ pacsRouter.post(
   "/remap/jobs/:jobId/resend",
   ...authMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
-    const request = req as { user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const jobId = asOptionalString(request.params?.jobId);
     if (!jobId) {
@@ -833,6 +833,7 @@ pacsRouter.post(
     const result = await resendDicomRemapJobToPacs({
       jobId,
       currentUserId,
+      confirmDestinationChecked: validateExplicitConfirm(asUnknownRecord(request.body ?? {}).confirmDestinationChecked),
     });
 
     res.status(202).json(result);
