@@ -36,11 +36,14 @@ import {
   cancelDicomRemapJob,
   clearFailedDicomRemapOrthancStudies,
   cleanupDicomRemapUploadTempDir,
+  cleanupDicomRemapStagingStorage,
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
-  processDicomRemapMultipartJob,
+  createDicomRemapStagingContext,
   createDicomRemapUploadJob,
   DICOM_REMAP_PREVIEW_HEADER_BYTES,
+  failDicomRemapStagingJob,
+  finalizeDicomRemapStagingJob,
   previewDicomRemapMultipartUpload,
   type DicomRemapStagedUploadFile,
   type DicomRemapPreviewFileMetadata,
@@ -55,6 +58,7 @@ import {
   resetDicomRemapJob,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
+  writeDicomRemapStagedFile,
 } from "../services/dicom-remap-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
@@ -182,6 +186,76 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
         .catch(fail);
     });
 
+    req.pipe(busboy);
+  });
+}
+
+function dicomRemapStagingFailureCode(error: unknown): string {
+  const code = String((error as { details?: { code?: unknown } } | null)?.details?.code || "");
+  if (["DICOM_REMAP_STAGING_FILE_LIMIT", "DICOM_REMAP_STAGING_SIZE_LIMIT"].includes(code)) return code;
+  return "DICOM_REMAP_STAGING_WRITE_FAILED";
+}
+
+async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<ReturnType<typeof createDicomRemapStagingContext>>): Promise<{
+  files: Awaited<ReturnType<typeof writeDicomRemapStagedFile>>[];
+  selectedStudyInstanceUID: string | null;
+  risproPatientId: string | null;
+  destinationPacsKey: string | null;
+  confirm: string | null;
+}> {
+  const files: Awaited<ReturnType<typeof writeDicomRemapStagedFile>>[] = [];
+  let selectedStudyInstanceUID: string | null = null;
+  let risproPatientId: string | null = null;
+  let destinationPacsKey: string | null = null;
+  let confirm: string | null = null;
+  const writes: Promise<void>[] = [];
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let uploadFinished = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      req.unpipe(busboy);
+      busboy.destroy(error instanceof Error ? error : new Error("DICOM remap staging failed."));
+      void failDicomRemapStagingJob(context.job.id, dicomRemapStagingFailureCode(error)).finally(() => reject(error));
+    };
+    const busboy = Busboy({ headers: req.headers, limits: { files: 5000 } });
+    const interruptUpload = () => {
+      if (settled || uploadFinished) return;
+      fail(new HttpError(400, "DICOM remap upload was interrupted. Please start a new upload.", { code: "DICOM_REMAP_STAGING_INTERRUPTED" }));
+    };
+    req.on("aborted", interruptUpload);
+    req.on("close", () => {
+      const requestComplete = Boolean((req as Request & { complete?: boolean }).complete);
+      if (!requestComplete && !uploadFinished) interruptUpload();
+    });
+    busboy.on("file", (fieldName, file, info) => {
+      if (fieldName !== "files") {
+        file.resume();
+        return;
+      }
+      const fileIndex = writes.length;
+      writes.push(writeDicomRemapStagedFile({ context, fileIndex, fileName: String(info.filename || "dicom.dcm"), mimeType: info.mimeType, stream: file })
+        .then((staged) => { files.push(staged); })
+        .catch(fail));
+    });
+    busboy.on("field", (fieldName, value) => {
+      const clean = String(value || "").trim() || null;
+      if (fieldName === "selectedStudyInstanceUID") selectedStudyInstanceUID = clean;
+      if (fieldName === "risproPatientId") risproPatientId = clean;
+      if (fieldName === "destinationPacsKey") destinationPacsKey = clean;
+      if (fieldName === "confirm") confirm = clean;
+    });
+    busboy.on("error", fail);
+    busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM upload.", { code: "DICOM_REMAP_STAGING_FILE_LIMIT" })));
+    busboy.on("finish", () => {
+      uploadFinished = true;
+      Promise.all(writes).then(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ files: files.sort((a, b) => a.id.localeCompare(b.id)), selectedStudyInstanceUID, risproPatientId, destinationPacsKey, confirm });
+      }).catch(fail);
+    });
     req.pipe(busboy);
   });
 }
@@ -314,6 +388,7 @@ async function stageDicomRemapPreviewMultipartFiles(req: Request): Promise<{
 export const __pacsRouteTestables = {
   stageDicomRemapMultipartFiles,
   stageDicomRemapPreviewMultipartFiles,
+  stageDicomRemapMultipartDurably,
 };
 
 // ---------------------------------------------------------------------------
@@ -604,29 +679,16 @@ pacsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { user: AuthenticatedUserContext };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
-    const staged = await stageDicomRemapMultipartFiles(req);
-    const confirm = validateExplicitConfirm(staged.confirm);
-    if (!confirm) {
-      throw new HttpError(400, "Explicit confirmation is required.");
+    const context = await createDicomRemapStagingContext(currentUserId);
+    try {
+      const staged = await stageDicomRemapMultipartDurably(req, context);
+      const result = await finalizeDicomRemapStagingJob({ context, ...staged });
+      res.status(202).json(result);
+    } catch (error) {
+      await failDicomRemapStagingJob(context.job.id, dicomRemapStagingFailureCode(error)).catch(() => undefined);
+      await cleanupDicomRemapStagingStorage(context.storageKey).catch(() => undefined);
+      throw error;
     }
-    if (!staged.risproPatientId) {
-      throw new HttpError(400, "risproPatientId is required.");
-    }
-    if (!staged.destinationPacsKey) {
-      throw new HttpError(400, "destinationPacsKey is required.");
-    }
-
-    const result = await processDicomRemapMultipartJob({
-      files: staged.files,
-      tempDir: staged.tempDir,
-      selectedStudyInstanceUID: staged.selectedStudyInstanceUID,
-      risproPatientId: staged.risproPatientId,
-      destinationPacsKey: staged.destinationPacsKey,
-      currentUserId,
-    });
-
-    // Upload/remap is complete, but PACS C-STORE is now an Orthanc background job.
-    res.status(202).json(result);
   })
 );
 

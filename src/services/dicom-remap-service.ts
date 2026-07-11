@@ -1,12 +1,13 @@
 import { Buffer } from "node:buffer";
-import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import dcmjs from "dcmjs";
 import { pool } from "../db/pool.js";
+import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normalize.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -23,6 +24,7 @@ const { DicomMessage, DicomMetaDictionary, datasetToBuffer } = dcmjs.data;
 
 export type DicomRemapJobStatus =
   | "uploaded"
+  | "processing"
   | "awaiting_confirmation"
   | "remapped"
   | "sending"
@@ -41,6 +43,7 @@ export interface DicomRemapStagedUploadFile {
   mimeType?: string;
   path: string;
   size: number;
+  internalId?: string;
 }
 
 interface DicomRemapUploadProcessingResult {
@@ -96,6 +99,23 @@ export interface DicomRemapJobRow {
   send_last_heartbeat_at: string | null;
   send_error_code: string | null;
   send_error_details: unknown;
+  processing_stage?: string | null;
+  staged_storage_key?: string | null;
+  staged_manifest_version?: number | null;
+  staged_file_count?: number | null;
+  staged_total_bytes?: number | null;
+  processed_file_count?: number | null;
+  processing_skipped_file_count?: number | null;
+  processing_attempt_count?: number | null;
+  processing_started_at?: string | null;
+  processing_completed_at?: string | null;
+  processing_last_checked_at?: string | null;
+  processing_last_heartbeat_at?: string | null;
+  processing_lease_owner?: string | null;
+  processing_lease_expires_at?: string | null;
+  processing_error_code?: string | null;
+  processing_error_details?: unknown;
+  staging_cleanup_completed_at?: string | null;
   error_message: string | null;
   cancellation_reason: string | null;
   created_at: string;
@@ -194,7 +214,15 @@ const DICOM_CONTROL_CHAR_PATTERN = /[\x00-\x1F\x7F]/;
 const DICOM_REMAP_UPLOAD_CONCURRENCY = 2;
 const DICOM_REMAP_TEMP_PREFIX = "rispro-dicom-remap-";
 export const DICOM_REMAP_PREVIEW_HEADER_BYTES = 512 * 1024;
-const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation", "remapped", "sending"];
+const DICOM_REMAP_STAGING_MANIFEST_VERSION = 1;
+const DICOM_REMAP_UID_PLAN_VERSION = 1;
+function readDicomRemapPositiveLimit(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+const DICOM_REMAP_STAGING_MAX_FILES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_FILES, 5_000);
+const DICOM_REMAP_STAGING_MAX_TOTAL_BYTES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_TOTAL_BYTES, 20 * 1024 * 1024 * 1024);
+const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"];
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
 const REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS = 60;
@@ -2368,6 +2396,508 @@ export async function cleanupStaleDicomRemapUploadTempDirs(maxAgeMs = 24 * 60 * 
   }));
 }
 
+export interface DicomRemapStagingContext {
+  job: DicomRemapJobRow;
+  storageKey: string;
+  directory: string;
+}
+
+export interface DicomRemapStagedManifestFile {
+  id: string;
+  relativePath: string;
+  displayName: string;
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+}
+
+interface DicomRemapStagingManifest {
+  version: number;
+  selectedStudyInstanceUID: string | null;
+  fileCount: number;
+  totalBytes: number;
+  files: DicomRemapStagedManifestFile[];
+}
+
+interface PersistedDicomUidPlan {
+  version: number;
+  studyInstanceUid: string;
+  seriesInstanceUidByOriginal: Record<string, string>;
+  sopInstanceUidByFileId: Record<string, string>;
+}
+
+function dicomRemapStagingRoot(): string {
+  const configured = String(env.dicomRemapStagingDir || "").trim();
+  if (!configured) throw new HttpError(500, "DICOM remap staging storage is not configured.");
+  return path.resolve(configured);
+}
+
+function resolveDicomRemapStagingPath(storageKey: string): string {
+  const root = dicomRemapStagingRoot();
+  const candidate = path.resolve(root, storageKey);
+  if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
+    throw new HttpError(500, "DICOM remap staging storage key is invalid.");
+  }
+  return candidate;
+}
+
+async function writePrivateJson(target: string, value: unknown): Promise<void> {
+  const temporary = `${target}.${randomUUID()}.part`;
+  await writeFile(temporary, `${JSON.stringify(value)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  await rename(temporary, target);
+}
+
+export async function createDicomRemapStagingContext(currentUserId: UserId): Promise<DicomRemapStagingContext> {
+  const job = await createEmptyDicomRemapUploadJob(currentUserId);
+  const storageKey = `jobs/${job.id}-${randomUUID()}`;
+  const directory = resolveDicomRemapStagingPath(storageKey);
+  try {
+    await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+    const result = await queryDicomRemapDb<DicomRemapJobRow>(
+      `update dicom_remap_jobs set staged_storage_key = $2, processing_stage = 'staging', updated_at = now() where id = $1 returning *`,
+      [job.id, storageKey]
+    );
+    const stagedJob = result.rows[0];
+    if (!stagedJob) throw new HttpError(500, "Failed to initialize DICOM remap staging.");
+    return { job: stagedJob, storageKey, directory };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    await failDicomRemapStagingJob(job.id, "DICOM_REMAP_STAGING_WRITE_FAILED");
+    throw error;
+  }
+}
+
+export async function writeDicomRemapStagedFile({
+  context,
+  fileIndex,
+  fileName,
+  mimeType,
+  stream,
+}: {
+  context: DicomRemapStagingContext;
+  fileIndex: number;
+  fileName: string;
+  mimeType?: string;
+  stream: NodeJS.ReadableStream;
+}): Promise<DicomRemapStagedManifestFile> {
+  if (fileIndex >= DICOM_REMAP_STAGING_MAX_FILES) {
+    throw new HttpError(413, "Too many files in DICOM upload.", { code: "DICOM_REMAP_STAGING_FILE_LIMIT" });
+  }
+  const id = `${fileIndex.toString().padStart(6, "0")}-${randomUUID()}`;
+  const relativePath = `files/${id}.dcm`;
+  const target = resolveDicomRemapStagingPath(path.posix.join(context.storageKey, relativePath));
+  const temporary = `${target}.part`;
+  const hash = createHash("sha256");
+  let byteSize = 0;
+  await new Promise<void>((resolve, reject) => {
+    const output = createWriteStream(temporary, { flags: "wx", mode: 0o600 });
+    const fail = (error: unknown) => {
+      (stream as NodeJS.ReadableStream & { destroy(error?: Error): void }).destroy(error instanceof Error ? error : new Error("DICOM remap staging write failed."));
+      output.destroy(error instanceof Error ? error : new Error("DICOM remap staging write failed."));
+      reject(error);
+    };
+    stream.on("data", (chunk: Buffer) => {
+      byteSize += chunk.length;
+      if (byteSize > DICOM_REMAP_STAGING_MAX_TOTAL_BYTES) {
+        fail(new HttpError(413, "DICOM upload file exceeds the configured limit.", { code: "DICOM_REMAP_STAGING_SIZE_LIMIT" }));
+        return;
+      }
+      hash.update(chunk);
+    });
+    stream.on("error", fail);
+    output.on("error", fail);
+    output.on("finish", resolve);
+    stream.pipe(output);
+  }).catch(async (error) => {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  });
+  await rename(temporary, target);
+  return {
+    id,
+    relativePath,
+    displayName: sanitizeFileName(fileName),
+    mimeType: String(mimeType || "application/octet-stream").trim(),
+    byteSize,
+    sha256: hash.digest("hex"),
+  };
+}
+
+export async function finalizeDicomRemapStagingJob({
+  context,
+  files,
+  selectedStudyInstanceUID,
+  risproPatientId,
+  destinationPacsKey,
+  confirm,
+}: {
+  context: DicomRemapStagingContext;
+  files: DicomRemapStagedManifestFile[];
+  selectedStudyInstanceUID: string | null;
+  risproPatientId: string | null;
+  destinationPacsKey: string | null;
+  confirm: string | null;
+}): Promise<{ job: DicomRemapJobRow }> {
+  if (!validateExplicitConfirm(confirm)) throw new HttpError(400, "Explicit confirmation is required.");
+  const patientId = normalizePositiveInteger(risproPatientId, "risproPatientId");
+  const destination = normalizeOrthancModalityKey(destinationPacsKey || "");
+  if (!patientId || !destination) throw new HttpError(400, "Patient and PACS destination are required.");
+  if (!String(selectedStudyInstanceUID || "").trim()) throw new HttpError(400, "selectedStudyInstanceUID is required.");
+  if (!files.length) throw new HttpError(400, "At least one DICOM file is required.");
+  if (files.length > DICOM_REMAP_STAGING_MAX_FILES) throw new HttpError(413, "Too many files in DICOM upload.");
+  const totalBytes = files.reduce((total, file) => total + file.byteSize, 0);
+  if (totalBytes <= 0 || totalBytes > DICOM_REMAP_STAGING_MAX_TOTAL_BYTES) throw new HttpError(413, "DICOM upload exceeds the configured size limit.");
+
+  const patient = await getPatientById(patientId);
+  const replacement = formatReplacementFromPatient(patient);
+  if (!replacement.patientId || !replacement.patientName) throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
+  const modalities = await listOrthancRemoteModalities();
+  if (!modalities.modalities.some((item) => item.key === destination)) throw new HttpError(400, "Selected PACS destination is not available.");
+
+  const manifest: DicomRemapStagingManifest = {
+    version: DICOM_REMAP_STAGING_MANIFEST_VERSION,
+    selectedStudyInstanceUID: String(selectedStudyInstanceUID).trim(),
+    fileCount: files.length,
+    totalBytes,
+    files,
+  };
+  try {
+    await writePrivateJson(path.join(context.directory, "manifest.json"), manifest);
+  } catch (error) {
+    await failDicomRemapStagingJob(context.job.id, "DICOM_REMAP_STAGING_MANIFEST_FAILED");
+    throw error;
+  }
+
+  const result = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs set status = 'uploaded', processing_stage = 'queued', staged_manifest_version = $2, staged_file_count = $3, staged_total_bytes = $4, rispro_patient_id = $5, destination_pacs_key = $6, replacement_patient_id = $7, replacement_patient_name = $8, replacement_patient_sex = $9, replacement_patient_birth_date = $10, processing_error_code = null, processing_error_details = null, error_message = null, updated_at = now() where id = $1 and staged_storage_key = $11 returning *`,
+    [context.job.id, manifest.version, manifest.fileCount, manifest.totalBytes, patientId, destination, replacement.patientId, replacement.patientName, replacement.patientSex, replacement.patientBirthDate, context.storageKey]
+  );
+  const job = result.rows[0];
+  if (!job) throw new HttpError(409, "DICOM remap upload changed before staging completed.");
+  await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_completed", oldValues: { status: "uploaded", processingStage: "staging" }, newValues: { status: "uploaded", processingStage: "queued", fileCount: manifest.fileCount, totalBytes: manifest.totalBytes }, changedByUserId: job.created_by_user_id });
+  return { job };
+}
+
+export async function failDicomRemapStagingJob(jobId: number, code: string): Promise<void> {
+  const safeCode = ["DICOM_REMAP_STAGING_INTERRUPTED", "DICOM_REMAP_STAGING_FILE_LIMIT", "DICOM_REMAP_STAGING_SIZE_LIMIT", "DICOM_REMAP_STAGING_WRITE_FAILED", "DICOM_REMAP_STAGING_MANIFEST_FAILED"].includes(code) ? code : "DICOM_REMAP_STAGING_WRITE_FAILED";
+  await queryDicomRemapDb(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = $2, processing_error_details = jsonb_build_object('code', $2), error_message = 'DICOM staging did not complete. Start a new upload.', processing_lease_owner = null, processing_lease_expires_at = null, updated_at = now() where id = $1`, [jobId, safeCode]);
+}
+
+export async function cleanupDicomRemapStagingStorage(storageKey: string): Promise<void> {
+  const directory = resolveDicomRemapStagingPath(storageKey);
+  await rm(directory, { recursive: true, force: true });
+}
+
+export async function cleanupExpiredFailedDicomRemapStaging(retentionHours: number, limit = 25): Promise<number> {
+  const safeHours = Math.max(1, Math.min(Math.floor(retentionHours), 24 * 365));
+  const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
+    `select * from dicom_remap_jobs where status = 'failed' and staged_storage_key is not null and staging_cleanup_completed_at is null and coalesce(processing_completed_at, updated_at) < now() - ($1::text || ' hours')::interval order by updated_at asc limit $2`,
+    [safeHours, Math.max(1, Math.min(limit, 100))]
+  );
+  let cleaned = 0;
+  for (const job of rows) {
+    try {
+      await cleanupDicomRemapStagingStorage(String(job.staged_storage_key));
+      const result = await queryDicomRemapDb<DicomRemapJobRow>(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1 and status = 'failed' and staging_cleanup_completed_at is null returning *`, [job.id]);
+      if (result.rows[0]) {
+        cleaned += 1;
+        await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_cleaned", oldValues: null, newValues: { retentionHours: safeHours, status: "failed" }, changedByUserId: null });
+      }
+    } catch {
+      // Retention cleanup diagnostics must never change a processing or send result.
+    }
+  }
+  const known = await queryDicomRemapDb<{ staged_storage_key: string | null }>(`select staged_storage_key from dicom_remap_jobs where staged_storage_key is not null`);
+  const knownKeys = new Set(known.rows.map((row) => String(row.staged_storage_key || "")).filter(Boolean));
+  const jobsRoot = path.join(dicomRemapStagingRoot(), "jobs");
+  const cutoff = Date.now() - safeHours * 60 * 60 * 1000;
+  const entries = await readdir(jobsRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^\d+-[a-f0-9-]{36}$/i.test(entry.name)) continue;
+    const storageKey = `jobs/${entry.name}`;
+    if (knownKeys.has(storageKey)) continue;
+    const directory = resolveDicomRemapStagingPath(storageKey);
+    const info = await stat(directory).catch(() => null);
+    if (!info || info.mtimeMs >= cutoff) continue;
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+  return cleaned;
+}
+
+function processingErrorCode(error: unknown): string {
+  if (error instanceof HttpError) {
+    const code = String((error.details as { code?: unknown } | null)?.code || "");
+    if (code.startsWith("DICOM_REMAP_")) return code;
+  }
+  return "DICOM_REMAP_ORTHANC_UPLOAD_FAILED";
+}
+
+function processingErrorMessage(code: string): string {
+  const messages: Record<string, string> = {
+    DICOM_REMAP_MANIFEST_INVALID: "DICOM remap staging manifest is invalid.",
+    DICOM_REMAP_STAGED_FILE_MISSING: "A staged DICOM file is missing.",
+    DICOM_REMAP_STAGED_FILE_HASH_MISMATCH: "A staged DICOM file did not pass integrity validation.",
+    DICOM_REMAP_UID_PLAN_INVALID: "DICOM remap UID plan is invalid.",
+    DICOM_REMAP_DICOM_PARSE_FAILED: "DICOM study validation failed.",
+    DICOM_REMAP_MULTIPLE_STUDIES: "Uploaded files must belong to exactly one selected study.",
+    DICOM_REMAP_ORTHANC_UPLOAD_FAILED: "Orthanc could not ingest the remapped study.",
+    DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT: "Orthanc reported a conflicting remapped instance.",
+    DICOM_REMAP_ORTHANC_VERIFICATION_FAILED: "Orthanc could not verify the remapped study.",
+    DICOM_REMAP_IDENTITY_VERIFICATION_FAILED: "Orthanc did not verify the selected replacement identity.",
+    DICOM_REMAP_PROCESSING_LEASE_LOST: "DICOM remap processing lease was lost and will be recovered safely.",
+  };
+  return messages[code] || "DICOM remap processing failed.";
+}
+
+async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ manifest: DicomRemapStagingManifest; directory: string }> {
+  const storageKey = String(job.staged_storage_key || "").trim();
+  if (!storageKey) throw new HttpError(409, "DICOM remap manifest is missing.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+  const directory = resolveDicomRemapStagingPath(storageKey);
+  let manifest: DicomRemapStagingManifest;
+  try {
+    manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8")) as DicomRemapStagingManifest;
+  } catch {
+    throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+  }
+  if (manifest.version !== DICOM_REMAP_STAGING_MANIFEST_VERSION || !Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length !== Number(manifest.fileCount)) {
+    throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+  }
+  const seen = new Set<string>();
+  let totalBytes = 0;
+  for (const file of manifest.files) {
+    if (!file || !/^[a-z0-9-]{10,}$/i.test(String(file.id || "")) || !/^files\/[a-z0-9-]+\.dcm$/i.test(String(file.relativePath || "")) || seen.has(file.id) || !/^[a-f0-9]{64}$/i.test(String(file.sha256 || ""))) {
+      throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+    }
+    seen.add(file.id);
+    const filePath = path.resolve(directory, file.relativePath);
+    if (!filePath.startsWith(`${directory}${path.sep}`)) throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+    const info = await stat(filePath).catch(() => null);
+    if (!info?.isFile()) throw new HttpError(409, "A staged DICOM file is missing.", { code: "DICOM_REMAP_STAGED_FILE_MISSING" });
+    if (info.size !== Number(file.byteSize)) throw new HttpError(409, "A staged DICOM file has an unexpected size.", { code: "DICOM_REMAP_STAGED_FILE_HASH_MISMATCH" });
+    const digest = createHash("sha256").update(await readFile(filePath)).digest("hex");
+    if (digest !== file.sha256) throw new HttpError(409, "A staged DICOM file failed integrity validation.", { code: "DICOM_REMAP_STAGED_FILE_HASH_MISMATCH" });
+    totalBytes += info.size;
+  }
+  if (totalBytes !== Number(manifest.totalBytes) || totalBytes !== Number(job.staged_total_bytes)) throw new HttpError(409, "DICOM remap manifest totals are invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+  return { manifest, directory };
+}
+
+function parseStagedDicomSummary(buffer: Buffer): { summary: OrthancStudySummary; seriesInstanceUid: string; sopInstanceUid: string } {
+  try {
+    const dicom = DicomMessage.readFile(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)) as { dict: Record<string, unknown>; meta: Record<string, unknown> };
+    const dataset = DicomMetaDictionary.naturalizeDataset(dicom.dict) as Record<string, unknown>;
+    const summary = readNaturalizedStudySummary(dataset);
+    const seriesInstanceUid = readDicomStringValue(dataset.SeriesInstanceUID);
+    const sopInstanceUid = readDicomStringValue(dataset.SOPInstanceUID);
+    if (!summary.studyInstanceUid || !seriesInstanceUid || !sopInstanceUid) throw new Error("missing_uid");
+    return { summary, seriesInstanceUid, sopInstanceUid };
+  } catch {
+    throw new HttpError(400, "DICOM file cannot be parsed.", { code: "DICOM_REMAP_DICOM_PARSE_FAILED" });
+  }
+}
+
+async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest: DicomRemapStagingManifest; directory: string }): Promise<{ plan: PersistedDicomUidPlan; originalSummary: OrthancStudySummary; validFiles: DicomRemapStagedManifestFile[]; skippedFiles: number }> {
+  const planPath = path.join(directory, "uid-plan.json");
+  const existing = await readFile(planPath, "utf8").catch(() => null);
+  if (existing) {
+    try {
+      const plan = JSON.parse(existing) as PersistedDicomUidPlan;
+      if (plan.version !== DICOM_REMAP_UID_PLAN_VERSION || !plan.studyInstanceUid || !plan.seriesInstanceUidByOriginal || !plan.sopInstanceUidByFileId) throw new Error("invalid");
+      const validFiles = manifest.files.filter((file) => Boolean(plan.sopInstanceUidByFileId[file.id]));
+      if (!validFiles.length) throw new Error("empty");
+      const first = parseStagedDicomSummary(await readFile(path.join(directory, validFiles[0]!.relativePath)));
+      return { plan, originalSummary: first.summary, validFiles, skippedFiles: manifest.files.length - validFiles.length };
+    } catch {
+      throw new HttpError(409, "DICOM remap UID plan is invalid.", { code: "DICOM_REMAP_UID_PLAN_INVALID" });
+    }
+  }
+
+  const seriesInstanceUidByOriginal: Record<string, string> = {};
+  const sopInstanceUidByFileId: Record<string, string> = {};
+  const validFiles: DicomRemapStagedManifestFile[] = [];
+  const studyUids = new Set<string>();
+  let originalSummary: OrthancStudySummary | null = null;
+  let skippedFiles = 0;
+  for (const file of manifest.files) {
+    if (isSkippableDicomRemapFolderEntry(file.displayName) || !isLikelyDicomFile(file.displayName, file.mimeType)) {
+      skippedFiles += 1;
+      continue;
+    }
+    let parsed: ReturnType<typeof parseStagedDicomSummary>;
+    try {
+      parsed = parseStagedDicomSummary(await readFile(path.join(directory, file.relativePath)));
+    } catch (error) {
+      if (error instanceof HttpError && error.statusCode === 400) {
+        skippedFiles += 1;
+        continue;
+      }
+      throw error;
+    }
+    studyUids.add(parsed.summary.studyInstanceUid);
+    if (manifest.selectedStudyInstanceUID && parsed.summary.studyInstanceUid !== manifest.selectedStudyInstanceUID) throw new HttpError(400, "Uploaded study does not match the selected study.", { code: "DICOM_REMAP_MULTIPLE_STUDIES" });
+    if (!originalSummary) originalSummary = parsed.summary;
+    validFiles.push(file);
+    seriesInstanceUidByOriginal[parsed.seriesInstanceUid] ||= createDicomUid();
+    sopInstanceUidByFileId[file.id] = createDicomUid();
+  }
+  if (!originalSummary || !validFiles.length) throw new HttpError(400, "No valid DICOM instances were staged.", { code: "DICOM_REMAP_DICOM_PARSE_FAILED" });
+  if (studyUids.size !== 1) throw new HttpError(400, "Uploaded files contain multiple studies.", { code: "DICOM_REMAP_MULTIPLE_STUDIES" });
+  const plan: PersistedDicomUidPlan = { version: DICOM_REMAP_UID_PLAN_VERSION, studyInstanceUid: createDicomUid(), seriesInstanceUidByOriginal, sopInstanceUidByFileId };
+  await writePrivateJson(planPath, plan);
+  return { plan, originalSummary, validFiles, skippedFiles };
+}
+
+async function rewriteStagedDicomForPersistedPlan(file: DicomRemapStagedManifestFile, directory: string, replacement: OrthancPatientSummary, plan: PersistedDicomUidPlan): Promise<Buffer> {
+  const raw = await readFile(path.join(directory, file.relativePath));
+  const dicom = DicomMessage.readFile(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)) as { dict: Record<string, unknown>; meta: Record<string, unknown> };
+  const dataset = DicomMetaDictionary.naturalizeDataset(dicom.dict) as Record<string, unknown>;
+  dataset._meta = DicomMetaDictionary.naturalizeDataset(dicom.meta) as Record<string, unknown>;
+  const seriesUid = plan.seriesInstanceUidByOriginal[readDicomStringValue(dataset.SeriesInstanceUID)];
+  const sopUid = plan.sopInstanceUidByFileId[file.id];
+  if (!seriesUid || !sopUid) throw new HttpError(409, "DICOM remap UID plan is invalid.", { code: "DICOM_REMAP_UID_PLAN_INVALID" });
+  dataset.PatientID = replacement.patientId;
+  dataset.PatientName = replacement.patientName;
+  dataset.PatientSex = replacement.patientSex;
+  dataset.PatientBirthDate = replacement.patientBirthDate;
+  dataset.StudyInstanceUID = plan.studyInstanceUid;
+  dataset.SeriesInstanceUID = seriesUid;
+  dataset.SOPInstanceUID = sopUid;
+  (dataset._meta as Record<string, unknown>).MediaStorageSOPInstanceUID = sopUid;
+  return Buffer.from(datasetToBuffer(dataset));
+}
+
+export async function claimNextDicomRemapProcessingJob(leaseOwner: string, leaseSeconds: number): Promise<{ job: DicomRemapJobRow; recovered: boolean } | null> {
+  const safeLeaseSeconds = Math.max(30, Math.min(Math.floor(leaseSeconds), 3600));
+  const result = await queryDicomRemapDb<DicomRemapJobRow & { recovered: boolean; previous_status: DicomRemapJobStatus }>(
+    `with candidate as (
+       select id, status as previous_status
+       from dicom_remap_jobs
+       where (status = 'uploaded' and processing_stage = 'queued')
+          or (status = 'remapped' and processing_stage = 'enqueueing_send')
+          or (status = 'processing' and processing_lease_expires_at < now())
+       order by created_at asc
+       for update skip locked
+       limit 1
+     )
+     update dicom_remap_jobs as job
+     set status = 'processing', processing_stage = case when job.status = 'remapped' and job.processing_stage = 'enqueueing_send' then 'enqueueing_send' else 'validating' end, processing_attempt_count = coalesce(job.processing_attempt_count, 0) + 1,
+         processing_started_at = coalesce(job.processing_started_at, now()), processing_last_checked_at = now(), processing_last_heartbeat_at = now(),
+         processing_lease_owner = $1, processing_lease_expires_at = now() + ($2::text || ' seconds')::interval, updated_at = now()
+     from candidate
+     where job.id = candidate.id
+     returning job.*, candidate.previous_status, (candidate.previous_status = 'processing' or candidate.previous_status = 'remapped') as recovered`,
+    [leaseOwner, safeLeaseSeconds]
+  );
+  const claimed = result.rows[0] || null;
+  if (!claimed) return null;
+  await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: claimed.id, actionType: claimed.recovered ? "dicom_remap_processing_recovered" : "dicom_remap_processing_claimed", oldValues: { status: claimed.previous_status }, newValues: { status: "processing", processingStage: claimed.processing_stage, attemptNumber: claimed.processing_attempt_count, recovered: claimed.recovered }, changedByUserId: null });
+  return { job: claimed, recovered: Boolean(claimed.recovered) };
+}
+
+async function renewDicomRemapProcessingLease(jobId: number, leaseOwner: string, leaseSeconds: number, stage?: string): Promise<boolean> {
+  const result = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs set processing_lease_expires_at = now() + ($3::text || ' seconds')::interval, processing_last_heartbeat_at = now(), processing_last_checked_at = now(), processing_stage = coalesce($4, processing_stage), updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+    [jobId, leaseOwner, Math.max(30, Math.min(Math.floor(leaseSeconds), 3600)), stage || null]
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function requireDicomRemapProcessingLease(jobId: number, leaseOwner: string, leaseSeconds: number, stage?: string): Promise<void> {
+  if (await renewDicomRemapProcessingLease(jobId, leaseOwner, leaseSeconds, stage)) return;
+  throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
+}
+
+async function updateDicomRemapProcessingProgress(jobId: number, leaseOwner: string, processedFileCount: number, skippedFileCount: number, leaseSeconds: number): Promise<void> {
+  const result = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs set processed_file_count = greatest(coalesce(processed_file_count, 0), $3), processing_skipped_file_count = $4, processing_last_heartbeat_at = now(), processing_last_checked_at = now(), processing_lease_expires_at = now() + ($5::text || ' seconds')::interval, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+    [jobId, leaseOwner, processedFileCount, skippedFileCount, Math.max(30, Math.min(Math.floor(leaseSeconds), 3600))]
+  );
+  if (!result.rows[0]) throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
+}
+
+async function uploadPersistedRemappedInstance(body: Buffer, fileIndex: number): Promise<string> {
+  const response = await fetchOrthancForRemap("/instances", { method: "POST", body, contentType: "application/dicom", timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS });
+  if (!response.ok) {
+    const identifiers = parseOrthancUploadResponse(response.json);
+    if (response.status === 409 && identifiers.parentStudyIds.length === 1 && identifiers.instanceIds.length >= 1) return identifiers.parentStudyIds[0]!;
+    if (response.status === 409) throw new HttpError(409, "Orthanc reported a conflicting remapped instance.", { code: "DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT", fileIndex, orthancStatus: response.status });
+    throw new HttpError(502, "Orthanc rejected a remapped DICOM instance.", { code: "DICOM_REMAP_ORTHANC_UPLOAD_FAILED", fileIndex, orthancStatus: response.status, responseShape: describeOrthancPayloadShape(response.json) });
+  }
+  const studyId = resolveStudyIdFromOrthancUploadResponse(response);
+  if (!studyId) throw new HttpError(502, "Orthanc did not identify the uploaded remapped study.", { code: "DICOM_REMAP_ORTHANC_UPLOAD_FAILED" });
+  return studyId;
+}
+
+export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSeconds }: { job: DicomRemapJobRow; leaseOwner: string; leaseSeconds: number }): Promise<DicomRemapJobRow> {
+  try {
+    if (job.processing_stage === "enqueueing_send" && job.modified_orthanc_study_id) {
+      await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "enqueueing_send");
+      const remapped = await queryDicomRemapDb<DicomRemapJobRow>(
+        `update dicom_remap_jobs set status = 'remapped', processing_lease_owner = null, processing_lease_expires_at = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+        [job.id, leaseOwner]
+      );
+      const remappedJob = remapped.rows[0];
+      if (!remappedJob) throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
+      return (await sendExistingDicomRemapJobToDestination({ job: remappedJob, currentUserId: remappedJob.created_by_user_id, auditActionType: "pacs_send_enqueued" })).job;
+    }
+    await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "validating");
+    const staged = await loadDicomRemapStagingManifest(job);
+    const patientId = job.rispro_patient_id;
+    const destination = String(job.destination_pacs_key || "").trim();
+    if (!patientId || !destination) throw new HttpError(409, "DICOM remap processing inputs are missing.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+    const patient = await getPatientById(patientId);
+    const replacement = formatReplacementFromPatient(patient);
+    if (!replacement.patientId || !replacement.patientName) throw new HttpError(409, "Replacement identity is unavailable.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
+    const modalities = await listOrthancRemoteModalities();
+    if (!modalities.modalities.some((item) => item.key === destination)) throw new HttpError(409, "PACS destination is unavailable.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+
+    await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "building_uid_plan");
+    const planned = await readOrBuildDicomRemapUidPlan(staged);
+    await updateDicomRemapProcessingProgress(job.id, leaseOwner, 0, planned.skippedFiles, leaseSeconds);
+
+    const studyIds = new Set<string>();
+    for (const [index, file] of planned.validFiles.entries()) {
+      await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "rewriting");
+      const body = await rewriteStagedDicomForPersistedPlan(file, staged.directory, replacement, planned.plan);
+      await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "uploading_to_orthanc");
+      studyIds.add(await uploadPersistedRemappedInstance(body, index + 1));
+      await updateDicomRemapProcessingProgress(job.id, leaseOwner, index + 1, planned.skippedFiles, leaseSeconds);
+    }
+    if (studyIds.size !== 1) throw new HttpError(502, "Orthanc produced an unexpected remapped study set.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
+    const modifiedStudyId = Array.from(studyIds)[0]!;
+
+    await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "verifying_orthanc");
+    const summary = await readStudySummary(modifiedStudyId);
+    if (summary.studyInstanceUid !== planned.plan.studyInstanceUid) throw new HttpError(502, "Orthanc did not preserve the persisted replacement Study UID.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
+    if (!hasSameReplacementIdentity(summary, replacement)) throw new HttpError(502, "Orthanc did not verify replacement identity.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
+    const statistics = await fetchOrthancForRemap(`/studies/${encodeURIComponent(modifiedStudyId)}/statistics`, { method: "GET" });
+    const instanceCount = statistics.ok ? readStudyInstanceCountFromPayload(statistics.json) : null;
+    if (instanceCount == null || instanceCount !== planned.validFiles.length) throw new HttpError(502, "Orthanc did not verify the expected remapped instance count.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
+
+    const remapped = await queryDicomRemapDb<DicomRemapJobRow>(
+      `update dicom_remap_jobs set status = 'remapped', processing_stage = 'enqueueing_send', source_orthanc_study_id = $3, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, replacement_patient_id = $8, replacement_patient_name = $9, replacement_patient_sex = $10, replacement_patient_birth_date = $11, processing_completed_at = now(), processing_last_heartbeat_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = null, processing_error_details = null, error_message = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+      [job.id, leaseOwner, modifiedStudyId, planned.originalSummary.patientId, planned.originalSummary.patientName, planned.originalSummary.patientSex, planned.originalSummary.patientBirthDate, replacement.patientId, replacement.patientName, replacement.patientSex, replacement.patientBirthDate]
+    );
+    const remappedJob = remapped.rows[0];
+    if (!remappedJob) throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
+    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: remappedJob.id, actionType: "dicom_remap_processing_completed", oldValues: { status: "processing" }, newValues: { status: "remapped", processingStage: "enqueueing_send", processedFileCount: planned.validFiles.length, skippedFileCount: planned.skippedFiles, modifiedOrthancStudyId: modifiedStudyId }, changedByUserId: null });
+    const sending = await sendExistingDicomRemapJobToDestination({ job: remappedJob, currentUserId: remappedJob.created_by_user_id, auditActionType: "pacs_send_enqueued" });
+    await cleanupDicomRemapStagingStorage(String(job.staged_storage_key || "")).then(async () => {
+      await queryDicomRemapDb(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1`, [job.id]);
+      await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_cleaned", oldValues: null, newValues: { processingStage: "completed" }, changedByUserId: null });
+    }).catch(() => undefined);
+    return sending.job;
+  } catch (error) {
+    const code = processingErrorCode(error);
+    const updated = await queryDicomRemapDb<DicomRemapJobRow>(
+      `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3, processing_error_details = jsonb_build_object('code', $3), error_message = $4, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+      [job.id, leaseOwner, code, processingErrorMessage(code)]
+    );
+    if (updated.rows[0]) await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_processing_failed", oldValues: { status: "processing" }, newValues: { status: "failed", processingStage: "failed", errorCode: code }, changedByUserId: null });
+    throw error;
+  }
+}
+
 function pickPreviewDisplayValue(existing: string, next: string): string {
   if (!existing && next) return next;
   return existing;
@@ -2982,6 +3512,11 @@ export async function cancelDicomRemapJob({
 
   const cancelledJob = result.rows[0];
   if (cancelledJob) {
+    if (cancelledJob.staged_storage_key) {
+      await cleanupDicomRemapStagingStorage(cancelledJob.staged_storage_key).then(async () => {
+        await queryDicomRemapDb(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1`, [cancelledJob.id]);
+      }).catch(() => undefined);
+    }
     await logDicomRemapAuditEntry({
       entityType: "dicom_remap_job",
       entityId: cancelledJob.id,
@@ -3023,6 +3558,9 @@ export async function resetDicomRemapJob({
   currentUserId: UserId;
 }): Promise<{ job: DicomRemapJobRow; summary: OrthancResetSummary }> {
   const job = await loadOwnedJob(jobId, currentUserId);
+  if (job.status === "processing" && job.processing_lease_expires_at && new Date(job.processing_lease_expires_at).getTime() > Date.now()) {
+    throw new HttpError(409, "This DICOM remap job is actively processing and cannot be reset safely.");
+  }
   if (job.status === "sending" || job.status === "sent") {
     throw new HttpError(409, "This DICOM remap job cannot be reset after send processing has started.");
   }
@@ -3051,6 +3589,12 @@ export async function resetDicomRemapJob({
   const resetJob = updateResult.rows[0];
   if (!resetJob) {
     throw new HttpError(500, "Failed to reset DICOM remap job.");
+  }
+
+  if (resetJob.staged_storage_key) {
+    await cleanupDicomRemapStagingStorage(resetJob.staged_storage_key).then(async () => {
+      await queryDicomRemapDb(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1`, [resetJob.id]);
+    }).catch(() => undefined);
   }
 
   await logDicomRemapAuditEntry({
@@ -3281,6 +3825,9 @@ export async function resendDicomRemapJobToPacs({
     throw new HttpError(409, "Only remapped, failed, or sent jobs can be resent to PACS.", {
       status: job.status,
     });
+  }
+  if (job.status === "failed" && !job.modified_orthanc_study_id) {
+    throw new HttpError(409, "A processing failure has no verified remapped study to resend.", { status: job.status, processingErrorCode: job.processing_error_code });
   }
   if (isDestinationVerificationRequired(job.send_error_code) && !confirmDestinationChecked) {
     throw new HttpError(409, "RISpro could not confirm whether PACS received this study. Check the destination PACS before resending to avoid a duplicate study.", {

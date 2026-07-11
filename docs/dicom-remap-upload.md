@@ -1,15 +1,29 @@
 # DICOM Remap Upload and PACS Send Transport
 
-RISpro uses `POST /api/pacs/remap/jobs/process-multipart` for the active DICOM remap workflow. The browser sends `multipart/form-data` to RISpro; RISpro stages and rewrites the selected study, ingests it into Orthanc, validates the replacement identity and one-study boundary, then requests an asynchronous Orthanc C-STORE job.
+RISpro uses `POST /api/pacs/remap/jobs/process-multipart` for the active DICOM remap workflow. The browser sends `multipart/form-data` to RISpro; RISpro streams those bytes to private durable job staging, writes a versioned manifest with byte counts and SHA-256 values, and returns `202 Accepted` once staging and the queued job commit are complete.
 
-The request returns `202 Accepted` only after RISpro has persisted the Orthanc job ID with remap status `sending`. It does not mean the PACS transfer has completed. The frontend polls RISpro job status; the server-side DICOM remap send worker monitors the exact persisted Orthanc job and updates the job to `sent` or `failed`.
+The request does not parse, rewrite, upload, validate, or transmit DICOM after the upload bytes have completed. The restart-safe processing worker claims the queued job under a database lease, validates staged files, persists a UID replacement plan, rewrites and uploads to Orthanc, verifies one study and replacement identity, then invokes the existing asynchronous C-STORE flow. The frontend polls RISpro job status through `uploaded`, `processing`, `sending`, `sent`, or `failed`.
 
 Deployment proxy requirements for large CT/MR studies:
 
 - Apply body-size and upload timeout settings to `/api/pacs/remap/jobs/process-multipart`.
-- Keep the proxy open for browser upload, rewrite, Orthanc ingestion, and validation.
-- The proxy no longer needs to remain open for the complete PACS C-STORE; it continues through the backend worker after the response.
+- Keep the proxy open only for browser upload and durable staging.
+- The proxy does not need to remain open for DICOM rewriting, Orthanc ingestion/verification, or PACS C-STORE; those continue through background workers after the response.
 - For Nginx-style proxies, configure `client_max_body_size` for the expected study size (for example `20g`), use `proxy_request_buffering off` where streaming is desired, and use `proxy_read_timeout`/`proxy_send_timeout` high enough for ingestion (for example `600s`).
+
+Worker recovery and failed sends:
+
+## Durable staging and processing deployment
+
+- `DICOM_REMAP_STAGING_DIR` defaults to `storage/dicom/remap-staging`. It must be a private, persistent, non-public filesystem location. The standard Docker `/app/storage` volume already covers the default path.
+- The application creates the root and job directories with owner-only permissions where the filesystem supports them. Staging keys are opaque; APIs never return server paths, filenames, manifests, or UID-plan locations.
+- Set `DICOM_REMAP_PROCESSING_WORKER_INTERVAL_MS` (default `5000`), `DICOM_REMAP_PROCESSING_LEASE_SECONDS` (default `120`), and `DICOM_REMAP_PROCESSING_BATCH_SIZE` (default `5`) to size the worker conservatively.
+- Multiple backend instances must share this staging volume. Alternatively run exactly one dedicated processing worker with access to the same volume and database. A lease prevents concurrent processing of one job; a lease expiry allows restart recovery.
+- A UID plan is atomically written before the first Orthanc instance upload. Retries reuse identical Study, Series, and SOP Instance UIDs, making a partial Orthanc upload restart-safe. Conflicting existing instances fail safely.
+- Successful jobs remove staged DICOM only after verified Orthanc ingestion and durable send enqueue. Cancelled queued and interrupted uploads are cleaned promptly. Failed-processing staging is retained for the configured retention window (`DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS`, default `72`) for controlled diagnosis.
+- DICOM staging contains PHI. Do not expose the directory through a web server, backup it to unapproved locations, or log file names, paths, metadata, file contents, or credentials.
+
+To inspect work, use Recent Jobs or the authenticated job endpoint. `uploaded` means durable staging is queued; `processing` exposes the persisted stage/counters/heartbeat; `sending` has an Orthanc C-STORE job; `sent` is terminal success; and `failed` exposes only sanitized error code/details. Ordinary resend is unavailable for a processing failure unless a verified remapped Orthanc study exists.
 
 Worker recovery and failed sends:
 

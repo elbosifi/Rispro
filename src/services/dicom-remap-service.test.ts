@@ -1,13 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import dcmjs from "dcmjs";
 import {
   __dicomRemapTestables,
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
+  claimNextDicomRemapProcessingJob,
+  cleanupDicomRemapStagingStorage,
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
@@ -17,6 +20,7 @@ import {
   resendDicomRemapJobToPacs,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
+  writeDicomRemapStagedFile,
   type DicomRemapJobRow,
 } from "./dicom-remap-service.js";
 import { HttpError } from "../utils/http-error.js";
@@ -187,6 +191,41 @@ test("validateExplicitConfirm only accepts explicit true values", () => {
   assert.equal(validateExplicitConfirm("TRUE"), true);
   assert.equal(validateExplicitConfirm("false"), false);
   assert.equal(validateExplicitConfirm(undefined), false);
+});
+
+test("durable staging writes a hashed private file by generated path", async () => {
+  const storageKey = `test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await mkdir(path.resolve("storage/dicom/remap-staging", storageKey, "files"), { recursive: true, mode: 0o700 });
+  const stream = new PassThrough();
+  const write = writeDicomRemapStagedFile({
+    context: { job: remapJob(), storageKey, directory: path.resolve("storage/dicom/remap-staging", storageKey) },
+    fileIndex: 0,
+    fileName: "../../unsafe patient file.dcm",
+    mimeType: "application/dicom",
+    stream,
+  });
+  stream.end(Buffer.from("durable-dicom"));
+  const staged = await write;
+  try {
+    assert.match(staged.relativePath, /^files\/[a-z0-9-]+\.dcm$/i);
+    assert.equal(staged.displayName.includes("/"), false);
+    assert.equal(staged.byteSize, 13);
+    assert.match(staged.sha256, /^[a-f0-9]{64}$/);
+    assert.deepEqual((await readdir(path.resolve("storage/dicom/remap-staging", storageKey, "files"))).filter((name) => name.endsWith(".part")), []);
+  } finally {
+    await cleanupDicomRemapStagingStorage(storageKey);
+  }
+});
+
+test("processing claim uses a skip-locked lease claim", async () => {
+  const claimed = remapJob({ status: "processing", processing_attempt_count: 1, processing_lease_owner: "worker-a" });
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const calls = queueQueryResults([{ rows: [{ ...claimed, recovered: false, previous_status: "uploaded" }] }]);
+  const result = await claimNextDicomRemapProcessingJob("worker-a", 120);
+  assert.equal(result?.job.id, claimed.id);
+  assert.equal(result?.recovered, false);
+  assert.match(calls[0]!.sql, /for update skip locked/i);
+  assert.match(calls[0]!.sql, /processing_lease_owner/i);
 });
 
 test("assertDicomRemapRouteAccess enforces authenticated user id", async () => {
@@ -1189,7 +1228,7 @@ test("dicom helper: cancelled status is terminal and not active", () => {
   assert.equal(__dicomRemapTestables.isDicomRemapTerminalStatus("cancelled"), true);
   assert.equal(__dicomRemapTestables.isDicomRemapActiveStatus("cancelled"), false);
   assert.deepEqual(__dicomRemapTestables.TERMINAL_JOB_STATUSES, ["sent", "failed", "cancelled"]);
-  assert.deepEqual(__dicomRemapTestables.ACTIVE_JOB_STATUSES, ["uploaded", "awaiting_confirmation", "remapped", "sending"]);
+  assert.deepEqual(__dicomRemapTestables.ACTIVE_JOB_STATUSES, ["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"]);
 });
 
 test("cancelDicomRemapJob cancels an active owner job and audits it", async () => {

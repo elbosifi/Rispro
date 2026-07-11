@@ -10,6 +10,7 @@ import type { PatientNotificationWorker } from "./services/patient-notification-
 import type { ReportingBoardBulkAssignmentWorker } from "./services/reporting-board-bulk-assignment-worker.js";
 import type { NoShowWorker } from "./services/no-show-worker.js";
 import type { DicomRemapSendWorker } from "./services/dicom-remap-send-worker.js";
+import type { DicomRemapProcessingWorker } from "./services/dicom-remap-processing-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -22,6 +23,7 @@ let patientNotificationWorker: PatientNotificationWorker | null = null;
 let reportingBoardBulkAssignmentWorker: ReportingBoardBulkAssignmentWorker | null = null;
 let noShowWorker: NoShowWorker | null = null;
 let dicomRemapSendWorker: DicomRemapSendWorker | null = null;
+let dicomRemapProcessingWorker: DicomRemapProcessingWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -90,6 +92,10 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
 
   if (dicomRemapSendWorker) {
     try { await dicomRemapSendWorker.stop(); } catch (error) { console.error("Failed to stop DICOM remap send worker.", error); }
+  }
+
+  if (dicomRemapProcessingWorker) {
+    try { await dicomRemapProcessingWorker.stop(); } catch (error) { console.error("Failed to stop DICOM remap processing worker.", error); }
   }
 
   server.close(async (serverError?: Error) => {
@@ -171,6 +177,16 @@ async function start(): Promise<void> {
     console.error("No-show worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.no_show_worker = "initialization_failed";
+  }
+
+  try {
+    const { startDicomRemapProcessingWorker } = await import("./services/dicom-remap-processing-worker.js");
+    dicomRemapProcessingWorker = await startDicomRemapProcessingWorker();
+    startupSummary.dicom_remap_processing_worker = "started";
+  } catch (error) {
+    console.error("DICOM remap processing worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.dicom_remap_processing_worker = "initialization_failed";
   }
 
   try {

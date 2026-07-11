@@ -100,6 +100,7 @@ export interface EnvConfig {
   requestBodyLimit: string;
   trustProxy: boolean | number | string;
   uploadsDir: string;
+  dicomRemapStagingDir: string;
   scanSessionTokenSecret: string;
   naps2WebscanEnabled: boolean;
   naps2WebscanEndpoint: string;
@@ -177,6 +178,7 @@ export const env: EnvConfig = {
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "75mb",
   trustProxy: readTrustProxy(),
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",
+  dicomRemapStagingDir: String(process.env.DICOM_REMAP_STAGING_DIR || "storage/dicom/remap-staging").trim(),
   scanSessionTokenSecret: process.env.SCAN_SESSION_TOKEN_SECRET || process.env.JWT_SECRET || "",
   naps2WebscanEnabled: readBoolean("NAPS2_WEBSCAN_ENABLED", false),
   naps2WebscanEndpoint: String(process.env.NAPS2_WEBSCAN_ENDPOINT || "").trim(),

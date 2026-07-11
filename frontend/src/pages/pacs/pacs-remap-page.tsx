@@ -6,7 +6,7 @@ import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal
 import { useLanguage } from "@/providers/language-provider";
 import { buildDicomUploadSelectionPlan, buildSkipPreviewScanResult, previewDicomStudiesFromFiles, type DicomScanFileEntry, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
-type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
+type JobStatus = "uploaded" | "processing" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
 type RemapWizardStep =
   | "select_files"
   | "scanning"
@@ -44,6 +44,15 @@ interface RemapJob {
   send_error_details: unknown;
   error_message: string | null;
   cancellation_reason: string | null;
+  processing_stage?: string | null;
+  staged_file_count?: number | null;
+  processed_file_count?: number | null;
+  processing_skipped_file_count?: number | null;
+  processing_attempt_count?: number | null;
+  processing_started_at?: string | null;
+  processing_last_heartbeat_at?: string | null;
+  processing_error_code?: string | null;
+  processing_error_details?: unknown;
 }
 
 interface RemapComparison {
@@ -151,7 +160,7 @@ function canResendJob(job: RemapJob | null | undefined): boolean {
   if (!job) return false;
   if (!["failed", "remapped", "sent"].includes(job.status)) return false;
   if (requiresDestinationCheck(job)) return false;
-  return Boolean(job.destination_pacs_key && (job.modified_orthanc_study_id || job.source_orthanc_study_id));
+  return Boolean(job.destination_pacs_key && job.modified_orthanc_study_id);
 }
 
 function requiresDestinationCheck(job: RemapJob | null | undefined): boolean {
@@ -166,7 +175,17 @@ function requiresDestinationCheck(job: RemapJob | null | undefined): boolean {
 
 function isSendFailedJob(job: RemapJob | null | undefined): boolean {
   if (!job || job.status !== "failed") return false;
-  return Boolean(job.destination_pacs_key && (job.modified_orthanc_study_id || job.source_orthanc_study_id));
+  return Boolean(job.destination_pacs_key && job.modified_orthanc_study_id);
+}
+
+function processingStageLabel(language: string, stage: string | null | undefined): string {
+  const labels: Record<string, [string, string]> = {
+    staging: ["Staging upload", "تجهيز الرفع"], queued: ["Queued", "في الانتظار"], validating: ["Validating study", "التحقق من الدراسة"],
+    building_uid_plan: ["Preparing UID remap", "تحضير تعيين UID"], rewriting: ["Rewriting DICOM", "إعادة كتابة DICOM"],
+    uploading_to_orthanc: ["Uploading to Orthanc", "الرفع إلى Orthanc"], verifying_orthanc: ["Verifying study", "التحقق من الدراسة"],
+    enqueueing_send: ["Sending to PACS", "الإرسال إلى PACS"], completed: ["Completed", "مكتمل"], failed: ["Failed", "فشل"],
+  };
+  return labels[stage || ""]?.[language === "ar" ? 1 : 0] || (language === "ar" ? "قيد المعالجة" : "Processing");
 }
 
 function oneLineReason(message: string | null | undefined): string {
@@ -364,7 +383,7 @@ export default function PacsRemapPage() {
     enabled: jobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
-      return status === "remapped" || status === "sending" ? 1500 : false;
+      return status === "uploaded" || status === "processing" || status === "remapped" || status === "sending" ? 1500 : false;
     },
   });
 
@@ -450,7 +469,7 @@ export default function PacsRemapPage() {
     },
     onSuccess: ({ uploadResult }) => {
       setJobId(uploadResult.job.id);
-      setProcessingStage(uploadResult.job.status === "sending" ? "sending" : uploadResult.job.status === "sent" ? "sent" : "failed");
+      setProcessingStage(uploadResult.job.status === "sending" ? "sending" : uploadResult.job.status === "sent" ? "sent" : "orthanc_processing");
       setSuccessMessage("");
       setErrorMessage("");
       setErrorDetails("");
@@ -610,6 +629,7 @@ export default function PacsRemapPage() {
   const wizardStep: RemapWizardStep = useMemo(() => {
     if (processMutation.isPending) return processingStage;
     if (currentJob?.status === "sending") return "sending";
+    if (currentJob?.status === "uploaded" || currentJob?.status === "processing" || currentJob?.status === "remapped") return "orthanc_processing";
     if (currentJob?.status === "sent") return "sent";
     if (currentJob?.status === "failed" || currentJob?.status === "cancelled") return "failed";
     if (processingStage === "sending") return "sending";
@@ -656,7 +676,7 @@ export default function PacsRemapPage() {
     wizardStep === "sent"
       ? ""
       : errorMessage || currentJob?.error_message || "";
-  const visibleErrorDetails = errorDetails || (currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
+  const visibleErrorDetails = errorDetails || (currentJob?.processing_error_details ? formatTechnicalDetails(currentJob.processing_error_details) : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
   const visibleSuccessMessage =
     wizardStep === "failed"
       ? ""
@@ -1223,9 +1243,16 @@ export default function PacsRemapPage() {
               </div>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                 {wizardStep === "uploading" && t(language, "pacs.remap.uploadingSelectedStudy", { percent: uploadPercent })}
-                {wizardStep === "orthanc_processing" && t(language, "pacs.remap.waitingOrthanc")}
+                {wizardStep === "orthanc_processing" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
                 {wizardStep === "sending" && t(language, "pacs.remap.sendingToPacs")}
               </p>
+              {wizardStep === "orthanc_processing" && currentJob && (
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {language === "ar" ? "الملفات المعالجة" : "Processed files"}: {currentJob.processed_file_count || 0}/{currentJob.staged_file_count || "—"}
+                  {currentJob.processing_skipped_file_count ? ` • ${language === "ar" ? "تم تجاوز" : "Skipped"}: ${currentJob.processing_skipped_file_count}` : ""}
+                  {currentJob.processing_attempt_count ? ` • ${language === "ar" ? "المحاولة" : "Attempt"}: ${currentJob.processing_attempt_count}` : ""}
+                </p>
+              )}
               {wizardStep === "sending" && currentJob?.send_error_code && (
                 <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
                   {currentJob.send_error_code}: {oneLineReason(currentJob.error_message) || "RISpro is continuing to monitor this PACS send."}
@@ -1335,6 +1362,9 @@ export default function PacsRemapPage() {
               <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {currentJob.replacement_patient_name || "—"} ({currentJob.replacement_patient_id || "—"})</p>
               <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {currentJob.destination_pacs_key || "—"}</p>
               <p>{t(language, "pacs.remap.orthancStudy")}: <span className="font-mono text-[11px]">{effectiveOrthancStudyId || "—"}</span></p>
+              {(currentJob.status === "uploaded" || currentJob.status === "processing") && (
+                <p><strong>{language === "ar" ? "المعالجة" : "Processing"}:</strong> {processingStageLabel(language, currentJob.processing_stage)} • {currentJob.processed_file_count || 0}/{currentJob.staged_file_count || "—"}</p>
+              )}
               {currentJob.source_orthanc_study_id && currentJob.modified_orthanc_study_id && currentJob.source_orthanc_study_id !== currentJob.modified_orthanc_study_id && (
                 <>
                   <p>{t(language, "pacs.remap.sourceStudy")}: <span className="font-mono text-[11px]">{currentJob.source_orthanc_study_id}</span></p>
@@ -1385,6 +1415,7 @@ export default function PacsRemapPage() {
                     className="w-full text-left hover:bg-black/5"
                   >
                     <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
+                    {(job.status === "uploaded" || job.status === "processing") && <p className="text-[11px]">{processingStageLabel(language, job.processing_stage)} • {job.processed_file_count || 0}/{job.staged_file_count || "—"}</p>}
                     <p className="truncate"><strong>{job.original_patient_name || "—"}</strong></p>
                     <p className="truncate">{job.replacement_patient_name || "—"} • {job.destination_pacs_key || "—"}</p>
                     {isSendFailedJob(job) && (
