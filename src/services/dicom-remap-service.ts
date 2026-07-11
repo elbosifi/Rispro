@@ -231,6 +231,7 @@ let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
 let sleepForDicomRemap: RemapSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let orthancBulkModifyAvailableForTests: boolean | null = null;
+let afterRemappedInstanceUploadForTests: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null = null;
 
 function joinUrl(baseUrl: string, suffix: string): string {
   const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
@@ -2860,7 +2861,9 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "rewriting");
       const body = await rewriteStagedDicomForPersistedPlan(file, staged.directory, replacement, planned.plan);
       await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "uploading_to_orthanc");
-      studyIds.add(await uploadPersistedRemappedInstance(body, index + 1));
+      const uploadedStudyId = await uploadPersistedRemappedInstance(body, index + 1);
+      studyIds.add(uploadedStudyId);
+      if (afterRemappedInstanceUploadForTests) await afterRemappedInstanceUploadForTests({ jobId: job.id, fileIndex: index + 1, studyId: uploadedStudyId, body });
       await updateDicomRemapProcessingProgress(job.id, leaseOwner, index + 1, planned.skippedFiles, leaseSeconds);
     }
     if (studyIds.size !== 1) throw new HttpError(502, "Orthanc produced an unexpected remapped study set.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
@@ -4042,11 +4045,15 @@ export const __dicomRemapTestables = {
   setBulkModifyRouteAvailableForTests(value: boolean | null): void {
     orthancBulkModifyAvailableForTests = value;
   },
+  setAfterRemappedInstanceUploadForTests(hook: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null): void {
+    afterRemappedInstanceUploadForTests = hook;
+  },
   resetTestOverrides(): void {
     queryDicomRemapDb = pool.query.bind(pool);
     logDicomRemapAuditEntry = logAuditEntry;
     fetchOrthancForRemap = orthancFetch;
     sleepForDicomRemap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     orthancBulkModifyAvailableForTests = null;
+    afterRemappedInstanceUploadForTests = null;
   },
 };

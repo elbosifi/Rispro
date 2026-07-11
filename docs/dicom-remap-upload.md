@@ -31,3 +31,13 @@ Worker recovery and failed sends:
 - Inspect the remap job in RISpro for its send status and sanitized diagnostics (`send_error_code` and `send_error_details`), then inspect the referenced Orthanc job ID server-side if needed. Do not place Orthanc credentials or patient identifiers in logs or diagnostic notes.
 
 Orthanc remains server-side only. Browsers must upload to RISpro, never directly to Orthanc.
+
+## Disposable Compose smoke test
+
+For host-side validation of the durable remap deployment mount and worker startup, run:
+
+```bash
+scripts/test-dicom-remap-compose-smoke.sh
+```
+
+The script creates a unique disposable Compose project with an internal PostgreSQL container, synthetic secrets, nonproduction ports, and the lightweight restore-validation image target. It waits for PostgreSQL and `/api/health`, verifies migration 119 and processing-worker startup, checks `/app/storage/dicom/remap-staging` is on the project `rispro-storage` volume, and confirms a non-PHI sentinel survives application restart and recreation. It also checks graceful shutdown and removes the temporary `.env`, containers, network, and volumes with a shell trap. It never connects to Orthanc, PACS, or production services.
