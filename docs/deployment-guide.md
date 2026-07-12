@@ -145,6 +145,12 @@ docker compose up -d
 | `DB_POOL_MAX` | | Max DB connections | `10` |
 | `SESSION_HOURS` | | Session timeout | `8` |
 | `TRUST_PROXY` | | Behind reverse proxy? | `1` |
+| `OHIF_ENABLED` | | Environment rollout gate; keep false until target validation | `false` |
+| `COMPOSE_PROFILES` | | Set to `ohif` when the viewer container should run | blank |
+| `OHIF_PUBLIC_BASE_URL` | | Same-domain viewer base path | `/ohif` |
+| `OHIF_DICOMWEB_PROXY_PATH` | | Protected browser-facing DICOMweb path | `/ohif-dicomweb` |
+| `OHIF_CONTAINER_IMAGE` | | Pinned locally built OHIF image | `rispro-ohif:v3.12.6` |
+| `OHIF_LAUNCH_TOKEN_TTL_SECONDS` | | Hashed launch-session lifetime | `600` |
 
 ### Orthanc and MPPS Deployment Modes
 
@@ -215,6 +221,10 @@ Supervisor API endpoints:
 - `GET /api/dicom/orthanc-sync/summary`
 - `POST /api/dicom/orthanc-sync/reconcile`
   - body: `{ "dateFrom": "YYYY-MM-DD", "dateTo": "YYYY-MM-DD", "apply": false, "limit": 5000 }`
+
+### OHIF Viewer
+
+The supported Compose stack builds OHIF `v3.12.6` as a separate container and publishes RISpro through `rispro-gateway` on the existing host web port. Configure the independent source in Settings → Integrations → OHIF Viewer, validate with a real staging source, then set `OHIF_ENABLED=true`. See [OHIF Viewer Integration](domains/ohif-viewer/README.md) and the [operations runbook](ohif-viewer-operations-runbook.md).
 
 ## Post-Deployment Checklist
 

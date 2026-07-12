@@ -22,11 +22,14 @@ import {
   fetchReportingBoardSavedViewByToken,
   fetchReportingBoardSavedViews,
   fetchReportingBoardSettings,
+  fetchOhifViewerAvailability,
+  fetchOhifRetrievalJob,
   fetchReportingBoardStats,
   fetchRosterDoctors,
   finalizeComparisonRequest,
   markReportingBoardCaseManualFinal,
   markReportingBoardCaseDiscontinued,
+  launchReportingBoardCaseInOhif,
   resumeReportingBoardBulkAssignmentJob,
   revokeReportingBoardSavedView,
   rotateReportingBoardSavedViewToken,
@@ -56,6 +59,7 @@ import type {
   ReportingBoardSortBy,
   ReportingBoardSortDirection,
   ReportingBoardSettings,
+  OhifViewerAvailability,
 } from "@/types/api";
 
 const REPORT_STATUS_OPTIONS: Array<{ value: ReportingBoardReportStatus; label: string }> = [
@@ -757,6 +761,7 @@ function RowActionMenu({
   onMarkManualFinal,
   onClearManualFinal,
   onDiscontinue,
+  ohifAvailability,
 }: {
   row: ReportingBoardCaseRow;
   doctors: DoctorProfile[];
@@ -767,11 +772,14 @@ function RowActionMenu({
   onMarkManualFinal: (row: ReportingBoardCaseRow) => void;
   onClearManualFinal: (row: ReportingBoardCaseRow) => void;
   onDiscontinue: (row: ReportingBoardCaseRow) => void;
+  ohifAvailability: OhifViewerAvailability | null;
 }) {
   const [open, setOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
   const [showFinalize, setShowFinalize] = useState(false);
   const [finalText, setFinalText] = useState("");
+  const [viewerState, setViewerState] = useState<"idle" | "resolving" | "retrieving" | "failed">("idle");
+  const [viewerMessage, setViewerMessage] = useState("");
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; minWidth: number } | null>(null);
@@ -788,6 +796,51 @@ function RowActionMenu({
       setCopyMessage("Could not copy accession.");
     }
   };
+  const openImages = async () => {
+    if (viewerState === "resolving" || viewerState === "retrieving" || !ohifAvailability?.enabled) return;
+    setViewerState("resolving");
+    setViewerMessage("Resolving the current study…");
+    let placeholder: Window | null = null;
+    if (ohifAvailability.openMode === "new_tab") {
+      placeholder = window.open("about:blank", "_blank");
+      if (placeholder) placeholder.opener = null;
+      if (!placeholder) {
+        setViewerState("failed");
+        setViewerMessage("The browser blocked the OHIF tab. Allow popups for RISpro and try again.");
+        return;
+      }
+    }
+    try {
+      let result = await launchReportingBoardCaseInOhif(row.appointmentId, true);
+      while (result.status === "retrieving" && result.retrievalJobId) {
+        setViewerState("retrieving");
+        setViewerMessage(result.message);
+        let ready = false;
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+          const job = await fetchOhifRetrievalJob(result.retrievalJobId);
+          if (job.status === "ready") { ready = true; break; }
+          if (["retrieval_failed", "failed", "timed_out", "not_found", "ambiguous"].includes(job.status)) throw new Error(job.message);
+        }
+        if (!ready) throw new Error("The study retrieval timed out.");
+        result = await launchReportingBoardCaseInOhif(row.appointmentId, true);
+      }
+      if (result.status !== "ready") throw new Error(result.message);
+      if (result.openMode === "same_tab") {
+        placeholder?.close();
+        window.location.assign(result.launchUrl);
+      } else if (placeholder) {
+        placeholder.location.href = result.launchUrl;
+      }
+      setViewerState("idle");
+      setViewerMessage(result.priorStudyCount > 0 ? `Opening current study with ${result.priorStudyCount} prior(s).` : "Opening current study.");
+      setOpen(false);
+    } catch (error) {
+      placeholder?.close();
+      setViewerState("failed");
+      setViewerMessage(error instanceof Error ? error.message : "The OHIF launch failed.");
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -795,7 +848,7 @@ function RowActionMenu({
       const rect = buttonRef.current?.getBoundingClientRect();
       if (!rect) return;
       const menuWidth = 256;
-      const estimatedHeight = row.caseType === "comparison" ? 360 : 320;
+      const estimatedHeight = row.caseType === "comparison" ? 360 : 390;
       const viewportPadding = 8;
       const opensUp = rect.bottom + estimatedHeight > window.innerHeight && rect.top > estimatedHeight;
       setMenuPosition({
@@ -827,6 +880,12 @@ function RowActionMenu({
 
   const menuContent = (
     <>
+      {ohifAvailability?.enabled && row.caseType === "appointment" && (
+        <button type="button" role="menuitem" disabled={viewerState === "resolving" || viewerState === "retrieving"} onClick={() => void openImages()} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:cursor-wait disabled:opacity-60">
+          {viewerState === "resolving" ? "Resolving images…" : viewerState === "retrieving" ? "Retrieving study…" : "Open Images"}
+        </button>
+      )}
+      {viewerMessage && <p role="status" className={`px-2 py-1 text-[11px] ${viewerState === "failed" ? "text-red-700" : "text-muted-foreground"}`}>{viewerMessage}</p>}
       {accessionNumber ? (
         <a role="menuitem" href={buildSonicDicomRedirectPath(row.appointmentId, "study")} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">
           Open this study in SonicDICOM
@@ -1778,6 +1837,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const settingsQuery = useQuery({ queryKey: ["doctor", "reporting-board", "settings"], queryFn: fetchReportingBoardSettings });
+  const ohifAvailabilityQuery = useQuery({ queryKey: ["ohif", "availability"], queryFn: fetchOhifViewerAvailability });
   const casesQuery = useQuery({
     queryKey: ["doctor", "reporting-board", "cases", filters],
     queryFn: () => fetchReportingBoardCases(filters),
@@ -2622,6 +2682,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                             row={row}
                             doctors={doctorsQuery.data ?? []}
                             canManage={canManage}
+                            ohifAvailability={ohifAvailabilityQuery.data ?? null}
                             onAssign={(targetRow, doctorId, reason) => assignMutation.mutate({ row: targetRow, doctorId, reason })}
                             onUnassign={async (targetRow, reason) => {
                               await unassignMutation.mutateAsync({ row: targetRow, reason });

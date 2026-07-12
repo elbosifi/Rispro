@@ -91,7 +91,7 @@ import {
 } from "./doctor-worklist-repository.js";
 import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 
-interface Actor {
+export interface Actor {
   userId: UserId;
   appRole: Role;
 }
@@ -672,26 +672,12 @@ function normalizeSonicDicomOpenScope(scope?: string | null): SonicDicomOpenScop
 }
 
 export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number, scopeInput?: string | null): Promise<{ redirectUrl: string }> {
-  const me = await requireRosterDoctor(actor);
-  const scope = normalizeSonicDicomOpenScope(scopeInput);
-  const canManage =
-    me.moduleCapabilities.includes("doctor_supervisor") ||
-    me.moduleCapabilities.includes("doctor_admin");
-  const filters = await effectiveFilters(
-    canManage
-      ? { appointmentId, reportStatus: "all", limit: 1, offset: 0 }
-      : { appointmentId, assignedDoctorId: me.profile!.id, assignmentStatus: "assigned", reportStatus: "all", limit: 1, offset: 0 }
+  const { me, row } = await getAuthorizedReportingBoardAppointment(
+    actor,
+    appointmentId,
+    "You are not allowed to open this Reporting Board case in SonicDICOM."
   );
-  const settings = await readReportingBoardSettings();
-  const scopedFilters =
-    filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: settings.enabledModalityCodes };
-  const rows = await listReportingBoardCaseCandidates(scopedFilters);
-  const row = rows[0] ?? null;
-  if (!row) {
-    const existing = await listReportingBoardCasesByAppointmentIds([appointmentId]);
-    if (existing.length === 0) throw new HttpError(404, "Case not found.");
-    throw new HttpError(403, "You are not allowed to open this Reporting Board case in SonicDICOM.");
-  }
+  const scope = normalizeSonicDicomOpenScope(scopeInput);
 
   const accessionNumber = String(row.accessionNumber || "").trim();
   const patientMrn = String(row.patientMrn || "").trim();
@@ -727,6 +713,34 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
   });
 
   return { redirectUrl };
+}
+
+export async function getAuthorizedReportingBoardAppointment(
+  actor: Actor,
+  appointmentId: number,
+  forbiddenMessage = "You are not allowed to open this Reporting Board case."
+) {
+  const me = await requireRosterDoctor(actor);
+  const canManage =
+    me.moduleCapabilities.includes("doctor_supervisor") ||
+    me.moduleCapabilities.includes("doctor_admin");
+  const filters = await effectiveFilters(
+    canManage
+      ? { appointmentId, reportStatus: "all", limit: 1, offset: 0 }
+      : { appointmentId, assignedDoctorId: me.profile!.id, assignmentStatus: "assigned", reportStatus: "all", limit: 1, offset: 0 }
+  );
+  const settings = await readReportingBoardSettings();
+  const scopedFilters = filters.modalityCode || filters.modalityId
+    ? filters
+    : { ...filters, modalityCodes: settings.enabledModalityCodes };
+  const rows = await listReportingBoardCaseCandidates(scopedFilters);
+  const row = rows[0] ?? null;
+  if (!row) {
+    const existing = await listReportingBoardCasesByAppointmentIds([appointmentId]);
+    if (existing.length === 0) throw new HttpError(404, "Case not found.");
+    throw new HttpError(403, forbiddenMessage);
+  }
+  return { me, row };
 }
 
 export async function markReportingBoardCaseDiscontinued(actor: Actor, appointmentId: number, reasonInput: string): Promise<{ ok: true; status: string; autoCompletionDisabledMessage?: string }> {

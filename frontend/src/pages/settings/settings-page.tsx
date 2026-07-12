@@ -62,6 +62,7 @@ import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import ActionPinPolicySection from "./action-pin-policy-section";
 import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
+import OhifViewerSection from "./ohif-viewer-section";
 import ExamTypesSection from "./exam-types-section";
 import type {
   User,
@@ -207,6 +208,7 @@ type SettingsSection =
   | "appointment_slip"
   | "patient_qr_self_service"
   | "sonicdicom_reports"
+  | "ohif_viewer"
   | "documents_and_uploads"
   | "backup_restore"
   | "system_diagnostics";
@@ -234,6 +236,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "appointment_slip",
   "patient_qr_self_service",
   "sonicdicom_reports",
+  "ohif_viewer",
   "documents_and_uploads",
   "backup_restore",
   "system_diagnostics"
@@ -262,6 +265,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   orthanc_mwl_sync: "integrations",
   sante_worklist_hl7: "integrations",
   sonicdicom_reports: "integrations",
+  ohif_viewer: "integrations",
   users: "admin",
   action_pin_policy: "admin",
   role_page_access: "admin",
@@ -289,6 +293,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "sonicdicom_reports") {
     return "SonicDICOM Reports";
+  }
+  if (section === "ohif_viewer") {
+    return "OHIF Viewer";
   }
   if (section === "action_pin_policy") {
     return "Action PIN Policy";
@@ -465,6 +472,7 @@ export default function SettingsPage() {
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "patient_duplicate_resolver" && <PatientDuplicateResolverSection onReAuthRequired={requestReAuth} />}
             {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
+            {section === "ohif_viewer" && <OhifViewerSection onReAuthRequired={requestReAuth} />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}

@@ -29,8 +29,9 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
+    expose:
+      - "3000"
     ports:
-      - "3000:3000"   # Web application
       - "11112:11112" # Embedded DICOM MWL SCP (used only in embedded mode)
     volumes:
       - rispro-storage:/app/storage
@@ -40,6 +41,47 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 30s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - rispro-network
+
+  ohif:
+    profiles: ["ohif"]
+    build:
+      context: .
+      dockerfile: docker/ohif/Dockerfile
+      args:
+        OHIF_VERSION: ${OHIF_VERSION:-v3.12.6}
+    image: ${OHIF_CONTAINER_IMAGE:-rispro-ohif:v3.12.6}
+    container_name: rispro-ohif
+    volumes:
+      - ./docker/ohif/app-config.js:/usr/share/nginx/html/ohif/app-config.js:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/ohif/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - rispro-network
+
+  gateway:
+    image: nginx:1.27.5-alpine
+    container_name: rispro-gateway
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./docker/reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${RISPRO_WEB_PORT:-3000}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway-health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
       retries: 3
     restart: unless-stopped
     networks:

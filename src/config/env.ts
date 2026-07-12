@@ -141,6 +141,13 @@ export interface EnvConfig {
   webPushReportReadyMaxChecksPerRun: number;
   doctorPortalEnabled: boolean;
   doctorPortalAutoRedirect: boolean;
+  ohifEnabled: boolean;
+  ohifPublicBaseUrl: string;
+  ohifDicomWebProxyPath: string;
+  ohifContainerUrl: string;
+  ohifSessionCookieName: string;
+  ohifLaunchTokenTtlSeconds: number;
+  ohifRetrievalWorkerIntervalMs: number;
 }
 
 function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
@@ -219,6 +226,13 @@ export const env: EnvConfig = {
   webPushReportReadyMaxChecksPerRun: readPositiveInteger("WEB_PUSH_REPORT_READY_MAX_CHECKS_PER_RUN", 25),
   doctorPortalEnabled: readBoolean("DOCTOR_PORTAL_ENABLED", true),
   doctorPortalAutoRedirect: readBoolean("DOCTOR_PORTAL_AUTO_REDIRECT", true),
+  ohifEnabled: readBoolean("OHIF_ENABLED", false),
+  ohifPublicBaseUrl: String(process.env.OHIF_PUBLIC_BASE_URL || "/ohif").trim(),
+  ohifDicomWebProxyPath: String(process.env.OHIF_DICOMWEB_PROXY_PATH || "/ohif-dicomweb").trim(),
+  ohifContainerUrl: String(process.env.OHIF_CONTAINER_URL || "http://ohif:80").trim(),
+  ohifSessionCookieName: String(process.env.OHIF_SESSION_COOKIE_NAME || "rispro_ohif_session").trim(),
+  ohifLaunchTokenTtlSeconds: readPositiveInteger("OHIF_LAUNCH_TOKEN_TTL_SECONDS", 600),
+  ohifRetrievalWorkerIntervalMs: readPositiveInteger("OHIF_RETRIEVAL_WORKER_INTERVAL_MS", 5000),
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
@@ -253,4 +267,14 @@ if (env.webPushEnabled) {
   if (!/^(mailto:.+@.+|https?:\/\/.+)/i.test(env.webPushVapidSubject)) {
     throw new Error("WEB_PUSH_VAPID_SUBJECT must be a mailto: address or absolute http(s) URL when WEB_PUSH_ENABLED=true.");
   }
+}
+
+for (const [name, value] of [["OHIF_PUBLIC_BASE_URL", env.ohifPublicBaseUrl], ["OHIF_DICOMWEB_PROXY_PATH", env.ohifDicomWebProxyPath]] as const) {
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("..") || value.includes("?") || value.includes("#")) {
+    throw new Error(`${name} must be a safe root-relative path.`);
+  }
+}
+
+if (env.ohifEnabled && !/^https?:\/\//i.test(env.ohifContainerUrl)) {
+  throw new Error("OHIF_CONTAINER_URL must be an absolute http(s) URL when OHIF is enabled.");
 }

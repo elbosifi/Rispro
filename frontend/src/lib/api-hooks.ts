@@ -62,6 +62,8 @@ import type {
   ReportingBoardBulkUnassignResult,
   ReportingBoardBulkUnassignSelectedPayload,
   ReportingBoardCaseRow,
+  OhifViewerAvailability,
+  OhifViewerLaunchResponse,
   ReportingBoardFilters,
   ReportingBoardNotificationSettings,
   ReportingBoardNotificationEvent,
@@ -841,6 +843,21 @@ export async function updateReportingBoardSettings(payload: ReportingBoardSettin
 
 export async function fetchReportingBoardCases(filters: ReportingBoardFilters): Promise<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }> {
   return api<{ cases: ReportingBoardCaseRow[]; filters: ReportingBoardFilters }>(`/doctor/reporting-board/cases?${reportingBoardParams(filters).toString()}`);
+}
+
+export async function fetchOhifViewerAvailability(): Promise<OhifViewerAvailability> {
+  return api<OhifViewerAvailability>("/ohif/availability");
+}
+
+export async function launchReportingBoardCaseInOhif(appointmentId: number, includePriors = true): Promise<OhifViewerLaunchResponse> {
+  return api<OhifViewerLaunchResponse>(`/doctor/reporting-board/cases/${appointmentId}/viewer-launch`, {
+    method: "POST",
+    body: JSON.stringify({ includePriors }),
+  });
+}
+
+export async function fetchOhifRetrievalJob(jobId: number): Promise<{ status: string; retrievalJobId: number; message: string }> {
+  return api<{ status: string; retrievalJobId: number; message: string }>(`/ohif/retrieval-jobs/${jobId}`);
 }
 
 export async function fetchReportingBoardStats(filters: ReportingBoardFilters): Promise<ReportingBoardStatsResponse> {

@@ -4,6 +4,7 @@ import { asOptionalBoolean, asOptionalString, asString } from "../../utils/reque
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
+import { launchReportingBoardCaseInOhif } from "../ohif-viewer/service.js";
 import type { ReportingBoardFilters, ReportingBoardNotificationSettings } from "./reporting-board-types.js";
 import {
   assignReportingBoardCaseToDoctor,
@@ -208,6 +209,19 @@ router.get(
       asOptionalString(req.query.scope)
     );
     res.redirect(302, result.redirectUrl);
+  })
+);
+
+router.post(
+  "/cases/:appointmentId/viewer-launch",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json(await launchReportingBoardCaseInOhif(
+      actor(req),
+      requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      body.includePriors !== false,
+      req.requestId
+    ));
   })
 );
 

@@ -74,6 +74,8 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --b
 | Container | Purpose | Ports | Volume |
 |-----------|---------|-------|--------|
 | `rispro-app` | RISpro app | 3000, 11112 in embedded mode | `rispro-storage` |
+| `rispro-gateway` | Same-domain HTTP gateway | 3000 | none |
+| `rispro-ohif` | Pinned OHIF Viewer | internal 80 | none |
 | `rispro-db`  | PostgreSQL 16 | 5432 (internal only) | `postgres-data` |
 
 > **Note:** Internal Docker PostgreSQL does not support SSL. The setup script writes `DATABASE_SSL=false` and `DATABASE_SSL_REJECT_UNAUTHORIZED=false` automatically.
@@ -344,6 +346,23 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `MPPS_USERNAME` | blank | Optional bridge admin username |
 | `MPPS_PASSWORD` | blank | Optional bridge admin password |
 
+### OHIF Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OHIF_ENABLED` | `false` | Environment rollout gate; both this and the database setting must be enabled |
+| `COMPOSE_PROFILES` | blank | Set to `ohif` only when deploying the optional viewer container |
+| `OHIF_PUBLIC_BASE_URL` | `/ohif` | Same-domain viewer path |
+| `OHIF_DICOMWEB_PROXY_PATH` | `/ohif-dicomweb` | RISpro-authenticated DICOMweb proxy path |
+| `OHIF_CONTAINER_IMAGE` | `rispro-ohif:v3.12.6` | Explicit pinned image name |
+| `OHIF_VERSION` | `v3.12.6` | Official OHIF source release used for the subpath build |
+| `OHIF_LAUNCH_TOKEN_TTL_SECONDS` | `600` | Short-lived viewer token lifetime |
+| `OHIF_DICOMWEB_USERNAME` | blank | Optional native upstream username; reference this variable name in Settings |
+| `OHIF_DICOMWEB_PASSWORD` | blank | Optional native upstream password; reference this variable name in Settings |
+| `OHIF_DICOMWEB_BEARER_TOKEN` | blank | Optional native bearer token; reference this variable name in Settings |
+
+The gateway keeps `/` on RISpro, `/ohif/` on the OHIF container, and `/ohif-dicomweb/` on the protected RISpro proxy. Imaging responses are streamed with proxy buffering disabled and bounded timeouts. Do not point the public reverse proxy directly at Orthanc or OsiriX.
+
 ### Preflight Validation
 
 Before startup, the setup/update scripts validate:
@@ -414,6 +433,16 @@ docker compose logs app
 # Check if database is ready (internal DB)
 docker compose -f docker-compose.yml -f docker-compose.internal-db.yml exec postgres pg_isready -U rispro
 ```
+
+### OHIF Won't Load Images
+
+```bash
+docker compose ps
+docker compose logs gateway ohif app
+curl -f http://localhost:3000/ohif/
+```
+
+If the shell loads but images do not, relaunch from the Reporting Board and use the request ID in System Diagnostics. A direct `/ohif-dicomweb/` request without an active scoped session is expected to return 401/403.
 
 ### Database Connection Failed
 

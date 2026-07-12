@@ -36,6 +36,9 @@ const finalizeComparisonRequestMock = vi.fn();
 const markReportingBoardCaseDiscontinuedMock = vi.fn();
 const markReportingBoardCaseManualFinalMock = vi.fn();
 const clearReportingBoardCaseManualFinalMock = vi.fn();
+const fetchOhifViewerAvailabilityMock = vi.fn();
+const launchReportingBoardCaseInOhifMock = vi.fn();
+const fetchOhifRetrievalJobMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
@@ -69,6 +72,9 @@ vi.mock("@/lib/api-hooks", () => ({
   markReportingBoardCaseDiscontinued: (...args: unknown[]) => markReportingBoardCaseDiscontinuedMock(...args),
   markReportingBoardCaseManualFinal: (...args: unknown[]) => markReportingBoardCaseManualFinalMock(...args),
   clearReportingBoardCaseManualFinal: (...args: unknown[]) => clearReportingBoardCaseManualFinalMock(...args),
+  fetchOhifViewerAvailability: (...args: unknown[]) => fetchOhifViewerAvailabilityMock(...args),
+  launchReportingBoardCaseInOhif: (...args: unknown[]) => launchReportingBoardCaseInOhifMock(...args),
+  fetchOhifRetrievalJob: (...args: unknown[]) => fetchOhifRetrievalJobMock(...args),
 }));
 
 const managerMe: DoctorMe = {
@@ -307,6 +313,27 @@ describe("DoctorReportingBoardPage", () => {
     markReportingBoardCaseDiscontinuedMock.mockResolvedValue({ ok: true, status: "discontinued" });
     markReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final" });
     clearReportingBoardCaseManualFinalMock.mockResolvedValue({ ok: true, appointmentId: 42, status: "manual_final_cleared" });
+    fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
+    launchReportingBoardCaseInOhifMock.mockResolvedValue({
+      status: "ready", launchUrl: "/api/ohif/launch/test-token", openMode: "new_tab",
+      currentStudy: { studyInstanceUid: "1.2.840.42" }, priorStudies: [], priorStudyCount: 0,
+    });
+    fetchOhifRetrievalJobMock.mockResolvedValue({ status: "ready", retrievalJobId: 1, message: "The study is ready." });
+  });
+
+  it("opens an authorized appointment in a placeholder OHIF tab and hides the action when disabled", async () => {
+    const placeholder = { opener: window, location: { href: "about:blank" }, close: vi.fn() } as unknown as Window;
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(placeholder);
+    fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: true, configured: true, openMode: "new_tab" });
+    renderPage();
+
+    const row = (await screen.findByText("V2-000042")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Open actions for V2-000042" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open Images" }));
+
+    await waitFor(() => expect(launchReportingBoardCaseInOhifMock).toHaveBeenCalledWith(42, true));
+    expect(openSpy).toHaveBeenCalledWith("about:blank", "_blank");
+    expect(placeholder.location.href).toBe("/api/ohif/launch/test-token");
   });
 
   it("renders compact board columns and row status without a visible priority column", async () => {

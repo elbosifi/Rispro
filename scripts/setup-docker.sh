@@ -52,6 +52,19 @@ main() {
       MPPS_BRIDGE_AE_TITLE="${CURRENT_MPPS_BRIDGE_AE_TITLE:-RISPRO_MPPS}"
       MPPS_USERNAME="${CURRENT_MPPS_USERNAME:-}"
       MPPS_PASSWORD="${CURRENT_MPPS_PASSWORD:-}"
+      OHIF_ENABLED="${CURRENT_OHIF_ENABLED:-false}"
+      OHIF_PUBLIC_BASE_URL="/ohif"
+      OHIF_DICOMWEB_PROXY_PATH="/ohif-dicomweb"
+      OHIF_CONTAINER_URL="http://ohif:80"
+      OHIF_CONTAINER_IMAGE="rispro-ohif:v3.12.6"
+      OHIF_VERSION="v3.12.6"
+      OHIF_SESSION_COOKIE_NAME="rispro_ohif_session"
+      OHIF_LAUNCH_TOKEN_TTL_SECONDS="600"
+      OHIF_RETRIEVAL_WORKER_INTERVAL_MS="5000"
+      OHIF_DICOMWEB_USERNAME="${CURRENT_OHIF_DICOMWEB_USERNAME:-}"
+      OHIF_DICOMWEB_PASSWORD="${CURRENT_OHIF_DICOMWEB_PASSWORD:-}"
+      OHIF_DICOMWEB_BEARER_TOKEN="${CURRENT_OHIF_DICOMWEB_BEARER_TOKEN:-}"
+      OHIF_COMPOSE_PROFILES="$([ "$OHIF_ENABLED" = "true" ] && printf ohif || printf '')"
       run_compose_preflight
       bring_up_stack
       wait_for_internal_orthanc_worklists

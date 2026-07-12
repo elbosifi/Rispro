@@ -527,6 +527,27 @@ export interface ReportingBoardCaseRow {
   exclusionReason: string | null;
 }
 
+export interface OhifViewerAvailability {
+  enabled: boolean;
+  configured: boolean;
+  openMode: "new_tab" | "same_tab";
+}
+
+export type OhifViewerLaunchResponse =
+  | {
+      status: "ready";
+      launchUrl: string;
+      openMode: "new_tab" | "same_tab";
+      currentStudy: { studyInstanceUid: string };
+      priorStudies: Array<{ studyInstanceUid: string; studyDate: string; modality: string; studyDescription: string; accessionNumber: string }>;
+      priorStudyCount: number;
+    }
+  | {
+      status: "not_found" | "ambiguous" | "source_unavailable" | "configuration_error" | "retrieval_required" | "retrieving" | "retrieval_failed";
+      message: string;
+      retrievalJobId?: number;
+    };
+
 export interface ReportingBoardStatsSummary {
   total: number;
   comparisonRequests: number;

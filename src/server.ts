@@ -12,6 +12,7 @@ import type { ReportingBoardSonicDicomCacheWorker } from "./services/reporting-b
 import type { NoShowWorker } from "./services/no-show-worker.js";
 import type { DicomRemapSendWorker } from "./services/dicom-remap-send-worker.js";
 import type { DicomRemapProcessingWorker } from "./services/dicom-remap-processing-worker.js";
+import type { OhifRetrievalWorker } from "./modules/ohif-viewer/worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -26,6 +27,7 @@ let reportingBoardSonicDicomCacheWorker: ReportingBoardSonicDicomCacheWorker | n
 let noShowWorker: NoShowWorker | null = null;
 let dicomRemapSendWorker: DicomRemapSendWorker | null = null;
 let dicomRemapProcessingWorker: DicomRemapProcessingWorker | null = null;
+let ohifRetrievalWorker: OhifRetrievalWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -101,6 +103,10 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
 
   if (dicomRemapProcessingWorker) {
     try { await dicomRemapProcessingWorker.stop(); } catch (error) { console.error("Failed to stop DICOM remap processing worker.", error); }
+  }
+
+  if (ohifRetrievalWorker) {
+    try { await ohifRetrievalWorker.stop(); } catch (error) { console.error("Failed to stop OHIF retrieval worker.", error); }
   }
 
   server.close(async (serverError?: Error) => {
@@ -286,6 +292,20 @@ async function start(): Promise<void> {
     startupSummary.orthanc_pacs_modalities = "sync_failed";
   }
 
+  if (env.ohifEnabled) {
+    try {
+      const { startOhifRetrievalWorker } = await import("./modules/ohif-viewer/worker.js");
+      ohifRetrievalWorker = await startOhifRetrievalWorker({ intervalMs: env.ohifRetrievalWorkerIntervalMs });
+      startupSummary.ohif_viewer = "enabled";
+    } catch (error) {
+      console.error("OHIF retrieval worker initialization failed. Continuing with OHIF unavailable.");
+      logError(error);
+      startupSummary.ohif_viewer = "initialization_failed";
+    }
+  } else {
+    startupSummary.ohif_viewer = "disabled";
+  }
+
   server.listen(env.port, async () => {
     // Print startup summary
     console.log("");
@@ -338,6 +358,10 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  Reporting Board SonicDICOM Cache:");
     console.log(`    Worker:         ${startupSummary.reporting_board_sonicdicom_cache || "disabled"}`);
+
+    console.log("");
+    console.log("  OHIF Viewer:");
+    console.log(`    Mode:           ${startupSummary.ohif_viewer || "disabled"}`);
 
     console.log("");
     console.log("  Patient Web Push:");

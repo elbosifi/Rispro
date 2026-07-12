@@ -634,10 +634,12 @@ export async function searchOrthancPacsStudies({
   criteria: rawCriteria,
   targetKey = "local",
   currentUserId,
+  audit = true,
 }: {
   criteria: OrthancPacsSearchCriteria | UnknownRecord;
   targetKey?: string | null;
   currentUserId: OptionalUserId;
+  audit?: boolean;
 }): Promise<{ studies: OrthancPacsStudySummary[]; target: OrthancPacsTarget }> {
   const settings = await resolveSettings();
   const criteria = normalizeCriteria(rawCriteria);
@@ -650,18 +652,20 @@ export async function searchOrthancPacsStudies({
     ? await searchLocal(criteria, settings)
     : await searchRemote(key, criteria, settings);
 
-  await logOrthancPacsAuditEntry({
-    entityType: "integration",
-    entityId: null,
-    actionType: "orthanc_pacs_search",
-    oldValues: null,
-    newValues: {
-      criteria,
-      target,
-      resultCount: studies.length,
-    },
-    changedByUserId: currentUserId,
-  });
+  if (audit) {
+    await logOrthancPacsAuditEntry({
+      entityType: "integration",
+      entityId: null,
+      actionType: "orthanc_pacs_search",
+      oldValues: null,
+      newValues: {
+        criteria,
+        target,
+        resultCount: studies.length,
+      },
+      changedByUserId: currentUserId,
+    });
+  }
 
   return { studies, target };
 }

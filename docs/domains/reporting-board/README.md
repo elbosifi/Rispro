@@ -11,6 +11,7 @@ The Reporting Board is the doctor-facing worklist for reportable cases. It inclu
 - Worker: `src/services/reporting-board-bulk-assignment-worker.ts`
 - Frontend pages: `frontend/src/pages/doctor/doctor-reporting-board-page.tsx`, `frontend/src/pages/doctor/reporting-board-mobile-page.tsx`, `frontend/src/pages/print/reporting-board-print-page.tsx`
 - Frontend API/types: `frontend/src/lib/reporting-board.api-hooks*`, `frontend/src/types/api.ts`
+- Authorized image launch: `src/modules/ohif-viewer/`, `frontend/src/pages/settings/ohif-viewer-section.tsx`
 - Validation doc: `docs/doctor-portal/reporting-board-staging-validation.md`
 
 ## Current Known Risks
@@ -26,6 +27,7 @@ The Reporting Board is the doctor-facing worklist for reportable cases. It inclu
 - Do not create modality worklist entries or consume modality capacity for comparison-only rows.
 - Do not hide filters or actions while refactoring layout.
 - Do not query Orthanc/SonicDICOM directly from the frontend.
+- Do not expose OHIF from public saved-view/QR tokens; launch must re-check the authenticated doctor's case scope.
 
 ## Recommended Tests Before Touching
 

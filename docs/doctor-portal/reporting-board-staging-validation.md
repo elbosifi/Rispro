@@ -71,6 +71,17 @@ Use this runbook after deploying Reporting Assignment Board changes to staging a
 5. Confirm printed output includes generated time, cutoff date, filter or saved-view name, total count, and case rows.
 6. Confirm printed columns are clinically useful and paper-friendly: priority, patient name, MRN, accession, appointment date/time, modality, exam, category, assigned doctor, report status, and notes/signature.
 
+## OHIF Viewer Checks
+
+1. Keep `OHIF_ENABLED=false` until the pinned container, gateway, and `/ohif/` base path are healthy.
+2. Select an active PACS node as the independent OHIF image source and confirm changing it does not change the general default PACS.
+3. Run C-ECHO, QIDO, WADO metadata, WADO frame/instance, and (when selected) Orthanc REST/DICOMweb/C-MOVE tests separately.
+4. As a normal doctor, confirm only an assigned visible case can launch; confirm an inaccessible case and unauthenticated request are rejected.
+5. Verify a known accession opens the correct current StudyInstanceUID and a bounded set of PatientID-safe priors.
+6. Verify `not_found`, ambiguity, source-unavailable, retrieval-failure, and timeout are distinct.
+7. Inspect browser requests and confirm no PACS/Orthanc password, bearer token, internal URL, or unrestricted QIDO capability is exposed.
+8. Confirm the public doctor worklist QR page has no permanent OHIF/PACS link.
+
 ## Go / No-Go
 
 GO only if:

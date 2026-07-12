@@ -103,5 +103,14 @@ export async function getDiagnosticsSummary() {
   const storage = await health("Storage", async () => { const root = env.uploadsDir; const stat = await fs.stat(root); await fs.access(root, fs.constants.W_OK); const space = await fs.statfs(root); return { roots: [{ name: "uploads", exists: stat.isDirectory(), writable: true, freeBytes: Number(space.bavail) * Number(space.bsize), totalBytes: Number(space.blocks) * Number(space.bsize) }] }; });
   const counts = await health("Diagnostics", async () => { const { rows } = await pool.query("select count(*) filter (where severity='error' and occurred_at > now()-interval '24 hours')::int as errors_24h, count(*) filter (where severity='critical' and occurred_at > now()-interval '24 hours')::int as critical_24h, count(*) filter (where resolved_at is null)::int as unresolved, max(occurred_at) filter (where severity in ('error','critical')) as latest_error_time from system_diagnostic_events"); return rows[0] || {}; });
   const backupRestore = await health("Backup/restore", async () => { const { rows } = await pool.query("select max(occurred_at) filter (where source='backup_restore' and severity='info') as last_success, max(occurred_at) filter (where source='backup_restore' and severity in ('error','critical')) as last_failure, (array_agg(operation order by occurred_at desc) filter (where source='backup_restore'))[1] as latest_restore_state from system_diagnostic_events"); return { v3RestoreEnabled: process.env.RESTORE_V3_FULL_ENABLED === "true", ...(rows[0] || {}) }; });
-  return { application: { version: process.env.npm_package_version || "unknown", gitCommit: process.env.GIT_COMMIT || null, environment: env.nodeEnv, uptimeSeconds: Math.floor(process.uptime()), serverTime: new Date().toISOString() }, database, storage, backupRestore, recentDiagnostics: counts };
+  const ohifViewer = await health("OHIF Viewer", async () => {
+    const { rows } = await pool.query(`select settings.enabled,settings.selected_pacs_node_id,settings.access_strategy,
+      endpoint.last_test_status,endpoint.qido_last_status,endpoint.wado_metadata_last_status,endpoint.wado_frame_last_status,
+      (select count(*)::int from ohif_retrieval_jobs where status in ('queued','resolving','retrieving')) as active_retrieval_jobs,
+      (select count(*)::int from ohif_retrieval_jobs where status in ('failed','timed_out') and updated_at>now()-interval '24 hours') as retrieval_failures_24h
+      from ohif_viewer_settings settings left join pacs_web_endpoints endpoint on endpoint.pacs_node_id=settings.selected_pacs_node_id
+      where settings.singleton_key=true limit 1`);
+    return { environmentEnabled: env.ohifEnabled, ...(rows[0] || {}) };
+  });
+  return { application: { version: process.env.npm_package_version || "unknown", gitCommit: process.env.GIT_COMMIT || null, environment: env.nodeEnv, uptimeSeconds: Math.floor(process.uptime()), serverTime: new Date().toISOString() }, database, storage, backupRestore, ohifViewer, recentDiagnostics: counts };
 }

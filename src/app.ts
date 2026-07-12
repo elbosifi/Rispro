@@ -33,6 +33,7 @@ import { blockForcedPasswordChange } from "./middleware/auth.js";
 import { cleanupStaleDicomRemapUploadTempDirs } from "./services/dicom-remap-service.js";
 import { cleanupExpiredDiagnosticEvents } from "./services/system-diagnostics-service.js";
 import { systemDiagnosticsRouter } from "./routes/system-diagnostics.js";
+import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer/routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -145,6 +146,7 @@ export function createApp(): Application {
   app.use("/api/dicom", dicomRouter);
   app.use("/api/pacs", pacsRouter);
   app.use("/api/legacy-access-viewer", legacyAccessViewerRouter);
+  app.use("/api/ohif", ohifViewerRouter);
   app.use("/api/doctor", createDoctorPortalRouter());
   app.use("/api/reporting", reportingBoardPublicRouter);
 
@@ -154,6 +156,8 @@ export function createApp(): Application {
   app.use("/api/public/appointments", publicAppointmentsCancelRouter);
 
   app.use("/api", notFoundHandler);
+
+  app.use(env.ohifDicomWebProxyPath, blockForcedPasswordChange, ohifDicomWebProxyRouter);
 
   // Legacy frontend (will be removed after migration is complete)
   app.get("/legacy", sendFrontendFile("index.html"));
