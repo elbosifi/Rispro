@@ -5,11 +5,13 @@ import { pool } from "../../db/pool.js";
 import {
   buildSonicDicomStaffViewerUrl,
   checkSonicDicomReportStatus,
+  checkSonicDicomReportStatusesBatch,
   fetchSonicDicomStudyNotes,
   type SonicDicomReportState,
   type SonicDicomStudyNoteResult,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
+import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResult } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -121,12 +123,10 @@ const REPORTING_BOARD_SORT_BY = new Set([
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
 let reportStatusChecker = checkSonicDicomReportStatus;
 let studyNoteFetcher = fetchSonicDicomStudyNotes;
-const reportStatusSnapshot = new Map<number, ReportingBoardCaseRow["reportStatus"]>();
 type EffectiveReportingBoardFilters = Omit<ReportingBoardFilters, "limit" | "offset"> & { limit: number; offset: number };
 
 export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
   reportStatusChecker = checker ?? checkSonicDicomReportStatus;
-  reportStatusSnapshot.clear();
 }
 
 export function __setReportingBoardStudyNoteFetcherForTest(fetcher: typeof fetchSonicDicomStudyNotes | null) {
@@ -290,57 +290,33 @@ export function narrowSavedViewFilters(savedViewFilters: ReportingBoardFilters, 
 }
 
 async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: ReportingBoardFilters["reportStatus"]) {
-  const checkedAt = new Date().toISOString();
   const resolved: ReportingBoardCaseRow[] = [];
   for (const row of rows) {
     if (row.caseType === "comparison") {
       const canAssign = row.canAssign && row.reportStatus !== "final";
       resolved.push(withTimelineMetrics({
         ...row,
-        reportStatusCheckedAt: checkedAt,
         canAssign,
         exclusionReason: canAssign ? null : row.exclusionReason ?? (row.reportStatus === "final" ? "report_final" : null),
       }));
       continue;
     }
     if (row.manualFinalOverrideId) {
-      reportStatusSnapshot.set(row.appointmentId, "final");
       resolved.push(withTimelineMetrics({
         ...row,
         reportStatus: "final",
         reportStatusSource: "manual",
         reportFinalAt: row.manualFinalAt ?? null,
-        reportStatusCheckedAt: checkedAt,
         canAssign: false,
         exclusionReason: "manual_final",
       }));
       continue;
     }
-    let status: ReportingBoardCaseRow["reportStatus"] = "unavailable";
-    try {
-      const result = await reportStatusChecker(
-        {
-          bookingId: row.appointmentId,
-          accessionNumber: row.accessionNumber,
-          studyInstanceUid: row.studyInstanceUid,
-          requiresReport: row.requiresReport,
-          status: row.appointmentStatus,
-        },
-        { useCache: true }
-      );
-      status = normalizeReportState(result.state);
-      row.reportFinalAt = status === "final" ? result.reportFinalAt ?? null : null;
-    } catch {
-      status = "unavailable";
-      row.reportFinalAt = null;
-    }
-    reportStatusSnapshot.set(row.appointmentId, status);
+    const status = row.reportStatus ?? "unavailable";
     const canAssign = row.canAssign && status !== "final";
     resolved.push(withTimelineMetrics({
       ...row,
       reportStatus: status,
-      reportStatusSource: "sonicdicom",
-      reportStatusCheckedAt: checkedAt,
       canAssign,
       exclusionReason: canAssign ? null : row.exclusionReason ?? (status === "final" ? "report_final" : null),
     }));
@@ -353,53 +329,8 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
   return resolved.filter((row) => row.reportStatus === reportStatus);
 }
 
-function emptySonicDicomStudyNote(row: ReportingBoardCaseRow): ReportingBoardCaseRow {
-  return {
-    ...row,
-    sonicDicomStudyNote: null,
-    sonicDicomStudyNoteCheckedAt: null,
-    sonicDicomStudyNoteSource: null,
-  };
-}
-
-function normalizeStudyNote(value: unknown): string | null {
-  const trimmed = String(value ?? "").trim();
-  return trimmed || null;
-}
-
-function withSonicDicomStudyNote(row: ReportingBoardCaseRow, result: SonicDicomStudyNoteResult | undefined): ReportingBoardCaseRow {
-  if (!result) return emptySonicDicomStudyNote(row);
-  const note = normalizeStudyNote(result.note);
-  return {
-    ...row,
-    sonicDicomStudyNote: note,
-    sonicDicomStudyNoteCheckedAt: result.checkedAt ?? null,
-    sonicDicomStudyNoteSource: note ? "sonicdicom" : null,
-  };
-}
-
-async function applySonicDicomStudyNotes(rows: ReportingBoardCaseRow[]): Promise<ReportingBoardCaseRow[]> {
-  const withDefaults = rows.map(emptySonicDicomStudyNote);
-  const appointmentRows = withDefaults.filter((row) => row.caseType === "appointment");
-  if (appointmentRows.length === 0) return withDefaults;
-
-  try {
-    const notes = await studyNoteFetcher(
-      appointmentRows.map((row) => ({
-        bookingId: row.appointmentId,
-        accessionNumber: row.accessionNumber,
-        studyInstanceUid: row.studyInstanceUid,
-      })),
-      { useCache: true }
-    );
-    return withDefaults.map((row) => row.caseType === "appointment" ? withSonicDicomStudyNote(row, notes.get(row.appointmentId)) : row);
-  } catch {
-    return withDefaults;
-  }
-}
-
 export function __attachSonicDicomStudyNotesForTest(rows: ReportingBoardCaseRow[]) {
-  return applySonicDicomStudyNotes(rows);
+  return Promise.resolve(rows);
 }
 
 function fetchLimitForUnifiedCandidates(filters: EffectiveReportingBoardFilters): number {
@@ -561,7 +492,10 @@ async function listUnifiedReportingBoardCases(
   const visibleRows = resolved
     .sort(compareReportingBoardRows(filters))
     .slice(filters.offset, filters.offset + filters.limit);
-  return options.includeSonicDicomStudyNotes ? applySonicDicomStudyNotes(visibleRows) : visibleRows;
+  // Board reads are cache-only. Enqueue visible appointment rows in one local
+  // PostgreSQL operation so out-of-lookback saved views refresh soon.
+  void enqueueReportingBoardSonicDicomCacheRows(visibleRows.filter((row) => row.caseType === "appointment").map((row) => row.appointmentId)).catch(() => null);
+  return visibleRows;
 }
 
 type ReportingBoardStatsInputRow = ReportingBoardStatsBaseRow & Partial<Pick<ReportingBoardCaseRow, "reportStatus">>;
@@ -569,10 +503,7 @@ type ReportingBoardStatsInputRow = ReportingBoardStatsBaseRow & Partial<Pick<Rep
 function statsReportStatus(row: ReportingBoardStatsInputRow): ReportingBoardCaseRow["reportStatus"] {
   if (row.reportStatus) return row.reportStatus;
   if (!row.requiresReport) return "no_report";
-  // Report status is not persisted locally. Statistics use statuses recently
-  // resolved by case listing; uncached required cases stay unavailable to avoid
-  // a SonicDICOM status check loop on every stats request.
-  return reportStatusSnapshot.get(row.appointmentId) ?? "unavailable";
+  return "unavailable";
 }
 
 function statsRequiredNotFinal(row: ReportingBoardStatsInputRow): boolean {
@@ -883,7 +814,6 @@ export async function markReportingBoardCaseManualFinal(
     reason,
     actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
   });
-  reportStatusSnapshot.set(appointmentId, "final");
   return { ok: true, appointmentId, status: "manual_final", override };
 }
 
@@ -901,7 +831,7 @@ export async function clearReportingBoardCaseManualFinal(
     reason,
     actor: { userId: actor.userId, doctorId: manager.profile?.id ?? null },
   });
-  reportStatusSnapshot.delete(appointmentId);
+  await enqueueReportingBoardSonicDicomCacheRows([appointmentId], pool, { force: true });
   return { ok: true, appointmentId, status: "manual_final_cleared", override };
 }
 
@@ -1483,6 +1413,20 @@ async function filtersFromBulkInput(actor: Actor, input: BulkAssignNextCasesInpu
   return input.filters ?? {};
 }
 
+async function directlyRevalidateReportingAssignmentCandidates(rows: ReportingBoardCaseRow[]): Promise<Set<number>> {
+  const appointments = rows.filter((row) => row.caseType === "appointment");
+  if (!appointments.length) return new Set();
+  const contexts = appointments.map((row) => ({ bookingId: row.appointmentId, accessionNumber: row.accessionNumber, studyInstanceUid: row.studyInstanceUid, requiresReport: row.requiresReport, status: row.appointmentStatus }));
+  const statuses = await checkSonicDicomReportStatusesBatch(contexts, { audit: false });
+  const finalIds = new Set<number>();
+  await Promise.all(contexts.map(async (context) => {
+    const result = statuses.get(context.bookingId) ?? null;
+    await persistReportingBoardSonicDicomCacheResult(context, result, result?.state === "unavailable" ? "SonicDICOM unavailable during assignment revalidation" : null);
+    if (result?.state === "final") finalIds.add(context.bookingId);
+  }));
+  return finalIds;
+}
+
 export async function bulkAssignNextReportingBoardCases(actor: Actor, input: BulkAssignNextCasesInput) {
   const me = await requireRosterManager(actor);
   if (!Number.isInteger(input.count) || input.count <= 0 || input.count > MAX_BULK_ASSIGN_COUNT) {
@@ -1513,7 +1457,11 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   const eligible = cases
     .filter((row) => row.caseType === "appointment" && row.canAssign && row.assignmentStatus === "unassigned" && row.requiresReport && row.appointmentStatus === "completed" && row.reportStatus !== "final")
     .sort(compareAutomaticAssignmentCandidates(filters.pinUrgentToTop));
-  const selected = eligible.slice(0, input.count);
+  // Revalidate a bounded window before the assignment transaction. This lets
+  // stale cache finals be skipped while later eligible cases fill the request.
+  const candidateWindow = eligible.slice(0, Math.min(eligible.length, Math.max(input.count * 3, input.count)));
+  const finalIds = await directlyRevalidateReportingAssignmentCandidates(candidateWindow);
+  const selected = candidateWindow.filter((row) => !finalIds.has(row.appointmentId)).slice(0, input.count);
 
   const result = await bulkAssignReportingCases({
     doctorId: input.doctorId,
@@ -1969,6 +1917,9 @@ export async function assignReportingBoardCaseToDoctor(
   input: { appointmentId: number; doctorId: number; reason?: string | null }
 ) {
   await requireRosterManager(actor);
+  const rows = await listReportingBoardCasesByAppointmentIds([input.appointmentId]);
+  const finalIds = await directlyRevalidateReportingAssignmentCandidates(rows);
+  if (finalIds.has(input.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
   const result = await assignDoctorCase(actor, {
     appointmentId: input.appointmentId,
     doctorId: input.doctorId,

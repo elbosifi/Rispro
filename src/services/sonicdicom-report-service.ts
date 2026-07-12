@@ -25,6 +25,8 @@ export interface ReportStatusResult {
   canViewReport: boolean;
   source: "sonicdicom" | "rispro";
   reportFinalAt: string | null;
+  /** Present for durable Reporting Board batch refreshes. */
+  studyNote?: string | null;
 }
 
 export interface SonicDicomSqlTestResult {
@@ -429,6 +431,75 @@ export async function checkSonicDicomReportStatus(
   }
 
   return result;
+}
+
+/**
+ * Resolve a bounded set of readiness checks on one SQL Server connection.
+ * This deliberately bypasses the process-local cache: callers are durable
+ * cache writers or state-changing assignment safety checks.
+ */
+export async function checkSonicDicomReportStatusesBatch(
+  contexts: ReportLookupContext[],
+  options: { audit?: boolean } = {}
+): Promise<Map<number, ReportStatusResult>> {
+  const results = new Map<number, ReportStatusResult>();
+  const unique = [...new Map(contexts.map((context) => [context.bookingId, context])).values()].slice(0, 200);
+  if (!unique.length) return results;
+  const settings = await readSonicDicomReportSettings();
+  if (!settings.sonicDicomReportsEnabled || settings.sonicDicomReadinessMode !== "sql_server") {
+    for (const context of unique) results.set(context.bookingId, {
+      state: settings.sonicDicomReportsEnabled ? "unavailable" : "disabled",
+      canViewReport: false,
+      source: settings.sonicDicomReportsEnabled ? "sonicdicom" : "rispro",
+      reportFinalAt: null,
+    });
+    return results;
+  }
+  const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
+  const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
+  try {
+    await withSqlConnection(settings, async ({ sql, pool }) => {
+      // A connection is intentionally shared across the bounded chunk. The
+      // legacy single-accession query stays parameterized for each request.
+      for (const context of unique) {
+        const accession = String(context.accessionNumber || "").trim();
+        if (!accession) {
+          results.set(context.bookingId, { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null });
+          continue;
+        }
+        const readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession);
+        const result = !readiness.foundStudy
+          ? { state: "study_not_found" as const, canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null }
+          : !readiness.foundReport || readiness.statusCode == null
+            ? { state: "no_report" as const, canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null }
+            : mapStatusCode(settings, readiness.statusCode, readiness.documentUpdatedAt);
+        results.set(context.bookingId, result);
+      }
+      const noteRows = await queryStudyNotes(
+        pool,
+        sql,
+        dicomDb,
+        [...new Set(unique.map((context) => String(context.accessionNumber || "").trim()).filter(Boolean))],
+        [...new Set(unique.map((context) => String(context.studyInstanceUid || "").trim()).filter(Boolean))]
+      );
+      const notes = resolveSonicDicomStudyNotes(unique, noteRows, new Date().toISOString());
+      for (const context of unique) {
+        const result = results.get(context.bookingId);
+        if (result) result.studyNote = notes.get(context.bookingId)?.note ?? null;
+      }
+    });
+  } catch {
+    for (const context of unique) results.set(context.bookingId, { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null });
+  }
+  if (options.audit && settings.auditReportStatusChecks) {
+    // Explicit callers retain existing audit semantics. Polling workers pass
+    // audit:false to avoid a patient-access audit row per appointment/tick.
+    await Promise.all([...results.entries()].map(([bookingId, result]) => logAuditEntry({
+      entityType: "patient_report", entityId: bookingId, actionType: `report_status_${result.state}`,
+      oldValues: null, newValues: { state: result.state, canViewReport: result.canViewReport }, changedByUserId: null,
+    }).catch(() => null)));
+  }
+  return results;
 }
 
 function normalizeStudyNote(value: unknown): string | null {

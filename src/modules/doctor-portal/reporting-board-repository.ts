@@ -1092,20 +1092,23 @@ export async function listReportingBoardCaseCandidates(
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
         first_assignment.first_assigned_at as "firstAssignedAt",
-        null::text as "reportFinalAt",
+        case when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
         null::text as "dueAt",
         null::int as "completedToAssignedMinutes",
         null::int as "assignedToFinalMinutes",
         null::int as "completedToFinalMinutes",
         null::int as "currentAssignmentAgeMinutes",
         null::int as "completedUnassignedAgeMinutes",
-        'unavailable'::text as "reportStatus",
-        null::text as "reportStatusCheckedAt",
+        case when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
+        cache.last_success_at as "reportStatusCheckedAt",
+        cache.sonicdicom_study_note as "sonicDicomStudyNote",
+        cache.last_success_at as "sonicDicomStudyNoteCheckedAt",
+        case when cache.last_success_at is not null and cache.sonicdicom_study_note is not null then 'sonicdicom' else null end as "sonicDicomStudyNoteSource",
         manual_final.id as "manualFinalOverrideId",
         manual_final.created_at as "manualFinalAt",
         manual_final_doctor.display_name as "manualFinalByName",
         manual_final.reason as "manualFinalReason",
-        case when manual_final.id is null then null else 'manual' end as "reportStatusSource",
+        case when manual_final.id is not null then 'manual' when cache.appointment_id is not null then 'sonicdicom' else null end as "reportStatusSource",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
         case
           when b.requires_report = false then 'report_not_required'
@@ -1129,6 +1132,7 @@ export async function listReportingBoardCaseCandidates(
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
@@ -1221,9 +1225,9 @@ export async function listReportingBoardStatsRows(
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
         first_assignment.first_assigned_at as "firstAssignedAt",
-        case when manual_final.id is not null then manual_final.created_at else null end as "reportFinalAt",
-        case when manual_final.id is not null then 'final' else null end as "reportStatus",
-        case when manual_final.id is not null then 'manual' else null end as "reportStatusSource",
+        case when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
+        case when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
+        case when manual_final.id is not null then 'manual' when cache.appointment_id is not null then 'sonicdicom' else null end as "reportStatusSource",
         manual_final.id as "manualFinalOverrideId"
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
@@ -1233,6 +1237,7 @@ export async function listReportingBoardStatsRows(
       left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
       left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
       left join doctor_portal.reporting_board_manual_final_overrides manual_final on manual_final.appointment_id = b.id and manual_final.cleared_at is null
+      left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join lateral (
         select min(history.assigned_at) as first_assigned_at
         from doctor_portal.case_team_assignments history
