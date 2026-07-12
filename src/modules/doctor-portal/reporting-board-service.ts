@@ -4,11 +4,7 @@ import type { UserId } from "../../types/http.js";
 import { pool } from "../../db/pool.js";
 import {
   buildSonicDicomStaffViewerUrl,
-  checkSonicDicomReportStatus,
   checkSonicDicomReportStatusesBatch,
-  fetchSonicDicomStudyNotes,
-  type SonicDicomReportState,
-  type SonicDicomStudyNoteResult,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResult } from "../../services/reporting-board-sonicdicom-cache-service.js";
@@ -121,17 +117,7 @@ const REPORTING_BOARD_SORT_BY = new Set([
   "oldest_completed",
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
-let reportStatusChecker = checkSonicDicomReportStatus;
-let studyNoteFetcher = fetchSonicDicomStudyNotes;
 type EffectiveReportingBoardFilters = Omit<ReportingBoardFilters, "limit" | "offset"> & { limit: number; offset: number };
-
-export function __setReportingBoardReportStatusCheckerForTest(checker: typeof checkSonicDicomReportStatus | null) {
-  reportStatusChecker = checker ?? checkSonicDicomReportStatus;
-}
-
-export function __setReportingBoardStudyNoteFetcherForTest(fetcher: typeof fetchSonicDicomStudyNotes | null) {
-  studyNoteFetcher = fetcher ?? fetchSonicDicomStudyNotes;
-}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -143,12 +129,6 @@ function addDays(dateIso: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function normalizeReportState(state: SonicDicomReportState): ReportingBoardCaseRow["reportStatus"] {
-  if (state === "final" || state === "draft" || state === "no_report" || state === "study_not_found" || state === "unavailable") {
-    return state;
-  }
-  return "unavailable";
-}
 
 function normalizeLimit(limit?: number | null): number {
   const value = limit ?? 100;
@@ -327,10 +307,6 @@ async function applyReportStatuses(rows: ReportingBoardCaseRow[], reportStatus: 
     return resolved.filter((row) => row.requiresReport && row.reportStatus !== "final");
   }
   return resolved.filter((row) => row.reportStatus === reportStatus);
-}
-
-export function __attachSonicDicomStudyNotesForTest(rows: ReportingBoardCaseRow[]) {
-  return Promise.resolve(rows);
 }
 
 function fetchLimitForUnifiedCandidates(filters: EffectiveReportingBoardFilters): number {
@@ -1150,6 +1126,11 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
   const actorModalityCodes = await listEffectiveDoctorModalityCodes(me.profile!.id, claimSettings.enabledModalityCodes);
   if (!actorModalityCodes.includes(eligible.modalityCode.toUpperCase())) {
     throw new HttpError(403, "This modality is not enabled for the claiming doctor.");
+  }
+  if (identity.caseType === "appointment") {
+    const rows = await listReportingBoardCasesByAppointmentIds([identity.appointmentId]);
+    const finalIds = await directlyRevalidateReportingAssignmentCandidates(rows);
+    if (finalIds.has(identity.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
   }
   const result = identity.caseType === "appointment"
     ? await claimAppointmentToDoctor({

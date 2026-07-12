@@ -459,21 +459,34 @@ export async function checkSonicDicomReportStatusesBatch(
   const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
   try {
     await withSqlConnection(settings, async ({ sql, pool }) => {
-      // A connection is intentionally shared across the bounded chunk. The
-      // legacy single-accession query stays parameterized for each request.
+      const lookupContexts = unique.filter((context) => String(context.accessionNumber || "").trim());
+      const request = pool.request();
+      const valueRows = lookupContexts.map((context, index) => {
+        request.input(`accession${index}`, sql.NVarChar(128), String(context.accessionNumber).trim());
+        return `(@accession${index})`;
+      });
+      const readinessRows = valueRows.length === 0 ? [] : (await request.query<{
+        AccessionNumber: string; FoundStudy: number; FoundReport: number; Status: number | null; UpdatedAt: Date | string | null;
+      }>(`
+        with InputAccessions(AccessionNumber) as (select * from (values ${valueRows.join(", ")}) v(AccessionNumber))
+        select input.AccessionNumber,
+          case when study.StudyInstanceUID is null then 0 else 1 end as FoundStudy,
+          case when report.ReportNo is null then 0 else 1 end as FoundReport,
+          document.Status, document.UpdatedAt
+        from InputAccessions input
+        outer apply (select top 1 s.StudyInstanceUID from [${dicomDb}].[dbo].[Studies] s where s.AccessionNumber = input.AccessionNumber order by s.StudyDate desc, s.StudyTime desc) study
+        outer apply (select top 1 r.No as ReportNo from [${reportDb}].[dbo].[Reports] r where r.StudyInstanceUID = study.StudyInstanceUID order by r.No desc) report
+        outer apply (select top 1 d.Status, d.UpdatedAt from [${reportDb}].[dbo].[Documents] d where d.Report = report.ReportNo order by d.UpdatedAt desc) document
+      `)).recordset;
+      const readinessByAccession = new Map(readinessRows.map((row) => [String(row.AccessionNumber), row]));
       for (const context of unique) {
-        const accession = String(context.accessionNumber || "").trim();
-        if (!accession) {
-          results.set(context.bookingId, { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null });
-          continue;
-        }
-        const readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession);
-        const result = !readiness.foundStudy
-          ? { state: "study_not_found" as const, canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null }
-          : !readiness.foundReport || readiness.statusCode == null
-            ? { state: "no_report" as const, canViewReport: false, source: "sonicdicom" as const, reportFinalAt: null }
-            : mapStatusCode(settings, readiness.statusCode, readiness.documentUpdatedAt);
-        results.set(context.bookingId, result);
+        const row = readinessByAccession.get(String(context.accessionNumber || "").trim());
+        const statusCode = row?.Status == null ? null : Number(row.Status);
+        results.set(context.bookingId, !row || !row.FoundStudy
+          ? { state: "study_not_found", canViewReport: false, source: "sonicdicom", reportFinalAt: null }
+          : !row.FoundReport || statusCode == null
+            ? { state: "no_report", canViewReport: false, source: "sonicdicom", reportFinalAt: null }
+            : mapStatusCode(settings, statusCode, row.UpdatedAt instanceof Date ? row.UpdatedAt.toISOString() : row.UpdatedAt ? String(row.UpdatedAt) : null));
       }
       const noteRows = await queryStudyNotes(
         pool,
