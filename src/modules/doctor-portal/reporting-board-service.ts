@@ -7,7 +7,7 @@ import {
   checkSonicDicomReportStatusesBatch,
 } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
-import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResult } from "../../services/reporting-board-sonicdicom-cache-service.js";
+import { enqueueReportingBoardSonicDicomCacheRows, persistReportingBoardSonicDicomCacheResults } from "../../services/reporting-board-sonicdicom-cache-service.js";
 import { updateBookingStatusManual } from "../appointments-v2/booking/services/status-booking.service.js";
 import { assignComparisonRequest, listComparisonReportingBoardRows, listComparisonReportingBoardStatsRows, unassignComparisonRequest } from "../../services/comparison-request-service.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
@@ -117,7 +117,12 @@ const REPORTING_BOARD_SORT_BY = new Set([
   "oldest_completed",
 ]);
 const REPORTING_BOARD_SORT_DIRECTIONS = new Set(["asc", "desc"]);
+let assignmentBatchChecker = checkSonicDicomReportStatusesBatch;
 type EffectiveReportingBoardFilters = Omit<ReportingBoardFilters, "limit" | "offset"> & { limit: number; offset: number };
+
+export function __setReportingBoardAssignmentBatchCheckerForTest(checker: typeof checkSonicDicomReportStatusesBatch | null): void {
+  assignmentBatchChecker = checker ?? checkSonicDicomReportStatusesBatch;
+}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -1129,8 +1134,9 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
   }
   if (identity.caseType === "appointment") {
     const rows = await listReportingBoardCasesByAppointmentIds([identity.appointmentId]);
-    const finalIds = await directlyRevalidateReportingAssignmentCandidates(rows);
-    if (finalIds.has(identity.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
+    const verification = await directlyRevalidateReportingAssignmentCandidates(rows);
+    if (verification.finalIds.has(identity.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
+    if (verification.unavailableIds.has(identity.appointmentId)) throw new HttpError(503, "Report finality could not be verified. Please try again.");
   }
   const result = identity.caseType === "appointment"
     ? await claimAppointmentToDoctor({
@@ -1394,18 +1400,25 @@ async function filtersFromBulkInput(actor: Actor, input: BulkAssignNextCasesInpu
   return input.filters ?? {};
 }
 
-async function directlyRevalidateReportingAssignmentCandidates(rows: ReportingBoardCaseRow[]): Promise<Set<number>> {
+interface AssignmentRevalidation { eligibleIds: Set<number>; finalIds: Set<number>; unavailableIds: Set<number>; }
+
+async function directlyRevalidateReportingAssignmentCandidates(rows: ReportingBoardCaseRow[]): Promise<AssignmentRevalidation> {
   const appointments = rows.filter((row) => row.caseType === "appointment");
-  if (!appointments.length) return new Set();
+  if (!appointments.length) return { eligibleIds: new Set(), finalIds: new Set(), unavailableIds: new Set() };
   const contexts = appointments.map((row) => ({ bookingId: row.appointmentId, accessionNumber: row.accessionNumber, studyInstanceUid: row.studyInstanceUid, requiresReport: row.requiresReport, status: row.appointmentStatus }));
-  const statuses = await checkSonicDicomReportStatusesBatch(contexts, { audit: false });
-  const finalIds = new Set<number>();
-  await Promise.all(contexts.map(async (context) => {
-    const result = statuses.get(context.bookingId) ?? null;
-    await persistReportingBoardSonicDicomCacheResult(context, result, result?.state === "unavailable" ? "SonicDICOM unavailable during assignment revalidation" : null);
-    if (result?.state === "final") finalIds.add(context.bookingId);
-  }));
-  return finalIds;
+  let statuses = new Map<number, Awaited<ReturnType<typeof checkSonicDicomReportStatusesBatch>> extends Map<number, infer T> ? T : never>();
+  let failure: unknown = null;
+  try { statuses = await assignmentBatchChecker(contexts, { audit: false }); } catch (error) { failure = error; }
+  const settings = await readSonicDicomReportSettings();
+  await persistReportingBoardSonicDicomCacheResults(contexts.map((context) => ({ context, result: statuses.get(context.bookingId) ?? null, error: failure ?? "SonicDICOM unavailable during assignment revalidation" })), settings);
+  const eligibleIds = new Set<number>(); const finalIds = new Set<number>(); const unavailableIds = new Set<number>();
+  for (const context of contexts) {
+    const state = statuses.get(context.bookingId)?.state;
+    if (state === "final") finalIds.add(context.bookingId);
+    else if (state === "draft" || state === "no_report" || state === "study_not_found") eligibleIds.add(context.bookingId);
+    else unavailableIds.add(context.bookingId);
+  }
+  return { eligibleIds, finalIds, unavailableIds };
 }
 
 export async function bulkAssignNextReportingBoardCases(actor: Actor, input: BulkAssignNextCasesInput) {
@@ -1441,8 +1454,8 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   // Revalidate a bounded window before the assignment transaction. This lets
   // stale cache finals be skipped while later eligible cases fill the request.
   const candidateWindow = eligible.slice(0, Math.min(eligible.length, Math.max(input.count * 3, input.count)));
-  const finalIds = await directlyRevalidateReportingAssignmentCandidates(candidateWindow);
-  const selected = candidateWindow.filter((row) => !finalIds.has(row.appointmentId)).slice(0, input.count);
+  const verification = await directlyRevalidateReportingAssignmentCandidates(candidateWindow);
+  const selected = candidateWindow.filter((row) => verification.eligibleIds.has(row.appointmentId)).slice(0, input.count);
 
   const result = await bulkAssignReportingCases({
     doctorId: input.doctorId,
@@ -1460,7 +1473,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   const preSkipped = cases
     .filter((row) => !selectedIds.has(row.appointmentId))
     .slice(0, Math.max(0, input.count - result.assignedCount))
-    .map((row) => ({ appointmentId: row.appointmentId, reason: row.exclusionReason ?? "not_selected" }));
+    .map((row) => ({ appointmentId: row.appointmentId, reason: verification.finalIds.has(row.appointmentId) ? "report_final" : verification.unavailableIds.has(row.appointmentId) ? "report_status_unavailable" : row.exclusionReason ?? "not_selected" }));
   return {
     ...result,
     requestedCount: input.count,
@@ -1721,6 +1734,7 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
     "all"
   );
   const rowsById = new Map(rows.map((row) => [row.appointmentId, row]));
+  const verification = await directlyRevalidateReportingAssignmentCandidates(rows);
   const comparisonRowsById = new Map(comparisonRows.map((row) => [row.comparisonRequestId, row]));
   const selectedModalities = [...new Set(rows.map((row) => row.modalityId))];
   for (const row of comparisonRows) selectedModalities.push(row.modalityId);
@@ -1737,6 +1751,14 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
     }
     if (!row.requiresReport || row.appointmentStatus !== "completed") {
       skipped.push({ appointmentId, reason: row.exclusionReason ?? "case_not_assignable" });
+      continue;
+    }
+    if (verification.unavailableIds.has(appointmentId)) {
+      skipped.push({ appointmentId, reason: "report_status_unavailable" });
+      continue;
+    }
+    if (verification.finalIds.has(appointmentId)) {
+      skipped.push({ appointmentId, reason: "report_final" });
       continue;
     }
     if (row.reportStatus === "final" && input.allowFinal !== true) {
@@ -1899,8 +1921,9 @@ export async function assignReportingBoardCaseToDoctor(
 ) {
   await requireRosterManager(actor);
   const rows = await listReportingBoardCasesByAppointmentIds([input.appointmentId]);
-  const finalIds = await directlyRevalidateReportingAssignmentCandidates(rows);
-  if (finalIds.has(input.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
+  const verification = await directlyRevalidateReportingAssignmentCandidates(rows);
+  if (verification.finalIds.has(input.appointmentId)) throw new HttpError(409, "Case is already final in SonicDICOM and cannot be assigned.");
+  if (verification.unavailableIds.has(input.appointmentId)) throw new HttpError(503, "Report finality could not be verified. Please try again.");
   const result = await assignDoctorCase(actor, {
     appointmentId: input.appointmentId,
     doctorId: input.doctorId,

@@ -559,6 +559,12 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     originalReportingBoardSetting = stored.rows[0]?.setting_value ?? null;
     reportingBoardService = await import("./reporting-board-service.js");
+    reportingBoardService.__setReportingBoardAssignmentBatchCheckerForTest(async (contexts) => new Map(contexts.map((context) => {
+      const state = statusByAppointmentId.get(context.bookingId) ?? "draft";
+      return [context.bookingId, state === "throw"
+        ? { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null }
+        : { state, canViewReport: state === "final", source: "sonicdicom", reportFinalAt: null }];
+    })));
     await cleanup();
     ctModalityId = await getOrCreateModality("CT", "CT");
     mrModalityId = await getOrCreateModality("MR", "MR");
@@ -627,6 +633,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
   });
 
   after(async () => {
+    reportingBoardService?.__setReportingBoardAssignmentBatchCheckerForTest(null);
     if (app) await app.close();
     if (pool) await cleanup();
   });
