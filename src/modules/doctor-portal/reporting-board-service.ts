@@ -87,9 +87,10 @@ import {
   findDoctorWorklistById,
   listDoctorWorklistBaseRows,
   listEffectiveDoctorModalityCodes,
+  listEffectiveDoctorModalityCodesGrouped,
   updateDoctorWorklistLifecycle,
 } from "./doctor-worklist-repository.js";
-import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
+import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 
 interface Actor {
   userId: UserId;
@@ -101,6 +102,7 @@ const MAX_UNIFIED_CANDIDATE_FETCH = 3000;
 const MAX_BULK_ASSIGN_COUNT = 100;
 const MAX_SELECTED_REASSIGN_COUNT = 100;
 const MOBILE_FULL_SCOPE_WARNING_MS = 2_000;
+const DOCTOR_DIRECTORY_WARNING_MS = 2_000;
 const MAX_SCHEDULED_BULK_ASSIGN_JOBS = 5;
 const REPORTING_BOARD_SORT_BY = new Set([
   "priority_study_date",
@@ -995,7 +997,7 @@ async function doctorWorklistScope(
     modalityId: null,
     modalityCode: null,
     modalityCodes: effectiveModalityCodes,
-    limit: MAX_UNIFIED_CANDIDATE_FETCH,
+    limit: MAX_CASE_LIST_LIMIT,
     offset: 0,
   });
   if (input.modalityCode) {
@@ -1080,7 +1082,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
   const canClaimToSelf = Boolean(
     actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
-    (identity.profile.id === view.targetDoctorId || canManage)
+    (Number(identity.profile.id) === view.targetDoctorId || canManage)
   );
   const accessLevel = !actor ? "public" : !identity ? "public" : identity.moduleCapabilities.includes("doctor_admin") ? "admin" : identity.moduleCapabilities.includes("doctor_supervisor") ? "supervisor" : "doctor";
 
@@ -1182,12 +1184,13 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
       ? assignReportingBoardCaseToDoctor(actor, { appointmentId: identity.appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" })
       : assignComparisonRequest(actor, identity.comparisonRequestId, { doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
   }
-  if (!canManage && view.targetDoctorId !== me.profile!.id) {
+  if (!canManage && view.targetDoctorId !== Number(me.profile!.id)) {
     throw new HttpError(403, "Doctors can claim cases only through their own worklist.");
   }
   const scope = await doctorWorklistScope(view.targetDoctorId!, {
     appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,
     comparisonRequestId: identity.caseType === "comparison" ? identity.comparisonRequestId : null,
+    caseSource: identity.caseType === "appointment" ? "appointments" : "comparisons",
     assignmentStatus: "unassigned",
     limit: 1,
     offset: 0,
@@ -1335,7 +1338,7 @@ export async function loadReportingBoardSavedViewByToken(actor: Actor, token: st
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
   const canManage = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
-  if (!canManage && (view.linkKind !== "doctor_worklist" || view.targetDoctorId !== me.profile!.id)) {
+  if (!canManage && (view.linkKind !== "doctor_worklist" || view.targetDoctorId !== Number(me.profile!.id))) {
     throw new HttpError(403, "This worklist does not belong to your doctor profile.");
   }
   return view;
@@ -1356,7 +1359,65 @@ async function summarizeDoctorWorklist(
 
 export async function listDoctorReportingWorklists(actor: Actor): Promise<DoctorReportingWorklistSummary[]> {
   await requireRosterManager(actor);
-  return Promise.all((await listDoctorWorklistBaseRows()).map(summarizeDoctorWorklist));
+  const startedAt = Date.now();
+  await reconcileDoctorWorklists();
+  const views = await listDoctorWorklistBaseRows();
+  const settings = await readReportingBoardSettings();
+  const modalities = await listEffectiveDoctorModalityCodesGrouped(settings.enabledModalityCodes);
+  const cutoff = settings.cutoffMode === "fixed_date" && settings.defaultCutoffDate
+    ? settings.defaultCutoffDate
+    : addDays(todayIso(), -settings.daysBack);
+  const base = await effectiveFilters({
+    dateFrom: cutoff,
+    cutoffDate: cutoff,
+    requiresReport: settings.defaultRequiresReport,
+    reportStatus: settings.defaultReportStatusFilter,
+    caseSource: settings.includedCaseSources.length === 1 ? settings.includedCaseSources[0] : "all",
+    modalityCodes: settings.enabledModalityCodes,
+    limit: MAX_CASE_LIST_LIMIT,
+    offset: 0,
+  });
+  const assignedStartedAt = Date.now();
+  const assigned = await listUnifiedReportingBoardCases({ ...base, assignmentStatus: "assigned" }, { fullScope: true });
+  const assignedDurationMs = Date.now() - assignedStartedAt;
+  const unassignedStartedAt = Date.now();
+  const unassigned = await listUnifiedReportingBoardCases({ ...base, assignedDoctorId: null, assignmentStatus: "unassigned" }, { fullScope: true });
+  const unassignedDurationMs = Date.now() - unassignedStartedAt;
+  const assignedCounts = new Map<number, number>();
+  for (const row of assigned) {
+    if (row.assignedDoctorId) assignedCounts.set(row.assignedDoctorId, (assignedCounts.get(row.assignedDoctorId) ?? 0) + 1);
+  }
+  const unassignedByModality = new Map<string, number>();
+  for (const row of unassigned) {
+    const code = row.modalityCode.toUpperCase();
+    unassignedByModality.set(code, (unassignedByModality.get(code) ?? 0) + 1);
+  }
+  const summaries = views.map((view) => {
+    const effectiveModalityCodes = modalities.get(view.targetDoctorId!) ?? [];
+    return {
+      ...view,
+      effectiveModalityCodes,
+      assignedPendingCount: assignedCounts.get(view.targetDoctorId!) ?? 0,
+      eligibleUnassignedCount: effectiveModalityCodes.reduce((sum, code) => sum + (unassignedByModality.get(code) ?? 0), 0),
+      scopeMessage: effectiveModalityCodes.length === 0
+        ? "No Reporting Board modalities are both globally enabled and permitted for this doctor."
+        : null,
+    };
+  });
+  const totalDurationMs = Date.now() - startedAt;
+  const timing = {
+    type: "doctor_worklist_directory_timing",
+    doctorCount: views.length,
+    worklistRowCount: summaries.length,
+    assignedCountDurationMs: assignedDurationMs,
+    sharedUnassignedCountDurationMs: unassignedDurationMs,
+    totalDirectoryDurationMs: totalDurationMs,
+  };
+  console.info(JSON.stringify(timing));
+  if (totalDurationMs > DOCTOR_DIRECTORY_WARNING_MS) {
+    console.warn(JSON.stringify({ ...timing, type: "doctor_worklist_directory_slow", warningThresholdMs: DOCTOR_DIRECTORY_WARNING_MS }));
+  }
+  return summaries;
 }
 
 export async function getMyDoctorReportingWorklist(actor: Actor): Promise<DoctorReportingWorklistSummary> {
@@ -1961,7 +2022,7 @@ async function authorizeWorklistNotificationActor(actor: Actor, token: string) {
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
   const canManage = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
-  if (!canManage && (view.linkKind !== "doctor_worklist" || view.targetDoctorId !== me.profile!.id)) {
+  if (!canManage && (view.linkKind !== "doctor_worklist" || view.targetDoctorId !== Number(me.profile!.id))) {
     throw new HttpError(403, "This worklist does not belong to your doctor profile.");
   }
   return { me, view };

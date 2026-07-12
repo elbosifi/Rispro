@@ -21,11 +21,14 @@ services:
       context: .
       dockerfile: Dockerfile
       target: ${RISPRO_APP_IMAGE_TARGET:-production}
+      args:
+        RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
     container_name: rispro-app
     env_file:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
     ports:
       - "3000:3000"   # Web application
       - "11112:11112" # Embedded DICOM MWL SCP (used only in embedded mode)

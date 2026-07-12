@@ -435,11 +435,11 @@ export async function updateSavedView(input: {
     `
       update doctor_portal.reporting_board_saved_views
       set
-        name = coalesce($4, name),
-        filters_json = coalesce($5::jsonb, filters_json),
-        notification_settings_json = coalesce($6::jsonb, notification_settings_json),
-        active = coalesce($7, active),
-        expires_at = case when $8::boolean then $9::timestamptz else expires_at end,
+        name = coalesce($3, name),
+        filters_json = coalesce($4::jsonb, filters_json),
+        notification_settings_json = coalesce($5::jsonb, notification_settings_json),
+        active = coalesce($6, active),
+        expires_at = case when $7::boolean then $8::timestamptz else expires_at end,
         updated_by_user_id = $2,
         updated_at = now()
       where id = $1
@@ -468,7 +468,6 @@ export async function updateSavedView(input: {
     [
       input.id,
       input.ownerUserId,
-      input.ownerDoctorId,
       input.name ?? null,
       input.filters ? JSON.stringify(input.filters) : null,
       input.notificationSettings ? JSON.stringify(input.notificationSettings) : null,
@@ -600,7 +599,7 @@ export async function rotateSavedViewToken(input: { id: number; ownerUserId: Use
   const result = await pool.query(
     `
       update doctor_portal.reporting_board_saved_views
-      set token = $4, updated_by_user_id = $2, updated_at = now()
+      set token = $3, updated_by_user_id = $2, updated_at = now()
       where id = $1
         and link_kind = 'admin_saved_view'
         and system_managed = false
@@ -625,7 +624,7 @@ export async function rotateSavedViewToken(input: { id: number; ownerUserId: Use
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
-    [input.id, input.ownerUserId, input.ownerDoctorId, randomBytes(32).toString("base64url")]
+    [input.id, input.ownerUserId, randomBytes(32).toString("base64url")]
   );
   return result.rows[0] ? savedView(result.rows[0]) : null;
 }

@@ -793,20 +793,22 @@ run_compose_preflight() {
 }
 
 wait_for_app_health() {
-  local attempts=45
+  local attempts="${APP_HEALTH_ATTEMPTS:-45}"
+  local interval="${APP_HEALTH_INTERVAL_SECONDS:-2}"
   local attempt=1
+  local health_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
 
-  log 'Waiting for application health endpoint...'
+  log "Checking application health at ${health_url} (timeout $((attempts * interval))s, container rispro-app)..."
   while [ "$attempt" -le "$attempts" ]; do
-    if command -v curl >/dev/null 2>&1 && curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
-      ok 'Application is healthy.'
+    if command -v curl >/dev/null 2>&1 && curl -fsS "${health_url}" >/dev/null 2>&1; then
+      ok "Application health check succeeded: ${health_url}"
       return 0
     fi
-    sleep 2
+    sleep "${interval}"
     attempt=$((attempt + 1))
   done
 
-  warn 'Application did not become healthy within the expected time window.'
+  err "Application health check failed after $((attempts * interval))s: ${health_url} (container rispro-app)."
   return 1
 }
 

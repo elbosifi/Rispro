@@ -115,6 +115,24 @@ export async function listEffectiveDoctorModalityCodes(doctorId: number, globall
   return result.rows.map((row) => row.code);
 }
 
+export async function listEffectiveDoctorModalityCodesGrouped(globallyEnabled: string[]): Promise<Map<number, string[]>> {
+  const grouped = new Map<number, string[]>();
+  if (globallyEnabled.length === 0) return grouped;
+  const result = await pool.query<{ doctor_id: number; codes: string[] }>(
+    `
+      select dmp.doctor_id, array_agg(distinct upper(m.code) order by upper(m.code)) as codes
+      from doctor_portal.doctor_modality_permissions dmp
+      join modalities m on m.id = dmp.modality_id
+      where dmp.active = true and dmp.can_report = true
+        and upper(m.code) = any($1::text[])
+      group by dmp.doctor_id
+    `,
+    [globallyEnabled.map((code) => code.toUpperCase())]
+  );
+  for (const row of result.rows) grouped.set(Number(row.doctor_id), row.codes);
+  return grouped;
+}
+
 export async function updateDoctorWorklistLifecycle(input: {
   id: number;
   actorUserId: UserId;
@@ -164,7 +182,7 @@ export async function claimAppointmentToDoctor(input: {
         where b.id = $1
           and b.status = 'completed'
           and b.requires_report = true
-          and upper(m.code) = any($4::text[])
+          and upper(m.code) = any($3::text[])
           and not exists (
             select 1 from doctor_portal.reporting_board_manual_final_overrides mf
             where mf.appointment_id = b.id and mf.cleared_at is null
@@ -173,7 +191,7 @@ export async function claimAppointmentToDoctor(input: {
         do nothing
         returning id
       `,
-      [input.appointmentId, input.doctorId, input.actorUserId, input.allowedModalityCodes]
+      [input.appointmentId, input.doctorId, input.allowedModalityCodes]
     );
     const assignmentId = Number(inserted.rows[0]?.id ?? 0);
     if (!assignmentId) {

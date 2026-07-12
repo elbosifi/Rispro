@@ -286,7 +286,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
 
     assert.match(repo, /where token = \$1\s+and active = true/);
     assert.match(service, /view\.linkKind !== "doctor_worklist"/);
-    assert.match(service, /view\.targetDoctorId !== me\.profile!\.id/);
+    assert.match(service, /view\.targetDoctorId !== Number\(me\.profile!\.id\)/);
     assert.match(service, /findActiveSavedViewByToken\(token\)/);
   });
 

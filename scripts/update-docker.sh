@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=./docker-deployment-lib.sh
 source "${SCRIPT_DIR}/docker-deployment-lib.sh"
+DEPLOY_COMMIT_SHA="unknown"
 
 cleanup() {
   local exit_code=$?
@@ -43,14 +44,17 @@ check_git_repo() {
   git clean -fd
   git fetch origin "${current_branch}"
   git pull
+  DEPLOY_COMMIT_SHA="$(git rev-parse HEAD)"
+  log "Pulled commit SHA: ${DEPLOY_COMMIT_SHA}"
   ok 'Git update completed.'
 }
 
 build_and_restart() {
   cd "${PROJECT_ROOT}"
   log 'Building and restarting containers...'
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build --force-recreate
+  RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build --force-recreate
   ok 'Containers rebuilt and restarted.'
+  log "Built/recreated rispro-app for commit: ${DEPLOY_COMMIT_SHA}"
 }
 
 should_reconfigure() {
@@ -91,7 +95,16 @@ main() {
   ok "Updated ${ENV_FILE}"
   build_and_restart
   wait_for_internal_orthanc_worklists
-  wait_for_app_health || true
+  if ! wait_for_app_health; then
+    if [ "${ALLOW_UNHEALTHY_DEPLOY:-0}" = "1" ]; then
+      warn 'ALLOW_UNHEALTHY_DEPLOY=1: continuing despite failed application health check.'
+    else
+      err 'Deployment failed because RISpro did not become healthy. Set ALLOW_UNHEALTHY_DEPLOY=1 only for an intentional diagnostic deployment.'
+      exit 1
+    fi
+  fi
+  log 'Migration diagnostics from rispro-app startup:'
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
   print_deployment_summary 'Update complete.'
 }
 

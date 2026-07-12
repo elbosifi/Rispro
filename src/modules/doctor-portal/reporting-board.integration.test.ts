@@ -848,7 +848,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(emptyView.data.cases, []);
     assert.match(emptyView.data.scopeMessage ?? "", /No Reporting Board modalities/);
 
-    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: unassigned } })).status, 200);
+    const appointmentClaim = await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: unassigned } });
+    assert.equal(appointmentClaim.status, 200, JSON.stringify(appointmentClaim.data));
     assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { caseType: "comparison", comparisonRequestId: comparison } })).status, 200);
     assert.equal((await api(otherDoctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: assignedToMe } })).status, 403);
     assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: assignedOther } })).status, 409);

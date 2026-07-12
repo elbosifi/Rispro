@@ -100,3 +100,44 @@ export async function syncDoctorWorklistForUser(userId: number, db: Queryable = 
   );
   if (result.rows[0]) await syncDoctorWorklistLifecycle(Number(result.rows[0].id), db);
 }
+
+/** Reconcile all profile-linked worklists without rotating tokens or undoing an administrator decision. */
+export async function reconcileDoctorWorklists(db: Queryable = pool): Promise<void> {
+  await db.query(
+    `
+      insert into doctor_portal.reporting_board_saved_views (
+        owner_user_id, owner_doctor_id, name, token, filters_json,
+        notification_settings_json, active, link_kind, system_managed, target_doctor_id
+      )
+      select null, null, dp.display_name || ' Worklist',
+        encode(gen_random_bytes(32), 'hex'), '{}'::jsonb, '{}'::jsonb,
+        dp.active and u.is_active, 'doctor_worklist', true, dp.id
+      from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
+      on conflict (target_doctor_id)
+        where link_kind = 'doctor_worklist' and system_managed = true
+      do nothing
+    `
+  );
+  await db.query(
+    `
+      update doctor_portal.reporting_board_saved_views sv
+      set active = dp.active and u.is_active
+          and sv.admin_disabled_at is null
+          and sv.revoked_at is null
+          and (sv.expires_at is null or sv.expires_at > now()),
+          name = dp.display_name || ' Worklist',
+          updated_at = case
+            when sv.active is distinct from (dp.active and u.is_active
+              and sv.admin_disabled_at is null and sv.revoked_at is null
+              and (sv.expires_at is null or sv.expires_at > now()))
+              or sv.name is distinct from dp.display_name || ' Worklist'
+            then now() else sv.updated_at end
+      from doctor_portal.doctor_profiles dp
+      join users u on u.id = dp.user_id
+      where sv.target_doctor_id = dp.id
+        and sv.link_kind = 'doctor_worklist'
+        and sv.system_managed = true
+    `
+  );
+}

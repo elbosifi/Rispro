@@ -493,6 +493,10 @@ function statusLabel(profile?: DoctorProfile): string {
   return profile.active ? "Doctor profile active" : "Doctor profile inactive";
 }
 
+function safeDoctorProfileError(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "An unexpected error occurred.";
+}
+
 function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -584,12 +588,6 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
         </div>
       )}
 
-      {doctorProfilesQuery.error && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
-          Doctor Portal profile settings are available to super admins when Doctor Portal is enabled.
-        </p>
-      )}
-
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
         {data?.users?.map((u) => {
           const doctorProfile = doctorProfilesByUserId.get(u.id);
@@ -639,20 +637,23 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
                 </button>
               </div>
             </div>
-            {!doctorProfilesQuery.error && (
+            {(u.role === "doctor" || u.role === "supervisor" || u.role === "super_admin") && (
               <div className="mt-3 rounded border border-stone-200 dark:border-stone-700 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-stone-900 dark:text-white">Doctor Portal</p>
-                    <p className="text-xs description-center">
-                      {statusLabel(doctorProfile)}
-                    </p>
+                    <p className="text-xs description-center">{doctorProfilesQuery.isLoading
+                      ? "Checking Doctor Portal profile…"
+                      : doctorProfilesQuery.isError
+                        ? "Unable to load Doctor Portal profile status"
+                        : statusLabel(doctorProfile)}</p>
+                    {doctorProfilesQuery.isError && <><p className="mt-1 text-xs text-red-700 dark:text-red-300">{safeDoctorProfileError(doctorProfilesQuery.error)}</p><button type="button" onClick={() => doctorProfilesQuery.refetch()} className="mt-2 rounded border px-2 py-1 text-xs font-medium">Retry</button></>}
                     <p className="mt-1 text-xs description-center">
                       Doctor profiles and modality permissions are managed in Doctor Portal → Admin → Doctors.
                     </p>
                   </div>
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${doctorProfile?.active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-                    {statusLabel(doctorProfile)}
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${doctorProfile?.active && doctorProfilesQuery.isSuccess ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                    {doctorProfilesQuery.isLoading ? "Checking…" : doctorProfilesQuery.isError ? "Unavailable" : statusLabel(doctorProfile)}
                   </span>
                 </div>
               </div>

@@ -118,6 +118,7 @@ seed_admin_accounts() {
 # ---------------------------------------------------------------------------
 log "========================================"
 log "  RISpro Docker Entrypoint"
+log "  Build commit: ${RISPRO_BUILD_COMMIT_SHA:-unknown}"
 log "========================================"
 
 wait_for_postgres

@@ -62,6 +62,11 @@ async function run(): Promise<void> {
     console.log(`Applied migration: ${file}`);
   }
 
+  const latest = await pool.query<{ filename: string }>(
+    `select filename from schema_migrations order by filename desc limit 1`
+  );
+  console.log(`Latest applied migration: ${latest.rows[0]?.filename ?? "none"}`);
+
   await pool.end();
 }
 

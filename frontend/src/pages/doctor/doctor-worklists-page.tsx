@@ -13,6 +13,10 @@ function worklistUrl(token: string): string {
   return `${window.location.origin}/reporting/worklist/${encodeURIComponent(token)}`;
 }
 
+function safeError(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "An unexpected error occurred.";
+}
+
 function QrDialog({ dataUrl, onClose }: { dataUrl: string; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Doctor worklist QR code">
@@ -56,7 +60,8 @@ export function MyReportingWorklistCard() {
     queryFn: fetchMyDoctorReportingWorklist,
   });
   if (query.isLoading) return <section className="rounded-lg border p-4">Loading My Reporting Worklist…</section>;
-  if (!query.data) return <section className="rounded-lg border p-4 text-sm text-red-700">My Reporting Worklist is unavailable.</section>;
+  if (query.isError) return <section className="rounded-lg border border-red-200 p-4 text-sm text-red-700"><h2 className="font-semibold">Unable to load My Reporting Worklist</h2><p className="mt-1">{safeError(query.error)}</p><button type="button" onClick={() => query.refetch()} className="mt-3 h-9 rounded-lg border px-3 font-semibold">Retry</button></section>;
+  if (!query.data) return <section className="rounded-lg border p-4 text-sm"><h2 className="font-semibold">My Reporting Worklist</h2><p className="mt-1 text-slate-600">No personal worklist is currently provisioned.</p><button type="button" onClick={() => query.refetch()} className="mt-3 h-9 rounded-lg border px-3 font-semibold">Retry</button></section>;
   const worklist = query.data;
   return (
     <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
@@ -85,6 +90,9 @@ export function DoctorWorklistsPage() {
     queryKey: ["doctor", "reporting-board", "doctor-worklists"],
     queryFn: fetchDoctorReportingWorklists,
   });
+  if (query.isLoading) return <div className="space-y-4" aria-label="Loading Doctor Worklists"><div className="h-8 w-64 animate-pulse rounded bg-slate-200" /><div className="h-48 animate-pulse rounded-lg border bg-slate-50" /></div>;
+  if (query.isError) return <section className="rounded-lg border border-red-200 p-5 text-red-700"><h2 className="text-lg font-semibold">Unable to load Doctor Worklists</h2><p className="mt-1 text-sm">{safeError(query.error)}</p><button type="button" onClick={() => query.refetch()} className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"><RefreshCw size={14} />Retry</button></section>;
+  if (!query.data?.length) return <section className="rounded-lg border p-5"><h2 className="text-lg font-semibold">Doctor Worklists</h2><p className="mt-2 text-sm text-slate-600">No doctor worklists are currently provisioned.</p><button type="button" onClick={() => query.refetch()} className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"><RefreshCw size={14} />Reconcile/Retry</button></section>;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -94,7 +102,7 @@ export function DoctorWorklistsPage() {
       <div className="overflow-x-auto rounded-lg border">
         <table className="min-w-[1180px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Doctor</th><th className="p-3">Role/status</th><th className="p-3">Modalities</th><th className="p-3">Pending</th><th className="p-3">Link</th><th className="p-3">Notifications</th><th className="p-3">Actions</th></tr></thead>
-          <tbody>{(query.data ?? []).map((worklist) => <tr key={worklist.id} className="border-t align-top">
+          <tbody>{query.data.map((worklist) => <tr key={worklist.id} className="border-t align-top">
             <td className="p-3 font-semibold">{worklist.doctorDisplayName}<span className="block text-xs font-normal text-slate-500">{worklist.username}</span></td>
             <td className="p-3">{worklist.doctorRole.replaceAll("_", " ")}<span className="block text-xs text-slate-500">User {worklist.userActive ? "active" : "inactive"} · Profile {worklist.doctorActive ? "active" : "inactive"}</span></td>
             <td className="p-3">{worklist.effectiveModalityCodes.join(" / ") || "None"}</td>
