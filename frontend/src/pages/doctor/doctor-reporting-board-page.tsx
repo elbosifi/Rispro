@@ -496,24 +496,26 @@ function reportingRowClass(row: ReportingBoardCaseRow, selected: boolean): strin
   return "border-l-2 border-transparent transition hover:bg-slate-50";
 }
 
-function reportStatusView(status: ReportingBoardCaseRow["reportStatus"]) {
+function reportStatusView(row: ReportingBoardCaseRow) {
   const views = {
     final: { label: "Final report", text: "", icon: CheckCircle2, className: "border-emerald-200 bg-white text-emerald-700" },
     draft: { label: "Draft report", text: "Draft", icon: FilePenLine, className: "border-amber-300 bg-white text-amber-800" },
-    no_report: { label: "No report required", text: "-", icon: Minus, className: "border-slate-200 bg-white text-slate-500" },
+    no_report: row.requiresReport
+      ? { label: "No report yet", text: "No report", icon: Minus, className: "border-slate-200 bg-white text-slate-500" }
+      : { label: "Report not required", text: "Report not required", icon: Minus, className: "border-slate-200 bg-white text-slate-500" },
     study_not_found: { label: "Study not found in PACS", text: "Missing", icon: AlertTriangle, className: "border-orange-300 bg-white text-orange-700" },
     unavailable: { label: "Report status unavailable", text: "PACS", icon: AlertTriangle, className: "border-orange-300 bg-white text-orange-700" },
   };
-  return views[status];
+  return views[row.reportStatus];
 }
 
 function reportStatusDisplay(row: ReportingBoardCaseRow): string {
-  return row.manualFinalOverrideId && row.reportStatus === "final" ? "Final · manual" : reportStatusView(row.reportStatus).label;
+  return row.manualFinalOverrideId && row.reportStatus === "final" ? "Final · manual" : reportStatusView(row).label;
 }
 
 function rowStatusLabel(row: ReportingBoardCaseRow): string {
   if (row.caseType === "comparison") {
-    return ["Comparison request", reportStatusView(row.reportStatus).label, labelStatus(row.appointmentStatus)].join(", ");
+    return ["Comparison request", reportStatusView(row).label, labelStatus(row.appointmentStatus)].join(", ");
   }
   const labels = [
     abnormalPriorityLabel(row),
@@ -620,7 +622,7 @@ function StudyCell({ row, showCategoryMarker }: { row: ReportingBoardCaseRow; sh
 }
 
 function CompactStatusCell({ row }: { row: ReportingBoardCaseRow }) {
-  const view = reportStatusView(row.reportStatus);
+  const view = reportStatusView(row);
   const Icon = view.icon;
   const appointmentLabel = row.caseType === "comparison"
     ? labelStatus(row.appointmentStatus)
