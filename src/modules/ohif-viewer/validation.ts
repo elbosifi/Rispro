@@ -130,6 +130,11 @@ export function createLaunchToken(): { token: string; tokenHash: string } {
   return { token, tokenHash: hashLaunchToken(token) };
 }
 
+export function createViewerSessionToken(): { token: string; tokenHash: string } {
+  const token = crypto.randomBytes(32).toString("base64url");
+  return { token, tokenHash: hashLaunchToken(token) };
+}
+
 export function hashLaunchToken(token: string): string {
   return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("hex");
 }

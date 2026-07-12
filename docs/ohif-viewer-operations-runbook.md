@@ -3,7 +3,7 @@
 ## Deployment
 
 1. Back up PostgreSQL and preserve the existing `.env`.
-2. Pull/build the stack; migration `123_ohif_viewer_integration.sql` is applied by the app entrypoint.
+2. Pull/build the stack; migrations `123_ohif_viewer_integration.sql` and `124_ohif_viewer_hardening.sql` are applied by the app entrypoint.
 3. Keep the database OHIF setting disabled, set `OHIF_ENABLED=true` and `COMPOSE_PROFILES=ohif` to stage the container without exposing the doctor action, and verify:
    - `curl -f http://localhost:3000/api/health`
    - `curl -f http://localhost:3000/ohif/`
@@ -24,7 +24,7 @@ Inspect container logs with:
 docker compose logs gateway ohif app
 ```
 
-Gateway mode retains completed retrieval-job records for the configured cache period. The cleanup worker evicts only studies associated with successful OHIF retrieval jobs after retention expires and after all launch sessions for that UID expire. It never deletes a source PACS study or a pre-existing Orthanc study that did not require an OHIF retrieval job.
+Gateway mode retains completed retrieval-job records for the configured cache period. `OHIF_CACHE_CLEANUP_ENABLED=false` is the default. When an operator explicitly enables it, the cleanup worker evicts only a persisted Orthanc study ID that was proven to appear after that retrieval's pre-C-MOVE cache snapshot, after retention expires and after all launch sessions for that UID expire. It never searches-and-deletes by StudyInstanceUID, deletes a pre-existing Orthanc study, or deletes a source-PACS study.
 
 ## Controlled Pilot
 

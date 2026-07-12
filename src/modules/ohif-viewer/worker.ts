@@ -1,12 +1,16 @@
 import { logAuditEntry } from "../../services/audit-service.js";
+import { env } from "../../config/env.js";
 import { createLogger } from "../../observability/logger.js";
 import { redactDiagnosticText } from "../../services/system-diagnostics-service.js";
-import { createImagingSourceAdapter, deleteOrthancCachedStudyByUid } from "./adapters.js";
+import { createImagingSourceAdapter } from "./adapters.js";
+import { deleteOwnedOrthancCacheStudyIfEligible, determineOwnedOrthancCacheStudyId } from "./cache-ownership.js";
 import {
   claimQueuedRetrievalJobs,
   deleteRetrievalJob,
   listExpiredAvailableRetrievalJobs,
   listRetrievingJobs,
+  recordOwnedOrthancCacheStudy,
+  recordRetrievalCacheBaseline,
   readOhifViewerConfiguration,
   updateRetrievalJob,
 } from "./repository.js";
@@ -28,7 +32,7 @@ export async function runOhifRetrievalWorkerTick(): Promise<{ queued: number; mo
     const configuration = await readOhifViewerConfiguration();
     if (!configuration.settings.enabled || configuration.settings.accessStrategy !== "orthanc_gateway") return summary;
     const adapter = await createImagingSourceAdapter(configuration);
-    if (!adapter.requestStudyRetrieval) return summary;
+    if (!adapter.requestStudyRetrieval || !adapter.findCacheStudyIds) return summary;
 
     const queued = await claimQueuedRetrievalJobs(3);
     summary.queued = queued.length;
@@ -39,6 +43,8 @@ export async function runOhifRetrievalWorkerTick(): Promise<{ queued: number; mo
           summary.failed += 1;
           continue;
         }
+        const preexistingOrthancStudyIds = await adapter.findCacheStudyIds(job.studyInstanceUid);
+        await recordRetrievalCacheBaseline(job.id, preexistingOrthancStudyIds);
         const result = await adapter.requestStudyRetrieval(job.studyInstanceUid);
         await updateRetrievalJob(job.id, { status: "retrieving", orthancJobId: result.orthancJobId });
         await logAuditEntry({ entityType: "ohif_retrieval_job", entityId: job.id, actionType: "retrieval_requested", newValues: { status: "retrieving", appointmentId: job.appointmentId }, changedByUserId: job.requestedByUserId });
@@ -55,7 +61,15 @@ export async function runOhifRetrievalWorkerTick(): Promise<{ queued: number; mo
     for (const job of retrieving) {
       if (!job.studyInstanceUid) continue;
       try {
-        if (await adapter.verifyStudyAvailable(job.studyInstanceUid)) {
+        const discoveredOrthancStudyIds = await adapter.findCacheStudyIds(job.studyInstanceUid);
+        if (discoveredOrthancStudyIds.length > 0) {
+          const ownedOrthancStudyId = determineOwnedOrthancCacheStudyId({
+            preexistingStudyIds: job.preexistingOrthancStudyIds,
+            discoveredStudyIds: discoveredOrthancStudyIds,
+          });
+          if (ownedOrthancStudyId && !job.cacheOwnershipProven) {
+            await recordOwnedOrthancCacheStudy(job.id, ownedOrthancStudyId);
+          }
           await updateRetrievalJob(job.id, { status: "available" });
           await logAuditEntry({ entityType: "ohif_retrieval_job", entityId: job.id, actionType: "retrieval_completed", newValues: { status: "available", appointmentId: job.appointmentId }, changedByUserId: job.requestedByUserId });
           summary.available += 1;
@@ -71,13 +85,21 @@ export async function runOhifRetrievalWorkerTick(): Promise<{ queued: number; mo
         summary.timedOut += 1;
       }
     }
-    const expired = await listExpiredAvailableRetrievalJobs(configuration.settings.cacheRetentionHours, 10);
+    const expired = env.ohifCacheCleanupEnabled
+      ? await listExpiredAvailableRetrievalJobs(configuration.settings.cacheRetentionHours, 10)
+      : [];
     for (const job of expired) {
-      if (!job.studyInstanceUid) continue;
       try {
-        const deletedStudies = await deleteOrthancCachedStudyByUid(job.studyInstanceUid);
+        if (!adapter.deleteOwnedCacheStudy || !job.ownedOrthancStudyId) continue;
+        const deleted = await deleteOwnedOrthancCacheStudyIfEligible({
+          cleanupEnabled: env.ohifCacheCleanupEnabled,
+          cacheOwnershipProven: job.cacheOwnershipProven,
+          ownedOrthancStudyId: job.ownedOrthancStudyId,
+          deleteExactStudy: (orthancStudyId) => adapter.deleteOwnedCacheStudy!(orthancStudyId),
+        });
+        if (!deleted) continue;
         await deleteRetrievalJob(job.id);
-        await logAuditEntry({ entityType: "ohif_retrieval_job", entityId: job.id, actionType: "orthanc_cache_evicted", newValues: { status: "successful", deletedStudies }, changedByUserId: job.requestedByUserId });
+        await logAuditEntry({ entityType: "ohif_retrieval_job", entityId: job.id, actionType: "orthanc_cache_evicted", newValues: { status: "successful", ownership: "proven" }, changedByUserId: job.requestedByUserId });
       } catch (error) {
         logger.warn("ohif_cache_cleanup_failed", { jobId: job.id, error: safeError(error) });
       }

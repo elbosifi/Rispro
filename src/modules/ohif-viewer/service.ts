@@ -30,6 +30,7 @@ import type { ImagingStudy, OhifAuthType, OhifViewerConfiguration, ViewerLaunchR
 import {
   assertSameDicomWebOrigin,
   createLaunchToken,
+  createViewerSessionToken,
   hashLaunchToken,
   isValidDicomUid,
   matchStudyByAccession,
@@ -321,10 +322,11 @@ export async function getRetrievalStatusForDoctor(actor: Actor, jobId: number) {
 }
 
 export async function exchangeViewerLaunchToken(token: string, userId: UserId, response: ExpressResponse): Promise<string> {
-  const tokenHash = hashLaunchToken(token);
-  const session = await consumeViewerLaunchToken(tokenHash, userId);
+  const launchTokenHash = hashLaunchToken(token);
+  const viewerSession = createViewerSessionToken();
+  const session = await consumeViewerLaunchToken(launchTokenHash, userId, viewerSession.tokenHash);
   if (!session) throw new HttpError(404, "Viewer launch session is invalid or expired.");
-  response.cookie(env.ohifSessionCookieName, token, {
+  response.cookie(env.ohifSessionCookieName, viewerSession.token, {
     httpOnly: true, secure: env.cookieSecure, sameSite: env.cookieSameSite, path: env.ohifDicomWebProxyPath,
     expires: new Date(session.expiresAt),
   });

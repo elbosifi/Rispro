@@ -165,23 +165,20 @@ async function orthancRequest(settings: ResolvedOrthancSettings, path: string, o
   });
 }
 
-export async function deleteOrthancCachedStudyByUid(studyInstanceUid: string): Promise<number> {
-  const settings = await resolveOrthancSettings();
-  if (!settings.baseUrl) throw new HttpError(400, "Orthanc base URL is not configured.");
+async function findOrthancCacheStudyIds(settings: ResolvedOrthancSettings, studyInstanceUid: string): Promise<string[]> {
   const found = await orthancRequest(settings, "/tools/find", {
     method: "POST", body: { Level: "Study", Query: { StudyInstanceUID: studyInstanceUid } },
   });
   const payload = await parseJsonResponse(found, "Orthanc cache lookup");
   if (!Array.isArray(payload)) throw new ImagingSourceError("malformed", "Orthanc cache lookup did not return an array.");
-  let deleted = 0;
-  for (const value of payload) {
-    const orthancId = firstString(value);
-    if (!orthancId) continue;
-    const response = await orthancRequest(settings, `/studies/${encodeURIComponent(orthancId)}`, { method: "DELETE" });
-    if (!response.response.ok && response.response.status !== 404) throw new ImagingSourceError("network", `Orthanc cache deletion failed with status ${response.response.status}.`, response.response.status);
-    deleted += response.response.status === 404 ? 0 : 1;
+  return [...new Set(payload.map(firstString).filter(Boolean))];
+}
+
+async function deleteExactOrthancCacheStudy(settings: ResolvedOrthancSettings, orthancStudyId: string): Promise<void> {
+  const response = await orthancRequest(settings, `/studies/${encodeURIComponent(orthancStudyId)}`, { method: "DELETE" });
+  if (!response.response.ok && response.response.status !== 404) {
+    throw new ImagingSourceError("network", `Orthanc cache deletion failed with status ${response.response.status}.`, response.response.status);
   }
-  return deleted;
 }
 
 export class OrthancGatewaySourceAdapter implements ImagingSourceAdapter {
@@ -225,11 +222,15 @@ export class OrthancGatewaySourceAdapter implements ImagingSourceAdapter {
   }
 
   async verifyStudyAvailable(studyInstanceUid: string): Promise<boolean> {
-    const result = await orthancRequest(this.settings, "/tools/find", {
-      method: "POST", body: { Level: "Study", Query: { StudyInstanceUID: studyInstanceUid } },
-    });
-    const payload = await parseJsonResponse(result, "Orthanc local study verification");
-    return Array.isArray(payload) && payload.length > 0;
+    return (await this.findCacheStudyIds(studyInstanceUid)).length > 0;
+  }
+
+  async findCacheStudyIds(studyInstanceUid: string): Promise<string[]> {
+    return findOrthancCacheStudyIds(this.settings, studyInstanceUid);
+  }
+
+  async deleteOwnedCacheStudy(orthancStudyId: string): Promise<void> {
+    await deleteExactOrthancCacheStudy(this.settings, orthancStudyId);
   }
 
   async requestStudyRetrieval(studyInstanceUid: string): Promise<{ orthancJobId: string | null }> {

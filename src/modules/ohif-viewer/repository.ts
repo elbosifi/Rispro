@@ -219,19 +219,24 @@ function launchSessionRow(row: Row): ViewerLaunchSessionRecord {
   };
 }
 
-export async function consumeViewerLaunchToken(tokenHash: string, userId: UserId): Promise<ViewerLaunchSessionRecord | null> {
-  const result = await pool.query<Row>(
-    `update viewer_launch_sessions set used_at=coalesce(used_at,now())
-     where token_hash=$1 and user_id=$2 and revoked_at is null and expires_at>now()
-     returning *`, [tokenHash, userId]
+export async function consumeViewerLaunchToken(
+  launchTokenHash: string,
+  userId: UserId,
+  viewerSessionTokenHash: string,
+  executor: DbExecutor = pool,
+): Promise<ViewerLaunchSessionRecord | null> {
+  const result = await executor.query<Row>(
+    `update viewer_launch_sessions set used_at=now(), viewer_session_token_hash=$3
+     where token_hash=$1 and user_id=$2 and used_at is null and revoked_at is null and expires_at>now()
+     returning *`, [launchTokenHash, userId, viewerSessionTokenHash]
   );
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
 
-export async function findAuthorizedViewerSession(tokenHash: string, userId: UserId): Promise<ViewerLaunchSessionRecord | null> {
-  const result = await pool.query<Row>(
-    `select * from viewer_launch_sessions where token_hash=$1 and user_id=$2 and used_at is not null
-     and revoked_at is null and expires_at>now() limit 1`, [tokenHash, userId]
+export async function findAuthorizedViewerSession(viewerSessionTokenHash: string, userId: UserId, executor: DbExecutor = pool): Promise<ViewerLaunchSessionRecord | null> {
+  const result = await executor.query<Row>(
+    `select * from viewer_launch_sessions where viewer_session_token_hash=$1 and user_id=$2 and used_at is not null
+     and revoked_at is null and expires_at>now() limit 1`, [viewerSessionTokenHash, userId]
   );
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
@@ -240,6 +245,7 @@ export interface RetrievalJobRecord {
   id: number; appointmentId: number; accessionNumber: string; studyInstanceUid: string | null; sourcePacsNodeId: number;
   requestedByUserId: number; status: "queued" | "resolving" | "retrieving" | "available" | "not_found" | "ambiguous" | "failed" | "timed_out";
   orthancJobId: string | null; attemptCount: number; startedAt: string | null; completedAt: string | null; lastError: string | null;
+  preexistingOrthancStudyIds: string[]; ownedOrthancStudyId: string | null; cacheOwnershipProven: boolean;
 }
 
 function retrievalJobRow(row: Row): RetrievalJobRecord {
@@ -249,6 +255,8 @@ function retrievalJobRow(row: Row): RetrievalJobRecord {
     requestedByUserId: Number(row.requested_by_user_id), status: String(row.status) as RetrievalJobRecord["status"],
     orthancJobId: nullableText(row.orthanc_job_id), attemptCount: Number(row.attempt_count || 0),
     startedAt: nullableText(row.started_at), completedAt: nullableText(row.completed_at), lastError: nullableText(row.last_error),
+    preexistingOrthancStudyIds: Array.isArray(row.preexisting_orthanc_study_ids) ? row.preexisting_orthanc_study_ids.map(String) : [],
+    ownedOrthancStudyId: nullableText(row.owned_orthanc_study_id), cacheOwnershipProven: row.cache_ownership_proven === true,
   };
 }
 
@@ -301,6 +309,26 @@ export async function updateRetrievalJob(id: number, patch: { status: RetrievalJ
     `update ohif_retrieval_jobs set status=$2,orthanc_job_id=coalesce($3,orthanc_job_id),last_error=$4,
      completed_at=case when $5 then now() else completed_at end,updated_at=now() where id=$1 returning *`,
     [id, patch.status, patch.orthancJobId ?? null, patch.lastError ?? null, terminal]
+  );
+  if (!result.rows[0]) throw new HttpError(404, "OHIF retrieval job not found.");
+  return retrievalJobRow(result.rows[0]);
+}
+
+export async function recordRetrievalCacheBaseline(id: number, orthancStudyIds: string[]): Promise<RetrievalJobRecord> {
+  const result = await pool.query<Row>(
+    `update ohif_retrieval_jobs set preexisting_orthanc_study_ids=$2::jsonb, updated_at=now()
+     where id=$1 and cache_ownership_proven=false returning *`,
+    [id, JSON.stringify([...new Set(orthancStudyIds)])]
+  );
+  if (!result.rows[0]) throw new HttpError(404, "OHIF retrieval job not found.");
+  return retrievalJobRow(result.rows[0]);
+}
+
+export async function recordOwnedOrthancCacheStudy(id: number, orthancStudyId: string): Promise<RetrievalJobRecord> {
+  const result = await pool.query<Row>(
+    `update ohif_retrieval_jobs set owned_orthanc_study_id=$2, cache_ownership_proven=true, updated_at=now()
+     where id=$1 and cache_ownership_proven=false returning *`,
+    [id, orthancStudyId]
   );
   if (!result.rows[0]) throw new HttpError(404, "OHIF retrieval job not found.");
   return retrievalJobRow(result.rows[0]);

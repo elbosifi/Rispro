@@ -148,6 +148,7 @@ export interface EnvConfig {
   ohifSessionCookieName: string;
   ohifLaunchTokenTtlSeconds: number;
   ohifRetrievalWorkerIntervalMs: number;
+  ohifCacheCleanupEnabled: boolean;
 }
 
 function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
@@ -233,6 +234,7 @@ export const env: EnvConfig = {
   ohifSessionCookieName: String(process.env.OHIF_SESSION_COOKIE_NAME || "rispro_ohif_session").trim(),
   ohifLaunchTokenTtlSeconds: readPositiveInteger("OHIF_LAUNCH_TOKEN_TTL_SECONDS", 600),
   ohifRetrievalWorkerIntervalMs: readPositiveInteger("OHIF_RETRIEVAL_WORKER_INTERVAL_MS", 5000),
+  ohifCacheCleanupEnabled: readBoolean("OHIF_CACHE_CLEANUP_ENABLED", false),
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {

@@ -101,6 +101,8 @@ export interface ImagingSourceAdapter {
   testFrameRetrieval?(studyInstanceUid: string, seriesInstanceUid: string, sopInstanceUid: string): Promise<{ bytes: number }>;
   verifyStudyAvailable(studyInstanceUid: string): Promise<boolean>;
   requestStudyRetrieval?(studyInstanceUid: string): Promise<{ orthancJobId: string | null }>;
+  findCacheStudyIds?(studyInstanceUid: string): Promise<string[]>;
+  deleteOwnedCacheStudy?(orthancStudyId: string): Promise<void>;
 }
 
 export interface ViewerLaunchReadyResponse {

@@ -215,7 +215,7 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
         <label className={labelClass}><span>Timeout (seconds)</span><input type="number" className={inputClass} value={form.timeoutSeconds} onChange={(event) => setForm({ ...form, timeoutSeconds: event.target.value })} /></label>
       </div>
     </section> : <section className="space-y-4 rounded-xl border border-border p-4">
-      <div><h4 className="font-semibold">Orthanc retrieval gateway</h4><p className="text-sm text-muted-foreground">Reuses the existing Orthanc connection. Orthanc is a temporary cache, not the source archive.</p></div>
+      <div><h4 className="font-semibold">Orthanc retrieval gateway</h4><p className="text-sm text-muted-foreground">Reuses the existing Orthanc connection. Orthanc is a temporary cache, not the source archive. Cache deletion is controlled by the server-side `OHIF_CACHE_CLEANUP_ENABLED` gate and requires a proven OHIF-owned Orthanc resource.</p></div>
       <div className="grid gap-4 md:grid-cols-2">
         <label className={labelClass}><span>Gateway enabled</span><input type="checkbox" checked={form.orthancGatewayEnabled} onChange={(event) => setForm({ ...form, orthancGatewayEnabled: event.target.checked })} /></label>
         <label className={labelClass}><span>Orthanc modality key</span><input className={inputClass} value={form.orthancModalityKey} onChange={(event) => setForm({ ...form, orthancModalityKey: event.target.value })} placeholder="Configured remote modality key" /></label>

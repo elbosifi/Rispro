@@ -357,6 +357,7 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `OHIF_CONTAINER_IMAGE` | `rispro-ohif:v3.12.6` | Explicit pinned image name |
 | `OHIF_VERSION` | `v3.12.6` | Official OHIF source release used for the subpath build |
 | `OHIF_LAUNCH_TOKEN_TTL_SECONDS` | `600` | Short-lived viewer token lifetime |
+| `OHIF_CACHE_CLEANUP_ENABLED` | `false` | Enables deletion only for proven OHIF-owned Orthanc cache IDs |
 | `OHIF_DICOMWEB_USERNAME` | blank | Optional native upstream username; reference this variable name in Settings |
 | `OHIF_DICOMWEB_PASSWORD` | blank | Optional native upstream password; reference this variable name in Settings |
 | `OHIF_DICOMWEB_BEARER_TOKEN` | blank | Optional native bearer token; reference this variable name in Settings |

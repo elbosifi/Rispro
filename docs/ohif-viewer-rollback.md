@@ -8,4 +8,4 @@
 6. The new tables may remain dormant for audit/history. Dropping migration tables is not required for rollback.
 7. The gateway remains a transparent proxy for RISpro even while OHIF is disabled. If the gateway container itself is the problem, temporarily publish app port 3000 only as an operator-controlled deployment rollback and restore the documented stack after diagnosis.
 
-Rollback never deletes studies from OsiriX or Orthanc automatically and never removes the existing viewer/report paths.
+Rollback never deletes studies from OsiriX or Orthanc automatically and never removes the existing viewer/report paths. Migration 124 is additive: leave its columns in place during rollback; no schema reversal is required for safe recovery.

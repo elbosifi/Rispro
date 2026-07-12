@@ -151,6 +151,7 @@ docker compose up -d
 | `OHIF_DICOMWEB_PROXY_PATH` | | Protected browser-facing DICOMweb path | `/ohif-dicomweb` |
 | `OHIF_CONTAINER_IMAGE` | | Pinned locally built OHIF image | `rispro-ohif:v3.12.6` |
 | `OHIF_LAUNCH_TOKEN_TTL_SECONDS` | | Hashed launch-session lifetime | `600` |
+| `OHIF_CACHE_CLEANUP_ENABLED` | | Keep false unless ownership-safe Orthanc cache cleanup has been validated | `false` |
 
 ### Orthanc and MPPS Deployment Modes
 
