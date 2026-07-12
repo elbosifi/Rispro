@@ -8,6 +8,7 @@ import type { SanteWorklistWorker } from "./services/sante-worklist-worker-servi
 import type { AppointmentsV2PacsAutoCompletionWorker } from "./services/appointments-v2-pacs-auto-completion-worker.js";
 import type { PatientNotificationWorker } from "./services/patient-notification-worker.js";
 import type { ReportingBoardBulkAssignmentWorker } from "./services/reporting-board-bulk-assignment-worker.js";
+import type { ReportingBoardSonicDicomCacheWorker } from "./services/reporting-board-sonicdicom-cache-worker.js";
 import type { NoShowWorker } from "./services/no-show-worker.js";
 import type { DicomRemapSendWorker } from "./services/dicom-remap-send-worker.js";
 import type { DicomRemapProcessingWorker } from "./services/dicom-remap-processing-worker.js";
@@ -21,6 +22,7 @@ let santeWorklistWorker: SanteWorklistWorker | null = null;
 let pacsAutoCompletionWorker: AppointmentsV2PacsAutoCompletionWorker | null = null;
 let patientNotificationWorker: PatientNotificationWorker | null = null;
 let reportingBoardBulkAssignmentWorker: ReportingBoardBulkAssignmentWorker | null = null;
+let reportingBoardSonicDicomCacheWorker: ReportingBoardSonicDicomCacheWorker | null = null;
 let noShowWorker: NoShowWorker | null = null;
 let dicomRemapSendWorker: DicomRemapSendWorker | null = null;
 let dicomRemapProcessingWorker: DicomRemapProcessingWorker | null = null;
@@ -84,6 +86,9 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
     } catch (error) {
       console.error("Failed to stop Reporting Board bulk assignment worker.", error);
     }
+  }
+  if (reportingBoardSonicDicomCacheWorker) {
+    try { await reportingBoardSonicDicomCacheWorker.stop(); } catch (error) { console.error("Failed to stop Reporting Board SonicDICOM cache worker.", error); }
   }
 
   if (noShowWorker) {
@@ -262,6 +267,16 @@ async function start(): Promise<void> {
   }
 
   try {
+    const { startReportingBoardSonicDicomCacheWorker } = await import("./services/reporting-board-sonicdicom-cache-worker.js");
+    reportingBoardSonicDicomCacheWorker = await startReportingBoardSonicDicomCacheWorker();
+    startupSummary.reporting_board_sonicdicom_cache = "started";
+  } catch (error) {
+    console.error("Reporting Board SonicDICOM cache worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.reporting_board_sonicdicom_cache = "initialization_failed";
+  }
+
+  try {
     const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
     const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
     startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
@@ -319,6 +334,10 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  PACS Auto-Completion:");
     console.log(`    Worker:         ${startupSummary.pacs_auto_completion || "disabled"}`);
+
+    console.log("");
+    console.log("  Reporting Board SonicDICOM Cache:");
+    console.log(`    Worker:         ${startupSummary.reporting_board_sonicdicom_cache || "disabled"}`);
 
     console.log("");
     console.log("  Patient Web Push:");

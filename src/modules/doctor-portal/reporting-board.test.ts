@@ -112,11 +112,12 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /order by \$\{orderBy\}/);
   });
 
-  it("uses SonicDICOM status without crashing board case listing", () => {
+  it("uses durable SonicDICOM cache status without blocking board case listing", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
-    assert.match(service, /checkSonicDicomReportStatus/);
-    assert.match(service, /catch \{\s*status = "unavailable";\s*row\.reportFinalAt = null;\s*\}/);
+    assert.match(repository, /reporting_board_sonicdicom_cache/);
+    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function fetchLimitForUnifiedCandidates")), /checkSonicDicomReportStatus\(/);
     assert.match(service, /reportStatus === "required_not_final"/);
     assert.match(service, /row\.reportStatus !== "final"/);
   });
@@ -189,7 +190,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /Only completed Reporting Board cases can be manually marked final/);
     assert.match(service, /exclusionReason: "manual_final"/);
     assert.match(service, /reportStatusSource: "manual"/);
-    assert.match(service, /reportStatusSnapshot\.delete\(appointmentId\)/);
+    assert.match(service, /enqueueReportingBoardSonicDicomCacheRows\(\[appointmentId\]\)/);
     assert.match(routes, /"\/cases\/:appointmentId\/mark-final"/);
     assert.match(routes, /"\/cases\/:appointmentId\/clear-manual-final"/);
     assert.doesNotMatch(service, /finalText|create.*PDF|SonicDICOM.*manual final/i);
@@ -204,7 +205,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /assignmentStatus: "unassigned"/);
     assert.match(service, /compareAutomaticAssignmentCandidates/);
     assert.match(service, /listDoctorReportableModalityIds/);
-    assert.match(service, /eligible\.slice\(0, input\.count\)/);
+    assert.match(service, /directlyRevalidateReportingAssignmentCandidates/);
+    assert.match(service, /candidateWindow\.filter/);
     assert.match(repo, /for update of b/);
     assert.match(repo, /doctorCanReportAllModalities/);
     assert.match(repo, /restrictToDoctorReportPermissions/);
@@ -482,54 +484,12 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repository, /subscription_hash = \$2 and enabled = true/);
   });
 
-  it("attaches SonicDICOM study notes to appointment rows only", async () => {
-    const service = await import("./reporting-board-service.js");
-    const rows = [
-      reportingBoardRow({ appointmentId: 11, accessionNumber: "ACC-11", caseKey: "appointment:11" }),
-      reportingBoardRow({ appointmentId: 12, accessionNumber: "ACC-12", caseKey: "appointment:12" }),
-      reportingBoardRow({ caseType: "comparison", caseKey: "comparison:9", appointmentId: 0, comparisonRequestId: 9, accessionNumber: "ACC-CMP" }),
-    ];
-
-    service.__setReportingBoardStudyNoteFetcherForTest(async (contexts) => {
-      assert.deepEqual(contexts.map((context) => context.accessionNumber), ["ACC-11", "ACC-12"]);
-      return new Map([
-        [11, { note: "mwa prior study note", checkedAt: "2026-07-04T08:00:00.000Z", source: "sonicdicom" }],
-        [12, { note: "   ", checkedAt: "2026-07-04T08:00:00.000Z", source: "sonicdicom" }],
-      ]);
-    });
-
-    try {
-      const resolved = await service.__attachSonicDicomStudyNotesForTest(rows);
-
-      assert.equal(resolved[0].sonicDicomStudyNote, "mwa prior study note");
-      assert.equal(resolved[0].sonicDicomStudyNoteCheckedAt, "2026-07-04T08:00:00.000Z");
-      assert.equal(resolved[0].sonicDicomStudyNoteSource, "sonicdicom");
-      assert.equal(resolved[1].sonicDicomStudyNote, null);
-      assert.equal(resolved[1].sonicDicomStudyNoteSource, null);
-      assert.equal(resolved[2].sonicDicomStudyNote, null);
-      assert.equal(resolved[2].sonicDicomStudyNoteCheckedAt, null);
-    } finally {
-      service.__setReportingBoardStudyNoteFetcherForTest(null);
-    }
-  });
-
-  it("keeps reporting board rows when SonicDICOM study-note lookup fails", async () => {
-    const service = await import("./reporting-board-service.js");
-    service.__setReportingBoardStudyNoteFetcherForTest(async () => {
-      throw new Error("SQL Server unavailable");
-    });
-
-    try {
-      const [resolved] = await service.__attachSonicDicomStudyNotesForTest([
-        reportingBoardRow({ appointmentId: 21, accessionNumber: "ACC-21", caseKey: "appointment:21" }),
-      ]);
-
-      assert.equal(resolved.sonicDicomStudyNote, null);
-      assert.equal(resolved.sonicDicomStudyNoteCheckedAt, null);
-      assert.equal(resolved.sonicDicomStudyNoteSource, null);
-    } finally {
-      service.__setReportingBoardStudyNoteFetcherForTest(null);
-    }
+  it("keeps board reads cache-only for status and study notes", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+    assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function fetchLimitForUnifiedCandidates")), /reportStatusChecker\(|studyNoteFetcher\(/);
+    assert.match(repository, /reporting_board_sonicdicom_cache/);
+    assert.match(repository, /sonicdicom_study_note as "sonicDicomStudyNote"/);
   });
 });
 

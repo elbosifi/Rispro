@@ -775,13 +775,14 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     statusByAppointmentId.set(ctFinal, "final");
     statusByAppointmentId.set(ctCancelled, "draft");
 
-    const response = await api<{ cases: Array<{ appointmentId: number; reportStatus: string; modalityCode: string }> }>(
+    const response = await api<{ cases: Array<{ appointmentId: number; reportStatus: string; modalityCode: string; requiresReport: boolean }> }>(
       supervisor.cookie,
-      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}`
+      `/api/doctor/reporting-board/cases?dateFrom=${date}&dateTo=${date}&requiresReport=true`
     );
     assert.equal(response.status, 200);
     const ids = response.data.cases.map((row) => row.appointmentId);
     assert.deepEqual(ids.sort((a, b) => a - b), [ctDraft, mrNoReport].sort((a, b) => a - b));
+    assert.ok(response.data.cases.every((row) => row.requiresReport === true));
     assert.ok(response.data.cases.every((row) => ["final", "draft", "no_report", "study_not_found", "unavailable"].includes(row.reportStatus)));
   });
 

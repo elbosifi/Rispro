@@ -432,6 +432,35 @@ describe("DoctorReportingBoardPage", () => {
     expect(row!.className).not.toContain("bg-emerald");
   });
 
+  it("distinguishes a required case with no report yet", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, appointmentStatus: "completed", reportStatus: "no_report" }],
+      filters: { reportStatus: "all" },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(row).getByLabelText("No report yet").getAttribute("title")).toBe("No report yet");
+    expect(within(row).getByText("No report")).toBeTruthy();
+    expect(within(row).queryByText("No report required")).toBeNull();
+    expect(row.getAttribute("aria-label")).toContain("No report yet");
+    expect(row.getAttribute("title")).toContain("Report: No report yet");
+  });
+
+  it("distinguishes a case where a report is not required", async () => {
+    fetchReportingBoardCasesMock.mockResolvedValue({
+      cases: [{ ...caseRow, requiresReport: false, appointmentStatus: "completed", reportStatus: "no_report" }],
+      filters: { reportStatus: "all", requiresReport: false },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("Alpha Patient")).closest("tr")!;
+    expect(within(row).getByLabelText("Report not required").getAttribute("title")).toBe("Report not required");
+    expect(within(row).getByText("Report not required")).toBeTruthy();
+    expect(row.getAttribute("aria-label")).toContain("Report not required");
+    expect(row.getAttribute("title")).toContain("Report: Report not required");
+  });
+
   it("marks appointment rows final in RISpro with a required reason", async () => {
     fetchReportingBoardCasesMock.mockResolvedValue({
       cases: [{ ...caseRow, appointmentStatus: "completed", reportStatus: "draft", canAssign: true, exclusionReason: null }],
