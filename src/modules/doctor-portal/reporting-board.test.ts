@@ -190,7 +190,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /Only completed Reporting Board cases can be manually marked final/);
     assert.match(service, /exclusionReason: "manual_final"/);
     assert.match(service, /reportStatusSource: "manual"/);
-    assert.match(service, /enqueueReportingBoardSonicDicomCacheRows\(\[appointmentId\]\)/);
+    assert.match(service, /enqueueReportingBoardSonicDicomCacheRows\(\[appointmentId\], pool, \{ force: true \}\)/);
     assert.match(routes, /"\/cases\/:appointmentId\/mark-final"/);
     assert.match(routes, /"\/cases\/:appointmentId\/clear-manual-final"/);
     assert.doesNotMatch(service, /finalText|create.*PDF|SonicDICOM.*manual final/i);

@@ -59,8 +59,16 @@ let noFinalizeDoctor: TestUser;
 let noMrPermissionDoctor: TestUser;
 let inactiveDoctor: TestUser;
 let receptionistCookie = "";
-const statusByAppointmentId = new Map<number, ReportState | "throw">();
-const finalAtByAppointmentId = new Map<number, string>();
+class DurableCacheStatusMap extends Map<number, ReportState | "throw"> {
+  private pending: Promise<void>[] = [];
+  override set(appointmentId: number, state: ReportState | "throw"): this {
+    super.set(appointmentId, state);
+    this.pending.push(seedSonicDicomCache(appointmentId, state));
+    return this;
+  }
+  async flush(): Promise<void> { await Promise.all(this.pending.splice(0)); }
+}
+const statusByAppointmentId = new DurableCacheStatusMap();
 
 function uniq(label: string) {
   return `${TEST_PREFIX}${label}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
@@ -243,7 +251,23 @@ async function createBooking(input: BookingInput): Promise<number> {
       admin.id,
     ]
   );
-  return Number(result.rows[0].id);
+  const bookingId = Number(result.rows[0].id);
+  if ((input.status ?? "completed") === "completed" && (input.requiresReport ?? true)) await seedSonicDicomCache(bookingId, "draft");
+  return bookingId;
+}
+
+async function seedSonicDicomCache(appointmentId: number, state: ReportState | "throw", finalAt: string | null = null): Promise<void> {
+  if (!pool) return;
+  const unavailable = state === "throw";
+  await pool.query(`
+    insert into doctor_portal.reporting_board_sonicdicom_cache (
+      appointment_id, report_status, report_final_at, source, last_success_at, last_attempt_at, next_check_at, status_changed_at, failure_count, accession_number_snapshot
+    ) values ($1::bigint, $2, $3, case when $4 then null else 'sonicdicom' end, case when $4 then null else now() end, now(), now() + interval '1 hour', now(), case when $4 then 1 else 0 end, ('V2-' || lpad(($1::bigint)::text, 6, '0')))
+    on conflict (appointment_id) do update set
+      report_status = excluded.report_status, report_final_at = excluded.report_final_at, source = excluded.source,
+      last_success_at = excluded.last_success_at, last_attempt_at = now(), next_check_at = excluded.next_check_at,
+      status_changed_at = now(), failure_count = excluded.failure_count
+  `, [appointmentId, unavailable ? "unavailable" : state, finalAt, unavailable]);
 }
 
 async function patientIdForBooking(bookingId: number): Promise<number> {
@@ -465,8 +489,10 @@ async function cleanup() {
   await pool.query(`delete from users where id = any($1::bigint[])`, [userIds]).catch(() => undefined);
 }
 
-const api = <T = unknown>(cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
-  fetchJson<T>(app.baseUrl, path, { cookie, ...options });
+const api = async <T = unknown>(cookie: string, path: string, options: { method?: string; body?: unknown } = {}) => {
+  await statusByAppointmentId.flush();
+  return fetchJson<T>(app.baseUrl, path, { cookie, ...options });
+};
 
 const rawApi = (cookie: string, path: string) =>
   fetch(`${app.baseUrl}${path}`, {
@@ -533,16 +559,12 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     originalReportingBoardSetting = stored.rows[0]?.setting_value ?? null;
     reportingBoardService = await import("./reporting-board-service.js");
-    reportingBoardService.__setReportingBoardReportStatusCheckerForTest(async (context) => {
+    reportingBoardService.__setReportingBoardAssignmentBatchCheckerForTest(async (contexts) => new Map(contexts.map((context) => {
       const state = statusByAppointmentId.get(context.bookingId) ?? "draft";
-      if (state === "throw") throw new Error("SonicDICOM unavailable");
-      return {
-        state,
-        canViewReport: state === "final",
-        source: "sonicdicom",
-        reportFinalAt: state === "final" ? finalAtByAppointmentId.get(context.bookingId) ?? null : null,
-      };
-    });
+      return [context.bookingId, state === "throw"
+        ? { state: "unavailable", canViewReport: false, source: "sonicdicom", reportFinalAt: null }
+        : { state, canViewReport: state === "final", source: "sonicdicom", reportFinalAt: null }];
+    })));
     await cleanup();
     ctModalityId = await getOrCreateModality("CT", "CT");
     mrModalityId = await getOrCreateModality("MR", "MR");
@@ -611,7 +633,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
   });
 
   after(async () => {
-    reportingBoardService?.__setReportingBoardReportStatusCheckerForTest(null);
+    reportingBoardService?.__setReportingBoardAssignmentBatchCheckerForTest(null);
     if (app) await app.close();
     if (pool) await cleanup();
   });
@@ -1024,8 +1046,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     await assignDirectly(finalId, targetDoctor.doctorId, "2026-05-01T09:00:00.000Z");
     statusByAppointmentId.set(unassignedId, "draft");
     statusByAppointmentId.set(reassignedId, "draft");
-    statusByAppointmentId.set(finalId, "final");
-    finalAtByAppointmentId.set(finalId, "2026-05-02T09:00:00.000Z");
+    await seedSonicDicomCache(finalId, "final", "2026-05-02T09:00:00.000Z");
 
     const response = await api<{
       cases: Array<{
