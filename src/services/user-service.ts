@@ -5,6 +5,7 @@ import { logAuditEntry } from "./audit-service.js";
 import { isRole } from "../constants/roles.js";
 import type { Role } from "../types/domain.js";
 import type { NullableUserId, UserId } from "../types/http.js";
+import { syncDoctorWorklistForUser } from "../modules/doctor-portal/doctor-worklist-provisioning.js";
 
 export interface UserRow {
   id: number;
@@ -560,6 +561,8 @@ export async function updateUserActiveState(
     newValues: { is_active: updatedUser.is_active },
     changedByUserId: actor.userId
   });
+
+  await syncDoctorWorklistForUser(cleanUserId);
 
   return updatedUser;
 }

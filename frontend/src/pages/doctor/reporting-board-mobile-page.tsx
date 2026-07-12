@@ -62,7 +62,9 @@ function urlBase64ToUint8Array(value: string): ArrayBuffer {
 }
 
 function pushSupported(): boolean {
-  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  return typeof window !== "undefined" && "serviceWorker" in navigator &&
+    typeof navigator.serviceWorker?.getRegistration === "function" &&
+    "PushManager" in window && "Notification" in window;
 }
 
 function Counter({ icon, label, value }: { icon: ReactNode; label: string; value: number | null }) {
@@ -139,6 +141,7 @@ export function ReportingBoardMobilePage() {
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLastSuccessAt, setPushLastSuccessAt] = useState<string | null>(null);
+  const [desktopLayout, setDesktopLayout] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1200);
   const refreshInFlight = useRef(false);
   const loadedOffsets = useRef<number[]>([0]);
 
@@ -173,6 +176,12 @@ export function ReportingBoardMobilePage() {
   };
 
   useEffect(() => {
+    const onResize = () => setDesktopLayout(window.innerWidth >= 1200);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
     if (!viewQuery.data) return;
     setLoadedCases((current) => {
       const merged = new Map(current.map((row) => [row.caseKey, row]));
@@ -200,13 +209,13 @@ export function ReportingBoardMobilePage() {
       await refreshLoadedPages();
     };
     const onVisibilityChange = () => { if (document.visibilityState === "visible") void refreshVisible(); };
-    const interval = window.setInterval(() => void refreshVisible(), 50_000);
+    const interval = window.setInterval(() => void refreshVisible(), Math.max(15, viewQuery.data?.refreshIntervalSeconds ?? 50) * 1000);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [filters, token]);
+  }, [filters, token, viewQuery.data?.refreshIntervalSeconds]);
 
   const refresh = () => refreshLoadedPages();
   const updateTemporaryFilters = (updater: (current: ReportingBoardFilters) => ReportingBoardFilters) => {
@@ -315,19 +324,20 @@ export function ReportingBoardMobilePage() {
     return <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-5 text-slate-950">Saved view is unavailable.</main>;
   }
 
-  const myCasesLocked = Boolean(data.lockedFilters.assignedDoctorId && data.lockedFilters.assignedDoctorId !== data.currentDoctorId);
-  const unassignedLocked = data.lockedFilters.assignmentStatus === "assigned" || Boolean(data.lockedFilters.assignedDoctorId);
-  const urgentLocked = Boolean(data.lockedFilters.priorityCode && !["urgent", "stat"].includes(String(data.lockedFilters.priorityCode).toLowerCase()));
-  const overdueLocked = ["final", "no_report"].includes(String(data.lockedFilters.reportStatus ?? "").toLowerCase());
+  const lockedFilters: ReportingBoardFilters = "systemManaged" in data.lockedFilters ? {} : data.lockedFilters;
+  const myCasesLocked = Boolean(lockedFilters.assignedDoctorId && lockedFilters.assignedDoctorId !== data.currentDoctorId);
+  const unassignedLocked = lockedFilters.assignmentStatus === "assigned" || Boolean(lockedFilters.assignedDoctorId);
+  const urgentLocked = Boolean(lockedFilters.priorityCode && !["urgent", "stat"].includes(String(lockedFilters.priorityCode).toLowerCase()));
+  const overdueLocked = ["final", "no_report"].includes(String(lockedFilters.reportStatus ?? "").toLowerCase());
 
   return (
     <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-5 text-slate-950">
-      <header className="mx-auto max-w-xl">
+      <header className="mx-auto max-w-7xl">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white">RIS<br />pro</div>
           <div>
             <h1 className="text-xl font-bold leading-tight">{data.savedView.name} - Reporting Board</h1>
-            <p className="mt-1 text-sm text-slate-500">Saved view · {data.filterSummary.join(" · ") || "Current scope"}</p>
+            <p className="mt-1 text-sm text-slate-500">{data.savedView.linkKind === "doctor_worklist" ? "System-managed doctor scope" : "Administrator saved view"} · {data.filterSummary.join(" · ") || "Current scope"}</p>
           </div>
         </div>
         <div className="mt-5 flex items-center justify-between">
@@ -338,7 +348,7 @@ export function ReportingBoardMobilePage() {
         </div>
       </header>
 
-      <section className="mx-auto mt-5 flex max-w-xl gap-3 overflow-x-auto pb-2">
+      <section className="mx-auto mt-5 flex max-w-7xl gap-3 overflow-x-auto pb-2">
         <Counter icon={<Clipboard size={18} />} label="Total" value={data.counters.total} />
         <Counter icon={<UserCheck size={18} />} label="Assigned to me" value={data.counters.assignedToMe} />
         <Counter icon={<Users size={18} />} label="Unassigned" value={data.counters.unassigned} />
@@ -346,7 +356,7 @@ export function ReportingBoardMobilePage() {
         <Counter icon={<Calendar size={18} />} label="Overdue" value={data.counters.overdue} />
       </section>
 
-      <section className="mx-auto mt-5 max-w-xl">
+      <section className="mx-auto mt-5 max-w-7xl">
         <div className="flex gap-2">
           <label className="flex h-12 flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm">
             <Search size={18} className="text-slate-500" />
@@ -370,13 +380,15 @@ export function ReportingBoardMobilePage() {
           <button type="button" aria-pressed={!filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat} onClick={resetTemporaryFilters} className={tabClass("blue", !filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat)}>All {data.counters.total}</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="font-semibold text-slate-500">Saved scope:</span>
+          <span className="font-semibold text-slate-500">Permanent scope:</span>
           {data.filterSummary.map((item) => <span key={item} className={chipClass("slate")}>{item}</span>)}
           {(filters.q || filters.assignmentStatus || filters.priorityCode || filters.caseCategory || filters.caseSource || filters.sortBy) && <span className={chipClass("teal")}>Temporary filters active</span>}
         </div>
       </section>
 
-      <section className="mx-auto mt-4 grid max-w-xl gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      {data.scopeMessage && <p className="mx-auto mt-4 max-w-7xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{data.scopeMessage}</p>}
+
+      <section className="mx-auto mt-4 grid max-w-7xl gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_auto]">
         <div>
           {data.allowedActions.readOnly && <p className="font-bold text-slate-950">Read-only saved view.</p>}
           <p className="text-sm text-slate-500">
@@ -389,8 +401,14 @@ export function ReportingBoardMobilePage() {
         {pushMessage && <p className="text-sm font-medium text-teal-700">{pushMessage}</p>}
       </section>
 
-      <section className="mx-auto mt-5 grid max-w-xl gap-3">
-        {loadedCases.map((row) => <CaseCard key={row.caseKey} row={row} onOpen={() => setSelectedCase(row)} />)}
+      <section className="mx-auto mt-5 grid max-w-7xl gap-3">
+        {!desktopLayout && <div className="grid gap-3">{loadedCases.map((row) => <CaseCard key={row.caseKey} row={row} onOpen={() => setSelectedCase(row)} />)}</div>}
+        {desktopLayout && loadedCases.length > 0 && <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="doctor-worklist-desktop-table">
+          <table className="w-full min-w-[1050px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Patient / case</th><th className="p-3">Study</th><th className="p-3">Priority</th><th className="p-3">Assignment</th><th className="p-3">Report</th><th className="p-3">Action</th></tr></thead>
+            <tbody>{loadedCases.map((row) => <tr key={row.caseKey} className="border-t"><td className="p-3 font-semibold">{row.patientName}<span className="block text-xs font-normal text-slate-500">MRN {row.mrn ?? "-"} · {row.accessionNumber}</span></td><td className="p-3">{row.modality} · {row.exam ?? "-"}<span className="block text-xs text-slate-500">{dateTime(row)} · {row.caseType === "comparison" ? "Comparison" : row.category}</span></td><td className="p-3">{row.priority ?? "Normal"}{row.overdue && <span className="block text-xs font-semibold text-red-700">Overdue</span>}</td><td className="p-3">{row.assignedDoctor ?? "Unassigned"}</td><td className="p-3 capitalize">{labelStatus(row.reportStatus)}</td><td className="p-3"><button type="button" onClick={() => setSelectedCase(row)} className="h-9 rounded-lg border px-3 text-xs font-semibold">Details</button></td></tr>)}</tbody>
+          </table>
+        </div>}
         {loadedCases.length === 0 && <p className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-sm text-slate-500">No cases match this saved view.</p>}
         <p className="text-center text-xs text-slate-500">Loaded {loadedCases.length} of {data.totalCount} cases</p>
         {data.pagination.hasMore && <button type="button" disabled={viewQuery.isFetching} onClick={() => { const nextOffset = data.pagination.nextOffset; if (nextOffset === null) return; loadedOffsets.current = [...new Set([...loadedOffsets.current, nextOffset])]; setFilters((current) => ({ ...current, offset: nextOffset })); }} className="h-11 rounded-xl border border-slate-300 bg-white text-sm font-bold disabled:opacity-50">{viewQuery.isFetching ? "Loading..." : "Load more"}</button>}
@@ -404,9 +422,9 @@ export function ReportingBoardMobilePage() {
               <p className="text-xs font-semibold text-slate-500">Locked saved-view criteria: {data.filterSummary.join(", ") || "None"}</p>
               <label className="grid gap-1 text-sm">Assignment state<select value={filters.assignmentStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, assignmentStatus: (event.target.value || null) as ReportingBoardFilters["assignmentStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></label>
               <label className="grid gap-1 text-sm">Priority<select value={filters.priorityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, priorityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="stat">STAT</option><option value="urgent">Urgent</option></select></label>
-              <label className="grid gap-1 text-sm">Modality code<input disabled={Boolean(data.lockedFilters.modalityCode || data.lockedFilters.modalityId)} value={filters.modalityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, modalityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100" placeholder="Any modality" /></label>
+              <label className="grid gap-1 text-sm">Modality code<input disabled={Boolean(lockedFilters.modalityCode || lockedFilters.modalityId)} value={filters.modalityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, modalityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100" placeholder="Any modality" /></label>
               <label className="grid gap-1 text-sm">Category<input value={filters.caseCategory ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, caseCategory: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3" placeholder="Any category" /></label>
-              <label className="grid gap-1 text-sm">Report state<select disabled={Boolean(data.lockedFilters.reportStatus)} value={filters.reportStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, reportStatus: (event.target.value || null) as ReportingBoardFilters["reportStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100"><option value="">All</option><option value="required_not_final">Required not final</option><option value="draft">Draft</option><option value="final">Final</option></select></label>
+              <label className="grid gap-1 text-sm">Report state<select disabled={Boolean(lockedFilters.reportStatus)} value={filters.reportStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, reportStatus: (event.target.value || null) as ReportingBoardFilters["reportStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100"><option value="">All</option><option value="required_not_final">Required not final</option><option value="draft">Draft</option><option value="final">Final</option></select></label>
               <label className="grid gap-1 text-sm">Case source<select value={filters.caseSource ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, caseSource: (event.target.value || null) as ReportingBoardFilters["caseSource"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="appointments">Appointments</option><option value="comparisons">Comparison requests</option></select></label>
               <label className="grid gap-1 text-sm">Sort<select value={filters.sortBy ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, sortBy: (event.target.value || null) as ReportingBoardFilters["sortBy"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">Priority + study date</option><option value="study_date">Study date</option><option value="longest_unassigned">Longest unassigned</option><option value="oldest_completed">Oldest completed</option></select></label>
               <button type="button" onClick={resetTemporaryFilters} className="h-10 rounded-lg border border-teal-600 text-sm font-bold text-teal-700">Reset temporary filters</button>

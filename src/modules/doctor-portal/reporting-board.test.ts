@@ -55,7 +55,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /REPORTING_BOARD_CASE_SOURCES = new Set\(\["all", "appointments", "comparisons"\]\)/);
     assert.match(routes, /caseSource: optionalCaseSource\(query\.caseSource\)/);
     assert.match(routes, /caseSource: optionalCaseSource\(body\.caseSource\)/);
-    assert.match(service, /caseSource: input\.caseSource \?\? "all"/);
+    assert.match(service, /settings\.includedCaseSources/);
     assert.match(service, /"caseSource"/);
     assert.match(frontendTypes, /ReportingBoardCaseSource = "all" \| "appointments" \| "comparisons"/);
   });
@@ -87,11 +87,10 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.doesNotMatch(index, /patient|public/i);
   });
 
-  it("restricts cutoff settings updates to super_admin", () => {
+  it("restricts Reporting Board settings updates to doctor managers", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
 
-    assert.match(service, /actor\.appRole !== "super_admin"/);
-    assert.match(service, /Only super_admin can update Reporting Board settings/);
+    assert.match(service, /putReportingBoardSettings[\s\S]*requireRosterManager\(actor\)/);
   });
 
   it("case list defaults to report-required CT/MR scope and priority ordering", () => {
@@ -281,13 +280,13 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(frontend, /const \[expanded, setExpanded\] = useState\(false\)/);
   });
 
-  it("saved view tokens are active-only and owner scoped unless loaded by a manager", () => {
+  it("keeps administrator saved views manager-only and doctor worklists doctor-scoped", () => {
     const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
-    assert.match(repo, /where token = \$1 and owner_user_id = \$2 and active = true/);
-    assert.match(repo, /where token = \$1 and active = true/);
-    assert.match(service, /moduleCapabilities\.includes\("doctor_supervisor"\)/);
+    assert.match(repo, /where token = \$1\s+and active = true/);
+    assert.match(service, /view\.linkKind !== "doctor_worklist"/);
+    assert.match(service, /view\.targetDoctorId !== me\.profile!\.id/);
     assert.match(service, /findActiveSavedViewByToken\(token\)/);
   });
 
@@ -301,12 +300,43 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /dedupe_key text not null unique/);
     assert.match(repo, /notifyAssignedToMe/);
     assert.match(repo, /on conflict \(dedupe_key\) do nothing/);
-    assert.match(repo, /Reporting case assigned/);
+    assert.match(repo, /Open the saved reporting view to review this update/);
     assert.match(repo, /patientEnglishName/);
     assert.match(repo, /accessionNumber/);
     assert.match(routes, /"\/notifications"/);
     assert.match(routes, /"\/notifications\/:id\/read"/);
     assert.match(routes, /"\/notifications\/:id\/dismiss"/);
+  });
+
+  it("adds classified, system-managed doctor worklists with idempotent provisioning", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/120_doctor_reporting_worklists.sql`, "utf8");
+    const provisioning = readFileSync(`${root}/src/modules/doctor-portal/doctor-worklist-provisioning.ts`, "utf8");
+    const claims = readFileSync(`${root}/src/modules/doctor-portal/doctor-worklist-repository.ts`, "utf8");
+    const repository = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
+
+    assert.match(migration, /link_kind text not null default 'admin_saved_view'/);
+    assert.match(migration, /system_managed boolean not null default false/);
+    assert.match(migration, /target_doctor_id bigint references doctor_portal\.doctor_profiles/);
+    assert.match(migration, /reporting_board_saved_views_one_doctor_worklist_idx/);
+    assert.match(migration, /gen_random_bytes\(32\)/);
+    assert.match(migration, /daysBack}', '30'/);
+    assert.match(repository, /daysBack: 30/);
+    assert.match(repository, /: 30;/);
+    assert.match(provisioning, /on conflict \(target_doctor_id\)/);
+    assert.match(provisioning, /admin_disabled_at is null/);
+    assert.match(claims, /on conflict \(appointment_id, assignment_type\) where status = 'active'/);
+    assert.match(claims, /for update/);
+  });
+
+  it("uses one responsive worklist route and preserves the legacy QR route", () => {
+    const app = readFileSync(`${root}/frontend/src/App.tsx`, "utf8");
+    const page = readFileSync(`${root}/frontend/src/pages/doctor/reporting-board-mobile-page.tsx`, "utf8");
+
+    assert.match(app, /path="\/reporting\/worklist\/:token"/);
+    assert.match(app, /path="\/mobile\/reporting-view\/:token" element=\{<LegacyReportingWorklistRedirect/);
+    assert.match(app, /location\.search/);
+    assert.match(page, /doctor-worklist-desktop-table/);
+    assert.doesNotMatch(page, /QRCode|Show QR/);
   });
 
   it("creates notifications only from Reporting Board assignment paths", () => {
@@ -388,7 +418,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(repo, /sendSavedViewPushNotifications/);
     assert.match(repo, /clickUrl/);
     assert.match(repo, /notification\.actionUrl\?\.replace/);
-    assert.match(repo, /"\/mobile\/reporting-view\/"/);
+    assert.match(repo, /"\/reporting\/worklist\/"/);
   });
 
   it("adds public read-only mobile saved-view routes with backend scope and authenticated writes", () => {

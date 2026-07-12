@@ -258,10 +258,10 @@ function defaultFilters(settings?: ReportingBoardSettings): ReportingBoardFilter
     assignmentStatus: "all",
     reportStatus: settings?.defaultReportStatusFilter ?? "required_not_final",
     requiresReport: settings?.defaultRequiresReport ?? true,
-    sortBy: "priority_study_date",
-    sortDirection: "asc",
-    pinUrgentToTop: true,
-    caseSource: "all",
+    sortBy: settings?.defaultSortBy ?? "priority_study_date",
+    sortDirection: settings?.defaultSortDirection ?? "asc",
+    pinUrgentToTop: settings?.pinUrgentToTop ?? true,
+    caseSource: settings?.includedCaseSources?.length === 1 ? settings.includedCaseSources[0] : "all",
     limit: 100,
     offset: 0,
   };
@@ -1713,12 +1713,19 @@ function BoardSettingsModal({
             <Field label="Default cutoff date"><input disabled={!canEditSettings} type="date" value={settingsDraft.defaultCutoffDate ?? ""} onChange={(event) => onChange({ ...settingsDraft, defaultCutoffDate: event.target.value || null })} className={inputClass()} /></Field>
             <Field label="Days back"><input disabled={!canEditSettings} type="number" value={settingsDraft.daysBack} onChange={(event) => onChange({ ...settingsDraft, daysBack: Number(event.target.value) || 0 })} className={inputClass()} /></Field>
             <Field label="Enabled modality codes"><input disabled={!canEditSettings} value={settingsDraft.enabledModalityCodes.join(",")} onChange={(event) => onChange({ ...settingsDraft, enabledModalityCodes: event.target.value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) })} className={inputClass()} /></Field>
+            <label className="inline-flex items-center gap-2"><input disabled={!canEditSettings} type="checkbox" checked={settingsDraft.defaultRequiresReport} onChange={(event) => onChange({ ...settingsDraft, defaultRequiresReport: event.target.checked })} />Require report by default</label>
             <Field label="Default report status">
               <select disabled={!canEditSettings} value={settingsDraft.defaultReportStatusFilter} onChange={(event) => onChange({ ...settingsDraft, defaultReportStatusFilter: event.target.value as ReportingBoardReportStatus })} className={inputClass()}>
                 {REPORT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </Field>
-            {!canEditSettings && <p style={{ color: "var(--text-muted)" }}>Read-only. Only superadmin can update cutoff settings.</p>}
+            <Field label="Default sort"><select disabled={!canEditSettings} value={settingsDraft.defaultSortBy ?? "priority_study_date"} onChange={(event) => onChange({ ...settingsDraft, defaultSortBy: event.target.value as ReportingBoardSortBy })} className={inputClass()}><option value="priority_study_date">Priority + study date</option><option value="study_date">Study date</option><option value="oldest_completed">Oldest completed</option><option value="longest_unassigned">Longest unassigned</option></select></Field>
+            <Field label="Sort direction"><select disabled={!canEditSettings} value={settingsDraft.defaultSortDirection} onChange={(event) => onChange({ ...settingsDraft, defaultSortDirection: event.target.value as ReportingBoardSortDirection })} className={inputClass()}><option value="asc">Ascending</option><option value="desc">Descending</option></select></Field>
+            <Field label="Refresh seconds"><input disabled={!canEditSettings} type="number" min={15} value={settingsDraft.refreshIntervalSeconds} onChange={(event) => onChange({ ...settingsDraft, refreshIntervalSeconds: Math.max(15, Number(event.target.value) || 15) })} className={inputClass()} /></Field>
+            <label className="inline-flex items-center gap-2"><input disabled={!canEditSettings} type="checkbox" checked={settingsDraft.pinUrgentToTop} onChange={(event) => onChange({ ...settingsDraft, pinUrgentToTop: event.target.checked })} />Pin STAT/urgent first</label>
+            <label className="inline-flex items-center gap-2"><input disabled={!canEditSettings} type="checkbox" checked={(settingsDraft.includedCaseSources ?? ["appointments", "comparisons"]).includes("appointments")} onChange={(event) => { const sources = settingsDraft.includedCaseSources ?? ["appointments", "comparisons"]; onChange({ ...settingsDraft, includedCaseSources: event.target.checked ? [...new Set([...sources, "appointments" as const])] : sources.filter((source) => source !== "appointments") }); }} />Include appointments</label>
+            <label className="inline-flex items-center gap-2"><input disabled={!canEditSettings} type="checkbox" checked={(settingsDraft.includedCaseSources ?? ["appointments", "comparisons"]).includes("comparisons")} onChange={(event) => { const sources = settingsDraft.includedCaseSources ?? ["appointments", "comparisons"]; onChange({ ...settingsDraft, includedCaseSources: event.target.checked ? [...new Set([...sources, "comparisons" as const])] : sources.filter((source) => source !== "comparisons") }); }} />Include comparison requests</label>
+            {!canEditSettings && <p style={{ color: "var(--text-muted)" }}>Read-only. Doctor administrators and supervisors can update Reporting Board defaults.</p>}
             <div className="mt-2 flex justify-end gap-2">
               <button type="button" onClick={onClose} className="h-9 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Close</button>
               {canEditSettings && <button type="button" disabled={saving} onClick={onSave} className="h-9 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white disabled:bg-teal-300">Save settings</button>}
@@ -2097,7 +2104,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
   const effectiveFilters = casesQuery.data?.filters ?? filters;
   const statsSummary = statsQuery.data?.summary;
   const doctorStats = statsQuery.data?.byDoctor ?? [];
-  const canEditSettings = Boolean(me.isSuperAdmin);
+  const canEditSettings = isManager(me);
   const canManage = isManager(me);
   const assignmentFilterValue = filters.assignedDoctorId ? `doctor:${filters.assignedDoctorId}` : filters.assignmentStatus === "unassigned" ? "unassigned" : "all";
   const selectedAssignedDoctor = filters.assignedDoctorId
@@ -2110,7 +2117,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
     selectedDoctorName: selectedAssignedDoctor?.displayName ?? null,
   });
   const savedViewLink = loadedSavedView ? `${window.location.origin}/doctor/reporting-board/saved/${loadedSavedView.token}` : "";
-  const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/mobile/reporting-view/${loadedSavedView.token}` : "";
+  const mobileSavedViewLink = loadedSavedView ? `${window.location.origin}/reporting/worklist/${loadedSavedView.token}` : "";
   const visibleCaseKeys = cases.map((row) => row.caseKey);
   const allVisibleSelected = visibleCaseKeys.length > 0 && visibleCaseKeys.every((key) => selectedCaseKeys.includes(key));
   const selectedReassignDoctor = selectedReassignDoctorId ? (doctorsQuery.data ?? []).find((doctor) => doctor.id === Number(selectedReassignDoctorId)) ?? null : null;
@@ -2299,7 +2306,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Portal</p>
           <h2 className="mt-1 text-2xl font-semibold text-foreground">Reporting Assignment Board</h2>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            Effective cutoff: {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"} - Cutoff settings are controlled by superadmin. {selectedAssignedDoctor ? `Selected doctor: ${selectedAssignedDoctor.displayName}.` : ""}
+            Effective cutoff: {effectiveFilters.cutoffDate ?? effectiveFilters.dateFrom ?? "-"} - Reporting Board defaults are centrally managed. {selectedAssignedDoctor ? `Selected doctor: ${selectedAssignedDoctor.displayName}.` : ""}
           </p>
           {loadedSavedView && (
             <p className="mt-1 text-xs font-semibold text-teal-700">Saved view: {loadedSavedView.name}</p>
@@ -2699,7 +2706,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
                 </div>
                 <div className="mt-3 space-y-2">
                   {(savedViewsQuery.data ?? []).map((view) => (
-                    <button key={view.id} type="button" onClick={() => {
+                    <button key={view.id} type="button" aria-label={view.name} onClick={() => {
                       setLoadedSavedView(view);
                       setFilters({ ...defaultFilters(settingsQuery.data), ...view.filters });
                       setNotifications({ ...EMPTY_NOTIFICATIONS, ...view.notificationSettings });

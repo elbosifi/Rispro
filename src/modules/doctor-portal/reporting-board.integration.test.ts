@@ -359,6 +359,22 @@ async function createSavedView(
   return response.data.savedView;
 }
 
+async function getDoctorWorklist(
+  owner: TestUser,
+  notifyAssignedToMe: boolean
+): Promise<{ id: number; token: string }> {
+  const response = await api<{ worklist: { id: number; token: string } }>(
+    owner.cookie,
+    "/api/doctor/reporting-board/doctor-worklists/me"
+  );
+  assert.equal(response.status, 200, JSON.stringify(response.data));
+  await pool.query(
+    `update doctor_portal.reporting_board_saved_views set notification_settings_json = jsonb_build_object('notifyAssignedToMe', $2::boolean) where id = $1`,
+    [response.data.worklist.id, notifyAssignedToMe]
+  );
+  return response.data.worklist;
+}
+
 async function assignDirectly(appointmentId: number, doctorId: number, assignedAt?: string) {
   await pool.query(
     `
@@ -590,7 +606,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     });
     assert.equal(update.status, 200);
     assert.equal((update.data as { settings: { daysBack: number } }).settings.daysBack, 7);
-    assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/settings", { method: "PUT", body: { daysBack: 1 } })).status, 403);
+    assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/settings", { method: "PUT", body: { daysBack: 1 } })).status, 200);
     assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/settings", { method: "PUT", body: { daysBack: 1 } })).status, 403);
     assert.equal((await api(admin.cookie, "/api/doctor/reporting-board/settings")).status, 200);
     assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/settings")).status, 200);
@@ -598,26 +614,56 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await api(receptionistCookie, "/api/doctor/reporting-board/settings")).status, 403);
   });
 
-  it("enforces saved-view ownership, active tokens, and manager token access", async () => {
+  it("keeps administrator saved views manager-only and doctor-link metadata doctor-scoped", async () => {
     guard();
-    const ownerView = await createSavedView(doctor, true, { assignedDoctorId: doctor.doctorId });
-    const ownerList = await api<{ savedViews: Array<{ id: number }> }>(doctor.cookie, "/api/doctor/reporting-board/saved-views");
-    assert.equal(ownerList.status, 200);
-    assert.equal(ownerList.data.savedViews.some((view) => view.id === ownerView.id), true);
-    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 200);
+    assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/saved-views")).status, 403);
+    assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/saved-views", { method: "POST", body: { name: "denied", filters: {} } })).status, 403);
+    const ownerView = await createSavedView(admin, true, { assignedDoctorId: doctor.doctorId });
+    const managerList = await api<{ savedViews: Array<{ id: number }> }>(supervisor.cookie, "/api/doctor/reporting-board/saved-views");
+    assert.equal(managerList.status, 200);
+    assert.equal(managerList.data.savedViews.some((view) => view.id === ownerView.id), true);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 403);
     assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 200);
-    assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 404);
-    const caseSourceView = await createSavedView(doctor, true, { caseSource: "comparisons" });
-    const loadedCaseSourceView = await api<{ savedView: { filters: { caseSource?: string } } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${caseSourceView.token}`);
+    const caseSourceView = await createSavedView(admin, true, { caseSource: "comparisons" });
+    const loadedCaseSourceView = await api<{ savedView: { filters: { caseSource?: string } } }>(supervisor.cookie, `/api/doctor/reporting-board/saved-views/token/${caseSourceView.token}`);
     assert.equal(loadedCaseSourceView.status, 200);
     assert.equal(loadedCaseSourceView.data.savedView.filters.caseSource, "comparisons");
-    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${ownerView.id}`, { method: "PATCH", body: { active: false } })).status, 200);
-    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownerView.token}`)).status, 404);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${ownerView.id}`, { method: "PATCH", body: { active: false } })).status, 403);
+
+    const ownWorklist = await getDoctorWorklist(doctor, false);
+    assert.equal((await api(otherDoctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownWorklist.token}`)).status, 403);
+    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/token/${ownWorklist.token}`)).status, 200);
+    assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/doctor-worklists")).status, 200);
+  });
+
+  it("provisions one doctor worklist and reactivates the same token across profile and user lifecycle changes", async () => {
+    guard();
+    const first = await getDoctorWorklist(noFinalizeDoctor, false);
+    const second = await getDoctorWorklist(noFinalizeDoctor, false);
+    assert.equal(second.id, first.id);
+    assert.equal(second.token, first.token);
+    const count = await pool.query<{ count: string }>(
+      `select count(*)::text as count from doctor_portal.reporting_board_saved_views where target_doctor_id = $1 and link_kind = 'doctor_worklist' and system_managed = true`,
+      [noFinalizeDoctor.doctorId]
+    );
+    assert.equal(Number(count.rows[0].count), 1);
+
+    assert.equal((await api(admin.cookie, `/api/doctor/profiles/${noFinalizeDoctor.doctorId}`, { method: "PATCH", body: { active: false } })).status, 200);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 404);
+    assert.equal((await api(admin.cookie, `/api/doctor/profiles/${noFinalizeDoctor.doctorId}`, { method: "PATCH", body: { active: true } })).status, 200);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 200);
+
+    assert.equal((await api(admin.cookie, `/api/doctor/admin/doctors/${noFinalizeDoctor.id}/deactivate`, { method: "POST" })).status, 200);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 404);
+    assert.equal((await api(admin.cookie, `/api/doctor/admin/doctors/${noFinalizeDoctor.id}/activate`, { method: "POST" })).status, 200);
+    assert.equal((await api("", `/api/reporting/saved-views/public/${first.token}/mobile`)).status, 200);
+    const restored = await pool.query<{ token: string }>(`select token from doctor_portal.reporting_board_saved_views where id = $1`, [first.id]);
+    assert.equal(restored.rows[0].token, first.token);
   });
 
   it("keeps valid token-scoped mobile views public while enforcing lifecycle and mutation authority", async () => {
     guard();
-    const view = await createSavedView(doctor, false, {});
+    const view = await createSavedView(admin, false, {});
     const publicPath = `/api/reporting/saved-views/public/${view.token}/mobile?limit=1`;
     const anonymous = await api<{ allowedActions: { authenticated: boolean; readOnly: boolean; batchReassign: boolean }; pagination: { limit: number; offset: number }; totalCount: number }>("", publicPath);
     assert.equal(anonymous.status, 200);
@@ -632,32 +678,32 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal((await api("", `/api/reporting/saved-views/public/${view.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: 1 } })).status, 401);
     assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${view.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: 1 } })).status, 403);
 
-    const rotated = await api<{ savedView: { token: string } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/rotate-token`, { method: "POST" });
+    const rotated = await api<{ savedView: { token: string } }>(admin.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/rotate-token`, { method: "POST" });
     assert.equal(rotated.status, 200);
     assert.notEqual(rotated.data.savedView.token, view.token);
     assert.equal((await api("", publicPath)).status, 404);
     assert.equal((await api("", `/api/reporting/saved-views/public/${rotated.data.savedView.token}/mobile`)).status, 200);
 
-    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/revoke`, { method: "POST" })).status, 200);
+    assert.equal((await api(admin.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/revoke`, { method: "POST" })).status, 200);
     assert.equal((await api("", `/api/reporting/saved-views/public/${rotated.data.savedView.token}/mobile`)).status, 404);
-    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/rotate-token`, { method: "POST" })).status, 409);
+    assert.equal((await api(admin.cookie, `/api/doctor/reporting-board/saved-views/${view.id}/rotate-token`, { method: "POST" })).status, 409);
 
-    const expired = await createSavedView(doctor, false, {});
+    const expired = await createSavedView(admin, false, {});
     const futureExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const setExpiry = await api<{ savedView: { expiresAt: string | null } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: futureExpiry } });
+    const setExpiry = await api<{ savedView: { expiresAt: string | null } }>(admin.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: futureExpiry } });
     assert.equal(setExpiry.status, 200);
     assert.ok(setExpiry.data.savedView.expiresAt);
-    const clearExpiry = await api<{ savedView: { expiresAt: string | null } }>(doctor.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: null } });
+    const clearExpiry = await api<{ savedView: { expiresAt: string | null } }>(admin.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: null } });
     assert.equal(clearExpiry.status, 200);
     assert.equal(clearExpiry.data.savedView.expiresAt, null);
-    assert.equal((await api(doctor.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: "not-a-timestamp" } })).status, 400);
+    assert.equal((await api(admin.cookie, `/api/doctor/reporting-board/saved-views/${expired.id}`, { method: "PATCH", body: { expiresAt: "not-a-timestamp" } })).status, 400);
     await pool.query(`update doctor_portal.reporting_board_saved_views set expires_at = now() - interval '1 minute' where id = $1`, [expired.id]);
     assert.equal((await api("", `/api/reporting/saved-views/public/${expired.token}/mobile`)).status, 404);
   });
 
   it("delivers a public saved-view test notification only to the requesting subscription", async () => {
     guard();
-    const view = await createSavedView(doctor, false, {});
+    const view = await createSavedView(admin, false, {});
     const subscriptionA = { endpoint: "https://push.example/device-a", keys: { p256dh: "device-a-key", auth: "device-a-auth" } };
     const subscriptionB = { endpoint: "https://push.example/device-b", keys: { p256dh: "device-b-key", auth: "device-b-auth" } };
     const hash = (subscription: typeof subscriptionA) => createHash("sha256").update(`${subscription.endpoint}|${subscription.keys.p256dh}`).digest("hex");
@@ -674,7 +720,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       send: async (subscription) => { deliveredEndpoints.push(subscription.endpoint); },
     });
     try {
-      const response = await api<{ attempted: number; sent: number }>("", `/api/reporting/saved-views/public/${view.token}/mobile/test-push`, { method: "POST", body: { subscription: subscriptionA } });
+      const response = await api<{ attempted: number; sent: number }>(admin.cookie, `/api/reporting/saved-views/public/${view.token}/mobile/test-push`, { method: "POST", body: { subscription: subscriptionA } });
       assert.equal(response.status, 200);
       assert.equal(response.data.attempted, 1);
       assert.equal(response.data.sent, 1);
@@ -762,6 +808,60 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
     assert.equal(ctOnly.status, 200);
     assert.deepEqual(ctOnly.data.cases.map((row) => `${row.caseType}:${row.modalityCode}`), ["comparison:CT", "appointment:CT"]);
+  });
+
+  it("scopes personal doctor worklists and atomically claims appointments and comparisons to self", async () => {
+    guard();
+    const date = addDays(12);
+    const previousDate = addDays(-12);
+    const label = uniq("doctor_worklist_scope");
+    const assignedToMe = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} assigned me` });
+    const unassigned = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date, patientName: `${label} unassigned` });
+    const assignedOther = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} assigned other` });
+    const globallyDisabled = await createBooking({ modalityId: usModalityId, examTypeId: usExamTypeId, date, patientName: `${label} US` });
+    const previous = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: previousDate, patientName: `${label} comparison` });
+    const comparison = await createComparisonRequestForBooking(previous, `${date}T09:00:00.000Z`, label);
+    [assignedToMe, unassigned, assignedOther, globallyDisabled].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await assignDirectly(assignedToMe, doctor.doctorId);
+    await assignDirectly(assignedOther, otherDoctor.doctorId);
+    const own = await getDoctorWorklist(doctor, false);
+    const other = await getDoctorWorklist(otherDoctor, false);
+
+    const view = await api<{ cases: Array<{ caseType: string; appointmentId: number; comparisonRequestId: number | null }>; effectiveModalityCodes: string[] }>(
+      doctor.cookie,
+      `/api/reporting/saved-views/public/${own.token}/mobile?q=${encodeURIComponent(label)}&limit=100`
+    );
+    assert.equal(view.status, 200, JSON.stringify(view.data));
+    assert.deepEqual(view.data.effectiveModalityCodes.sort(), ["CT", "MR"]);
+    assert.equal(view.data.cases.some((row) => row.appointmentId === assignedToMe), true);
+    assert.equal(view.data.cases.some((row) => row.appointmentId === unassigned), true);
+    assert.equal(view.data.cases.some((row) => row.comparisonRequestId === comparison), true);
+    assert.equal(view.data.cases.some((row) => row.appointmentId === assignedOther), false);
+    assert.equal(view.data.cases.some((row) => row.appointmentId === globallyDisabled), false);
+    const ctOnlyWorklist = await getDoctorWorklist(noMrPermissionDoctor, false);
+    const ctOnlyView = await api<{ effectiveModalityCodes: string[] }>(noMrPermissionDoctor.cookie, `/api/reporting/saved-views/public/${ctOnlyWorklist.token}/mobile?limit=1`);
+    assert.deepEqual(ctOnlyView.data.effectiveModalityCodes, ["CT"]);
+    const noPermissionDoctor = await createDoctorUser("no_permissions", "doctor", { canReportModalities: [] });
+    const emptyWorklist = await getDoctorWorklist(noPermissionDoctor, false);
+    const emptyView = await api<{ cases: unknown[]; effectiveModalityCodes: string[]; scopeMessage: string | null }>(noPermissionDoctor.cookie, `/api/reporting/saved-views/public/${emptyWorklist.token}/mobile?limit=1`);
+    assert.deepEqual(emptyView.data.effectiveModalityCodes, []);
+    assert.deepEqual(emptyView.data.cases, []);
+    assert.match(emptyView.data.scopeMessage ?? "", /No Reporting Board modalities/);
+
+    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: unassigned } })).status, 200);
+    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { caseType: "comparison", comparisonRequestId: comparison } })).status, 200);
+    assert.equal((await api(otherDoctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: assignedToMe } })).status, 403);
+    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: assignedOther } })).status, 409);
+    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/reassign`, { method: "POST", body: { appointmentId: unassigned, doctorId: otherDoctor.doctorId, reason: "denied" } })).status, 403);
+    assert.equal((await api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/unassign`, { method: "POST", body: { appointmentId: unassigned, reason: "denied" } })).status, 403);
+
+    const race = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} race` });
+    statusByAppointmentId.set(race, "draft");
+    const raceResults = await Promise.all([
+      api(doctor.cookie, `/api/reporting/saved-views/public/${own.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: race } }),
+      api(otherDoctor.cookie, `/api/reporting/saved-views/public/${other.token}/mobile/assign-to-me`, { method: "POST", body: { appointmentId: race } }),
+    ]);
+    assert.deepEqual(raceResults.map((result) => result.status).sort(), [200, 409]);
   });
 
   it("exposes patientDicomId from primary patient identifier with legacy fallbacks but never MRN", async () => {
@@ -1089,7 +1189,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     [first, alreadyAssigned, noReport].forEach((id) => statusByAppointmentId.set(id, "draft"));
     statusByAppointmentId.set(finalCase, "final");
     await assignDirectly(alreadyAssigned, otherDoctor.doctorId);
-    await createSavedView(targetDoctor, true, { assignedDoctorId: targetDoctor.doctorId });
+    await getDoctorWorklist(targetDoctor, true);
 
     const response = await api<{ assignedCount: number; requestedCount: number; assignedAppointmentIds: number[]; skipped: Array<{ appointmentId: number; reason: string }> }>(
       supervisor.cookie,
@@ -1376,8 +1476,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
   it("single-row Reporting Board assignment writes audit and creates notifyAssignedToMe events only when enabled", async () => {
     guard();
-    const notifyView = await createSavedView(targetDoctor, true, { assignedDoctorId: targetDoctor.doctorId });
-    const silentView = await createSavedView(otherDoctor, false, { assignedDoctorId: otherDoctor.doctorId });
+    const notifyView = await getDoctorWorklist(targetDoctor, true);
+    const silentView = await getDoctorWorklist(otherDoctor, false);
     const notifyCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(50), patientName: "Notify Patient" });
     const silentCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(50), patientName: "Silent Patient" });
     statusByAppointmentId.set(notifyCase, "draft");
@@ -1394,11 +1494,9 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       [notifyView.id, notifyCase]
     );
     assert.equal(events.rowCount, 1);
-    assert.match(events.rows[0].title, /Reporting case assigned/);
-    assert.match(events.rows[0].title, /V2-/);
-    assert.match(events.rows[0].body, /Notify Patient/);
-    assert.match(events.rows[0].body, /CT/);
-    assert.match(events.rows[0].action_url, new RegExp(`/doctor/reporting-board/saved/${notifyView.token}`));
+    assert.equal(events.rows[0].title, "RISpro reporting case update");
+    assert.equal(events.rows[0].body, "Open the saved reporting view to review this update.");
+    assert.match(events.rows[0].action_url, new RegExp(`/reporting/worklist/${notifyView.token}`));
 
     assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${notifyCase}/assign-doctor`, { method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "repeat" } })).status, 200);
     assert.equal((await pool.query(`select 1 from doctor_portal.reporting_board_notification_events where saved_view_id = $1 and appointment_id = $2`, [notifyView.id, notifyCase])).rowCount, 1);
@@ -1409,7 +1507,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
   it("scopes notification list and read/dismiss/read-all actions to the current user", async () => {
     guard();
-    const view = await createSavedView(targetDoctor, true, {});
+    const view = await getDoctorWorklist(targetDoctor, true);
     const appointmentA = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(60), patientName: "Notification A" });
     const appointmentB = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(60), patientName: "Notification B" });
     statusByAppointmentId.set(appointmentA, "draft");
@@ -1419,7 +1517,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const ownList = await api<{ notifications: Array<{ id: number; title: string; body: string }> }>(targetDoctor.cookie, "/api/doctor/reporting-board/notifications");
     assert.equal(ownList.status, 200);
     assert.ok(ownList.data.notifications.length >= 2);
-    assert.ok(ownList.data.notifications.some((notification) => /Notification A|Notification B|V2-/.test(`${notification.title} ${notification.body}`)));
+    assert.ok(ownList.data.notifications.some((notification) => /RISpro reporting case update/.test(notification.title)));
     const otherList = await api<{ notifications: unknown[] }>(otherDoctor.cookie, "/api/doctor/reporting-board/notifications");
     assert.equal(otherList.status, 200);
     assert.equal(otherList.data.notifications.some((item) => ownList.data.notifications.map((n) => n.id).includes((item as { id: number }).id)), false);

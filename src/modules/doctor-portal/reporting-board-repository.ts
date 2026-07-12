@@ -27,6 +27,10 @@ const SETTINGS_CATEGORY = "doctor_portal_reporting_board";
 const SETTINGS_KEY = "config";
 let reportingBoardPushVapidConfigurer = configurePatientWebPushVapid;
 let reportingBoardPushSender: (subscription: PushSubscription, payload: string) => Promise<unknown> = (subscription, payload) => webPush.sendNotification(subscription, payload);
+const REPORTING_BOARD_SORT_KEYS = new Set([
+  "priority_study_date", "study_date", "accession", "patient_name", "mrn", "exam_type",
+  "modality", "assigned_doctor", "longest_unassigned", "longest_assigned_not_final", "oldest_completed",
+]);
 
 export function __setReportingBoardPushDeliveryForTest(options: {
   configure?: typeof configurePatientWebPushVapid;
@@ -39,10 +43,15 @@ export function __setReportingBoardPushDeliveryForTest(options: {
 export const DEFAULT_REPORTING_BOARD_SETTINGS: ReportingBoardSettings = {
   cutoffMode: "days_back",
   defaultCutoffDate: null,
-  daysBack: 14,
+  daysBack: 30,
   enabledModalityCodes: ["CT", "MR"],
   defaultRequiresReport: true,
   defaultReportStatusFilter: "required_not_final",
+  defaultSortBy: "priority_study_date",
+  defaultSortDirection: "asc",
+  pinUrgentToTop: true,
+  includedCaseSources: ["appointments", "comparisons"],
+  refreshIntervalSeconds: 50,
 };
 
 interface AssignmentActor {
@@ -159,7 +168,7 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
 export function normalizeReportingBoardSettings(input: unknown): ReportingBoardSettings {
   const record = cleanRecord(input);
   const cutoffMode = record.cutoffMode === "fixed_date" ? "fixed_date" : "days_back";
-  const daysBack = Number.isInteger(record.daysBack) && Number(record.daysBack) >= 0 ? Number(record.daysBack) : 14;
+  const daysBack = Number.isInteger(record.daysBack) && Number(record.daysBack) >= 0 ? Number(record.daysBack) : 30;
   const defaultReportStatusFilter =
     record.defaultReportStatusFilter === "all" ||
     record.defaultReportStatusFilter === "final" ||
@@ -177,6 +186,17 @@ export function normalizeReportingBoardSettings(input: unknown): ReportingBoardS
     enabledModalityCodes: normalizeStringArray(record.enabledModalityCodes, DEFAULT_REPORTING_BOARD_SETTINGS.enabledModalityCodes),
     defaultRequiresReport: typeof record.defaultRequiresReport === "boolean" ? record.defaultRequiresReport : true,
     defaultReportStatusFilter,
+    defaultSortBy: REPORTING_BOARD_SORT_KEYS.has(String(record.defaultSortBy))
+      ? record.defaultSortBy as ReportingBoardSettings["defaultSortBy"]
+      : "priority_study_date",
+    defaultSortDirection: record.defaultSortDirection === "desc" ? "desc" : "asc",
+    pinUrgentToTop: typeof record.pinUrgentToTop === "boolean" ? record.pinUrgentToTop : true,
+    includedCaseSources: Array.isArray(record.includedCaseSources)
+      ? record.includedCaseSources.filter((value): value is "appointments" | "comparisons" => value === "appointments" || value === "comparisons")
+      : ["appointments", "comparisons"],
+    refreshIntervalSeconds: Number.isInteger(record.refreshIntervalSeconds) && Number(record.refreshIntervalSeconds) >= 15
+      ? Number(record.refreshIntervalSeconds)
+      : 50,
   };
 }
 
@@ -193,6 +213,10 @@ function savedView(row: {
   expiresAt: string | null;
   revokedAt: string | null;
   accessMode: string | null;
+  linkKind?: "admin_saved_view" | "doctor_worklist";
+  systemManaged?: boolean;
+  targetDoctorId?: number | null;
+  adminDisabledAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }): ReportingBoardSavedView {
@@ -202,6 +226,10 @@ function savedView(row: {
     expiresAt: nullableIsoString(row.expiresAt),
     revokedAt: nullableIsoString(row.revokedAt),
     accessMode: "public_readonly",
+    linkKind: row.linkKind ?? "admin_saved_view",
+    systemManaged: Boolean(row.systemManaged),
+    targetDoctorId: nullableNumber(row.targetDoctorId),
+    adminDisabledAt: nullableIsoString(row.adminDisabledAt),
     filters: cleanRecord(row.filters) as ReportingBoardFilters,
     notificationSettings: cleanRecord(row.notificationSettings) as ReportingBoardNotificationSettings,
   };
@@ -315,7 +343,7 @@ export async function updateReportingBoardSettings(input: unknown, actorUserId: 
   return normalized;
 }
 
-export async function listSavedViews(ownerUserId: UserId, ownerDoctorId: number | null): Promise<ReportingBoardSavedView[]> {
+export async function listSavedViews(_ownerUserId: UserId, _ownerDoctorId: number | null): Promise<ReportingBoardSavedView[]> {
   const result = await pool.query(
     `
       select
@@ -331,14 +359,18 @@ export async function listSavedViews(ownerUserId: UserId, ownerDoctorId: number 
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
-      where owner_user_id = $1
-        and ($2::bigint is null or owner_doctor_id = $2)
+      where link_kind = 'admin_saved_view'
+        and system_managed = false
       order by created_at desc, id desc
     `,
-    [ownerUserId, ownerDoctorId]
+    []
   );
   return result.rows.map(savedView);
 }
@@ -353,9 +385,10 @@ export async function createSavedView(input: {
   const result = await pool.query(
     `
       insert into doctor_portal.reporting_board_saved_views (
-        owner_user_id, owner_doctor_id, name, token, filters_json, notification_settings_json, created_by_user_id, updated_by_user_id
+        owner_user_id, owner_doctor_id, name, token, filters_json, notification_settings_json,
+        link_kind, system_managed, created_by_user_id, updated_by_user_id
       )
-      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $1, $1)
+      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'admin_saved_view', false, $1, $1)
       returning
         id,
         owner_user_id as "ownerUserId",
@@ -369,6 +402,10 @@ export async function createSavedView(input: {
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
@@ -406,8 +443,8 @@ export async function updateSavedView(input: {
         updated_by_user_id = $2,
         updated_at = now()
       where id = $1
-        and owner_user_id = $2
-        and ($3::bigint is null or owner_doctor_id = $3)
+        and link_kind = 'admin_saved_view'
+        and system_managed = false
       returning
         id,
         owner_user_id as "ownerUserId",
@@ -421,6 +458,10 @@ export async function updateSavedView(input: {
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
@@ -455,6 +496,10 @@ export async function findSavedViewByToken(token: string, ownerUserId: UserId): 
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
@@ -482,6 +527,10 @@ export async function findActiveSavedViewByToken(token: string): Promise<Reporti
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
@@ -489,6 +538,17 @@ export async function findActiveSavedViewByToken(token: string): Promise<Reporti
         and active = true
         and revoked_at is null
         and (expires_at is null or expires_at > now())
+        and (
+          link_kind = 'admin_saved_view'
+          or exists (
+            select 1
+            from doctor_portal.doctor_profiles target_dp
+            join users target_user on target_user.id = target_dp.user_id
+            where target_dp.id = target_doctor_id
+              and target_dp.active = true
+              and target_user.is_active = true
+          )
+        )
       limit 1
     `,
     [token]
@@ -512,13 +572,19 @@ export async function findSavedViewById(id: number, ownerUserId: UserId): Promis
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
       from doctor_portal.reporting_board_saved_views
-      where id = $1 and owner_user_id = $2
+      where id = $1
+        and link_kind = 'admin_saved_view'
+        and system_managed = false
       limit 1
     `,
-    [id, ownerUserId]
+    [id]
   );
   return result.rows[0] ? savedView(result.rows[0]) : null;
 }
@@ -535,7 +601,9 @@ export async function rotateSavedViewToken(input: { id: number; ownerUserId: Use
     `
       update doctor_portal.reporting_board_saved_views
       set token = $4, updated_by_user_id = $2, updated_at = now()
-      where id = $1 and owner_user_id = $2 and ($3::bigint is null or owner_doctor_id = $3)
+      where id = $1
+        and link_kind = 'admin_saved_view'
+        and system_managed = false
         and active = true and revoked_at is null
       returning
         id,
@@ -550,6 +618,10 @@ export async function rotateSavedViewToken(input: { id: number; ownerUserId: Use
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
@@ -563,7 +635,9 @@ export async function revokeSavedView(input: { id: number; ownerUserId: UserId; 
     `
       update doctor_portal.reporting_board_saved_views
       set active = false, revoked_at = now(), updated_by_user_id = $2, updated_at = now()
-      where id = $1 and owner_user_id = $2 and ($3::bigint is null or owner_doctor_id = $3)
+      where id = $1
+        and link_kind = 'admin_saved_view'
+        and system_managed = false
       returning
         id,
         owner_user_id as "ownerUserId",
@@ -577,10 +651,14 @@ export async function revokeSavedView(input: { id: number; ownerUserId: UserId; 
         expires_at as "expiresAt",
         revoked_at as "revokedAt",
         access_mode as "accessMode",
+        link_kind as "linkKind",
+        system_managed as "systemManaged",
+        target_doctor_id as "targetDoctorId",
+        admin_disabled_at as "adminDisabledAt",
         created_at as "createdAt",
         updated_at as "updatedAt"
     `,
-    [input.id, input.ownerUserId, input.ownerDoctorId]
+    [input.id, input.ownerUserId]
   );
   return result.rows[0] ? savedView(result.rows[0]) : null;
 }
@@ -2066,7 +2144,7 @@ async function sendSavedViewPushNotifications(notification: CreatedNotificationR
   let failed = 0;
   for (const row of subscriptions) {
     const subscription: PushSubscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
-    const clickUrl = notification.actionUrl?.replace(/^\/doctor\/reporting-board\/saved\//, "/mobile/reporting-view/")
+    const clickUrl = notification.actionUrl?.replace(/^\/doctor\/reporting-board\/saved\//, "/reporting/worklist/")
       ?? "/doctor/reporting-board";
     try {
       await reportingBoardPushSender(subscription, JSON.stringify({
@@ -2138,9 +2216,9 @@ export async function createAssignedToMeNotifications(input: {
         dp.user_id as "recipientUserId",
         dp.id as "recipientDoctorId"
       from doctor_portal.reporting_board_saved_views rbsv
-      join doctor_portal.doctor_profiles dp on dp.id = rbsv.owner_doctor_id
+      join doctor_portal.doctor_profiles dp on dp.id = coalesce(rbsv.target_doctor_id, rbsv.owner_doctor_id)
       join users u on u.id = dp.user_id
-      where rbsv.owner_doctor_id = $1
+      where coalesce(rbsv.target_doctor_id, rbsv.owner_doctor_id) = $1
         and rbsv.active = true
         and dp.active = true
         and u.is_active = true
@@ -2166,7 +2244,7 @@ export async function createAssignedToMeNotifications(input: {
       const text = reportingCaseNotificationText(caseRow ?? null);
       const actionUrl = caseRow?.caseType === "comparison" && caseRow.comparisonRequestId
         ? `/comparisons/${caseRow.comparisonRequestId}`
-        : `/doctor/reporting-board/saved/${target.token}`;
+        : `/reporting/worklist/${target.token}`;
       const dedupeKey = `reporting_case_assigned_to_me:${target.savedViewId}:${target.recipientDoctorId}:${notificationCase.caseType}:${notificationCase.id}`;
       const result = await pool.query<CreatedNotificationRow>(
         `

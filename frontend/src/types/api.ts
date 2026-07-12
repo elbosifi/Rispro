@@ -429,6 +429,11 @@ export interface ReportingBoardSettings {
   enabledModalityCodes: string[];
   defaultRequiresReport: boolean;
   defaultReportStatusFilter: ReportingBoardReportStatus;
+  defaultSortBy: ReportingBoardSortBy;
+  defaultSortDirection: "asc" | "desc";
+  pinUrgentToTop: boolean;
+  includedCaseSources: Array<"appointments" | "comparisons">;
+  refreshIntervalSeconds: number;
 }
 
 export interface ReportingBoardSavedView {
@@ -444,9 +449,26 @@ export interface ReportingBoardSavedView {
   expiresAt: string | null;
   revokedAt: string | null;
   accessMode: "public_readonly";
+  linkKind: "admin_saved_view" | "doctor_worklist";
+  systemManaged: boolean;
+  targetDoctorId: number | null;
+  adminDisabledAt: string | null;
   matchingCaseCount?: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DoctorReportingWorklistSummary extends ReportingBoardSavedView {
+  doctorDisplayName: string;
+  username: string;
+  doctorRole: string;
+  userActive: boolean;
+  doctorActive: boolean;
+  effectiveModalityCodes: string[];
+  assignedPendingCount: number;
+  eligibleUnassignedCount: number;
+  subscriptionCount: number;
+  scopeMessage: string | null;
 }
 
 export interface ReportingBoardCaseRow {
@@ -757,8 +779,10 @@ export interface ReportingBoardMobileCase {
 }
 
 export interface ReportingBoardMobileResponse {
-  savedView: { id: number; name: string; token: string };
-  lockedFilters: ReportingBoardFilters;
+  savedView: { id: number; name: string; token: string; linkKind?: "admin_saved_view" | "doctor_worklist"; targetDoctorId?: number | null };
+  lockedFilters: ReportingBoardFilters | { systemManaged: true; targetDoctorId: number | null };
+  effectiveModalityCodes?: string[] | null;
+  scopeMessage?: string | null;
   currentDoctorId: number | null;
   filters: ReportingBoardFilters;
   filterSummary: string[];
@@ -785,6 +809,7 @@ export interface ReportingBoardMobileResponse {
     copyAccession: boolean;
     copyMrn: boolean;
   };
+  refreshIntervalSeconds?: number;
   refreshedAt: string;
 }
 

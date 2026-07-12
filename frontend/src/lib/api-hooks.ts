@@ -68,6 +68,7 @@ import type {
   ReportingBoardMobileResponse,
   ReportingBoardPushConfig,
   ReportingBoardSavedView,
+  DoctorReportingWorklistSummary,
   ReportingBoardSettings,
   ReportingBoardStatsResponse,
   ComparisonRequest,
@@ -916,6 +917,27 @@ export async function unassignReportingBoardMobileCase(token: string, identity: 
 export async function fetchReportingBoardSavedViews(): Promise<ReportingBoardSavedView[]> {
   const raw = await api<{ savedViews: ReportingBoardSavedView[] }>("/doctor/reporting-board/saved-views");
   return raw.savedViews;
+}
+
+export async function fetchMyDoctorReportingWorklist(): Promise<DoctorReportingWorklistSummary> {
+  const raw = await api<{ worklist: DoctorReportingWorklistSummary }>("/doctor/reporting-board/doctor-worklists/me");
+  return raw.worklist;
+}
+
+export async function fetchDoctorReportingWorklists(): Promise<DoctorReportingWorklistSummary[]> {
+  const raw = await api<{ worklists: DoctorReportingWorklistSummary[] }>("/doctor/reporting-board/doctor-worklists");
+  return raw.worklists;
+}
+
+export async function updateDoctorReportingWorklist(
+  id: number,
+  payload: { active?: boolean; expiresAt?: string | null; rotate?: boolean }
+): Promise<DoctorReportingWorklistSummary> {
+  const raw = await api<{ worklist: DoctorReportingWorklistSummary }>(`/doctor/reporting-board/doctor-worklists/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.worklist;
 }
 
 export async function createReportingBoardSavedView(payload: {

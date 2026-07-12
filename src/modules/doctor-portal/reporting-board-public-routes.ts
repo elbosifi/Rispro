@@ -139,9 +139,10 @@ router.get(
 router.post(
   "/saved-views/public/:token/mobile/push-subscribe",
   mobileLimiter,
+  requireAuth,
   asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
-    res.json(await subscribePublicReportingBoardMobilePush(String(req.params.token || ""), {
+    res.json(await subscribePublicReportingBoardMobilePush(actor(req)!, String(req.params.token || ""), {
       subscription: asUnknownRecord(body.subscription ?? body),
       userAgent: req.get("user-agent") ?? null,
     }));
@@ -151,27 +152,30 @@ router.post(
 router.post(
   "/saved-views/public/:token/mobile/push-unsubscribe",
   mobileLimiter,
+  requireAuth,
   asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
-    res.json(await unsubscribePublicReportingBoardMobilePush(String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
+    res.json(await unsubscribePublicReportingBoardMobilePush(actor(req)!, String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
   })
 );
 
 router.post(
   "/saved-views/public/:token/mobile/push-status",
   mobileLimiter,
+  requireAuth,
   asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
-    res.json(await getPublicReportingBoardMobilePushStatus(String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
+    res.json(await getPublicReportingBoardMobilePushStatus(actor(req)!, String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
   })
 );
 
 router.post(
   "/saved-views/public/:token/mobile/test-push",
   mobileLimiter,
+  requireAuth,
   asyncRoute(async (req: ReportingPublicRequest, res: Response) => {
     const body = asUnknownRecord(req.body);
-    res.json(await sendPublicReportingBoardMobileTestPush(String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
+    res.json(await sendPublicReportingBoardMobileTestPush(actor(req)!, String(req.params.token || ""), asUnknownRecord(body.subscription ?? body)));
   })
 );
 

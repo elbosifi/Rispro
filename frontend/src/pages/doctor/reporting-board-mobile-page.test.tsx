@@ -137,6 +137,7 @@ function renderPage() {
 describe("ReportingBoardMobilePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024, writable: true });
     fetchReportingBoardMobileViewMock.mockResolvedValue(mobileResponse);
     fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, displayName: "Dr Target" }]);
     assignReportingBoardMobileCaseToMeMock.mockResolvedValue({ assignmentId: 1 });
@@ -162,6 +163,16 @@ describe("ReportingBoardMobilePage", () => {
     expect(screen.queryByText("Board settings")).toBeNull();
     expect(screen.getByText("Read-only saved view.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Assign to me" })).toBeNull();
+    expect(screen.queryByAltText(/QR code/i)).toBeNull();
+  });
+
+  it("renders the shared worklist data as a dense desktop table at desktop width", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440, writable: true });
+    renderPage();
+
+    expect(await screen.findByTestId("doctor-worklist-desktop-table")).toBeTruthy();
+    expect(screen.getByText("Mohammed Bashir Meftah")).toBeTruthy();
+    expect(screen.queryByAltText(/QR code/i)).toBeNull();
   });
 
   it("uses comparison identity for mobile saved-view actions", async () => {
@@ -283,7 +294,7 @@ describe("ReportingBoardMobilePage", () => {
     const register = vi.fn().mockResolvedValue({ pushManager: { subscribe } });
     Object.defineProperty(window, "Notification", { configurable: true, value: { permission: "granted", requestPermission: vi.fn() } });
     Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
-    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { register } });
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { register, getRegistration: vi.fn().mockResolvedValue(null) } });
 
     renderPage();
 

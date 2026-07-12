@@ -22,6 +22,8 @@ import {
   getReportingBoardSettings,
   getReportingBoardStats,
   getMyReportingBoardNotifications,
+  getMyDoctorReportingWorklist,
+  listDoctorReportingWorklists,
   listMyReportingBoardSavedViews,
   loadReportingBoardSavedViewByToken,
   clearReportingBoardCaseManualFinal,
@@ -39,6 +41,7 @@ import {
   unassignReportingBoardCase,
   undoScheduledReportingBoardBulkAssignmentJob,
   updateReportingBoardSavedView,
+  updateDoctorReportingWorklist,
 } from "./reporting-board-service.js";
 
 const router = Router();
@@ -248,6 +251,38 @@ router.get(
   "/stats",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     res.json(await getReportingBoardStats(actor(req), filtersFromQuery(req.query)));
+  })
+);
+
+router.get(
+  "/doctor-worklists/me",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ worklist: await getMyDoctorReportingWorklist(actor(req)) });
+  })
+);
+
+router.get(
+  "/doctor-worklists",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ worklists: await listDoctorReportingWorklists(actor(req)) });
+  })
+);
+
+router.patch(
+  "/doctor-worklists/:id",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    res.json({
+      worklist: await updateDoctorReportingWorklist(
+        actor(req),
+        requiredPositiveInteger(req.params.id, "id"),
+        {
+          active: body.active === undefined ? undefined : asOptionalBoolean(body.active),
+          expiresAt: body.expiresAt === undefined ? undefined : body.expiresAt === null ? null : asString(body.expiresAt),
+          rotate: body.rotate === undefined ? undefined : asOptionalBoolean(body.rotate),
+        }
+      ),
+    });
   })
 );
 

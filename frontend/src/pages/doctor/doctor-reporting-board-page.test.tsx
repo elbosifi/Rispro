@@ -783,7 +783,7 @@ describe("DoctorReportingBoardPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Show mobile QR/i }));
 
     expect(await screen.findByText("Mobile read-only saved view")).toBeTruthy();
-    expect(await screen.findByText(/\/mobile\/reporting-view\/tok-9/)).toBeTruthy();
+    expect(await screen.findByText(/\/reporting\/worklist\/tok-9/)).toBeTruthy();
   });
 
   it("validates and submits the bulk assignment modal", async () => {
@@ -1032,12 +1032,12 @@ describe("DoctorReportingBoardPage", () => {
     }));
   });
 
-  it("does not expose editable settings for non-superadmin managers", async () => {
+  it("allows doctor supervisors to edit centrally managed Reporting Board defaults", async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Board settings" }));
-    expect(await screen.findByText("Read-only. Only superadmin can update cutoff settings.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Save settings" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Save settings" })).toBeTruthy();
+    expect(screen.getByLabelText("Pin STAT/urgent first")).toBeTruthy();
   });
 
   it("opens board settings modal with existing controls", async () => {

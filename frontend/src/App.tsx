@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams } from "react-router-dom";
 import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Clock3 } from "lucide-react";
@@ -342,13 +342,20 @@ function AppContent() {
   );
 }
 
+function LegacyReportingWorklistRedirect() {
+  const { token = "" } = useParams();
+  const location = useLocation();
+  return <Navigate to={`/reporting/worklist/${encodeURIComponent(token)}${location.search}`} replace />;
+}
+
 function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
-      <Route path="/mobile/reporting-view/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />
+      <Route path="/reporting/worklist/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />
+      <Route path="/mobile/reporting-view/:token" element={<LegacyReportingWorklistRedirect />} />
       <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route path="/print/reporting-board" element={<ProtectedRoute><ReportingBoardPrintPage /></ProtectedRoute>} />
       <Route

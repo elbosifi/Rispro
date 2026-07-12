@@ -105,6 +105,9 @@ const fetchReportingBoardSettingsMock = vi.fn();
 const updateReportingBoardSettingsMock = vi.fn();
 const fetchReportingBoardCasesMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
+const fetchMyDoctorReportingWorklistMock = vi.fn();
+const fetchDoctorReportingWorklistsMock = vi.fn();
+const updateDoctorReportingWorklistMock = vi.fn();
 const createReportingBoardSavedViewMock = vi.fn();
 const updateReportingBoardSavedViewMock = vi.fn();
 const fetchReportingBoardSavedViewByTokenMock = vi.fn();
@@ -225,6 +228,9 @@ vi.mock("@/lib/api-hooks", () => ({
   updateReportingBoardSettings: (...args: unknown[]) => updateReportingBoardSettingsMock(...args),
   fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
+  fetchMyDoctorReportingWorklist: (...args: unknown[]) => fetchMyDoctorReportingWorklistMock(...args),
+  fetchDoctorReportingWorklists: (...args: unknown[]) => fetchDoctorReportingWorklistsMock(...args),
+  updateDoctorReportingWorklist: (...args: unknown[]) => updateDoctorReportingWorklistMock(...args),
   createReportingBoardSavedView: (...args: unknown[]) => createReportingBoardSavedViewMock(...args),
   updateReportingBoardSavedView: (...args: unknown[]) => updateReportingBoardSavedViewMock(...args),
   fetchReportingBoardSavedViewByToken: (...args: unknown[]) => fetchReportingBoardSavedViewByTokenMock(...args),
@@ -478,6 +484,9 @@ describe("Doctor Portal shell", () => {
     updateReportingBoardSettingsMock.mockReset();
     fetchReportingBoardCasesMock.mockReset();
     fetchReportingBoardSavedViewsMock.mockReset();
+    fetchMyDoctorReportingWorklistMock.mockReset();
+    fetchDoctorReportingWorklistsMock.mockReset();
+    updateDoctorReportingWorklistMock.mockReset();
     createReportingBoardSavedViewMock.mockReset();
     updateReportingBoardSavedViewMock.mockReset();
     fetchReportingBoardSavedViewByTokenMock.mockReset();
@@ -743,14 +752,30 @@ describe("Doctor Portal shell", () => {
     fetchReportingBoardSettingsMock.mockResolvedValue({
       cutoffMode: "days_back",
       defaultCutoffDate: null,
-      daysBack: 14,
+      daysBack: 30,
       enabledModalityCodes: ["CT", "MR"],
       defaultRequiresReport: true,
       defaultReportStatusFilter: "required_not_final",
+      defaultSortBy: "priority_study_date",
+      defaultSortDirection: "asc",
+      pinUrgentToTop: true,
+      includedCaseSources: ["appointments", "comparisons"],
+      refreshIntervalSeconds: 50,
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
     fetchReportingBoardCasesMock.mockResolvedValue({ cases: [], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([]);
+    fetchMyDoctorReportingWorklistMock.mockResolvedValue({
+      id: 90, ownerUserId: null, ownerDoctorId: null, name: "Dr Normal Worklist", token: "doctor-token",
+      filters: {}, notificationSettings: {}, active: true, lastAccessedAt: null, expiresAt: null, revokedAt: null,
+      accessMode: "public_readonly", linkKind: "doctor_worklist", systemManaged: true, targetDoctorId: 1,
+      adminDisabledAt: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+      doctorDisplayName: "Dr Normal", username: "doctor", doctorRole: "consultant", userActive: true,
+      doctorActive: true, effectiveModalityCodes: ["CT", "MR"], assignedPendingCount: 2,
+      eligibleUnassignedCount: 3, subscriptionCount: 0, scopeMessage: null,
+    });
+    fetchDoctorReportingWorklistsMock.mockResolvedValue([]);
+    updateDoctorReportingWorklistMock.mockResolvedValue({});
     createReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     updateReportingBoardSavedViewMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: {}, notificationSettings: {}, active: true });
     fetchReportingBoardSavedViewByTokenMock.mockResolvedValue({ id: 1, name: "CT urgent", token: "tok", filters: { priorityCode: "urgent" }, notificationSettings: {}, active: true });
@@ -1671,12 +1696,13 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByTitle(/Plain Patient.*PACS note/)).toBeNull();
   });
 
-  it("normal doctor cannot open the Reporting Assignment Board route or assignment controls", async () => {
+  it("normal doctor sees only their personal Reporting Worklist card without manager controls", async () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal("/doctor/reporting-board");
 
-    expect(await screen.findByText("Clinical coordination workspace")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "My Reporting Worklist" })).toBeTruthy();
     expect(screen.queryByText("Reporting Assignment Board")).toBeNull();
+    expect(screen.queryByText("Saved views")).toBeNull();
     expect(screen.queryByRole("button", { name: /Bulk assign next cases/i })).toBeNull();
   });
 

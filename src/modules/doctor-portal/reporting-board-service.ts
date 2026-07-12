@@ -76,9 +76,20 @@ import type {
   ReportingBoardStatsBaseRow,
   ReportingBoardStatsResponse,
   ReportingBoardStatsSummary,
+  DoctorReportingWorklistSummary,
 } from "./reporting-board-types.js";
 import type { ClaimedReportingBoardBulkAssignmentJob } from "./reporting-board-repository.js";
 import type { ReportingBoardManualFinalOverride } from "./reporting-board-repository.js";
+import {
+  claimAppointmentToDoctor,
+  claimComparisonToDoctor,
+  findDoctorWorklistByDoctorId,
+  findDoctorWorklistById,
+  listDoctorWorklistBaseRows,
+  listEffectiveDoctorModalityCodes,
+  updateDoctorWorklistLifecycle,
+} from "./doctor-worklist-repository.js";
+import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 
 interface Actor {
   userId: UserId;
@@ -232,13 +243,15 @@ async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<Effe
     caseCategory: input.caseCategory ?? null,
     priorityCode: input.priorityCode ?? null,
     q: input.q?.trim() || null,
-    caseSource: input.caseSource ?? "all",
+    caseSource: input.caseSource ?? (
+      settings.includedCaseSources.length === 1 ? settings.includedCaseSources[0] : "all"
+    ),
     assignedDoctorId: input.assignedDoctorId ?? null,
     modalityId: input.modalityId ?? null,
     modalityCodes: input.modalityCodes ?? null,
-    sortBy: normalizeSortBy(input.sortBy),
-    sortDirection: normalizeSortDirection(input.sortDirection),
-    pinUrgentToTop: input.pinUrgentToTop ?? true,
+    sortBy: normalizeSortBy(input.sortBy ?? settings.defaultSortBy),
+    sortDirection: normalizeSortDirection(input.sortDirection ?? settings.defaultSortDirection),
+    pinUrgentToTop: input.pinUrgentToTop ?? settings.pinUrgentToTop,
   };
 }
 
@@ -684,7 +697,7 @@ export async function getReportingBoardSettings(actor: Actor) {
 }
 
 export async function putReportingBoardSettings(actor: Actor, input: unknown) {
-  if (actor.appRole !== "super_admin") throw new HttpError(403, "Only super_admin can update Reporting Board settings.");
+  await requireRosterManager(actor);
   return updateReportingBoardSettings(input, actor.userId);
 }
 
@@ -912,14 +925,14 @@ function mobileCase(row: ReportingBoardCaseRow) {
   };
 }
 
-function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean) {
-  const actionDisabledReason = !canManage
-    ? "Open RISpro in this browser with supervisor access to manage assignments."
+function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canClaimToSelf = false) {
+  const actionDisabledReason = !canManage && !canClaimToSelf
+    ? "Sign in with the doctor profile linked to this worklist to claim eligible cases."
     : !row.canAssign
       ? row.exclusionReason ?? "This case is not eligible for assignment changes."
       : null;
   return {
-    canAssignToMe: canManage && row.canAssign && row.assignmentStatus === "unassigned",
+    canAssignToMe: canClaimToSelf && row.canAssign && row.assignmentStatus === "unassigned",
     canReassign: canManage && row.canAssign,
     canUnassign: canManage && row.canAssign && row.assignmentStatus === "assigned",
     actionDisabledReason,
@@ -948,6 +961,79 @@ function filterSummary(filters: ReportingBoardFilters): string[] {
   ].filter(Boolean) as string[];
 }
 
+async function doctorWorklistScope(
+  doctorId: number,
+  input: ReportingBoardFilters = {},
+  fullScope = false
+): Promise<{
+  cases: ReportingBoardCaseRow[];
+  filters: EffectiveReportingBoardFilters;
+  effectiveModalityCodes: string[];
+  scopeMessage: string | null;
+}> {
+  const settings = await readReportingBoardSettings();
+  const permanentCutoff = settings.cutoffMode === "fixed_date" && settings.defaultCutoffDate
+    ? settings.defaultCutoffDate
+    : addDays(todayIso(), -settings.daysBack);
+  const narrowedDateFrom = input.dateFrom && input.dateFrom > permanentCutoff ? input.dateFrom : permanentCutoff;
+  const effectiveModalityCodes = await listEffectiveDoctorModalityCodes(doctorId, settings.enabledModalityCodes);
+  const allowedSources = settings.includedCaseSources;
+  const requestedSource = input.caseSource && input.caseSource !== "all" ? input.caseSource : null;
+  const caseSource = requestedSource && allowedSources.includes(requestedSource)
+    ? requestedSource
+    : allowedSources.length === 1 ? allowedSources[0] : "all";
+  const compatibleReportStatus = input.reportStatus && !["all", "final"].includes(input.reportStatus)
+    ? input.reportStatus
+    : settings.defaultReportStatusFilter;
+  const base = await effectiveFilters({
+    ...input,
+    dateFrom: narrowedDateFrom,
+    cutoffDate: permanentCutoff,
+    requiresReport: settings.defaultRequiresReport,
+    reportStatus: compatibleReportStatus,
+    caseSource,
+    modalityId: null,
+    modalityCode: null,
+    modalityCodes: effectiveModalityCodes,
+    limit: MAX_UNIFIED_CANDIDATE_FETCH,
+    offset: 0,
+  });
+  if (input.modalityCode) {
+    const requested = input.modalityCode.toUpperCase();
+    base.modalityCodes = effectiveModalityCodes.includes(requested) ? [requested] : [];
+  }
+  if (effectiveModalityCodes.length === 0 || base.modalityCodes?.length === 0) {
+    return {
+      cases: [],
+      filters: { ...base, limit: normalizeLimit(input.limit), offset: normalizeOffset(input.offset) },
+      effectiveModalityCodes,
+      scopeMessage: "No Reporting Board modalities are both globally enabled and permitted for this doctor.",
+    };
+  }
+
+  const requestedAssignmentStatus = input.assignedDoctorId === doctorId ? "assigned" : input.assignmentStatus;
+  const includeAssigned = requestedAssignmentStatus !== "unassigned";
+  const includeUnassigned = requestedAssignmentStatus !== "assigned";
+  const [assigned, unassigned] = await Promise.all([
+    includeAssigned
+      ? listUnifiedReportingBoardCases({ ...base, assignedDoctorId: doctorId, assignmentStatus: "assigned" }, { fullScope: true })
+      : Promise.resolve([]),
+    includeUnassigned
+      ? listUnifiedReportingBoardCases({ ...base, assignedDoctorId: null, assignmentStatus: "unassigned" }, { fullScope: true })
+      : Promise.resolve([]),
+  ]);
+  const allCases = [...new Map([...assigned, ...unassigned].map((row) => [row.caseKey, row])).values()]
+    .sort(compareReportingBoardRows(base));
+  const offset = normalizeOffset(input.offset);
+  const limit = normalizeLimit(input.limit);
+  return {
+    cases: fullScope ? allCases : allCases.slice(offset, offset + limit),
+    filters: { ...base, limit, offset },
+    effectiveModalityCodes,
+    scopeMessage: null,
+  };
+}
+
 async function getMobileIdentity(actor?: Actor | null) {
   if (!actor) return null;
   try {
@@ -961,11 +1047,25 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
   const identity = await getMobileIdentity(actor);
-  const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
-  const settings = await readReportingBoardSettings();
-  const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? settings.enabledModalityCodes };
+  const globalSettings = await readReportingBoardSettings();
+  const requestedLimit = normalizeLimit(input.limit ?? 100);
+  const requestedOffset = normalizeOffset(input.offset);
+  let filters: EffectiveReportingBoardFilters;
+  let allCases: ReportingBoardCaseRow[];
+  let effectiveModalityCodes: string[] | null = null;
+  let scopeMessage: string | null = null;
   const fullScopeStartedAt = Date.now();
-  const allCases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
+  if (view.linkKind === "doctor_worklist" && view.targetDoctorId) {
+    const scope = await doctorWorklistScope(view.targetDoctorId, { ...input, limit: MAX_CASE_LIST_LIMIT, offset: 0 }, true);
+    filters = { ...scope.filters, limit: requestedLimit, offset: requestedOffset };
+    allCases = scope.cases;
+    effectiveModalityCodes = scope.effectiveModalityCodes;
+    scopeMessage = scope.scopeMessage;
+  } else {
+    filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
+    const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? globalSettings.enabledModalityCodes };
+    allCases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
+  }
   const fullScopeListingDurationMs = Date.now() - fullScopeStartedAt;
   const timing = {
     type: "reporting_board_mobile_full_scope_timing",
@@ -976,8 +1076,12 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   if (fullScopeListingDurationMs > MOBILE_FULL_SCOPE_WARNING_MS) {
     console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
   }
-  const cases = allCases.slice(filters.offset, filters.offset + filters.limit);
+  const cases = allCases.slice(requestedOffset, requestedOffset + requestedLimit);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
+  const canClaimToSelf = Boolean(
+    actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
+    (identity.profile.id === view.targetDoctorId || canManage)
+  );
   const accessLevel = !actor ? "public" : !identity ? "public" : identity.moduleCapabilities.includes("doctor_admin") ? "admin" : identity.moduleCapabilities.includes("doctor_supervisor") ? "supervisor" : "doctor";
 
   await insertDoctorAuditEvent(pool, {
@@ -992,8 +1096,10 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   await touchSavedViewLastAccessed(view.id).catch(() => undefined);
 
   return {
-    savedView: { id: view.id, name: view.name, token: view.token },
-    lockedFilters: view.filters,
+    savedView: { id: view.id, name: view.name, token: view.token, linkKind: view.linkKind, targetDoctorId: view.targetDoctorId },
+    lockedFilters: view.linkKind === "doctor_worklist" ? { systemManaged: true, targetDoctorId: view.targetDoctorId } : view.filters,
+    effectiveModalityCodes,
+    scopeMessage,
     currentDoctorId: identity?.profile?.id ?? null,
     filters,
     filterSummary: filterSummary(filters),
@@ -1005,19 +1111,20 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
       hasMore: filters.offset + cases.length < allCases.length,
       nextOffset: filters.offset + cases.length < allCases.length ? filters.offset + cases.length : null,
     },
-    cases: cases.map((row) => ({ ...mobileCase(row), ...mobileCaseActions(row, canManage) })),
+    cases: cases.map((row) => ({ ...mobileCase(row), ...mobileCaseActions(row, canManage, canClaimToSelf) })),
     allowedActions: {
       authenticated: Boolean(actor),
       accessLevel,
-      readOnly: !canManage,
-      readOnlyReason: canManage ? null : actor ? "Doctor supervisor access is required to manage assignments." : "Open RISpro in this browser to manage assignments.",
-      assignToMe: canManage,
+      readOnly: !canManage && !canClaimToSelf,
+      readOnlyReason: canManage || canClaimToSelf ? null : actor ? "This worklist does not belong to your doctor profile." : "Sign in to claim eligible cases.",
+      assignToMe: canClaimToSelf,
       reassign: canManage,
       unassign: canManage,
       batchReassign: false,
       copyAccession: true,
       copyMrn: true,
     },
+    refreshIntervalSeconds: globalSettings.refreshIntervalSeconds,
     refreshedAt: new Date().toISOString(),
   };
 }
@@ -1064,11 +1171,60 @@ async function ensureCaseInSavedViewScope(token: string, identity: MobileCaseIde
 }
 
 export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: string, identity: MobileCaseIdentity, reason?: string | null) {
-  const me = await requireRosterManager(actor);
-  await ensureCaseInSavedViewScope(token, identity);
-  return identity.caseType === "appointment"
-    ? assignReportingBoardCaseToDoctor(actor, { appointmentId: identity.appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" })
-    : assignComparisonRequest(actor, identity.comparisonRequestId, { doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
+  const me = await requireRosterDoctor(actor);
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Worklist not found.");
+  const canManage = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+  if (view.linkKind !== "doctor_worklist") {
+    await requireRosterManager(actor);
+    await ensureCaseInSavedViewScope(token, identity);
+    return identity.caseType === "appointment"
+      ? assignReportingBoardCaseToDoctor(actor, { appointmentId: identity.appointmentId, doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" })
+      : assignComparisonRequest(actor, identity.comparisonRequestId, { doctorId: me.profile!.id, reason: reason ?? "mobile saved-view assign to me" });
+  }
+  if (!canManage && view.targetDoctorId !== me.profile!.id) {
+    throw new HttpError(403, "Doctors can claim cases only through their own worklist.");
+  }
+  const scope = await doctorWorklistScope(view.targetDoctorId!, {
+    appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,
+    comparisonRequestId: identity.caseType === "comparison" ? identity.comparisonRequestId : null,
+    assignmentStatus: "unassigned",
+    limit: 1,
+    offset: 0,
+  });
+  const eligible = scope.cases.find((row) => identity.caseType === "appointment"
+    ? row.caseType === "appointment" && row.appointmentId === identity.appointmentId
+    : row.caseType === "comparison" && row.comparisonRequestId === identity.comparisonRequestId);
+  if (!eligible || !eligible.canAssign || eligible.assignmentStatus !== "unassigned" || eligible.reportStatus === "final") {
+    throw new HttpError(409, "Case is no longer eligible to claim.");
+  }
+  const claimSettings = await readReportingBoardSettings();
+  const actorModalityCodes = await listEffectiveDoctorModalityCodes(me.profile!.id, claimSettings.enabledModalityCodes);
+  if (!actorModalityCodes.includes(eligible.modalityCode.toUpperCase())) {
+    throw new HttpError(403, "This modality is not enabled for the claiming doctor.");
+  }
+  const result = identity.caseType === "appointment"
+    ? await claimAppointmentToDoctor({
+      appointmentId: identity.appointmentId,
+      doctorId: me.profile!.id,
+      actorUserId: actor.userId,
+      allowedModalityCodes: actorModalityCodes,
+      reason,
+    })
+    : await claimComparisonToDoctor({
+      comparisonRequestId: identity.comparisonRequestId,
+      doctorId: me.profile!.id,
+      actorUserId: actor.userId,
+      allowedModalityCodes: actorModalityCodes,
+      reason,
+    });
+  if (!result) throw new HttpError(409, "Another doctor claimed this case first.");
+  await createAssignedToMeNotifications({
+    doctorId: me.profile!.id,
+    appointmentIds: identity.caseType === "appointment" ? [identity.appointmentId] : [],
+    comparisonRequestIds: identity.caseType === "comparison" ? [identity.comparisonRequestId] : [],
+  });
+  return result;
 }
 
 export async function reassignReportingBoardMobileCase(actor: Actor, token: string, identity: MobileCaseIdentity, doctorId: number, reason?: string | null) {
@@ -1088,7 +1244,7 @@ export async function unassignReportingBoardMobileCase(actor: Actor, token: stri
 }
 
 export async function listMyReportingBoardSavedViews(actor: Actor) {
-  const me = await requireRosterDoctor(actor);
+  const me = await requireRosterManager(actor);
   const views = await listSavedViews(actor.userId, me.profile!.id);
   const settings = await readReportingBoardSettings();
   return Promise.all(views.map(async (view) => {
@@ -1110,7 +1266,7 @@ export async function createReportingBoardSavedView(
   actor: Actor,
   input: { name: string; filters: ReportingBoardFilters; notificationSettings: ReportingBoardNotificationSettings }
 ) {
-  const me = await requireRosterDoctor(actor);
+  const me = await requireRosterManager(actor);
   const name = input.name.trim();
   if (!name) throw new HttpError(400, "name is required.");
   return createSavedView({
@@ -1133,7 +1289,7 @@ export async function updateReportingBoardSavedView(
     expiresAt?: string | null;
   }
 ) {
-  const me = await requireRosterDoctor(actor);
+  const me = await requireRosterManager(actor);
   const expiresAt = normalizeSavedViewExpiresAt(input.expiresAt);
   const view = await updateSavedView({
     id: input.id,
@@ -1158,7 +1314,7 @@ function normalizeSavedViewExpiresAt(value: string | null | undefined): string |
 }
 
 export async function rotateReportingBoardSavedViewToken(actor: Actor, id: number) {
-  const me = await requireRosterDoctor(actor);
+  const me = await requireRosterManager(actor);
   const current = await findSavedViewById(id, actor.userId);
   if (!current) throw new HttpError(404, "Saved view not found.");
   if (!current.active || current.revokedAt) throw new HttpError(409, "Inactive or revoked saved views cannot be rotated.");
@@ -1168,7 +1324,7 @@ export async function rotateReportingBoardSavedViewToken(actor: Actor, id: numbe
 }
 
 export async function revokeReportingBoardSavedView(actor: Actor, id: number) {
-  const me = await requireRosterDoctor(actor);
+  const me = await requireRosterManager(actor);
   const view = await revokeSavedView({ id, ownerUserId: actor.userId, ownerDoctorId: me.profile!.id });
   if (!view) throw new HttpError(404, "Saved view not found.");
   return view;
@@ -1176,12 +1332,61 @@ export async function revokeReportingBoardSavedView(actor: Actor, id: number) {
 
 export async function loadReportingBoardSavedViewByToken(actor: Actor, token: string) {
   const me = await requireRosterDoctor(actor);
-  let view = await findSavedViewByToken(token, actor.userId);
-  if (!view && (me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"))) {
-    view = await findActiveSavedViewByToken(token);
-  }
+  const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
+  const canManage = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+  if (!canManage && (view.linkKind !== "doctor_worklist" || view.targetDoctorId !== me.profile!.id)) {
+    throw new HttpError(403, "This worklist does not belong to your doctor profile.");
+  }
   return view;
+}
+
+async function summarizeDoctorWorklist(
+  view: NonNullable<Awaited<ReturnType<typeof findDoctorWorklistByDoctorId>>>
+): Promise<DoctorReportingWorklistSummary> {
+  const scope = await doctorWorklistScope(view.targetDoctorId!, { limit: MAX_CASE_LIST_LIMIT, offset: 0 }, true);
+  return {
+    ...view,
+    effectiveModalityCodes: scope.effectiveModalityCodes,
+    assignedPendingCount: scope.cases.filter((row) => row.assignedDoctorId === view.targetDoctorId).length,
+    eligibleUnassignedCount: scope.cases.filter((row) => row.assignmentStatus === "unassigned").length,
+    scopeMessage: scope.scopeMessage,
+  };
+}
+
+export async function listDoctorReportingWorklists(actor: Actor): Promise<DoctorReportingWorklistSummary[]> {
+  await requireRosterManager(actor);
+  return Promise.all((await listDoctorWorklistBaseRows()).map(summarizeDoctorWorklist));
+}
+
+export async function getMyDoctorReportingWorklist(actor: Actor): Promise<DoctorReportingWorklistSummary> {
+  const me = await requireRosterDoctor(actor);
+  await syncDoctorWorklistLifecycle(me.profile!.id);
+  const view = await findDoctorWorklistByDoctorId(me.profile!.id);
+  if (!view) throw new HttpError(404, "Doctor worklist not found.");
+  return summarizeDoctorWorklist(view);
+}
+
+export async function updateDoctorReportingWorklist(
+  actor: Actor,
+  id: number,
+  input: { active?: boolean; expiresAt?: string | null; rotate?: boolean }
+): Promise<DoctorReportingWorklistSummary> {
+  await requireRosterManager(actor);
+  const current = await findDoctorWorklistById(id);
+  if (!current) throw new HttpError(404, "Doctor worklist not found.");
+  const expiresAt = normalizeSavedViewExpiresAt(input.expiresAt);
+  await updateDoctorWorklistLifecycle({
+    id,
+    actorUserId: actor.userId,
+    active: input.active,
+    expiresAt,
+    rotate: input.rotate,
+  });
+  await syncDoctorWorklistLifecycle(current.targetDoctorId!);
+  const updated = await findDoctorWorklistById(id);
+  if (!updated) throw new HttpError(404, "Doctor worklist not found.");
+  return summarizeDoctorWorklist(updated);
 }
 
 async function filtersFromBulkInput(actor: Actor, input: BulkAssignNextCasesInput): Promise<ReportingBoardFilters> {
@@ -1739,7 +1944,7 @@ export async function subscribeReportingBoardSavedViewPush(
   actor: Actor,
   input: { savedViewId: number; subscription: BrowserPushSubscriptionInput; userAgent?: string | null }
 ) {
-  const me = await requireRosterDoctor(actor);
+  const me = await requireRosterManager(actor);
   const view = await findSavedViewById(input.savedViewId, actor.userId);
   if (!view) throw new HttpError(404, "Saved view not found.");
   return upsertReportingBoardPushSubscription({
@@ -1751,45 +1956,53 @@ export async function subscribeReportingBoardSavedViewPush(
   });
 }
 
+async function authorizeWorklistNotificationActor(actor: Actor, token: string) {
+  const me = await requireRosterDoctor(actor);
+  const view = await findActiveSavedViewByToken(token);
+  if (!view) throw new HttpError(404, "Saved view not found.");
+  const canManage = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+  if (!canManage && (view.linkKind !== "doctor_worklist" || view.targetDoctorId !== me.profile!.id)) {
+    throw new HttpError(403, "This worklist does not belong to your doctor profile.");
+  }
+  return { me, view };
+}
+
 export async function subscribePublicReportingBoardMobilePush(
+  actor: Actor,
   token: string,
   input: { subscription: BrowserPushSubscriptionInput; userAgent?: string | null }
 ) {
-  const view = await findActiveSavedViewByToken(token);
-  if (!view) throw new HttpError(404, "Saved view not found.");
+  const { me, view } = await authorizeWorklistNotificationActor(actor, token);
   return upsertReportingBoardPushSubscription({
     savedViewId: view.id,
-    userId: null,
-    doctorId: null,
+    userId: actor.userId,
+    doctorId: me.profile!.id,
     subscription: input.subscription,
     userAgent: input.userAgent,
   });
 }
 
-export async function unsubscribePublicReportingBoardMobilePush(token: string, subscription: BrowserPushSubscriptionInput) {
-  const view = await findActiveSavedViewByToken(token);
-  if (!view) throw new HttpError(404, "Saved view not found.");
+export async function unsubscribePublicReportingBoardMobilePush(actor: Actor, token: string, subscription: BrowserPushSubscriptionInput) {
+  const { view } = await authorizeWorklistNotificationActor(actor, token);
   return disableReportingBoardPushSubscription({ savedViewId: view.id, subscription });
 }
 
-export async function getPublicReportingBoardMobilePushStatus(token: string, subscription: BrowserPushSubscriptionInput) {
-  const view = await findActiveSavedViewByToken(token);
-  if (!view) throw new HttpError(404, "Saved view not found.");
+export async function getPublicReportingBoardMobilePushStatus(actor: Actor, token: string, subscription: BrowserPushSubscriptionInput) {
+  const { view } = await authorizeWorklistNotificationActor(actor, token);
   return getReportingBoardPushSubscriptionStatus({ savedViewId: view.id, subscription });
 }
 
-export async function sendPublicReportingBoardMobileTestPush(token: string, subscription: BrowserPushSubscriptionInput) {
-  const view = await findActiveSavedViewByToken(token);
-  if (!view) throw new HttpError(404, "Saved view not found.");
+export async function sendPublicReportingBoardMobileTestPush(actor: Actor, token: string, subscription: BrowserPushSubscriptionInput) {
+  const { view } = await authorizeWorklistNotificationActor(actor, token);
   return sendReportingBoardSavedViewTestPush({
     savedViewId: view.id,
-    actionUrl: `/mobile/reporting-view/${view.token}`,
+    actionUrl: `/reporting/worklist/${view.token}`,
     subscription,
   });
 }
 
 export async function sendReportingBoardSavedViewTestNotification(actor: Actor, savedViewId: number) {
-  await requireRosterDoctor(actor);
+  await requireRosterManager(actor);
   const view = await findSavedViewById(savedViewId, actor.userId);
   if (!view) throw new HttpError(404, "Saved view not found.");
   const { cases } = await getReportingBoardCases(actor, { ...view.filters, limit: 1, offset: 0 });

@@ -7,6 +7,7 @@ import { canRoleAccessPage, readPageVisibilityMatrix } from "../../services/page
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { deriveDoctorCapabilities } from "./capabilities.js";
+import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
@@ -112,7 +113,9 @@ export async function createProfileForAdmin(
   input: CreateDoctorProfileInput
 ): Promise<DoctorProfileRow> {
   await requireDoctorAdmin(actorUserId, appRole);
-  return createDoctorProfile(input, actorUserId);
+  const profile = await createDoctorProfile(input, actorUserId);
+  await syncDoctorWorklistLifecycle(profile.id);
+  return profile;
 }
 
 export async function createDoctorWithUserForAdmin(
@@ -266,6 +269,7 @@ export async function createDoctorWithUserForAdmin(
       },
       reason: null,
     });
+    await syncDoctorWorklistLifecycle(profile.id, client);
     await client.query("commit");
 
     return {
@@ -309,6 +313,7 @@ export async function updateProfileForAdmin(
   if (!profile) {
     throw new HttpError(404, "Doctor profile not found.");
   }
+  await syncDoctorWorklistLifecycle(profile.id);
   return profile;
 }
 

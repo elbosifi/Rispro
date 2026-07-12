@@ -11,6 +11,7 @@ import {
   Settings,
   Stethoscope,
   Users,
+  QrCode,
 } from "lucide-react";
 import {
   dismissReportingBoardNotification,
@@ -27,6 +28,7 @@ import { DoctorTeamWorkloadPage } from "./doctor-team-workload-page";
 import { DoctorAvailabilityPage } from "./doctor-availability-page";
 import { DoctorAdminDoctorsPage } from "./doctor-admin-doctors-page";
 import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
+import { DoctorWorklistsPage, MyReportingWorklistCard } from "./doctor-worklists-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -39,10 +41,12 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/my-work", label: "My Work", icon: LayoutDashboard },
   { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
+  { path: "/doctor/reporting-board", label: "Reporting Board", icon: ClipboardList },
 ];
 
 const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/reporting-board", label: "Reporting Board", icon: ClipboardList, management: true },
+  { path: "/doctor/doctor-worklists", label: "Doctor Worklists", icon: QrCode, management: true },
   { path: "/doctor/roster-planner", label: "Roster Planner", icon: CalendarDays, management: true },
   { path: "/doctor/doctors-directory", label: "Doctors Directory", icon: Users, management: true },
   { path: "/doctor/advanced-setup", label: "Advanced Setup", icon: Settings, management: true },
@@ -103,6 +107,7 @@ function DoctorPortalHome({ me }: { me: DoctorMe }) {
           {canAccessProtocolsPage(me) && <ShortcutCard title="Protocols" body="Review and manage protocol tasks." to="/doctor/protocols" />}
         </section>
       )}
+      {canAccessClinical && <MyReportingWorklistCard />}
     </div>
   );
 }
@@ -242,7 +247,11 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route path="cases" element={<Navigate to="/doctor/today-cases" replace />} />
       <Route
         path="reporting-board"
-        element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+        element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : canAccessClinical ? <MyReportingWorklistCard /> : <Navigate to="/doctor/my-work" replace />}
+      />
+      <Route
+        path="doctor-worklists"
+        element={canManageRoster ? <DoctorWorklistsPage /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="reporting-board/saved/:token"
@@ -380,11 +389,17 @@ export default function DoctorPage() {
     const byPath = new Map<string, DoctorPortalNavItem>();
     baseNav.forEach((item) => byPath.set(item.path, item));
     if (canManageClinicalRoster(me)) {
-      byPath.set(SUPERVISOR_NAV[0].path, SUPERVISOR_NAV[0]);
-      byPath.set(SUPERVISOR_NAV[1].path, SUPERVISOR_NAV[1]);
+      SUPERVISOR_NAV.filter((item) => ["/doctor/reporting-board", "/doctor/doctor-worklists", "/doctor/roster-planner"].includes(item.path))
+        .forEach((item) => byPath.set(item.path, item));
     }
-    if (canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[2].path, SUPERVISOR_NAV[2]);
-    if (canManageClinicalRoster(me) || canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[3].path, SUPERVISOR_NAV[3]);
+    if (canAccessDoctorAdmin(me)) {
+      const item = SUPERVISOR_NAV.find((candidate) => candidate.path === "/doctor/doctors-directory");
+      if (item) byPath.set(item.path, item);
+    }
+    if (canManageClinicalRoster(me) || canAccessDoctorAdmin(me)) {
+      const item = SUPERVISOR_NAV.find((candidate) => candidate.path === "/doctor/advanced-setup");
+      if (item) byPath.set(item.path, item);
+    }
     return [...byPath.values()];
   }, [me]);
 
