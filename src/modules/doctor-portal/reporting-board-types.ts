@@ -29,6 +29,8 @@ export interface ReportingBoardFilters {
   dateTo?: string | null;
   cutoffDate?: string | null;
   modalityId?: number | null;
+  /** Internal automatic-assignment scope; never accepted from the HTTP API. */
+  reportableModalityIds?: number[] | null;
   modalityCode?: string | null;
   modalityCodes?: string[] | null;
   assignedDoctorId?: number | null;

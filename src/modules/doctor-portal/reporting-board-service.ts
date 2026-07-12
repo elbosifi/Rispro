@@ -27,6 +27,7 @@ import {
   createSavedView,
   disableReportingBoardPushSubscription,
   doctorCanReportAllModalities,
+  listDoctorReportableModalityIds,
   dismissReportingBoardNotification,
   failReportingBoardBulkAssignmentJob,
   finishReportingBoardBulkAssignmentJob,
@@ -466,6 +467,20 @@ function priorityPinRank(row: ReportingBoardCaseRow): number {
   if (priority === "stat") return 0;
   if (priority === "urgent") return 1;
   return 2;
+}
+
+/** Automatic assignment deliberately does not reuse the visible board sorter. */
+export function compareAutomaticAssignmentCandidates(pinUrgentToTop: boolean | null | undefined) {
+  // Do not construct a Date from booking_date/booking_time: they are local
+  // scheduling fields. Their ISO tuple is already safe and deterministic.
+  const effectiveAge = (row: ReportingBoardCaseRow): string => row.completedAt ?? `${row.bookingDate}T${row.bookingTime ?? "00:00:00"}`;
+  return (left: ReportingBoardCaseRow, right: ReportingBoardCaseRow): number => {
+    if (pinUrgentToTop !== false) {
+      const priority = priorityPinRank(left) - priorityPinRank(right);
+      if (priority !== 0) return priority;
+    }
+    return effectiveAge(left).localeCompare(effectiveAge(right)) || left.appointmentId - right.appointmentId;
+  };
 }
 
 function compareReportingBoardRows(filters: EffectiveReportingBoardFilters) {
@@ -1479,33 +1494,33 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   if (!doctor.canFinalizeReports) throw new HttpError(400, "Doctor must be allowed to finalize reports.");
 
   const rawFilters = await filtersFromBulkInput(actor, input);
+  // Constrain the SQL candidate query before its page limit. An empty set is
+  // intentional: PostgreSQL's ANY('{}') returns no candidates.
+  const reportableModalityIds = await listDoctorReportableModalityIds(input.doctorId);
   const filters = await effectiveFilters({
     ...rawFilters,
-    assignmentStatus: input.unassignedOnly === false ? rawFilters.assignmentStatus : "unassigned",
-    limit: Math.min(MAX_CASE_LIST_LIMIT, input.count * 3),
+    caseSource: "appointments",
+    assignmentStatus: "unassigned",
+    requiresReport: true,
+    reportableModalityIds,
+    reportStatus: rawFilters.reportStatus === "all" ? "required_not_final" : rawFilters.reportStatus,
+    limit: MAX_CASE_LIST_LIMIT,
     offset: 0,
   });
-  const { cases } = await getReportingBoardCases(actor, filters);
-  const explicitlyAllowsFinal = filters.reportStatus === "final" || filters.reportStatus === "all";
-  const eligible = cases.filter((row) => {
-    if (row.caseType !== "appointment") return false;
-    if (!row.canAssign) return false;
-    if (input.unassignedOnly !== false && row.assignmentStatus !== "unassigned") return false;
-    if (row.reportStatus === "final" && !explicitlyAllowsFinal) return false;
-    return true;
-  });
+  // Fetch the complete filtered appointment scope before applying the dedicated
+  // automatic ordering; no visible table sort or pagination may choose cases.
+  const cases = await listUnifiedReportingBoardCases(filters, { fullScope: true });
+  const eligible = cases
+    .filter((row) => row.caseType === "appointment" && row.canAssign && row.assignmentStatus === "unassigned" && row.requiresReport && row.appointmentStatus === "completed" && row.reportStatus !== "final")
+    .sort(compareAutomaticAssignmentCandidates(filters.pinUrgentToTop));
   const selected = eligible.slice(0, input.count);
-  const hasModalityPermission = await doctorCanReportAllModalities(
-    input.doctorId,
-    [...new Set(selected.map((row) => row.modalityId))]
-  );
-  if (!hasModalityPermission) throw new HttpError(400, "Doctor does not have report permission for the selected modalities.");
 
   const result = await bulkAssignReportingCases({
     doctorId: input.doctorId,
     candidateAppointmentIds: selected.map((row) => row.appointmentId),
     reason: input.reason?.trim() || null,
-    unassignedOnly: input.unassignedOnly !== false,
+    unassignedOnly: true,
+    restrictToDoctorReportPermissions: true,
     actor: { userId: actor.userId, doctorId: me.profile!.id },
   });
   await createAssignedToMeNotifications({

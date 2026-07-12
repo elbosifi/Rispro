@@ -922,6 +922,10 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
     values.push(input.modalityId);
     where.push(`b.modality_id = $${values.length}`);
   }
+  if (input.reportableModalityIds !== null && input.reportableModalityIds !== undefined) {
+    values.push(input.reportableModalityIds);
+    where.push(`b.modality_id = any($${values.length}::bigint[])`);
+  }
   if (input.modalityCode) {
     values.push(input.modalityCode.toUpperCase());
     where.push(`upper(m.code) = $${values.length}`);
@@ -1570,6 +1574,20 @@ export async function doctorCanReportAllModalities(doctorId: number, modalityIds
   return result.rows.length === uniqueModalityIds.length;
 }
 
+export async function listDoctorReportableModalityIds(doctorId: number): Promise<number[]> {
+  const result = await pool.query<{ modality_id: number }>(
+    `
+      select modality_id
+      from doctor_portal.doctor_modality_permissions
+      where doctor_id = $1
+        and can_report = true
+        and active = true
+    `,
+    [doctorId]
+  );
+  return result.rows.map((row) => Number(row.modality_id));
+}
+
 export async function bulkAssignReportingCases(input: {
   doctorId: number;
   candidateAppointmentIds: number[];
@@ -1578,15 +1596,16 @@ export async function bulkAssignReportingCases(input: {
   actor: AssignmentActor;
   caseAuditEventType?: string;
   summaryAuditEventType?: string;
+  restrictToDoctorReportPermissions?: boolean;
 }): Promise<BulkAssignNextCasesResult> {
   const client = await pool.connect();
   const assignedAppointmentIds: number[] = [];
   const skipped: Array<{ appointmentId: number; reason: string }> = [];
   try {
     await client.query("begin");
-    const locked = await client.query<CandidateAssignment>(
+    const locked = await client.query<CandidateAssignment & { modalityId: number }>(
       `
-        select b.id as "appointmentId", cta.id
+        select b.id as "appointmentId", b.modality_id as "modalityId", cta.id
         from appointments_v2.bookings b
         left join doctor_portal.case_team_assignments cta
           on cta.appointment_id = b.id and cta.assignment_type = 'reporting' and cta.status = 'active'
@@ -1596,7 +1615,29 @@ export async function bulkAssignReportingCases(input: {
       [input.candidateAppointmentIds]
     );
     const lockedIds = new Set(locked.rows.map((row) => Number(row.appointmentId)));
-    const existingActiveIds = new Set(locked.rows.filter((row) => row.id !== null).map((row) => Number(row.appointmentId)));
+    // The initial left join can have been read before this transaction waited
+    // for another automatic assigner to release the booking lock. Re-read
+    // active assignments after those locks are held so the waiting caller
+    // reports a skip instead of correcting/replacing the first assignment.
+    const activeAssignments = await client.query<{ appointment_id: number }>(
+      `
+        select appointment_id
+        from doctor_portal.case_team_assignments
+        where appointment_id = any($1::bigint[])
+          and assignment_type = 'reporting'
+          and status = 'active'
+        for update
+      `,
+      [input.candidateAppointmentIds]
+    );
+    const existingActiveIds = new Set(activeAssignments.rows.map((row) => Number(row.appointment_id)));
+    const modalityByAppointmentId = new Map(locked.rows.map((row) => [Number(row.appointmentId), Number(row.modalityId)]));
+    const reportableModalityIds = input.restrictToDoctorReportPermissions
+      ? new Set((await client.query<{ modality_id: number }>(
+        `select modality_id from doctor_portal.doctor_modality_permissions where doctor_id = $1 and can_report = true and active = true`,
+        [input.doctorId]
+      )).rows.map((row) => Number(row.modality_id)))
+      : null;
     for (const appointmentId of input.candidateAppointmentIds) {
       if (!lockedIds.has(appointmentId)) {
         skipped.push({ appointmentId, reason: "appointment_not_found" });
@@ -1604,6 +1645,10 @@ export async function bulkAssignReportingCases(input: {
       }
       if (input.unassignedOnly && existingActiveIds.has(appointmentId)) {
         skipped.push({ appointmentId, reason: "already_assigned" });
+        continue;
+      }
+      if (reportableModalityIds && !reportableModalityIds.has(modalityByAppointmentId.get(appointmentId)!)) {
+        skipped.push({ appointmentId, reason: "doctor_not_permitted_for_modality" });
         continue;
       }
       await client.query(

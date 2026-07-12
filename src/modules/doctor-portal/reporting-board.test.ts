@@ -200,10 +200,14 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
 
     assert.match(service, /reason: input\.reason\?\.trim\(\) \|\| null/);
-    assert.match(service, /assignmentStatus: input\.unassignedOnly === false \? rawFilters\.assignmentStatus : "unassigned"/);
+    assert.match(service, /caseSource: "appointments"/);
+    assert.match(service, /assignmentStatus: "unassigned"/);
+    assert.match(service, /compareAutomaticAssignmentCandidates/);
+    assert.match(service, /listDoctorReportableModalityIds/);
     assert.match(service, /eligible\.slice\(0, input\.count\)/);
     assert.match(repo, /for update of b/);
     assert.match(repo, /doctorCanReportAllModalities/);
+    assert.match(repo, /restrictToDoctorReportPermissions/);
     assert.match(repo, /result\.rows\.length === uniqueModalityIds\.length/);
     assert.match(repo, /reporting_board_bulk_case_assigned/);
     assert.match(repo, /reporting_board_bulk_assign_completed/);

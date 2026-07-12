@@ -581,6 +581,35 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     });
   });
 
+  it("uses the protected automatic-assignment age order independently of the visible board sort", () => {
+    guard();
+    const row = (appointmentId: number, priority: string | null, completedAt: string | null, bookingDate: string, bookingTime: string | null) => ({
+      appointmentId,
+      reportingPriorityCode: priority,
+      completedAt,
+      bookingDate,
+      bookingTime,
+    }) as never;
+    const routineOld = row(30, "routine", "2026-05-01T06:00:00.000Z", "2026-05-10", "09:00");
+    const urgent = row(20, "urgent", "2026-05-03T06:00:00.000Z", "2026-05-10", "09:00");
+    const stat = row(10, "stat", "2026-05-04T06:00:00.000Z", "2026-05-10", "09:00");
+    const nullCompletedEarly = row(40, "routine", null, "2026-05-02", "07:00");
+    const nullCompletedNoTime = row(50, "routine", null, "2026-05-02", null);
+    const equalAgeHigherId = row(61, "routine", "2026-05-05T08:00:00.000Z", "2026-05-10", "09:00");
+    const equalAgeLowerId = row(60, "routine", "2026-05-05T08:00:00.000Z", "2026-05-10", "09:00");
+
+    assert.deepEqual(
+      [routineOld, urgent, stat].sort(reportingBoardService.compareAutomaticAssignmentCandidates(true)).map((item: { appointmentId: number }) => item.appointmentId),
+      [10, 20, 30]
+    );
+    assert.deepEqual(
+      [routineOld, urgent, stat, nullCompletedEarly, nullCompletedNoTime, equalAgeHigherId, equalAgeLowerId]
+        .sort(reportingBoardService.compareAutomaticAssignmentCandidates(false))
+        .map((item: { appointmentId: number }) => item.appointmentId),
+      [30, 50, 40, 20, 10, 60, 61]
+    );
+  });
+
   after(async () => {
     reportingBoardService?.__setReportingBoardReportStatusCheckerForTest(null);
     if (app) await app.close();
@@ -1129,7 +1158,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     }
   });
 
-  it("bulk assigns next eligible cases in priority/date/time order and enforces assignment rules", async () => {
+  it("bulk assigns next eligible appointment cases in protected priority/age order and enforces assignment rules", async () => {
     guard();
     const date = addDays(40);
     const stat = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, time: "09:00", patientName: "Bulk Stat" });
@@ -1141,19 +1170,28 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const finalCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, time: null, patientName: "Bulk Final" });
     const noReport = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, requiresReport: false, patientName: "Bulk No Report" });
     const cancelled = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, status: "cancelled", patientName: "Bulk Cancelled" });
+    const comparison = await createComparisonRequestForBooking(urgent, `${date}T10:00:00.000Z`, "automatic bulk assignment exclusion");
     [stat, urgent, routine, noPriority, later, alreadyAssigned, noReport, cancelled].forEach((id) => statusByAppointmentId.set(id, "draft"));
     statusByAppointmentId.set(finalCase, "final");
     await assignDirectly(alreadyAssigned, otherDoctor.doctorId);
 
-    const noNote = await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+    const noNote = await api<{ assignedCount: number; requestedCount: number }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
       method: "POST",
       body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: addDays(41), dateTo: addDays(41) }, reason: "" },
     });
     assert.equal(noNote.status, 200);
+    assert.equal(noNote.data.requestedCount, 1);
+    assert.equal(noNote.data.assignedCount, 0);
     assert.equal((await api(doctor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "no" } })).status, 403);
     assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: inactiveDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "inactive" } })).status, 404);
     assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: noFinalizeDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date }, reason: "no finalize" } })).status, 400);
-    assert.equal((await api(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", { method: "POST", body: { doctorId: noMrPermissionDoctor.doctorId, count: 2, filters: { dateFrom: date, dateTo: date }, reason: "missing MR" } })).status, 400);
+    const noMrPermission = await api<{ assignedCount: number; assignedAppointmentIds: number[] }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+      method: "POST",
+      body: { doctorId: noMrPermissionDoctor.doctorId, count: 2, filters: { dateFrom: date, dateTo: date, modalityId: usModalityId, caseSource: "comparisons" }, reason: "missing MR" },
+    });
+    assert.equal(noMrPermission.status, 200, JSON.stringify(noMrPermission.data));
+    assert.deepEqual(noMrPermission.data.assignedAppointmentIds, []);
+    assert.equal((await pool.query(`select 1 from doctor_portal.comparison_case_assignments where comparison_request_id = $1`, [comparison])).rowCount, 0);
 
     const response = await api<{ assignedCount: number; requestedCount: number; assignedAppointmentIds: number[] }>(
       supervisor.cookie,
@@ -1178,6 +1216,115 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(assigned.has(cancelled), false);
     const audit = await pool.query(`select 1 from doctor_portal.doctor_module_audit_events where event_type = 'reporting_board_bulk_assign_completed' and reason = $1 limit 1`, ["daily reporting distribution"]);
     assert.equal(audit.rowCount, 1);
+  });
+
+  it("filters unauthorized modalities in SQL scope before automatic candidate selection", async () => {
+    guard();
+    const date = addDays(45);
+    const unauthorizedMr = await Promise.all(Array.from({ length: 8 }, (_, index) => createBooking({
+      modalityId: mrModalityId,
+      examTypeId: mrExamTypeId,
+      date,
+      completedAt: `2026-01-01T0${index}:00:00.000Z`,
+      patientName: `Unauthorized MR ${index}`,
+    })));
+    const authorizedCt = await Promise.all(Array.from({ length: 5 }, (_, index) => createBooking({
+      modalityId: ctModalityId,
+      examTypeId: ctExamTypeId,
+      date,
+      completedAt: `2026-02-01T0${index}:00:00.000Z`,
+      patientName: `Authorized CT ${index}`,
+    })));
+    [...unauthorizedMr, ...authorizedCt].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const response = await api<{ assignedCount: number; assignedAppointmentIds: number[] }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+      method: "POST",
+      body: { doctorId: noMrPermissionDoctor.doctorId, count: 5, filters: { dateFrom: date, dateTo: date }, reason: "CT-only distribution" },
+    });
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal(response.data.assignedCount, 5);
+    assert.deepEqual(response.data.assignedAppointmentIds, authorizedCt);
+  });
+
+  it("uses the protected automatic order for scheduled jobs", async () => {
+    guard();
+    const date = addDays(46);
+    const routine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date, completedAt: "2026-01-01T08:00:00.000Z", patientName: "Scheduled routine" });
+    const urgent = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: urgentPriorityId, date, completedAt: "2026-01-02T08:00:00.000Z", patientName: "Scheduled urgent" });
+    const stat = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, completedAt: "2026-01-03T08:00:00.000Z", patientName: "Scheduled stat" });
+    [routine, urgent, stat].forEach((id) => statusByAppointmentId.set(id, "draft"));
+
+    const created = await api<{ job: { id: number } }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assignment-jobs", {
+      method: "POST",
+      body: { scheduledFor: new Date().toISOString(), doctorId: targetDoctor.doctorId, count: 3, filters: { dateFrom: date, dateTo: date, sortBy: "patient_name", pinUrgentToTop: true }, reason: "scheduled protected order" },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    const ran = await api<{ job: { status: string; result: { assignedAppointmentIds: number[] } } }>(supervisor.cookie, `/api/doctor/reporting-board/bulk-assignment-jobs/${created.data.job.id}/run-now`, { method: "POST" });
+    assert.equal(ran.status, 200, JSON.stringify(ran.data));
+    assert.equal(ran.data.job.status, "completed");
+    assert.deepEqual(ran.data.job.result.assignedAppointmentIds, [stat, urgent, routine]);
+  });
+
+  it("never assigns final studies from final or all report-status filters", async () => {
+    guard();
+    const date = addDays(47);
+    const finalCase = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date, patientName: "Automatic final exclusion" });
+    const routine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date, patientName: "Automatic all filter routine" });
+    statusByAppointmentId.set(finalCase, "final");
+    statusByAppointmentId.set(routine, "draft");
+
+    const finalOnly = await api<{ assignedCount: number }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+      method: "POST",
+      body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date, reportStatus: "final" }, reason: "final filter exclusion" },
+    });
+    assert.equal(finalOnly.status, 200, JSON.stringify(finalOnly.data));
+    assert.equal(finalOnly.data.assignedCount, 0);
+    const allStatuses = await api<{ assignedAppointmentIds: number[] }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+      method: "POST",
+      body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date, reportStatus: "all" }, reason: "all filter exclusion" },
+    });
+    assert.equal(allStatuses.status, 200, JSON.stringify(allStatuses.data));
+    assert.deepEqual(allStatuses.data.assignedAppointmentIds, [routine]);
+  });
+
+  it("keeps a previously assigned and unassigned case in original completion-age order", async () => {
+    guard();
+    const date = addDays(48);
+    const previouslyAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T08:00:00.000Z", patientName: "Original completion age" });
+    const newer = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-02T08:00:00.000Z", patientName: "Newer completion age" });
+    [previouslyAssigned, newer].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await assignDirectly(previouslyAssigned, otherDoctor.doctorId, "2026-06-01T08:00:00.000Z");
+    const unassigned = await api(supervisor.cookie, `/api/doctor/reporting-board/${previouslyAssigned}/unassign`, { method: "POST", body: { reason: "return to automatic queue" } });
+    assert.equal(unassigned.status, 200);
+    const response = await api<{ assignedAppointmentIds: number[] }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+      method: "POST",
+      body: { doctorId: targetDoctor.doctorId, count: 1, filters: { dateFrom: date, dateTo: date, pinUrgentToTop: false }, reason: "original completion ordering" },
+    });
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.deepEqual(response.data.assignedAppointmentIds, [previouslyAssigned]);
+  });
+
+  it("keeps overlapping automatic assignments conflict-safe and reports a partial result", async () => {
+    guard();
+    const date = addDays(49);
+    const first = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T08:00:00.000Z", patientName: "Concurrent first" });
+    const second = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, completedAt: "2026-01-01T09:00:00.000Z", patientName: "Concurrent second" });
+    [first, second].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    const request = () => api<{ assignedCount: number; assignedAppointmentIds: number[]; skipped: Array<{ appointmentId: number; reason: string }> }>(supervisor.cookie, "/api/doctor/reporting-board/bulk-assign-next", {
+      method: "POST",
+      body: { doctorId: targetDoctor.doctorId, count: 2, filters: { dateFrom: date, dateTo: date, pinUrgentToTop: false }, reason: "concurrent distribution" },
+    });
+    const [left, right] = await Promise.all([request(), request()]);
+    assert.equal(left.status, 200, JSON.stringify(left.data));
+    assert.equal(right.status, 200, JSON.stringify(right.data));
+    const active = await pool.query<{ appointment_id: string; count: string }>(
+      `select appointment_id::text, count(*)::text from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[]) and assignment_type = 'reporting' and status = 'active' group by appointment_id`,
+      [[first, second]]
+    );
+    assert.equal(active.rows.length, 2);
+    assert.equal(active.rows.every((row) => Number(row.count) === 1), true);
+    assert.equal(left.data.assignedCount + right.data.assignedCount, 2);
+    assert.equal(left.data.assignedCount < 2 || right.data.assignedCount < 2, true);
   });
 
   it("bulk reassigns selected visible cases, deduplicates ids, skips final cases, and audits", async () => {
