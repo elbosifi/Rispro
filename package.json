@@ -22,6 +22,7 @@
     "agent:preflight": "node scripts/dev/preflight-env.mjs",
     "test:db:one": "node scripts/dev/test-one-db.mjs",
     "agent:contract": "node scripts/harness/check-agent-contract.mjs",
+    "test:docker:deployment": "bash scripts/test-docker-deployment-regressions.sh",
     "test": "npm run test:backend:unit",
     "test:unit": "npm run test:backend:unit",
     "test:backend:unit": "node scripts/run-backend-tests.js unit",

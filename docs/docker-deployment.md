@@ -22,7 +22,7 @@ The supervisor credentials are printed at the end of setup.
 ./scripts/update-docker.sh
 ```
 
-This pulls the latest code, reuses the current `.env` deployment settings by default, validates the stack, rebuilds, restarts containers, and verifies health. Volumes are preserved.
+This pulls the latest code, reuses the current `.env` deployment settings by default, validates the stack, rebuilds, restarts containers, and verifies health. Volumes are preserved. The deployed commit SHA is injected into the running app through Compose and is intentionally not baked into the early Docker dependency layers, so changing commits does not rebuild unchanged OS or npm dependency layers.
 
 If you want to change deployment settings during an update, run:
 
@@ -34,11 +34,11 @@ The update script now force-syncs the working tree before pulling:
 
 ```bash
 git reset --hard HEAD
-git clean -fd
+git clean -fd -e '/storage/sante-hl7-outbox/'
 git pull origin <current-branch>
 ```
 
-That means any local tracked changes or untracked files in the repository will be discarded during update.
+That means any local tracked changes or untracked files in the repository will be discarded during update, except the persistent Sante HL7 outbox. `storage/sante-hl7-outbox/` is runtime data bind-mounted into the app and must retain pending files across normal updates, reconfigure updates, rebuilds, and container recreation.
 
 ---
 

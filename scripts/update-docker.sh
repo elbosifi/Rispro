@@ -41,7 +41,7 @@ check_git_repo() {
 
   log "Forcing repository to match origin/${current_branch}..."
   git reset --hard HEAD
-  git clean -fd
+  git clean -fd -e '/storage/sante-hl7-outbox/'
   git fetch origin "${current_branch}"
   git pull
   DEPLOY_COMMIT_SHA="$(git rev-parse HEAD)"

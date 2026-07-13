@@ -21,8 +21,6 @@ services:
       context: .
       dockerfile: Dockerfile
       target: ${RISPRO_APP_IMAGE_TARGET:-production}
-      args:
-        RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
     container_name: rispro-app
     env_file:
       - .env

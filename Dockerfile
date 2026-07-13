@@ -70,9 +70,6 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime-base
 
-ARG RISPRO_BUILD_COMMIT_SHA=unknown
-ENV RISPRO_BUILD_COMMIT_SHA=${RISPRO_BUILD_COMMIT_SHA}
-
 # Install runtime dependencies for the app and DCMTK shared libraries.
 # PostgreSQL client 16 is required so pg_dump matches the internal PostgreSQL 16 deployment.
 RUN set -eux; \

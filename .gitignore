@@ -4,6 +4,9 @@ node_modules/
 .env.local
 docker/orthanc/generated/
 
+# Persistent runtime data; protected from update-script git cleanup.
+storage/sante-hl7-outbox/
+
 # Build outputs and local validation artifacts
 dist-frontend/
 restore-v3-validation-*/
