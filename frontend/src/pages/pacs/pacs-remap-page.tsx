@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 import { statusLabel, t } from "@/lib/i18n";
@@ -23,6 +23,14 @@ type RemapProcessingStage =
   | "failed";
 
 type PatientLookupMode = "filtered_appointments" | "all_appointments" | "all_patients";
+
+function readActiveRemapJobId(details: unknown): number | null {
+  if (!details || typeof details !== "object") return null;
+  const activeJobId = (details as { activeJobId?: unknown }).activeJobId;
+  return typeof activeJobId === "number" && Number.isSafeInteger(activeJobId) && activeJobId > 0
+    ? activeJobId
+    : null;
+}
 
 interface RemapJob {
   id: number;
@@ -267,6 +275,7 @@ export default function PacsRemapPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [resumedJobMessage, setResumedJobMessage] = useState("");
   const [completeScanStatus, setCompleteScanStatus] = useState<"idle" | "running" | "complete" | "skipped">("idle");
   const [scanProgress, setScanProgress] = useState<DicomStudyScanProgress | null>(null);
   const [skipAcknowledged, setSkipAcknowledged] = useState(false);
@@ -283,6 +292,7 @@ export default function PacsRemapPage() {
   const focusHeadingAfterNavigationRef = useRef(false);
   const fullScanControllerRef = useRef<AbortController | null>(null);
   const scanRunIdRef = useRef(0);
+  const activeJobLookupHandledRef = useRef<number | null>(null);
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
   const provisionalIdentityIsConsistent = useMemo(() => {
@@ -362,6 +372,13 @@ export default function PacsRemapPage() {
     queryFn: () => api<{ jobs: RemapJob[] }>("/pacs/remap/jobs?limit=20"),
   });
 
+  const activeJobQuery = useQuery({
+    queryKey: ["pacs", "remap", "active-job"],
+    queryFn: () => api<{ job: RemapJob | null; comparison: RemapComparison | null }>("/pacs/remap/jobs/active"),
+    retry: 0,
+  });
+  const refetchActiveJob = activeJobQuery.refetch;
+
   const replacementPreviewQuery = useQuery({
     queryKey: ["pacs", "remap", "replacement-preview", selectedPatientId],
     queryFn: async () => {
@@ -391,6 +408,42 @@ export default function PacsRemapPage() {
     fullScanControllerRef.current?.abort();
     fullScanControllerRef.current = null;
   };
+
+  const clearAbandonedDraft = useCallback((): void => {
+    cancelActiveFullScan();
+    setFiles([]);
+    setScanResult(null);
+    setSelectedStudyInstanceUid("");
+    setSelectedPatientId("");
+    setSelectedDestinationKey("");
+    setPatientSearch("");
+    setCompleteScanStatus("idle");
+    setScanProgress(null);
+    setSkipAcknowledged(false);
+    setConfirmChecked(false);
+    setUploadLoaded(0);
+    setUploadTotal(0);
+    setFileInputVersion((value) => value + 1);
+  }, []);
+
+  const attachToExistingRemapJob = useCallback((activeJobId: number, reason: "startup" | "conflict" | "recent" = "conflict"): void => {
+    if (!Number.isSafeInteger(activeJobId) || activeJobId <= 0) return;
+    if (reason === "conflict") clearAbandonedDraft();
+    cancelActiveFullScan();
+    focusHeadingAfterNavigationRef.current = true;
+    setJobId(activeJobId);
+    setUiStep("processing");
+    setProcessingStage("queued");
+    setUploadLoaded(0);
+    setUploadTotal(0);
+    setErrorMessage("");
+    setErrorDetails("");
+    setSuccessMessage("");
+    setResumedJobMessage(t(language, "pacs.remap.existingJobResumed", { jobId: activeJobId }));
+    void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", activeJobId] });
+    void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
+  }, [clearAbandonedDraft, language, queryClient]);
 
   const startCompleteScan = (sourceFiles: File[], runId: number): void => {
     const controller = new AbortController();
@@ -505,6 +558,11 @@ export default function PacsRemapPage() {
       void currentJobQuery.refetch();
     },
     onError: (error: unknown) => {
+      const activeJobId = error instanceof ApiError && error.status === 409 ? readActiveRemapJobId(error.details) : null;
+      if (activeJobId) {
+        attachToExistingRemapJob(activeJobId, "conflict");
+        return;
+      }
       setProcessingStage("failed");
       setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Processing failed.");
@@ -655,6 +713,7 @@ export default function PacsRemapPage() {
   const canContinueDestination = !!selectedDestinationKey;
   const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
   const skippedScanMode = completeScanStatus === "skipped";
+  const checkingForActiveJob = activeJobQuery.isPending && jobId == null;
   const reviewFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : selectedStudy?.files || [];
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
@@ -681,9 +740,30 @@ export default function PacsRemapPage() {
   const openRecentJob = (id: number): void => {
     const hasDraft = files.length > 0 || !!selectedPatientId || !!selectedDestinationKey;
     if (uiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
-    setJobId(id);
-    navigateTo("processing");
+    attachToExistingRemapJob(id, "recent");
   };
+
+  useEffect(() => {
+    const activeJobId = activeJobQuery.data?.job?.id;
+    if (!activeJobQuery.isSuccess || !activeJobId || jobId != null || activeJobLookupHandledRef.current === activeJobId) return;
+    activeJobLookupHandledRef.current = activeJobId;
+    attachToExistingRemapJob(activeJobId, "startup");
+  }, [activeJobQuery.data?.job?.id, activeJobQuery.isSuccess, attachToExistingRemapJob, jobId]);
+
+  useEffect(() => {
+    if (!jobId || !currentJobQuery.isError) return;
+    let active = true;
+    void refetchActiveJob().then((result) => {
+      if (!active || result.data?.job || jobId == null) return;
+      setJobId(null);
+      setProcessingStage("idle");
+      setUiStep("source");
+      setResumedJobMessage("");
+      setErrorDetails("");
+      setErrorMessage(t(language, "pacs.remap.resumedJobUnavailable"));
+    });
+    return () => { active = false; };
+  }, [currentJobQuery.isError, jobId, language, refetchActiveJob]);
 
   useEffect(() => {
     if (!focusHeadingAfterNavigationRef.current) return;
@@ -727,6 +807,7 @@ export default function PacsRemapPage() {
     setErrorMessage("");
     setErrorDetails("");
     setSuccessMessage("");
+    setResumedJobMessage("");
     setProcessingStage("idle");
     setUiStep("source");
     focusHeadingAfterNavigationRef.current = false;
@@ -795,6 +876,11 @@ export default function PacsRemapPage() {
 
         <div {...activeCardProps}>
           {uiStep === "source" && <>
+            {checkingForActiveJob && (
+              <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900" role="status">
+                {t(language, "pacs.remap.checkingActiveJob")}
+              </div>
+            )}
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <h3 ref={mainHeadingRef} id="remap-active-step" tabIndex={-1} className="text-lg font-semibold" style={{ color: "var(--text)" }}>
                 {stepLabels[0]}
@@ -821,7 +907,9 @@ export default function PacsRemapPage() {
                   key={`files-${fileInputVersion}`}
                   type="file"
                   multiple
+                  disabled={checkingForActiveJob}
                   onChange={(event) => {
+                    if (checkingForActiveJob) return;
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     setFiles(selectedFiles);
@@ -850,7 +938,9 @@ export default function PacsRemapPage() {
                   key={`folder-${fileInputVersion}`}
                   type="file"
                   multiple
+                  disabled={checkingForActiveJob}
                   onChange={(event) => {
+                    if (checkingForActiveJob) return;
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     setFiles(selectedFiles);
@@ -890,7 +980,7 @@ export default function PacsRemapPage() {
               <button
                 type="button"
                 onClick={() => scanMutation.mutate(files)}
-                disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
+                disabled={checkingForActiveJob || files.length === 0 || scanMutation.isPending || processMutation.isPending}
                 className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
               >
                 {scanMutation.isPending ? t(language, "pacs.remap.scanningFiles") : t(language, "pacs.remap.scanSelected")}
@@ -1353,12 +1443,14 @@ export default function PacsRemapPage() {
                 })}
               </div>
               <p className="text-xs" style={{ color: "var(--text-muted)" }} aria-live="polite">
+                {resumedJobMessage && <span className="block font-medium text-teal-800">{resumedJobMessage}</span>}
                 {effectiveProcessingStage === "uploading" && t(language, "pacs.remap.uploadingSelectedStudy", { percent: uploadPercent })}
                 {effectiveProcessingStage !== "uploading" && effectiveProcessingStage !== "enqueueing_send" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
                 {effectiveProcessingStage === "enqueueing_send" && t(language, "pacs.remap.sendingToPacs")}
               </p>
               {currentJob && (
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {language === "ar" ? "حالة المهمة" : "Job status"}: {statusLabel(language, currentJob.status)} •{" "}
                   {language === "ar" ? "الملفات المعالجة" : "Processed files"}: {currentJob.processed_file_count || 0}/{currentJob.staged_file_count || "—"}
                   {currentJob.processing_skipped_file_count ? ` • ${language === "ar" ? "تم تجاوز" : "Skipped"}: ${currentJob.processing_skipped_file_count}` : ""}
                   {currentJob.processing_attempt_count ? ` • ${language === "ar" ? "المحاولة" : "Attempt"}: ${currentJob.processing_attempt_count}` : ""}

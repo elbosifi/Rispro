@@ -3524,6 +3524,19 @@ export async function getDicomRemapJob({
   return { job, comparison };
 }
 
+export async function getMyActiveDicomRemapJob({
+  currentUserId,
+}: {
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow | null; comparison: ConfirmComparison | null }> {
+  const activeJob = await readActiveDicomRemapJob(currentUserId);
+  if (!activeJob) return { job: null, comparison: null };
+  if (await markStaleActiveJobFailedIfSourceMissing(activeJob)) {
+    return { job: null, comparison: null };
+  }
+  return getDicomRemapJob({ jobId: activeJob.id, currentUserId });
+}
+
 export async function listMyDicomRemapJobs({
   currentUserId,
   limit = 20,
@@ -4072,6 +4085,7 @@ export const __dicomRemapTestables = {
   normalizeDicomPatientNameForReplace,
   validateOrthancReplacementIdentity,
   readNaturalizedStudySummary,
+  getMyActiveDicomRemapJob,
   rewriteDicomFileForRemap,
   parseOrthancResourceId,
   parseOrthancModifiedStudyId,

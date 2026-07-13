@@ -15,6 +15,7 @@ import {
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
   failStaleDicomRemapSendEnqueues,
+  getMyActiveDicomRemapJob,
   monitorDicomRemapSendJob,
   previewDicomRemapMultipartUpload,
   resendDicomRemapJobToPacs,
@@ -1627,6 +1628,20 @@ test("createDicomRemapUploadJob maps upload insert races to activeJobId conflict
       return true;
     }
   );
+});
+
+test("active remap lookup returns only the caller's canonical active job and ignores terminal rows", async () => {
+  const active = remapJob({ id: 77, created_by_user_id: 42, status: "processing", source_orthanc_study_id: null });
+  const calls = queueQueryResults([{ rows: [active] }, { rows: [active] }]);
+  const result = await getMyActiveDicomRemapJob({ currentUserId: 42 });
+  assert.equal(result.job?.id, 77);
+  assert.equal(result.job?.status, "processing");
+  assert.match(calls[0]?.sql || "", /status = any/);
+  assert.deepEqual(calls[0]?.params, [42, __dicomRemapTestables.ACTIVE_JOB_STATUSES]);
+
+  queueQueryResults([{ rows: [] }]);
+  const noActive = await getMyActiveDicomRemapJob({ currentUserId: 42 });
+  assert.deepEqual(noActive, { job: null, comparison: null });
 });
 
 test("createDicomRemapUploadJob skips DICOMDIR folder index files", async () => {

@@ -49,6 +49,7 @@ import {
   type DicomRemapPreviewFileMetadata,
   type DicomRemapPreviewStagedFile,
   getDicomRemapJob,
+  getMyActiveDicomRemapJob,
   getDicomRemapReplacementPreview,
   hardResetOrthancStudies,
   listDicomRemapDestinations,
@@ -748,6 +749,16 @@ pacsRouter.get(
       limit: limit ? Number(limit) : 20,
     });
     res.json({ jobs });
+  })
+);
+
+pacsRouter.get(
+  "/remap/jobs/active",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    res.json(await getMyActiveDicomRemapJob({ currentUserId }));
   })
 );
 

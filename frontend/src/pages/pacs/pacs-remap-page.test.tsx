@@ -35,6 +35,7 @@ vi.mock("@/lib/dicom-study-scan", () => ({
 class FakeXHR {
   static DONE = 4;
   static instances: FakeXHR[] = [];
+  static nextResponse: { status: number; body: unknown } | null = null;
   withCredentials = false;
   readyState = 0;
   status = 0;
@@ -55,8 +56,10 @@ class FakeXHR {
     this.sentBody = body as FormData;
     this.upload.onprogress?.({ loaded: 5, total: 10 } as ProgressEvent<EventTarget>);
     this.upload.onload?.();
-    this.status = 202;
-    this.responseText = JSON.stringify({ job: { id: 88, status: "sending" }, skippedFilesCount: 0 });
+    const response = FakeXHR.nextResponse || { status: 202, body: { job: { id: 88, status: "sending" }, skippedFilesCount: 0 } };
+    FakeXHR.nextResponse = null;
+    this.status = response.status;
+    this.responseText = JSON.stringify(response.body);
     this.readyState = FakeXHR.DONE;
     this.onreadystatechange?.();
   }
@@ -79,6 +82,7 @@ function renderPage() {
 
 async function scanOne() {
   const file = new File(["x"], "a.dcm", { type: "application/dicom" });
+  await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
   fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [file] } });
   await screen.findByText(/Complete folder scan complete/i);
   return file;
@@ -88,11 +92,13 @@ describe("PacsRemapPage five-step wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     FakeXHR.instances.length = 0;
+    FakeXHR.nextResponse = null;
     previewMock.mockResolvedValue(result());
     scanMock.mockResolvedValue(result());
     buildPlanMock.mockReturnValue({ files: [new File(["x"], "a.dcm")], selectedStudyInstanceUid: "1.2.3", usesFallback: false });
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, accession_number: "ACC-1", appointment_date: "2026-01-01", modality_id: 3, modality_name_en: "CT", exam_name_en: "CT Brain", english_full_name: "John Doe", national_id: "N1" }] });
       if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
       if (String(path).includes("/jobs/88")) return Promise.resolve({ job: { id: 88, status: "sending", destination_pacs_key: "1", processing_stage: "enqueueing_send" }, comparison: null });
@@ -110,6 +116,22 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByRole("heading", { name: "Review" })).toBeNull();
     expect(document.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
     expect(screen.getAllByText(/Source|Patient|Destination|Review|Processing/).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("checks for and automatically attaches to an active job before enabling Source", async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: { id: 32, status: "processing", processing_stage: "rewriting" }, comparison: null });
+      if (path === "/pacs/remap/jobs/32") return Promise.resolve({ job: { id: 32, status: "processing", processing_stage: "rewriting", staged_file_count: 4, processed_file_count: 2 }, comparison: null });
+      if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
+      return Promise.resolve({ items: [] });
+    });
+    renderPage();
+    expect(screen.getByText("Checking for an active DICOM remap job…")).toBeTruthy();
+    expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(true);
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    expect(screen.getByText("Existing remap job #32 resumed automatically.")).toBeTruthy();
+    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/32");
   });
 
   it("keeps quick preview and complete scan inside Source and gates Continue", async () => {
@@ -201,10 +223,38 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByText(/75%|90%/)).toBeNull();
   });
 
+  it("attaches to the structured active-job conflict without retrying or showing a failed upload", async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, english_full_name: "John Doe", national_id: "N1" }] });
+      if (path === "/pacs/remap/jobs/32") return Promise.resolve({ job: { id: 32, status: "processing", processing_stage: "validating", staged_file_count: 8, processed_file_count: 1 }, comparison: null });
+      if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
+      return Promise.resolve({ items: [] });
+    });
+    FakeXHR.nextResponse = { status: 409, body: { error: { message: "You already have an active DICOM remap job.", details: { activeJobId: 32 } } } };
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+    expect(await screen.findByText("Existing remap job #32 resumed automatically.")).toBeTruthy();
+    expect(FakeXHR.instances).toHaveLength(1);
+    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/32");
+    expect(screen.queryByText(/You already have an active DICOM remap job/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start new upload" })).toBeNull();
+  });
+
   it("keeps skipped-scan acknowledgement and warning visible", async () => {
     previewMock.mockResolvedValue({ ...result(), previewOnly: true, totalFileCount: 2, dicomLikeFileCount: 2, parsedDicomFileCount: 1 });
     scanMock.mockReturnValue(new Promise(() => undefined));
     renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
     await screen.findByText(/Detected 1 studies/i);
     expect(screen.queryByRole("button", { name: /Cancel complete scan/i })).toBeNull();
@@ -223,6 +273,7 @@ describe("PacsRemapPage five-step wizard", () => {
     previewMock.mockResolvedValue({ ...result(), previewOnly: true });
     scanMock.mockReturnValue(deferred);
     renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
     await screen.findByRole("button", { name: "Continue with server verification" });
     fireEvent.click(screen.getByRole("checkbox", { name: /complete folder scan has not finished/i }));
