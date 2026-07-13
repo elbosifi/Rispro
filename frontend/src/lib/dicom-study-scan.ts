@@ -52,6 +52,8 @@ export interface DicomScanFileEntry {
   modality: string;
   patientId: string;
   patientName: string;
+  patientBirthDate?: string;
+  patientSex?: string;
 }
 
 export interface DicomScanStudySummary {
@@ -286,6 +288,8 @@ async function parseDicomHeader(file: File): Promise<DicomScanFileEntry | null> 
         modality: normalizeTag(dataSet.string("x00080060")),
         patientId: normalizeTag(dataSet.string("x00100020")),
         patientName: normalizeTag(dataSet.string("x00100010")),
+        patientBirthDate: normalizeTag(dataSet.string("x00100030")),
+        patientSex: normalizeTag(dataSet.string("x00100040")),
       };
     } catch {
       // try a larger header slice on next iteration

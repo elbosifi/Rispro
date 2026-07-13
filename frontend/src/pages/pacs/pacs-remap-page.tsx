@@ -285,6 +285,17 @@ export default function PacsRemapPage() {
   const scanRunIdRef = useRef(0);
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
+  const provisionalIdentityIsConsistent = useMemo(() => {
+    const entries = scanResult?.studies[0]?.files || [];
+    const values = (key: "patientId" | "patientName" | "patientBirthDate" | "patientSex") => new Set(entries
+      .map((entry) => String(entry[key] || "").trim().replace(/\s+/g, " "))
+      .filter(Boolean)
+      .map((value) => key === "patientName"
+        ? value.split("^").map((part) => part.trim()).join("^").toUpperCase()
+        : key === "patientSex" ? value.toUpperCase() : value));
+    return ["patientId", "patientName", "patientBirthDate", "patientSex"]
+      .every((key) => values(key as "patientId" | "patientName" | "patientBirthDate" | "patientSex").size <= 1);
+  }, [scanResult]);
 
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
@@ -435,7 +446,9 @@ export default function PacsRemapPage() {
     && scanResult?.previewOnly === true
     && scanResult.studies.length === 1
     && scanResult.parsedDicomFileCount > 0
-    && scanResult.unparsedCount === 0;
+    && scanResult.unparsedCount === 0
+    && Boolean(scanResult.studies[0]?.studyInstanceUid.trim())
+    && provisionalIdentityIsConsistent;
 
   const skipCompleteScan = (): void => {
     if (!canSkipCompleteScan || !skipAcknowledged) return;
@@ -686,7 +699,9 @@ export default function PacsRemapPage() {
   const visibleErrorMessage =
     isTerminalSuccess
       ? ""
-      : errorMessage || currentJob?.error_message || "";
+      : currentJob?.processing_error_code === "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED" || currentJob?.processing_error_code === "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT"
+        ? t(language, "pacs.remap.serverVerificationFailed")
+        : errorMessage || currentJob?.error_message || "";
   const visibleErrorDetails = errorDetails || (currentJob?.processing_error_details ? formatTechnicalDetails(currentJob.processing_error_details) : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
   const visibleSuccessMessage =
     isTerminalFailure
@@ -883,11 +898,6 @@ export default function PacsRemapPage() {
               <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">
                 {t(language, "pacs.remap.resetWorkflow")}
               </button>
-              {completeScanStatus === "running" && (
-                <button type="button" onClick={() => { cancelActiveFullScan(); setCompleteScanStatus("idle"); }} className="btn-secondary px-4 py-2 rounded-lg">
-                  {language === "ar" ? "إيقاف الفحص الكامل" : "Cancel complete scan"}
-                </button>
-              )}
             </div>
 
             {visibleErrorMessage && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{visibleErrorMessage}</div>}

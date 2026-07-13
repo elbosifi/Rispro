@@ -637,6 +637,55 @@ test("unverified single-study folder validation accepts one matching staged stud
   assert.equal(result.originalSummary.studyInstanceUid, uid);
 });
 
+test("staged DICOM validation rejects conflicting source identity with sanitized counts before UID planning", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const uid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const files = [
+    { id: "identity-file-one", relativePath: "files/one.dcm", displayName: "one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+    { id: "identity-file-two", relativePath: "files/two.dcm", displayName: "two.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "b".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: uid, PatientID: "SOURCE-A", PatientName: "Source^Patient", PatientBirthDate: "19900101", PatientSex: "M" }));
+  await writeFile(path.join(directory, files[1]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: uid, PatientID: "SOURCE-B", PatientName: "source^patient", PatientBirthDate: "19900101", PatientSex: "M" }));
+
+  await assert.rejects(
+    () => __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+      directory,
+      manifest: { version: 1, selectedStudyInstanceUID: uid, uploadMode: "single_study_folder_unverified", fileCount: 2, totalBytes: 2, files },
+    }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? (error.details as { code?: string } | null)?.code : null, "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT");
+      assert.deepEqual(error instanceof HttpError ? error.details : null, {
+        code: "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT",
+        parsedDicomFileCount: 2,
+        uniquePatientIdCount: 2,
+        uniquePatientNameCount: 1,
+        uniqueBirthDateCount: 1,
+        uniqueSexCount: 1,
+      });
+      return true;
+    },
+  );
+  assert.equal((await readdir(directory)).includes("uid-plan.json"), false);
+});
+
+test("staged DICOM validation accepts empty identities and trivial name formatting variation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const uid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const files = [
+    { id: "consistent-file-one", relativePath: "files/one.dcm", displayName: "one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+    { id: "consistent-file-two", relativePath: "files/two.dcm", displayName: "two.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "b".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: uid, PatientID: "SOURCE", PatientName: "Source^Patient", PatientBirthDate: "", PatientSex: "" }));
+  await writeFile(path.join(directory, files[1]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: uid, PatientID: "SOURCE", PatientName: " source^patient ", PatientBirthDate: "", PatientSex: "" }));
+  const result = await __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+    directory,
+    manifest: { version: 1, selectedStudyInstanceUID: uid, uploadMode: "single_study_folder_unverified", fileCount: 2, totalBytes: 2, files },
+  });
+  assert.equal(result.validFiles.length, 2);
+});
+
 test("dicom helper: Orthanc resource id parser supports common response shapes", () => {
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({ ParentStudy: "abc-study" }), "abc-study");
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({ ID: "new-id" }), "new-id");

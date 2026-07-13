@@ -207,12 +207,30 @@ describe("PacsRemapPage five-step wizard", () => {
     renderPage();
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
     await screen.findByText(/Detected 1 studies/i);
-    const skip = screen.getByRole("button", { name: "Skip complete scan" }) as HTMLButtonElement;
+    expect(screen.queryByRole("button", { name: /Cancel complete scan/i })).toBeNull();
+    const skip = screen.getByRole("button", { name: "Continue with server verification" }) as HTMLButtonElement;
     expect(skip.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this folder is expected/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /The complete folder scan has not finished/i }));
     fireEvent.click(skip);
     expect(screen.getAllByText(/Folder not fully scanned/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/upload all DICOM-like candidates/i)).toBeTruthy();
+    expect(screen.getByText(/verify every uploaded DICOM file before remapping/i)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("aborts a provisional full scan without letting its stale completion replace skipped state", async () => {
+    let resolveScan: ((value: ReturnType<typeof result>) => void) = () => undefined;
+    const deferred = new Promise<ReturnType<typeof result>>((resolve) => { resolveScan = resolve; });
+    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
+    scanMock.mockReturnValue(deferred);
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    await screen.findByRole("button", { name: "Continue with server verification" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /complete folder scan has not finished/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue with server verification" }));
+    expect((scanMock.mock.calls[0]?.[1] as { signal: AbortSignal }).signal.aborted).toBe(true);
+    resolveScan(result([study("stale-study", "Stale")]));
+    await waitFor(() => expect(screen.getAllByText(/Folder not fully scanned/i).length).toBeGreaterThan(0));
+    expect(screen.queryByText("Stale")).toBeNull();
   });
 
   it("keeps Recent Jobs secondary and requires the existing ambiguous-send confirmation", async () => {

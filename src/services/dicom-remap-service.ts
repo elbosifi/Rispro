@@ -171,6 +171,8 @@ interface DicomRemapPreviewEntry {
   modality: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
 }
 
 interface DicomRemapPreviewStudySummary {
@@ -2650,6 +2652,7 @@ function processingErrorMessage(code: string): string {
     DICOM_REMAP_DICOM_PARSE_FAILED: "DICOM study validation failed.",
     DICOM_REMAP_MULTIPLE_STUDIES: "Uploaded files must belong to exactly one selected study.",
     DICOM_REMAP_MULTIPLE_STUDIES_DETECTED: "More than one DICOM study was found in the selected folder. Start again, allow the complete folder scan to finish, and select the required study.",
+    DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT: "The selected folder contains conflicting source-patient identity information. No DICOM files were remapped or sent. Run the complete folder scan and select the required study.",
     DICOM_REMAP_ORTHANC_UPLOAD_FAILED: "Orthanc could not ingest the remapped study.",
     DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT: "Orthanc reported a conflicting remapped instance.",
     DICOM_REMAP_ORTHANC_VERIFICATION_FAILED: "Orthanc could not verify the remapped study.",
@@ -2706,6 +2709,15 @@ function parseStagedDicomSummary(buffer: Buffer): { summary: OrthancStudySummary
   }
 }
 
+function normalizeSourceIdentityValue(value: string, field: "patientId" | "patientName" | "patientBirthDate" | "patientSex"): string {
+  const collapsed = String(value || "").trim().replace(/\s+/g, " ");
+  if (!collapsed) return "";
+  if (field === "patientName") return normalizeDicomPatientName(collapsed).split("^").map((part) => part.trim()).join("^").toUpperCase();
+  if (field === "patientBirthDate") return normalizeDicomBirthDate(collapsed);
+  if (field === "patientSex") return normalizePatientSex(collapsed);
+  return collapsed;
+}
+
 async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest: DicomRemapStagingManifest; directory: string }): Promise<{ plan: PersistedDicomUidPlan; originalSummary: OrthancStudySummary; validFiles: DicomRemapStagedManifestFile[]; skippedFiles: number }> {
   const planPath = path.join(directory, "uid-plan.json");
   const existing = await readFile(planPath, "utf8").catch(() => null);
@@ -2726,6 +2738,12 @@ async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest:
   const sopInstanceUidByFileId: Record<string, string> = {};
   const validFiles: DicomRemapStagedManifestFile[] = [];
   const studyUids = new Set<string>();
+  const sourceIdentity = {
+    patientId: new Set<string>(),
+    patientName: new Set<string>(),
+    patientBirthDate: new Set<string>(),
+    patientSex: new Set<string>(),
+  };
   let originalSummary: OrthancStudySummary | null = null;
   let skippedFiles = 0;
   for (const file of manifest.files) {
@@ -2744,6 +2762,10 @@ async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest:
       throw error;
     }
     studyUids.add(parsed.summary.studyInstanceUid);
+    for (const field of Object.keys(sourceIdentity) as Array<keyof typeof sourceIdentity>) {
+      const value = normalizeSourceIdentityValue(parsed.summary[field], field);
+      if (value) sourceIdentity[field].add(value);
+    }
     if (!originalSummary) originalSummary = parsed.summary;
     validFiles.push(file);
   }
@@ -2757,6 +2779,19 @@ async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest:
       code,
       parsedDicomFileCount: validFiles.length,
       uniqueStudyCount: studyUids.size,
+    });
+  }
+  const identityDiagnostics = {
+    parsedDicomFileCount: validFiles.length,
+    uniquePatientIdCount: sourceIdentity.patientId.size,
+    uniquePatientNameCount: sourceIdentity.patientName.size,
+    uniqueBirthDateCount: sourceIdentity.patientBirthDate.size,
+    uniqueSexCount: sourceIdentity.patientSex.size,
+  };
+  if (Object.values(sourceIdentity).some((values) => values.size > 1)) {
+    throw new HttpError(400, "Uploaded files contain conflicting source-patient identity information.", {
+      code: "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT",
+      ...identityDiagnostics,
     });
   }
   for (const file of validFiles) {
@@ -2914,13 +2949,17 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
   } catch (error) {
     const code = processingErrorCode(error);
     const details = error instanceof HttpError && error.details && typeof error.details === "object"
-      ? error.details as { parsedDicomFileCount?: unknown; uniqueStudyCount?: unknown }
+      ? error.details as { parsedDicomFileCount?: unknown; uniqueStudyCount?: unknown; uniquePatientIdCount?: unknown; uniquePatientNameCount?: unknown; uniqueBirthDateCount?: unknown; uniqueSexCount?: unknown }
       : null;
     const numericDiagnostic = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
     const processingDiagnostics = {
       code,
       ...(numericDiagnostic(details?.parsedDicomFileCount) !== undefined ? { parsedDicomFileCount: numericDiagnostic(details?.parsedDicomFileCount) } : {}),
       ...(numericDiagnostic(details?.uniqueStudyCount) !== undefined ? { uniqueStudyCount: numericDiagnostic(details?.uniqueStudyCount) } : {}),
+      ...(numericDiagnostic(details?.uniquePatientIdCount) !== undefined ? { uniquePatientIdCount: numericDiagnostic(details?.uniquePatientIdCount) } : {}),
+      ...(numericDiagnostic(details?.uniquePatientNameCount) !== undefined ? { uniquePatientNameCount: numericDiagnostic(details?.uniquePatientNameCount) } : {}),
+      ...(numericDiagnostic(details?.uniqueBirthDateCount) !== undefined ? { uniqueBirthDateCount: numericDiagnostic(details?.uniqueBirthDateCount) } : {}),
+      ...(numericDiagnostic(details?.uniqueSexCount) !== undefined ? { uniqueSexCount: numericDiagnostic(details?.uniqueSexCount) } : {}),
     };
     const updated = await queryDicomRemapDb<DicomRemapJobRow>(
       `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3::text, processing_error_details = $4::jsonb, error_message = $5::text, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
@@ -3068,6 +3107,8 @@ export async function previewDicomRemapMultipartUpload({
         modality: String(tags["00080060"] || "").trim(),
         patientId: String(tags["00100020"] || "").trim(),
         patientName: normalizeDicomPatientName(String(tags["00100010"] || "").trim()),
+        patientBirthDate: normalizeDicomBirthDate(String(tags["00100030"] || "").trim()),
+        patientSex: normalizePatientSex(String(tags["00100040"] || "").trim()),
       });
     }
 
