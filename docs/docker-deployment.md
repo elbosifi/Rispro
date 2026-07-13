@@ -350,8 +350,9 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OHIF_ENABLED` | `false` | Environment rollout gate; both this and the database setting must be enabled |
-| `COMPOSE_PROFILES` | blank | Set to `ohif` only when deploying the optional viewer container |
+| `OHIF_ENABLED` | `true` | Written by supported setup/update scripts while OHIF infrastructure is deployed; it is not the routine clinical control |
+| `COMPOSE_PROFILES` | `ohif` | Written by supported setup/update scripts so the OHIF container and same-domain route are deployed |
+| `OHIF_INFRASTRUCTURE_DISABLED` | `false` | Emergency deployment override; set to `true` only to omit OHIF infrastructure on the next supported setup/update run |
 | `OHIF_PUBLIC_BASE_URL` | `/ohif` | Same-domain viewer path |
 | `OHIF_DICOMWEB_PROXY_PATH` | `/ohif-dicomweb` | RISpro-authenticated DICOMweb proxy path |
 | `OHIF_CONTAINER_IMAGE` | `rispro-ohif:v3.12.6` | Explicit pinned image name |
@@ -363,6 +364,8 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `OHIF_DICOMWEB_BEARER_TOKEN` | blank | Optional native bearer token; reference this variable name in Settings |
 
 The gateway keeps `/` on RISpro, `/ohif/` on the OHIF container, and `/ohif-dicomweb/` on the protected RISpro proxy. Imaging responses are streamed with proxy buffering disabled and bounded timeouts. Do not point the public reverse proxy directly at Orthanc or OsiriX.
+
+Supported `scripts/setup-docker.sh` and `scripts/update-docker.sh` seed `COMPOSE_PROFILES=ohif` and `OHIF_ENABLED=true` automatically. The database-backed Settings → Integrations → OHIF Viewer setting remains disabled by default for a new installation and is the routine operational control for doctor launch access. The shell cannot determine that database setting; its deployment summary reports the infrastructure state and `/ohif/` URL. To perform an emergency infrastructure rollback, set `OHIF_INFRASTRUCTURE_DISABLED=true` before a supported setup/update run; do not use it for ordinary enable/disable operations.
 
 ### Preflight Validation
 

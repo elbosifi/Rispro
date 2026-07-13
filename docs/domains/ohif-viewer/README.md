@@ -21,7 +21,7 @@ OHIF is built from the pinned `v3.12.6` source release with `PUBLIC_URL=/ohif/`.
 
 ## Configuration
 
-1. Keep `OHIF_ENABLED=false` during installation.
+1. Run the supported setup/update deployment; it deploys OHIF infrastructure while the database setting remains disabled by default.
 2. Deploy and confirm `rispro-gateway`, `rispro-app`, and `rispro-ohif` health.
 3. Open Settings → Integrations → OHIF Viewer after supervisor re-authentication.
 4. Select an active `OHIF image source`; this is independent of the general default PACS.
@@ -31,7 +31,7 @@ OHIF is built from the pinned `v3.12.6` source release with `PUBLIC_URL=/ohif/`.
 6. Record the installed OsiriX MD version and whether its DICOMweb server is enabled.
 7. Run C-ECHO, QIDO, WADO metadata/frame, Orthanc REST, Orthanc DICOMweb, and authorized full-launch diagnostics separately.
 8. Keep `OHIF_CACHE_CLEANUP_ENABLED=false` until cache ownership validation is complete.
-8. Enable the database setting, then set `OHIF_ENABLED=true` and `COMPOSE_PROFILES=ohif` and restart the stack.
+9. Enable the database setting after source validation. No `.env` edit or Docker restart is required for routine operational enablement.
 
 Do not store a username, password, or bearer token in the settings fields. Store environment-variable names such as `OHIF_DICOMWEB_PASSWORD`; put the actual secret only in `.env` or the deployment secret manager.
 

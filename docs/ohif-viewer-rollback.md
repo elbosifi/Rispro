@@ -1,7 +1,7 @@
 # OHIF Viewer Rollback
 
-1. Disable the database OHIF setting, set `OHIF_ENABLED=false`, and clear `COMPOSE_PROFILES`, then restart RISpro. This removes `Open Images` and blocks new launches.
-2. Stop the already-running optional container with `docker compose stop ohif`; clearing a profile prevents future deployment but is not relied on to stop an existing container.
+1. For the normal operational rollback, disable the database OHIF setting. This removes `Open Images` and blocks new launches while the container may remain running.
+2. For an emergency infrastructure rollback, set `OHIF_INFRASTRUCTURE_DISABLED=true` and run the supported setup/update script; it writes `OHIF_ENABLED=false` and clears the OHIF Compose profile. Stop an already-running OHIF container with `docker compose stop ohif` if immediate removal is required.
 3. Keep SonicDICOM, RadiAnt, reporting, booking, PACS, and QR workflows unchanged.
 4. If native DICOMweb alone fails, explicitly switch to Orthanc gateway after its diagnostics pass; this is a strategy change, not automatic fallback.
 5. If gateway mode fails, disable OHIF. Do not delete or modify source PACS data.
