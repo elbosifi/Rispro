@@ -250,6 +250,31 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByRole("button", { name: "Start new upload" })).toBeNull();
   });
 
+  it("shows an actionable gateway-limit message for a multipart 413 without retrying or attaching another job", async () => {
+    FakeXHR.nextResponse = { status: 413, body: "<html><body>Request Entity Too Large</body></html>" };
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+
+    expect(await screen.findByText(/exceeds the upload limit configured on the RISpro gateway/i)).toBeTruthy();
+    expect(screen.getByText(/No remap job was created/i)).toBeTruthy();
+    expect(screen.queryByText(/Request Entity Too Large/i)).toBeNull();
+    expect(screen.queryByText(/Existing remap job #/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start new upload" })).toBeNull();
+    expect(FakeXHR.instances).toHaveLength(1);
+    expect(apiMock.mock.calls.some(([path]) => path === "/pacs/remap/jobs/88")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Review" }));
+    expect(await screen.findByRole("heading", { name: "Review" })).toBeTruthy();
+    expect(screen.getAllByText(/CT Chest/).length).toBeGreaterThan(0);
+  });
+
   it("keeps skipped-scan acknowledgement and warning visible", async () => {
     previewMock.mockResolvedValue({ ...result(), previewOnly: true, totalFileCount: 2, dicomLikeFileCount: 2, parsedDicomFileCount: 1 });
     scanMock.mockReturnValue(new Promise(() => undefined));

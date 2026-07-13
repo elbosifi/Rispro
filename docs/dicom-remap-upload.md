@@ -10,12 +10,23 @@ If the complete scan is taking too long, it can be skipped only after a one-stud
 
 The request does not parse, rewrite, upload, validate, or transmit DICOM after the upload bytes have completed. The restart-safe processing worker claims the queued job under a database lease, validates staged files, persists a UID replacement plan, rewrites and uploads to Orthanc, verifies one study and replacement identity, then invokes the existing asynchronous C-STORE flow. The frontend polls RISpro job status through `uploaded`, `processing`, `sending`, `sent`, or `failed`.
 
-Deployment proxy requirements for large CT/MR studies:
+## Gateway transport for large CT/MR studies
 
-- Apply body-size and upload timeout settings to `/api/pacs/remap/jobs/process-multipart`.
-- Keep the proxy open only for browser upload and durable staging.
-- The proxy does not need to remain open for DICOM rewriting, Orthanc ingestion/verification, or PACS C-STORE; those continue through background workers after the response.
-- For Nginx-style proxies, configure `client_max_body_size` for the expected study size (for example `20g`), use `proxy_request_buffering off` where streaming is desired, and use `proxy_read_timeout`/`proxy_send_timeout` high enough for ingestion (for example `600s`).
+Ordinary RISpro API requests remain limited to **75 MiB** at the bundled Nginx gateway. The active remap endpoint, `POST /api/pacs/remap/jobs/process-multipart`, has an exact dedicated route with a **21 GiB** gateway allowance, 900-second upload/proxy timeouts, and both `proxy_request_buffering off` and `proxy_buffering off`. Nginx therefore streams the browser request to RISpro instead of buffering a full study.
+
+The extra 1 GiB is transport headroom for multipart boundaries and request metadata. It does not expand the accepted DICOM content limit: RISpro remains authoritative and enforces `DICOM_REMAP_STAGING_MAX_FILES=5000` and `DICOM_REMAP_STAGING_MAX_TOTAL_BYTES=21474836480` (20 GiB) by default. Ensure the private persistent staging volume has adequate free space for the configured application limit.
+
+The proxy connection is required only until durable staging commits and RISpro returns `202 Accepted`. Rewriting, Orthanc verification, and PACS sending continue through background workers after that response.
+
+After deploying an update, verify the loaded gateway configuration and restart the mounted configuration using the supported update path (`./scripts/update-docker.sh`, which recreates the Compose services), or for a configuration-only change:
+
+```bash
+docker compose exec gateway nginx -t
+docker compose exec gateway nginx -T
+docker compose restart gateway
+```
+
+Confirm the rendered output includes `location = /api/pacs/remap/jobs/process-multipart`, `client_max_body_size 21g`, `proxy_request_buffering off`, and `proxy_buffering off`.
 
 ## Durable staging and processing deployment
 

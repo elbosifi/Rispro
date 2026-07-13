@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { setImmediate } from "node:timers/promises";
 import os from "node:os";
 import type { Request } from "express";
@@ -53,6 +53,13 @@ test("pacs remap multipart staging cleans temp files when client aborts", async 
 
   const after = await listRemapTempDirs();
   assert.deepEqual(after, before);
+});
+
+test("active remap process-multipart bypasses the global Express JSON parser", async () => {
+  const appSource = await readFile(new URL("../app.ts", import.meta.url), "utf8");
+  assert.match(appSource, /const PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH = "\/api\/pacs\/remap\/jobs\/process-multipart";/);
+  assert.match(appSource, /req\.path === PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH/);
+  assert.match(appSource, /Let route-specific body parsers handle it\./);
 });
 
 test("pacs remap multipart staging keeps normal completed upload staged for service cleanup", async () => {

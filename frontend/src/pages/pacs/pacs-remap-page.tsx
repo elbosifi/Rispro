@@ -274,6 +274,7 @@ export default function PacsRemapPage() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
+  const [gatewayUploadLimitRejected, setGatewayUploadLimitRejected] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [resumedJobMessage, setResumedJobMessage] = useState("");
   const [completeScanStatus, setCompleteScanStatus] = useState<"idle" | "running" | "complete" | "skipped">("idle");
@@ -515,6 +516,7 @@ export default function PacsRemapPage() {
     onMutate: () => {
       focusHeadingAfterNavigationRef.current = true;
       setUiStep("processing");
+      setGatewayUploadLimitRejected(false);
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
@@ -554,6 +556,7 @@ export default function PacsRemapPage() {
       setSuccessMessage("");
       setErrorMessage("");
       setErrorDetails("");
+      setGatewayUploadLimitRejected(false);
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
       void currentJobQuery.refetch();
     },
@@ -563,8 +566,19 @@ export default function PacsRemapPage() {
         attachToExistingRemapJob(activeJobId, "conflict");
         return;
       }
+      if (error instanceof ApiError && error.status === 413) {
+        setProcessingStage("failed");
+        setSuccessMessage("");
+        setGatewayUploadLimitRejected(true);
+        setErrorMessage(t(language, "pacs.remap.gatewayUploadLimitExceeded"));
+        // Gateway-generated 413 responses can be HTML. Do not surface that as
+        // operator-facing diagnostics; retain only structured API details.
+        setErrorDetails(error.details && typeof error.details === "object" ? formatTechnicalDetails(error.details) : "");
+        return;
+      }
       setProcessingStage("failed");
       setSuccessMessage("");
+      setGatewayUploadLimitRejected(false);
       setErrorMessage(error instanceof Error ? error.message : "Processing failed.");
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
       void currentJobQuery.refetch();
@@ -806,6 +820,7 @@ export default function PacsRemapPage() {
     setJobId(null);
     setErrorMessage("");
     setErrorDetails("");
+    setGatewayUploadLimitRejected(false);
     setSuccessMessage("");
     setResumedJobMessage("");
     setProcessingStage("idle");
@@ -1481,7 +1496,11 @@ export default function PacsRemapPage() {
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
+                {gatewayUploadLimitRejected ? (
+                  <button type="button" onClick={() => navigateTo("review")} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.backToReview")}</button>
+                ) : (
+                  <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
+                )}
                 {jobId && (
                   <>
                     {requiresDestinationCheck(currentJob) && (
