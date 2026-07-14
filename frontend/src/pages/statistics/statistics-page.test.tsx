@@ -200,7 +200,9 @@ describe("StatisticsPage", () => {
     fetchStatisticsMock.mockResolvedValue(baseStats);
     const user = userEvent.setup();
 
-    renderPage();
+    renderPage([
+      `/statistics?date=${baseStats.metadata.dateFrom}`,
+    ]);
 
     await waitFor(() => expect(screen.getAllByText("CT").length).toBeGreaterThan(1));
     const fromInput = screen.getByLabelText("From");
@@ -274,7 +276,7 @@ describe("StatisticsPage", () => {
 
     expect(await screen.findByText("Operational exceptions")).toBeTruthy();
     expect(screen.getByText("Completion rate (selected period)")).toBeTruthy();
-    expect(screen.getByText("33.3%")).toBeTruthy();
+    expect(await screen.findByText("33.3%")).toBeTruthy();
     expect(screen.getByText("No-show rate (selected period)")).toBeTruthy();
     expect(screen.getAllByText("8.3%").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Walk-ins (selected period)")).toBeTruthy();
@@ -292,7 +294,9 @@ describe("StatisticsPage", () => {
     fetchStatisticsMock.mockResolvedValue(baseStats);
     const user = userEvent.setup();
 
-    renderPage();
+    renderPage([
+      `/statistics?date=${baseStats.metadata.dateFrom}`,
+    ]);
 
     await waitFor(() => expect(screen.getAllByText("CT").length).toBeGreaterThan(1));
     await user.selectOptions(screen.getByRole("combobox"), "1");

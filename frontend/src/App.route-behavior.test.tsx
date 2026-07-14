@@ -307,7 +307,14 @@ describe("App route behavior", () => {
       fullName: "Super Admin",
       role: "super_admin",
     } as User;
-    renderAppAt("/dashboard");
+    renderAppAt(
+      "/dashboard",
+      DEFAULT_PAGE_VISIBILITY_MATRIX,
+      {
+        hasActiveDoctorProfile: true,
+        canAccessCoreWorkspace: true,
+      },
+    );
 
     expect(await screen.findByTestId("dashboard-page")).toBeTruthy();
     for (const item of APP_NAV_ITEMS) {
