@@ -143,10 +143,6 @@ function formatFallbackModalityLabel(language: string, id: number): string {
   return language === "ar" ? `موداليتي #${id}` : `Modality #${id}`;
 }
 
-function isCancellableJobStatus(status: JobStatus): boolean {
-  return ["uploaded", "awaiting_confirmation"].includes(status);
-}
-
 function canResendJob(job: RemapJob | null | undefined): boolean {
   if (!job) return false;
   if (!["failed", "remapped", "sent"].includes(job.status)) return false;
@@ -597,24 +593,6 @@ export default function PacsRemapPage() {
     },
   });
 
-  const cancelMutation = useMutation({
-    mutationFn: async () => {
-      if (!jobId) throw new Error("Missing job ID.");
-      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${jobId}/cancel`, {
-        method: "POST",
-        body: JSON.stringify({ reason: "Cancelled from DICOM remap page" }),
-      });
-    },
-    onSuccess: () => {
-      setProcessingStage("failed");
-      setSuccessMessage("");
-      setErrorMessage(language === "ar" ? "تم إلغاء المهمة النشطة." : "Active job cancelled.");
-      setErrorDetails("");
-      void currentJobQuery.refetch();
-      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-    },
-  });
-
   const resetJobMutation = useMutation({
     mutationFn: async () => {
       if (!jobId) throw new Error("Missing job ID.");
@@ -692,9 +670,7 @@ export default function PacsRemapPage() {
   });
 
   const currentJob = (currentJobQuery.data?.job || null) as RemapJob;
-  const comparison = (currentJobQuery.data?.comparison || null) as RemapComparison;
   const destinations = destinationsQuery.data?.destinations || [];
-  const effectiveOrthancStudyId = currentJob?.modified_orthanc_study_id || currentJob?.source_orthanc_study_id || null;
   const directoryPatients = patientQuery.data?.patients || [];
   const appointmentPatientOptions = useMemo(() => {
     const combinedAppointments = [
@@ -1561,87 +1537,6 @@ export default function PacsRemapPage() {
         </div>
 
         <div className="space-y-4">
-          {comparison && false && <div className="card-shell sticky top-4 p-4 space-y-3 text-xs">
-            <div>
-              <h4 className="font-semibold text-sm">{t(language, "pacs.remap.summary")}</h4>
-              <p style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.currentStep")}: {stepLabels[currentStepIndex]}</p>
-            </div>
-            <div className="space-y-2">
-              {[
-                { label: t(language, "pacs.remap.selectedStudy"), value: skippedScanMode ? selectedStudyInstanceUid : selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedStudy },
-                { label: t(language, "pacs.remap.originalDICOMPatient"), value: skippedScanMode ? t(language, "pacs.remap.folderNotFullyScanned") : `${selectedStudy?.patientName || "—"} (${selectedStudy?.patientId || "—"})`, ready: !!selectedStudy?.patientName || !!selectedStudy?.patientId || skippedScanMode },
-                { label: t(language, "pacs.remap.selectedRISProPatient"), value: selectedPatientLabel || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedPatientLabel },
-                { label: t(language, "pacs.remap.destinationLabel"), value: selectedDestinationKey || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedDestinationKey },
-                { label: t(language, "pacs.remap.currentJobStatus"), value: currentJob?.status ? statusLabel(language, currentJob.status) : t(language, "pacs.remap.noCurrentJob"), ready: !!currentJob?.status },
-              ].map((item) => (
-                <div key={item.label} className="rounded-xl border border-slate-200 bg-white/80 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-medium text-slate-500">{item.label}</span>
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${item.ready ? "bg-teal-500" : "bg-slate-300"}`} />
-                  </div>
-                  <p className="mt-1 font-semibold" style={{ color: "var(--text)" }}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-            {comparison && (
-              <div className="rounded border p-2">
-                <p><strong>{t(language, "pacs.remap.replacementPatientId")}:</strong> {comparison.replacement.patientId || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementPatientName")}:</strong> {comparison.replacement.patientName || "—"}</p>
-              </div>
-            )}
-          </div>}
-
-          {currentJob && false && (
-            <div className="card-shell p-4 space-y-2 text-xs">
-              <h4 className="font-semibold text-sm">{t(language, "pacs.remap.currentUpload")}</h4>
-              <p>{t(language, "pacs.remap.job")} #{currentJob.id}</p>
-              <p><strong>{t(language, "pacs.remap.originalDICOMPatient")}:</strong> {currentJob.original_patient_name || "—"} ({currentJob.original_patient_id || "—"})</p>
-              <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {currentJob.replacement_patient_name || "—"} ({currentJob.replacement_patient_id || "—"})</p>
-              <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {currentJob.destination_pacs_key || "—"}</p>
-              <p>{t(language, "pacs.remap.orthancStudy")}: <span className="font-mono text-[11px]">{effectiveOrthancStudyId || "—"}</span></p>
-              {(currentJob.status === "uploaded" || currentJob.status === "processing") && (
-                <p><strong>{language === "ar" ? "المعالجة" : "Processing"}:</strong> {processingStageLabel(language, currentJob.processing_stage)} • {currentJob.processed_file_count || 0}/{currentJob.staged_file_count || "—"}</p>
-              )}
-              {currentJob.source_orthanc_study_id && currentJob.modified_orthanc_study_id && currentJob.source_orthanc_study_id !== currentJob.modified_orthanc_study_id && (
-                <>
-                  <p>{t(language, "pacs.remap.sourceStudy")}: <span className="font-mono text-[11px]">{currentJob.source_orthanc_study_id}</span></p>
-                  <p>{t(language, "pacs.remap.modifiedStudy")}: <span className="font-mono text-[11px]">{currentJob.modified_orthanc_study_id}</span></p>
-                </>
-              )}
-              {isSendFailedJob(currentJob) && (
-                <p className="text-red-700">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(currentJob.error_message) || t(language, "pacs.remap.failedResend")}</p>
-              )}
-              {isCancellableJobStatus(currentJob.status) && (
-                <button type="button" onClick={() => cancelMutation.mutate()} disabled={cancelMutation.isPending} className="btn-secondary px-3 py-2 rounded-lg text-xs">
-                  {t(language, "pacs.remap.cancelActiveJob")}
-                </button>
-              )}
-              {canResendJob(currentJob) && (
-                <button
-                  type="button"
-                  onClick={() => resendJobMutation.mutate({ targetJobId: currentJob.id })}
-                  disabled={resendJobMutation.isPending}
-                  className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
-                >
-                  {t(language, "pacs.remap.resendToPacs")}
-                </button>
-              )}
-            </div>
-          )}
-
-          {false && <details className="card-shell p-4 space-y-2 text-xs">
-            <summary className="cursor-pointer font-semibold text-sm">{t(language, "pacs.remap.maintenance")}</summary>
-            <h4 className="font-semibold text-sm">{t(language, "pacs.remap.maintenance")}</h4>
-            <button
-              type="button"
-              onClick={() => clearFailedStudiesMutation.mutate()}
-              disabled={clearFailedStudiesMutation.isPending}
-              className="btn-secondary px-3 py-2 rounded-lg text-xs"
-            >
-              {t(language, "pacs.remap.clearFailedStudies")}
-            </button>
-          </details>}
-
           <details className="card-shell p-4 space-y-2 text-xs">
             <summary className="cursor-pointer font-semibold text-sm">{t(language, "pacs.remap.viewRecentJobs")}</summary>
             <div className="space-y-2 max-h-72 overflow-y-auto">

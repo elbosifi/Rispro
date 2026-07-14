@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowUp, Plus, Save, Trash2, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Save, Trash2, Loader2 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, type Language } from "@/lib/i18n";

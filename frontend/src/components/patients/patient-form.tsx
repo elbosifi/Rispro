@@ -28,7 +28,7 @@ import { DateInput } from "@/components/common/date-input";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import type { Patient, PatientIdentifierTypeOption } from "@/types/api";
 import { Button, Card } from "@/components/shared";
-import { chooseLocalized, t } from "@/lib/i18n";
+import { chooseLocalized } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -410,11 +410,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       { confirmByPaste: isValidNationalId(normalizeIdentifierForType("national_id", pastedValue)) }
     ));
   };
-  const findPrimaryIdentifierIndex = (identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }>) => {
-    const idx = identifiers.findIndex((entry) => entry.isPrimary);
-    return idx >= 0 ? idx : 0;
-  };
-
   const fieldOrder: FormFieldKey[] = [
     "arabicFullName",
     "englishFullName",

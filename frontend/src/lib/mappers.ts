@@ -12,7 +12,7 @@ import type {
   AuditEntry,
   IdentifierType
 } from "@/types/api";
-import type { DictionaryEntry, PersistedDictionaryEntry } from "@/lib/name-generation";
+import type { PersistedDictionaryEntry } from "@/lib/name-generation";
 
 type RawRecord = Record<string, unknown>;
 

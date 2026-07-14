@@ -397,8 +397,8 @@ function setup(
   canUseNonStandardCapacityModes: boolean = true,
   priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }> = [],
   modalityOptions: ModalityDto[] = [
-    { id: 1, name: "CT", nameAr: "Ø£Ø´Ø¹Ø© Ù…Ù‚Ø·Ø¹ÙŠØ©", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-    { id: 2, name: "MRI", nameAr: "Ø±Ù†ÙŠÙ† Ù…ØºÙ†Ø§Ø·ÙŠØ³ÙŠ", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+    { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+    { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
   ],
   currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor",
   doctorModuleCapabilities: DoctorModuleCapability[] = []
@@ -446,10 +446,7 @@ function setup(
           <Route path="/appointments" element={
             <CreateAppointmentTab
               patientLookups={{}}
-              modalityOptions={[
-                { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-                { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-              ]}
+              modalityOptions={modalityOptions}
               examTypeOptions={[]}
               specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
               priorityOptions={priorityOptions}

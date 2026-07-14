@@ -47,7 +47,6 @@ export function GlobalSearch({ language, isRtl, canSearchPatients, canSearchRegi
   const results = useMemo<Result[]>(() => [...patients.map((value) => ({ kind: "patient" as const, value })), ...registrations.map((value) => ({ kind: "registration" as const, value }))], [patients, registrations]);
   const loading = patientQuery.isLoading || registrationQuery.isLoading;
   const failed = patientQuery.isError || registrationQuery.isError;
-  const showResults = canSearch && !loading && !failed;
   const placeholder = t(language, "globalSearch.placeholder");
 
   const close = () => { setOpen(false); setActiveIndex(0); };

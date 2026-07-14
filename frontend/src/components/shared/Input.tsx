@@ -1,13 +1,9 @@
 import { InputHTMLAttributes, forwardRef } from "react";
 
-type InputVariant = "default";
-
-interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  variant?: InputVariant;
-}
+type InputProps = InputHTMLAttributes<HTMLInputElement>;
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ variant = "default", className = "", ...props }, ref) => {
+  ({ className = "", ...props }, ref) => {
     return (
       <input
         ref={ref}

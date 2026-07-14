@@ -98,7 +98,7 @@ type AutoCompletionDraft = {
 export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery<{ modalities: OrthancRemoteModality[] }>({
+  const { data, error } = useQuery<{ modalities: OrthancRemoteModality[] }>({
     queryKey: ["pacs", "orthanc-modalities"],
     queryFn: () => api<{ modalities: OrthancRemoteModality[] }>("/pacs/orthanc-modalities", {}, SETTINGS_LOAD_TIMEOUT_MS)
   });

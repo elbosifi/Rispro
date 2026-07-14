@@ -32,7 +32,7 @@ import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
-import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { todayIsoDateLy } from "@/lib/date-format";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AppointmentLookups, AppointmentStatus, ModalityProtocolAssignment } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
@@ -212,13 +212,6 @@ function notesIndicator(language: Language, appointment: AppointmentWithDetails)
   return appointment.notes?.trim() || appointment.specialReasonNote?.trim()
     ? chooseLocalized(language, "توجد ملاحظات", "Notes")
     : t(language, "common.na");
-}
-
-function relatedAppointmentBadgeText(
-  language: Language,
-  appointment: NonNullable<AppointmentWithDetails["relatedAppointments"]>[number]
-): string {
-  return chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn) || appointment.accessionNumber;
 }
 
 function isProtocolModality(appointment: AppointmentWithDetails | null): boolean {
@@ -413,20 +406,6 @@ function statusActionLabel(language: Language, action: BoardStatusAction): strin
     default:
       return chooseLocalized(language, "تأكيد", "Confirm");
   }
-}
-
-function relatedAppointmentTitle(
-  language: Language,
-  appointment: NonNullable<AppointmentWithDetails["relatedAppointments"]>[number]
-): string {
-  const modality = chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn);
-  const exam = chooseLocalized(language, appointment.examNameAr, appointment.examNameEn);
-  return [
-    modality,
-    exam,
-    appointment.accessionNumber,
-    normalizeStatusLabel(language, appointment.appointmentStatus),
-  ].filter(Boolean).join(" - ");
 }
 
 function rowStatusClass(status: AppointmentStatus, selected: boolean): string {
@@ -690,7 +669,6 @@ export default function ModalityPage() {
   };
 
   const modalities = lookups?.modalities ?? [];
-  const today = todayIsoDateLy();
   const headerTitle = t(language, "modality.title");
   const currentModality = modalities.find((modality) => String(modality.id) === modalityId);
   const currentModalityLabel = currentModality

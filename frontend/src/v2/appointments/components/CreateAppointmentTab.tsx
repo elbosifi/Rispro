@@ -148,7 +148,6 @@ function buildNoShowRestrictionDecision(): SchedulingDecisionDto {
 }
 
 export function CreateAppointmentTab({
-  patientLookups: _patientLookups,
   modalityOptions,
   examTypeOptions,
   specialReasonOptions,

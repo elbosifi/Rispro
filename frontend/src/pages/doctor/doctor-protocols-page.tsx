@@ -183,10 +183,6 @@ function canManageProtocolLibrary(me: DoctorMe): boolean {
   return Boolean(me.isSuperAdmin || me.canAccessDoctorAdmin || me.canSupervise || me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"));
 }
 
-function canAccessProtocolsPage(me: DoctorMe): boolean {
-  return Boolean(me.canAssignProtocols || canManageProtocolLibrary(me));
-}
-
 function numberText(value: number | null): string {
   return value == null ? "" : String(value);
 }
@@ -1144,49 +1140,6 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
           }}
         />
       )}
-    </section>
-  );
-}
-
-function LegacyProtocolAssignmentPanel({ detail, protocols, scanners, saving, onSave, onCancel }: { detail: DoctorProtocolingAppointmentDetail; protocols: ProtocolLibraryProtocol[]; scanners: ImagingScanner[]; saving: boolean; onSave: (payload: ProtocolAssignmentPayload) => void; onCancel: () => void }) {
-  const appointment = detail.appointment;
-  const existing = appointment.assignment;
-  const activeProtocols = protocols.filter((protocol) => protocol.isActive && protocol.modality === appointment.modalityCode && protocol.activeVersionId && protocol.activeVersionStatus === "ACTIVE");
-  const matchingScanners = scanners.filter((scanner) => scanner.isActive && scanner.modality === appointment.modalityCode);
-  const [protocolId, setProtocolId] = useState(existing?.protocolId ? String(existing.protocolId) : "");
-  const [scannerId, setScannerId] = useState(existing?.scannerId ? String(existing.scannerId) : "");
-  const [protocolNotes, setProtocolNotes] = useState(existing?.protocolNotes ?? "");
-  const [contrastNotes, setContrastNotes] = useState(existing?.contrastNotes ?? "");
-
-  const payload = (): ProtocolAssignmentPayload => ({
-    protocolId: Number(protocolId),
-    scannerId: scannerId ? Number(scannerId) : null,
-    protocolNotes: nullableText(protocolNotes),
-    contrastNotes: nullableText(contrastNotes),
-    status: "ASSIGNED",
-  });
-
-  return (
-    <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-xl font-semibold">Assign protocol</h3>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{protocolingPatientName(appointment)} · {appointment.appointmentDate} {appointment.appointmentTime ?? ""} · {appointment.modalityCode} · {appointment.examTypeName ?? "-"}</p>
-          {appointment.clinicalNotes && <p className="mt-1 text-sm">{appointment.clinicalNotes}</p>}
-        </div>
-        <button type="button" onClick={onCancel} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Close</button>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <Field label="Protocol"><select aria-label="Protocol" value={protocolId} onChange={(event) => setProtocolId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Select protocol</option>{activeProtocols.map((protocol) => <option key={protocol.id} value={protocol.id}>{protocol.name} v{protocol.activeVersionNumber}</option>)}</select></Field>
-        <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
-        <Field label="Protocol notes"><textarea aria-label="Protocol notes" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
-        <Field label="Contrast notes"><textarea aria-label="Contrast notes" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
-      </div>
-      <div className="mt-4 flex gap-2">
-        <button type="button" disabled={!protocolId || saving} onClick={() => onSave(payload())} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving..." : "Save assignment"}</button>
-        <button type="button" onClick={onCancel} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
-      </div>
-      {detail.assignmentDetail && <ProtocolAssignmentSummary detail={detail} />}
     </section>
   );
 }

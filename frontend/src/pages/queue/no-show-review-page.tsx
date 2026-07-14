@@ -21,7 +21,15 @@ export default function NoShowReviewPage() {
   const action = useMutation({ mutationFn: async (request: NonNullable<Confirmation> & { reason: string }) => request.kind === "one" ? confirmNoShow(request.ids[0], request.reason) : request.kind === "bulk" ? confirmNoShowBulk(request.ids, request.reason) : request.kind === "old" ? confirmOldNoShows(request.ids, request.reason) : runOldNoShowCleanupNow(request.reason), onSuccess: (data: any) => { const outcomes = data?.results ?? []; const processed = data?.processedCount ?? outcomes.filter((item: any) => item.status === "confirmed").length; const skipped = data?.skipped?.length ?? outcomes.filter((item: any) => item.status !== "confirmed").length; setResult(`${processed} processed; ${skipped} skipped; ${data?.remainingEligibleCount ?? 0} remaining.`); setConfirmation(null); setReason(""); setSelected([]); setOldSelected([]); refresh(); }, onError: (error: Error) => setResult(error.message) });
   const candidates = useMemo(() => (query.data?.candidates ?? []).filter((item) => { const value = `${candidateName(item, language)} ${item.accessionNumber}`.toLowerCase(); return (!search || value.includes(search.toLowerCase())) && (!modality || item.modalityNameEn === modality); }), [query.data?.candidates, search, modality, language]);
   const modalities = useMemo(() => [...new Set((query.data?.candidates ?? []).map((item) => item.modalityNameEn).filter(Boolean))], [query.data?.candidates]);
-  const toggle = (id: number, old = false) => { const set = old ? oldSelected : selected; const update = set.includes(id) ? set.filter((item) => item !== id) : [...set, id]; old ? setOldSelected(update) : setSelected(update); };
+  const toggle = (id: number, old = false) => {
+    const selectedIds = old ? oldSelected : selected;
+    const update = selectedIds.includes(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id];
+    if (old) {
+      setOldSelected(update);
+    } else {
+      setSelected(update);
+    }
+  };
   const selectedNames = confirmation?.ids.slice(0, 5).map((id) => [...(query.data?.candidates ?? []), ...(query.data?.oldCleanupCandidates ?? [])].find((item) => item.appointmentId === id)).filter(Boolean).map((item) => candidateName(item!, language)) ?? [];
   const modeText = query.data?.mode === "manual" ? "Manual confirmation" : query.data?.mode === "automatic" ? "Automatic processing" : "Disabled";
   if (query.isLoading) return <div className="mx-auto max-w-7xl"><Card className="p-6 text-sm text-muted-foreground">Loading no-show review candidates…</Card></div>;

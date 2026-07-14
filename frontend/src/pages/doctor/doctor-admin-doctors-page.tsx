@@ -304,7 +304,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
 
   const saveModalities = (patch?: Partial<DoctorModalityPermission> & { modalityId: number }) => {
     const rows = modalityRows.map((row) => row.modalityId === patch?.modalityId ? { ...row, ...patch } : row);
-    const permissions = rows.map(({ label: _label, ...row }) => row);
+    const permissions = rows.map(({ modalityId, canProtocol, canReport, canSupervise, active }) => ({ modalityId, canProtocol, canReport, canSupervise, active }));
     setModalityDraft(Object.fromEntries(permissions.map((permission) => [permission.modalityId, permission])));
     modalityMutation.mutate(permissions);
   };

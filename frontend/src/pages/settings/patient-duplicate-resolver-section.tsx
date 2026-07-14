@@ -123,24 +123,6 @@ function signalLabel(signal: PatientDuplicateCandidate["signals"][number], t: (k
   return signal.label ? formatReason(signal.label) : field;
 }
 
-function patientToDuplicateSummary(patient: Patient): PatientDuplicateSummary {
-  return {
-    id: patient.id,
-    mrn: patient.mrn || null,
-    nationalId: patient.nationalId || null,
-    identifierType: patient.identifierType || null,
-    identifierValue: patient.identifierValue || null,
-    arabicFullName: patient.arabicFullName,
-    englishFullName: patient.englishFullName || null,
-    ageYears: patient.ageYears,
-    dateOfBirth: patient.estimatedDateOfBirth || null,
-    sex: patient.sex || null,
-    phone1: patient.phone1 || null,
-    phone2: patient.phone2 || null,
-    category: patient.category || null,
-  };
-}
-
 function duplicateSummaryToPatient(patient: PatientDuplicateSummary): Patient {
   return {
     id: patient.id,

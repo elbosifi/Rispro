@@ -169,7 +169,7 @@ describe("dicom study scan", () => {
 
   it("reports batched progress and finds a second study at the end of a folder", async () => {
     const parseMock = vi.mocked(dicomParser.parseDicom);
-    parseMock.mockImplementation((_bytes: unknown) => {
+    parseMock.mockImplementation(() => {
       const callIndex = parseMock.mock.calls.length;
       return mockDataSet({ x0020000d: callIndex > 100 ? "study-b" : "study-a" }) as never;
     });

@@ -1,6 +1,6 @@
 import { InputHTMLAttributes, forwardRef } from "react";
 
-interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {}
+type SwitchProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type">;
 
 export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
   ({ className = "", ...props }, ref) => {
