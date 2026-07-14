@@ -3920,7 +3920,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     const allExamTypes = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
     const filteredOptions = modalityId
       ? examTypeOptions.filter((opt: { value: string }) => {
-          const et = allExamTypes.find((examType: any) => String(examType.id) === opt.value);
+          const et = allExamTypes.find((examType) => String(examType.id) === opt.value);
           return et && String(et.modalityId || et.modality_id) === modalityId;
         })
       : [];
