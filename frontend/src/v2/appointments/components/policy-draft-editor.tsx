@@ -1868,8 +1868,8 @@ export function PolicyDraftEditor({
               color: "var(--text-muted, #64748b)",
             }}
           >
-            Patient identifier types are not part of the current V2 policy snapshot contract.
-            Manage identifier types in Settings until the V2 admin DTO includes this section.
+            Patient identifier types are not part of the current policy snapshot contract.
+            Manage identifier types in Settings until the scheduling administration DTO includes this section.
           </div>
         </details>
 

@@ -131,6 +131,12 @@ describe("SchedulingAdminPage", () => {
     expect(screen.getByText("No live policy published yet.")).toBeTruthy();
   });
 
+  it("renders neutral patient identifier policy guidance", async () => {
+    renderPage();
+
+    expect(await screen.findByText("Patient identifier types are not part of the current policy snapshot contract. Manage identifier types in Settings until the scheduling administration DTO includes this section.")).toBeTruthy();
+  });
+
   it("disables publish when no draft exists and shows a reason", () => {
     policyStatus = { ...baseStatus(), draft: null };
 
