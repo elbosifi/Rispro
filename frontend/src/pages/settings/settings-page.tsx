@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo, type ChangeEvent } from "react";
+import { useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
@@ -3641,7 +3641,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     specialReasons: [],
     identifierTypes: []
   });
-  const [draft, setDraft] = useState<SchedulingDraft>(emptyDraft());
+  const [draft, setDraftState] = useState<SchedulingDraft>(emptyDraft());
   const { data, isLoading, error } = useQuery({
     queryKey: ["scheduling-engine-config"],
     queryFn: fetchSchedulingEngineConfig
@@ -3854,33 +3854,23 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
 
   useEffect(() => {
     if (data) {
-      isSettingFromServer.current = true;
-      setDraft(normalizeConfig(data));
+      setDraftState(normalizeConfig(data));
     }
   }, [data]);
 
   const [saveNotice, setSaveNotice] = useState<"saved" | null>(null);
   const [quotaModalityFilter, setQuotaModalityFilter] = useState<string>("");
   const [quotaNotice, setQuotaNotice] = useState<string>("");
-  const isSettingFromServer = useRef(false);
-
-  // Clear save notice on any user edit (but not on server-set drafts)
-  useEffect(() => {
-    if (isSettingFromServer.current) {
-      isSettingFromServer.current = false;
-      return;
-    }
-    if (saveNotice !== null) {
-      setSaveNotice(null);
-    }
-  }, [draft, saveNotice]);
+  const setDraft: Dispatch<SetStateAction<SchedulingDraft>> = (nextDraft) => {
+    setDraftState(nextDraft);
+    setSaveNotice(null);
+  };
 
   const saveMutation = useMutation({
     mutationFn: (payload: SchedulingEngineConfig) => saveSchedulingEngineConfig(payload),
     onSuccess: (returnedConfig) => {
       // Immediately replace local draft with the authoritative server response
-      isSettingFromServer.current = true;
-      setDraft(normalizeConfig(returnedConfig));
+      setDraftState(normalizeConfig(returnedConfig));
       setValidationErrors([]);
       setSaveNotice("saved");
       queryClient.invalidateQueries({ queryKey: ["scheduling-engine-config"] });
