@@ -3632,6 +3632,10 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     specialReasons: SpecialReasonRow[];
     identifierTypes: IdentifierTypeRow[];
   };
+  type SchedulingDraftOverride = {
+    baseUpdatedAt: number;
+    value: SchedulingDraft;
+  };
 
   const emptyDraft = (): SchedulingDraft => ({
     categoryLimits: [],
@@ -3641,8 +3645,8 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     specialReasons: [],
     identifierTypes: []
   });
-  const [draft, setDraftState] = useState<SchedulingDraft>(emptyDraft());
-  const { data, isLoading, error } = useQuery({
+  const [draftOverride, setDraftOverride] = useState<SchedulingDraftOverride | null>(null);
+  const { data, dataUpdatedAt, isLoading, error } = useQuery({
     queryKey: ["scheduling-engine-config"],
     queryFn: fetchSchedulingEngineConfig
   });
@@ -3779,6 +3783,12 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     };
   };
 
+  const serverDraft = data ? normalizeConfig(data) : emptyDraft();
+  const draft =
+    draftOverride?.baseUpdatedAt === dataUpdatedAt
+      ? draftOverride.value
+      : serverDraft;
+
   const serializeDraft = (value: SchedulingDraft): SchedulingEngineConfig => ({
     categoryLimits: value.categoryLimits
       .filter((row) => row.modalityId.trim() && row.dailyLimit.trim())
@@ -3852,17 +3862,25 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
       }))
   });
 
-  useEffect(() => {
-    if (data) {
-      setDraftState(normalizeConfig(data));
-    }
-  }, [data]);
-
   const [saveNotice, setSaveNotice] = useState<"saved" | null>(null);
   const [quotaModalityFilter, setQuotaModalityFilter] = useState<string>("");
   const [quotaNotice, setQuotaNotice] = useState<string>("");
   const setDraft: Dispatch<SetStateAction<SchedulingDraft>> = (nextDraft) => {
-    setDraftState(nextDraft);
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === dataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      const nextValue =
+        typeof nextDraft === "function"
+          ? nextDraft(currentDraft)
+          : nextDraft;
+
+      return {
+        baseUpdatedAt: dataUpdatedAt,
+        value: nextValue
+      };
+    });
     setSaveNotice(null);
   };
 
@@ -3870,7 +3888,10 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     mutationFn: (payload: SchedulingEngineConfig) => saveSchedulingEngineConfig(payload),
     onSuccess: (returnedConfig) => {
       // Immediately replace local draft with the authoritative server response
-      setDraftState(normalizeConfig(returnedConfig));
+      setDraftOverride({
+        baseUpdatedAt: dataUpdatedAt,
+        value: normalizeConfig(returnedConfig)
+      });
       setValidationErrors([]);
       setSaveNotice("saved");
       queryClient.invalidateQueries({ queryKey: ["scheduling-engine-config"] });
