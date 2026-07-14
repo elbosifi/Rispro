@@ -201,6 +201,26 @@ describe("ReportingBoardMobilePage", () => {
     expect(page?.getAttribute("dir")).toBe("ltr");
   });
 
+  it("defaults the QR reporting view to My cases while keeping the existing filters switchable", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({ ...mobileResponse, currentDoctorId: 5 });
+    renderPage();
+
+    await screen.findByRole("button", { name: /My cases/i });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
+      "tok-9",
+      expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: null, reportStatus: null })
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: /My cases/i }).getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.getByRole("button", { name: /My cases/i }).getAttribute("class")).toContain("ring-2");
+
+    const all = screen.getByRole("button", { name: /^All 2$/i });
+    fireEvent.click(all);
+
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", { limit: 40, offset: 0 }));
+    expect(all.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /My cases/i }).getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("opens a mobile case detail sheet", async () => {
     renderPage();
 

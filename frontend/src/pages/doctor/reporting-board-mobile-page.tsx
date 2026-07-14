@@ -144,6 +144,7 @@ export function ReportingBoardMobilePage() {
   const [desktopLayout, setDesktopLayout] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1200);
   const refreshInFlight = useRef(false);
   const loadedOffsets = useRef<number[]>([0]);
+  const initialMyCasesApplied = useRef(false);
 
   const viewQuery = useQuery({
     queryKey: ["reporting-board", "mobile", token, filters],
@@ -316,6 +317,24 @@ export function ReportingBoardMobilePage() {
     const minutes = Math.max(0, Math.floor((Date.now() - new Date(data.refreshedAt).getTime()) / 60_000));
     return minutes === 0 ? "just now" : `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
   }, [data]);
+
+  useEffect(() => {
+    const currentDoctorId = data?.currentDoctorId;
+    if (!currentDoctorId || initialMyCasesApplied.current) return;
+    initialMyCasesApplied.current = true;
+    setLoadedCases([]);
+    loadedOffsets.current = [0];
+    setFilters((current) => ({
+      ...current,
+      assignedDoctorId: currentDoctorId,
+      assignmentStatus: null,
+      priorityCode: null,
+      urgentOrStat: false,
+      overdue: false,
+      reportStatus: null,
+      offset: 0,
+    }));
+  }, [data?.currentDoctorId]);
 
   if (viewQuery.isLoading) {
     return <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-5 text-slate-950">Loading reporting view...</main>;
