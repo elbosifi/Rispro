@@ -104,6 +104,7 @@ const confirmDoctorImportMock = vi.fn();
 const fetchReportingBoardSettingsMock = vi.fn();
 const updateReportingBoardSettingsMock = vi.fn();
 const fetchReportingBoardCasesMock = vi.fn();
+const fetchOhifViewerAvailabilityMock = vi.fn();
 const fetchReportingBoardSavedViewsMock = vi.fn();
 const fetchMyDoctorReportingWorklistMock = vi.fn();
 const fetchDoctorReportingWorklistsMock = vi.fn();
@@ -227,6 +228,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchReportingBoardSettings: (...args: unknown[]) => fetchReportingBoardSettingsMock(...args),
   updateReportingBoardSettings: (...args: unknown[]) => updateReportingBoardSettingsMock(...args),
   fetchReportingBoardCases: (...args: unknown[]) => fetchReportingBoardCasesMock(...args),
+  fetchOhifViewerAvailability: (...args: unknown[]) => fetchOhifViewerAvailabilityMock(...args),
   fetchReportingBoardSavedViews: (...args: unknown[]) => fetchReportingBoardSavedViewsMock(...args),
   fetchMyDoctorReportingWorklist: (...args: unknown[]) => fetchMyDoctorReportingWorklistMock(...args),
   fetchDoctorReportingWorklists: (...args: unknown[]) => fetchDoctorReportingWorklistsMock(...args),
@@ -483,6 +485,7 @@ describe("Doctor Portal shell", () => {
     fetchReportingBoardSettingsMock.mockReset();
     updateReportingBoardSettingsMock.mockReset();
     fetchReportingBoardCasesMock.mockReset();
+    fetchOhifViewerAvailabilityMock.mockReset();
     fetchReportingBoardSavedViewsMock.mockReset();
     fetchMyDoctorReportingWorklistMock.mockReset();
     fetchDoctorReportingWorklistsMock.mockReset();
@@ -764,6 +767,7 @@ describe("Doctor Portal shell", () => {
     });
     updateReportingBoardSettingsMock.mockResolvedValue({});
     fetchReportingBoardCasesMock.mockResolvedValue({ cases: [], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
+    fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([]);
     fetchMyDoctorReportingWorklistMock.mockResolvedValue({
       id: 90, ownerUserId: null, ownerDoctorId: null, name: "Dr Normal Worklist", token: "doctor-token",
