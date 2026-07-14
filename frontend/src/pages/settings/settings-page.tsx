@@ -503,6 +503,15 @@ function safeDoctorProfileError(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "An unexpected error occurred.";
 }
 
+function mutationErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return fallback;
+}
+
 function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -1112,7 +1121,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       invalidateModalityDerivedAppointmentCaches(queryClient);
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Deactivate failed"); }
+    onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Deactivate failed")); }
   });
   const hardDeleteMutation = useMutation({
     mutationFn: (id: number) => deleteModality(id),
@@ -1122,7 +1131,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       invalidateModalityDerivedAppointmentCaches(queryClient);
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Hard delete failed"); }
+    onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Hard delete failed")); }
   });
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) => updateModality(id, {
@@ -1144,7 +1153,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       setEditingId(null);
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
+    onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Update failed")); }
   });
   const createMutation = useMutation({
     mutationFn: (data: any) => createModality({
@@ -1167,7 +1176,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, general_instruction_ar: "", general_instruction_en: "", safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
+    onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Create failed")); }
   });
 
   if (error) {
