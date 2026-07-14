@@ -67,9 +67,7 @@ import ExamTypesSection from "./exam-types-section";
 import type {
   User,
   DoctorProfile,
-  SchedulingEngineConfig,
-  PatientImportBatch,
-  PatientImportStagingRow
+  SchedulingEngineConfig
 } from "@/types/api";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,

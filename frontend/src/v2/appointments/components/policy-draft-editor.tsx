@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, Input } from "@/components/shared";
+import { Button, Card } from "@/components/shared";
 import { chooseLocalized } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { useV2ExamTypeCatalog, useV2Lookups, useV2PolicyUsers } from "../api";
