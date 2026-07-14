@@ -154,7 +154,7 @@ vi.mock("@/pages/public/cancel-appointment-page", () => ({
 }));
 vi.mock("@/v2/appointments", () => ({
   AppointmentCreatePage: () => <TestPage testId="appointment-create-page" label="Appointment Create Page" />,
-  SchedulingAdminV2Page: () => <TestPage testId="scheduling-admin-page" label="Scheduling Admin Page" />,
+  SchedulingAdminPage: () => <TestPage testId="scheduling-admin-page" label="Scheduling Admin Page" />,
 }));
 
 function renderAppAt(

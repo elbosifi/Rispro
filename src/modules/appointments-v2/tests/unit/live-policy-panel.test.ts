@@ -79,10 +79,10 @@ describe("LivePolicyPanel — component structure", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test: SchedulingAdminV2Page integration
+// Test: SchedulingAdminPage integration
 // ---------------------------------------------------------------------------
 
-describe("SchedulingAdminV2Page — live policy integration", () => {
+describe("SchedulingAdminPage — live policy integration", () => {
   const pagePath = `${process.cwd()}/frontend/src/v2/appointments/scheduling-admin-page.tsx`;
 
   it("imports LivePolicyPanel", async () => {

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SchedulingAdminV2Page } from "../scheduling-admin-page";
+import { SchedulingAdminPage } from "../scheduling-admin-page";
 import type { PolicyPreviewDto, PolicyStatusDto } from "../types";
 
 const createDraftMock = vi.fn();
@@ -80,12 +80,12 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <SchedulingAdminV2Page />
+      <SchedulingAdminPage />
     </QueryClientProvider>
   );
 }
 
-describe("SchedulingAdminV2Page", () => {
+describe("SchedulingAdminPage", () => {
   beforeEach(() => {
     policyStatus = baseStatus();
     policyPreview = {

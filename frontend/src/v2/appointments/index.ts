@@ -59,7 +59,7 @@ export {
 } from "./api";
 
 // Pages
-export { SchedulingAdminV2Page } from "./scheduling-admin-page";
+export { SchedulingAdminPage } from "./scheduling-admin-page";
 export { AppointmentCreatePage } from "./appointment-create-page";
 
 // Components

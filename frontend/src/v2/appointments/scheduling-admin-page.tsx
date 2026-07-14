@@ -44,7 +44,7 @@ function snapshotsDiffer(published: PolicySnapshotDto | undefined, draft: Policy
   return JSON.stringify(publishedVersioned) !== JSON.stringify(draftVersioned);
 }
 
-export function SchedulingAdminV2Page() {
+export function SchedulingAdminPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [showPublish, setShowPublish] = useState(false);

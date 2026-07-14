@@ -34,7 +34,7 @@ import WorklistMonitorPage from "@/pages/worklist-monitor/worklist-monitor-page"
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
-import { AppointmentCreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
+import { AppointmentCreatePage, SchedulingAdminPage } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { hasDoctorWorkspaceAccess, NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
@@ -309,7 +309,7 @@ function AppContent() {
             <Route
               path="/v2/appointments/admin"
               element={(user.role === "supervisor" || user.role === "super_admin")
-                ? guardedPage("v2.appointments.admin", <SchedulingAdminV2Page />)
+                ? guardedPage("v2.appointments.admin", <SchedulingAdminPage />)
                 : <Navigate to="/appointments" replace />}
             />
 
