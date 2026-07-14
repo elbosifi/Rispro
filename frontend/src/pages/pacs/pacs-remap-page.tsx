@@ -274,10 +274,11 @@ export default function PacsRemapPage() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
+  const [previewWarning, setPreviewWarning] = useState("");
   const [gatewayUploadLimitRejected, setGatewayUploadLimitRejected] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [resumedJobMessage, setResumedJobMessage] = useState("");
-  const [completeScanStatus, setCompleteScanStatus] = useState<"idle" | "running" | "complete" | "skipped">("idle");
+  const [completeScanStatus, setCompleteScanStatus] = useState<"idle" | "running" | "complete" | "failed" | "skipped">("idle");
   const [scanProgress, setScanProgress] = useState<DicomStudyScanProgress | null>(null);
   const [skipAcknowledged, setSkipAcknowledged] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
@@ -293,6 +294,7 @@ export default function PacsRemapPage() {
   const focusHeadingAfterNavigationRef = useRef(false);
   const fullScanControllerRef = useRef<AbortController | null>(null);
   const scanRunIdRef = useRef(0);
+  const completedFullScanRunIdRef = useRef<number | null>(null);
   const activeJobLookupHandledRef = useRef<number | null>(null);
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
@@ -420,6 +422,7 @@ export default function PacsRemapPage() {
     setPatientSearch("");
     setCompleteScanStatus("idle");
     setScanProgress(null);
+    setPreviewWarning("");
     setSkipAcknowledged(false);
     setConfirmChecked(false);
     setUploadLoaded(0);
@@ -458,12 +461,18 @@ export default function PacsRemapPage() {
       },
     }).then((result) => {
       if (runId !== scanRunIdRef.current || controller.signal.aborted) return;
+      completedFullScanRunIdRef.current = runId;
+      fullScanControllerRef.current = null;
       setScanResult(result);
       setCompleteScanStatus("complete");
+      setPreviewWarning("");
       setScanProgress({ candidateFileCount: result.dicomLikeFileCount, processedFileCount: result.dicomLikeFileCount, parsedDicomFileCount: result.parsedDicomFileCount, unparsedCount: result.unparsedCount, studyCount: result.studies.length });
       setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
     }).catch((error: unknown) => {
       if (error instanceof DicomStudyScanCancelledError || controller.signal.aborted || runId !== scanRunIdRef.current) return;
+      fullScanControllerRef.current = null;
+      setPreviewWarning("");
+      setCompleteScanStatus("failed");
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
       setUiStep("source");
     });
@@ -471,28 +480,30 @@ export default function PacsRemapPage() {
 
   const scanMutation = useMutation({
     mutationFn: async (sourceFiles: File[]) => previewDicomStudiesFromFiles(sourceFiles),
-    onMutate: () => {
+    onMutate: (sourceFiles) => {
       cancelActiveFullScan();
       const runId = ++scanRunIdRef.current;
+      completedFullScanRunIdRef.current = null;
       setUiStep("source");
       setErrorMessage("");
       setErrorDetails("");
+      setPreviewWarning("");
       setSuccessMessage("");
-      setCompleteScanStatus("idle");
+      setCompleteScanStatus("running");
       setScanProgress(null);
       setSkipAcknowledged(false);
       setSelectedStudyInstanceUid("");
+      startCompleteScan(sourceFiles, runId);
       return { runId };
     },
-    onSuccess: (result, sourceFiles, context) => {
-      if (context?.runId !== scanRunIdRef.current) return;
+    onSuccess: (result, _sourceFiles, context) => {
+      if (context?.runId !== scanRunIdRef.current || completedFullScanRunIdRef.current === context.runId) return;
       setScanResult(result);
-      startCompleteScan(sourceFiles, context.runId);
+      setPreviewWarning("");
     },
-    onError: (error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
-      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
-      setUiStep("source");
+    onError: (_error: unknown, _sourceFiles, context) => {
+      if (context?.runId !== scanRunIdRef.current || completedFullScanRunIdRef.current === context?.runId) return;
+      setPreviewWarning(t(language, "pacs.remap.fastPreviewUnavailable"));
     },
   });
 
@@ -787,7 +798,9 @@ export default function PacsRemapPage() {
   }, [uiStep]);
 
   useEffect(() => () => {
+    scanRunIdRef.current += 1;
     fullScanControllerRef.current?.abort();
+    fullScanControllerRef.current = null;
   }, []);
 
   const visibleErrorMessage =
@@ -820,6 +833,7 @@ export default function PacsRemapPage() {
     setJobId(null);
     setErrorMessage("");
     setErrorDetails("");
+    setPreviewWarning("");
     setGatewayUploadLimitRejected(false);
     setSuccessMessage("");
     setResumedJobMessage("");
@@ -901,13 +915,13 @@ export default function PacsRemapPage() {
                 {stepLabels[0]}
               </h3>
               <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
-                {language === "ar" ? "معاينة سريعة أولاً" : "Fast preview first"}
+                {t(language, "pacs.remap.fastPreviewAndCompleteScan")}
               </span>
             </div>
             <div className="hidden" aria-hidden="true">
               <h3 className="text-base font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
               <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
-                {language === "ar" ? "معاينة سريعة أولا" : "Fast preview first"}
+                {t(language, "pacs.remap.fastPreviewAndCompleteScan")}
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -986,7 +1000,7 @@ export default function PacsRemapPage() {
             {scanResult && (
               <div className={`rounded-xl border px-3 py-2 text-xs ${completeScanStatus === "skipped" ? "border-amber-300 bg-amber-50 text-amber-900" : completeScanStatus === "complete" ? "border-teal-200 bg-teal-50 text-teal-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
                 <p className="font-semibold" aria-live="polite">
-                  {completeScanStatus === "running" ? t(language, "pacs.remap.completeScanRunning") : completeScanStatus === "complete" ? t(language, "pacs.remap.completeScanComplete") : completeScanStatus === "skipped" ? t(language, "pacs.remap.completeScanSkipped") : t(language, "pacs.remap.quickPreviewComplete")}
+                  {completeScanStatus === "running" ? t(language, "pacs.remap.completeScanRunning") : completeScanStatus === "complete" ? t(language, "pacs.remap.completeScanComplete") : completeScanStatus === "failed" ? t(language, "pacs.remap.completeScanFailed") : completeScanStatus === "skipped" ? t(language, "pacs.remap.completeScanSkipped") : t(language, "pacs.remap.quickPreviewComplete")}
                 </p>
                 {scanProgress && <p>{t(language, "pacs.remap.scanProgress", { processed: scanProgress.processedFileCount, total: scanProgress.candidateFileCount, parsed: scanProgress.parsedDicomFileCount, unparsed: scanProgress.unparsedCount, studies: scanProgress.studyCount })}</p>}
               </div>
@@ -1006,6 +1020,7 @@ export default function PacsRemapPage() {
             </div>
 
             {visibleErrorMessage && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{visibleErrorMessage}</div>}
+            {previewWarning && completeScanStatus === "running" && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">{previewWarning}</div>}
 
           {scanResult && (
             <div className="mt-6 space-y-4 border-t border-slate-200 pt-5">

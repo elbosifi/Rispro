@@ -75,6 +75,13 @@ function result(studies = [study()]) {
   return { studies, skippedSidecarCount: 0, unparsedCount: 0, totalFileCount: 1, dicomLikeFileCount: 1, parsedDicomFileCount: 1, fallbackUploadFiles: studies.flatMap((item) => item.files), unparsedFiles: [] };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}><PacsRemapPage /></QueryClientProvider>);
@@ -142,6 +149,94 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByRole("heading", { name: "Source" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByRole("heading", { name: "Patient" })).toBeNull();
+  });
+
+  it("starts the complete scan immediately while the fast preview is pending", async () => {
+    const preview = deferred<ReturnType<typeof result>>();
+    previewMock.mockReturnValue(preview.promise);
+    scanMock.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+
+    await waitFor(() => expect(scanMock).toHaveBeenCalledTimes(1));
+    expect(previewMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a successful complete scan usable after a fast preview failure", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
+    previewMock.mockRejectedValue(new Error("Preview API unavailable"));
+    scanMock.mockReturnValue(fullScan.promise);
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+
+    expect(await screen.findByText("Fast preview was unavailable. RISpro is continuing the complete folder scan.")).toBeTruthy();
+    expect(screen.queryByText("Preview API unavailable")).toBeNull();
+
+    fullScan.resolve(result([study("full-study", "Complete Study")]));
+    expect(await screen.findByText("Complete Study")).toBeTruthy();
+    expect(screen.getByText("Complete folder scan complete")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Fast preview was unavailable. RISpro is continuing the complete folder scan.")).toBeNull();
+  });
+
+  it("continues to the authoritative scan when the preview reports zero studies", async () => {
+    previewMock.mockRejectedValue(new Error("No studies were detected in the preview."));
+    scanMock.mockResolvedValue(result([study("full-study", "Usable Complete Study")]));
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+
+    expect(await screen.findByText("Usable Complete Study")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("No studies were detected in the preview.")).toBeNull();
+  });
+
+  it("does not let a late preview replace a completed full scan", async () => {
+    const preview = deferred<ReturnType<typeof result>>();
+    const fullScan = deferred<ReturnType<typeof result>>();
+    previewMock.mockReturnValue(preview.promise);
+    scanMock.mockReturnValue(fullScan.promise);
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+
+    fullScan.resolve(result([study("study-a", "Authoritative Study")]));
+    expect(await screen.findByText("Authoritative Study")).toBeTruthy();
+    preview.resolve({ ...result([study("study-b", "Late Preview Study")]), previewOnly: true });
+    await waitFor(() => expect(screen.queryByText("Late Preview Study")).toBeNull());
+    expect((screen.getByRole("radio") as HTMLInputElement).value).toBe("study-a");
+  });
+
+  it("ignores preview and full-scan results from a previous folder selection", async () => {
+    const firstPreview = deferred<ReturnType<typeof result>>();
+    const firstScan = deferred<ReturnType<typeof result>>();
+    previewMock.mockReturnValueOnce(firstPreview.promise).mockResolvedValueOnce({ ...result([study("study-2", "Folder Two")]), previewOnly: true });
+    scanMock.mockReturnValueOnce(firstScan.promise).mockResolvedValueOnce(result([study("study-2", "Folder Two")]));
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    const input = screen.getByLabelText("Select DICOM files");
+    fireEvent.change(input, { target: { files: [new File(["1"], "folder-one.dcm")] } });
+    fireEvent.change(input, { target: { files: [new File(["2"], "folder-two.dcm")] } });
+
+    firstPreview.resolve({ ...result([study("study-1", "Folder One")]), previewOnly: true });
+    firstScan.resolve(result([study("study-1", "Folder One")]));
+    expect(await screen.findByText("Folder Two")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Folder One")).toBeNull());
+  });
+
+  it("shows a terminal error only when the complete scan fails", async () => {
+    previewMock.mockResolvedValue({ ...result(), previewOnly: true });
+    scanMock.mockRejectedValue(new Error("Complete scan failed to read this folder."));
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Complete scan failed to read this folder.");
+    expect(screen.getByText("Complete folder scan failed")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("requires explicit study selection when multiple studies are detected", async () => {
@@ -290,6 +385,17 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getAllByText(/Folder not fully scanned/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/verify every uploaded DICOM file before remapping/i)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not offer skipping when the provisional preview is unsafe", async () => {
+    previewMock.mockResolvedValue({ ...result([study("1", "First"), study("2", "Second")]), previewOnly: true });
+    scanMock.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+
+    expect(await screen.findByText("Multiple studies detected. Select one study to remap.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with server verification" })).toBeNull();
   });
 
   it("aborts a provisional full scan without letting its stale completion replace skipped state", async () => {
