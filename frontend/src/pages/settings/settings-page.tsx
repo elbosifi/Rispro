@@ -7,6 +7,7 @@ import {
   fetchDoctorProfilesForAdmin,
   fetchExamTypes,
   fetchModalitiesSettings,
+  type ModalitySettingsRow,
   fetchNameDictionary,
   fetchPatientNotAllowedNameWords,
   fetchSettings,
@@ -1101,7 +1102,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const [showInactive, setShowInactive] = useState(false);
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error } = useQuery<{ modalities: ModalitySettingsRow[] }>({
     queryKey: ["modalities", showInactive ? "with-inactive" : "active"],
     queryFn: () => fetchModalitiesSettings(showInactive)
   });
@@ -1186,19 +1187,21 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
 
-  const startEdit = (m: any) => {
-    setEditingId(m.id);
+  const modalities = Array.isArray(data?.modalities) ? data.modalities : [];
+
+  const startEdit = (modality: ModalitySettingsRow) => {
+    setEditingId(modality.id);
     setEditForm({
-      code: m.code,
-      name_ar: m.name_ar,
-      name_en: m.name_en,
-      daily_capacity: m.daily_capacity ?? 0,
-      is_active: m.is_active,
-      general_instruction_ar: m.general_instruction_ar || "",
-      general_instruction_en: m.general_instruction_en || "",
-      safety_warning_ar: m.safety_warning_ar || "",
-      safety_warning_en: m.safety_warning_en || "",
-      safety_warning_enabled: m.safety_warning_enabled !== false
+      code: modality.code,
+      name_ar: modality.name_ar,
+      name_en: modality.name_en,
+      daily_capacity: modality.daily_capacity ?? 0,
+      is_active: modality.is_active,
+      general_instruction_ar: modality.general_instruction_ar || "",
+      general_instruction_en: modality.general_instruction_en || "",
+      safety_warning_ar: modality.safety_warning_ar || "",
+      safety_warning_en: modality.safety_warning_en || "",
+      safety_warning_enabled: modality.safety_warning_enabled !== false
     });
   };
 
@@ -1246,7 +1249,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
           <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة جهاز"}</Button>
         </div>
       </div>
-      <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
+      <span className="text-sm description-center">{modalities.length} modalities</span>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
@@ -1273,15 +1276,15 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
         </div>
       )}
 
-      {((data as any)?.modalities?.length ?? 0) === 0 ? (
+      {modalities.length === 0 ? (
         <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 p-4 text-sm text-stone-500 dark:text-stone-400">
           لم يتم تكوين أي أجهزة بعد.
         </div>
       ) : (
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-        {(data as any)?.modalities?.map((m: any) => (
-          <li key={m.id} className="py-3">
-            {editingId === m.id ? (
+        {modalities.map((modality) => (
+          <li key={modality.id} className="py-3">
+            {editingId === modality.id ? (
               <div className="space-y-2 text-sm">
                 <div className="grid grid-cols-2 gap-2">
                   <input value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
@@ -1304,26 +1307,26 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                   </div>
                 )}
                 <div className="flex gap-2">
-                  <button onClick={() => updateMutation.mutate({ id: m.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => updateMutation.mutate({ id: modality.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
                   <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">إلغاء</button>
                 </div>
               </div>
             ) : (
               <div className="flex items-center justify-between">
                 <div className="text-start">
-                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, m.name_ar, m.name_en) || m.code || `Modality ${m.id}`}</p>
-                  <p className="text-sm description-center">{t("settings.capacity")}: {m.daily_capacity ?? "-"}</p>
+                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`}</p>
+                  <p className="text-sm description-center">{t("settings.capacity")}: {modality.daily_capacity ?? "-"}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-                    {m.is_active ? t("settings.active") : t("settings.inactive")}
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${modality.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                    {modality.is_active ? t("settings.active") : t("settings.inactive")}
                   </span>
-                  <button onClick={() => startEdit(m)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
-                  {m.is_active ? (
+                  <button onClick={() => startEdit(modality)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  {modality.is_active ? (
                     <button
                       onClick={() => {
                         if (window.confirm("Deactivate this modality? It will disappear from active lists.")) {
-                          deactivateMutation.mutate(m.id);
+                          deactivateMutation.mutate(modality.id);
                         }
                       }}
                       className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
@@ -1334,7 +1337,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                     <button
                       onClick={() => {
                         if (window.confirm("Reactivate this modality?")) {
-                          updateMutation.mutate({ id: m.id, data: { ...m, is_active: true } });
+                          updateMutation.mutate({ id: modality.id, data: { ...modality, is_active: true } });
                         }
                       }}
                       className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors"
@@ -1345,7 +1348,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                   <button
                     onClick={() => {
                       if (window.confirm("Permanently delete this modality? This cannot be undone.")) {
-                        hardDeleteMutation.mutate(m.id);
+                        hardDeleteMutation.mutate(modality.id);
                       }
                     }}
                     className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"

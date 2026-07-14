@@ -3673,9 +3673,23 @@ export async function fetchExamTypes(includeInactive = false): Promise<{ modalit
   return raw;
 }
 
-export async function fetchModalitiesSettings(includeInactive = false): Promise<{ modalities: RawRecord[] }> {
+export type ModalitySettingsRow = RawRecord & {
+  id: number;
+  code: string;
+  name_ar: string;
+  name_en: string;
+  daily_capacity: number | null;
+  general_instruction_ar: string | null;
+  general_instruction_en: string | null;
+  is_active: boolean;
+  safety_warning_ar: string | null;
+  safety_warning_en: string | null;
+  safety_warning_enabled: boolean;
+};
+
+export async function fetchModalitiesSettings(includeInactive = false): Promise<{ modalities: ModalitySettingsRow[] }> {
   const query = includeInactive ? "?includeInactive=true" : "";
-  const raw = await api<{ modalities: RawRecord[] }>(`/settings/modalities${query}`);
+  const raw = await api<{ modalities: ModalitySettingsRow[] }>(`/settings/modalities${query}`);
   return raw;
 }
 

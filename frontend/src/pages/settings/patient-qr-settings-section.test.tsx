@@ -120,7 +120,19 @@ describe.skip("PatientQrSettingsSection", () => {
       modalities: [
         { id: 2, nameAr: "Ã˜Â±Ã™â€ Ã™Å Ã™â€ ", nameEn: "MRI", code: "MR" },
         { id: 3, nameAr: "Ã˜Â£Ã˜Â´Ã˜Â¹Ã˜Â© Ã™â€¦Ã™â€šÃ˜Â·Ã˜Â¹Ã™Å Ã˜Â©", nameEn: "CT", code: "CT" },
-      ],
+      ].map((row) => ({
+        id: row.id,
+        code: row.code,
+        name_ar: row.nameAr,
+        name_en: row.nameEn,
+        daily_capacity: null,
+        general_instruction_ar: null,
+        general_instruction_en: null,
+        is_active: true,
+        safety_warning_ar: null,
+        safety_warning_en: null,
+        safety_warning_enabled: true,
+      })),
     });
     vi.mocked(fetchPatientQrSettings).mockResolvedValue(baseSettings);
     vi.mocked(savePatientQrSettings).mockResolvedValue({});
