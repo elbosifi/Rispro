@@ -566,7 +566,6 @@ export function buildAppointmentSlipLayoutModel(
   const qrCaptionLines = qrShown ? Math.ceil(localizeText(settings.qrCaptionAr, settings.qrCaptionEn, settings.languageMode).length / 24) : 0;
   const qrHelperLines = qrShown ? Math.ceil(localizeText(settings.qrHelperTextAr, settings.qrHelperTextEn, settings.languageMode).length / 42) : 0;
   const qrHeight = qrShown ? mm(settings.qrSizeMm) + 10 + qrCaptionLines * 9 * fontScale + qrHelperLines * 7 * fontScale : 0;
-  const headerHeight = mode === "blank" ? 34 * fontScale + (qrShown ? Math.max(qrHeight, 22 * fontScale) : 0) : (qrShown ? qrHeight : 0);
   const barcodeBlockHeight = settings.showAccessionBarcode ? mm(settings.barcodeHeightMm) + 24 * fontScale : 0;
   const barcodeWidth = Math.min(mm(settings.barcodeWidthMm), content.w - 6);
   const barcodeX = content.x + (content.w - barcodeWidth) / 2;
@@ -906,17 +905,6 @@ export async function createAppointmentSlipPdfBlob(
     drawPdfText(doc, shorten(slip.accessionBarcodePayload, 40), layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y + layout.barcodeBlock.h - 6, { align: "center" });
   }
   return doc.output("blob");
-}
-
-function renderFieldHtml(field: SlipField): string {
-  return `
-    <div class="summary-item">
-      <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
-      <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
-    </div>
-  `;
 }
 
 function isMeaningfulSlipValue(value: string | null | undefined): boolean {

@@ -1,4 +1,4 @@
-import { ApiError, api } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 import { normalizePageVisibilityMatrix, type PageVisibilityMatrix } from "@/lib/page-visibility";
 import { normalizeActionPinPolicy, type ActionPinPolicy } from "@/lib/action-pin-policy";
 import {
@@ -24,7 +24,6 @@ import type {
   User,
   AppointmentStatistics,
   DicomDevice,
-  AuditEntry,
   AuditEntriesResponse,
   SchedulingEngineConfig,
   PatientImportBatch,
@@ -3257,6 +3256,7 @@ export async function updateAppointment(id: number, payload: RawRecord) {
 }
 
 export async function cancelAppointment(id: number, _cancelReason: string) {
+  void _cancelReason;
   const raw = await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
     method: "POST"
   });

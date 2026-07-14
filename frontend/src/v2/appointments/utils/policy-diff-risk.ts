@@ -1,9 +1,7 @@
 import type {
-  PolicyCategoryDailyLimitDto,
   PolicyDisplayLookupsDto,
   PolicyExamMixQuotaRuleDto,
   PolicyExamTypeRuleDto,
-  PolicyExamTypeSpecialQuotaDto,
   PolicyModalityBlockedRuleDto,
   PolicySnapshotDto,
 } from "../types";
