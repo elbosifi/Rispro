@@ -6,7 +6,7 @@ import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { configurePatientWebPushVapid, getPatientWebPushSharedConfig } from "../../services/patient-web-push-service.js";
-import { buildComparisonCaseAssignedNotification, buildPatientNotificationLabel, buildReportingCaseAssignedNotification } from "../../services/internal-notification-formatters.js";
+import { buildComparisonCaseAssignedNotification, buildInternalNotificationPatientLabel, buildReportingCaseAssignedNotification } from "../../services/internal-notification-formatters.js";
 import { resolvePatientPrimaryIdentifier } from "../../services/internal-notification-primary-identifier.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
@@ -2172,7 +2172,7 @@ async function reportingCaseNotificationText(row: ReportingBoardCaseRow | null, 
     };
   }
   const identifier = await resolvePatientPrimaryIdentifier(row.patientId);
-  const patient = buildPatientNotificationLabel(row.patientEnglishName || row.patientArabicName, identifier);
+  const patient = buildInternalNotificationPatientLabel({ fullName: row.patientEnglishName || row.patientArabicName, primaryIdentifier: identifier });
   if (row.caseType === "comparison") {
     const note = await pool.query<{ reason: string | null }>(`select reason from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active' limit 1`, [row.comparisonRequestId]);
     return buildComparisonCaseAssignedNotification({ modality: row.modalityCode || row.modalityName, exam: row.examTypeName, priorDate: row.linkedPreviousStudyDate, patient, note: note.rows[0]?.reason });

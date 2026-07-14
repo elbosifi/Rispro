@@ -10,7 +10,7 @@ import {
 } from "./patient-web-push-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import type { SchedulingOverrideRequestRow } from "../modules/appointments-v2/scheduling-override-requests/models/scheduling-override-request.js";
-import { buildPatientNotificationLabel, buildSchedulingOverrideNotification, maskNotificationIdentifier, sanitizeNotificationText } from "./internal-notification-formatters.js";
+import { buildInternalNotificationPatientLabel, buildSchedulingOverrideNotification } from "./internal-notification-formatters.js";
 
 export interface UserPushPayload {
   eventType: string;
@@ -211,8 +211,7 @@ async function safeSendMany(userIds: number[], payload: UserPushPayload): Promis
 }
 
 function overrideNotificationPayload(request: SchedulingOverrideRequestRow, state: "created" | "approved" | "rejected" | "failed" | "expired" | "cancelled"): UserPushPayload {
-  const rawValue = sanitizeNotificationText(request.patientPrimaryIdentifier);
-  const patient = buildPatientNotificationLabel(request.patientDisplayName, rawValue ? { rawValue, maskedValue: maskNotificationIdentifier(rawValue) } : null);
+  const patient = buildInternalNotificationPatientLabel({ fullName: request.patientDisplayName ?? null, primaryIdentifier: request.patientPrimaryIdentifier ?? null });
   const context = request.decisionContext;
   const capacity = context?.currentCapacity != null && context.totalCapacity != null ? `${context.currentCapacity}/${context.totalCapacity} booked` : null;
   const notification = buildSchedulingOverrideNotification({

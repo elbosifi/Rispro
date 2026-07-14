@@ -27,7 +27,8 @@ describe("user web push service", () => {
 
     assert.match(source, /buildSchedulingOverrideNotification/);
     assert.match(source, /patientPrimaryIdentifier/);
-    assert.match(source, /maskNotificationIdentifier/);
+    assert.match(source, /buildInternalNotificationPatientLabel/);
+    assert.match(source, /patientPrimaryIdentifier/);
     assert.match(source, /clickUrl: `\/scheduling\/override-requests\?requestId=\$\{request\.id\}`/);
     assert.doesNotMatch(source, /request\.patientIdentifier|request\.patientMrn|accession|StudyInstanceUID|diagnosis|report text/i);
   });
