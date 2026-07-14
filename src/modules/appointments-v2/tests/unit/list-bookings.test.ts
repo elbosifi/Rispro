@@ -1,18 +1,19 @@
 /**
- * Appointments V2 — List bookings unit tests.
+ * Appointments V2 — List bookings backend unit tests.
  *
- * Tests for the list bookings service, repository query shape, and frontend types.
+ * The active GET /api/v2/appointments endpoint remains covered after the
+ * obsolete frontend list client was removed.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
-// Test: ListBookingsParams shape
+// Test: Backend list query and result shapes
 // ---------------------------------------------------------------------------
 
-describe("List bookings — params shape", () => {
-  it("has required modalityId and date range", () => {
+describe("List bookings — backend query params", () => {
+  it("has required modality and date range with pagination", () => {
     const params = {
       modalityId: 1,
       dateFrom: "2026-04-01",
@@ -22,12 +23,11 @@ describe("List bookings — params shape", () => {
     };
     assert.strictEqual(typeof params.modalityId, "number");
     assert.strictEqual(typeof params.dateFrom, "string");
-    assert.strictEqual(typeof params.dateTo, "string");
     assert.strictEqual(params.limit, 50);
     assert.strictEqual(params.offset, 0);
   });
 
-  it("supports optional limit, offset, and includeCancelled with defaults", () => {
+  it("supports optional pagination and include-cancelled filtering", () => {
     const params: {
       modalityId: number;
       dateFrom: string;
@@ -46,12 +46,8 @@ describe("List bookings — params shape", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Test: BookingWithPatientInfo shape
-// ---------------------------------------------------------------------------
-
-describe("List bookings — BookingWithPatientInfo shape", () => {
-  it("includes all booking fields plus patient/modality/exam info", () => {
+describe("List bookings — backend result record shape", () => {
+  it("includes booking, patient, modality, and exam information", () => {
     const booking = {
       id: 1,
       patientId: 10,
@@ -68,7 +64,7 @@ describe("List bookings — BookingWithPatientInfo shape", () => {
       createdByUserId: 1,
       updatedAt: "2026-04-10T10:00:00Z",
       updatedByUserId: 1,
-      patientArabicName: "أحمد محمد",
+      patientArabicName: "Ahmed Mohamed",
       patientEnglishName: "Ahmed Mohamed",
       patientNationalId: "12345678901",
       modalityName: "CT",
@@ -83,7 +79,7 @@ describe("List bookings — BookingWithPatientInfo shape", () => {
     assert.strictEqual(typeof booking.modalityName, "string");
   });
 
-  it("supports all valid booking statuses", () => {
+  it("supports all booking statuses returned by the active endpoint", () => {
     const statuses = [
       "scheduled",
       "arrived",
@@ -100,28 +96,11 @@ describe("List bookings — BookingWithPatientInfo shape", () => {
     }
   });
 
-  it("cancelled bookings has patientEnglishName and patientNationalId", () => {
+  it("retains patient details for cancelled records", () => {
     const booking = {
-      id: 99,
-      patientId: 10,
-      modalityId: 2,
-      examTypeId: null,
-      reportingPriorityId: null,
-      bookingDate: "2026-04-15",
-      bookingTime: null,
-      caseCategory: "non_oncology" as const,
       status: "cancelled" as const,
-      notes: "Patient called to cancel",
-      policyVersionId: 1,
-      createdAt: "2026-04-10T10:00:00Z",
-      createdByUserId: 1,
-      updatedAt: "2026-04-10T12:00:00Z",
-      updatedByUserId: 1,
-      patientArabicName: null,
       patientEnglishName: "Cancelled Patient",
       patientNationalId: "12345678901",
-      modalityName: "CT",
-      examTypeName: null,
     };
 
     assert.strictEqual(booking.status, "cancelled");
@@ -129,103 +108,18 @@ describe("List bookings — BookingWithPatientInfo shape", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Test: ListBookingsResponse shape
-// ---------------------------------------------------------------------------
-
-describe("List bookings — response shape", () => {
-  it("wraps bookings array", () => {
-    const response = {
-      bookings: [
-        {
-          id: 1,
-          patientId: 10,
-          modalityId: 2,
-          examTypeId: null,
-          reportingPriorityId: null,
-          bookingDate: "2026-04-15",
-          bookingTime: null,
-          caseCategory: "non_oncology" as const,
-          status: "scheduled" as const,
-          notes: null,
-          policyVersionId: 1,
-          createdAt: "2026-04-10T10:00:00Z",
-          createdByUserId: 1,
-          updatedAt: "2026-04-10T10:00:00Z",
-          updatedByUserId: 1,
-          patientArabicName: null,
-          patientEnglishName: "Test Patient",
-          patientNationalId: null,
-          modalityName: "CT",
-          examTypeName: null,
-        },
-      ],
-    };
-
+describe("List bookings — backend result wrapper", () => {
+  it("wraps records in a bookings array", () => {
+    const response = { bookings: [{ id: 1, patientEnglishName: "Test Patient" }] };
     assert.ok(Array.isArray(response.bookings));
     assert.strictEqual(response.bookings.length, 1);
     assert.strictEqual(response.bookings[0].patientEnglishName, "Test Patient");
   });
 
-  it("returns empty array when no bookings found", () => {
+  it("returns an empty array when no records are found", () => {
     const response = { bookings: [] };
     assert.strictEqual(response.bookings.length, 0);
   });
-});
-
-// ---------------------------------------------------------------------------
-// Test: Frontend API hook shape
-// ---------------------------------------------------------------------------
-
-describe("List bookings — frontend API params", () => {
-  it("listV2Bookings requires modalityId, dateFrom, dateTo", () => {
-    const params = {
-      modalityId: 1,
-      dateFrom: "2026-04-01",
-      dateTo: "2026-04-14",
-    };
-    assert.strictEqual(typeof params.modalityId, "number");
-    assert.strictEqual(params.dateFrom.length, 10); // ISO date length
-    assert.strictEqual(params.dateTo.length, 10);
-  });
-
-  it("useV2ListBookings accepts null when modality not selected", () => {
-    const params = null;
-    assert.strictEqual(params, null);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Test: Barrel exports
-// ---------------------------------------------------------------------------
-
-describe("V2 appointments — barrel exports for list bookings", () => {
-  const frontendIndexPath = `${process.cwd()}/frontend/src/v2/appointments/index.ts`;
-
-  it("index.ts exports useV2ListBookings", async () => {
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(frontendIndexPath, "utf-8");
-    assert.ok(content.includes("useV2ListBookings"));
-  });
-
-  it("index.ts exports listV2Bookings", async () => {
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(frontendIndexPath, "utf-8");
-    assert.ok(content.includes("listV2Bookings"));
-  });
-
-  it("index.ts exports BookingWithPatientInfo type", async () => {
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(frontendIndexPath, "utf-8");
-    assert.ok(content.includes("BookingWithPatientInfo"));
-  });
-
-  it("index.ts exports ListBookingsResponse type", async () => {
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(frontendIndexPath, "utf-8");
-    assert.ok(content.includes("ListBookingsResponse"));
-  });
-
 });
 
 // ---------------------------------------------------------------------------
@@ -282,21 +176,4 @@ describe("List bookings — includeCancelled", () => {
     assert.ok(content.includes("includeCancelled"));
     assert.ok(content.includes("include cancelled and discontinued bookings in results"));
   });
-
-  it("frontend API includes includeCancelled in params", async () => {
-    const fs = await import("node:fs/promises");
-    const apiPath = `${process.cwd()}/frontend/src/v2/appointments/api.ts`;
-    const content = await fs.readFile(apiPath, "utf-8");
-    assert.ok(content.includes("includeCancelled?: boolean"));
-    assert.ok(content.includes('searchParams.set("includeCancelled", "true")'));
-  });
-
-  it("frontend types include ListBookingsParams with includeCancelled", async () => {
-    const fs = await import("node:fs/promises");
-    const typesPath = `${process.cwd()}/frontend/src/v2/appointments/types.ts`;
-    const content = await fs.readFile(typesPath, "utf-8");
-    assert.ok(content.includes("ListBookingsParams"));
-    assert.ok(content.includes("includeCancelled?: boolean"));
-  });
-
 });

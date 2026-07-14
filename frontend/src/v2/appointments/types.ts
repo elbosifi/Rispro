@@ -128,16 +128,6 @@ export interface AvailabilityResponse {
   };
 }
 
-export interface SuggestionDto {
-  date: string;
-  modalityId: number;
-  decision: SchedulingDecisionDto;
-}
-
-export interface SuggestionsResponse {
-  items: SuggestionDto[];
-}
-
 export interface EvaluateRequest {
   patientId: number;
   modalityId: number;
@@ -240,47 +230,6 @@ export interface SpecialReasonCodeDto {
   labelAr: string;
   labelEn: string;
   isActive: boolean;
-}
-
-export interface BookingWithPatientInfo {
-  id: number;
-  patientId: number;
-  modalityId: number;
-  examTypeId: number | null;
-  reportingPriorityId: number | null;
-  bookingDate: string;
-  bookingTime: string | null;
-  caseCategory: CaseCategory;
-  requiresReport?: boolean;
-  studyInstanceUid?: string | null;
-  status: BookingStatus;
-  notes: string | null;
-  policyVersionId: number;
-  createdAt: string;
-  createdByUserId: number | null;
-  createdByRole?: string | null;
-  canBypassExamTypeChangeSupervisorAuth?: boolean;
-  updatedAt: string;
-  updatedByUserId: number | null;
-  patientArabicName: string | null;
-  patientEnglishName: string | null;
-  patientNationalId: string | null;
-  patientIdentifierValue: string | null;
-  modalityName: string | null;
-  examTypeName: string | null;
-}
-
-export interface ListBookingsResponse {
-  bookings: BookingWithPatientInfo[];
-}
-
-export interface ListBookingsParams {
-  modalityId: number;
-  dateFrom: string;
-  dateTo: string;
-  limit?: number;
-  offset?: number;
-  includeCancelled?: boolean;
 }
 
 export interface RescheduleBookingRequest {

@@ -156,41 +156,8 @@ describe("V2 Frontend — RescheduleBookingResponse type shape", () => {
   });
 });
 
-describe("V2 Frontend — Reschedule API query key structure", () => {
-  it("useV2RescheduleBooking is a mutation (no query key)", () => {
-    // Mutations don't have query keys — they have mutation functions.
-    // We verify the mutationFn signature here.
-    const mutationFn = ({
-      bookingId,
-      input,
-    }: {
-      bookingId: number;
-      input: { bookingDate: string; bookingTime: string | null };
-    }) => ({
-      url: `/v2/appointments/${bookingId}`,
-      method: "PUT",
-      body: input,
-    });
-
-    const result = mutationFn({
-      bookingId: 42,
-      input: { bookingDate: "2026-04-20", bookingTime: "10:00" },
-    });
-
-    assert.equal(result.url, "/v2/appointments/42");
-    assert.equal(result.method, "PUT");
-    assert.equal(result.body.bookingDate, "2026-04-20");
-  });
-});
-
 describe("V2 appointments — barrel exports for reschedule", () => {
   const frontendIndexPath = `${process.cwd()}/frontend/src/v2/appointments/index.ts`;
-
-  it("index.ts exports useV2RescheduleBooking", async () => {
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(frontendIndexPath, "utf-8");
-    assert.ok(content.includes("useV2RescheduleBooking"));
-  });
 
   it("index.ts exports rescheduleV2Booking", async () => {
     const fs = await import("node:fs/promises");

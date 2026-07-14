@@ -9,7 +9,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type {
   AvailabilityResponse,
-  SuggestionsResponse,
   EvaluateRequest,
   SchedulingDecisionDto,
   CreateBookingRequest,
@@ -17,7 +16,6 @@ import type {
   LookupsResponse,
   ModalityDto,
   ExamTypeDto,
-  ListBookingsResponse,
   RescheduleBookingRequest,
   RescheduleBookingResponse,
   SchedulingOverrideRequestDto,
@@ -77,27 +75,6 @@ export async function fetchV2Availability(params: {
   }
 
   return api<AvailabilityResponse>(`/v2/scheduling/availability?${searchParams.toString()}`);
-}
-
-export async function fetchV2Suggestions(params: {
-  modalityId: number;
-  days: number;
-  examTypeId: number | null;
-  caseCategory: "oncology" | "non_oncology" | undefined;
-}): Promise<SuggestionsResponse> {
-  const searchParams = new URLSearchParams({
-    modalityId: String(params.modalityId),
-    days: String(params.days),
-  });
-
-  if (params.examTypeId != null) {
-    searchParams.set("examTypeId", String(params.examTypeId));
-  }
-  if (params.caseCategory) {
-    searchParams.set("caseCategory", params.caseCategory);
-  }
-
-  return api<SuggestionsResponse>(`/v2/scheduling/suggestions?${searchParams.toString()}`);
 }
 
 export async function evaluateV2Scheduling(input: EvaluateRequest): Promise<SchedulingDecisionDto> {
@@ -181,12 +158,6 @@ export async function createV2Booking(input: CreateBookingRequest): Promise<Book
   return api<BookingResponse>("/v2/appointments", {
     method: "POST",
     body: JSON.stringify(input),
-  });
-}
-
-export async function cancelV2Booking(bookingId: number): Promise<{ booking: unknown; previousStatus: string }> {
-  return api<{ booking: unknown; previousStatus: string }>(`/v2/appointments/${bookingId}/cancel`, {
-    method: "POST",
   });
 }
 
@@ -295,27 +266,6 @@ export async function sendUserTestPush(): Promise<{ attempted: number; sent: num
   });
 }
 
-export async function listV2Bookings(params: {
-  modalityId: number;
-  dateFrom: string;
-  dateTo: string;
-  limit?: number;
-  offset?: number;
-  includeCancelled?: boolean;
-}): Promise<ListBookingsResponse> {
-  const searchParams = new URLSearchParams({
-    modalityId: String(params.modalityId),
-    dateFrom: params.dateFrom,
-    dateTo: params.dateTo,
-  });
-
-  if (params.limit != null) searchParams.set("limit", String(params.limit));
-  if (params.offset != null) searchParams.set("offset", String(params.offset));
-  if (params.includeCancelled) searchParams.set("includeCancelled", "true");
-
-  return api<ListBookingsResponse>(`/v2/appointments?${searchParams.toString()}`);
-}
-
 export async function fetchV2PolicyStatus(policySetKey: string = "default"): Promise<PolicyStatusDto> {
   const searchParams = new URLSearchParams({ policySetKey });
   return api<PolicyStatusDto>(`/v2/scheduling/admin/policy?${searchParams.toString()}`);
@@ -383,21 +333,6 @@ export function useV2Availability(params: Parameters<typeof fetchV2Availability>
   });
 }
 
-export function useV2Suggestions(params: Parameters<typeof fetchV2Suggestions>[0] | undefined) {
-  return useQuery({
-    queryKey: ["v2-suggestions", params] as const,
-    queryFn: () => fetchV2Suggestions(params as Parameters<typeof fetchV2Suggestions>[0]),
-    enabled: params != null,
-    staleTime: 30_000,
-  });
-}
-
-export function useV2Evaluate() {
-  return useMutation({
-    mutationFn: evaluateV2Scheduling,
-  });
-}
-
 export function useV2Lookups() {
   return useQuery({
     queryKey: ["v2-lookups"] as const,
@@ -436,53 +371,6 @@ export function useV2Priorities() {
     queryKey: ["v2-priorities"] as const,
     queryFn: fetchV2Priorities,
     staleTime: 60 * 60_000, // Priorities rarely change
-  });
-}
-
-export function useV2CreateBooking() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: createV2Booking,
-    onSuccess: () => {
-      // Invalidate availability cache after booking
-      queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
-    },
-  });
-}
-
-export function useV2CancelBooking() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: cancelV2Booking,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
-      queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
-    },
-  });
-}
-
-export function useV2ListBookings(params: Parameters<typeof listV2Bookings>[0] | null) {
-  return useQuery({
-    queryKey: ["v2-bookings", params] as const,
-    queryFn: () => (params != null ? listV2Bookings(params) : { bookings: [] }),
-    enabled: params != null,
-    staleTime: 10_000, // 10 seconds — bookings change when user creates/cancels
-  });
-}
-
-export function useV2RescheduleBooking() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ bookingId, input }: { bookingId: number; input: RescheduleBookingRequest }) =>
-      rescheduleV2Booking(bookingId, input),
-    onSuccess: () => {
-      // Invalidate availability and bookings cache after reschedule
-      queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
-      queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
-    },
   });
 }
 
