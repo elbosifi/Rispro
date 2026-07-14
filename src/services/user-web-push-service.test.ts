@@ -22,18 +22,14 @@ describe("user web push service", () => {
     assert.match(source, /hashPushSubscription/);
   });
 
-  it("keeps override push payloads generic and routes users to existing override UI", async () => {
+  it("builds compact override payloads from the explicit primary identifier and targets the request", async () => {
     const source = await readFile("src/services/user-web-push-service.ts", "utf-8");
 
-    assert.match(source, /title: "New override request"/);
-    assert.match(source, /body: "A scheduling override request needs review\."/);
-    assert.match(source, /title: "Override request approved"/);
-    assert.match(source, /title: "Override request rejected"/);
-    assert.match(source, /title: "Override request failed"/);
-    assert.match(source, /title: "Override request expired"/);
-    assert.match(source, /title: "Override request cancelled"/);
-    assert.match(source, /clickUrl: "\/scheduling\/override-requests"/);
-    assert.doesNotMatch(source, /patientDisplayName|patientIdentifier|accession|StudyInstanceUID|diagnosis|report text/i);
+    assert.match(source, /buildSchedulingOverrideNotification/);
+    assert.match(source, /patientPrimaryIdentifier/);
+    assert.match(source, /maskNotificationIdentifier/);
+    assert.match(source, /clickUrl: `\/scheduling\/override-requests\?requestId=\$\{request\.id\}`/);
+    assert.doesNotMatch(source, /request\.patientIdentifier|request\.patientMrn|accession|StudyInstanceUID|diagnosis|report text/i);
   });
 
   it("uses existing approval RBAC, supports multiple devices, and disables dead subscriptions", async () => {

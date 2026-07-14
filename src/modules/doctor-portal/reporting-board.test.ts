@@ -71,7 +71,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /caseKey: row\.caseKey/);
     assert.match(service, /comparisonRequestId: row\.comparisonRequestId/);
     assert.match(publicRoutes, /caseIdentity\(body\)/);
-    assert.match(repository, /RISpro comparison request update/);
+    assert.match(repository, /buildComparisonCaseAssignedNotification/);
     assert.match(repository, /comparisonRequestIds/);
     assert.match(repository, /\/comparisons\/\$\{caseRow\.comparisonRequestId\}/);
     assert.match(comparisonService, /createAssignedToMeNotifications/);
@@ -315,7 +315,8 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(migration, /dedupe_key text not null unique/);
     assert.match(repo, /notifyAssignedToMe/);
     assert.match(repo, /on conflict \(dedupe_key\) do nothing/);
-    assert.match(repo, /Open the saved reporting view to review this update/);
+    assert.match(repo, /buildReportingCaseAssignedNotification/);
+    assert.match(repo, /resolvePatientPrimaryIdentifier/);
     assert.match(repo, /patientEnglishName/);
     assert.match(repo, /accessionNumber/);
     assert.match(routes, /"\/notifications"/);

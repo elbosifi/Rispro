@@ -6,6 +6,8 @@ import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { configurePatientWebPushVapid, getPatientWebPushSharedConfig } from "../../services/patient-web-push-service.js";
+import { buildComparisonCaseAssignedNotification, buildPatientNotificationLabel, buildReportingCaseAssignedNotification } from "../../services/internal-notification-formatters.js";
+import { resolvePatientPrimaryIdentifier } from "../../services/internal-notification-primary-identifier.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type {
   BrowserPushSubscriptionInput,
@@ -2162,17 +2164,20 @@ export async function getReportingBoardPushSubscriptionStatus(input: {
   return { enabled: Boolean(row?.enabled), lastSuccessAt: nullableIsoString(row?.last_success_at) };
 }
 
-function reportingCaseNotificationText(row: ReportingBoardCaseRow | null): { title: string; body: string } {
+async function reportingCaseNotificationText(row: ReportingBoardCaseRow | null, assignmentNote: string | null = null): Promise<{ title: string; body: string }> {
   if (!row) {
     return {
       title: "RISpro test reporting notification",
       body: "Test notification for Reporting Board saved view alerts.",
     };
   }
-  return {
-    title: row.caseType === "comparison" ? "RISpro comparison request update" : "RISpro reporting case update",
-    body: "Open the saved reporting view to review this update.",
-  };
+  const identifier = await resolvePatientPrimaryIdentifier(row.patientId);
+  const patient = buildPatientNotificationLabel(row.patientEnglishName || row.patientArabicName, identifier);
+  if (row.caseType === "comparison") {
+    const note = await pool.query<{ reason: string | null }>(`select reason from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active' limit 1`, [row.comparisonRequestId]);
+    return buildComparisonCaseAssignedNotification({ modality: row.modalityCode || row.modalityName, exam: row.examTypeName, priorDate: row.linkedPreviousStudyDate, patient, note: note.rows[0]?.reason });
+  }
+  return buildReportingCaseAssignedNotification({ modality: row.modalityCode || row.modalityName, exam: row.examTypeName, date: row.bookingDate, patient, note: assignmentNote });
 }
 
 interface PushSubscriptionDeliveryRow {
@@ -2228,7 +2233,7 @@ export async function sendReportingBoardSavedViewTestPush(input: {
   caseRow?: ReportingBoardCaseRow | null;
   subscription?: BrowserPushSubscriptionInput;
 }): Promise<PushDeliveryResult> {
-  const text = reportingCaseNotificationText(input.caseRow ?? null);
+  const text = await reportingCaseNotificationText(input.caseRow ?? null);
   let targetSubscriptions: PushSubscriptionDeliveryRow[] | undefined;
   if (input.subscription) {
     const normalized = normalizePushSubscription(input.subscription);
@@ -2257,6 +2262,7 @@ export async function createAssignedToMeNotifications(input: {
   doctorId: number;
   appointmentIds?: number[];
   comparisonRequestIds?: number[];
+  appointmentNotes?: Record<number, string | null | undefined>;
 }): Promise<number> {
   const appointmentIds = input.appointmentIds ?? [];
   const comparisonRequestIds = input.comparisonRequestIds ?? [];
@@ -2294,7 +2300,7 @@ export async function createAssignedToMeNotifications(input: {
         : await import("../../services/comparison-request-service.js").then((module) =>
             module.listComparisonReportingBoardRows({ comparisonRequestId: notificationCase.id, reportStatus: "all", limit: 1, offset: 0 })
           );
-      const text = reportingCaseNotificationText(caseRow ?? null);
+      const text = await reportingCaseNotificationText(caseRow ?? null, input.appointmentNotes?.[notificationCase.id] ?? null);
       const actionUrl = caseRow?.caseType === "comparison" && caseRow.comparisonRequestId
         ? `/comparisons/${caseRow.comparisonRequestId}`
         : `/reporting/worklist/${target.token}`;

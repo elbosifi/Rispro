@@ -38,6 +38,8 @@ export interface SchedulingOverrideRequestRow {
   updatedAt: string;
   patientDisplayName?: string | null;
   patientIdentifier?: string | null;
+  /** Notification-only, explicitly-primary identifier; never falls back to MRN or legacy columns. */
+  patientPrimaryIdentifier?: string | null;
   modalityName?: string | null;
   modalityCode?: string | null;
   examTypeName?: string | null;

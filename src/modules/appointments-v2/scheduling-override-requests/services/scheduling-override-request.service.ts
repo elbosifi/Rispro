@@ -78,11 +78,13 @@ async function hydrateRequestDisplayNames(
           id: number;
           displayName: string | null;
           identifier: string | null;
+          primaryIdentifier: string | null;
         }>(
           `
             select id,
                    coalesce(nullif(english_full_name, ''), nullif(arabic_full_name, '')) as "displayName",
-                   coalesce(nullif(identifier_value, ''), nullif(national_id, ''), mrn) as identifier
+                   coalesce(nullif(identifier_value, ''), nullif(national_id, ''), mrn) as identifier,
+                   (select nullif(trim(pi.value), '') from patient_identifiers pi where pi.patient_id = patients.id and pi.is_primary = true limit 1) as "primaryIdentifier"
             from patients
             where id = any($1::bigint[])
           `,
@@ -136,6 +138,7 @@ async function hydrateRequestDisplayNames(
       ...request,
       patientDisplayName: patient?.displayName ?? null,
       patientIdentifier: patient?.identifier ?? null,
+      patientPrimaryIdentifier: patient?.primaryIdentifier ?? null,
       modalityName: modality?.name ?? null,
       modalityCode: modality?.code ?? null,
       examTypeName: examType?.name ?? null,

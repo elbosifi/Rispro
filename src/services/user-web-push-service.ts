@@ -10,6 +10,7 @@ import {
 } from "./patient-web-push-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import type { SchedulingOverrideRequestRow } from "../modules/appointments-v2/scheduling-override-requests/models/scheduling-override-request.js";
+import { buildPatientNotificationLabel, buildSchedulingOverrideNotification, maskNotificationIdentifier, sanitizeNotificationText } from "./internal-notification-formatters.js";
 
 export interface UserPushPayload {
   eventType: string;
@@ -209,72 +210,62 @@ async function safeSendMany(userIds: number[], payload: UserPushPayload): Promis
   });
 }
 
+function overrideNotificationPayload(request: SchedulingOverrideRequestRow, state: "created" | "approved" | "rejected" | "failed" | "expired" | "cancelled"): UserPushPayload {
+  const rawValue = sanitizeNotificationText(request.patientPrimaryIdentifier);
+  const patient = buildPatientNotificationLabel(request.patientDisplayName, rawValue ? { rawValue, maskedValue: maskNotificationIdentifier(rawValue) } : null);
+  const context = request.decisionContext;
+  const capacity = context?.currentCapacity != null && context.totalCapacity != null ? `${context.currentCapacity}/${context.totalCapacity} booked` : null;
+  const notification = buildSchedulingOverrideNotification({
+    state,
+    modality: request.modalityCode || request.modalityName,
+    date: request.requestedBookingDate,
+    exam: request.examTypeName,
+    patient,
+    capacity,
+    overbook: context?.overbookAmount ?? null,
+    requesterReason: request.requesterReason,
+    approverReason: request.approverReason,
+    failure: request.failureMessage,
+  });
+  return { eventType: `scheduling_override_request_${state}`, ...notification, clickUrl: `/scheduling/override-requests?requestId=${request.id}` };
+}
+
 export function safeNotifySchedulingOverrideCreated(request: SchedulingOverrideRequestRow): void {
   void approverUserIds(request)
-    .then((userIds) => safeSendMany(userIds, {
-      eventType: "scheduling_override_request_created",
-      title: "New override request",
-      body: "A scheduling override request needs review.",
-      clickUrl: "/scheduling/override-requests",
-    }))
+    .then((userIds) => safeSendMany(userIds, overrideNotificationPayload(request, "created")))
     .catch((error) => {
       console.warn(JSON.stringify({ type: "override_created_push_failed", error: error instanceof Error ? error.message : String(error) }));
     });
 }
 
 export function safeNotifySchedulingOverrideApproved(request: SchedulingOverrideRequestRow): void {
-  void sendUserWebPush(Number(request.requesterUserId), {
-    eventType: "scheduling_override_request_approved",
-    title: "Override request approved",
-    body: "Your scheduling override request was approved.",
-    clickUrl: "/scheduling/override-requests",
-  }).catch((error) => {
+  void sendUserWebPush(Number(request.requesterUserId), overrideNotificationPayload(request, "approved")).catch((error) => {
     console.warn(JSON.stringify({ type: "override_approved_push_failed", error: error instanceof Error ? error.message : String(error) }));
   });
 }
 
 export function safeNotifySchedulingOverrideApprovalFailed(request: SchedulingOverrideRequestRow, approverUserId: number): void {
   const userIds = [...new Set([Number(request.requesterUserId), Number(approverUserId)].filter((id) => Number.isInteger(id) && id > 0))];
-  void safeSendMany(userIds, {
-    eventType: "scheduling_override_request_failed",
-    title: "Override request failed",
-    body: "A scheduling override request could not be approved.",
-    clickUrl: "/scheduling/override-requests",
-  }).catch((error) => {
+  void safeSendMany(userIds, overrideNotificationPayload(request, "failed")).catch((error) => {
     console.warn(JSON.stringify({ type: "override_failed_push_failed", error: error instanceof Error ? error.message : String(error) }));
   });
 }
 
 export function safeNotifySchedulingOverrideRejected(request: SchedulingOverrideRequestRow): void {
-  void sendUserWebPush(Number(request.requesterUserId), {
-    eventType: "scheduling_override_request_rejected",
-    title: "Override request rejected",
-    body: "Your scheduling override request was rejected.",
-    clickUrl: "/scheduling/override-requests",
-  }).catch((error) => {
+  void sendUserWebPush(Number(request.requesterUserId), overrideNotificationPayload(request, "rejected")).catch((error) => {
     console.warn(JSON.stringify({ type: "override_rejected_push_failed", error: error instanceof Error ? error.message : String(error) }));
   });
 }
 
 export function safeNotifySchedulingOverrideExpired(request: SchedulingOverrideRequestRow): void {
-  void sendUserWebPush(Number(request.requesterUserId), {
-    eventType: "scheduling_override_request_expired",
-    title: "Override request expired",
-    body: "Your scheduling override request expired before approval.",
-    clickUrl: "/scheduling/override-requests",
-  }).catch((error) => {
+  void sendUserWebPush(Number(request.requesterUserId), overrideNotificationPayload(request, "expired")).catch((error) => {
     console.warn(JSON.stringify({ type: "override_expired_push_failed", error: error instanceof Error ? error.message : String(error) }));
   });
 }
 
 export function safeNotifySchedulingOverrideCancelled(request: SchedulingOverrideRequestRow, cancelledByUserId: number): void {
   if (Number(request.requesterUserId) === Number(cancelledByUserId)) return;
-  void sendUserWebPush(Number(request.requesterUserId), {
-    eventType: "scheduling_override_request_cancelled",
-    title: "Override request cancelled",
-    body: "Your scheduling override request was cancelled.",
-    clickUrl: "/scheduling/override-requests",
-  }).catch((error) => {
+  void sendUserWebPush(Number(request.requesterUserId), overrideNotificationPayload(request, "cancelled")).catch((error) => {
     console.warn(JSON.stringify({ type: "override_cancelled_push_failed", error: error instanceof Error ? error.message : String(error) }));
   });
 }

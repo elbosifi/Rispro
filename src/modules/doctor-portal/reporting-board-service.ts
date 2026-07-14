@@ -1175,6 +1175,7 @@ export async function assignReportingBoardMobileCaseToMe(actor: Actor, token: st
     doctorId: me.profile!.id,
     appointmentIds: identity.caseType === "appointment" ? [identity.appointmentId] : [],
     comparisonRequestIds: identity.caseType === "comparison" ? [identity.comparisonRequestId] : [],
+    appointmentNotes: identity.caseType === "appointment" ? { [identity.appointmentId]: reason } : undefined,
   });
   return result;
 }
@@ -1485,6 +1486,7 @@ export async function bulkAssignNextReportingBoardCases(actor: Actor, input: Bul
   await createAssignedToMeNotifications({
     doctorId: input.doctorId,
     appointmentIds: result.assignedAppointmentIds,
+    appointmentNotes: Object.fromEntries(result.assignedAppointmentIds.map((id) => [id, input.reason ?? null])),
   });
   const selectedIds = new Set(selected.map((row) => row.appointmentId));
   const preSkipped = cases
@@ -1811,6 +1813,7 @@ export async function bulkReassignSelectedReportingBoardCases(actor: Actor, inpu
   await createAssignedToMeNotifications({
     doctorId: input.doctorId,
     appointmentIds: result.assignedAppointmentIds,
+    appointmentNotes: Object.fromEntries(result.assignedAppointmentIds.map((id) => [id, input.reason ?? null])),
   });
   return {
     requestedCount: appointmentIds.length + comparisonRequestIds.length,
@@ -1949,6 +1952,7 @@ export async function assignReportingBoardCaseToDoctor(
   await createAssignedToMeNotifications({
     doctorId: input.doctorId,
     appointmentIds: [input.appointmentId],
+    appointmentNotes: { [input.appointmentId]: input.reason ?? null },
   });
   return result;
 }
