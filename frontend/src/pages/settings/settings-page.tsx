@@ -1525,7 +1525,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
     const entries = data?.entries ?? [];
     if (entries.length === 0) return;
     if (window.confirm(`Delete all ${entries.length} dictionary entries? This cannot be undone.`)) {
-      deleteAllMutation.mutate(entries.map((e: any) => e.id));
+      deleteAllMutation.mutate(entries.map((e) => e.id));
     }
   };
 
@@ -1537,7 +1537,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
 
   const allEntries = data?.entries ?? [];
   const filteredEntries = searchQuery
-    ? allEntries.filter((e: any) =>
+    ? allEntries.filter((e) =>
         e.arabicText?.includes(searchQuery) ||
         e.englishText?.toLowerCase().includes(searchQuery.toLowerCase())
       )
@@ -1620,7 +1620,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
                   {searchQuery ? "No entries match your search" : "No dictionary entries"}
                 </td></tr>
               ) : (
-                filteredEntries.map((e: any) => (
+                filteredEntries.map((e) => (
                   <tr key={e.id} className="hover:bg-stone-50 dark:hover:bg-stone-700/30 transition-colors">
                     {editingId === e.id ? (
                       <>

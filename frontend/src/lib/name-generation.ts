@@ -13,6 +13,10 @@ export interface DictionaryEntry {
   createdAt?: string | null;
 }
 
+export type PersistedDictionaryEntry = DictionaryEntry & {
+  id: number;
+};
+
 export interface NameGenerationResult {
   englishName: string;
   missingTokens: string[];

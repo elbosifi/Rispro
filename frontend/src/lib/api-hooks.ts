@@ -108,7 +108,7 @@ import type {
   RosterDutyType,
   RosterTeamRole
 } from "@/types/api";
-import type { DictionaryEntry } from "@/lib/name-generation";
+import type { PersistedDictionaryEntry } from "@/lib/name-generation";
 
 // Generic raw response type for API responses that are passed through mappers
 type RawRecord = Record<string, unknown>;
@@ -3693,7 +3693,7 @@ export async function fetchModalitiesSettings(includeInactive = false): Promise<
   return raw;
 }
 
-export async function fetchNameDictionary(): Promise<{ entries: DictionaryEntry[]; meta: RawRecord }> {
+export async function fetchNameDictionary(): Promise<{ entries: PersistedDictionaryEntry[]; meta: RawRecord }> {
   const raw = await api<{ entries: RawRecord[]; meta?: RawRecord }>("/settings/name-dictionary");
   return {
     entries: mapNameDictionary(raw.entries ?? []),

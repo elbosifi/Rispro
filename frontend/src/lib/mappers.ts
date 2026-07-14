@@ -12,7 +12,7 @@ import type {
   AuditEntry,
   IdentifierType
 } from "@/types/api";
-import type { DictionaryEntry } from "@/lib/name-generation";
+import type { DictionaryEntry, PersistedDictionaryEntry } from "@/lib/name-generation";
 
 type RawRecord = Record<string, unknown>;
 
@@ -638,7 +638,7 @@ export function mapSettings(raw: RawRecord[]): Record<string, string> {
 }
 
 // -- Name Dictionary Mapping --
-export function mapNameDictionaryEntry(raw: RawRecord): DictionaryEntry {
+export function mapNameDictionaryEntry(raw: RawRecord): PersistedDictionaryEntry {
   return {
     id: num(raw, 'id'),
     arabicText: str(raw, 'arabic_text') || str(raw, 'arabicText'),
@@ -648,7 +648,7 @@ export function mapNameDictionaryEntry(raw: RawRecord): DictionaryEntry {
   };
 }
 
-export function mapNameDictionary(rawArray: RawRecord[]): DictionaryEntry[] {
+export function mapNameDictionary(rawArray: RawRecord[]): PersistedDictionaryEntry[] {
   return rawArray.map(mapNameDictionaryEntry);
 }
 

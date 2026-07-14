@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { mapAppointmentWithDetails, mapQueueSnapshot } from "./mappers";
+import { mapAppointmentWithDetails, mapNameDictionaryEntry, mapQueueSnapshot } from "./mappers";
 
 describe("workflow timestamp mapping", () => {
+  it("maps persisted dictionary entries with a numeric ID", () => {
+    const entry = mapNameDictionaryEntry({
+      id: 17,
+      arabic_text: "محمد",
+      english_text: "Mohamed",
+    });
+
+    expect(entry.id).toBe(17);
+    expect(entry.arabicText).toBe("محمد");
+    expect(entry.englishText).toBe("Mohamed");
+  });
+
   it("maps appointment workflow timestamps from snake_case API fields", () => {
     const appointment = mapAppointmentWithDetails({
       id: 1,
