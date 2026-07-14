@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PacsRemapPage from "./pacs-remap-page";
+import type { DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 const apiMock = vi.fn();
 const previewMock = vi.fn();
@@ -71,7 +72,9 @@ function study(uid = "1.2.3", description = "CT Chest") {
   return { studyInstanceUid: uid, studyDescription: description, studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One^Patient", seriesCount: 1, fileCount: 1, totalBytes: file.size, files: [file] };
 }
 
-function result(studies = [study()]) {
+type TestScanResult = Omit<DicomStudyScanResult, "studies"> & { studies: ReturnType<typeof study>[] };
+
+function result(studies = [study()]): TestScanResult {
   return { studies, skippedSidecarCount: 0, unparsedCount: 0, totalFileCount: 1, dicomLikeFileCount: 1, parsedDicomFileCount: 1, fallbackUploadFiles: studies.flatMap((item) => item.files), unparsedFiles: [] };
 }
 
