@@ -7,12 +7,12 @@ import {
   CalendarDays,
   ClipboardList,
   LayoutDashboard,
-  LogOut,
   Settings,
   Stethoscope,
   Users,
   QrCode,
 } from "lucide-react";
+import { hasDoctorWorkspaceAccess, WorkspaceSwitcher } from "@/components/layout/navigation";
 import {
   dismissReportingBoardNotification,
   fetchDoctorMe,
@@ -405,7 +405,7 @@ export default function DoctorPage() {
 
   if (isLoading) return <LoadingShell />;
 
-  if (!(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.canAccessDoctorAdmin)) {
+  if (!hasDoctorWorkspaceAccess(me)) {
     return <Navigate to="/" replace />;
   }
 
@@ -430,17 +430,7 @@ export default function DoctorPage() {
           </div>
           <div className="flex items-center gap-2">
             {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
-            {me.canAccessCoreWorkspace && (
-              <button
-                type="button"
-                onClick={() => navigate("/dashboard")}
-                className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold"
-                style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}
-              >
-                <LogOut size={14} />
-                RISpro Core
-              </button>
-            )}
+            <WorkspaceSwitcher language="en" currentWorkspace="doctor" canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(me)} canAccessCoreWorkspace={me.canAccessCoreWorkspace} onNavigate={navigate} />
           </div>
         </div>
       </header>

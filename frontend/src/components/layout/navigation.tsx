@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Role, User } from "@/types/api";
+import type { DoctorMe, Role, User } from "@/types/api";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
 import {
   canRoleAccessRoute,
@@ -42,6 +42,10 @@ import { GlobalSearch } from "@/components/search/global-search";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 
 export const NAV_ITEMS = APP_NAV_ITEMS;
+
+export function hasDoctorWorkspaceAccess(me: Pick<DoctorMe, "canAccessDoctorPortal" | "hasActiveDoctorProfile" | "canAccessDoctorAdmin"> | null | undefined): boolean {
+  return Boolean(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.canAccessDoctorAdmin);
+}
 
 function canAccess(item: Pick<AppNavItem, "route">, user: User | null, matrix: PageVisibilityMatrix): boolean {
   if (!user) return false;
@@ -229,7 +233,7 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
   return [
     group("quick", "navGroup.quickActions", [["patients.new"], ["appointments", "nav.newAppointment"]], true),
     group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["queue"]], true),
-    group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["doctor"], ["queue.checkin"]], true),
+    group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["queue.checkin"]], true),
     group("reporting", "navGroup.reporting", [["print"], ["statistics"]], false),
     group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["settings"]], false),
     group("systems", "navGroup.systems", [["pacs"], ["worklist.monitor"]], false),
@@ -388,6 +392,63 @@ function AccountMenu({ user, language, accountActions, canAccessSettings, onSett
   );
 }
 
+export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorWorkspace, canAccessCoreWorkspace = true, onNavigate }: {
+  language: Language;
+  currentWorkspace: "core" | "doctor";
+  canAccessDoctorWorkspace: boolean;
+  canAccessCoreWorkspace?: boolean;
+  onNavigate: (path: "/dashboard" | "/doctor/my-work") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(ref, () => setOpen(false), open);
+
+  if (!canAccessDoctorWorkspace) return null;
+
+  const currentLabel = t(language, currentWorkspace === "doctor" ? "workspace.doctor" : "workspace.core");
+  const workspaces = (canAccessCoreWorkspace ? ["core", "doctor"] : ["doctor"]) as const;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        style={{ borderColor: "var(--border)" }}
+        onClick={() => setOpen((value) => !value)}
+        aria-label={`${t(language, "workspace.switcher")}: ${currentLabel}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <span className="max-w-32 truncate">{currentLabel}</span>
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div role="menu" className="absolute end-0 top-full z-50 mt-2 min-w-48 rounded-xl border bg-card p-2 shadow-xl" style={{ borderColor: "var(--border)" }}>
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "workspace.switcher")}</p>
+          {workspaces.map((workspace) => {
+            const label = t(language, workspace === "doctor" ? "workspace.doctor" : "workspace.core");
+            return (
+              <button
+                key={workspace}
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-start text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                aria-current={currentWorkspace === workspace ? "true" : undefined}
+                onClick={() => {
+                  onNavigate(workspace === "doctor" ? "/doctor/my-work" : "/dashboard");
+                  setOpen(false);
+                }}
+              >
+                <span>{label}</span>
+                {currentWorkspace === workspace ? <span className="text-xs text-accent">●</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TopBar({
   user,
   language,
@@ -406,7 +467,10 @@ export function TopBar({
   canSearchPatients = false,
   canSearchRegistrations = false,
   onPatientSearchSelect = () => {},
-  onRegistrationSearchSelect = () => {}
+  onRegistrationSearchSelect = () => {},
+  canAccessDoctorWorkspace = false,
+  currentWorkspace = "core",
+  onWorkspaceNavigate = () => {}
 }: {
   user: User | null;
   language: Language;
@@ -426,6 +490,9 @@ export function TopBar({
   canSearchRegistrations?: boolean;
   onPatientSearchSelect?: (patientId: number) => void;
   onRegistrationSearchSelect?: (appointment: AppointmentWithDetails) => void;
+  canAccessDoctorWorkspace?: boolean;
+  currentWorkspace?: "core" | "doctor";
+  onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work") => void;
 }) {
   return (
     <header className="sticky top-0 z-50 border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>
@@ -448,6 +515,7 @@ export function TopBar({
           {extraActions}
           {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}
           <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} />
+          <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={canAccessDoctorWorkspace} onNavigate={onWorkspaceNavigate} />
           {user ? <AccountMenu user={user} language={language} accountActions={accountMenuActions} canAccessSettings={canAccessSettings} onSettings={onSettings} onLogout={onLogout} /> : null}
         </div>
       </div>
@@ -651,7 +719,7 @@ export function MobileDrawer({
     retry: false,
   });
   const matrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
-  const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user, matrix));
+  const visibleItems = NAV_ITEMS.filter((item) => item.route !== "doctor" && canAccess(item, user, matrix));
 
   if (!isOpen) return null;
 

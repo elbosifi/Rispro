@@ -36,7 +36,7 @@ import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-v
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
 import { AppointmentCreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
-import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { hasDoctorWorkspaceAccess, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -270,6 +270,9 @@ function AppContent() {
         canSearchRegistrations={canRoleAccessRoute(normalizedMatrix, "registrations", user.role)}
         onPatientSearchSelect={setGlobalPatientId}
         onRegistrationSearchSelect={(appointment) => navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}&tab=details`)}
+        canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctorMe)}
+        canAccessCoreWorkspace
+        onWorkspaceNavigate={navigate}
       />
 
       <div className="flex flex-1 overflow-hidden">

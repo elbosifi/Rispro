@@ -149,6 +149,29 @@ describe("Navigation governance", () => {
     expect(NAV_ITEMS.some((item) => item.route === "scheduling.override.requests")).toBe(true);
   });
 
+  it("shows the workspace switcher beside the account control for authorized users", async () => {
+    const onWorkspaceNavigate = vi.fn();
+    render(
+      <TopBar
+        user={{ id: 1, username: "doc", fullName: "Doctor", role: "doctor" }}
+        language="en"
+        isRtl={false}
+        canAccessDoctorWorkspace
+        onWorkspaceNavigate={onWorkspaceNavigate}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Switch workspace: RISpro Core" }));
+    expect(screen.getByRole("menuitem", { name: /RISpro Core/ })).toBeTruthy();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Doctor Workspace" }));
+    expect(onWorkspaceNavigate).toHaveBeenCalledWith("/doctor/my-work");
+  });
+
   it("keeps only menu and global search as the normal mobile controls", () => {
     const onMobileNavToggle = vi.fn();
     render(
@@ -392,7 +415,7 @@ describe("Navigation governance", () => {
     expect(screen.queryByText("Settings")).toBeNull();
   });
 
-  it("doctor sees doctor page by default", () => {
+  it("does not render Doctor Workspace in the sidebar for doctor users", () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     render(
       <SideNav
@@ -403,7 +426,7 @@ describe("Navigation governance", () => {
         onNavigate={() => {}}
       />
     );
-    expect(screen.queryByText("Doctor workspace")).not.toBeNull();
+    expect(screen.queryByText("Doctor workspace")).toBeNull();
   });
 
   it("modality_staff sees modality page by default", () => {
@@ -735,7 +758,7 @@ describe("Navigation governance", () => {
         onNavigate={() => {}}
       />
     );
-    expect(screen.queryByText("Doctor workspace")).not.toBeNull();
+    expect(screen.queryByText("Doctor workspace")).toBeNull();
   });
 
   it("settings access cannot be removed from super_admin", () => {
