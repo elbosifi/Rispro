@@ -1874,7 +1874,7 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
   , no_show_grace_minutes: { label: "No-show booking-time grace (minutes)", type: "number", min: "0", max: "720" },
 };
 
-function inferSettingControl(key: string, value: any): SettingControl {
+function inferSettingControl(key: string, value: string): SettingControl {
   const known = SETTINGS_CATALOG[key];
   if (known) return known;
 
@@ -1914,6 +1914,11 @@ function friendlySettingLabel(category: string, key: string, t: (key: Translatio
   return key.replace(/_/g, " ");
 }
 
+type SimpleSettingEntry = {
+  key: string;
+  value: string;
+};
+
 function SimpleSettingsSection({ category, onReAuthRequired }: { category: string; onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -1927,7 +1932,7 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
     }
   }, [category, data]);
   const saveMutation = useMutation({
-    mutationFn: (payload: { entries: { key: string; value: any }[] }) => saveSettings(category, payload),
+    mutationFn: (payload: { entries: SimpleSettingEntry[] }) => saveSettings(category, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings", category] });
       if (category === "patient_registration") {
@@ -1938,10 +1943,10 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
       }
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Save failed"); }
+    onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Save failed")); }
   });
 
-  const handleSave = (key: string, value: any) => {
+  const handleSave = (key: string, value: string) => {
     saveMutation.mutate({ entries: [{ key, value }] });
   };
 
@@ -1951,6 +1956,8 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
     return <QueryError message={msg} />;
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+  const settingsValues: Record<string, string> = data ?? {};
+
   return (
     <div className="space-y-3">
       {category === "patient_registration" && (
@@ -1990,9 +1997,9 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
           <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
-      {Object.entries(data || {})
+      {Object.entries(settingsValues)
         .filter(([key]) => !(category === "patient_registration" && key === "mrn_prefix"))
-        .map(([key, value]: [string, any]) => {
+        .map(([key, value]) => {
         const control = inferSettingControl(key, value);
         const label = control.label || friendlySettingLabel(category, key, t);
         const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
