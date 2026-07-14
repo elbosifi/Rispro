@@ -8,19 +8,23 @@ import {
   ClipboardList,
   LayoutDashboard,
   Settings,
-  Stethoscope,
   Users,
   QrCode,
+  X,
 } from "lucide-react";
-import { hasDoctorWorkspaceAccess, WorkspaceSwitcher } from "@/components/layout/navigation";
+import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
+import { hasDoctorWorkspaceAccess, NoShowReviewTopBarAction, TopBar } from "@/components/layout/navigation";
+import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import {
   dismissReportingBoardNotification,
   fetchDoctorMe,
+  fetchPageVisibilityMatrix,
   fetchReportingBoardNotifications,
   markAllReportingBoardNotificationsRead,
   markReportingBoardNotificationRead,
 } from "@/lib/api-hooks";
-import type { DoctorMe } from "@/types/api";
+import type { DoctorMe, User } from "@/types/api";
+import { canRoleAccessRoute, DEFAULT_PAGE_VISIBILITY_MATRIX, normalizePageVisibilityMatrix } from "@/lib/page-visibility";
 import { DoctorCasesPage } from "./doctor-cases-page";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
@@ -373,15 +377,73 @@ function ReportingBoardNotificationsButton() {
   );
 }
 
-export default function DoctorPage() {
+function DoctorMobileDrawer({ isOpen, currentPath, navItems, onNavigate, onClose }: {
+  isOpen: boolean;
+  currentPath: string;
+  navItems: DoctorPortalNavItem[];
+  onNavigate: (path: string) => void;
+  onClose: () => void;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[55] lg:hidden" role="dialog" aria-modal="true" aria-label="Doctor Workspace navigation">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <aside className="absolute bottom-0 left-0 top-0 flex w-72 flex-col border-r bg-background shadow-xl" style={{ borderColor: "var(--border)" }}>
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "var(--border)" }}>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Doctor Workspace</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>Clinical navigation</p>
+          </div>
+          <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close Doctor Workspace navigation">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = currentPath === item.path;
+            return (
+              <button
+                key={`${item.path}-${item.label}`}
+                type="button"
+                onClick={() => { onNavigate(item.path); onClose(); }}
+                className="flex min-h-10 w-full items-center gap-2 rounded-lg border px-3 text-start text-sm font-medium"
+                style={{
+                  borderColor: active ? "var(--accent)" : "transparent",
+                  backgroundColor: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent",
+                  color: active ? "var(--accent)" : "var(--foreground)",
+                }}
+              >
+                <Icon size={16} />
+                <span>{item.label}</span>
+                {item.management && <Settings size={13} className="ml-auto opacity-60" />}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+    </div>
+  );
+}
+
+export default function DoctorPage({ user, onLogout }: { user: User; onLogout: () => void | Promise<void> }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { data: me, isLoading } = useQuery({
     queryKey: ["doctor", "me"],
     queryFn: fetchDoctorMe,
     retry: false,
     staleTime: 1000 * 60,
   });
+  const { data: pageVisibilityMatrix } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+  const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
 
   const navItems = useMemo(() => {
     if (!me) return DOCTOR_NAV;
@@ -415,31 +477,45 @@ export default function DoctorPage() {
     return <Navigate to="/doctor/my-work" replace />;
   }
 
+  const canAccessSettings = canRoleAccessRoute(normalizedMatrix, "settings", user.role);
+  const canSearchPatients = canRoleAccessRoute(normalizedMatrix, "patients", user.role);
+  const canSearchRegistrations = canRoleAccessRoute(normalizedMatrix, "registrations", user.role);
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }} lang="en" dir="ltr">
-      <header className="border-b" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="flex h-14 items-center justify-between gap-3 px-4 lg:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: "var(--accent)" }}>
-              <Stethoscope size={18} />
-            </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-base font-semibold text-foreground">Doctor Portal</h1>
-              <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>
-                Team-based clinical workflow
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+      <TopBar
+        user={user}
+        language="en"
+        isRtl={false}
+        shellTitle="Doctor Workspace"
+        shellSubtitle="Team-based clinical workflow"
+        showLanguageControl={false}
+        extraActions={(
+          <>
+            <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
+            <SchedulingOverrideApprovalCenter user={user} />
             {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
-            <WorkspaceSwitcher language="en" currentWorkspace="doctor" canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(me)} canAccessCoreWorkspace={me.canAccessCoreWorkspace} onNavigate={navigate} />
-          </div>
-        </div>
-      </header>
+          </>
+        )}
+        accountMenuActions={<ActionPinSettingsButton variant="drawer" />}
+        canAccessSettings={canAccessSettings}
+        onSettings={() => navigate("/settings")}
+        onUndo={() => navigate(-1)}
+        onRedo={() => navigate(1)}
+        onToggleLanguage={() => undefined}
+        onLogout={onLogout}
+        onMobileNavToggle={() => setMobileNavOpen(true)}
+        canSearchPatients={canSearchPatients}
+        canSearchRegistrations={canSearchRegistrations}
+        canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(me)}
+        canAccessCoreWorkspace={me.canAccessCoreWorkspace}
+        currentWorkspace="doctor"
+        onWorkspaceNavigate={navigate}
+      />
 
       <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 lg:grid-cols-[240px_1fr]">
-        <aside className="border-b p-3 lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border)" }}>
-          <nav className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+        <aside className="hidden border-b p-3 lg:block lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border)" }}>
+          <nav className="flex flex-col gap-2">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = location.pathname === item.path;
@@ -467,6 +543,7 @@ export default function DoctorPage() {
           <DoctorPortalRoutes me={me} />
         </main>
       </div>
+      <DoctorMobileDrawer isOpen={mobileNavOpen} currentPath={location.pathname} navItems={navItems} onNavigate={navigate} onClose={() => setMobileNavOpen(false)} />
     </div>
   );
 }

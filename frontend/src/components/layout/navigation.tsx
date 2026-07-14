@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import type { DoctorMe, Role, User } from "@/types/api";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
 import {
@@ -9,10 +10,11 @@ import {
   type PageVisibilityMatrix,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
-import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { fetchNoShowSummary, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import { APP_NAV_ITEMS, type AppNavIcon, type AppNavItem } from "@/lib/route-registry";
 import {
   LayoutGrid,
+  Clock3,
   Users,
   GitMerge,
   BookOpenText,
@@ -42,6 +44,14 @@ import { GlobalSearch } from "@/components/search/global-search";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 
 export const NAV_ITEMS = APP_NAV_ITEMS;
+
+export function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
+  const navigate = useNavigate();
+  const { data } = useQuery({ queryKey: ["queue", "no-show-summary"], queryFn: fetchNoShowSummary, enabled, refetchInterval: 30_000, staleTime: 15_000, retry: false });
+  if (!enabled || !data || (!data.pendingCount && !(data.mode === "automatic" && data.lastAutomaticProcessedCount > 0))) return null;
+  const label = data.mode === "manual" ? `No-show review · ${data.pendingCount}` : `No-shows processed · ${data.lastAutomaticProcessedCount}`;
+  return <button type="button" onClick={() => navigate("/queue/no-shows")} className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/30 dark:text-amber-100" aria-label={label} title={label}><Clock3 size={14}/><span className="hidden max-w-[11rem] truncate sm:inline">{label}</span></button>;
+}
 
 export function hasDoctorWorkspaceAccess(me: Pick<DoctorMe, "canAccessDoctorPortal" | "hasActiveDoctorProfile" | "canAccessDoctorAdmin"> | null | undefined): boolean {
   return Boolean(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.canAccessDoctorAdmin);
@@ -454,6 +464,8 @@ export function TopBar({
   language,
   isRtl,
   pageTitle,
+  shellTitle,
+  shellSubtitle,
   pageAction,
   extraActions,
   accountMenuActions,
@@ -470,6 +482,7 @@ export function TopBar({
   onRegistrationSearchSelect = () => {},
   canAccessDoctorWorkspace = false,
   canAccessCoreWorkspace = true,
+  showLanguageControl = true,
   currentWorkspace = "core",
   onWorkspaceNavigate = () => {}
 }: {
@@ -477,6 +490,8 @@ export function TopBar({
   language: Language;
   isRtl: boolean;
   pageTitle?: string;
+  shellTitle?: string;
+  shellSubtitle?: string;
   pageAction?: ReactNode;
   extraActions?: ReactNode;
   accountMenuActions?: ReactNode;
@@ -493,6 +508,7 @@ export function TopBar({
   onRegistrationSearchSelect?: (appointment: AppointmentWithDetails) => void;
   canAccessDoctorWorkspace?: boolean;
   canAccessCoreWorkspace?: boolean;
+  showLanguageControl?: boolean;
   currentWorkspace?: "core" | "doctor";
   onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work") => void;
 }) {
@@ -503,8 +519,8 @@ export function TopBar({
           <button type="button" className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-transparent px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 lg:hidden" onClick={onMobileNavToggle} aria-label={t(language, "shell.toggleNav")} title={t(language, "shell.toggleNav")}><Menu className="h-5 w-5" /></button>
           <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-xs font-bold text-white sm:flex">R</div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-foreground">{pageTitle || t(language, "shell.reception")}</p>
-            {pageTitle ? <p className="hidden truncate text-[10px] text-muted-foreground sm:block">{t(language, "shell.reception")}</p> : null}
+            <p className="truncate text-sm font-semibold text-foreground">{pageTitle || shellTitle || t(language, "shell.reception")}</p>
+            {pageTitle || shellSubtitle ? <p className="hidden truncate text-[10px] text-muted-foreground sm:block">{shellSubtitle || t(language, "shell.reception")}</p> : null}
           </div>
           {pageAction ? <div className="shrink-0">{pageAction}</div> : null}
         </div>
@@ -516,7 +532,7 @@ export function TopBar({
         <div className="flex shrink-0 items-center gap-1">
           {extraActions}
           {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}
-          <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} />
+          {showLanguageControl ? <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} /> : null}
           <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={canAccessDoctorWorkspace} canAccessCoreWorkspace={canAccessCoreWorkspace} onNavigate={onWorkspaceNavigate} />
           {user ? <AccountMenu user={user} language={language} accountActions={accountMenuActions} canAccessSettings={canAccessSettings} onSettings={onSettings} onLogout={onLogout} /> : null}
         </div>

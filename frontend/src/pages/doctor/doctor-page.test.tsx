@@ -4,9 +4,12 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DoctorPage from "./doctor-page";
 import { LanguageProvider } from "@/providers/language-provider";
-import type { DoctorMe, ReportingBoardCaseRow } from "@/types/api";
+import type { DoctorMe, ReportingBoardCaseRow, User } from "@/types/api";
+import { DEFAULT_PAGE_VISIBILITY_MATRIX } from "@/lib/page-visibility";
 
 const fetchDoctorMeMock = vi.fn();
+const fetchPageVisibilityMatrixMock = vi.fn();
+const fetchNoShowSummaryMock = vi.fn();
 const fetchMyDoctorRosterMock = vi.fn();
 const fetchDoctorRosterWeekMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -131,6 +134,8 @@ const printProtocolSheetMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
+  fetchPageVisibilityMatrix: () => fetchPageVisibilityMatrixMock(),
+  fetchNoShowSummary: () => fetchNoShowSummaryMock(),
   fetchMyDoctorRoster: (...args: unknown[]) => fetchMyDoctorRosterMock(...args),
   fetchDoctorRosterWeek: (...args: unknown[]) => fetchDoctorRosterWeekMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -297,6 +302,13 @@ const normalDoctor: DoctorMe = {
   canAccessCoreWorkspace: true,
 };
 
+const doctorUser: User = {
+  id: 10,
+  username: "doctor",
+  fullName: "Doctor User",
+  role: "doctor",
+};
+
 function reportingBoardCase(overrides: Partial<ReportingBoardCaseRow> = {}): ReportingBoardCaseRow {
   return {
     caseType: "appointment",
@@ -376,7 +388,7 @@ function renderDoctorPortal(initialPath = "/doctor") {
           <Routes>
             <Route path="/" element={<CorePlaceholder />} />
             <Route path="/dashboard" element={<CorePlaceholder />} />
-            <Route path="/doctor/*" element={<DoctorPage />} />
+            <Route path="/doctor/*" element={<DoctorPage user={doctorUser} onLogout={() => {}} />} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -388,6 +400,8 @@ describe("Doctor Portal shell", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
     fetchDoctorMeMock.mockReset();
+    fetchPageVisibilityMatrixMock.mockReset();
+    fetchNoShowSummaryMock.mockReset();
     fetchMyDoctorRosterMock.mockReset();
     fetchDoctorRosterWeekMock.mockReset();
     fetchAppointmentLookupsMock.mockReset();
@@ -768,6 +782,8 @@ describe("Doctor Portal shell", () => {
     updateReportingBoardSettingsMock.mockResolvedValue({});
     fetchReportingBoardCasesMock.mockResolvedValue({ cases: [], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
     fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
+    fetchPageVisibilityMatrixMock.mockResolvedValue(DEFAULT_PAGE_VISIBILITY_MATRIX);
+    fetchNoShowSummaryMock.mockResolvedValue({ mode: "manual", pendingCount: 0, lastAutomaticProcessedCount: 0 });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([]);
     fetchMyDoctorReportingWorklistMock.mockResolvedValue({
       id: 90, ownerUserId: null, ownerDoctorId: null, name: "Dr Normal Worklist", token: "doctor-token",
@@ -803,9 +819,25 @@ describe("Doctor Portal shell", () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal();
 
-    expect(await screen.findByRole("heading", { name: "Doctor Portal" })).toBeTruthy();
+    expect((await screen.findByRole("banner")).textContent).toContain("Doctor Workspace");
     expect(await screen.findByText("Dr Normal")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open account menu" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Switch workspace: Doctor Workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /My Work/i })).toBeTruthy();
+  });
+
+  it("opens the Doctor navigation drawer from the shared mobile top-bar menu", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/my-work");
+
+    await screen.findByRole("banner");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle navigation" }));
+
+    const drawer = screen.getByRole("dialog", { name: "Doctor Workspace navigation" });
+    expect(drawer).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "My Work" })).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole("button", { name: "My Work" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Doctor Workspace navigation" })).toBeNull());
   });
 
   it("keeps the doctor portal LTR when the saved app language is Arabic", async () => {
@@ -814,7 +846,7 @@ describe("Doctor Portal shell", () => {
 
     renderDoctorPortal();
 
-    const heading = await screen.findByRole("heading", { name: "Doctor Portal" });
+    const heading = await screen.findByRole("heading", { name: "Dr Normal" });
     expect(heading.closest("[dir]")?.getAttribute("dir")).toBe("ltr");
   });
 

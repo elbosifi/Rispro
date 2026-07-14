@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams } from "react-router-dom";
 import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Clock3 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
@@ -36,12 +36,12 @@ import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-v
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
 import { AppointmentCreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
-import { hasDoctorWorkspaceAccess, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { hasDoctorWorkspaceAccess, NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
-import { fetchDoctorMe, fetchNoShowSummary, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import { APP_PATH_TO_ROUTE, APP_ROUTE_PATHS, APP_ROUTE_TITLE_KEYS } from "@/lib/route-registry";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,
@@ -64,14 +64,6 @@ function LoadingScreen() {
       <div className="spinner-industrial h-12 w-12" />
     </div>
   );
-}
-
-function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
-  const navigate = useNavigate();
-  const { data } = useQuery({ queryKey: ["queue", "no-show-summary"], queryFn: fetchNoShowSummary, enabled, refetchInterval: 30_000, staleTime: 15_000, retry: false });
-  if (!enabled || !data || (!data.pendingCount && !(data.mode === "automatic" && data.lastAutomaticProcessedCount > 0))) return null;
-  const label = data.mode === "manual" ? `No-show review · ${data.pendingCount}` : `No-shows processed · ${data.lastAutomaticProcessedCount}`;
-  return <button type="button" onClick={() => navigate("/queue/no-shows")} className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/30 dark:text-amber-100" aria-label={label} title={label}><Clock3 size={14}/><span className="hidden max-w-[11rem] truncate sm:inline">{label}</span></button>;
 }
 
 function QueueCheckInAccessRoute() {
@@ -351,6 +343,14 @@ function LegacyReportingWorklistRedirect() {
   return <Navigate to={`/reporting/worklist/${encodeURIComponent(token)}${location.search}`} replace />;
 }
 
+function DoctorWorkspaceRoute() {
+  const { user, logout } = useAuth();
+
+  if (!user) return null;
+
+  return <EnglishOnlyRoute><DoctorPage user={user} onLogout={logout} /></EnglishOnlyRoute>;
+}
+
 function RouterConfig() {
   return (
     <Routes>
@@ -369,7 +369,7 @@ function RouterConfig() {
         path="/doctor/*"
         element={
           <ProtectedRoute>
-            <EnglishOnlyRoute><DoctorPage /></EnglishOnlyRoute>
+            <DoctorWorkspaceRoute />
           </ProtectedRoute>
         }
       />
