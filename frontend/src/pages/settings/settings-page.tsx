@@ -1682,12 +1682,12 @@ function NotAllowedNameWordsSection({ onReAuthRequired }: { onReAuthRequired: (k
       setArabicText("");
       setMutationError(null);
     },
-    onError: (err: any) => {
-      if (isReauthError(err)) {
+    onError: (error: unknown) => {
+      if (isReauthError(error)) {
         onReAuthRequired(["patient-not-allowed-name-words"]);
         return;
       }
-      setMutationError(err?.message || "Save failed");
+      setMutationError(mutationErrorMessage(error, "Save failed"));
     }
   });
 
@@ -1697,12 +1697,12 @@ function NotAllowedNameWordsSection({ onReAuthRequired }: { onReAuthRequired: (k
       queryClient.invalidateQueries({ queryKey: ["patient-not-allowed-name-words"] });
       setMutationError(null);
     },
-    onError: (err: any) => {
-      if (isReauthError(err)) {
+    onError: (error: unknown) => {
+      if (isReauthError(error)) {
         onReAuthRequired(["patient-not-allowed-name-words"]);
         return;
       }
-      setMutationError(err?.message || "Delete failed");
+      setMutationError(mutationErrorMessage(error, "Delete failed"));
     }
   });
 
