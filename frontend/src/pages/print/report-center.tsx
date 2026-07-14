@@ -321,7 +321,7 @@ export function ReportCenter() {
           <div className="grid gap-3">
             <DateInput label="Date from" value={date} onChange={setDate} />
             <DateInput label="Date to" value={dateTo} onChange={setDateTo} />
-            <Select label="Modality" value={modalityId} onChange={setModalityId} options={[{ value: "", label: "All modalities" }, ...(lookups?.modalities ?? []).map((m: any) => ({ value: String(m.id), label: m.nameEn }))]} />
+            <Select label="Modality" value={modalityId} onChange={setModalityId} options={[{ value: "", label: "All modalities" }, ...(lookups?.modalities ?? []).map((modality) => ({ value: String(modality.id), label: modality.nameEn }))]} />
             <Select label="Status" value={status} onChange={setStatus} options={[
               { value: "", label: selectedTemplate.status ? `Template default (${selectedTemplate.status})` : "Active statuses" },
               ...["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled", "discontinued"].map((value) => ({ value, label: value })),
@@ -509,8 +509,8 @@ function AuditPreview({ rows }: { rows: AuditEntry[] }) {
                 <td className="px-3 py-2">{String(values.reportTemplate || "-")}</td>
                 <td className="px-3 py-2">{String(values.rowCount ?? "-")}</td>
                 <td className="px-3 py-2">
-                  {Boolean(values.includePhoneNumbers) ? "phones " : ""}
-                  {Boolean(values.includePatientIdentifiers) ? "identifiers" : ""}
+                  {values.includePhoneNumbers ? "phones " : ""}
+                  {values.includePatientIdentifiers ? "identifiers" : ""}
                   {!values.includePhoneNumbers && !values.includePatientIdentifiers ? "none" : ""}
                 </td>
               </tr>
