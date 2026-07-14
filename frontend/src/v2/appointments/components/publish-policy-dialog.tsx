@@ -26,7 +26,7 @@ export function PublishPolicyDialog({
         <DialogHeader showClose={false}>
           <DialogTitle>{language === "ar" ? "نشر مسودة السياسة" : "Publish Draft Policy"}</DialogTitle>
           <DialogDescription>
-            {language === "ar" ? "سيتم نشر المسودة وجعلها فعالة لجدولة V2." : "This publishes the draft and makes it active for V2 scheduling."}
+            {language === "ar" ? "سيتم نشر المسودة وجعلها فعالة لجدولة المواعيد." : "This publishes the draft and makes it active for appointment scheduling."}
           </DialogDescription>
         </DialogHeader>
 

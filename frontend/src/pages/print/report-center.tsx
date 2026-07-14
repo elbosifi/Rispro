@@ -48,7 +48,7 @@ const REPORT_TEMPLATES: ReportTemplate[] = [
   { id: "capacity-utilization", title: "Capacity utilization report", description: "Daily counts by modality; capacity denominator can be added from policy data.", source: "appointments", roles: ["supervisor", "super_admin"], grouping: "modality" },
   { id: "special-quota", title: "Special quota report", description: "Appointments using special quota.", source: "appointments", roles: ["supervisor", "super_admin"], specialQuota: "true" },
   { id: "supervisor-override", title: "Supervisor override report", description: "Override and capacity exception bookings.", source: "appointments", roles: ["supervisor", "super_admin"], supervisorOverride: "true" },
-  { id: "referring-physician-volume", title: "Referring physician volume report", description: "Referring physician is not exposed on V2 bookings.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "No referring physician field is available in the list API." },
+  { id: "referring-physician-volume", title: "Referring physician volume report", description: "Referring physician is not exposed by the appointment list API.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "No referring physician field is available in the list API." },
   { id: "exam-type-volume", title: "Exam type volume report", description: "Grouped appointment counts by exam.", source: "appointments", roles: ["supervisor", "super_admin"] },
   { id: "printed-documents-audit", title: "User activity / printed documents report", description: "Recent report print/export/copy activity.", source: "audit", roles: ["super_admin"] },
 ];
