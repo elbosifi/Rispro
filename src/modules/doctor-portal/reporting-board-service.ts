@@ -881,11 +881,11 @@ function mobileCaseActions(row: ReportingBoardCaseRow, canManage: boolean, canCl
   };
 }
 
-function mobileCounters(cases: ReportingBoardCaseRow[], actorDoctorId?: number | null) {
+function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: number | null) {
   const today = todayIso();
   return {
     total: cases.length,
-    assignedToMe: actorDoctorId ? cases.filter((row) => row.assignedDoctorId === actorDoctorId).length : null,
+    assignedToMe: assignedDoctorId ? cases.filter((row) => row.assignedDoctorId === assignedDoctorId).length : null,
     unassigned: cases.filter((row) => row.assignmentStatus === "unassigned").length,
     urgent: cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase())).length,
     requiredNotFinal: cases.filter((row) => row.requiresReport && row.reportStatus !== "final").length,
@@ -1045,7 +1045,10 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     currentDoctorId: identity?.profile?.id ?? null,
     filters,
     filterSummary: filterSummary(filters),
-    counters: mobileCounters(allCases, identity?.profile?.id ?? null),
+    counters: mobileCounters(
+      allCases,
+      view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null
+    ),
     totalCount: allCases.length,
     pagination: {
       limit: filters.limit,

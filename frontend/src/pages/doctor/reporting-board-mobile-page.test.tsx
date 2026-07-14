@@ -121,6 +121,14 @@ const mobileResponse: ReportingBoardMobileResponse = {
   ],
 };
 
+const doctorWorklistResponse: ReportingBoardMobileResponse = {
+  ...mobileResponse,
+  savedView: { id: 9, name: "Salma", token: "tok-9", linkKind: "doctor_worklist", targetDoctorId: 5 },
+  lockedFilters: { systemManaged: true, targetDoctorId: 5 },
+  currentDoctorId: 9,
+  counters: { ...mobileResponse.counters, assignedToMe: 1 },
+};
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
@@ -201,24 +209,52 @@ describe("ReportingBoardMobilePage", () => {
     expect(page?.getAttribute("dir")).toBe("ltr");
   });
 
-  it("defaults the QR reporting view to My cases while keeping the existing filters switchable", async () => {
-    fetchReportingBoardMobileViewMock.mockResolvedValue({ ...mobileResponse, currentDoctorId: 5 });
+  it("defaults a doctor worklist to the target doctor's Assigned cases, not the authenticated viewer", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue(doctorWorklistResponse);
     renderPage();
 
-    await screen.findByRole("button", { name: /My cases/i });
+    await screen.findByRole("button", { name: /Assigned cases 1/i });
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
       "tok-9",
-      expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: null, reportStatus: null })
+      expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: "assigned", reportStatus: null })
     ));
-    await waitFor(() => expect(screen.getByRole("button", { name: /My cases/i }).getAttribute("aria-pressed")).toBe("true"));
-    expect(screen.getByRole("button", { name: /My cases/i }).getAttribute("class")).toContain("ring-2");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("class")).toContain("ring-2");
 
     const all = screen.getByRole("button", { name: /^All 2$/i });
     fireEvent.click(all);
 
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", { limit: 40, offset: 0 }));
     expect(all.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: /My cases/i }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("defaults an anonymous doctor worklist to the target doctor's Assigned cases", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({ ...doctorWorklistResponse, currentDoctorId: null });
+    renderPage();
+
+    await screen.findByRole("button", { name: /Assigned cases 1/i });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
+      "tok-9",
+      expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: "assigned" })
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  it("uses the opened worklist target when the target doctor is the authenticated viewer", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...doctorWorklistResponse,
+      savedView: { ...doctorWorklistResponse.savedView, name: "Seraj", targetDoctorId: 9 },
+      currentDoctorId: 5,
+    });
+    renderPage();
+
+    await screen.findByRole("button", { name: /Assigned cases 1/i });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
+      "tok-9",
+      expect.objectContaining({ assignedDoctorId: 9, assignmentStatus: "assigned" })
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("true"));
   });
 
   it("opens a mobile case detail sheet", async () => {

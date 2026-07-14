@@ -144,7 +144,7 @@ export function ReportingBoardMobilePage() {
   const [desktopLayout, setDesktopLayout] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1200);
   const refreshInFlight = useRef(false);
   const loadedOffsets = useRef<number[]>([0]);
-  const initialMyCasesApplied = useRef(false);
+  const initialAssignedCasesApplied = useRef(false);
 
   const viewQuery = useQuery({
     queryKey: ["reporting-board", "mobile", token, filters],
@@ -319,22 +319,24 @@ export function ReportingBoardMobilePage() {
   }, [data]);
 
   useEffect(() => {
-    const currentDoctorId = data?.currentDoctorId;
-    if (!currentDoctorId || initialMyCasesApplied.current) return;
-    initialMyCasesApplied.current = true;
+    const assignedCasesDoctorId = data?.savedView.linkKind === "doctor_worklist"
+      ? data.savedView.targetDoctorId
+      : data?.currentDoctorId;
+    if (!assignedCasesDoctorId || initialAssignedCasesApplied.current) return;
+    initialAssignedCasesApplied.current = true;
     setLoadedCases([]);
     loadedOffsets.current = [0];
     setFilters((current) => ({
       ...current,
-      assignedDoctorId: currentDoctorId,
-      assignmentStatus: null,
+      assignedDoctorId: assignedCasesDoctorId,
+      assignmentStatus: "assigned",
       priorityCode: null,
       urgentOrStat: false,
       overdue: false,
       reportStatus: null,
       offset: 0,
     }));
-  }, [data?.currentDoctorId]);
+  }, [data?.currentDoctorId, data?.savedView.linkKind, data?.savedView.targetDoctorId]);
 
   if (viewQuery.isLoading) {
     return <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-5 text-slate-950">Loading reporting view...</main>;
@@ -344,7 +346,10 @@ export function ReportingBoardMobilePage() {
   }
 
   const lockedFilters: ReportingBoardFilters = "systemManaged" in data.lockedFilters ? {} : data.lockedFilters;
-  const myCasesLocked = Boolean(lockedFilters.assignedDoctorId && lockedFilters.assignedDoctorId !== data.currentDoctorId);
+  const assignedCasesDoctorId = data.savedView.linkKind === "doctor_worklist"
+    ? data.savedView.targetDoctorId
+    : data.currentDoctorId;
+  const assignedCasesLocked = Boolean(lockedFilters.assignedDoctorId && lockedFilters.assignedDoctorId !== assignedCasesDoctorId);
   const unassignedLocked = lockedFilters.assignmentStatus === "assigned" || Boolean(lockedFilters.assignedDoctorId);
   const urgentLocked = Boolean(lockedFilters.priorityCode && !["urgent", "stat"].includes(String(lockedFilters.priorityCode).toLowerCase()));
   const overdueLocked = ["final", "no_report"].includes(String(lockedFilters.reportStatus ?? "").toLowerCase());
@@ -369,7 +374,7 @@ export function ReportingBoardMobilePage() {
 
       <section className="mx-auto mt-5 flex max-w-7xl gap-3 overflow-x-auto pb-2">
         <Counter icon={<Clipboard size={18} />} label="Total" value={data.counters.total} />
-        <Counter icon={<UserCheck size={18} />} label="Assigned to me" value={data.counters.assignedToMe} />
+        <Counter icon={<UserCheck size={18} />} label="Assigned cases" value={data.counters.assignedToMe} />
         <Counter icon={<Users size={18} />} label="Unassigned" value={data.counters.unassigned} />
         <Counter icon={<Flame size={18} />} label="Urgent" value={data.counters.urgent} />
         <Counter icon={<Calendar size={18} />} label="Overdue" value={data.counters.overdue} />
@@ -392,7 +397,7 @@ export function ReportingBoardMobilePage() {
           </button>
         </div>
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {data.currentDoctorId && <button type="button" aria-pressed={filters.assignedDoctorId === data.currentDoctorId} disabled={myCasesLocked} title={myCasesLocked ? "This saved view is locked to another assigned doctor." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignedDoctorId: data.currentDoctorId, assignmentStatus: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("teal", filters.assignedDoctorId === data.currentDoctorId)}>My cases {data.counters.assignedToMe}</button>}
+          {assignedCasesDoctorId && <button type="button" aria-pressed={filters.assignedDoctorId === assignedCasesDoctorId && filters.assignmentStatus === "assigned"} disabled={assignedCasesLocked} title={assignedCasesLocked ? "This saved view is locked to another assigned doctor." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignedDoctorId: assignedCasesDoctorId, assignmentStatus: "assigned", priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("teal", filters.assignedDoctorId === assignedCasesDoctorId && filters.assignmentStatus === "assigned")}>Assigned cases {data.counters.assignedToMe}</button>}
           <button type="button" aria-pressed={filters.assignmentStatus === "unassigned"} disabled={unassignedLocked} title={unassignedLocked ? "This saved view is locked to assigned cases." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("slate", filters.assignmentStatus === "unassigned")}>Unassigned {data.counters.unassigned}</button>
           <button type="button" aria-pressed={filters.urgentOrStat === true} disabled={urgentLocked} title={urgentLocked ? "This saved view is locked to a non-urgent priority." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, urgentOrStat: true, priorityCode: null, assignmentStatus: null, assignedDoctorId: null, overdue: false, reportStatus: null }))} className={tabClass("orange", filters.urgentOrStat === true)}>Urgent {data.counters.urgent}</button>
           <button type="button" aria-pressed={filters.overdue === true} disabled={overdueLocked} title={overdueLocked ? "This saved view is locked to a report state that cannot be overdue." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, overdue: true, urgentOrStat: false, priorityCode: null, reportStatus: "required_not_final" }))} className={tabClass("red", filters.overdue === true)}>Overdue {data.counters.overdue}</button>

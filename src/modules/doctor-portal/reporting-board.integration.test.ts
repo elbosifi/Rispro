@@ -862,6 +862,52 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(ctOnly.data.cases.map((row) => `${row.caseType}:${row.modalityCode}`), ["comparison:CT", "appointment:CT"]);
   });
 
+  it("uses the doctor worklist target for mobile assigned scope and counters across viewers", async () => {
+    guard();
+    const date = addDays(12);
+    const label = uniq("doctor_worklist_target_scope");
+    const targetAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} target assigned` });
+    const viewerAssigned = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} viewer assigned` });
+    const unassigned = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, date, patientName: `${label} unassigned` });
+    [targetAssigned, viewerAssigned, unassigned].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await assignDirectly(targetAssigned, targetDoctor.doctorId);
+    await assignDirectly(viewerAssigned, doctor.doctorId);
+    const worklist = await getDoctorWorklist(targetDoctor, false);
+    type MobileView = {
+      savedView: { linkKind: string; targetDoctorId: number | null };
+      currentDoctorId: number | null;
+      counters: { assignedToMe: number | null };
+      cases: Array<{ appointmentId: number; assignedDoctorId: number | null }>;
+      allowedActions: { assignToMe: boolean; reassign: boolean };
+    };
+    const path = `/api/reporting/saved-views/public/${worklist.token}/mobile?q=${encodeURIComponent(label)}&limit=100`;
+    const viewers: Array<{ name: string; cookie: string; currentDoctorId: number | null; canManage: boolean }> = [
+      { name: "anonymous", cookie: "", currentDoctorId: null, canManage: false },
+      { name: "another doctor", cookie: doctor.cookie, currentDoctorId: doctor.doctorId, canManage: false },
+      { name: "supervisor", cookie: supervisor.cookie, currentDoctorId: supervisor.doctorId, canManage: true },
+      { name: "superadmin", cookie: admin.cookie, currentDoctorId: admin.doctorId, canManage: true },
+      { name: "target doctor", cookie: targetDoctor.cookie, currentDoctorId: targetDoctor.doctorId, canManage: false },
+    ];
+
+    for (const viewer of viewers) {
+      const response = await api<MobileView>(viewer.cookie, path);
+      assert.equal(response.status, 200, `${viewer.name}: ${JSON.stringify(response.data)}`);
+      assert.equal(response.data.savedView.linkKind, "doctor_worklist");
+      assert.equal(response.data.savedView.targetDoctorId, targetDoctor.doctorId);
+      assert.equal(response.data.currentDoctorId == null ? null : Number(response.data.currentDoctorId), viewer.currentDoctorId);
+      assert.equal(response.data.counters.assignedToMe, 1, viewer.name);
+      assert.equal(response.data.cases.some((row) => row.appointmentId === targetAssigned), true, viewer.name);
+      assert.equal(response.data.cases.some((row) => row.appointmentId === unassigned), true, viewer.name);
+      assert.equal(response.data.cases.some((row) => row.appointmentId === viewerAssigned), false, viewer.name);
+      assert.equal(response.data.allowedActions.assignToMe, viewer.name === "target doctor" || viewer.canManage);
+      assert.equal(response.data.allowedActions.reassign, viewer.canManage);
+    }
+
+    const assignedOnly = await api<MobileView>("", `${path}&assignedDoctorId=${targetDoctor.doctorId}&assignmentStatus=assigned`);
+    assert.equal(assignedOnly.status, 200, JSON.stringify(assignedOnly.data));
+    assert.deepEqual(assignedOnly.data.cases.map((row) => row.appointmentId), [targetAssigned]);
+  });
+
   it("scopes personal doctor worklists and atomically claims appointments and comparisons to self", async () => {
     guard();
     const date = addDays(12);

@@ -296,6 +296,15 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(service, /findActiveSavedViewByToken\(token\)/);
   });
 
+  it("uses the doctor worklist target for mobile assignment counters while preserving actor permissions", () => {
+    const service = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-service.ts`, "utf8");
+
+    assert.match(service, /function mobileCounters\(cases: ReportingBoardCaseRow\[], assignedDoctorId\?: number \| null\)/);
+    assert.match(service, /assignedToMe: assignedDoctorId \? cases\.filter\(\(row\) => row\.assignedDoctorId === assignedDoctorId\)\.length : null/);
+    assert.match(service, /view\.linkKind === "doctor_worklist" \? view\.targetDoctorId : identity\?\.profile\?\.id \?\? null/);
+    assert.match(service, /Number\(identity\.profile\.id\) === view\.targetDoctorId \|\| canManage/);
+  });
+
   it("adds in-app Reporting Board notification event storage and safe body text", () => {
     const migration = readFileSync(`${root}/src/db/migrations/088_doctor_portal_reporting_board_notifications.sql`, "utf8");
     const repo = readFileSync(`${root}/src/modules/doctor-portal/reporting-board-repository.ts`, "utf8");
