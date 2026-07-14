@@ -1098,6 +1098,46 @@ function CatalogImportExportPanel({
   );
 }
 
+type ModalityFormState = {
+  code: string;
+  name_ar: string;
+  name_en: string;
+  daily_capacity: number;
+  is_active: boolean;
+  general_instruction_ar: string;
+  general_instruction_en: string;
+  safety_warning_ar: string;
+  safety_warning_en: string;
+  safety_warning_enabled: boolean;
+};
+
+type ModalityMutationSource = Pick<
+  ModalitySettingsRow,
+  | "code"
+  | "name_ar"
+  | "name_en"
+  | "daily_capacity"
+  | "is_active"
+  | "general_instruction_ar"
+  | "general_instruction_en"
+  | "safety_warning_ar"
+  | "safety_warning_en"
+  | "safety_warning_enabled"
+>;
+
+const EMPTY_MODALITY_FORM: ModalityFormState = {
+  code: "",
+  name_ar: "",
+  name_en: "",
+  daily_capacity: 0,
+  is_active: true,
+  general_instruction_ar: "",
+  general_instruction_en: "",
+  safety_warning_ar: "",
+  safety_warning_en: "",
+  safety_warning_enabled: true
+};
+
 function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
@@ -1108,9 +1148,9 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   });
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<any>({});
+  const [editForm, setEditForm] = useState<ModalityFormState>({ ...EMPTY_MODALITY_FORM });
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, general_instruction_ar: "", general_instruction_en: "", safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
+  const [createForm, setCreateForm] = useState<ModalityFormState>({ ...EMPTY_MODALITY_FORM });
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<string | null>(null);
 
@@ -1135,7 +1175,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
     onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Hard delete failed")); }
   });
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: any }) => updateModality(id, {
+    mutationFn: ({ id, data }: { id: number; data: ModalityMutationSource }) => updateModality(id, {
       code: data.code,
       nameAr: data.name_ar,
       nameEn: data.name_en,
@@ -1157,7 +1197,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
     onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Update failed")); }
   });
   const createMutation = useMutation({
-    mutationFn: (data: any) => createModality({
+    mutationFn: (data: ModalityFormState) => createModality({
       code: data.code,
       nameAr: data.name_ar,
       nameEn: data.name_en,
@@ -1174,7 +1214,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       queryClient.invalidateQueries({ queryKey: ["lookups"] });
       invalidateModalityDerivedAppointmentCaches(queryClient);
       setShowCreate(false);
-      setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, general_instruction_ar: "", general_instruction_en: "", safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
+      setCreateForm({ ...EMPTY_MODALITY_FORM });
       setMutationError(null);
     },
     onError: (error: unknown) => { setMutationError(mutationErrorMessage(error, "Create failed")); }
