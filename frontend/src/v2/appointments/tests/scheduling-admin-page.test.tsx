@@ -119,6 +119,18 @@ describe("SchedulingAdminPage", () => {
     expect(screen.getByText("Draft has unpublished changes")).toBeTruthy();
   });
 
+  it("renders the no-live-policy state when no published snapshot exists", () => {
+    policyStatus = {
+      ...baseStatus(),
+      published: null,
+      publishedSnapshot: null as unknown as PolicyStatusDto["publishedSnapshot"],
+    };
+
+    renderPage();
+
+    expect(screen.getByText("No live policy published yet.")).toBeTruthy();
+  });
+
   it("disables publish when no draft exists and shows a reason", () => {
     policyStatus = { ...baseStatus(), draft: null };
 
