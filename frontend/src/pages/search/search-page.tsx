@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchPatients, deletePatient } from "@/lib/api-hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -447,7 +447,7 @@ function EditPatientForm({
   );
 }
 
-function Field({ label, value }: { label: string; value: any }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <p className="text-xs font-mono-data uppercase tracking-[0.06em]" style={{ color: "var(--text-muted)" }}>{label}</p>

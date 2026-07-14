@@ -43,7 +43,12 @@ function getPatientRequirementDetails(error: unknown): { patientId: number | nul
 }
 
 function getErrorMessage(error: unknown): string | null {
-  return error instanceof Error ? error.message : null;
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === "string" && message ? message : null;
+  }
+  return null;
 }
 
 function formatClockValue(language: string, value: string | null | undefined): string {
@@ -218,11 +223,11 @@ export default function QueuePage() {
         message: t("queue.cancelledMessage")
       });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: t("queue.cancelFailedTitle"),
-        message: err?.message || t("queue.cancelFailedMessage")
+        message: getErrorMessage(err) || t("queue.cancelFailedMessage")
       });
     }
   });

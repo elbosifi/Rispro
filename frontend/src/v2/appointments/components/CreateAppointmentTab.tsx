@@ -817,7 +817,7 @@ export function CreateAppointmentTab({
             <PatientSearchSection
               value={form.patient}
               caseCategory={form.caseCategory}
-              onSelectPatient={(patient: any) => {
+              onSelectPatient={(patient: SelectedPatient) => {
                 actions.setPatient(patient);
                 setAvailabilitySelectedRow(null);
                 setPageError(null);

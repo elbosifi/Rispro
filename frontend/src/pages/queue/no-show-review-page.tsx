@@ -10,6 +10,37 @@ import type { NoShowReviewCandidate } from "@/types/api";
 
 type Confirmation = { kind: "one" | "bulk" | "old" | "run-old"; ids: number[] } | null;
 
+type NoShowActionSummary = {
+  processedCount: number;
+  skippedCount: number;
+  remainingEligibleCount: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function summarizeNoShowActionResult(result: unknown): NoShowActionSummary {
+  const data = isRecord(result) ? result : {};
+  const outcomes = Array.isArray(data.results)
+    ? data.results.filter(isRecord)
+    : [];
+  const processedCount = typeof data.processedCount === "number"
+    ? data.processedCount
+    : outcomes.filter((item) => item.status === "confirmed").length;
+  const skippedCount = Array.isArray(data.skipped)
+    ? data.skipped.length
+    : outcomes.filter((item) => item.status !== "confirmed").length;
+
+  return {
+    processedCount,
+    skippedCount,
+    remainingEligibleCount: typeof data.remainingEligibleCount === "number"
+      ? data.remainingEligibleCount
+      : 0,
+  };
+}
+
 function candidateName(candidate: NoShowReviewCandidate, language: Language) { return chooseLocalized(language, candidate.arabicFullName, candidate.englishFullName); }
 
 export default function NoShowReviewPage() {
@@ -18,7 +49,7 @@ export default function NoShowReviewPage() {
   const [oldSelected, setOldSelected] = useState<number[]>([]); const [confirmation, setConfirmation] = useState<Confirmation>(null); const [reason, setReason] = useState(""); const [result, setResult] = useState<string | null>(null);
   const query = useQuery({ queryKey: ["queue", "no-shows"], queryFn: fetchNoShowReviewSnapshot, refetchInterval: 30_000 });
   const refresh = () => { void queryClient.invalidateQueries({ queryKey: ["queue", "no-shows"] }); void queryClient.invalidateQueries({ queryKey: ["queue", "no-show-summary"] }); void queryClient.invalidateQueries({ queryKey: ["queue"] }); };
-  const action = useMutation({ mutationFn: async (request: NonNullable<Confirmation> & { reason: string }) => request.kind === "one" ? confirmNoShow(request.ids[0], request.reason) : request.kind === "bulk" ? confirmNoShowBulk(request.ids, request.reason) : request.kind === "old" ? confirmOldNoShows(request.ids, request.reason) : runOldNoShowCleanupNow(request.reason), onSuccess: (data: any) => { const outcomes = data?.results ?? []; const processed = data?.processedCount ?? outcomes.filter((item: any) => item.status === "confirmed").length; const skipped = data?.skipped?.length ?? outcomes.filter((item: any) => item.status !== "confirmed").length; setResult(`${processed} processed; ${skipped} skipped; ${data?.remainingEligibleCount ?? 0} remaining.`); setConfirmation(null); setReason(""); setSelected([]); setOldSelected([]); refresh(); }, onError: (error: Error) => setResult(error.message) });
+  const action = useMutation({ mutationFn: async (request: NonNullable<Confirmation> & { reason: string }) => request.kind === "one" ? confirmNoShow(request.ids[0], request.reason) : request.kind === "bulk" ? confirmNoShowBulk(request.ids, request.reason) : request.kind === "old" ? confirmOldNoShows(request.ids, request.reason) : runOldNoShowCleanupNow(request.reason), onSuccess: (data) => { const summary = summarizeNoShowActionResult(data); setResult(`${summary.processedCount} processed; ${summary.skippedCount} skipped; ${summary.remainingEligibleCount} remaining.`); setConfirmation(null); setReason(""); setSelected([]); setOldSelected([]); refresh(); }, onError: (error: Error) => setResult(error.message) });
   const candidates = useMemo(() => (query.data?.candidates ?? []).filter((item) => { const value = `${candidateName(item, language)} ${item.accessionNumber}`.toLowerCase(); return (!search || value.includes(search.toLowerCase())) && (!modality || item.modalityNameEn === modality); }), [query.data?.candidates, search, modality, language]);
   const modalities = useMemo(() => [...new Set((query.data?.candidates ?? []).map((item) => item.modalityNameEn).filter(Boolean))], [query.data?.candidates]);
   const toggle = (id: number, old = false) => {

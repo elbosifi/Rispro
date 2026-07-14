@@ -8,6 +8,15 @@ interface SupervisorReAuthModalProps {
   onSuccess: () => void;
 }
 
+function getErrorMessage(error: unknown): string | null {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === "string" && message ? message : null;
+  }
+  return null;
+}
+
 export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthModalProps) {
   const { reAuth } = useAuth();
   const { language } = useLanguage();
@@ -38,8 +47,8 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
     try {
       await reAuth(password);
       onSuccess();
-    } catch (err: any) {
-      setError(err?.message || t(language, "reauth.failed"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || t(language, "reauth.failed"));
     } finally {
       setIsPending(false);
     }

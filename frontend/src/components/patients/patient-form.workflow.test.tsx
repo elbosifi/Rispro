@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import PatientForm from "@/components/patients/patient-form";
 import { LanguageProvider } from "@/providers/language-provider";
 import type { Patient } from "@/types/api";
+import type { DictionaryEntry, PersistedDictionaryEntry } from "@/lib/name-generation";
+import type { PatientNotAllowedNameWord } from "@/lib/api-hooks";
 import {
   createPatient,
   searchPatients,
@@ -70,6 +72,24 @@ function makePatient(overrides: Partial<Patient> = {}): Patient {
   };
 }
 
+function withPersistedDictionaryIds(response: {
+  entries: Array<Pick<DictionaryEntry, "arabicText" | "englishText">>;
+}): { entries: PersistedDictionaryEntry[]; meta: Record<string, unknown> } {
+  return {
+    entries: response.entries.map((entry, index) => ({ id: index + 1, ...entry })),
+    meta: {},
+  };
+}
+
+function withNotAllowedNameWordMetadata(response: {
+  entries: Array<Omit<PatientNotAllowedNameWord, "createdAt" | "updatedAt">>;
+}): { entries: PatientNotAllowedNameWord[]; meta: Record<string, unknown> } {
+  return {
+    entries: response.entries.map((entry) => ({ ...entry, createdAt: null, updatedAt: null })),
+    meta: {},
+  };
+}
+
 function renderPatientForm(props: { mode: "create" | "edit"; patientId?: number }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -94,7 +114,7 @@ describe("PatientForm workflow hardening", () => {
     vi.clearAllMocks();
     authMock.user = { role: "receptionist" };
     localStorage.setItem("rispro-language", "en");
-    vi.mocked(fetchNameDictionary).mockResolvedValue({
+    vi.mocked(fetchNameDictionary).mockResolvedValue(withPersistedDictionaryIds({
       entries: [
         { arabicText: "مريض", englishText: "Patient" },
         { arabicText: "جديد", englishText: "New" },
@@ -104,13 +124,13 @@ describe("PatientForm workflow hardening", () => {
         { arabicText: "علي", englishText: "Ali" },
         { arabicText: "حسن", englishText: "Hassan" }
       ]
-    } as any);
-    vi.mocked(fetchPatientNotAllowedNameWords).mockResolvedValue({ entries: [{ id: 1, arabicText: "عبد", normalizedArabicText: "عبد", isActive: true }] } as any);
+    }));
+    vi.mocked(fetchPatientNotAllowedNameWords).mockResolvedValue(withNotAllowedNameWordMetadata({ entries: [{ id: 1, arabicText: "عبد", normalizedArabicText: "عبد", isActive: true }] }));
     vi.mocked(searchPatients).mockResolvedValue([]);
-    vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
+    vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } });
     vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
     vi.mocked(fetchPatientIdentifierTypes).mockResolvedValue([]);
-    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "optional" } as any);
+    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "optional" });
     vi.mocked(createPatient).mockResolvedValue(makePatient({ id: 100, arabicFullName: "مريض جديد ثالث", mrn: "MRN-100" }));
     vi.mocked(fetchPatientById).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: true }));
     vi.mocked(updatePatient).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: false }));
@@ -235,7 +255,7 @@ describe("PatientForm workflow hardening", () => {
   });
 
   it("marks frontend-enforced required fields", async () => {
-    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "required_with_confirmation" } as any);
+    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "required_with_confirmation" });
     renderPatientForm({ mode: "create" });
 
     expect(screen.getByText(/Arabic Full Name \*/i)).toBeTruthy();
@@ -248,7 +268,7 @@ describe("PatientForm workflow hardening", () => {
 
   it("treats required_with_confirmation as requiring the primary identifier on the frontend", async () => {
     const user = userEvent.setup();
-    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "required_with_confirmation" } as any);
+    vi.mocked(fetchSettings).mockResolvedValue({ national_id_required: "required_with_confirmation" });
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
@@ -370,10 +390,10 @@ describe("PatientForm workflow hardening", () => {
     await user.click(screen.getByRole("button", { name: /Register Patient/i }));
 
     await waitFor(() => expect(createPatient).toHaveBeenCalled());
-    const payload = vi.mocked(createPatient).mock.calls[0]?.[0] as Record<string, any>;
-    expect(payload.identifierType).toBe("other");
-    expect(payload.identifierValue).toBe("SECONDARY-PRIMARY");
-    expect(payload.identifiers.find((x: any) => x.isPrimary)?.value).toBe("SECONDARY-PRIMARY");
+    const payload = vi.mocked(createPatient).mock.calls[0]?.[0];
+    expect(payload?.identifierType).toBe("other");
+    expect(payload?.identifierValue).toBe("SECONDARY-PRIMARY");
+    expect(payload?.identifiers?.find((identifier) => identifier.isPrimary)?.value).toBe("SECONDARY-PRIMARY");
   });
 
   it("auto-derives sex and birth year when primary identifier is a valid national ID", async () => {
@@ -530,12 +550,12 @@ describe("PatientForm workflow hardening", () => {
 
   it("blocks submit when auto-generated English transliteration has unresolved Arabic tokens", async () => {
     const user = userEvent.setup();
-    vi.mocked(fetchNameDictionary).mockResolvedValue({
+    vi.mocked(fetchNameDictionary).mockResolvedValue(withPersistedDictionaryIds({
       entries: [
         { arabicText: "محمد", englishText: "Mohamed" },
         { arabicText: "حسن", englishText: "Hassan" }
       ]
-    } as any);
+    }));
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");
@@ -552,12 +572,12 @@ describe("PatientForm workflow hardening", () => {
 
   it("allows save after manual English-name correction even when transliteration has unresolved tokens", async () => {
     const user = userEvent.setup();
-    vi.mocked(fetchNameDictionary).mockResolvedValue({
+    vi.mocked(fetchNameDictionary).mockResolvedValue(withPersistedDictionaryIds({
       entries: [
         { arabicText: "محمد", englishText: "Mohamed" },
         { arabicText: "حسن", englishText: "Hassan" }
       ]
-    } as any);
+    }));
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");

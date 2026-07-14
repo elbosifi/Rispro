@@ -11,6 +11,19 @@ import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-pro
 import { AuthProvider } from "@/providers/auth-provider";
 import { LanguageProvider } from "@/providers/language-provider";
 import { createV2Booking } from "@/v2/appointments/api";
+import type { Patient } from "@/types/api";
+import type { CreateBookingRequest } from "@/v2/appointments/types";
+
+const ACTION_PIN_BOOKING_REQUEST: CreateBookingRequest = {
+  patientId: 1,
+  modalityId: 1,
+  examTypeId: null,
+  reportingPriorityId: null,
+  bookingDate: "2026-07-14",
+  bookingTime: null,
+  caseCategory: "non_oncology",
+  notes: null,
+};
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -307,7 +320,7 @@ describe("ActionPinProvider", () => {
       .mockResolvedValueOnce(jsonResponse(200, { patient: { id: 10, arabicFullName: "Ada" } }));
 
     renderWithActionPin(
-      <TestRealApiButton label="Real patient create" run={() => createPatient({ arabicFullName: "Ada" } as any)} />
+      <TestRealApiButton label="Real patient create" run={() => createPatient({ arabicFullName: "Ada" } satisfies Partial<Patient>)} />
     );
     await userEvent.click(screen.getByRole("button", { name: "Real patient create" }));
     await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");
@@ -325,7 +338,7 @@ describe("ActionPinProvider", () => {
       .mockResolvedValueOnce(jsonResponse(200, { booking: { id: 20 } }));
 
     renderWithActionPin(
-      <TestRealApiButton label="Real appointment create" run={() => createV2Booking({ patientId: 1 } as any)} />
+      <TestRealApiButton label="Real appointment create" run={() => createV2Booking(ACTION_PIN_BOOKING_REQUEST)} />
     );
     await userEvent.click(screen.getByRole("button", { name: "Real appointment create" }));
     await userEvent.type(await screen.findByLabelText("Security Action PIN"), "1234");

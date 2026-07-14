@@ -76,11 +76,15 @@ describe("print list helpers", () => {
     const close = vi.fn();
     const focus = vi.fn();
     const print = vi.fn();
-    const open = vi.spyOn(window, "open").mockReturnValue({
-      document: { write, close } as any,
-      focus,
-      print,
-    } as unknown as Window);
+    const printDocument: Document = Object.create(document);
+    Object.assign(printDocument, { write, close });
+    const printWindow: Window = Object.create(window);
+    Object.defineProperties(printWindow, {
+      document: { value: printDocument },
+      focus: { value: focus },
+      print: { value: print },
+    });
+    const open = vi.spyOn(window, "open").mockReturnValue(printWindow);
 
     printAppointmentListV2([makeAppointment("scheduled")], "2026-04-25");
 

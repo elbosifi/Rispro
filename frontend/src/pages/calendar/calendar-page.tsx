@@ -236,7 +236,7 @@ export default function CalendarPage() {
                 aria-label={t(language, "calendar.modalityFilter")}
               >
                 <option value="">{t(language, "calendar.allModalities")}</option>
-                {(lookups?.modalities ?? []).map((m: any) => (
+                {(lookups?.modalities ?? []).map((m) => (
                   <option key={m.id} value={m.id.toString()}>
                     {chooseLocalized(language, m.nameAr, m.nameEn)}
                   </option>

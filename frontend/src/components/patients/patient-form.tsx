@@ -311,7 +311,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       }
       onSuccess?.(patient);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       showToast(localizedPatientError(err, "patients.registerFailed"), "error");
     }
   });
@@ -322,7 +322,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       showToast(language === "ar" ? `تم تحديث المريض: ${patient.arabicFullName}` : `Patient updated: ${patient.arabicFullName}`);
       onSuccess?.(patient);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       showToast(localizedPatientError(err, "patients.updateFailed"), "error");
     }
   });
@@ -333,7 +333,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       queryClient.invalidateQueries();
       onCancel?.();
     },
-    onError: (err: any) => {
+    onError: (err: { message?: string }) => {
       showToast(err?.message || (language === "ar" ? "تعذر حذف المريض" : "Could not delete patient"), "error");
     }
   });
@@ -593,8 +593,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       const r = generateEnglishFromDictionary(form.arabicFullName, [...serverDictionary, ...localDictionary, ne]);
       setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
       queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
-    } catch (err: any) {
-      setAddTokenError(err?.message || (language === "ar" ? "فشل إضافة الرمز إلى القاموس." : "Failed to add token to dictionary"));
+    } catch (err: unknown) {
+      setAddTokenError(getUnknownErrorMessage(err) || (language === "ar" ? "فشل إضافة الرمز إلى القاموس." : "Failed to add token to dictionary"));
     } finally {
       setAddingToken(null);
     }
@@ -1214,9 +1214,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           {submitLabel}
         </Button>
       </div>
-      {mutation.error && (
+      {Boolean(mutation.error) && (
         <div className="p-4 rounded-xl border-red-200" style={{ background: "rgba(239, 68, 68, 0.05)", color: "#ef4444" }}>
-          <p className="text-sm">{mutation.error.message}</p>
+          <p className="text-sm">{getUnknownErrorMessage(mutation.error)}</p>
         </div>
       )}
     </form>
@@ -1386,7 +1386,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     </div>
   );
 }
-
 // -- Sub-components --
 
 function Field({ label, value }: { label: string; value: string }) {

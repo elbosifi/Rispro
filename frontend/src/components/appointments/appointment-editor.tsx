@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { deleteAppointment, updateAppointment } from "@/lib/api-hooks";
-import type { Appointment, AppointmentLookups } from "@/types/api";
+import type { AppointmentLookups } from "@/types/api";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
 import { useV2ExamTypes } from "@/v2/appointments/api";
 
 interface AppointmentEditorProps {
-  appointment: Appointment & Record<string, any>;
+  appointment: AppointmentWithDetails;
   lookups: AppointmentLookups | undefined;
-  onUpdated?: (appointment: any) => void;
+  onUpdated?: (appointment: AppointmentWithDetails) => void;
   onDeleted?: () => void;
   defaultOpen?: boolean;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return fallback;
 }
 
 function resolveRoutinePriorityId(lookups: AppointmentLookups | undefined): number | null {
@@ -116,11 +126,11 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
       queryClient.invalidateQueries();
       onUpdated?.(updated);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: t(language, "appointmentEditor.toastUpdateFailed"),
-        message: err?.message || t(language, "appointmentEditor.toastUpdateFailedMsg")
+        message: getErrorMessage(err, t(language, "appointmentEditor.toastUpdateFailedMsg"))
       });
     }
   });
@@ -139,11 +149,11 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
       queryClient.invalidateQueries();
       onDeleted?.();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       pushToast({
         type: "error",
         title: t(language, "appointmentEditor.toastVoidFailed"),
-        message: err?.message || t(language, "appointmentEditor.toastVoidFailedMsg")
+        message: getErrorMessage(err, t(language, "appointmentEditor.toastVoidFailedMsg"))
       });
     }
   });
