@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
@@ -2707,7 +2707,17 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     onReAuthSuccess: handleReAuthSuccess
   }));
 
-  const probeV3RestoreAvailability = async () => {
+  const parseErrorMessage = useCallback(async (response: Response) => {
+    const responseData = await response.json().catch(() => null);
+    return (
+      (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
+      responseData?.message ||
+      (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
+      `HTTP ${response.status}`
+    );
+  }, []);
+
+  const probeV3RestoreAvailability = useCallback(async () => {
     try {
       const response = await fetch("/api/admin/restore/v3/status", {
         method: "GET",
@@ -2731,9 +2741,9 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       setRestoreV3Status(null);
       setFullRestoreStatus("Could not confirm v3 full restore availability.");
     }
-  };
+  }, [parseErrorMessage]);
 
-  const fetchRestoreV3FlagStatus = async () => {
+  const fetchRestoreV3FlagStatus = useCallback(async () => {
     if (!isSuperAdmin) {
       setRestoreV3FlagStatus(null);
       return;
@@ -2751,22 +2761,12 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     } catch {
       setRestoreV3FlagStatus(null);
     }
-  };
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     void probeV3RestoreAvailability();
     void fetchRestoreV3FlagStatus();
-  }, [user?.role, user?.recentSupervisorReauth]);
-
-  const parseErrorMessage = async (response: Response) => {
-    const responseData = await response.json().catch(() => null);
-    return (
-      (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
-      responseData?.message ||
-      (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
-      `HTTP ${response.status}`
-    );
-  };
+  }, [fetchRestoreV3FlagStatus, probeV3RestoreAvailability, user?.recentSupervisorReauth]);
 
   const downloadBackup = async () => {
     if (backupPassphrase.length < 8) {
@@ -4411,21 +4411,40 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
 };
 
 function RolePageAccessSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
+  type PageVisibilityDraftOverride = {
+    baseUpdatedAt: number;
+    value: PageVisibilityMatrix;
+  };
+
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<PageVisibilityMatrix>(DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const [draftOverride, setDraftOverride] = useState<PageVisibilityDraftOverride | null>(null);
   const [message, setMessage] = useState<string>("");
 
-  const { data, isLoading, error } = useQuery({
+  const { data, dataUpdatedAt, isLoading, error } = useQuery({
     queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
     queryFn: fetchPageVisibilityMatrix,
     staleTime: 1000 * 60,
     retry: false,
   });
 
-  useEffect(() => {
-    if (!data) return;
-    setDraft(normalizePageVisibilityMatrix(data));
-  }, [data]);
+  const serverDraft = normalizePageVisibilityMatrix(data ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const draft =
+    draftOverride?.baseUpdatedAt === dataUpdatedAt
+      ? draftOverride.value
+      : serverDraft;
+  const setDraft: Dispatch<SetStateAction<PageVisibilityMatrix>> = (nextDraft) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === dataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+
+      return {
+        baseUpdatedAt: dataUpdatedAt,
+        value: typeof nextDraft === "function" ? nextDraft(currentDraft) : nextDraft,
+      };
+    });
+  };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -4435,7 +4454,10 @@ function RolePageAccessSection({ onReAuthRequired }: { onReAuthRequired: (key: s
       return savePageVisibilityMatrix(draft);
     },
     onSuccess: async (saved) => {
-      setDraft(normalizePageVisibilityMatrix(saved));
+      setDraftOverride({
+        baseUpdatedAt: dataUpdatedAt,
+        value: normalizePageVisibilityMatrix(saved),
+      });
       setMessage("Role page visibility saved.");
       await queryClient.invalidateQueries({ queryKey: ["settings", "users_and_roles", "page_visibility_by_role"] });
     },
@@ -4517,7 +4539,7 @@ function RolePageAccessSection({ onReAuthRequired }: { onReAuthRequired: (key: s
         </button>
         <button
           className="btn-secondary text-sm"
-          onClick={() => setDraft(normalizePageVisibilityMatrix(data ?? DEFAULT_PAGE_VISIBILITY_MATRIX))}
+          onClick={() => setDraft(serverDraft)}
           disabled={saveMutation.isPending}
         >
           Reset
@@ -4538,68 +4560,105 @@ function QueryError({ message }: { message: string }) {
   );
 }
 
+type DocumentsStorageForm = {
+  storagePath: string;
+  authUsername: string;
+  authPassword: string;
+  authDomain: string;
+  fallbackEnabled: boolean;
+  naps2WebScanEnabled: boolean;
+  naps2WebScanEndpoint: string;
+  scannerAppEnabled: boolean;
+  scannerAppDownloadUrl: string;
+  scanSessionExpiryMinutes: string;
+  scanDpi: string;
+  scanColorMode: string;
+  scannerSource: string;
+};
+
+type DocumentsStorageFormOverride = {
+  baseUpdatedAt: number;
+  value: DocumentsStorageForm;
+};
+
+function normalizeDocumentsStorageForm(
+  settings: Record<string, string> | undefined
+): DocumentsStorageForm {
+  return {
+    storagePath: settings?.storage_path || "",
+    authUsername: settings?.storage_auth_username || "",
+    authPassword: settings?.storage_auth_password || "",
+    authDomain: settings?.storage_auth_domain || "",
+    fallbackEnabled: String(settings?.storage_fallback_enabled || "true").toLowerCase() === "true",
+    naps2WebScanEnabled: String(settings?.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled",
+    naps2WebScanEndpoint: settings?.scanner_bridge_endpoint || settings?.naps2_webscan_endpoint || "",
+    scannerAppEnabled: String(settings?.scanner_app_enabled || "enabled").toLowerCase() === "enabled",
+    scannerAppDownloadUrl: settings?.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi",
+    scanSessionExpiryMinutes: settings?.scan_session_expiry_minutes || "15",
+    scanDpi: settings?.scan_dpi || "200",
+    scanColorMode: settings?.scan_color_mode || "grayscale",
+    scannerSource: settings?.scanner_source || "feeder",
+  };
+}
+
 function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const queryClient = useQueryClient();
   const { t, language } = useLanguage();
-  const [storagePath, setStoragePath] = useState("");
-  const [authUsername, setAuthUsername] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authDomain, setAuthDomain] = useState("");
-  const [fallbackEnabled, setFallbackEnabled] = useState(true);
-  const [naps2WebScanEnabled, setNaps2WebScanEnabled] = useState(false);
-  const [naps2WebScanEndpoint, setNaps2WebScanEndpoint] = useState("");
-  const [scannerAppEnabled, setScannerAppEnabled] = useState(true);
-  const [scannerAppDownloadUrl, setScannerAppDownloadUrl] = useState("/assets/downloads/RISproScannerSetup.msi");
-  const [scanSessionExpiryMinutes, setScanSessionExpiryMinutes] = useState("15");
-  const [scanDpi, setScanDpi] = useState("200");
-  const [scanColorMode, setScanColorMode] = useState("grayscale");
-  const [scannerSource, setScannerSource] = useState("feeder");
+  const [formOverride, setFormOverride] = useState<DocumentsStorageFormOverride | null>(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [resultMessage, setResultMessage] = useState<string>("");
 
-  const { data: settings, error, isLoading } = useQuery({
+  const { data: settings, dataUpdatedAt, error, isLoading } = useQuery({
     queryKey: ["settings", "documents_and_uploads"],
     queryFn: () => fetchSettings("documents_and_uploads"),
     staleTime: 1000 * 60,
   });
 
-  useEffect(() => {
-    if (!settings) return;
-    setStoragePath(settings.storage_path || "");
-    setAuthUsername(settings.storage_auth_username || "");
-    setAuthPassword(settings.storage_auth_password || "");
-    setAuthDomain(settings.storage_auth_domain || "");
-    setFallbackEnabled(String(settings.storage_fallback_enabled || "true").toLowerCase() === "true");
-    setNaps2WebScanEnabled(String(settings.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled");
-    setNaps2WebScanEndpoint(settings.scanner_bridge_endpoint || settings.naps2_webscan_endpoint || "");
-    setScannerAppEnabled(String(settings.scanner_app_enabled || "enabled").toLowerCase() === "enabled");
-    setScannerAppDownloadUrl(settings.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi");
-    setScanSessionExpiryMinutes(settings.scan_session_expiry_minutes || "15");
-    setScanDpi(settings.scan_dpi || "200");
-    setScanColorMode(settings.scan_color_mode || "grayscale");
-    setScannerSource(settings.scanner_source || "feeder");
-  }, [settings]);
+  const serverForm = normalizeDocumentsStorageForm(settings);
+  const form =
+    formOverride?.baseUpdatedAt === dataUpdatedAt
+      ? formOverride.value
+      : serverForm;
+  const updateForm = <K extends keyof DocumentsStorageForm,>(
+    key: K,
+    value: DocumentsStorageForm[K]
+  ) => {
+    setFormOverride((currentOverride) => {
+      const currentForm =
+        currentOverride?.baseUpdatedAt === dataUpdatedAt
+          ? currentOverride.value
+          : serverForm;
+
+      return {
+        baseUpdatedAt: dataUpdatedAt,
+        value: {
+          ...currentForm,
+          [key]: value,
+        },
+      };
+    });
+  };
 
   const saveMutation = useMutation({
     mutationFn: async () =>
       saveSettings("documents_and_uploads", {
         entries: [
-          { key: "storage_path", value: { value: storagePath } },
-          { key: "storage_auth_username", value: { value: authUsername } },
-          { key: "storage_auth_password", value: { value: authPassword } },
-          { key: "storage_auth_domain", value: { value: authDomain } },
-          { key: "storage_fallback_enabled", value: { value: String(fallbackEnabled) } },
-          { key: "naps2_webscan_enabled", value: { value: naps2WebScanEnabled ? "enabled" : "disabled" } },
-          { key: "scanner_bridge_endpoint", value: { value: naps2WebScanEndpoint } },
-          { key: "naps2_webscan_endpoint", value: { value: naps2WebScanEndpoint } },
-          { key: "scanner_bridge_mode", value: { value: naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
-          { key: "scanner_app_enabled", value: { value: scannerAppEnabled ? "enabled" : "disabled" } },
-          { key: "scanner_app_download_url", value: { value: scannerAppDownloadUrl } },
-          { key: "scan_session_expiry_minutes", value: { value: scanSessionExpiryMinutes } },
-          { key: "scan_dpi", value: { value: scanDpi } },
-          { key: "scan_color_mode", value: { value: scanColorMode } },
-          { key: "scanner_source", value: { value: scannerSource } },
+          { key: "storage_path", value: { value: form.storagePath } },
+          { key: "storage_auth_username", value: { value: form.authUsername } },
+          { key: "storage_auth_password", value: { value: form.authPassword } },
+          { key: "storage_auth_domain", value: { value: form.authDomain } },
+          { key: "storage_fallback_enabled", value: { value: String(form.fallbackEnabled) } },
+          { key: "naps2_webscan_enabled", value: { value: form.naps2WebScanEnabled ? "enabled" : "disabled" } },
+          { key: "scanner_bridge_endpoint", value: { value: form.naps2WebScanEndpoint } },
+          { key: "naps2_webscan_endpoint", value: { value: form.naps2WebScanEndpoint } },
+          { key: "scanner_bridge_mode", value: { value: form.naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
+          { key: "scanner_app_enabled", value: { value: form.scannerAppEnabled ? "enabled" : "disabled" } },
+          { key: "scanner_app_download_url", value: { value: form.scannerAppDownloadUrl } },
+          { key: "scan_session_expiry_minutes", value: { value: form.scanSessionExpiryMinutes } },
+          { key: "scan_dpi", value: { value: form.scanDpi } },
+          { key: "scan_color_mode", value: { value: form.scanColorMode } },
+          { key: "scanner_source", value: { value: form.scannerSource } },
           { key: "scan_file_format", value: { value: "pdf" } },
         ],
       }),
@@ -4625,10 +4684,10 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
 
   const testNaps2Mutation = useMutation({
     mutationFn: () => scanAppointmentRequest({
-      endpoint: naps2WebScanEndpoint,
-      dpi: Number(scanDpi) || 200,
-      colorMode: scanColorMode === "color" ? "color" : "grayscale",
-      source: scannerSource === "flatbed" ? "flatbed" : scannerSource === "duplex" ? "duplex" : "feeder",
+      endpoint: form.naps2WebScanEndpoint,
+      dpi: Number(form.scanDpi) || 200,
+      colorMode: form.scanColorMode === "color" ? "color" : "grayscale",
+      source: form.scannerSource === "flatbed" ? "flatbed" : form.scannerSource === "duplex" ? "duplex" : "feeder",
       fileName: "naps2-test-scan.pdf",
     }),
     onSuccess: (result) => {
@@ -4708,8 +4767,8 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             <label className="inline-flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={scannerAppEnabled}
-                onChange={(e) => setScannerAppEnabled(e.target.checked)}
+                checked={form.scannerAppEnabled}
+                onChange={(e) => updateForm("scannerAppEnabled", e.target.checked)}
               />
               {t("settings.documents.scannerAppEnabled")}
             </label>
@@ -4717,15 +4776,15 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scannerAppDownloadUrl")}</label>
             <input
-              value={scannerAppDownloadUrl}
-              onChange={(e) => setScannerAppDownloadUrl(e.target.value)}
+              value={form.scannerAppDownloadUrl}
+              onChange={(e) => updateForm("scannerAppDownloadUrl", e.target.value)}
               placeholder="/assets/downloads/RISproScannerSetup.msi"
               className="input-premium w-full"
             />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scanSessionExpiryMinutes")}</label>
-            <select value={scanSessionExpiryMinutes} onChange={(e) => setScanSessionExpiryMinutes(e.target.value)} className="input-premium w-full">
+            <select value={form.scanSessionExpiryMinutes} onChange={(e) => updateForm("scanSessionExpiryMinutes", e.target.value)} className="input-premium w-full">
               <option value="10">10</option>
               <option value="15">15</option>
               <option value="30">30</option>
@@ -4735,8 +4794,8 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             <label className="inline-flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={naps2WebScanEnabled}
-                onChange={(e) => setNaps2WebScanEnabled(e.target.checked)}
+                checked={form.naps2WebScanEnabled}
+                onChange={(e) => updateForm("naps2WebScanEnabled", e.target.checked)}
               />
               {t("settings.documents.naps2Enabled")}
             </label>
@@ -4744,29 +4803,29 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.naps2Endpoint")}</label>
             <input
-              value={naps2WebScanEndpoint}
-              onChange={(e) => setNaps2WebScanEndpoint(e.target.value)}
+              value={form.naps2WebScanEndpoint}
+              onChange={(e) => updateForm("naps2WebScanEndpoint", e.target.value)}
               placeholder="http://127.0.0.1:9810"
               className="input-premium w-full"
             />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scanDpi")}</label>
-            <select value={scanDpi} onChange={(e) => setScanDpi(e.target.value)} className="input-premium w-full">
+            <select value={form.scanDpi} onChange={(e) => updateForm("scanDpi", e.target.value)} className="input-premium w-full">
               <option value="150">150</option>
               <option value="200">200</option>
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scanColorMode")}</label>
-            <select value={scanColorMode} onChange={(e) => setScanColorMode(e.target.value)} className="input-premium w-full">
+            <select value={form.scanColorMode} onChange={(e) => updateForm("scanColorMode", e.target.value)} className="input-premium w-full">
               <option value="grayscale">{t("settings.documents.grayscale")}</option>
               <option value="color">{t("settings.documents.color")}</option>
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">{t("settings.documents.scannerSource")}</label>
-            <select value={scannerSource} onChange={(e) => setScannerSource(e.target.value)} className="input-premium w-full">
+            <select value={form.scannerSource} onChange={(e) => updateForm("scannerSource", e.target.value)} className="input-premium w-full">
               <option value="feeder">{t("settings.documents.feeder")}</option>
               <option value="flatbed">{t("settings.documents.flatbed")}</option>
               <option value="duplex">{t("settings.documents.duplex")}</option>
@@ -4789,25 +4848,25 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="block text-sm font-medium mb-1">{t("settings.documents.storagePath")}</label>
-          <input value={storagePath} onChange={(e) => setStoragePath(e.target.value)} className="input-premium w-full" />
+          <input value={form.storagePath} onChange={(e) => updateForm("storagePath", e.target.value)} className="input-premium w-full" />
         </div>
         <div className="flex items-end">
           <label className="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={fallbackEnabled} onChange={(e) => setFallbackEnabled(e.target.checked)} />
+            <input type="checkbox" checked={form.fallbackEnabled} onChange={(e) => updateForm("fallbackEnabled", e.target.checked)} />
             {t("settings.documents.enableFallback")}
           </label>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">{t("settings.documents.networkUsername")}</label>
-          <input value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} className="input-premium w-full" />
+          <input value={form.authUsername} onChange={(e) => updateForm("authUsername", e.target.value)} className="input-premium w-full" />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">{t("settings.documents.networkPassword")}</label>
-          <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="input-premium w-full" />
+          <input type="password" value={form.authPassword} onChange={(e) => updateForm("authPassword", e.target.value)} className="input-premium w-full" />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">{t("settings.documents.networkDomain")}</label>
-          <input value={authDomain} onChange={(e) => setAuthDomain(e.target.value)} className="input-premium w-full" />
+          <input value={form.authDomain} onChange={(e) => updateForm("authDomain", e.target.value)} className="input-premium w-full" />
         </div>
       </div>
 
