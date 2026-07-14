@@ -2610,7 +2610,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [restartRequested, setRestartRequested] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
-  const [fullRestoreEnabled, setFullRestoreEnabled] = useState<boolean | null>(null);
+  const [, setFullRestoreEnabled] = useState<boolean | null>(null);
   const [restoreV3Status, setRestoreV3Status] = useState<BackupV3RestoreStatus | null>(null);
   const [restoreV3FlagStatus, setRestoreV3FlagStatus] = useState<BackupV3RestoreFlagStatus | null>(null);
   const [restoreV3FlagBusy, setRestoreV3FlagBusy] = useState(false);
