@@ -22,8 +22,6 @@ import {
   X,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
-import { useLanguage } from "@/providers/language-provider";
-import { chooseLocalized } from "@/lib/i18n";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
@@ -256,24 +254,6 @@ function normalizePhone(value: string): string {
     .trim();
 }
 
-function isValidPhone(value: string): boolean {
-  const normalized = normalizePhone(value);
-  if (!normalized) return true;
-  return /^\+?\d{7,15}$/.test(normalized);
-}
-
-function isValidUrl(value: string): boolean {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return true;
-  try {
-    // eslint-disable-next-line no-new
-    new URL(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function isCancellableStatus(status: string): boolean {
   return ["scheduled", "arrived", "waiting"].includes(status);
 }
@@ -345,15 +325,6 @@ function Header(props: { centerName: string }) {
         </div>
       </div>
     </Card>
-  );
-}
-
-function SectionTitle(props: { title: string; subtitle?: string }) {
-  return (
-    <div className="space-y-1">
-      <h2 className="text-lg font-extrabold tracking-tight text-slate-900">{props.title}</h2>
-      {props.subtitle ? <p className="text-sm leading-7 text-slate-600">{props.subtitle}</p> : null}
-    </div>
   );
 }
 
@@ -961,12 +932,6 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
   );
 }
 
-function addDays(date: Date, amount: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + amount);
-  return result;
-}
-
 function buildIcsDate(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
@@ -980,7 +945,7 @@ function escapeIcs(value: string): string {
     .replace(/,/g, "\\,");
 }
 
-export function createCalendarBlob(preview: PublicAppointmentCancelPreview, settings: PatientQrSettings, patientPageUrl: string): Blob {
+function createCalendarBlob(preview: PublicAppointmentCancelPreview, settings: PatientQrSettings, patientPageUrl: string): Blob {
   const title = [preview.examNameAr || preview.examName || "موعد أشعة", preview.modalityNameAr || preview.modalityName || ""]
     .filter(Boolean)
     .join(" - ");

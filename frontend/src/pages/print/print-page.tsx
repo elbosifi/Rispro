@@ -45,6 +45,46 @@ function EditedBadge() {
   );
 }
 
+function Field({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="p-3 rounded-xl border border-border bg-muted/30">
+      <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-1">{label}</p>
+      <p className="font-medium">{value == null ? "—" : value}</p>
+    </div>
+  );
+}
+
+function Select({ label, value, onChange, options }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <div>
+      <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">{label}</label>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="input-premium input-ltr w-full">
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function Input({ label, value, onChange, placeholder, type = "text" }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">{label}</label>
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="input-premium input-ltr w-full" />
+    </div>
+  );
+}
+
 export default function PrintPage() {
   const [searchParams] = useSearchParams();
   return searchParams.get("appointmentId") ? <DirectAppointmentPrintPage /> : <ReportCenter />;
@@ -200,77 +240,6 @@ function DirectAppointmentPrintPage() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     setDate(tomorrow.toISOString().slice(0, 10));
-  }
-
-  function Field({ label, value }: { label: string; value: ReactNode }) {
-    return (
-      <div className="p-3 rounded-xl border border-border bg-muted/30">
-        <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-1">
-          {label}
-        </p>
-        <p className="font-medium">{value == null ? "—" : value}</p>
-      </div>
-    );
-  }
-
-  function Select({
-    label,
-    value,
-    onChange,
-    options,
-  }: {
-    label: string;
-    value: string;
-    onChange: (v: string) => void;
-    options: Array<{ value: string; label: string }>;
-  }) {
-    return (
-      <div>
-        <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-          {label}
-        </label>
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="input-premium input-ltr w-full"
-        >
-          {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  }
-
-  function Input({
-    label,
-    value,
-    onChange,
-    placeholder,
-    type = "text",
-  }: {
-    label: string;
-    value: string;
-    onChange: (v: string) => void;
-    placeholder?: string;
-    type?: string;
-  }) {
-    return (
-      <div>
-        <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-          {label}
-        </label>
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="input-premium input-ltr w-full"
-        />
-      </div>
-    );
   }
 
   const modalities = lookups?.modalities ?? [];

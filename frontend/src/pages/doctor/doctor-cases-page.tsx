@@ -41,14 +41,14 @@ function weekStartIso(isoDate: string): string {
 }
 
 function RosterDropTarget({ assignment }: { assignment: { id: number; label: string } }) {
-  const droppable = useDroppable({ id: `case-roster-${assignment.id}`, data: { rosterAssignmentId: assignment.id } });
+  const { isOver, setNodeRef } = useDroppable({ id: `case-roster-${assignment.id}`, data: { rosterAssignmentId: assignment.id } });
   return (
     <div
-      ref={droppable.setNodeRef}
+      ref={setNodeRef}
       className="rounded-lg border p-3 text-sm"
       style={{
-        borderColor: droppable.isOver ? "var(--accent)" : "var(--border)",
-        backgroundColor: droppable.isOver ? "var(--accent-soft)" : "var(--card)",
+        borderColor: isOver ? "var(--accent)" : "var(--border)",
+        backgroundColor: isOver ? "var(--accent-soft)" : "var(--card)",
       }}
     >
       <p className="font-semibold text-foreground">Roster target #{assignment.id}</p>
@@ -66,17 +66,17 @@ function DraggableCaseRow({
   canManage: boolean;
   children: ReactNode;
 }) {
-  const draggable = useDraggable({
+  const { attributes, isDragging, listeners, setNodeRef } = useDraggable({
     id: `case-${row.appointmentId}`,
     disabled: !canManage,
     data: { appointmentId: row.appointmentId },
   });
   return (
     <tr
-      ref={draggable.setNodeRef}
-      style={{ opacity: draggable.isDragging ? 0.55 : 1 }}
-      {...(canManage ? draggable.listeners : {})}
-      {...(canManage ? draggable.attributes : {})}
+      ref={setNodeRef}
+      style={{ opacity: isDragging ? 0.55 : 1 }}
+      {...(canManage ? listeners : {})}
+      {...(canManage ? attributes : {})}
     >
       {children}
     </tr>

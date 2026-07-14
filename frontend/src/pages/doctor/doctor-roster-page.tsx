@@ -133,18 +133,18 @@ function DraggableDoctor({
   reason?: string;
   source?: { assignmentId: number; memberId: number };
 }) {
-  const draggable = useDraggable({ id: source ? `member-${source.memberId}` : `doctor-${id}`, data: { doctorId: id, source } });
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: source ? `member-${source.memberId}` : `doctor-${id}`, data: { doctorId: id, source } });
   return (
     <button
-      ref={draggable.setNodeRef}
+      ref={setNodeRef}
       type="button"
-      {...draggable.listeners}
-      {...draggable.attributes}
+      {...listeners}
+      {...attributes}
       className="rounded-lg border px-3 py-2 text-left text-xs"
       style={{
         borderColor: "var(--border)",
         opacity: dimmed ? 0.55 : 1,
-        transform: draggable.transform ? `translate3d(${draggable.transform.x}px, ${draggable.transform.y}px, 0)` : undefined,
+        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
       }}
       title={reason}
     >
@@ -176,10 +176,10 @@ function DroppableRosterSlot({
   onDeleteAssignment?: (assignmentId: number) => void;
   onRemoveMember?: (assignmentId: number, memberId: number) => void;
 }) {
-  const droppable = useDroppable({ id: `assignment-${assignment.id}`, data: { assignmentId: assignment.id } });
+  const { isOver, setNodeRef } = useDroppable({ id: `assignment-${assignment.id}`, data: { assignmentId: assignment.id } });
   const assignmentConflicts = conflicts.filter((conflict) => conflict.assignmentId === assignment.id);
   return (
-    <article ref={droppable.setNodeRef} className="min-h-48 rounded-lg border p-4" style={{ borderColor: droppable.isOver ? "var(--accent)" : "var(--border)", backgroundColor: "var(--card)" }}>
+    <article ref={setNodeRef} className="min-h-48 rounded-lg border p-4" style={{ borderColor: isOver ? "var(--accent)" : "var(--border)", backgroundColor: "var(--card)" }}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold">{assignment.teamName}</p>
@@ -210,7 +210,7 @@ function DroppableRosterSlot({
           ))}
         </div>
       )}
-      <div className="mt-4 flex min-h-14 flex-wrap gap-2 rounded-lg border border-dashed p-3" style={{ borderColor: droppable.isOver ? "var(--accent)" : "var(--border)" }}>
+      <div className="mt-4 flex min-h-14 flex-wrap gap-2 rounded-lg border border-dashed p-3" style={{ borderColor: isOver ? "var(--accent)" : "var(--border)" }}>
         {assignment.members.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{editable ? "Drop doctor here" : "No doctors assigned"}</span>}
         {assignment.members.map((member) => (
           <span key={member.id} className="inline-flex items-center gap-2">

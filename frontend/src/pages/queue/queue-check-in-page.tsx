@@ -8,7 +8,6 @@ import {
   Building2,
   Clock3,
   ScanLine,
-  Sparkles,
   TriangleAlert,
   Waves,
   RefreshCw,
@@ -25,7 +24,6 @@ import { Button, Card, Input } from "@/components/shared";
 
 const RESET_DELAY_MS = 4500;
 const FLASH_DURATION_MS = 900;
-const FALLBACK_MODALITY_LIMIT = 6;
 
 type CheckInState =
   | { mode: "idle" }
@@ -162,7 +160,7 @@ export default function QueueCheckInPage() {
 
   const queue = queueQuery.data;
   const statistics = statisticsQuery.data;
-  const queueEntries = queue?.queueEntries ?? [];
+  const queueEntries = useMemo(() => queue?.queueEntries ?? [], [queue?.queueEntries]);
   const statsSummary = statistics?.summary;
 
   const enteredToday = queue?.summary.waiting_count || countEnteredEntries(queue);
@@ -295,12 +293,6 @@ export default function QueueCheckInPage() {
     resetToIdle();
   };
 
-  const statusText = useMemo(() => {
-    if (state.mode === "loading") return t("queue.checkInScanning");
-    if (state.mode === "error") return state.message;
-    return t("queue.checkInReady");
-  }, [state, t]);
-
   const timeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(language === "ar" ? "ar-LY" : "en-GB", {
@@ -317,23 +309,6 @@ export default function QueueCheckInPage() {
   const pageTitle = t("queue.checkInTitle");
   const subtitle = t("queue.checkInInstruction");
   const lastUpdatedText = lastUpdatedAt ? formatDateTimeLy(new Date(lastUpdatedAt)) : t("queue.lastUpdatedUnknown");
-  const hasQueueSummaryData = enteredToday > 0 || completedToday > 0 || waitingNow > 0 || scheduledNotArrived > 0 || totalAppointments > 0;
-  const heroStatusLabel =
-    state.mode === "loading"
-      ? t("queue.checkInScanning")
-      : state.mode === "success"
-        ? t("queue.checkInSuccessShort")
-        : state.mode === "error"
-          ? t("queue.checkInErrorTitle")
-          : t("queue.checkInReady");
-  const heroBodyText =
-    state.mode === "loading"
-      ? t("queue.checkInScanningHint")
-      : state.mode === "success"
-        ? t("queue.checkInSuccessMessage")
-        : state.mode === "error"
-          ? state.message
-          : subtitle;
   const checkedInAt =
     state.mode === "success" && state.entry ? state.entry.arrivedAt ?? state.entry.scannedAt ?? null : null;
 
