@@ -72,17 +72,11 @@ export {
 } from "./api";
 
 // Pages
-export { AppointmentsV2Page } from "./page";
 export { SchedulingAdminV2Page } from "./scheduling-admin-page";
 export { AppointmentCreatePage } from "./appointment-create-page";
 
 // Components
-export { StatusBadge } from "./components/status-badge";
 export { PatientSearch } from "./components/patient-search";
-export { OverrideDialog } from "./components/override-dialog";
-export { BookingForm } from "./components/booking-form";
-export { CancelConfirmDialog } from "./components/cancel-confirm-dialog";
-export { RescheduleDialog } from "./components/reschedule-dialog";
 export { CreateAppointmentTab } from "./components/CreateAppointmentTab";
 export { useCreateAppointmentForm } from "./hooks/useCreateAppointmentForm";
 export { useAppointmentAvailability } from "./hooks/useAppointmentAvailability";

@@ -226,11 +226,6 @@ describe("V2 appointments — barrel exports for list bookings", () => {
     assert.ok(content.includes("ListBookingsResponse"));
   });
 
-  it("index.ts exports CancelConfirmDialog", async () => {
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(frontendIndexPath, "utf-8");
-    assert.ok(content.includes("CancelConfirmDialog"));
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -304,21 +299,4 @@ describe("List bookings — includeCancelled", () => {
     assert.ok(content.includes("includeCancelled?: boolean"));
   });
 
-  it("page uses includeCancelled state and toggle UI", async () => {
-    const fs = await import("node:fs/promises");
-    const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
-    const content = await fs.readFile(pagePath, "utf-8");
-    assert.ok(content.includes("includeCancelled"));
-    assert.ok(content.includes("setIncludeCancelled"));
-    assert.ok(content.includes("Include cancelled/discontinued/voided"));
-    assert.ok(content.includes('type="checkbox"'));
-  });
-
-  it("cancelled bookings rows have reduced opacity", async () => {
-    const fs = await import("node:fs/promises");
-    const pagePath = `${process.cwd()}/frontend/src/v2/appointments/page.tsx`;
-    const content = await fs.readFile(pagePath, "utf-8");
-    assert.ok(content.includes('booking.status === "cancelled" || booking.status === "discontinued" || booking.status === "voided"'));
-    assert.ok(content.includes("opacity"));
-  });
 });
