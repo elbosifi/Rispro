@@ -727,6 +727,12 @@ function CatalogImportExportPanel({
     examTypes: Array<Record<string, unknown>>;
   }>(null);
 
+  const catalogImportIssueLabel = (value: unknown): unknown => {
+    if (typeof value !== "object" || value === null) return undefined;
+    const issue = value as Record<string, unknown>;
+    return issue.errorType || issue.message;
+  };
+
   const handleExport = async () => {
     try {
       setIsExporting(true);
@@ -1003,7 +1009,7 @@ function CatalogImportExportPanel({
                         <td className="py-2 pr-2"><input type="number" value={Number(row.dailyCapacity ?? 0)} onChange={(e) => updateDraftRow("modalities", String(row.id), "dailyCapacity", Number(e.target.value) || 0)} className="w-20 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
                         <td className="py-2 pr-2">
                           {Array.isArray(row.errors) && row.errors.length > 0 ? (
-                            <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map((item: any) => item.errorType || item.message).join(", ")}</div>
+                            <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map(catalogImportIssueLabel).join(", ")}</div>
                           ) : (
                             <div className="text-stone-500">Ready</div>
                           )}
@@ -1064,7 +1070,7 @@ function CatalogImportExportPanel({
                         <td className="py-2 pr-2"><input type="number" value={row.durationMinutes == null ? "" : Number(row.durationMinutes)} onChange={(e) => updateDraftRow("examTypes", String(row.id), "durationMinutes", e.target.value === "" ? null : Number(e.target.value))} className="w-20 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
                         <td className="py-2 pr-2">
                           {Array.isArray(row.errors) && row.errors.length > 0 ? (
-                            <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map((item: any) => item.errorType || item.message).join(", ")}</div>
+                            <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map(catalogImportIssueLabel).join(", ")}</div>
                           ) : (
                             <div className="text-stone-500">Ready</div>
                           )}
