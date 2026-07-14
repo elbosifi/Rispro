@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PatientForm from "@/components/patients/patient-form";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { Patient } from "@/types/api";
 import type { DictionaryEntry, PersistedDictionaryEntry } from "@/lib/name-generation";
 import type { PatientNotAllowedNameWord } from "@/lib/api-hooks";

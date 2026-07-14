@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { DateInput } from "@/components/common/date-input";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 
 describe("DateInput", () => {
   beforeEach(() => {

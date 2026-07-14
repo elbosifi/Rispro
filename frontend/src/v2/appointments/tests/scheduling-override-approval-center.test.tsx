@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SchedulingOverrideApprovalCenter, SchedulingOverrideRequestsWorkspace } from "../components/SchedulingOverrideApprovalCenter";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { SchedulingOverrideRequestDto } from "../types";
 import type { User } from "@/types/api";
 

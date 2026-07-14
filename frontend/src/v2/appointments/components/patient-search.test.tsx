@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import { transliterateArabicName } from "@/lib/transliterate";
 import { PatientSearch } from "./patient-search";
 

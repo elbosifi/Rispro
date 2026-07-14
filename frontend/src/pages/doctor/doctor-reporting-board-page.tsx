@@ -61,6 +61,11 @@ import type {
   ReportingBoardSettings,
   OhifViewerAvailability,
 } from "@/types/api";
+import {
+  buildRadiantPacsTagUrl,
+  buildReportingBoardPrintUrl,
+  isWindowsWorkstation,
+} from "./doctor-reporting-board-page.helpers";
 
 const REPORT_STATUS_OPTIONS: Array<{ value: ReportingBoardReportStatus; label: string }> = [
   { value: "required_not_final", label: "Required not final" },
@@ -137,17 +142,6 @@ function urlBase64ToUint8Array(value: string): ArrayBuffer {
 
 function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-}
-
-export function isWindowsWorkstation(): boolean {
-  if (typeof navigator === "undefined") return false;
-  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  const platform = `${nav.userAgentData?.platform ?? ""} ${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`;
-  return /\bWin/i.test(platform);
-}
-
-export function buildRadiantPacsTagUrl(tag: string, value: string): string {
-  return `radiant:///?n=pstv&v=${encodeURIComponent(tag)}&v=${encodeURIComponent(`"${value}"`)}`;
 }
 
 function buildSonicDicomRedirectPath(appointmentId: number, scope: "study" | "patient"): string {
@@ -235,22 +229,6 @@ function nextTripoliSunday(): string {
   const today = `${parts.year}-${parts.month}-${parts.day}`;
   const day = new Date(`${today}T00:00:00Z`).getUTCDay();
   return addDaysToDateString(today, (7 - day) % 7);
-}
-
-export function buildReportingBoardPrintUrl(input: {
-  filters: ReportingBoardFilters;
-  savedViewToken?: string | null;
-  selectedAppointmentIds?: number[];
-  autoprint?: boolean;
-  selectedDoctorName?: string | null;
-}): string {
-  const params = new URLSearchParams();
-  Object.entries(compactFilters(input.filters)).forEach(([key, value]) => params.set(key, String(value)));
-  if (input.savedViewToken) params.set("savedViewToken", input.savedViewToken);
-  if (input.selectedAppointmentIds?.length) params.set("appointmentIds", input.selectedAppointmentIds.join(","));
-  if (input.selectedDoctorName) params.set("doctorName", input.selectedDoctorName);
-  if (input.autoprint) params.set("autoprint", "1");
-  return `/print/reporting-board?${params.toString()}`;
 }
 
 function defaultFilters(settings?: ReportingBoardSettings): ReportingBoardFilters {

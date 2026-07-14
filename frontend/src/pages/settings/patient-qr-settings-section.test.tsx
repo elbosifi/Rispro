@@ -11,7 +11,7 @@ import {
   savePatientQrSettings,
   type PatientQrSettings,
 } from "@/lib/api-hooks";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 
 vi.mock("@/lib/api-hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-hooks")>();

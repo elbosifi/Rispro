@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import type { DoctorMe, Role, User } from "@/types/api";
+import type { Role, User } from "@/types/api";
 import { t, type Language, type TranslationKey } from "@/lib/i18n";
 import {
   canRoleAccessRoute,
@@ -43,7 +43,7 @@ import {
 import { GlobalSearch } from "@/components/search/global-search";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 
-export const NAV_ITEMS = APP_NAV_ITEMS;
+const NAV_ITEMS = APP_NAV_ITEMS;
 
 export function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
   const navigate = useNavigate();
@@ -51,10 +51,6 @@ export function NoShowReviewTopBarAction({ enabled }: { enabled: boolean }) {
   if (!enabled || !data || (!data.pendingCount && !(data.mode === "automatic" && data.lastAutomaticProcessedCount > 0))) return null;
   const label = data.mode === "manual" ? `No-show review · ${data.pendingCount}` : `No-shows processed · ${data.lastAutomaticProcessedCount}`;
   return <button type="button" onClick={() => navigate("/queue/no-shows")} className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/30 dark:text-amber-100" aria-label={label} title={label}><Clock3 size={14}/><span className="hidden max-w-[11rem] truncate sm:inline">{label}</span></button>;
-}
-
-export function hasDoctorWorkspaceAccess(me: Pick<DoctorMe, "canAccessDoctorPortal" | "hasActiveDoctorProfile" | "canAccessDoctorAdmin"> | null | undefined): boolean {
-  return Boolean(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.canAccessDoctorAdmin);
 }
 
 function canAccess(item: Pick<AppNavItem, "route">, user: User | null, matrix: PageVisibilityMatrix): boolean {

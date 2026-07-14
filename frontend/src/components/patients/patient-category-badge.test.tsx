@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 
 function renderBadge(category: "oncology" | "non_oncology" | null, showWhenUnset = false) {

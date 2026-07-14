@@ -4,7 +4,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PatientsPage from "./patients-page";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 
 const fetchPatientDirectoryMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();

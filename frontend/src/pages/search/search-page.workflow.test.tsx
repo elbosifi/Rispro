@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SearchPage from "@/pages/search/search-page";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { Patient } from "@/types/api";
 import { searchPatients, updatePatient, deletePatient } from "@/lib/api-hooks";
 

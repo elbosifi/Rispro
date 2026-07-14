@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { ApiError, api, setActionPinChallengeHandler } from "@/lib/api-client";
@@ -15,8 +15,6 @@ interface PendingChallenge extends ActionPinChallenge {
   resolve: () => void;
   reject: (error: Error) => void;
 }
-
-const ActionPinContext = createContext<null>(null);
 
 function actionLabel(actionKey: string) {
   return actionKey.replace(/_/g, " ");
@@ -356,7 +354,7 @@ export function ActionPinProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ActionPinContext.Provider value={null}>
+    <>
       {children}
       {challenge && (
         <ActionPinDialog
@@ -365,10 +363,6 @@ export function ActionPinProvider({ children }: { children: ReactNode }) {
           onVerified={verified}
         />
       )}
-    </ActionPinContext.Provider>
+    </>
   );
-}
-
-export function useActionPinProvider() {
-  return useContext(ActionPinContext);
 }

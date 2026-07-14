@@ -27,7 +27,6 @@ function TestPage({ testId, label }: { testId: string; label: string }) {
 }
 
 vi.mock("@/providers/auth-provider", () => ({
-  AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useAuth: () => ({
     user: testState.user,
     isLoading: false,
@@ -38,10 +37,13 @@ vi.mock("@/providers/auth-provider", () => ({
   }),
 }));
 
+vi.mock("@/providers/auth-provider-component", () => ({
+  AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
 vi.mock("@/providers/language-provider", async () => {
   const { t } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
   return {
-    LanguageProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
     useLanguage: () => ({
       language: testState.language,
       isArabic: testState.language === "ar",
@@ -51,6 +53,10 @@ vi.mock("@/providers/language-provider", async () => {
     }),
   };
 });
+
+vi.mock("@/providers/language-provider-component", () => ({
+  LanguageProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
 
 vi.mock("@/providers/action-pin-provider", () => ({
   ActionPinProvider: ({ children }: { children: ReactNode }) => <>{children}</>,

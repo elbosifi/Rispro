@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import QueueCheckInPage from "./queue-check-in-page";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { QueueSnapshot } from "@/types/api";
 
 const fetchQueueSnapshotMock = vi.fn();

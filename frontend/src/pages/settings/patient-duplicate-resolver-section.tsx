@@ -520,7 +520,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     }
   };
 
-  const usePatientField = (patient: Patient, key: MergeField) => {
+  const applyPatientField = (patient: Patient, key: MergeField) => {
     setMergeDraft((current) => ({ ...current, [key]: fieldValue(patient, key) }));
     setFieldSources((current) => ({ ...current, [key]: patient.id }));
   };
@@ -804,7 +804,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                               <button
                                 type="button"
                                 className={`rounded border px-2 py-1 font-semibold ${selected ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
-                                onClick={() => usePatientField(patient, field.key)}
+                                onClick={() => applyPatientField(patient, field.key)}
                               >
                                 {selected ? t("patientMerge.using") : t("patientMerge.use")}
                               </button>

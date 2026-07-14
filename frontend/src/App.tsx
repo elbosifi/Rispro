@@ -2,7 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, usePa
 import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { AuthProvider, useAuth } from "@/providers/auth-provider";
+import { useAuth } from "@/providers/auth-provider";
+import { AuthProvider } from "@/providers/auth-provider-component";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { ProtectedRoute } from "@/components/auth/protected-route";
@@ -36,11 +37,13 @@ import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-v
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
 import { AppointmentCreatePage, SchedulingAdminPage } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
-import { hasDoctorWorkspaceAccess, NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { hasDoctorWorkspaceAccess } from "@/components/layout/navigation.helpers";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
-import { LanguageProvider, useLanguage } from "@/providers/language-provider";
+import { useLanguage } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import { APP_PATH_TO_ROUTE, APP_ROUTE_PATHS, APP_ROUTE_TITLE_KEYS } from "@/lib/route-registry";
 import {

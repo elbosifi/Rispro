@@ -13,7 +13,8 @@ import {
   X,
 } from "lucide-react";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
-import { hasDoctorWorkspaceAccess, NoShowReviewTopBarAction, TopBar } from "@/components/layout/navigation";
+import { NoShowReviewTopBarAction, TopBar } from "@/components/layout/navigation";
+import { hasDoctorWorkspaceAccess } from "@/components/layout/navigation.helpers";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import {
   dismissReportingBoardNotification,

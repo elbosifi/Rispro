@@ -2,7 +2,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DoctorReportingBoardPage, buildReportingBoardPrintUrl } from "./doctor-reporting-board-page";
+import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
+import { buildReportingBoardPrintUrl } from "./doctor-reporting-board-page.helpers";
 import type { DoctorMe, ReportingBoardCaseRow } from "@/types/api";
 
 const fetchReportingBoardSettingsMock = vi.fn();

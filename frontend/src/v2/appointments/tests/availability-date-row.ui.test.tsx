@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, it, expect } from "vitest";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import { AvailabilityDateRow } from "../components/AvailabilityDateRow";
 
 function baseProps() {

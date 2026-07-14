@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import QueuePage from "./queue-page";
 import { ApiError } from "@/lib/api-client";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { QueueSnapshot } from "@/types/api";
 
 const fetchQueueSnapshotMock = vi.fn();

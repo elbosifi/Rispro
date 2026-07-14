@@ -262,7 +262,7 @@ function OperationalMetricCard({
 export default function StatisticsPage() {
   const { language } = useLanguage();
   const [searchParams] = useSearchParams();
-  const initialFilters = useMemo(() => parseInitialStatisticsFilters(searchParams), []);
+  const [initialFilters] = useState(() => parseInitialStatisticsFilters(searchParams));
   const [quickRange, setQuickRange] = useState<QuickRange>(initialFilters.quickRange);
   const [dateFrom, setDateFrom] = useState(initialFilters.dateFrom);
   const [dateTo, setDateTo] = useState(initialFilters.dateTo);

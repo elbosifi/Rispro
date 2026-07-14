@@ -8,8 +8,8 @@ import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-b
 import { createPatient, addWalkIn } from "@/lib/api-hooks";
 import { api, setActionPinChallengeHandler } from "@/lib/api-client";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
-import { AuthProvider } from "@/providers/auth-provider";
-import { LanguageProvider } from "@/providers/language-provider";
+import { AuthProvider } from "@/providers/auth-provider-component";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import { createV2Booking } from "@/v2/appointments/api";
 import type { Patient } from "@/types/api";
 import type { CreateBookingRequest } from "@/v2/appointments/types";

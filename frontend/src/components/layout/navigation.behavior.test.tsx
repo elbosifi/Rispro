@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
-import { NAV_ITEMS, MobileDrawer, SideNav, TopBar } from "./navigation";
+import { MobileDrawer, SideNav, TopBar } from "./navigation";
+import { APP_NAV_ITEMS as NAV_ITEMS } from "@/lib/route-registry";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX, type PageVisibilityMatrix } from "@/lib/page-visibility";
 
 vi.mock("lucide-react", () => {

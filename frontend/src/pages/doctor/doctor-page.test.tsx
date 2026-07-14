@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DoctorPage from "./doctor-page";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { DoctorMe, ReportingBoardCaseRow, User } from "@/types/api";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX } from "@/lib/page-visibility";
 

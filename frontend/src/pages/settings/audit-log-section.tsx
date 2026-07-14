@@ -148,6 +148,14 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
   const totalPages = pagination?.totalPages || 0;
   const visiblePage = pagination?.page || 1;
 
+  function updateState(patch: Partial<AuditState>, mode: "push" | "replace" = "push") {
+    setState((current) => {
+      const next = { ...current, ...patch };
+      writeAuditUrl(next, mode);
+      return next;
+    });
+  }
+
   useEffect(() => {
     const onPopState = () => {
       const next = parseAuditUrl();
@@ -180,14 +188,6 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
       onReAuthRequired(["audit", String(state.page), String(state.pageSize)]);
     }
   }, [auditQuery.error]);
-
-  function updateState(patch: Partial<AuditState>, mode: "push" | "replace" = "push") {
-    setState((current) => {
-      const next = { ...current, ...patch };
-      writeAuditUrl(next, mode);
-      return next;
-    });
-  }
 
   function clearFilters() {
     const tab = state.tab === "all" ? "all" : "important";

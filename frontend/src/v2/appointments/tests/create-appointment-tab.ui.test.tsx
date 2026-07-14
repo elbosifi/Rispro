@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
-import { LanguageProvider } from "@/providers/language-provider";
+import { LanguageProvider } from "@/providers/language-provider-component";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, CreateSchedulingOverrideRequestInput, SchedulingDecisionDto } from "../types";
 import type { ModalityDto } from "../types";
