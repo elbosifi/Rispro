@@ -1425,34 +1425,34 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteNameDictionaryEntry(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
-    onError: (err: any) => {
-      if (isReauthError(err)) {
+    onError: (error: unknown) => {
+      if (isReauthError(error)) {
         onReAuthRequired(["name-dictionary"]);
         return;
       }
-      setMutationError(err?.message || "Delete failed");
+      setMutationError(mutationErrorMessage(error, "Delete failed"));
     }
   });
   const deleteAllMutation = useMutation({
     mutationFn: async (ids: number[]) => { for (const id of ids) await deleteNameDictionaryEntry(id); },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
-    onError: (err: any) => {
-      if (isReauthError(err)) {
+    onError: (error: unknown) => {
+      if (isReauthError(error)) {
         onReAuthRequired(["name-dictionary"]);
         return;
       }
-      setMutationError(err?.message || "Delete all failed");
+      setMutationError(mutationErrorMessage(error, "Delete all failed"));
     }
   });
   const updateMutation = useMutation({
     mutationFn: (_data: { arabicText: string; englishText: string }) => upsertNameDictionaryEntry(_data.arabicText, _data.englishText),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setEditingId(null); setMutationError(null); },
-    onError: (err: any) => {
-      if (isReauthError(err)) {
+    onError: (error: unknown) => {
+      if (isReauthError(error)) {
         onReAuthRequired(["name-dictionary"]);
         return;
       }
-      setMutationError(err?.message || "Update failed");
+      setMutationError(mutationErrorMessage(error, "Update failed"));
     }
   });
   const importMutation = useMutation({
@@ -1463,13 +1463,13 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
       setCsvImportStage("idle");
       setCsvImportCount(0);
     },
-    onError: (err: any) => {
-      if (isReauthError(err)) {
+    onError: (error: unknown) => {
+      if (isReauthError(error)) {
         setCsvImportStage("idle");
         onReAuthRequired(["name-dictionary"]);
         return;
       }
-      setMutationError(err?.message || "Import failed");
+      setMutationError(mutationErrorMessage(error, "Import failed"));
       setCsvImportStage("idle");
     }
   });
