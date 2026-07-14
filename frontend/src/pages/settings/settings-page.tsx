@@ -3610,31 +3610,40 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     return Number.isInteger(n) ? n : null;
   };
 
+  type ModalityLookupRow = Record<string, unknown> & {
+    nameEn?: string;
+    name_en?: string;
+  };
+  type ExamTypeLookupRow = ModalityLookupRow & {
+    modalityId?: unknown;
+    modality_id?: unknown;
+  };
+
   // Build modality options for dropdowns
   const modalityOptions = useMemo(() => {
-    const rows = Array.isArray(modalityLookup?.modalities) ? modalityLookup.modalities : [];
+    const rows: ModalityLookupRow[] = Array.isArray(modalityLookup?.modalities) ? modalityLookup.modalities : [];
     return rows
-      .filter((m: any) => m.isActive !== false)
-      .map((m: any) => ({ value: String(m.id), label: m.nameEn || m.name_en || `Modality ${m.id}` }));
+      .filter((modality) => modality.isActive !== false)
+      .map((modality) => ({ value: String(modality.id), label: modality.nameEn || modality.name_en || `Modality ${modality.id}` }));
   }, [modalityLookup]);
 
   // Build exam type options for dropdowns
   const examTypeOptions = useMemo(() => {
-    const rows = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
+    const rows: ExamTypeLookupRow[] = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
     return rows
-      .filter((et: any) => et.isActive !== false)
-      .map((et: any) => ({ value: String(et.id), label: et.nameEn || et.name_en || `Exam ${et.id}` }));
+      .filter((examType) => examType.isActive !== false)
+      .map((examType) => ({ value: String(examType.id), label: examType.nameEn || examType.name_en || `Exam ${examType.id}` }));
   }, [examTypeLookup]);
 
   // Build exam type options with modality for filtering
   const examTypeOptionsWithModality = useMemo(() => {
-    const rows = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
+    const rows: ExamTypeLookupRow[] = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
     return rows
-      .filter((et: any) => et.isActive !== false)
-      .map((et: any) => ({
-        value: String(et.id),
-        label: et.nameEn || et.name_en || `Exam ${et.id}`,
-        modalityId: et.modalityId ?? et.modality_id
+      .filter((examType) => examType.isActive !== false)
+      .map((examType) => ({
+        value: String(examType.id),
+        label: examType.nameEn || examType.name_en || `Exam ${examType.id}`,
+        modalityId: examType.modalityId ?? examType.modality_id
       }));
   }, [examTypeLookup]);
 
