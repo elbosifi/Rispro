@@ -209,6 +209,61 @@ describe("App route behavior", () => {
     expect(await screen.findByTestId("appointment-create-page")).toBeTruthy();
   });
 
+  it("allows supervisor access to appointment administration when page visibility allows it", async () => {
+    testState.user = {
+      id: 2,
+      username: "supervisor",
+      fullName: "Supervisor User",
+      role: "supervisor",
+    } as User;
+
+    renderAppAt("/v2/appointments/admin");
+
+    expect(await screen.findByTestId("scheduling-admin-page")).toBeTruthy();
+    expect(window.location.pathname).toBe("/v2/appointments/admin");
+  });
+
+  it("allows super-admin access to appointment administration when page visibility allows it", async () => {
+    testState.user = {
+      id: 3,
+      username: "super-admin",
+      fullName: "Super Admin",
+      role: "super_admin",
+    } as User;
+
+    renderAppAt("/v2/appointments/admin");
+
+    expect(await screen.findByTestId("scheduling-admin-page")).toBeTruthy();
+    expect(window.location.pathname).toBe("/v2/appointments/admin");
+  });
+
+  it("redirects receptionist appointment administration access to the canonical appointment route", async () => {
+    renderAppAt("/v2/appointments/admin");
+
+    await waitFor(() => expect(window.location.pathname).toBe("/appointments"));
+    expect(await screen.findByTestId("appointment-create-page")).toBeTruthy();
+    expect(screen.queryByTestId("scheduling-admin-page")).toBeNull();
+  });
+
+  it("redirects an authorized appointment administrator denied by page visibility to the normal fallback", async () => {
+    testState.user = {
+      id: 2,
+      username: "supervisor",
+      fullName: "Supervisor User",
+      role: "supervisor",
+    } as User;
+    const deniedMatrix: PageVisibilityMatrix = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      "v2.appointments.admin": [],
+    };
+
+    renderAppAt("/v2/appointments/admin", deniedMatrix);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/queue"));
+    expect(screen.queryByTestId("scheduling-admin-page")).toBeNull();
+    expect(await screen.findByTestId("queue-page")).toBeTruthy();
+  });
+
   it("uses Doctor Portal as the root landing for doctor-only users", async () => {
     renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
       hasActiveDoctorProfile: true,
