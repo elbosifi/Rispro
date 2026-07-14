@@ -405,6 +405,8 @@ export default function DoctorPage() {
 
   if (isLoading) return <LoadingShell />;
 
+  if (!me) return <Navigate to="/" replace />;
+
   if (!hasDoctorWorkspaceAccess(me)) {
     return <Navigate to="/" replace />;
   }

@@ -406,7 +406,7 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
   if (!canAccessDoctorWorkspace) return null;
 
   const currentLabel = t(language, currentWorkspace === "doctor" ? "workspace.doctor" : "workspace.core");
-  const workspaces = (canAccessCoreWorkspace ? ["core", "doctor"] : ["doctor"]) as const;
+  const workspaces: readonly ("core" | "doctor")[] = canAccessCoreWorkspace ? ["core", "doctor"] : ["doctor"];
   return (
     <div ref={ref} className="relative">
       <button
@@ -469,6 +469,7 @@ export function TopBar({
   onPatientSearchSelect = () => {},
   onRegistrationSearchSelect = () => {},
   canAccessDoctorWorkspace = false,
+  canAccessCoreWorkspace = true,
   currentWorkspace = "core",
   onWorkspaceNavigate = () => {}
 }: {
@@ -491,6 +492,7 @@ export function TopBar({
   onPatientSearchSelect?: (patientId: number) => void;
   onRegistrationSearchSelect?: (appointment: AppointmentWithDetails) => void;
   canAccessDoctorWorkspace?: boolean;
+  canAccessCoreWorkspace?: boolean;
   currentWorkspace?: "core" | "doctor";
   onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work") => void;
 }) {
@@ -515,7 +517,7 @@ export function TopBar({
           {extraActions}
           {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}
           <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} />
-          <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={canAccessDoctorWorkspace} onNavigate={onWorkspaceNavigate} />
+          <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={canAccessDoctorWorkspace} canAccessCoreWorkspace={canAccessCoreWorkspace} onNavigate={onWorkspaceNavigate} />
           {user ? <AccountMenu user={user} language={language} accountActions={accountMenuActions} canAccessSettings={canAccessSettings} onSettings={onSettings} onLogout={onLogout} /> : null}
         </div>
       </div>
