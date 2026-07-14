@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isReAuthRequiredError } from "./settings-page";
+import { isReAuthRequiredError } from "./settings-page.helpers";
 import { ApiError } from "@/lib/api-client";
 
 describe("settings page re-auth detection", () => {

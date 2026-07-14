@@ -65,6 +65,7 @@ import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
 import ExamTypesSection from "./exam-types-section";
+import { isReAuthRequiredError } from "./settings-page.helpers";
 import type {
   User,
   DoctorProfile,
@@ -157,30 +158,6 @@ const ACTION_LABELS = {
   reset: "إعادة القيم من الخادم",
   saving: "جاري الحفظ…"
 } as const;
-
-function _friendlyRuleType(value: string): string {
-  return RULE_TYPE_LABELS[value] || value;
-}
-
-function _friendlyEffectMode(value: string): string {
-  return EFFECT_MODE_LABELS[value] || value;
-}
-
-function _friendlyWeekday(value: string): string {
-  return WEEKDAY_LABELS[value] || value;
-}
-
-function _friendlyCaseCategory(value: string): string {
-  return CASE_CATEGORY_LABELS[value] || value;
-}
-
-// Export for testing
-export { _friendlyRuleType as friendlyRuleType, _friendlyEffectMode as friendlyEffectMode, _friendlyWeekday as friendlyWeekday, _friendlyCaseCategory as friendlyCaseCategory };
-
-export function isReAuthRequiredError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err || "");
-  return message.includes("re-authentication") || message.includes("403");
-}
 
 type SettingsSection =
   | "menu"
