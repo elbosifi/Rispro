@@ -96,11 +96,6 @@ const EFFECT_MODE_LABELS: Record<string, string> = {
   hard_restriction: "تقييد صارم"
 };
 
-const CASE_CATEGORY_LABELS: Record<string, string> = {
-  oncology: "أورام",
-  non_oncology: "غير أورام"
-};
-
 function invalidateModalityDerivedAppointmentCaches(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["lookups"] });
   queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
