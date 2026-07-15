@@ -1710,8 +1710,9 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       [notifyView.id, notifyCase]
     );
     assert.equal(events.rowCount, 1);
-    assert.equal(events.rows[0].title, "RISpro reporting case update");
-    assert.equal(events.rows[0].body, "Open the saved reporting view to review this update.");
+    assert.equal(events.rows[0].title, "Case assigned • CT");
+    assert.match(events.rows[0].body, /Notify Patient/);
+    assert.match(events.rows[0].body, /Note: board single assignment/);
     assert.match(events.rows[0].action_url, new RegExp(`/reporting/worklist/${notifyView.token}`));
 
     assert.equal((await api(supervisor.cookie, `/api/doctor/reporting-board/${notifyCase}/assign-doctor`, { method: "POST", body: { doctorId: targetDoctor.doctorId, reason: "repeat" } })).status, 200);
@@ -1733,7 +1734,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     const ownList = await api<{ notifications: Array<{ id: number; title: string; body: string }> }>(targetDoctor.cookie, "/api/doctor/reporting-board/notifications");
     assert.equal(ownList.status, 200);
     assert.ok(ownList.data.notifications.length >= 2);
-    assert.ok(ownList.data.notifications.some((notification) => /RISpro reporting case update/.test(notification.title)));
+    assert.ok(ownList.data.notifications.some((notification) => /Case assigned • CT/.test(notification.title)));
     const otherList = await api<{ notifications: unknown[] }>(otherDoctor.cookie, "/api/doctor/reporting-board/notifications");
     assert.equal(otherList.status, 200);
     assert.equal(otherList.data.notifications.some((item) => ownList.data.notifications.map((n) => n.id).includes((item as { id: number }).id)), false);

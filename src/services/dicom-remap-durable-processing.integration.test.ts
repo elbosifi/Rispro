@@ -558,7 +558,12 @@ test("abrupt worker death leaves a reclaimable row and resumes partial Orthanc u
         child.once("exit", (code, signal) => resolve({ code, signal }));
         child.once("close", () => { if (stderr && !child.killed) process.stderr.write(stderr); });
       });
-      assert.equal(exit.signal, "SIGKILL", `${mode} child must die abruptly`);
+      if (process.platform === "win32") {
+        assert.notEqual(exit.code, 0, `${mode} child must die abruptly`);
+        assert.equal(exit.signal, null);
+      } else {
+        assert.equal(exit.signal, "SIGKILL", `${mode} child must die abruptly`);
+      }
       const crashed = await pool.query<{ status: string; processing_lease_owner: string | null; processing_error_code: string | null }>(`select status, processing_lease_owner, processing_error_code from dicom_remap_jobs where id = $1`, [staged.id]);
       assert.equal(crashed.rows[0]?.status, "processing");
       assert.equal(crashed.rows[0]?.processing_lease_owner, `crash-worker-${mode}`);

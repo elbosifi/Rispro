@@ -101,7 +101,7 @@ describe("action PIN route enforcement wiring", () => {
     assert.match(queue, /queueRouter\.post\(\s*"\/walk-in",\s*requireActionPin\("queue_walk_in"\),\s*asyncRoute/s);
     assert.match(queue, /queueRouter\.post\(\s*"\/confirm-no-show",\s*requireActionPin\("queue_confirm_no_show"\),\s*asyncRoute/s);
     assert.match(readV2, /router\.post\(\s*"\/queue\/walk-in",\s*requirePageAccess\("queue"\),\s*requireActionPin\("queue_walk_in"\),\s*asyncRoute/s);
-    assert.match(readV2, /router\.post\(\s*"\/appointments\/:id\/no-show",\s*requireActionPin\("queue_confirm_no_show"\),\s*asyncRoute/s);
+    assert.match(readV2, /router\.post\(\s*"\/appointments\/:id\/no-show",\s*requirePageAccess\("queue"\),\s*requireActionPin\("queue_confirm_no_show"\),\s*asyncRoute/s);
     assert.doesNotMatch(queue, /"\/scan",\s*requireActionPin/s);
   });
 

@@ -113,13 +113,13 @@ function renderComponent() {
   );
 }
 
-describe.skip("PatientQrSettingsSection", () => {
+describe("PatientQrSettingsSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchModalitiesSettings).mockResolvedValue({
       modalities: [
-        { id: 2, nameAr: "Ã˜Â±Ã™â€ Ã™Å Ã™â€ ", nameEn: "MRI", code: "MR" },
-        { id: 3, nameAr: "Ã˜Â£Ã˜Â´Ã˜Â¹Ã˜Â© Ã™â€¦Ã™â€šÃ˜Â·Ã˜Â¹Ã™Å Ã˜Â©", nameEn: "CT", code: "CT" },
+        { id: 2, nameAr: "MRI", nameEn: "MRI", code: "MR" },
+        { id: 3, nameAr: "CT", nameEn: "CT", code: "CT" },
       ].map((row) => ({
         id: row.id,
         code: row.code,
@@ -157,9 +157,9 @@ describe.skip("PatientQrSettingsSection", () => {
     const intro = screen.getByDisplayValue("Ù…Ù‚Ø¯Ù…Ø©") as HTMLTextAreaElement;
     await user.clear(intro);
     await user.type(intro, "Ù…Ù‚Ø¯Ù…Ø© Ø¬Ø¯ÙŠØ¯Ø©");
-    await user.click(screen.getByRole("checkbox", { name: /Ø¥Ø¸Ù‡Ø§Ø± Ø¨Ø·Ø§Ù‚Ø© Ø§Ù„Ù…ÙˆÙ‚Ø¹/i }));
+    await user.click(screen.getByRole("checkbox", { name: "إظهار بطاقة الموقع" }));
 
-    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+    await user.click(screen.getByRole("button", { name: "حفظ" }));
 
     await waitFor(() => {
       expect(savePatientQrSettings).toHaveBeenCalled();
@@ -178,15 +178,15 @@ describe.skip("PatientQrSettingsSection", () => {
     renderComponent();
 
     await screen.findAllByRole("heading", { name: /QR/i });
-    const addInput = screen.getByPlaceholderText("Ø¥Ø¶Ø§ÙØ© Ø¹Ù†ØµØ± Ø¬Ø¯ÙŠØ¯...");
+    const addInput = screen.getByPlaceholderText("إضافة عنصر جديد...");
     await user.type(addInput, "ØªØ­Ø§Ù„ÙŠÙ„ Ø­Ø¯ÙŠØ«Ø©");
-    await user.click(screen.getByRole("button", { name: /Ø¥Ø¶Ø§ÙØ©/i }));
+    await user.click(screen.getByRole("button", { name: "إضافة" }));
     expect(screen.getByDisplayValue("ØªØ­Ø§Ù„ÙŠÙ„ Ø­Ø¯ÙŠØ«Ø©")).toBeTruthy();
 
-    const moveUpButtons = screen.getAllByRole("button", { name: "ØªØ­Ø±ÙŠÙƒ Ø§Ù„Ø¹Ù†ØµØ± Ø¥Ù„Ù‰ Ø§Ù„Ø£Ø¹Ù„Ù‰" });
-    await user.click(moveUpButtons[2]);
+    const moveUpButtons = screen.getAllByRole("button", { name: "تحريك العنصر إلى الأعلى" });
+    await user.click(moveUpButtons[moveUpButtons.length - 1]);
 
-    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+    await user.click(screen.getByRole("button", { name: "حفظ" }));
 
     await waitFor(() => {
       expect(savePatientQrSettings).toHaveBeenCalled();
@@ -196,21 +196,17 @@ describe.skip("PatientQrSettingsSection", () => {
   });
 
   it("shows validation errors for invalid phone and URL values", async () => {
-    const user = userEvent.setup();
     renderComponent();
 
     await screen.findAllByRole("heading", { name: /QR/i });
-    await user.clear(screen.getByLabelText("Ø±Ù‚Ù… Ø§Ù„Ù‡Ø§ØªÙ Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠ"));
-    await user.type(screen.getByLabelText("Ø±Ù‚Ù… Ø§Ù„Ù‡Ø§ØªÙ Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠ"), "abc");
-    await user.clear(screen.getByLabelText("Ø±Ø§Ø¨Ø· Ø®Ø±Ø§Ø¦Ø· Google"));
-    await user.type(screen.getByLabelText("Ø±Ø§Ø¨Ø· Ø®Ø±Ø§Ø¦Ø· Google"), "bad-url");
-    await user.clear(screen.getByLabelText("Ø±Ø§Ø¨Ø· RISpro Ø§Ù„Ø¹Ø§Ù…"));
-    await user.type(screen.getByLabelText("Ø±Ø§Ø¨Ø· RISpro Ø§Ù„Ø¹Ø§Ù…"), "bad-url");
-    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+    fireEvent.change(screen.getByLabelText("رقم الهاتف الرئيسي"), { target: { value: "abc" } });
+    fireEvent.change(screen.getByLabelText("رابط خرائط Google"), { target: { value: "bad-url" } });
+    fireEvent.change(screen.getByLabelText("رابط RISpro العام"), { target: { value: "bad-url" } });
+    fireEvent.click(screen.getByRole("button", { name: "حفظ" }));
 
     expect(await screen.findByText("Public RISpro URL is invalid.")).toBeTruthy();
-    expect(await screen.findByText("Ø±Ù‚Ù… Ø§Ù„Ù‡Ø§ØªÙ ØºÙŠØ± ØµØ§Ù„Ø­.")).toBeTruthy();
-    expect(screen.getByText("Ø±Ø§Ø¨Ø· Ø®Ø±Ø§Ø¦Ø· Google ØºÙŠØ± ØµØ§Ù„Ø­.")).toBeTruthy();
+    expect(await screen.findByText("رقم الهاتف غير صالح.")).toBeTruthy();
+    expect(screen.getByText("رابط خرائط Google غير صالح.")).toBeTruthy();
   });
 
   it("asks for supervisor re-authentication when saving is rejected with 403", async () => {
@@ -236,7 +232,7 @@ describe.skip("PatientQrSettingsSection", () => {
     );
 
     await screen.findAllByRole("heading", { name: /QR/i });
-    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+    await user.click(screen.getByRole("button", { name: "حفظ" }));
 
     await waitFor(() => {
       expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "patient_qr_self_service"]);
@@ -266,7 +262,7 @@ describe.skip("PatientQrSettingsSection", () => {
     );
 
     await screen.findAllByRole("heading", { name: /QR/i });
-    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+    await user.click(screen.getByRole("button", { name: "حفظ" }));
 
     await waitFor(() => {
       expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "patient_qr_self_service"]);
@@ -291,13 +287,13 @@ describe.skip("PatientQrSettingsSection", () => {
 
     await screen.findAllByRole("heading", { name: /QR/i });
 
-    await user.selectOptions(screen.getByLabelText(/Report modality scope|Ù†Ø·Ø§Ù‚ Ø§Ù„Ø£Ø¬Ù‡Ø²Ø© Ù„Ù„ØªÙ‚Ø§Ø±ÙŠØ±/i), "include");
+    await user.selectOptions(screen.getByLabelText(/Report modality scope|نطاق الأجهزة للتقارير/i), "include");
     await user.click(screen.getByRole("checkbox", { name: "MRI" }));
 
-    await user.selectOptions(screen.getByLabelText(/Image modality scope|Ù†Ø·Ø§Ù‚ Ø§Ù„Ø£Ø¬Ù‡Ø²Ø© Ù„Ù„ØµÙˆØ±/i), "exclude");
-    await user.click(screen.getByRole("checkbox", { name: "CT" }));
+    await user.selectOptions(screen.getByLabelText(/Image modality scope|نطاق الأجهزة للصور/i), "exclude");
+    await user.click(screen.getAllByRole("checkbox", { name: "CT" })[1]);
 
-    await user.click(screen.getByRole("button", { name: /Ã˜Â­Ã™ÂÃ˜Â¸/i }));
+    await user.click(screen.getByRole("button", { name: "حفظ" }));
 
     await waitFor(() => {
       expect(savePatientQrSettings).toHaveBeenCalled();
@@ -309,3 +305,4 @@ describe.skip("PatientQrSettingsSection", () => {
     expect(payload.imageAccessModalityIds).toEqual([3]);
   });
 });
+import { fireEvent } from "@testing-library/react";

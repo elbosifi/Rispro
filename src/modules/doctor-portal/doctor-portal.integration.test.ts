@@ -214,10 +214,14 @@ async function workbookBase64(rows: Array<Record<string, unknown>>): Promise<str
   return (XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer).toString("base64");
 }
 
-async function cleanupDoctorPortalTestData() {
+async function cleanupDoctorPortalTestData(extraUserIds: number[] = []) {
   const userRows = await pool.query<{ id: string }>(`select id::text as id from users where username like $1`, [`${TEST_PREFIX.toLowerCase()}%`]);
   const userIds = userRows.rows.map((row) => Number(row.id));
-  const doctorRows = await pool.query<{ id: string }>(`select id::text as id from doctor_portal.doctor_profiles where display_name like $1`, [`${TEST_PREFIX}%`]);
+  const doctorProfileUserIds = [...userIds, ...extraUserIds];
+  const doctorRows = await pool.query<{ id: string }>(
+    `select id::text as id from doctor_portal.doctor_profiles where display_name like $1 or user_id = any($2::bigint[])`,
+    [`${TEST_PREFIX}%`, doctorProfileUserIds]
+  );
   const doctorIds = doctorRows.rows.map((row) => Number(row.id));
   const patientRows = await pool.query<{ id: string }>(`select id::text as id from patients where english_full_name like $1`, [`${TEST_PREFIX}%`]);
   const patientIds = patientRows.rows.map((row) => Number(row.id));
@@ -229,6 +233,15 @@ async function cleanupDoctorPortalTestData() {
   const assignmentIds = assignmentRows.rows.map((row) => Number(row.id));
 
   await pool.query(`delete from doctor_portal.doctor_module_audit_events where actor_user_id = any($1::bigint[]) or actor_doctor_id = any($2::bigint[])`, [userIds, doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.reporting_assignment_intents where intended_doctor_id = any($1::bigint[]) or requested_by_doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
+  await pool.query(
+    `delete from doctor_portal.reporting_board_bulk_assignment_jobs where target_doctor_id = any($1::bigint[]) or created_by_doctor_id = any($1::bigint[]) or created_by_user_id = any($2::bigint[])`,
+    [doctorIds, userIds]
+  ).catch(() => undefined);
+  await pool.query(
+    `delete from doctor_portal.reporting_board_saved_views where owner_doctor_id = any($1::bigint[]) or target_doctor_id = any($1::bigint[]) or owner_user_id = any($2::bigint[]) or created_by_user_id = any($2::bigint[]) or updated_by_user_id = any($2::bigint[])`,
+    [doctorIds, userIds]
+  ).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_roster_notifications where roster_week_id = any($1::bigint[]) or doctor_id = any($2::bigint[])`, [weekIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.appointment_protocol_audit_events where appointment_id = any($1::bigint[]) or changed_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.appointment_protocols where appointment_id = any($1::bigint[]) or assigned_by_doctor_id = any($2::bigint[]) or updated_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
@@ -293,7 +306,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
   after(async () => {
     if (!testData) return;
     await app.close();
-    await cleanupDoctorPortalTestData();
+    await cleanupDoctorPortalTestData([testData.userId]);
     await testDb.cleanup();
   });
 

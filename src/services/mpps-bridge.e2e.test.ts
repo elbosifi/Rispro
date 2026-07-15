@@ -23,6 +23,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
 const bridgeScript = path.join(repoRoot, "docker", "mpps-bridge", "app.py");
 const senderScript = path.join(repoRoot, "scripts", "dicom-gateway", "send-mpps-fixture.py");
+let pythonCommand = "python3";
 
 async function commandSucceeds(command: string, args: string[]): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
@@ -70,7 +71,7 @@ async function stopProcess(child: ChildProcess | null): Promise<void> {
 }
 
 async function runSender(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const sender = spawn("python3", [senderScript, ...args], {
+  const sender = spawn(pythonCommand, [senderScript, ...args], {
     cwd: repoRoot,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -95,7 +96,7 @@ async function startBridge(options: {
   adminPort: number;
   aeTitle?: string;
 }): Promise<ChildProcess> {
-  const startedBridge = spawn("python3", [bridgeScript], {
+  const startedBridge = spawn(pythonCommand, [bridgeScript], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -138,13 +139,19 @@ describe("mpps bridge end-to-end", () => {
       return;
     }
 
-    const pythonAvailable = await commandSucceeds("python3", ["--version"]);
-    if (!pythonAvailable) {
-      skipReason = "python3 is not available in this environment";
+    const pythonCandidates = [process.env.MPPS_BRIDGE_PYTHON, "python3", "python", "py"].filter(
+      (command): command is string => !!command
+    );
+    const availablePython = (await Promise.all(pythonCandidates.map(async (command) =>
+      (await commandSucceeds(command, ["--version"])) ? command : null
+    ))).find((command): command is string => command !== null);
+    if (!availablePython) {
+      skipReason = "Python 3 is not available in this environment";
       return;
     }
+    pythonCommand = availablePython;
 
-    const pythonDepsAvailable = await commandSucceeds("python3", [
+    const pythonDepsAvailable = await commandSucceeds(pythonCommand, [
       "-c",
       "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pydicom') and importlib.util.find_spec('pynetdicom') else 1)",
     ]);

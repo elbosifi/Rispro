@@ -73,11 +73,9 @@ async function writeStagedTables(rowsByTable: Record<string, unknown[]>): Promis
 
 async function setupDatabase(pool: pg.Pool): Promise<void> {
   await pool.query("drop schema if exists appointments_v2 cascade");
-  await pool.query("drop table if exists public.strict_child cascade");
-  await pool.query("drop table if exists public.loop_a cascade");
-  await pool.query("drop table if exists public.loop_b cascade");
-  await pool.query("drop table if exists public.patients cascade");
-  await pool.query("drop table if exists public.users cascade");
+  await pool.query("drop schema if exists doctor_portal cascade");
+  await pool.query("drop schema if exists public cascade");
+  await pool.query("create schema public");
   await pool.query("create schema appointments_v2");
   await pool.query("create table public.users (id bigserial primary key, username text not null unique)");
   await pool.query("create table public.patients (id bigserial primary key, created_by_user_id bigint references public.users(id) deferrable initially immediate)");
