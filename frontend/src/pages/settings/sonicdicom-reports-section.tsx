@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import {
@@ -46,6 +46,11 @@ const DEFAULTS: SonicSettings = {
   sonicDicomSqlDraftStatusCodes: [1],
 };
 
+type SonicSettingsFormOverride = {
+  baseUpdatedAt: number;
+  value: SonicSettings;
+};
+
 function normalize(raw: Record<string, unknown>): SonicSettings {
   return { ...DEFAULTS, ...(raw || {}) } as SonicSettings;
 }
@@ -73,19 +78,32 @@ function isValidUrl(value: unknown): boolean {
 
 export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDicomReportsSectionProps) {
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({
+  const { data, dataUpdatedAt, isLoading, error } = useQuery({
     queryKey: ["settings", "sonicdicom_reports"],
     queryFn: () => fetchSonicDicomSettings(),
   });
-  const [form, setForm] = useState<SonicSettings>(DEFAULTS);
+  const [formOverride, setFormOverride] = useState<SonicSettingsFormOverride | null>(null);
+  const serverForm = normalize(data ?? {});
+  const form =
+    formOverride?.baseUpdatedAt === dataUpdatedAt
+      ? formOverride.value
+      : serverForm;
+  const setForm: Dispatch<SetStateAction<SonicSettings>> = (nextForm) => {
+    setFormOverride((currentOverride) => {
+      const currentForm =
+        currentOverride?.baseUpdatedAt === dataUpdatedAt
+          ? currentOverride.value
+          : serverForm;
+      return {
+        baseUpdatedAt: dataUpdatedAt,
+        value: typeof nextForm === "function" ? nextForm(currentForm) : nextForm,
+      };
+    });
+  };
   const [message, setMessage] = useState("");
   const [testAccessionNumber, setTestAccessionNumber] = useState("");
   const [testReportNo, setTestReportNo] = useState("");
   const [testResult, setTestResult] = useState<SonicDicomSqlReadinessResponse | null>(null);
-
-  useEffect(() => {
-    if (data) setForm(normalize(data));
-  }, [data]);
 
   const mutation = useMutation({
     mutationFn: (payload: SonicSettings) =>

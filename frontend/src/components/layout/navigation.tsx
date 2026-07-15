@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { Role, User } from "@/types/api";
@@ -575,12 +575,11 @@ export function SideNav({
     ])) as Record<SidebarGroupKey, boolean>;
   });
 
-  useEffect(() => {
-    const activeGroup = visibleGroups.find((group) => group.items.some((item) => item.route === currentRoute));
-    if (activeGroup && !expandedGroups[activeGroup.key]) {
-      setExpandedGroups((current) => ({ ...current, [activeGroup.key]: true }));
-    }
-  }, [currentRoute, visibleGroups, expandedGroups]);
+  const activeGroup = visibleGroups.find((group) => group.items.some((item) => item.route === currentRoute));
+  const visibleExpandedGroups =
+    activeGroup && !expandedGroups[activeGroup.key]
+      ? { ...expandedGroups, [activeGroup.key]: true }
+      : expandedGroups;
 
   const toggleGroup = (groupKey: SidebarGroupKey) => {
     setExpandedGroups((current) => {
@@ -596,17 +595,17 @@ export function SideNav({
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
 
-  const clearPreviewTimers = () => {
+  const clearPreviewTimers = useCallback(() => {
     if (openTimerRef.current != null) window.clearTimeout(openTimerRef.current);
     if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
     openTimerRef.current = null;
     closeTimerRef.current = null;
-  };
+  }, []);
 
-  const closePreview = () => {
+  const closePreview = useCallback(() => {
     clearPreviewTimers();
     setPreviewOpen(false);
-  };
+  }, [clearPreviewTimers]);
 
   const schedulePreviewOpen = () => {
     if (!collapsed || !finePointer || previewOpen) return;
@@ -637,19 +636,23 @@ export function SideNav({
     return () => media.removeEventListener?.("change", update);
   }, []);
 
-  useEffect(() => {
-    if (!collapsed) closePreview();
-    return clearPreviewTimers;
-  }, [collapsed]);
+  useEffect(() => clearPreviewTimers, [clearPreviewTimers]);
 
   useEffect(() => {
-    if (!previewOpen) return;
+    if (!collapsed || !previewOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closePreview();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [previewOpen]);
+  }, [closePreview, collapsed, previewOpen]);
+
+  const handleToggleCollapsed = () => {
+    if (collapsed) closePreview();
+    onToggleCollapsed?.();
+  };
+
+  const previewVisible = collapsed && previewOpen;
 
   return (
     <div
@@ -680,22 +683,22 @@ export function SideNav({
         aria-label={t(language, "shell.menu")}
       >
         {onToggleCollapsed ? <div className={`shrink-0 p-2 ${isRtl ? "flex justify-start" : "flex justify-end"}`}>
-          <button type="button" className="flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:scale-95" onClick={onToggleCollapsed} aria-label={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")} aria-expanded={!collapsed} aria-controls="desktop-sidebar-navigation" title={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")}>
+          <button type="button" className="flex h-10 min-w-10 items-center justify-center rounded-lg px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:scale-95" onClick={handleToggleCollapsed} aria-label={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")} aria-expanded={!collapsed} aria-controls="desktop-sidebar-navigation" title={t(language, collapsed ? "shell.expandNavigation" : "shell.collapseNavigation")}>
             {isRtl ? (collapsed ? <ChevronLeft size={18} /> : <ChevronRight size={18} />) : (collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />)}
           </button>
         </div> : null}
         <div id="desktop-sidebar-navigation" className="min-h-0 flex-1 overflow-y-auto p-2.5">
-          <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={expandedGroups} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={!previewOpen} idPrefix="sidebar" />
+          <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={visibleExpandedGroups} collapsed={collapsed} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={!previewVisible} idPrefix="sidebar" />
         </div>
         <div className={`shrink-0 border-t p-2.5 ${collapsed ? "flex justify-center" : "flex items-center justify-between gap-2"}`} style={{ borderColor: "var(--border)", backgroundColor: "var(--muted)" }}>
           <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />{!collapsed ? <span className="truncate">{t(language, "shell.systemOnline")}</span> : null}</div>
         </div>
       </nav>
 
-      {collapsed && previewOpen ? <aside data-testid="desktop-sidebar-preview" className={`absolute inset-y-0 z-40 w-[240px] border bg-background shadow-xl motion-safe:transition-[opacity,transform] motion-safe:duration-200 motion-reduce:transition-none ${isRtl ? "end-full me-2" : "start-full ms-2"}`} style={{ borderColor: "var(--border)" }} aria-label={t(language, "shell.menu")} onPointerEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onPointerLeave={schedulePreviewClose} onMouseEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onMouseLeave={schedulePreviewClose}>
+      {previewVisible ? <aside data-testid="desktop-sidebar-preview" className={`absolute inset-y-0 z-40 w-[240px] border bg-background shadow-xl motion-safe:transition-[opacity,transform] motion-safe:duration-200 motion-reduce:transition-none ${isRtl ? "end-full me-2" : "start-full ms-2"}`} style={{ borderColor: "var(--border)" }} aria-label={t(language, "shell.menu")} onPointerEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onPointerLeave={schedulePreviewClose} onMouseEnter={() => { if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current); }} onMouseLeave={schedulePreviewClose}>
         <div className="flex h-full min-h-0 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
-            <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={expandedGroups} collapsed={false} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={false} idPrefix="sidebar-preview" />
+            <SidebarNavigationContent visibleGroups={visibleGroups} visibleDashboard={visibleDashboard} expandedGroups={visibleExpandedGroups} collapsed={false} currentRoute={currentRoute} isRtl={isRtl} language={language} onToggleGroup={toggleGroup} onNavigate={onNavigate} showTooltips={false} idPrefix="sidebar-preview" />
           </div>
         </div>
       </aside> : null}

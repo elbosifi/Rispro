@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
@@ -391,25 +391,25 @@ export function CreateAppointmentTab({
     };
   }, [entityDisplayMode, form.patientId]);
 
-  function visibleInAvailabilityPanel(row: AvailabilityRowViewModel, selected = false): boolean {
+  const canRequestDeferredOverride = useCallback((
+    overrideType: SchedulingOverrideType | null,
+    row: AvailabilityRowViewModel | null = availabilitySelectedRow
+  ): boolean => {
+    if (!overrideType || !row || row.status === "available") return false;
+    if (isReceptionist) return allowReceptionOverrideRequestsFromAvailability;
+    return isSupervisor && overrideType === "total_capacity_override";
+  }, [allowReceptionOverrideRequestsFromAvailability, availabilitySelectedRow, isReceptionist, isSupervisor]);
+
+  const visibleInAvailabilityPanel = useCallback((row: AvailabilityRowViewModel, selected = false): boolean => {
     return isAvailabilityRowVisible(row, {
       showFullDays,
       showPolicyHiddenDays,
       selected,
       requestableOverride: canRequestDeferredOverride(inferSupportedOverrideType(row.reasonCodes), row),
     });
-  }
+  }, [canRequestDeferredOverride, showFullDays, showPolicyHiddenDays]);
 
-  function canRequestDeferredOverride(
-    overrideType: SchedulingOverrideType | null,
-    row: AvailabilityRowViewModel | null = availabilitySelectedRow
-  ): boolean {
-    if (!overrideType || !row || row.status === "available") return false;
-    if (isReceptionist) return allowReceptionOverrideRequestsFromAvailability;
-    return isSupervisor && overrideType === "total_capacity_override";
-  }
-
-  function canSelectAvailabilityRow(row: AvailabilityRowViewModel): boolean {
+  const canSelectAvailabilityRow = useCallback((row: AvailabilityRowViewModel): boolean => {
     const hasRowSpecialQuota = (row.specialQuotaRemaining ?? 0) > 0;
     const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
     if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota) && !canRequestDeferredOverride(supportedOverrideType, row)) {
@@ -418,7 +418,7 @@ export function CreateAppointmentTab({
     if (row.status === "blocked" && !supportedOverrideType) return false;
     if (row.status === "full" && !row.requiresSupervisorOverride && !hasRowSpecialQuota && !supportedOverrideType) return false;
     return true;
-  }
+  }, [canRequestDeferredOverride, isReceptionist]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (!canSelectAvailabilityRow(row)) return;
@@ -481,9 +481,11 @@ export function CreateAppointmentTab({
     availability.isLoading,
     availability.rows,
     availabilitySelectedRow,
+    canSelectAvailabilityRow,
     form.appointmentDate,
     showFullDays,
     showPolicyHiddenDays,
+    visibleInAvailabilityPanel,
   ]);
 
   function validateBaseFields(): string | null {

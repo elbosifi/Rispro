@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 
@@ -98,6 +98,11 @@ const EMPTY_FORM: FormState = {
   osirixVersion: "", dicomwebServerEnabled: false,
 };
 
+type OhifFormOverride = {
+  baseUpdatedAt: number;
+  value: FormState;
+};
+
 function formFromResponse(data: OhifConfigurationResponse): FormState {
   const settings = data.configuration.settings;
   const endpoint = data.configuration.webEndpoint;
@@ -123,7 +128,7 @@ const labelClass = "grid gap-1 text-sm font-medium text-foreground";
 
 export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [formOverride, setFormOverride] = useState<OhifFormOverride | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [accessionNumber, setAccessionNumber] = useState("");
   const [studyInstanceUid, setStudyInstanceUid] = useState("");
@@ -131,7 +136,23 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
   const [sopInstanceUid, setSopInstanceUid] = useState("");
   const [appointmentId, setAppointmentId] = useState("");
   const query = useQuery({ queryKey: ["ohif", "configuration"], queryFn: () => api<OhifConfigurationResponse>("/ohif/admin/configuration") });
-  useEffect(() => { if (query.data) setForm(formFromResponse(query.data)); }, [query.data]);
+  const serverForm = query.data ? formFromResponse(query.data) : EMPTY_FORM;
+  const form =
+    formOverride?.baseUpdatedAt === query.dataUpdatedAt
+      ? formOverride.value
+      : serverForm;
+  const setForm: Dispatch<SetStateAction<FormState>> = (nextForm) => {
+    setFormOverride((currentOverride) => {
+      const currentForm =
+        currentOverride?.baseUpdatedAt === query.dataUpdatedAt
+          ? currentOverride.value
+          : serverForm;
+      return {
+        baseUpdatedAt: query.dataUpdatedAt,
+        value: typeof nextForm === "function" ? nextForm(currentForm) : nextForm,
+      };
+    });
+  };
   const selectedNode = useMemo(() => query.data?.pacsNodes.find((node) => Number(node.id) === Number(form.selectedPacsNodeId)) ?? null, [form.selectedPacsNodeId, query.data?.pacsNodes]);
 
   const save = useMutation({
@@ -157,7 +178,14 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
         },
       }),
     }),
-    onSuccess: async (data) => { setForm(formFromResponse(data)); setMessage("OHIF Viewer settings saved."); await queryClient.invalidateQueries({ queryKey: ["ohif"] }); },
+    onSuccess: async (data) => {
+      setFormOverride({
+        baseUpdatedAt: query.dataUpdatedAt,
+        value: formFromResponse(data),
+      });
+      setMessage("OHIF Viewer settings saved.");
+      await queryClient.invalidateQueries({ queryKey: ["ohif"] });
+    },
     onError: (error: Error) => {
       if (error instanceof ApiError && error.status === 403) onReAuthRequired(["ohif", "configuration"]);
       else setMessage(error.message);

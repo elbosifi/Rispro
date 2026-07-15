@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "@/lib/api-client";
 import { fetchSettings, saveSettings } from "@/lib/api-hooks";
@@ -40,6 +40,16 @@ type FormState = {
   hl7_field_limits_json: string;
   hl7_overflow_policy_json: string;
   hl7_extra_fields_json: string;
+};
+
+type SanteWorklistDraft = {
+  form: FormState;
+  dirty: boolean;
+};
+
+type SanteWorklistDraftOverride = {
+  baseUpdatedAt: number;
+  value: SanteWorklistDraft;
 };
 
 type OverflowPolicy = "reject" | "truncate" | "omit";
@@ -180,8 +190,7 @@ function jsonStringify(value: unknown): string {
 
 export default function SanteWorklistSection({ onReAuthRequired }: Props) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<FormState>(DEFAULT_FORM);
-  const [dirty, setDirty] = useState(false);
+  const [draftOverride, setDraftOverride] = useState<SanteWorklistDraftOverride | null>(null);
   const [message, setMessage] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -190,17 +199,47 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
     queryKey: ["settings", "sante_worklist_hl7"],
     queryFn: () => fetchSettings("sante_worklist_hl7"),
   });
+  const serverDraft: SanteWorklistDraft = {
+    form: toForm(settingsQuery.data as Record<string, string> | undefined),
+    dirty: false,
+  };
+  const draft =
+    draftOverride?.baseUpdatedAt === settingsQuery.dataUpdatedAt
+      ? draftOverride.value
+      : serverDraft;
+  const { form, dirty } = draft;
+  const setForm: Dispatch<SetStateAction<FormState>> = (nextForm) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === settingsQuery.dataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseUpdatedAt: settingsQuery.dataUpdatedAt,
+        value: {
+          ...currentDraft,
+          form: typeof nextForm === "function" ? nextForm(currentDraft.form) : nextForm,
+        },
+      };
+    });
+  };
+  const setDirty = (nextDirty: boolean) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === settingsQuery.dataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseUpdatedAt: settingsQuery.dataUpdatedAt,
+        value: { ...currentDraft, dirty: nextDirty },
+      };
+    });
+  };
 
   const summaryQuery = useQuery({
     queryKey: ["dicom", "sante-hl7", "summary"],
     queryFn: () => api<SummaryResponse>("/dicom/sante-hl7/summary"),
   });
-
-  useEffect(() => {
-    if (!settingsQuery.data) return;
-    setForm(toForm(settingsQuery.data as Record<string, string>));
-    setDirty(false);
-  }, [settingsQuery.data]);
 
   const setValue = (key: keyof FormState, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));

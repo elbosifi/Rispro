@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Button, Card } from "@/components/shared";
 import { chooseLocalized } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -66,6 +66,11 @@ interface ExamTypeOption {
   value: number;
   label: string;
 }
+
+type SnapshotScopedValue<T> = {
+  baseSnapshot: PolicySnapshotDto | null;
+  value: T;
+};
 
 type ScheduleRule =
   | Pick<PolicyExamTypeRuleDto, "ruleType" | "specificDate" | "startDate" | "endDate" | "weekday" | "alternateWeeks" | "recurrenceAnchorDate">
@@ -169,25 +174,53 @@ export function PolicyDraftEditor({
   const examTypeCatalog = useV2ExamTypeCatalog();
   const policyUsers = useV2PolicyUsers();
   const { language } = useLanguage();
-  const [draft, setDraft] = useState<PolicySnapshotDto>(emptySnapshot());
+  const [draftOverride, setDraftOverride] = useState<SnapshotScopedValue<PolicySnapshotDto> | null>(null);
   const [changeNote, setChangeNote] = useState("");
-  const [advancedJsonValue, setAdvancedJsonValue] = useState("");
-  const [advancedJsonError, setAdvancedJsonError] = useState<string | null>(null);
-  const [saveValidationError, setSaveValidationError] = useState<string | null>(null);
+  const [advancedJsonOverride, setAdvancedJsonOverride] = useState<SnapshotScopedValue<string> | null>(null);
+  const [advancedJsonErrorState, setAdvancedJsonErrorState] = useState<SnapshotScopedValue<string | null> | null>(null);
+  const [saveValidationErrorState, setSaveValidationErrorState] = useState<SnapshotScopedValue<string | null> | null>(null);
   const [availableExamFilters, setAvailableExamFilters] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    const next = snapshot ?? emptySnapshot();
-    setDraft(next);
-    setAdvancedJsonValue(JSON.stringify(next, null, 2));
-    setAdvancedJsonError(null);
-    setSaveValidationError(null);
-  }, [snapshot]);
-
-  useEffect(() => {
-    setAdvancedJsonValue(JSON.stringify(draft, null, 2));
-    setSaveValidationError(null);
-  }, [draft]);
+  const serverDraft = snapshot ?? emptySnapshot();
+  const draft =
+    draftOverride?.baseSnapshot === snapshot
+      ? draftOverride.value
+      : serverDraft;
+  const advancedJsonValue =
+    advancedJsonOverride?.baseSnapshot === snapshot
+      ? advancedJsonOverride.value
+      : JSON.stringify(draft, null, 2);
+  const advancedJsonError =
+    advancedJsonErrorState?.baseSnapshot === snapshot
+      ? advancedJsonErrorState.value
+      : null;
+  const saveValidationError =
+    saveValidationErrorState?.baseSnapshot === snapshot
+      ? saveValidationErrorState.value
+      : null;
+  const setDraft: Dispatch<SetStateAction<PolicySnapshotDto>> = (nextDraft) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseSnapshot === snapshot
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseSnapshot: snapshot,
+        value: typeof nextDraft === "function" ? nextDraft(currentDraft) : nextDraft,
+      };
+    });
+    setAdvancedJsonOverride(null);
+    setSaveValidationErrorState({ baseSnapshot: snapshot, value: null });
+  };
+  const setAdvancedJsonValue = (value: string) => {
+    setAdvancedJsonOverride({ baseSnapshot: snapshot, value });
+  };
+  const setAdvancedJsonError = (value: string | null) => {
+    setAdvancedJsonErrorState({ baseSnapshot: snapshot, value });
+  };
+  const setSaveValidationError = (value: string | null) => {
+    setSaveValidationErrorState({ baseSnapshot: snapshot, value });
+  };
 
   const modalityOptions = useMemo(() => {
     return (lookups.data?.modalities ?? [])
@@ -256,7 +289,7 @@ export function PolicyDraftEditor({
       map.set(Number(examType.id), examType);
     }
     return map;
-  }, [displayLookups?.examTypes, examTypeCatalog.data]);
+  }, [displayLookups?.examTypes, examTypeCatalog]);
 
   const policyUserOptions = useMemo(() => {
     return (policyUsers.data ?? [])

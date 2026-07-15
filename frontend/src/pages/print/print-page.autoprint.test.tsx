@@ -153,7 +153,13 @@ vi.mock("@/providers/language-provider", () => ({
   useLanguage: () => ({ language: "en" }),
 }));
 
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({ user: { id: 1, username: "supervisor", fullName: "Supervisor", role: "supervisor" }, isLoading: false }),
+}));
+
 vi.mock("@/lib/i18n", () => ({
+  chooseLocalized: vi.fn((_, primary, secondary) => primary || secondary || ""),
+  statusLabel: vi.fn((_, status) => status),
   t: vi.fn((_, key) => key),
 }));
 
@@ -327,14 +333,12 @@ describe("PrintPage autoprint", () => {
     });
   });
 
-  it("list mode still selects first visible appointment", async () => {
+  it("list mode renders the report center", async () => {
     vi.mocked(apiHooks.fetchAppointments).mockResolvedValueOnce([mockAppointment99, mockAppointment42]);
     renderWithRouter("/print");
 
-    const printSlipButton = await screen.findByRole("button", { name: "print.printSlip" });
-    await waitFor(() => {
-      expect(printSlipButton.hasAttribute("disabled")).toBe(false);
-    });
+    expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Daily appointment list")).toBeTruthy();
   });
 
   it("autoprint resets and fires again when appointmentId changes", async () => {

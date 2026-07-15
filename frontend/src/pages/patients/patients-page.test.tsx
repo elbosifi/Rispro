@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PatientsPage from "./patients-page";
 import { LanguageProvider } from "@/providers/language-provider-component";
+import { AuthContext } from "@/providers/auth-provider";
 
 const fetchPatientDirectoryMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
@@ -13,6 +14,15 @@ function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location-probe" data-pathname={location.pathname} data-search={location.search} />;
 }
+
+const noShowSummary = {
+  noShowCount: 0,
+  bookingRestricted: false,
+  lastNoShowAppointment: null,
+  lastAuthorizationUser: null,
+  lastAuthorizationDate: null,
+  lastAuthorizationReason: null,
+};
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchPatientDirectory: (...args: unknown[]) => fetchPatientDirectoryMock(...args),
@@ -31,17 +41,27 @@ function renderPatientsPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  const authValue = {
+    user: { id: 1, username: "supervisor", fullName: "Supervisor", role: "supervisor" as const },
+    isLoading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    reAuth: vi.fn(),
+    changePassword: vi.fn(),
+  };
 
   return render(
     <LanguageProvider>
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/patients"]}>
-          <Routes>
-            <Route path="/patients" element={<PatientsPage />} />
-            <Route path="/registrations" element={<LocationProbe />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
+      <AuthContext.Provider value={authValue}>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={["/patients"]}>
+            <Routes>
+              <Route path="/patients" element={<PatientsPage />} />
+              <Route path="/registrations" element={<LocationProbe />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </AuthContext.Provider>
     </LanguageProvider>,
   );
 }
@@ -144,6 +164,7 @@ describe("PatientsPage interactions", () => {
           examTypeName: "MRI Abdomen",
         },
       ],
+      noShow: noShowSummary,
     });
   });
 
@@ -223,6 +244,7 @@ describe("PatientsPage interactions", () => {
       lastAppointment: null,
       nextAppointment: null,
       recentAppointments: [],
+      noShow: noShowSummary,
     });
 
     renderPatientsPage();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "@/lib/api-client";
 import { fetchSettings, saveSettings } from "@/lib/api-hooks";
@@ -28,6 +28,16 @@ type OrthancSettingsForm = {
   mwl_tag_limits_json: string;
   mwl_overflow_policy_json: string;
   mwl_extra_tags_json: string;
+};
+
+type OrthancSettingsDraft = {
+  form: OrthancSettingsForm;
+  dirty: boolean;
+};
+
+type OrthancSettingsDraftOverride = {
+  baseUpdatedAt: number;
+  value: OrthancSettingsDraft;
 };
 
 type OverflowPolicy = "reject" | "truncate" | "omit";
@@ -193,8 +203,7 @@ function jsonStringify(value: unknown): string {
 export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectionProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<OrthancSettingsForm>(() => toInitialForm(null));
-  const [dirty, setDirty] = useState(false);
+  const [draftOverride, setDraftOverride] = useState<OrthancSettingsDraftOverride | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [dateFrom, setDateFrom] = useState(() => isoDateDaysFromNow(-1));
   const [dateTo, setDateTo] = useState(() => isoDateDaysFromNow(1));
@@ -202,18 +211,49 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
 
   const {
     data: settingsData,
+    dataUpdatedAt: settingsDataUpdatedAt,
     isLoading: settingsLoading,
     error: settingsError,
   } = useQuery({
     queryKey: ["settings", "orthanc_mwl_sync"],
     queryFn: () => fetchSettings("orthanc_mwl_sync"),
   });
-
-  useEffect(() => {
-    if (!settingsData) return;
-    setForm(toInitialForm(settingsData as Record<string, string>));
-    setDirty(false);
-  }, [settingsData]);
+  const serverDraft: OrthancSettingsDraft = {
+    form: toInitialForm(settingsData as Record<string, string> | undefined),
+    dirty: false,
+  };
+  const draft =
+    draftOverride?.baseUpdatedAt === settingsDataUpdatedAt
+      ? draftOverride.value
+      : serverDraft;
+  const { form, dirty } = draft;
+  const setForm: Dispatch<SetStateAction<OrthancSettingsForm>> = (nextForm) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === settingsDataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseUpdatedAt: settingsDataUpdatedAt,
+        value: {
+          ...currentDraft,
+          form: typeof nextForm === "function" ? nextForm(currentDraft.form) : nextForm,
+        },
+      };
+    });
+  };
+  const setDirty = (nextDirty: boolean) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === settingsDataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseUpdatedAt: settingsDataUpdatedAt,
+        value: { ...currentDraft, dirty: nextDirty },
+      };
+    });
+  };
 
   const {
     data: summaryData,

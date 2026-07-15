@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, Loader2, Search, UserRound, X } from "lucide-react";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -9,6 +9,11 @@ import { chooseLocalized, statusLabel, t, type Language } from "@/lib/i18n";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 
 type Result = { kind: "patient"; value: Patient } | { kind: "registration"; value: AppointmentWithDetails };
+type ActiveSelection = {
+  term: string;
+  resultCount: number;
+  index: number;
+};
 
 function isTypingTarget(target: EventTarget | null) {
   const element = target instanceof HTMLElement ? target : null;
@@ -34,7 +39,11 @@ export function GlobalSearch({ language, isRtl, canSearchPatients, canSearchRegi
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeSelection, setActiveSelection] = useState<ActiveSelection>({
+    term: "",
+    resultCount: 0,
+    index: 0,
+  });
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
@@ -45,16 +54,27 @@ export function GlobalSearch({ language, isRtl, canSearchPatients, canSearchRegi
   const patients = (Array.isArray(patientQuery.data) ? patientQuery.data : []).slice(0, 5);
   const registrations = (Array.isArray(registrationQuery.data) ? registrationQuery.data : []).filter((item) => !["cancelled", "discontinued", "voided"].includes(item.status)).slice(0, 5);
   const results = useMemo<Result[]>(() => [...patients.map((value) => ({ kind: "patient" as const, value })), ...registrations.map((value) => ({ kind: "registration" as const, value }))], [patients, registrations]);
+  const activeIndex =
+    activeSelection.term === term && activeSelection.resultCount === results.length
+      ? activeSelection.index
+      : 0;
   const loading = patientQuery.isLoading || registrationQuery.isLoading;
   const failed = patientQuery.isError || registrationQuery.isError;
   const placeholder = t(language, "globalSearch.placeholder");
 
-  const close = () => { setOpen(false); setActiveIndex(0); };
-  const select = (result: Result) => {
+  const setActiveIndex = useCallback((nextIndex: number) => {
+    setActiveSelection({
+      term,
+      resultCount: results.length,
+      index: nextIndex,
+    });
+  }, [results.length, term]);
+  const close = useCallback(() => { setOpen(false); setActiveIndex(0); }, [setActiveIndex]);
+  const select = useCallback((result: Result) => {
     close();
     if (result.kind === "patient") onPatientSelect(result.value.id);
     else onRegistrationSelect(result.value);
-  };
+  }, [close, onPatientSelect, onRegistrationSelect]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -65,19 +85,18 @@ export function GlobalSearch({ language, isRtl, canSearchPatients, canSearchRegi
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [close]);
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => { if (open && !rootRef.current?.contains(event.target as Node)) close(); };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
-  useEffect(() => setActiveIndex(0), [term, results.length]);
+  }, [close, open]);
 
   const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") { event.preventDefault(); close(); return; }
     if (!results.length) return;
-    if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((index) => (index + 1) % results.length); }
-    if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => (index - 1 + results.length) % results.length); }
+    if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((activeIndex + 1) % results.length); }
+    if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((activeIndex - 1 + results.length) % results.length); }
     if (event.key === "Enter") { event.preventDefault(); select(results[activeIndex]); }
   };
   const input = <div className="relative"><Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input ref={inputRef} value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={onInputKeyDown} className="h-9 w-full rounded-xl border bg-card py-2 ps-9 pe-16 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" style={{ borderColor: "var(--border)" }} placeholder={placeholder} aria-label={placeholder} role="combobox" aria-expanded={open} aria-controls={listboxId} aria-activedescendant={results[activeIndex] ? `global-search-result-${activeIndex}` : undefined} /><kbd className="pointer-events-none absolute end-3 top-1/2 hidden -translate-y-1/2 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground xl:block">{navigator.platform?.includes("Mac") ? "⌘ K" : "Ctrl K"}</kbd></div>;

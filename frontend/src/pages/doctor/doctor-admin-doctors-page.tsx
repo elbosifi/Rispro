@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDoctorWithUserForAdmin,
@@ -50,6 +50,12 @@ type ModalityPermissionDraft = {
   active: boolean;
 };
 
+type ModalityDraftOverride = {
+  profileId: number | null;
+  baseUpdatedAt: number;
+  value: Record<number, ModalityPermissionDraft>;
+};
+
 const DOCTOR_ROLES: Array<{ value: DoctorProfileRole; label: string }> = [
   { value: "consultant", label: "Consultant" },
   { value: "specialist", label: "Specialist" },
@@ -80,6 +86,8 @@ const DEFAULT_CREATE_DOCTOR_DRAFT: CreateDoctorDraft = {
   canSupervise: false,
 };
 
+const EMPTY_DOCTOR_PROFILES: DoctorProfile[] = [];
+
 function statusLabel(profile?: DoctorProfile): string {
   if (!profile) return "No doctor profile";
   return profile.active ? "Doctor profile active" : "Doctor profile inactive";
@@ -103,7 +111,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   }>>({});
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
-  const [modalityDraft, setModalityDraft] = useState<Record<number, ModalityPermissionDraft>>({});
+  const [modalityDraftOverride, setModalityDraftOverride] = useState<ModalityDraftOverride | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [draft, setDraft] = useState({
@@ -125,7 +133,42 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     enabled: Boolean(selectedProfileId),
   });
 
-  const profiles = profilesQuery.data ?? [];
+  const modalityServerDraft = useMemo(
+    () =>
+      Object.fromEntries(
+        (modalitiesQuery.data ?? []).map((permission) => [
+          permission.modalityId,
+          {
+            canProtocol: permission.canProtocol,
+            canReport: permission.canReport,
+            canSupervise: permission.canSupervise,
+            active: permission.active,
+          },
+        ])
+      ),
+    [modalitiesQuery.data]
+  );
+  const modalityDraft =
+    modalityDraftOverride?.profileId === selectedProfileId &&
+    modalityDraftOverride.baseUpdatedAt === modalitiesQuery.dataUpdatedAt
+      ? modalityDraftOverride.value
+      : modalityServerDraft;
+  const setModalityDraft: Dispatch<SetStateAction<Record<number, ModalityPermissionDraft>>> = (nextDraft) => {
+    setModalityDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.profileId === selectedProfileId &&
+        currentOverride.baseUpdatedAt === modalitiesQuery.dataUpdatedAt
+          ? currentOverride.value
+          : modalityServerDraft;
+      return {
+        profileId: selectedProfileId,
+        baseUpdatedAt: modalitiesQuery.dataUpdatedAt,
+        value: typeof nextDraft === "function" ? nextDraft(currentDraft) : nextDraft,
+      };
+    });
+  };
+
+  const profiles = profilesQuery.data ?? EMPTY_DOCTOR_PROFILES;
   const usersById = useMemo(() => new Map((usersQuery.data?.users ?? []).map((user) => [user.id, user])), [usersQuery.data?.users]);
   const profilesByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.userId, profile])), [profiles]);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
@@ -255,22 +298,6 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   });
 
   const importPayload = () => ({ fileContentBase64: importFileBase64, format: importFormat, fileName: importFileName });
-
-  useEffect(() => {
-    if (!selectedProfileId || !modalitiesQuery.data) {
-      setModalityDraft({});
-      return;
-    }
-    setModalityDraft(Object.fromEntries(modalitiesQuery.data.map((permission) => [
-      permission.modalityId,
-      {
-        canProtocol: permission.canProtocol,
-        canReport: permission.canReport,
-        canSupervise: permission.canSupervise,
-        active: permission.active,
-      },
-    ])));
-  }, [modalitiesQuery.data, selectedProfileId]);
 
   const readImportFile = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {

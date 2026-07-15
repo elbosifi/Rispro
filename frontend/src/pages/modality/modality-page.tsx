@@ -498,23 +498,6 @@ export default function ModalityPage() {
   });
 
   useEffect(() => {
-    if (selectedAppointmentId == null) return;
-    if (!appointments.some((appointment) => appointment.id === selectedAppointmentId)) {
-      setSelectedAppointmentId(null);
-      setConfirmTargetId(null);
-      setConfirmVerified(false);
-    }
-  }, [appointments, selectedAppointmentId]);
-
-  useEffect(() => {
-    if (confirmTargetId == null) return;
-    if (!appointments.some((appointment) => appointment.id === confirmTargetId)) {
-      setConfirmTargetId(null);
-      setConfirmVerified(false);
-    }
-  }, [appointments, confirmTargetId]);
-
-  useEffect(() => {
     const timer = window.setInterval(() => setElapsedNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);

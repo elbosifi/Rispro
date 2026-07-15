@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { ApiError, api } from "@/lib/api-client";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -95,6 +95,21 @@ type AutoCompletionDraft = {
   stopAfterHours: number | "";
 };
 
+function toAutoCompletionDraft(setting: PacsAutoCompletionSetting): AutoCompletionDraft {
+  return {
+    enabled: setting.enabled,
+    orthancTargetType: setting.orthanc_target_type,
+    orthancTargetKey: setting.orthanc_target_key || "",
+    matchingStrategy: setting.matching_strategy,
+    completionThreshold: setting.completion_threshold,
+    minimumSeriesCount: Number(setting.minimum_series_count || 2),
+    belowMinimumSeriesAction: setting.below_minimum_series_action || "leave_unchanged",
+    pollIntervalMinutes: Number(setting.poll_interval_minutes || 15),
+    lookbackHours: Number(setting.lookback_hours || 24),
+    stopAfterHours: Number(setting.stop_after_hours || 72)
+  };
+}
+
 export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
@@ -115,7 +130,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [showCreate, setShowCreate] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ key: string | null; ok: boolean; message: string } | null>(null);
-  const [autoDrafts, setAutoDrafts] = useState<Record<number, AutoCompletionDraft>>({});
+  const [autoDraftOverrides, setAutoDraftOverrides] = useState<Record<number, AutoCompletionDraft>>({});
   const [autoMessage, setAutoMessage] = useState<string | null>(null);
   const [autoTestingId, setAutoTestingId] = useState<number | null>(null);
   const [autoTestBookingIds, setAutoTestBookingIds] = useState<Record<number, string>>({});
@@ -133,28 +148,20 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [editForm, setEditForm] = useState<OrthancModalityFormState>(emptyForm);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!autoSettingsQuery.data?.settings) return;
-    setAutoDrafts((current) => {
-      const next: Record<number, AutoCompletionDraft> = { ...current };
-      for (const setting of autoSettingsQuery.data.settings) {
-        if (next[setting.modality_id]) continue;
-        next[setting.modality_id] = {
-          enabled: setting.enabled,
-          orthancTargetType: setting.orthanc_target_type,
-          orthancTargetKey: setting.orthanc_target_key || "",
-          matchingStrategy: setting.matching_strategy,
-          completionThreshold: setting.completion_threshold,
-          minimumSeriesCount: Number(setting.minimum_series_count || 2),
-          belowMinimumSeriesAction: setting.below_minimum_series_action || "leave_unchanged",
-          pollIntervalMinutes: Number(setting.poll_interval_minutes || 15),
-          lookbackHours: Number(setting.lookback_hours || 24),
-          stopAfterHours: Number(setting.stop_after_hours || 72)
-        };
-      }
-      return next;
-    });
-  }, [autoSettingsQuery.data?.settings]);
+  const serverAutoDrafts = useMemo(
+    () =>
+      Object.fromEntries(
+        (autoSettingsQuery.data?.settings ?? []).map((setting) => [
+          setting.modality_id,
+          toAutoCompletionDraft(setting),
+        ])
+      ) as Record<number, AutoCompletionDraft>,
+    [autoSettingsQuery.data?.settings]
+  );
+  const autoDrafts = useMemo(
+    () => ({ ...serverAutoDrafts, ...autoDraftOverrides }),
+    [autoDraftOverrides, serverAutoDrafts]
+  );
 
   const toOrthancPayload = (form: OrthancModalityFormState) => ({
     aet: form.aet,
@@ -433,7 +440,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
             };
             const targetValue = draft.orthancTargetType === "local" ? "local" : draft.orthancTargetKey;
             const updateDraft = (patch: Partial<AutoCompletionDraft>) => {
-              setAutoDrafts((prev) => ({
+              setAutoDraftOverrides((prev) => ({
                 ...prev,
                 [setting.modality_id]: { ...draft, ...patch }
               }));

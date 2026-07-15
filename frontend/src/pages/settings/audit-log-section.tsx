@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, Download, RefreshCw, Search, X } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
@@ -148,13 +148,13 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
   const totalPages = pagination?.totalPages || 0;
   const visiblePage = pagination?.page || 1;
 
-  function updateState(patch: Partial<AuditState>, mode: "push" | "replace" = "push") {
+  const updateState = useCallback((patch: Partial<AuditState>, mode: "push" | "replace" = "push") => {
     setState((current) => {
       const next = { ...current, ...patch };
       writeAuditUrl(next, mode);
       return next;
     });
-  }
+  }, []);
 
   useEffect(() => {
     const onPopState = () => {
@@ -173,7 +173,7 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
       }
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [searchDraft]);
+  }, [searchDraft, state.search, updateState]);
 
   useEffect(() => {
     if (selectedEntry) drawerCloseRef.current?.focus();
@@ -181,13 +181,13 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
 
   useEffect(() => {
     if (!auditQuery.isFetching && auditQuery.data) listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [auditQuery.data?.pagination.page]);
+  }, [auditQuery.data, auditQuery.isFetching]);
 
   useEffect(() => {
     if (auditQuery.error instanceof ApiError && (auditQuery.error.status === 403 || auditQuery.error.message.includes("re-authentication"))) {
       onReAuthRequired(["audit", String(state.page), String(state.pageSize)]);
     }
-  }, [auditQuery.error]);
+  }, [auditQuery.error, onReAuthRequired, state.page, state.pageSize]);
 
   function clearFilters() {
     const tab = state.tab === "all" ? "all" : "important";

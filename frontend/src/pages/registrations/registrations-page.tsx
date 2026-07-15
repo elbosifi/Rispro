@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Bell, ExternalLink, Eye, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
@@ -837,7 +837,7 @@ export default function RegistrationsPage() {
     setWhatsappAppointment(null);
   };
 
-  const closeManageDrawer = () => {
+  const closeManageDrawer = useCallback(() => {
     setSelectedAppointment(null);
     setManageTab("details");
     setReportStatus(null);
@@ -848,7 +848,7 @@ export default function RegistrationsPage() {
       nextSearchParams.delete("tab");
       setSearchParams(nextSearchParams, { replace: true });
     }
-  };
+  }, [appointmentIdParam, searchParams, setSearchParams]);
 
   useEffect(() => {
     const rawAppointmentId = appointmentIdParam?.trim();
@@ -904,7 +904,7 @@ export default function RegistrationsPage() {
       setManualStatus(selectedAppointment.status as (typeof MANUAL_STATUS_OPTIONS)[number]);
     }
     setManualStatusReason("");
-  }, [selectedAppointment?.id, manageTab]);
+  }, [manageTab, selectedAppointment?.id, selectedAppointment?.status]);
 
   useEffect(() => {
     if (
@@ -992,7 +992,7 @@ export default function RegistrationsPage() {
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [selectedAppointment, language]);
+  }, [closeManageDrawer, language, selectedAppointment]);
 
   function Field({ label, value }: { label: string; value: ReactNode }) {
     return (

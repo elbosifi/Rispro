@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, ListFilter, Search } from "lucide-react";
@@ -104,29 +104,27 @@ export default function CalendarPage() {
 
   const monthStats = useMemo(() => buildMonthStats(filteredAppointments, language), [filteredAppointments, language]);
 
-  useEffect(() => {
-    if (userSelectedDate || isLoading || groupedByDate[selectedDate] || filteredAppointments.length === 0) return;
-
-    const firstAppointmentDate = filteredAppointments
-      .map((appointment) => String(appointment.appointmentDate || "").slice(0, 10))
-      .filter(Boolean)
-      .sort()[0];
-
-    if (firstAppointmentDate) {
-      setSelectedDate(firstAppointmentDate);
-      setSelectedModalitySummaryKey(null);
-      setIsModalityModalOpen(false);
-    }
-  }, [filteredAppointments, groupedByDate, isLoading, selectedDate, userSelectedDate]);
+  const firstAppointmentDate = useMemo(
+    () =>
+      filteredAppointments
+        .map((appointment) => String(appointment.appointmentDate || "").slice(0, 10))
+        .filter(Boolean)
+        .sort()[0],
+    [filteredAppointments]
+  );
+  const effectiveSelectedDate =
+    !userSelectedDate && !isLoading && !groupedByDate[selectedDate] && firstAppointmentDate
+      ? firstAppointmentDate
+      : selectedDate;
 
   // Build grid
   const gridDays = useMemo(
-    () => buildCalendarGrid(displayDate, selectedDate, groupedByDate, language),
-    [displayDate, selectedDate, groupedByDate, language]
+    () => buildCalendarGrid(displayDate, effectiveSelectedDate, groupedByDate, language),
+    [displayDate, effectiveSelectedDate, groupedByDate, language]
   );
 
   // Selected day appointments
-  const selectedAppointments = useMemo(() => groupedByDate[selectedDate] || [], [groupedByDate, selectedDate]);
+  const selectedAppointments = useMemo(() => groupedByDate[effectiveSelectedDate] || [], [groupedByDate, effectiveSelectedDate]);
   const selectedDateSummaries = useMemo(() => buildSelectedDaySummaries(selectedAppointments, language), [selectedAppointments, language]);
   const selectedModalitySummary = useMemo(
     () => selectedDateSummaries.find((summary) => summary.key === selectedModalitySummaryKey) || null,
@@ -179,12 +177,12 @@ export default function CalendarPage() {
   };
 
   const openRegistrationsForSelectedDay = () => {
-    navigate(`/registrations?date=${selectedDate}`);
+    navigate(`/registrations?date=${effectiveSelectedDate}`);
   };
 
   const printSelectedDayList = () => {
     printDayListFromRoute({
-      date: selectedDate,
+      date: effectiveSelectedDate,
       modalityId: modalityFilter,
       status: statusFilter,
       caseCategory: categoryFilter,
@@ -401,7 +399,7 @@ export default function CalendarPage() {
           <Card className="overflow-hidden sticky top-6">
             <div className="p-4 border-b border-border" data-testid="selected-day-summary">
               <h3 className="font-semibold text-lg">
-                {selectedDate === formatDate(new Date()) ? t(language, "calendar.todayRegistrations") : t(language, "calendar.dayRegistrations", { date: formatDateDisplay(selectedDate) })}
+                {effectiveSelectedDate === formatDate(new Date()) ? t(language, "calendar.todayRegistrations") : t(language, "calendar.dayRegistrations", { date: formatDateDisplay(effectiveSelectedDate) })}
               </h3>
               <p className="text-sm text-muted-foreground mt-1">
                 {selectedAppointments.length} {selectedAppointments.length === 1 ? t(language, "calendar.registrationCount", { count: 1 }) : t(language, "calendar.registrationCountPlural", { count: selectedAppointments.length })}
@@ -417,7 +415,7 @@ export default function CalendarPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => navigate(`/print?date=${selectedDate}`)}
+                  onClick={() => navigate(`/print?date=${effectiveSelectedDate}`)}
                 >
                   {t(language, "calendar.openPrintTab")}
                 </Button>
@@ -480,7 +478,7 @@ export default function CalendarPage() {
                 <div>
                   <DialogTitle>{selectedModalitySummary.label}</DialogTitle>
                   <DialogDescription>
-                    {t(language, "calendar.dayRegistrations", { date: formatDateDisplay(selectedDate) })} • {t(language, "calendar.totalRegistrations", { count: selectedModalitySummary.total })}
+                    {t(language, "calendar.dayRegistrations", { date: formatDateDisplay(effectiveSelectedDate) })} • {t(language, "calendar.totalRegistrations", { count: selectedModalitySummary.total })}
                   </DialogDescription>
                 </div>
               </DialogHeader>

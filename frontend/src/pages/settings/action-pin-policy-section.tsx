@@ -102,6 +102,25 @@ function parseUserIds(value: string): number[] {
   return result;
 }
 
+type ActionPinPolicyForm = {
+  draft: ActionPinPolicy;
+  idleIncludedUserIdsText: string;
+  idleExcludedUserIdsText: string;
+};
+
+type ActionPinPolicyFormOverride = {
+  baseUpdatedAt: number;
+  value: ActionPinPolicyForm;
+};
+
+function actionPinPolicyForm(policy: ActionPinPolicy): ActionPinPolicyForm {
+  return {
+    draft: policy,
+    idleIncludedUserIdsText: formatUserIds(policy.idleLockUserIds),
+    idleExcludedUserIdsText: formatUserIds(policy.idleLockExcludedUserIds),
+  };
+}
+
 function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
@@ -270,9 +289,7 @@ function UserPinManagementTable({
 export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<ActionPinPolicy>(() => normalizeActionPinPolicy({}));
-  const [idleIncludedUserIdsText, setIdleIncludedUserIdsText] = useState("");
-  const [idleExcludedUserIdsText, setIdleExcludedUserIdsText] = useState("");
+  const [formOverride, setFormOverride] = useState<ActionPinPolicyFormOverride | null>(null);
   const [message, setMessage] = useState("");
   const isArabic = language === "ar";
 
@@ -282,6 +299,24 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
     staleTime: 1000 * 60,
     retry: false,
   });
+  const serverForm = actionPinPolicyForm(normalizeActionPinPolicy(query.data ?? {}));
+  const form =
+    formOverride?.baseUpdatedAt === query.dataUpdatedAt
+      ? formOverride.value
+      : serverForm;
+  const { draft, idleIncludedUserIdsText, idleExcludedUserIdsText } = form;
+  const updateForm = (updater: (current: ActionPinPolicyForm) => ActionPinPolicyForm) => {
+    setFormOverride((currentOverride) => {
+      const currentForm =
+        currentOverride?.baseUpdatedAt === query.dataUpdatedAt
+          ? currentOverride.value
+          : serverForm;
+      return {
+        baseUpdatedAt: query.dataUpdatedAt,
+        value: updater(currentForm),
+      };
+    });
+  };
   const currentUserPinQuery = useQuery({
     queryKey: ["action-pin", "status"],
     queryFn: fetchActionPinStatus,
@@ -290,33 +325,30 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
   });
 
   useEffect(() => {
-    if (query.data) {
-      const normalized = normalizeActionPinPolicy(query.data);
-      setDraft(normalized);
-      setIdleIncludedUserIdsText(formatUserIds(normalized.idleLockUserIds));
-      setIdleExcludedUserIdsText(formatUserIds(normalized.idleLockExcludedUserIds));
-    }
-  }, [query.data]);
-
-  useEffect(() => {
     if (query.error && isReAuthRequiredError(query.error)) {
       onReAuthRequired(["settings", "users_and_roles", "action_pin_policy"]);
     }
   }, [onReAuthRequired, query.error]);
 
   const update = <K extends keyof ActionPinPolicy>(key: K, value: ActionPinPolicy[K]) => {
-    setDraft((current) => ({ ...current, [key]: value }));
+    updateForm((current) => ({
+      ...current,
+      draft: { ...current.draft, [key]: value },
+    }));
     setMessage("");
   };
 
   const updateMode = (actionKey: ActionPinActionKey, role: ActionPinRole, mode: ActionPinMode) => {
-    setDraft((current) => ({
+    updateForm((current) => ({
       ...current,
-      actionModes: {
-        ...current.actionModes,
-        [actionKey]: {
-          ...(current.actionModes[actionKey] ?? {}),
-          [role]: mode,
+      draft: {
+        ...current.draft,
+        actionModes: {
+          ...current.draft.actionModes,
+          [actionKey]: {
+            ...(current.draft.actionModes[actionKey] ?? {}),
+            [role]: mode,
+          },
         },
       },
     }));
@@ -331,9 +363,10 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
     },
     onSuccess: async (saved) => {
       const normalized = normalizeActionPinPolicy(saved);
-      setDraft(normalized);
-      setIdleIncludedUserIdsText(formatUserIds(normalized.idleLockUserIds));
-      setIdleExcludedUserIdsText(formatUserIds(normalized.idleLockExcludedUserIds));
+      setFormOverride({
+        baseUpdatedAt: query.dataUpdatedAt,
+        value: actionPinPolicyForm(normalized),
+      });
       setMessage("Action PIN policy saved.");
       await queryClient.invalidateQueries({ queryKey: ["settings", "users_and_roles", "action_pin_policy"] });
     },
@@ -422,8 +455,16 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
               aria-label="Idle lock included user IDs"
               value={idleIncludedUserIdsText}
               onChange={(event) => {
-                setIdleIncludedUserIdsText(event.target.value);
-                update("idleLockUserIds", parseUserIds(event.target.value));
+                const value = event.target.value;
+                updateForm((current) => ({
+                  ...current,
+                  idleIncludedUserIdsText: value,
+                  draft: {
+                    ...current.draft,
+                    idleLockUserIds: parseUserIds(value),
+                  },
+                }));
+                setMessage("");
               }}
               className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
             />
@@ -434,8 +475,16 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
               aria-label="Idle lock excluded user IDs"
               value={idleExcludedUserIdsText}
               onChange={(event) => {
-                setIdleExcludedUserIdsText(event.target.value);
-                update("idleLockExcludedUserIds", parseUserIds(event.target.value));
+                const value = event.target.value;
+                updateForm((current) => ({
+                  ...current,
+                  idleExcludedUserIdsText: value,
+                  draft: {
+                    ...current.draft,
+                    idleLockExcludedUserIds: parseUserIds(value),
+                  },
+                }));
+                setMessage("");
               }}
               className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
             />
@@ -509,10 +558,10 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         <button
           className="btn-secondary text-sm"
           onClick={() => {
-            const normalized = normalizeActionPinPolicy(query.data ?? {});
-            setDraft(normalized);
-            setIdleIncludedUserIdsText(formatUserIds(normalized.idleLockUserIds));
-            setIdleExcludedUserIdsText(formatUserIds(normalized.idleLockExcludedUserIds));
+            setFormOverride({
+              baseUpdatedAt: query.dataUpdatedAt,
+              value: serverForm,
+            });
           }}
           disabled={saveMutation.isPending}
         >

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -505,25 +505,26 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
     defaultTeamRole: "specialist",
     createMissingDoctors: true,
   });
-  useEffect(() => {
-    const firstTemplate = templatesQuery.data?.[0];
-    if (firstTemplate && !templateApplyForm.templateId) {
-      setTemplateApplyForm((current) => ({ ...current, templateId: String(firstTemplate.id) }));
-    }
-  }, [templatesQuery.data, templateApplyForm.templateId]);
-  useEffect(() => {
-    const firstDutyType = activeDutyTypes[0]?.code ?? "";
-    if (!firstDutyType) return;
-    setAssignmentForm((current) => (current.dutyType ? current : { ...current, dutyType: firstDutyType }));
-    setTemplateForm((current) => (current.dutyType ? current : { ...current, dutyType: firstDutyType }));
-    setShiftMappingDraft((current) => (current.dutyTypeCode ? current : { ...current, dutyTypeCode: firstDutyType }));
-  }, [activeDutyTypes]);
-  useEffect(() => {
-    setAssignmentForm((current) => {
-      if (current.date >= weekStart && current.date <= weekEnd) return current;
-      return { ...current, date: weekStart };
-    });
-  }, [weekEnd, weekStart]);
+  const firstTemplateId = templatesQuery.data?.[0]?.id != null ? String(templatesQuery.data[0].id) : "";
+  const firstDutyType = activeDutyTypes[0]?.code ?? "";
+  const assignmentDate = assignmentForm.date >= weekStart && assignmentForm.date <= weekEnd ? assignmentForm.date : weekStart;
+  const effectiveAssignmentForm = {
+    ...assignmentForm,
+    date: assignmentDate,
+    dutyType: assignmentForm.dutyType || (firstDutyType as RosterDutyType),
+  };
+  const effectiveTemplateForm = {
+    ...templateForm,
+    dutyType: templateForm.dutyType || (firstDutyType as RosterDutyType),
+  };
+  const effectiveTemplateApplyForm = {
+    ...templateApplyForm,
+    templateId: templateApplyForm.templateId || firstTemplateId,
+  };
+  const effectiveShiftMappingDraft = {
+    ...shiftMappingDraft,
+    dutyTypeCode: shiftMappingDraft.dutyTypeCode || firstDutyType,
+  };
 
   const roster = rosterQuery.data;
   const editable = canManage && roster?.week?.status === "draft";
@@ -767,33 +768,33 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
               className="grid gap-2 sm:grid-cols-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!shiftMappingDraft.dutyTypeCode) return;
+                if (!effectiveShiftMappingDraft.dutyTypeCode) return;
                 saveShiftMappingMutation.mutate({
-                  sourceSystem: shiftMappingDraft.sourceSystem || "abc",
-                  sourceShiftName: shiftMappingDraft.sourceShiftName || null,
-                  sourceShiftType: shiftMappingDraft.sourceShiftType || null,
-                  sourceShiftAbbreviation: shiftMappingDraft.sourceShiftAbbreviation || null,
-                  dutyTypeCode: shiftMappingDraft.dutyTypeCode,
-                  modalityId: shiftMappingDraft.modalityId ? Number(shiftMappingDraft.modalityId) : null,
-                  teamName: shiftMappingDraft.teamName || null,
-                  active: shiftMappingDraft.active,
+                  sourceSystem: effectiveShiftMappingDraft.sourceSystem || "abc",
+                  sourceShiftName: effectiveShiftMappingDraft.sourceShiftName || null,
+                  sourceShiftType: effectiveShiftMappingDraft.sourceShiftType || null,
+                  sourceShiftAbbreviation: effectiveShiftMappingDraft.sourceShiftAbbreviation || null,
+                  dutyTypeCode: effectiveShiftMappingDraft.dutyTypeCode,
+                  modalityId: effectiveShiftMappingDraft.modalityId ? Number(effectiveShiftMappingDraft.modalityId) : null,
+                  teamName: effectiveShiftMappingDraft.teamName || null,
+                  active: effectiveShiftMappingDraft.active,
                 });
               }}
             >
-              <input placeholder="Shift name" value={shiftMappingDraft.sourceShiftName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Shift type" value={shiftMappingDraft.sourceShiftType} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftType: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Abbreviation" value={shiftMappingDraft.sourceShiftAbbreviation} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftAbbreviation: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <select value={shiftMappingDraft.dutyTypeCode} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, dutyTypeCode: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <input placeholder="Shift name" value={effectiveShiftMappingDraft.sourceShiftName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Shift type" value={effectiveShiftMappingDraft.sourceShiftType} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftType: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Abbreviation" value={effectiveShiftMappingDraft.sourceShiftAbbreviation} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftAbbreviation: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <select value={effectiveShiftMappingDraft.dutyTypeCode} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, dutyTypeCode: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">Duty type</option>
                 {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
               </select>
-              <select value={shiftMappingDraft.modalityId} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <select value={effectiveShiftMappingDraft.modalityId} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">No modality</option>
                 {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}
               </select>
-              <input placeholder="Team name" value={shiftMappingDraft.teamName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={shiftMappingDraft.active} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, active: e.target.checked }))} /> Active</label>
-              <button type="submit" disabled={!shiftMappingDraft.dutyTypeCode || saveShiftMappingMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Save mapping</button>
+              <input placeholder="Team name" value={effectiveShiftMappingDraft.teamName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={effectiveShiftMappingDraft.active} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, active: e.target.checked }))} /> Active</label>
+              <button type="submit" disabled={!effectiveShiftMappingDraft.dutyTypeCode || saveShiftMappingMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Save mapping</button>
             </form>
             <div className="space-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
               {(shiftMappingsQuery.data ?? []).map((mapping) => (
@@ -942,16 +943,16 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             className="space-y-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!roster?.week || !assignmentForm.dutyType) return;
+              if (!roster?.week || !effectiveAssignmentForm.dutyType) return;
               assignmentMutation.mutate({
                 rosterWeekId: roster.week.id,
-                date: assignmentForm.date,
-                modalityId: assignmentForm.modalityId ? Number(assignmentForm.modalityId) : null,
-                dutyType: assignmentForm.dutyType,
-                sessionName: assignmentForm.sessionName || null,
-                startTime: assignmentForm.startTime || null,
-                endTime: assignmentForm.endTime || null,
-                teamName: assignmentForm.teamName || "Rostered team",
+                date: effectiveAssignmentForm.date,
+                modalityId: effectiveAssignmentForm.modalityId ? Number(effectiveAssignmentForm.modalityId) : null,
+                dutyType: effectiveAssignmentForm.dutyType,
+                sessionName: effectiveAssignmentForm.sessionName || null,
+                startTime: effectiveAssignmentForm.startTime || null,
+                endTime: effectiveAssignmentForm.endTime || null,
+                teamName: effectiveAssignmentForm.teamName || "Rostered team",
               }, {
                 onSuccess: () => setShowAssignmentForm(false),
               });
@@ -969,26 +970,26 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="text-sm font-medium">
                 Assignment date
-                <input type="date" min={weekStart} max={weekEnd} value={assignmentForm.date} onChange={(e) => setAssignmentForm((c) => ({ ...c, date: e.target.value }))} className="mt-1 block w-full rounded-lg border px-3 py-2 text-sm" />
+                <input type="date" min={weekStart} max={weekEnd} value={effectiveAssignmentForm.date} onChange={(e) => setAssignmentForm((c) => ({ ...c, date: e.target.value }))} className="mt-1 block w-full rounded-lg border px-3 py-2 text-sm" />
               </label>
-              <select value={assignmentForm.modalityId} onChange={(e) => setAssignmentForm((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <select value={effectiveAssignmentForm.modalityId} onChange={(e) => setAssignmentForm((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">No modality</option>
                 {(lookupsQuery.data?.modalities ?? []).map((modality) => (
                   <option key={modality.id} value={modality.id}>{modality.nameEn}</option>
                 ))}
               </select>
-              <select value={assignmentForm.dutyType} onChange={(e) => setAssignmentForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
+              <select value={effectiveAssignmentForm.dutyType} onChange={(e) => setAssignmentForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">Duty type</option>
                 {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
               </select>
-              <input placeholder="Team name" value={assignmentForm.teamName} onChange={(e) => setAssignmentForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-              <input placeholder="Session" value={assignmentForm.sessionName} onChange={(e) => setAssignmentForm((c) => ({ ...c, sessionName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Team name" value={effectiveAssignmentForm.teamName} onChange={(e) => setAssignmentForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Session" value={effectiveAssignmentForm.sessionName} onChange={(e) => setAssignmentForm((c) => ({ ...c, sessionName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               <div className="grid grid-cols-2 gap-2">
-                <input type="time" value={assignmentForm.startTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, startTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-                <input type="time" value={assignmentForm.endTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <input type="time" value={effectiveAssignmentForm.startTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, startTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <input type="time" value={effectiveAssignmentForm.endTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               </div>
             </div>
-            <button type="submit" disabled={!assignmentForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Add assignment</button>
+            <button type="submit" disabled={!effectiveAssignmentForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Add assignment</button>
           </form>
         </section>
       )}
@@ -1052,26 +1053,26 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
               className="grid gap-2 sm:grid-cols-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!templateApplyForm.templateId) return;
+                if (!effectiveTemplateApplyForm.templateId) return;
                 applyTemplateMutation.mutate({
-                  templateId: Number(templateApplyForm.templateId),
+                  templateId: Number(effectiveTemplateApplyForm.templateId),
                   targetWeekStartDate: weekStart,
-                  copyMode: templateApplyForm.copyMode,
-                  overwriteExisting: templateApplyForm.overwriteExisting,
+                  copyMode: effectiveTemplateApplyForm.copyMode,
+                  overwriteExisting: effectiveTemplateApplyForm.overwriteExisting,
                   modalityId: null,
                 });
               }}
             >
-              <select value={templateApplyForm.templateId} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, templateId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <select value={effectiveTemplateApplyForm.templateId} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, templateId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">Select template</option>
                 {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
               </select>
-              <select value={templateApplyForm.copyMode} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, copyMode: e.target.value as RosterTemplateCopyMode }))} className="rounded-lg border px-3 py-2 text-sm">
+              <select value={effectiveTemplateApplyForm.copyMode} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, copyMode: e.target.value as RosterTemplateCopyMode }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="structure_only">Structure only</option>
                 <option value="structure_with_named_doctors">Structure with named doctors</option>
               </select>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={templateApplyForm.overwriteExisting} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, overwriteExisting: e.target.checked }))} />
+                <input type="checkbox" checked={effectiveTemplateApplyForm.overwriteExisting} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, overwriteExisting: e.target.checked }))} />
                 Overwrite existing draft duties
               </label>
               <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Apply template</button>
@@ -1132,26 +1133,26 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
               className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!templateForm.dutyType) return;
+                if (!effectiveTemplateForm.dutyType) return;
                 createTemplateMutation.mutate({
-                  name: templateForm.name || "New roster template",
+                  name: effectiveTemplateForm.name || "New roster template",
                   description: null,
                   modalityId: null,
-                  templateType: templateForm.templateType,
+                  templateType: effectiveTemplateForm.templateType,
                   assignments: [{
-                    dayOfWeek: Number(templateForm.dayOfWeek),
+                    dayOfWeek: Number(effectiveTemplateForm.dayOfWeek),
                     modalityId: null,
-                    dutyType: templateForm.dutyType,
+                    dutyType: effectiveTemplateForm.dutyType,
                     sessionName: null,
                     startTime: "08:00",
                     endTime: "14:00",
-                    teamName: templateForm.teamName || "Template team",
+                    teamName: effectiveTemplateForm.teamName || "Template team",
                     sortOrder: 0,
                     members: [{
                       doctorId: null,
                       teamRole: "lead",
-                      placeholderLabel: templateForm.placeholderLabel || "Lead specialist",
-                      requiredRole: templateForm.requiredRole || "specialist",
+                      placeholderLabel: effectiveTemplateForm.placeholderLabel || "Lead specialist",
+                      requiredRole: effectiveTemplateForm.requiredRole || "specialist",
                     }],
                   }],
                 });
@@ -1159,21 +1160,21 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             >
               <h3 className="font-semibold">Create template</h3>
               <div className="grid gap-2 sm:grid-cols-2">
-                <input placeholder="Template name" value={templateForm.name} onChange={(e) => setTemplateForm((c) => ({ ...c, name: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-                <select value={templateForm.templateType} onChange={(e) => setTemplateForm((c) => ({ ...c, templateType: e.target.value as RosterTemplateType }))} className="rounded-lg border px-3 py-2 text-sm">
+                <input placeholder="Template name" value={effectiveTemplateForm.name} onChange={(e) => setTemplateForm((c) => ({ ...c, name: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <select value={effectiveTemplateForm.templateType} onChange={(e) => setTemplateForm((c) => ({ ...c, templateType: e.target.value as RosterTemplateType }))} className="rounded-lg border px-3 py-2 text-sm">
                   {TEMPLATE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
                 </select>
-                <select value={templateForm.dayOfWeek} onChange={(e) => setTemplateForm((c) => ({ ...c, dayOfWeek: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                <select value={effectiveTemplateForm.dayOfWeek} onChange={(e) => setTemplateForm((c) => ({ ...c, dayOfWeek: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>Day {day}</option>)}
                 </select>
-                <select value={templateForm.dutyType} onChange={(e) => setTemplateForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
+                <select value={effectiveTemplateForm.dutyType} onChange={(e) => setTemplateForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
                   <option value="">Duty type</option>
                   {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
                 </select>
-                <input placeholder="Team name" value={templateForm.teamName} onChange={(e) => setTemplateForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
-                <input placeholder="Placeholder" value={templateForm.placeholderLabel} onChange={(e) => setTemplateForm((c) => ({ ...c, placeholderLabel: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <input placeholder="Team name" value={effectiveTemplateForm.teamName} onChange={(e) => setTemplateForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <input placeholder="Placeholder" value={effectiveTemplateForm.placeholderLabel} onChange={(e) => setTemplateForm((c) => ({ ...c, placeholderLabel: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               </div>
-              <button type="submit" disabled={!templateForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Create template</button>
+              <button type="submit" disabled={!effectiveTemplateForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Create template</button>
             </form>
           )}
         </section>

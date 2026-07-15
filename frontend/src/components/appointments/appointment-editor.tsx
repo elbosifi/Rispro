@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { deleteAppointment, updateAppointment } from "@/lib/api-hooks";
 import type { AppointmentLookups } from "@/types/api";
@@ -43,7 +43,37 @@ function getPriorityTone(codeOrName: string): "urgent" | "stat" | null {
   return null;
 }
 
-export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, defaultOpen = false }: AppointmentEditorProps) {
+export function AppointmentEditor(props: AppointmentEditorProps) {
+  const { appointment, lookups, defaultOpen = false } = props;
+  const routinePriorityId = resolveRoutinePriorityId(lookups);
+  const routinePriorityIdString = routinePriorityId != null ? String(routinePriorityId) : "";
+  const editorKey = [
+    appointment.id,
+    appointment.examTypeId ?? "",
+    appointment.reportingPriorityId ?? routinePriorityIdString,
+    appointment.notes ?? "",
+    appointment.requiresReport ? "report" : "no-report",
+    defaultOpen ? "open" : "closed",
+  ].join("|");
+
+  return (
+    <AppointmentEditorForm
+      key={editorKey}
+      {...props}
+      defaultOpen={defaultOpen}
+      routinePriorityIdString={routinePriorityIdString}
+    />
+  );
+}
+
+function AppointmentEditorForm({
+  appointment,
+  lookups,
+  onUpdated,
+  onDeleted,
+  defaultOpen,
+  routinePriorityIdString,
+}: AppointmentEditorProps & { defaultOpen: boolean; routinePriorityIdString: string }) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const parsedModalityId = Number(appointment.modalityId);
@@ -51,19 +81,10 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
   const modalityExamTypes = useV2ExamTypes(modalityId);
   const [examTypeId, setExamTypeId] = useState(String(appointment.examTypeId ?? ""));
   const [isEditing, setIsEditing] = useState(defaultOpen);
-  const [priorityId, setPriorityId] = useState("");
   const [notes, setNotes] = useState(String(appointment.notes ?? ""));
   const [requiresReport, setRequiresReport] = useState(Boolean(appointment.requiresReport));
-  const routinePriorityId = resolveRoutinePriorityId(lookups);
-  const routinePriorityIdString = routinePriorityId != null ? String(routinePriorityId) : "";
-
-  useEffect(() => {
-    setExamTypeId(String(appointment.examTypeId ?? ""));
-    setPriorityId(String(appointment.reportingPriorityId ?? routinePriorityIdString));
-    setNotes(String(appointment.notes ?? ""));
-    setRequiresReport(Boolean(appointment.requiresReport));
-    setIsEditing(defaultOpen);
-  }, [appointment.id, appointment.examTypeId, appointment.reportingPriorityId, appointment.notes, appointment.requiresReport, defaultOpen, routinePriorityIdString]);
+  const initialPriorityId = String(appointment.reportingPriorityId ?? routinePriorityIdString);
+  const [priorityId, setPriorityId] = useState(initialPriorityId);
 
   const isEdited = Boolean(
     appointment.updatedAt &&

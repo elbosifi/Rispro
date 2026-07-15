@@ -11,8 +11,11 @@ import {
 import { Button, Card } from "@/components/shared";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
+import type { PersistedDictionaryEntry } from "@/lib/name-generation";
 
 type SortMode = "arabic" | "english" | "recent";
+
+const EMPTY_DICTIONARY_ENTRIES: PersistedDictionaryEntry[] = [];
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -82,7 +85,7 @@ export default function NameDictionaryPage() {
     onError: (error) => pushToast({ type: "error", title: t("nameDictionary.applyFailed"), message: errorMessage(error, t("nameDictionary.applyFailed")) }),
   });
 
-  const entries = dictionaryQuery.data?.entries ?? [];
+  const entries = dictionaryQuery.data?.entries ?? EMPTY_DICTIONARY_ENTRIES;
   const visibleEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const filtered = query

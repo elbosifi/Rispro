@@ -57,6 +57,8 @@ const DEFAULT_CANDIDATE_FILTERS: PatientDuplicateCandidateFilters = {
   hasPhone: "",
 };
 
+const EMPTY_DUPLICATE_CANDIDATES: PatientDuplicateCandidate[] = [];
+
 const MERGE_FIELDS: Array<{ key: MergeField; labelKey: TranslationKey; type?: "number" | "select" }> = [
   { key: "arabicFullName", labelKey: "patientMerge.field.arabicName" },
   { key: "englishFullName", labelKey: "patientMerge.field.englishName" },
@@ -354,7 +356,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     retry: false,
   });
 
-  const candidates = candidatesQuery.data?.candidates || [];
+  const candidates = candidatesQuery.data?.candidates || EMPTY_DUPLICATE_CANDIDATES;
   const filteredCandidates = useMemo(() => {
     const needle = candidateQuery.trim().toLowerCase();
     const visible = !needle ? candidates : candidates.filter((candidate) => {

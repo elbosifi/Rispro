@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Plus, Save, Trash2, Loader2 } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
 import { ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, type Language } from "@/lib/i18n";
@@ -11,6 +12,11 @@ interface PatientQrSettingsSectionProps {
   onReAuthRequired: (key: string[]) => void;
   reauthVersion?: number;
 }
+
+type PatientQrDraftOverride = {
+  baseUpdatedAt: number;
+  value: PatientQrSettings;
+};
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
@@ -198,7 +204,7 @@ function isValidUrl(value: string): boolean {
 export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersion = 0 }: PatientQrSettingsSectionProps) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({
+  const { data, dataUpdatedAt, isLoading, error } = useQuery({
     queryKey: ["patient-qr-settings"],
     queryFn: fetchPatientQrSettings,
   });
@@ -210,7 +216,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
     queryKey: ["v2-modalities", "patient-qr-settings"],
     queryFn: fetchV2Modalities,
   });
-  const [draft, setDraft] = useState<PatientQrSettings>(DEFAULT_SETTINGS);
+  const [draftOverride, setDraftOverride] = useState<PatientQrDraftOverride | null>(null);
   const [newChecklistItemAr, setNewChecklistItemAr] = useState("");
   const [newChecklistItemEn, setNewChecklistItemEn] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -219,13 +225,31 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
     requestedAtVersion: number;
   } | null>(null);
 
-  useEffect(() => {
-    if (data) setDraft(cloneSettings(data));
-  }, [data]);
+  const serverDraft = useMemo(() => cloneSettings(data ?? DEFAULT_SETTINGS), [data]);
+  const draft =
+    draftOverride?.baseUpdatedAt === dataUpdatedAt
+      ? draftOverride.value
+      : serverDraft;
+  const setDraft: Dispatch<SetStateAction<PatientQrSettings>> = (nextDraft) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === dataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseUpdatedAt: dataUpdatedAt,
+        value: typeof nextDraft === "function" ? nextDraft(currentDraft) : nextDraft,
+      };
+    });
+  };
 
   const mutation = useMutation({
     mutationFn: (payload: PatientQrSettings) => savePatientQrSettings(payload),
-    onSuccess: async () => {
+    onSuccess: async (_result, payload) => {
+      setDraftOverride({
+        baseUpdatedAt: dataUpdatedAt,
+        value: cloneSettings(payload),
+      });
       await queryClient.invalidateQueries({ queryKey: ["patient-qr-settings"] });
       setPendingSaveAfterReAuth(null);
       setErrors({});
@@ -248,8 +272,9 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
   useEffect(() => {
     if (!pendingSaveAfterReAuth || reauthVersion <= pendingSaveAfterReAuth.requestedAtVersion || mutation.isPending) return;
     const { payload } = pendingSaveAfterReAuth;
-    setPendingSaveAfterReAuth(null);
-    mutation.mutate(payload);
+    mutation.mutate(payload, {
+      onSettled: () => setPendingSaveAfterReAuth(null),
+    });
   }, [reauthVersion, pendingSaveAfterReAuth, mutation]);
 
   const canSave = useMemo(() => {

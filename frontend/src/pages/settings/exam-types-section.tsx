@@ -57,6 +57,9 @@ const emptyForm: ExamTypeForm = {
   durationMinutes: "",
 };
 
+const EMPTY_MODALITY_ROWS: ModalityRow[] = [];
+const EMPTY_EXAM_TYPE_ROWS: ExamTypeRow[] = [];
+
 function invalidateModalityDerivedAppointmentCaches(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["lookups"] });
   queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
@@ -204,8 +207,8 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
     onError: (err: unknown) => { setMutationError(getErrorMessage(err, "Create failed")); },
   });
 
-  const modalities = ((data?.modalities ?? []) as ModalityRow[]);
-  const examTypes = ((data?.examTypes ?? []) as ExamTypeRow[]);
+  const modalities = (data?.modalities ?? EMPTY_MODALITY_ROWS) as ModalityRow[];
+  const examTypes = (data?.examTypes ?? EMPTY_EXAM_TYPE_ROWS) as ExamTypeRow[];
 
   const modalityOptions = modalities.map((modality) => {
     const baseLabel = chooseLocalized(language, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`;

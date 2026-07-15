@@ -75,6 +75,8 @@ interface Destination {
   isDefault?: boolean;
 }
 
+const EMPTY_DESTINATIONS: Destination[] = [];
+
 interface PatientOption {
   id: number;
   arabic_full_name?: string;
@@ -291,7 +293,6 @@ export default function PacsRemapPage() {
   const fullScanControllerRef = useRef<AbortController | null>(null);
   const scanRunIdRef = useRef(0);
   const completedFullScanRunIdRef = useRef<number | null>(null);
-  const activeJobLookupHandledRef = useRef<number | null>(null);
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
   const provisionalIdentityIsConsistent = useMemo(() => {
@@ -310,6 +311,13 @@ export default function PacsRemapPage() {
     queryKey: ["pacs", "remap", "destinations"],
     queryFn: () => api<{ destinations: Destination[] }>("/pacs/remap/destinations"),
   });
+  const destinations = destinationsQuery.data?.destinations || EMPTY_DESTINATIONS;
+  const defaultDestinationKey = useMemo(() => {
+    if (destinations.length === 0) return "";
+    const defaultDestination = destinations.find((destination) => destination.isDefault) || null;
+    return defaultDestination?.key ?? (destinations.length === 1 ? destinations[0]!.key : "");
+  }, [destinations]);
+  const effectiveSelectedDestinationKey = selectedDestinationKey || defaultDestinationKey;
 
   const modalityLookupQuery = useQuery({
     queryKey: ["v2", "lookups", "modalities"],
@@ -377,6 +385,12 @@ export default function PacsRemapPage() {
     retry: 0,
   });
   const refetchActiveJob = activeJobQuery.refetch;
+  const startupActiveJob = jobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
+  const effectiveJobId = jobId ?? startupActiveJob?.id ?? null;
+  const effectiveUiStep: RemapWizardUiStep = startupActiveJob ? "processing" : uiStep;
+  const effectiveResumedJobMessage = startupActiveJob
+    ? t(language, "pacs.remap.existingJobResumed", { jobId: startupActiveJob.id })
+    : resumedJobMessage;
 
   const replacementPreviewQuery = useQuery({
     queryKey: ["pacs", "remap", "replacement-preview", selectedPatientId],
@@ -393,9 +407,9 @@ export default function PacsRemapPage() {
   });
 
   const currentJobQuery = useQuery({
-    queryKey: ["pacs", "remap", "job", jobId],
-    queryFn: () => api<{ job: RemapJob; comparison: RemapComparison | null }>(`/pacs/remap/jobs/${jobId}`),
-    enabled: jobId != null,
+    queryKey: ["pacs", "remap", "job", effectiveJobId],
+    queryFn: () => api<{ job: RemapJob; comparison: RemapComparison | null }>(`/pacs/remap/jobs/${effectiveJobId}`),
+    enabled: effectiveJobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
       return status === "uploaded" || status === "processing" || status === "remapped" || status === "sending" ? 1500 : false;
@@ -529,7 +543,7 @@ export default function PacsRemapPage() {
       setSuccessMessage("");
     },
     mutationFn: async () => {
-      if (!selectedPatientId || !selectedDestinationKey) throw new Error("Patient and destination are required.");
+      if (!selectedPatientId || !effectiveSelectedDestinationKey) throw new Error("Patient and destination are required.");
       const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, false);
       const uploadFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : plan.files;
       if (uploadFiles.length === 0) throw new Error("No uploadable files were selected.");
@@ -544,7 +558,7 @@ export default function PacsRemapPage() {
       if (selectedUidForUpload) formData.append("selectedStudyInstanceUID", selectedUidForUpload);
       if (skippedScanMode) formData.append("uploadMode", "single_study_folder_unverified");
       formData.append("risproPatientId", selectedPatientId);
-      formData.append("destinationPacsKey", selectedDestinationKey);
+      formData.append("destinationPacsKey", effectiveSelectedDestinationKey);
       formData.append("confirm", "true");
 
       const uploadResult = await uploadMultipartWithProgress("/pacs/remap/jobs/process-multipart", formData, 900_000, (loaded, total) => {
@@ -669,8 +683,7 @@ export default function PacsRemapPage() {
     },
   });
 
-  const currentJob = (currentJobQuery.data?.job || null) as RemapJob;
-  const destinations = destinationsQuery.data?.destinations || [];
+  const currentJob = (currentJobQuery.data?.job || startupActiveJob || null) as RemapJob;
   const directoryPatients = patientQuery.data?.patients || [];
   const appointmentPatientOptions = useMemo(() => {
     const combinedAppointments = [
@@ -686,17 +699,6 @@ export default function PacsRemapPage() {
   }, [todayStudiesQuery.data?.appointments, allDatesStudiesQuery.data?.appointments]);
   const selectedDirectoryPatient = directoryPatients.find((patient) => String(patient.id) === selectedPatientId) || null;
 
-  useEffect(() => {
-    if (selectedDestinationKey || destinations.length === 0) {
-      return;
-    }
-    const defaultDestination = destinations.find((destination) => destination.isDefault) || null;
-    if (defaultDestination) {
-      setSelectedDestinationKey(defaultDestination.key);
-    } else if (destinations.length === 1) {
-      setSelectedDestinationKey(destinations[0]!.key);
-    }
-  }, [destinations, selectedDestinationKey]);
   const selectedAppointmentPatient = appointmentPatientOptions.find((appointment) => String(appointment.patient_id) === selectedPatientId) || null;
   const selectedPatientLabel =
     selectedAppointmentPatient
@@ -711,10 +713,10 @@ export default function PacsRemapPage() {
     && !replacementPreviewQuery.isLoading
     && !replacementPreviewQuery.isError
     && !!replacementPreviewQuery.data;
-  const canContinueDestination = !!selectedDestinationKey;
+  const canContinueDestination = !!effectiveSelectedDestinationKey;
   const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
   const skippedScanMode = completeScanStatus === "skipped";
-  const checkingForActiveJob = activeJobQuery.isPending && jobId == null;
+  const checkingForActiveJob = activeJobQuery.isPending && effectiveJobId == null;
   const reviewFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : selectedStudy?.files || [];
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
@@ -739,17 +741,10 @@ export default function PacsRemapPage() {
   };
 
   const openRecentJob = (id: number): void => {
-    const hasDraft = files.length > 0 || !!selectedPatientId || !!selectedDestinationKey;
-    if (uiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
+    const hasDraft = files.length > 0 || !!selectedPatientId || !!effectiveSelectedDestinationKey;
+    if (effectiveUiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
     attachToExistingRemapJob(id, "recent");
   };
-
-  useEffect(() => {
-    const activeJobId = activeJobQuery.data?.job?.id;
-    if (!activeJobQuery.isSuccess || !activeJobId || jobId != null || activeJobLookupHandledRef.current === activeJobId) return;
-    activeJobLookupHandledRef.current = activeJobId;
-    attachToExistingRemapJob(activeJobId, "startup");
-  }, [activeJobQuery.data?.job?.id, activeJobQuery.isSuccess, attachToExistingRemapJob, jobId]);
 
   useEffect(() => {
     if (!jobId || !currentJobQuery.isError) return;
@@ -825,10 +820,10 @@ export default function PacsRemapPage() {
     ? ["المصدر", "المريض", "الوجهة", "المراجعة", "المعالجة"]
     : ["Source", "Patient", "Destination", "Review", "Processing"];
   const uiStepOrder: RemapWizardUiStep[] = ["source", "patient", "destination", "review", "processing"];
-  const currentStepIndex = uiStepOrder.indexOf(uiStep);
+  const currentStepIndex = uiStepOrder.indexOf(effectiveUiStep);
   const activeCardProps = {
     className: "card-shell min-h-[28rem] border border-teal-500 p-5 shadow-md shadow-teal-900/5",
-    "aria-busy": uiStep === "source" && (scanMutation.isPending || completeScanStatus === "running"),
+    "aria-busy": effectiveUiStep === "source" && (scanMutation.isPending || completeScanStatus === "running"),
   } as const;
 
   return (
@@ -875,12 +870,12 @@ export default function PacsRemapPage() {
           <strong className="w-full text-sm sm:w-auto">{language === "ar" ? "ملخص الاختيارات" : "Selected context"}</strong>
           <span className={!selectedStudy ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.studyLabel")}:</b> {selectedStudy?.studyDescription || (selectedStudy ? selectedStudy.modality : "—") || (language === "ar" ? "غير مكتملة" : "Not selected")}{selectedStudy ? ` • ${selectedStudy.fileCount} ${language === "ar" ? "ملف" : "files"}` : ""}</span>
           <span className={!selectedPatientLabel ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.selectedRISProPatient")}:</b> {selectedPatientLabel || (language === "ar" ? "غير مكتمل" : "Not selected")}</span>
-          <span className={!selectedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === selectedDestinationKey)?.name || selectedDestinationKey || (language === "ar" ? "غير مكتملة" : "Not selected")}</span>
+          <span className={!effectiveSelectedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === effectiveSelectedDestinationKey)?.name || effectiveSelectedDestinationKey || (language === "ar" ? "غير مكتملة" : "Not selected")}</span>
           {skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
         </section>
 
         <div {...activeCardProps}>
-          {uiStep === "source" && <>
+          {effectiveUiStep === "source" && <>
             {checkingForActiveJob && (
               <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900" role="status">
                 {t(language, "pacs.remap.checkingActiveJob")}
@@ -1089,7 +1084,7 @@ export default function PacsRemapPage() {
             </div>
           </>}
 
-          {uiStep === "patient" && scanResult && (
+          {effectiveUiStep === "patient" && scanResult && (
             <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[1]}</h3>
@@ -1257,18 +1252,18 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {uiStep === "destination" && scanResult && (
+          {effectiveUiStep === "destination" && scanResult && (
             <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[2]}</h3>
-                {selectedDestinationKey && (
+                {effectiveSelectedDestinationKey && (
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                    {selectedDestinationKey}
+                    {effectiveSelectedDestinationKey}
                   </span>
                 )}
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3">
-                <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
+                <select value={effectiveSelectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
                   <option value="">{t(language, "pacs.remap.selectDestination")}</option>
                   {destinations.map((destination) => (
                     <option key={destination.key} value={destination.key}>
@@ -1284,7 +1279,7 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {uiStep === "review" && scanResult && (
+          {effectiveUiStep === "review" && scanResult && (
             <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[3]}</h3>
@@ -1330,7 +1325,7 @@ export default function PacsRemapPage() {
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.destinationLabel")}</th>
                       <td className="px-3 py-2">—</td>
-                      <td className="px-3 py-2 font-mono">{selectedDestinationKey || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{effectiveSelectedDestinationKey || "—"}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1412,7 +1407,7 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {uiStep === "processing" && !isTerminalSuccess && !isTerminalFailure && (
+          {effectiveUiStep === "processing" && !isTerminalSuccess && !isTerminalFailure && (
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[4]}</h3>
               <ol className="space-y-2 text-xs" aria-label={language === "ar" ? "مراحل المعالجة" : "Processing stages"}>
@@ -1449,7 +1444,7 @@ export default function PacsRemapPage() {
                 })}
               </div>
               <p className="text-xs" style={{ color: "var(--text-muted)" }} aria-live="polite">
-                {resumedJobMessage && <span className="block font-medium text-teal-800">{resumedJobMessage}</span>}
+                {effectiveResumedJobMessage && <span className="block font-medium text-teal-800">{effectiveResumedJobMessage}</span>}
                 {effectiveProcessingStage === "uploading" && t(language, "pacs.remap.uploadingSelectedStudy", { percent: uploadPercent })}
                 {effectiveProcessingStage !== "uploading" && effectiveProcessingStage !== "enqueueing_send" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
                 {effectiveProcessingStage === "enqueueing_send" && t(language, "pacs.remap.sendingToPacs")}
@@ -1470,7 +1465,7 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {uiStep === "processing" && (isTerminalSuccess || isTerminalFailure) && (
+          {effectiveUiStep === "processing" && (isTerminalSuccess || isTerminalFailure) && (
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-lg font-semibold">{stepLabels[4]}</h3>
               {isTerminalSuccess ? (
@@ -1581,12 +1576,12 @@ export default function PacsRemapPage() {
         </div>
       </div>
 
-      {visibleErrorMessage && uiStep !== "processing" && (
+      {visibleErrorMessage && effectiveUiStep !== "processing" && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {visibleErrorMessage}
         </div>
       )}
-      {visibleSuccessMessage && uiStep !== "processing" && (
+      {visibleSuccessMessage && effectiveUiStep !== "processing" && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
           {visibleSuccessMessage}
         </div>

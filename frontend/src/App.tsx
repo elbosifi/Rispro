@@ -177,20 +177,16 @@ function AppContent() {
   const routePageTitleKey = APP_ROUTE_TITLE_KEYS[currentRoute as keyof typeof APP_ROUTE_TITLE_KEYS];
   const sidebarPreferenceKey = "rispro-sidebar-collapsed";
   const hasSavedSidebarPreference = localStorage.getItem(sidebarPreferenceKey) != null;
-  const [desktopNavCollapsed, setDesktopNavCollapsed] = useState(() => {
+  const [desktopNavCollapsedPreference, setDesktopNavCollapsedPreference] = useState(() => {
     const saved = localStorage.getItem(sidebarPreferenceKey);
-    if (saved != null) return saved === "true";
-    return currentRoute === "modality";
+    return saved === "true";
   });
-
-  useEffect(() => {
-    if (!hasSavedSidebarPreference) {
-      setDesktopNavCollapsed(currentRoute === "modality");
-    }
-  }, [currentRoute, hasSavedSidebarPreference]);
+  const desktopNavCollapsed = hasSavedSidebarPreference
+    ? desktopNavCollapsedPreference
+    : currentRoute === "modality";
 
   const toggleDesktopNavCollapsed = useCallback(() => {
-    setDesktopNavCollapsed((current) => {
+    setDesktopNavCollapsedPreference((current) => {
       const next = !current;
       localStorage.setItem(sidebarPreferenceKey, String(next));
       return next;

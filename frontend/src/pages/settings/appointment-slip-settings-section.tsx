@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useId, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, Save } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
@@ -20,6 +20,11 @@ interface AppointmentSlipSettingsSectionProps {
 
 const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+};
+
+type AppointmentSlipDraftOverride = {
+  baseUpdatedAt: number;
+  value: AppointmentSlipSettings;
 };
 
 function cloneSettings(settings: AppointmentSlipSettings): AppointmentSlipSettings {
@@ -82,7 +87,7 @@ function normalizeForSave(settings: AppointmentSlipSettings): AppointmentSlipSet
 export default function AppointmentSlipSettingsSection({ onReAuthRequired }: AppointmentSlipSettingsSectionProps) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({
+  const { data, dataUpdatedAt, isLoading, error } = useQuery({
     queryKey: ["appointment-slip-settings"],
     queryFn: fetchAppointmentSlipSettings,
   });
@@ -94,12 +99,25 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
     queryKey: ["modalities-settings", "active"],
     queryFn: () => fetchModalitiesSettings(false),
   });
-  const [draft, setDraft] = useState<AppointmentSlipSettings>(DEFAULT_SETTINGS);
+  const [draftOverride, setDraftOverride] = useState<AppointmentSlipDraftOverride | null>(null);
+  const serverDraft = cloneSettings(data ?? DEFAULT_SETTINGS);
+  const draft =
+    draftOverride?.baseUpdatedAt === dataUpdatedAt
+      ? draftOverride.value
+      : serverDraft;
+  const setDraft: Dispatch<SetStateAction<AppointmentSlipSettings>> = (nextDraft) => {
+    setDraftOverride((currentOverride) => {
+      const currentDraft =
+        currentOverride?.baseUpdatedAt === dataUpdatedAt
+          ? currentOverride.value
+          : serverDraft;
+      return {
+        baseUpdatedAt: dataUpdatedAt,
+        value: typeof nextDraft === "function" ? nextDraft(currentDraft) : nextDraft,
+      };
+    });
+  };
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (data) setDraft(cloneSettings(data));
-  }, [data]);
 
   const validation = useMemo(() => {
     const nextErrors: Record<string, string> = {};

@@ -97,11 +97,8 @@ function DirectAppointmentPrintPage() {
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [query, setQuery] = useState("");
-  const [selectedAppointment, setSelectedAppointment] =
-    useState<AppointmentWithDetails | null>(null);
-  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
-  const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [autoprintDone, setAutoprintDone] = useState(false);
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
+  const [autoprintDoneKey, setAutoprintDoneKey] = useState<string | null>(null);
   const appointmentIdParam = searchParams.get("appointmentId");
   const isDirectPreview = Boolean(appointmentIdParam);
   const autoprintParam = searchParams.get("autoprint") === "1";
@@ -127,7 +124,9 @@ function DirectAppointmentPrintPage() {
 
   const {
     data: appointmentById,
+    dataUpdatedAt: appointmentByIdUpdatedAt,
     isLoading: appointmentByIdLoading,
+    isFetching: appointmentByIdFetching,
     error: appointmentByIdError,
   } = useQuery({
     queryKey: ["print-appointment", appointmentIdParam],
@@ -172,45 +171,62 @@ function DirectAppointmentPrintPage() {
         ? "Patient QR Settings could not be loaded. Using defaults for this print preview."
         : "";
   const appointmentByIdErrorDetails = describeQueryError(appointmentByIdError);
+  const selectedAppointment =
+    !isDirectPreview && visibleAppointments.length > 0
+      ? visibleAppointments.find((appointment) => appointment.id === selectedAppointmentId) ?? visibleAppointments[0]
+      : null;
   const activePrintAppointment = isDirectPreview ? (appointmentById ?? null) : selectedAppointment;
+  const autoprintKey = isDirectPreview ? `${appointmentIdParam}:${autoprintParam}` : "";
+  const autoprintDone = autoprintDoneKey === autoprintKey;
+
+  const {
+    data: slipPreviewHtml = null,
+    isFetching: slipPreviewLoading,
+  } = useQuery({
+    queryKey: [
+      "print-appointment-slip-preview",
+      activePrintAppointment?.id ?? null,
+      activePrintAppointment?.updatedAt ?? null,
+      isDirectPreview ? appointmentByIdUpdatedAt : null,
+      renderOptions,
+    ],
+    queryFn: async () =>
+      activePrintAppointment && renderOptions
+        ? prepareAppointmentSlipHtml(activePrintAppointment, renderOptions)
+        : null,
+    enabled: Boolean(
+      isDirectPreview &&
+      activePrintAppointment &&
+      renderOptions &&
+      !appointmentByIdLoading &&
+      !appointmentByIdFetching &&
+      !appointmentByIdError &&
+      !settingsLoadFailed
+    ),
+    staleTime: 0,
+  });
 
   useEffect(() => {
-    if (!isDirectPreview) return;
-    setAutoprintDone(false);
-  }, [appointmentIdParam, autoprintParam, isDirectPreview]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!isDirectPreview || !activePrintAppointment || !renderOptions || appointmentByIdLoading || appointmentByIdError || settingsLoadFailed) {
-      return () => {
-        cancelled = true;
-      };
+    if (!isDirectPreview || !activePrintAppointment || !renderOptions || appointmentByIdLoading || appointmentByIdFetching || appointmentByIdError || settingsLoadFailed) {
+      return;
     }
-    setSlipPreviewLoading(true);
-    void prepareAppointmentSlipHtml(activePrintAppointment, renderOptions)
-      .then((html) => {
-        if (cancelled || !html) return;
-        setSlipPreviewHtml(html);
-      })
-      .finally(() => {
-        if (!cancelled) setSlipPreviewLoading(false);
-      });
 
     if (autoprintParam && !autoprintDone) {
-      setTimeout(() => {
+      const timeout = window.setTimeout(() => {
         printAppointmentSlip(activePrintAppointment, renderOptions);
-        setAutoprintDone(true);
+        setAutoprintDoneKey(autoprintKey);
       }, 300);
+      return () => window.clearTimeout(timeout);
     }
-    return () => {
-      cancelled = true;
-    };
+    return undefined;
   }, [
     activePrintAppointment,
     appointmentByIdError,
+    appointmentByIdFetching,
     appointmentByIdLoading,
     autoprintParam,
     autoprintDone,
+    autoprintKey,
     isDirectPreview,
     renderOptions,
     settingsLoadFailed,
@@ -244,32 +260,6 @@ function DirectAppointmentPrintPage() {
 
   const modalities = lookups?.modalities ?? [];
 
-  useEffect(() => {
-    if (isDirectPreview) return;
-    if (visibleAppointments.length === 0) {
-      setSelectedAppointment(null);
-      return;
-    }
-
-    const matchingAppointment = selectedAppointment
-      ? visibleAppointments.find((appointment) => appointment.id === selectedAppointment.id)
-      : null;
-
-    if (!selectedAppointment) {
-      setSelectedAppointment(visibleAppointments[0]);
-      return;
-    }
-
-    if (matchingAppointment && matchingAppointment !== selectedAppointment) {
-      setSelectedAppointment(matchingAppointment);
-      return;
-    }
-
-    if (!matchingAppointment) {
-      setSelectedAppointment(visibleAppointments[0]);
-    }
-  }, [isDirectPreview, visibleAppointments, selectedAppointment]);
-
   if (isDirectPreview) {
     return (
       <div className="max-w-5xl mx-auto p-4 space-y-4">
@@ -300,7 +290,7 @@ function DirectAppointmentPrintPage() {
               <Button
                 type="button"
                 onClick={() => activePrintAppointment && handlePrintSlip(activePrintAppointment)}
-                disabled={!activePrintAppointment || appointmentByIdLoading || slipPreviewLoading || !settingsReady || settingsLoadFailed}
+                disabled={!activePrintAppointment || appointmentByIdLoading || appointmentByIdFetching || slipPreviewLoading || !settingsReady || settingsLoadFailed}
               >
                 {t(language, "print.confirmPrint")}
               </Button>
@@ -431,7 +421,7 @@ function DirectAppointmentPrintPage() {
                     className={`p-3 cursor-pointer transition-colors ${
                       selectedAppointment?.id === appointment.id ? "bg-accent/10" : "hover:bg-muted/40"
                     }`}
-                    onClick={() => setSelectedAppointment(appointment)}
+                    onClick={() => setSelectedAppointmentId(appointment.id)}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">

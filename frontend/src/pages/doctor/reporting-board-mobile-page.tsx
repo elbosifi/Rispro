@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Bell, Calendar, Clipboard, FileText, Flame, RefreshCw, Search, SlidersHorizontal, User, UserCheck, Users } from "lucide-react";
@@ -157,7 +157,7 @@ export function ReportingBoardMobilePage() {
     enabled: Boolean(viewQuery.data?.allowedActions.reassign),
   });
 
-  const refreshLoadedPages = async () => {
+  const refreshLoadedPages = useCallback(async () => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     try {
@@ -174,7 +174,7 @@ export function ReportingBoardMobilePage() {
     } finally {
       refreshInFlight.current = false;
     }
-  };
+  }, [filters, queryClient, token]);
 
   useEffect(() => {
     const onResize = () => setDesktopLayout(window.innerWidth >= 1200);
@@ -202,7 +202,7 @@ export function ReportingBoardMobilePage() {
       setPushLastSuccessAt(status.lastSuccessAt);
     };
     void updateSubscription();
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     const refreshVisible = async () => {
@@ -216,7 +216,7 @@ export function ReportingBoardMobilePage() {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [filters, token, viewQuery.data?.refreshIntervalSeconds]);
+  }, [refreshLoadedPages, viewQuery.data?.refreshIntervalSeconds]);
 
   const refresh = () => refreshLoadedPages();
   const updateTemporaryFilters = (updater: (current: ReportingBoardFilters) => ReportingBoardFilters) => {
