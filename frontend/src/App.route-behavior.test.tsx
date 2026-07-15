@@ -300,31 +300,54 @@ describe("App route behavior", () => {
     expect(window.location.pathname).toBe("/doctor/dashboard");
   });
 
-  it("renders navigation labels from APP_NAV_ITEMS", async () => {
+  it("renders configured sidebar labels from APP_NAV_ITEMS", async () => {
     testState.user = {
       id: 2,
       username: "admin",
       fullName: "Super Admin",
       role: "super_admin",
     } as User;
-    renderAppAt(
-      "/dashboard",
-      DEFAULT_PAGE_VISIBILITY_MATRIX,
-      {
-        hasActiveDoctorProfile: true,
-        canAccessCoreWorkspace: true,
-      },
-    );
+    renderAppAt("/dashboard");
 
     expect(await screen.findByTestId("dashboard-page")).toBeTruthy();
     for (const item of APP_NAV_ITEMS) {
+      // Doctor access is presented through WorkspaceSwitcher, not SideNav.
+      if (item.route === "doctor") {
+        continue;
+      }
+
       if (item.route === "appointments") {
         await userEvent.click(screen.getByRole("button", { name: "New" }));
         expect(screen.getByRole("menuitem", { name: "New appointment" })).toBeTruthy();
-      } else {
-        expect(screen.getAllByText(translate("en", item.labelKey)).length).toBeGreaterThan(0);
+        continue;
       }
+
+      expect(screen.getAllByText(translate("en", item.labelKey)).length).toBeGreaterThan(0);
     }
+  });
+
+  it("renders Doctor Workspace in the workspace switcher for dual-access users", async () => {
+    testState.user = {
+      id: 2,
+      username: "admin",
+      fullName: "Super Admin",
+      role: "super_admin",
+    } as User;
+    renderAppAt("/dashboard", DEFAULT_PAGE_VISIBILITY_MATRIX, {
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: true,
+    });
+
+    const workspaceSwitcher = await screen.findByRole("button", {
+      name: new RegExp(translate("en", "workspace.switcher"), "i"),
+    });
+    await userEvent.click(workspaceSwitcher);
+
+    expect(
+      await screen.findByRole("menuitem", {
+        name: translate("en", "workspace.doctor"),
+      }),
+    ).toBeTruthy();
   });
 
   it("places the sidebar left in LTR and right of the main content in RTL", async () => {
