@@ -13,13 +13,13 @@ jobs:
 
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://rispro:rispro_password@localhost:5432/rispro
-      TEST_DATABASE_URL: postgresql://rispro:rispro_password@localhost:5432/rispro
+      DATABASE_URL: postgresql://rispro_test:rispro_test_password@localhost:5433/rispro_test
+      TEST_DATABASE_URL: postgresql://rispro_test:rispro_test_password@localhost:5433/rispro_test
       PGHOST: localhost
-      PGPORT: 5432
-      PGDATABASE: rispro
-      PGUSER: rispro
-      PGPASSWORD: rispro_password
+      PGPORT: 5433
+      PGDATABASE: rispro_test
+      PGUSER: rispro_test
+      PGPASSWORD: rispro_test_password
       JWT_SECRET: ci-test-secret
       COOKIE_SECURE: "false"
       COOKIE_SAME_SITE: lax
@@ -40,20 +40,23 @@ jobs:
           docker rm -f rispro-ci-postgres 2>/dev/null || true
           docker run -d \
             --name rispro-ci-postgres \
-            -e POSTGRES_USER=rispro \
-            -e POSTGRES_PASSWORD=rispro_password \
-            -e POSTGRES_DB=rispro \
-            -p 5432:5432 \
+            -e POSTGRES_USER=rispro_test \
+            -e POSTGRES_PASSWORD=rispro_test_password \
+            -e POSTGRES_DB=rispro_test \
+            -p 5433:5432 \
             postgres:16-alpine
 
       - name: Wait for PostgreSQL
         run: |
           for i in $(seq 1 30); do
-            if docker exec rispro-ci-postgres pg_isready -U rispro -d rispro; then
+            if docker exec rispro-ci-postgres pg_isready \
+              -U rispro_test \
+              -d rispro_test; then
               exit 0
             fi
             sleep 2
           done
+
           docker logs rispro-ci-postgres
           exit 1
 
