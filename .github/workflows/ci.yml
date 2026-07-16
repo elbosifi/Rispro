@@ -2,13 +2,11 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 jobs:
   backend-scheduling:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -91,6 +89,7 @@ jobs:
 
   frontend-build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
