@@ -896,6 +896,65 @@ function mobileCounters(cases: ReportingBoardCaseRow[], assignedDoctorId?: numbe
   };
 }
 
+function withoutMobileQuickTabFilters(input: ReportingBoardFilters): ReportingBoardFilters {
+  switch (input.mobileQuickTab) {
+    case "assigned":
+    case "unassigned":
+      return { ...input, assignedDoctorId: null, assignmentStatus: null, mobileQuickTab: null };
+    case "urgent":
+      return { ...input, priorityCode: null, urgentOrStat: null, mobileQuickTab: null };
+    case "overdue":
+      return {
+        ...input,
+        overdue: null,
+        // The mobile Overdue tab alone supplies this value; explicit drawer report-state filters do not carry this marker.
+        reportStatus: input.reportStatus === "required_not_final" ? null : input.reportStatus,
+        mobileQuickTab: null,
+      };
+    case "all":
+      return { ...input, mobileQuickTab: null };
+    default:
+      return input;
+  }
+}
+
+function applyMobileQuickTab(cases: ReportingBoardCaseRow[], input: ReportingBoardFilters): ReportingBoardCaseRow[] {
+  switch (input.mobileQuickTab) {
+    case "assigned":
+      return cases.filter((row) => row.assignmentStatus === "assigned" && row.assignedDoctorId === input.assignedDoctorId);
+    case "unassigned":
+      return cases.filter((row) => row.assignmentStatus === "unassigned");
+    case "urgent":
+      return cases.filter((row) => ["urgent", "stat"].includes(String(row.reportingPriorityCode || "").toLowerCase()));
+    case "overdue":
+      return cases.filter((row) => row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso());
+    default:
+      return cases;
+  }
+}
+
+function mobileResultFilters(
+  counterFilters: EffectiveReportingBoardFilters,
+  input: ReportingBoardFilters,
+  limit: number,
+  offset: number
+): EffectiveReportingBoardFilters {
+  const resultFilters: EffectiveReportingBoardFilters = { ...counterFilters, limit, offset, mobileQuickTab: input.mobileQuickTab ?? null };
+  if (input.mobileQuickTab === "assigned" || input.mobileQuickTab === "unassigned") {
+    resultFilters.assignedDoctorId = input.assignedDoctorId ?? null;
+    resultFilters.assignmentStatus = input.assignmentStatus ?? null;
+  }
+  if (input.mobileQuickTab === "urgent") {
+    resultFilters.priorityCode = input.priorityCode ?? null;
+    resultFilters.urgentOrStat = input.urgentOrStat ?? null;
+  }
+  if (input.mobileQuickTab === "overdue") {
+    resultFilters.overdue = input.overdue ?? null;
+    resultFilters.reportStatus = input.reportStatus ?? counterFilters.reportStatus;
+  }
+  return resultFilters;
+}
+
 function filterSummary(filters: ReportingBoardFilters): string[] {
   return [
     filters.reportStatus ? String(filters.reportStatus).replaceAll("_", " ") : null,
@@ -999,17 +1058,19 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   let allCases: ReportingBoardCaseRow[];
   let effectiveModalityCodes: string[] | null = null;
   let scopeMessage: string | null = null;
+  const counterInput = withoutMobileQuickTabFilters(input);
   const fullScopeStartedAt = Date.now();
   if (view.linkKind === "doctor_worklist" && view.targetDoctorId) {
-    const scope = await doctorWorklistScope(view.targetDoctorId, { ...input, limit: MAX_CASE_LIST_LIMIT, offset: 0 }, true);
-    filters = { ...scope.filters, limit: requestedLimit, offset: requestedOffset };
+    const scope = await doctorWorklistScope(view.targetDoctorId, { ...counterInput, limit: MAX_CASE_LIST_LIMIT, offset: 0 }, true);
+    filters = mobileResultFilters(scope.filters, input, requestedLimit, requestedOffset);
     allCases = scope.cases;
     effectiveModalityCodes = scope.effectiveModalityCodes;
     scopeMessage = scope.scopeMessage;
   } else {
-    const narrowed = narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 });
-    filters = await effectiveFilters(mobileIdentity ? withMobileCaseIdentity(narrowed, mobileIdentity) : narrowed);
-    const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? globalSettings.enabledModalityCodes };
+    const narrowed = narrowSavedViewFilters(view.filters, { ...counterInput, limit: input.limit ?? 100 });
+    const counterFilters = await effectiveFilters(mobileIdentity ? withMobileCaseIdentity(narrowed, mobileIdentity) : narrowed);
+    filters = mobileResultFilters(counterFilters, input, requestedLimit, requestedOffset);
+    const scopedFilters = counterFilters.modalityCode || counterFilters.modalityId ? counterFilters : { ...counterFilters, modalityCodes: counterFilters.modalityCodes ?? globalSettings.enabledModalityCodes };
     allCases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
   }
   const fullScopeListingDurationMs = Date.now() - fullScopeStartedAt;
@@ -1022,7 +1083,8 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
   if (fullScopeListingDurationMs > MOBILE_FULL_SCOPE_WARNING_MS) {
     console.warn(JSON.stringify({ ...timing, type: "reporting_board_mobile_full_scope_slow", warningThresholdMs: MOBILE_FULL_SCOPE_WARNING_MS }));
   }
-  const cases = allCases.slice(requestedOffset, requestedOffset + requestedLimit);
+  const resultCases = applyMobileQuickTab(allCases, input);
+  const cases = resultCases.slice(requestedOffset, requestedOffset + requestedLimit);
   const canManage = Boolean(identity?.moduleCapabilities.includes("doctor_supervisor") || identity?.moduleCapabilities.includes("doctor_admin"));
   const canClaimToSelf = Boolean(
     actor && identity?.profile?.id && view.linkKind === "doctor_worklist" &&
@@ -1053,12 +1115,12 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
       allCases,
       view.linkKind === "doctor_worklist" ? view.targetDoctorId : identity?.profile?.id ?? null
     ),
-    totalCount: allCases.length,
+    totalCount: resultCases.length,
     pagination: {
       limit: filters.limit,
       offset: filters.offset,
-      hasMore: filters.offset + cases.length < allCases.length,
-      nextOffset: filters.offset + cases.length < allCases.length ? filters.offset + cases.length : null,
+      hasMore: filters.offset + cases.length < resultCases.length,
+      nextOffset: filters.offset + cases.length < resultCases.length ? filters.offset + cases.length : null,
     },
     cases: cases.map((row) => ({ ...mobileCase(row, Boolean(identity)), ...mobileCaseActions(row, canManage, canClaimToSelf) })),
     allowedActions: {

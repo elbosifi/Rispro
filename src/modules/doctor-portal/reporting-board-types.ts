@@ -23,6 +23,7 @@ export type ReportingBoardSortBy =
   | "longest_assigned_not_final"
   | "oldest_completed";
 export type ReportingBoardSortDirection = "asc" | "desc";
+export type ReportingBoardMobileQuickTab = "assigned" | "unassigned" | "urgent" | "overdue" | "all";
 
 export interface ReportingBoardFilters {
   dateFrom?: string | null;
@@ -48,6 +49,8 @@ export interface ReportingBoardFilters {
   sortDirection?: ReportingBoardSortDirection | null;
   pinUrgentToTop?: boolean | null;
   overdue?: boolean | null;
+  /** Mobile-only request marker used to separate a quick-tab predicate from explicit drawer filters. */
+  mobileQuickTab?: ReportingBoardMobileQuickTab | null;
   limit?: number | null;
   offset?: number | null;
 }

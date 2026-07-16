@@ -374,6 +374,7 @@ export interface DoctorCaseAssignmentSummary {
 export type ReportingBoardAssignmentStatus = "all" | "unassigned" | "assigned";
 export type ReportingBoardCaseSource = "all" | "appointments" | "comparisons";
 export type ReportingBoardReportStatus = "required_not_final" | "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | "all";
+export type ReportingBoardMobileQuickTab = "assigned" | "unassigned" | "urgent" | "overdue" | "all";
 
 export interface ReportingBoardFilters {
   dateFrom?: string | null;
@@ -396,6 +397,8 @@ export interface ReportingBoardFilters {
   sortDirection?: ReportingBoardSortDirection | null;
   pinUrgentToTop?: boolean | null;
   overdue?: boolean | null;
+  /** Mobile-only request marker used to separate a quick-tab predicate from explicit drawer filters. */
+  mobileQuickTab?: ReportingBoardMobileQuickTab | null;
   limit?: number | null;
   offset?: number | null;
 }

@@ -300,6 +300,39 @@ describe("ReportingBoardMobilePage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("true"));
   });
 
+  it("keeps server-provided quick-tab counters stable while rendering each tab's filtered result total", async () => {
+    const counters = { total: 5, assignedToMe: 2, unassigned: 3, urgent: 2, requiredNotFinal: 5, overdue: 1 };
+    const assigned = { ...doctorWorklistResponse, counters, totalCount: 2, cases: [doctorWorklistResponse.cases[0]] };
+    const unassigned = { ...doctorWorklistResponse, counters, totalCount: 3, cases: [doctorWorklistResponse.cases[1]] };
+    const urgent = { ...doctorWorklistResponse, counters, totalCount: 2, cases: [doctorWorklistResponse.cases[0]] };
+    const overdue = { ...doctorWorklistResponse, counters, totalCount: 1, cases: [doctorWorklistResponse.cases[1]] };
+    const all = { ...doctorWorklistResponse, counters, totalCount: 5, cases: doctorWorklistResponse.cases };
+    fetchReportingBoardMobileViewMock.mockImplementation((_token, filters: { mobileQuickTab?: string; assignedDoctorId?: number | null }) => {
+      if (filters.mobileQuickTab === "unassigned") return Promise.resolve(unassigned);
+      if (filters.mobileQuickTab === "urgent") return Promise.resolve(urgent);
+      if (filters.mobileQuickTab === "overdue") return Promise.resolve(overdue);
+      if (filters.mobileQuickTab === "all") return Promise.resolve(all);
+      if (!filters.assignedDoctorId) return Promise.resolve(all);
+      return Promise.resolve(assigned);
+    });
+    renderPage();
+
+    await screen.findByRole("button", { name: /^Assigned 2$/i });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({ mobileQuickTab: "assigned", assignedDoctorId: 5, assignmentStatus: "assigned" })));
+    expect(screen.getByText("Loaded 1 of 2 cases")).toBeTruthy();
+
+    for (const [tab, patient, total] of [["Unassigned 3", "Abeer Farhat Salem Al-Sadeq", 3], ["Urgent 2", "Mohammed Bashir Meftah", 2], ["Overdue 1", "Abeer Farhat Salem Al-Sadeq", 1], ["All 5", "Comparison Patient", 5]] as const) {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${tab}$`, "i") }));
+      await screen.findByText(patient);
+      expect(screen.getByText(`Loaded ${tab === "All 5" ? 3 : 1} of ${total} cases`)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Assigned 2$/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Unassigned 3$/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Urgent 2$/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Overdue 1$/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^All 5$/i })).toBeTruthy();
+    }
+  });
+
   it("uses the opened worklist target when the target doctor is the authenticated viewer", async () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue({
       ...doctorWorklistResponse,

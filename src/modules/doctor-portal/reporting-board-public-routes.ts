@@ -91,6 +91,7 @@ function mobileFilters(query: Request["query"]): ReportingBoardFilters {
     sortBy: (asOptionalString(query.sortBy) as ReportingBoardFilters["sortBy"]) ?? null,
     sortDirection: (asOptionalString(query.sortDirection) as ReportingBoardFilters["sortDirection"]) ?? null,
     overdue: asOptionalString(query.overdue) === "true",
+    mobileQuickTab: (asOptionalString(query.mobileQuickTab) as ReportingBoardFilters["mobileQuickTab"]) ?? null,
     limit,
     offset: optionalNonNegativeInteger(query.offset, "offset") ?? 0,
   };

@@ -1004,6 +1004,71 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.deepEqual(assignedOnly.data.cases.map((row) => row.appointmentId), [targetAssigned]);
   });
 
+  it("keeps mobile quick-tab counters stable across tabs, search, pagination, and permanent saved-view filters", async () => {
+    guard();
+    const label = uniq("mobile_quick_tab_counters");
+    const assignedUrgentOverdue = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: urgentPriorityId, date: addDays(-1), patientName: `${label} assigned urgent overdue` });
+    const assignedRoutine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date: addDays(1), patientName: `${label} assigned routine` });
+    const unassignedStat = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: statPriorityId, date: addDays(1), patientName: `${label} unassigned stat` });
+    const unassignedOverdue = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date: addDays(-2), patientName: `${label} unassigned overdue` });
+    const unassignedRoutine = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, priorityId: routinePriorityId, date: addDays(2), patientName: `${label} unassigned routine` });
+    const excludedMr = await createBooking({ modalityId: mrModalityId, examTypeId: mrExamTypeId, priorityId: statPriorityId, date: addDays(1), patientName: `${label} excluded MR` });
+    [assignedUrgentOverdue, assignedRoutine, unassignedStat, unassignedOverdue, unassignedRoutine, excludedMr].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await statusByAppointmentId.flush();
+    await assignDirectly(assignedUrgentOverdue, targetDoctor.doctorId);
+    await assignDirectly(assignedRoutine, targetDoctor.doctorId);
+
+    type MobileView = {
+      counters: { total: number; assignedToMe: number | null; unassigned: number; urgent: number; requiredNotFinal: number; overdue: number };
+      totalCount: number;
+      pagination: { hasMore: boolean; nextOffset: number | null };
+      cases: Array<{ appointmentId: number; assignmentStatus: string; priorityCode: string | null; overdue: boolean }>;
+    };
+    const worklist = await getDoctorWorklist(targetDoctor, false);
+    const baseline = await reportingBoardService.getPublicReportingBoardMobileView(null, worklist.token, { q: label, limit: 1 }) as MobileView;
+    assert.deepEqual(baseline.counters, { total: 5, assignedToMe: 2, unassigned: 3, urgent: 3, requiredNotFinal: 5, overdue: 1 });
+    assert.equal(baseline.totalCount, 5);
+    assert.equal(baseline.cases.length, 1);
+    assert.equal(baseline.pagination.hasMore, true);
+    assert.equal(baseline.pagination.nextOffset, 1);
+
+    const tabCases = async (filters: Record<string, unknown>) => reportingBoardService.getPublicReportingBoardMobileView(null, worklist.token, { q: label, limit: 10, ...filters }) as Promise<MobileView>;
+    const assigned = await tabCases({ mobileQuickTab: "assigned", assignedDoctorId: targetDoctor.doctorId, assignmentStatus: "assigned" });
+    assert.equal(assigned.totalCount, 2);
+    assert.deepEqual(assigned.cases.map((row) => row.appointmentId).sort((left, right) => left - right), [assignedUrgentOverdue, assignedRoutine].sort((left, right) => left - right));
+    assert.ok(assigned.cases.every((row) => row.assignmentStatus === "assigned"));
+    assert.deepEqual(assigned.counters, baseline.counters);
+    const unassigned = await tabCases({ mobileQuickTab: "unassigned", assignmentStatus: "unassigned" });
+    assert.equal(unassigned.totalCount, 3);
+    assert.ok(unassigned.cases.every((row) => row.assignmentStatus === "unassigned"));
+    assert.deepEqual(unassigned.counters, baseline.counters);
+    const urgent = await tabCases({ mobileQuickTab: "urgent", urgentOrStat: true });
+    assert.equal(urgent.totalCount, 3);
+    assert.ok(urgent.cases.every((row) => ["urgent", "stat"].includes(String(row.priorityCode))));
+    assert.deepEqual(urgent.counters, baseline.counters);
+    const overdue = await tabCases({ mobileQuickTab: "overdue", overdue: true, reportStatus: "required_not_final" });
+    assert.equal(overdue.totalCount, 1);
+    assert.ok(overdue.cases.every((row) => row.overdue));
+    assert.deepEqual(overdue.counters, baseline.counters);
+    const all = await tabCases({ mobileQuickTab: "all" });
+    assert.equal(all.totalCount, 5);
+    assert.deepEqual(all.counters, baseline.counters);
+
+    const permanentlyUnassignedCt = await createSavedView(admin, false, {
+      q: label,
+      modalityCode: "CT",
+      caseSource: "appointments",
+      reportStatus: "draft",
+      assignmentStatus: "unassigned",
+    });
+    const lockedBaseline = await reportingBoardService.getPublicReportingBoardMobileView(null, permanentlyUnassignedCt.token, { limit: 10 }) as MobileView;
+    assert.deepEqual(lockedBaseline.counters, { total: 2, assignedToMe: null, unassigned: 2, urgent: 1, requiredNotFinal: 2, overdue: 0 });
+    const lockedUrgent = await reportingBoardService.getPublicReportingBoardMobileView(null, permanentlyUnassignedCt.token, { limit: 10, mobileQuickTab: "urgent", urgentOrStat: true }) as MobileView;
+    assert.equal(lockedUrgent.totalCount, 1);
+    assert.deepEqual(lockedUrgent.counters, lockedBaseline.counters);
+    assert.ok(lockedUrgent.cases.every((row) => row.appointmentId !== excludedMr && row.assignmentStatus === "unassigned"));
+  });
+
   it("scopes personal doctor worklists and atomically claims appointments and comparisons to self", async () => {
     guard();
     const date = addDays(12);
