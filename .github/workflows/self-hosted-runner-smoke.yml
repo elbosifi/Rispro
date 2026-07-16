@@ -1,0 +1,30 @@
+name: Self-hosted runner smoke test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - rispro-ci
+
+    steps:
+      - name: Show runner identity
+        run: |
+          hostname
+          whoami
+          pwd
+
+      - name: Check installed tools
+        run: |
+          node --version
+          npm --version
+          python3 --version
+          docker --version
+          docker compose version
+
+      - name: Test Docker access
+        run: docker run --rm hello-world
