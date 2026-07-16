@@ -1,25 +1,25 @@
-name: Deploy RISpro
+name: Deploy RISpro Dev Server
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: rispro-production-deploy
+  group: rispro-dev-server-deploy
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy production
+    name: Deploy local development server
     runs-on:
       - self-hosted
       - Linux
       - X64
       - rispro-ci
 
-    environment: production
+    environment: development
 
     steps:
-      - name: Verify production SSH connectivity
+      - name: Verify development server SSH connectivity
         run: |
           ssh \
             -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
@@ -29,7 +29,7 @@ jobs:
             rispro-deploy@192.9.101.250 \
             'whoami && hostname'
 
-      - name: Deploy RISpro production
+      - name: Deploy RISpro development server
         run: |
           ssh \
             -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
