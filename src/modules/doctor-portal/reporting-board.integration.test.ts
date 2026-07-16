@@ -845,6 +845,38 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.notEqual(firstComparison, targetComparison);
   });
 
+  it("rejects mobile reassignment and unassignment outside a restrictive saved-view case source", async () => {
+    guard();
+    const date = addDays(8);
+    const label = uniq("mobile_case_source_scope");
+    const appointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} appointment` });
+    const prior = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(7), patientName: `${label} comparison prior` });
+    const comparison = await createComparisonRequestForBooking(prior, `${date}T08:00:00.000Z`, `${label} comparison`);
+    statusByAppointmentId.set(appointment, "draft");
+    await statusByAppointmentId.flush();
+    const comparisonsOnly = await createSavedView(admin, false, { q: label, caseSource: "comparisons" });
+    const appointmentsOnly = await createSavedView(admin, false, { q: label, caseSource: "appointments" });
+    const supervisorActor = { userId: supervisor.id, appRole: "supervisor" as const };
+    const rejectsOutsideSource = async (operation: () => Promise<unknown>) => {
+      await assert.rejects(operation, (error: unknown) =>
+        (error as { statusCode?: number }).statusCode === 404 && (error as Error).message === "Case not found."
+      );
+    };
+
+    await rejectsOutsideSource(() => reportingBoardService.reassignReportingBoardMobileCase(
+      supervisorActor, comparisonsOnly.token, { caseType: "appointment", appointmentId: appointment }, otherDoctor.doctorId, "source scope test"
+    ));
+    await rejectsOutsideSource(() => reportingBoardService.unassignReportingBoardMobileCase(
+      supervisorActor, comparisonsOnly.token, { caseType: "appointment", appointmentId: appointment }, "source scope test"
+    ));
+    await rejectsOutsideSource(() => reportingBoardService.reassignReportingBoardMobileCase(
+      supervisorActor, appointmentsOnly.token, { caseType: "comparison", comparisonRequestId: comparison }, otherDoctor.doctorId, "source scope test"
+    ));
+    await rejectsOutsideSource(() => reportingBoardService.unassignReportingBoardMobileCase(
+      supervisorActor, appointmentsOnly.token, { caseType: "comparison", comparisonRequestId: comparison }, "source scope test"
+    ));
+  });
+
   it("applies default case-list scope, SonicDICOM status filtering, and normalized statuses", async () => {
     guard();
     const date = addDays(10);

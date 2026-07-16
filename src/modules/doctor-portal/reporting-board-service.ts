@@ -1113,6 +1113,10 @@ async function ensureCaseInSavedViewScope(token: string, identity: MobileCaseIde
     limit: 1,
     offset: 0,
   }), identity));
+  const sourceAllowsIdentity = identity.caseType === "appointment"
+    ? sourceAllowsAppointments(filters.caseSource)
+    : sourceAllowsComparisons(filters.caseSource);
+  if (!sourceAllowsIdentity) throw new HttpError(404, "Case not found.");
   const rows = identity.caseType === "appointment"
     ? await listReportingBoardCaseCandidates(filters)
     : await listComparisonReportingBoardRows(filters);
