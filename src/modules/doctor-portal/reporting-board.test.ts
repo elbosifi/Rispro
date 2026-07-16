@@ -500,6 +500,9 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.doesNotMatch(service.slice(service.indexOf("async function applyReportStatuses"), service.indexOf("function fetchLimitForUnifiedCandidates")), /reportStatusChecker\(|studyNoteFetcher\(/);
     assert.match(repository, /reporting_board_sonicdicom_cache/);
     assert.match(repository, /sonicdicom_study_note as "sonicDicomStudyNote"/);
+    const mobileView = service.slice(service.indexOf("export async function getPublicReportingBoardMobileView"), service.indexOf("export async function getPublicReportingBoardMobileCase"));
+    assert.doesNotMatch(mobileView, /checkSonicDicomReportStatusesBatch|fetchSonicDicomStudyNotes|studyNoteFetcher/);
+    assert.match(mobileView, /mobileCase\(row, Boolean\(identity\)\)/);
   });
 });
 

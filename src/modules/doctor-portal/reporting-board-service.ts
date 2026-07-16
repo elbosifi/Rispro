@@ -830,7 +830,7 @@ export async function clearReportingBoardCaseManualFinal(
   return { ok: true, appointmentId, status: "manual_final_cleared", override };
 }
 
-function mobileCase(row: ReportingBoardCaseRow) {
+function mobileCase(row: ReportingBoardCaseRow, includePacsNote: boolean) {
   const overdue = row.requiresReport && row.reportStatus !== "final" && row.bookingDate < todayIso();
   return {
     caseType: row.caseType,
@@ -864,6 +864,9 @@ function mobileCase(row: ReportingBoardCaseRow) {
     overdue,
     linkedPreviousStudyDate: row.linkedPreviousStudyDate,
     linkedPreviousAccessionNumber: row.linkedPreviousAccessionNumber,
+    sonicDicomStudyNote: includePacsNote ? row.sonicDicomStudyNote : null,
+    sonicDicomStudyNoteCheckedAt: includePacsNote ? row.sonicDicomStudyNoteCheckedAt : null,
+    sonicDicomStudyNoteSource: includePacsNote ? row.sonicDicomStudyNoteSource ?? null : null,
   };
 }
 
@@ -1056,7 +1059,7 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
       hasMore: filters.offset + cases.length < allCases.length,
       nextOffset: filters.offset + cases.length < allCases.length ? filters.offset + cases.length : null,
     },
-    cases: cases.map((row) => ({ ...mobileCase(row), ...mobileCaseActions(row, canManage, canClaimToSelf) })),
+    cases: cases.map((row) => ({ ...mobileCase(row, Boolean(identity)), ...mobileCaseActions(row, canManage, canClaimToSelf) })),
     allowedActions: {
       authenticated: Boolean(actor),
       accessLevel,

@@ -176,6 +176,11 @@ export function ReportingBoardMobilePage() {
     queryFn: fetchRosterDoctors,
     enabled: Boolean(viewQuery.data?.allowedActions.reassign),
   });
+  const pushConfigQuery = useQuery({
+    queryKey: ["reporting-board", "mobile", token, "push-config"],
+    queryFn: () => fetchReportingBoardMobilePushConfig(token),
+    enabled: Boolean(token) && pushSupported(),
+  });
 
   const refreshLoadedPages = useCallback(async () => {
     if (refreshInFlight.current) return;
@@ -373,14 +378,15 @@ export function ReportingBoardMobilePage() {
   const unassignedLocked = lockedFilters.assignmentStatus === "assigned" || Boolean(lockedFilters.assignedDoctorId);
   const urgentLocked = Boolean(lockedFilters.priorityCode && !["urgent", "stat"].includes(String(lockedFilters.priorityCode).toLowerCase()));
   const overdueLocked = ["final", "no_report"].includes(String(lockedFilters.reportStatus ?? "").toLowerCase());
-  const activeTemporaryFilterCount = [filters.q, filters.caseCategory, filters.caseSource, filters.sortBy, filters.modalityCode, filters.priorityCode, filters.assignmentStatus, filters.reportStatus, filters.urgentOrStat, filters.overdue]
+  const activeTemporaryFilterCount = [filters.q, filters.caseCategory, filters.caseSource, filters.sortBy && filters.sortBy !== "priority_study_date", filters.modalityCode, filters.modalityId, filters.priorityCode, filters.reportStatus && filters.reportStatus !== lockedFilters.reportStatus, filters.urgentOrStat, filters.overdue]
     .filter((value) => value !== null && value !== undefined && value !== false && value !== "").length;
   const selectedAssigned = filters.assignedDoctorId === assignedCasesDoctorId && filters.assignmentStatus === "assigned";
   const scopeSummary = data.filterSummary.filter((item) => !(selectedAssigned && /assigned/i.test(item)));
-  const scopeDescription = selectedAssigned
-    ? `My assigned ${scopeSummary.join(" ") || "cases"} awaiting final reports`
-    : `${scopeSummary.join(" · ") || "Current"} cases awaiting reports`;
-  const notificationsSupported = pushSupported();
+  const scopeModalitySummary = data.effectiveModalityCodes?.join("/") || data.filterSummary.find((item) => /^(?:[A-Z]{2,4})(?:\/[A-Z]{2,4})*$/.test(item.trim())) || "selected";
+  const scopeDescription = data.savedView.linkKind === "doctor_worklist" && selectedAssigned
+    ? `My assigned ${scopeModalitySummary} cases awaiting final reports`
+    : "Cases awaiting reports";
+  const notificationsSupported = pushSupported() && window.Notification.permission !== "denied" && Boolean(pushConfigQuery.data?.enabled);
 
   return (
     <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-3 text-slate-950">

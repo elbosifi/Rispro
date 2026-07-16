@@ -272,6 +272,13 @@ describe("ReportingBoardMobilePage", () => {
     ));
     await waitFor(() => expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("true"));
     expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("class")).toContain("ring-2");
+    expect(screen.getByTestId("reporting-board-filter-button").textContent).toContain("Filters");
+    expect(screen.getByTestId("reporting-board-filter-button").textContent).not.toContain("Filters 1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search patient, MRN, accession, exam..."), { target: { value: "005279" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("Search patient, MRN, accession, exam..."), { key: "Enter" });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({ q: "005279" })));
+    expect((await screen.findByTestId("reporting-board-filter-button")).textContent).toContain("Filters 1");
 
     const all = screen.getByRole("button", { name: /^All 2$/i });
     fireEvent.click(all);
@@ -337,6 +344,18 @@ describe("ReportingBoardMobilePage", () => {
     await screen.findByText("Mohammed Bashir Meftah");
     expect(screen.queryByText(/Receive alerts for newly assigned/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /^Enable$/i })).toBeNull();
+  });
+
+  it("omits the enable banner when Web Push is disabled server-side", async () => {
+    Object.defineProperty(window, "Notification", { configurable: true, value: { permission: "default", requestPermission: vi.fn() } });
+    Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { getRegistration: vi.fn().mockResolvedValue(null) } });
+    fetchReportingBoardMobilePushConfigMock.mockResolvedValue({ enabled: false, publicKey: null });
+    renderPage();
+
+    await screen.findByText("Mohammed Bashir Meftah");
+    await waitFor(() => expect(fetchReportingBoardMobilePushConfigMock).toHaveBeenCalledWith("tok-9"));
+    expect(screen.queryByText(/Receive alerts for newly assigned/i)).toBeNull();
   });
 
   it("does not show read-only copy when authenticated actions are available", async () => {

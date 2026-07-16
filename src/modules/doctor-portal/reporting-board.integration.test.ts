@@ -781,6 +781,36 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     }
   });
 
+  it("returns cached PACS notes only to authenticated mobile reporting-board readers", async () => {
+    guard();
+    const notedBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "cached-note" });
+    const emptyBookingId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(-1), patientName: "empty-note" });
+    await pool.query(
+      `update doctor_portal.reporting_board_sonicdicom_cache set sonicdicom_study_note = $2, last_success_at = now(), source = 'sonicdicom' where appointment_id = $1`,
+      [notedBookingId, "Cached SonicDICOM study note"]
+    );
+    const view = await createSavedView(admin, false, { appointmentId: notedBookingId });
+    const path = `/api/reporting/saved-views/public/${view.token}/mobile`;
+    const authenticated = await api<{ cases: Array<{ appointmentId: number; sonicDicomStudyNote: string | null; sonicDicomStudyNoteCheckedAt: string | null; sonicDicomStudyNoteSource: string | null }> }>(doctor.cookie, path);
+    assert.equal(authenticated.status, 200);
+    assert.deepEqual(authenticated.data.cases.map((row) => row.appointmentId), [notedBookingId]);
+    assert.equal(authenticated.data.cases[0].sonicDicomStudyNote, "Cached SonicDICOM study note");
+    assert.ok(authenticated.data.cases[0].sonicDicomStudyNoteCheckedAt);
+    assert.equal(authenticated.data.cases[0].sonicDicomStudyNoteSource, "sonicdicom");
+
+    const anonymous = await api<{ cases: Array<{ appointmentId: number; sonicDicomStudyNote: string | null; sonicDicomStudyNoteCheckedAt: string | null; sonicDicomStudyNoteSource: string | null }> }>("", path);
+    assert.equal(anonymous.status, 200);
+    assert.deepEqual(anonymous.data.cases.map((row) => row.appointmentId), [notedBookingId]);
+    assert.equal(anonymous.data.cases[0].sonicDicomStudyNote, null);
+    assert.equal(anonymous.data.cases[0].sonicDicomStudyNoteCheckedAt, null);
+    assert.equal(anonymous.data.cases[0].sonicDicomStudyNoteSource, null);
+
+    const emptyView = await createSavedView(admin, false, { appointmentId: emptyBookingId });
+    const empty = await api<{ cases: Array<{ sonicDicomStudyNote: string | null }> }>(doctor.cookie, `/api/reporting/saved-views/public/${emptyView.token}/mobile`);
+    assert.equal(empty.status, 200);
+    assert.equal(empty.data.cases[0].sonicDicomStudyNote, null);
+  });
+
   it("applies default case-list scope, SonicDICOM status filtering, and normalized statuses", async () => {
     guard();
     const date = addDays(10);
