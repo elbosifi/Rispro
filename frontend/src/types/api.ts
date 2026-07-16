@@ -797,6 +797,9 @@ export interface ReportingBoardMobileCase {
   actionDisabledReason: string | null;
   linkedPreviousStudyDate?: string | null;
   linkedPreviousAccessionNumber?: string | null;
+  sonicDicomStudyNote?: string | null;
+  sonicDicomStudyNoteCheckedAt?: string | null;
+  sonicDicomStudyNoteSource?: "sonicdicom" | null;
 }
 
 export interface ReportingBoardMobileResponse {

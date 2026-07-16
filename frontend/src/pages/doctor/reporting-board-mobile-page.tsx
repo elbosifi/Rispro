@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { Bell, Calendar, Clipboard, FileText, Flame, RefreshCw, Search, SlidersHorizontal, User, UserCheck, Users } from "lucide-react";
+import { Calendar, Clipboard, FileText, Flame, RefreshCw, Search, SlidersHorizontal, User, UserCheck, Users } from "lucide-react";
 import {
   assignReportingBoardMobileCaseToMe,
   fetchReportingBoardMobilePushConfig,
@@ -77,10 +77,22 @@ function Counter({ icon, label, value }: { icon: ReactNode; label: string; value
   );
 }
 
+function normalizePacsNote(note: string | null | undefined): string {
+  return String(note ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () => void }) {
+  const [noteExpanded, setNoteExpanded] = useState(false);
+  const pacsNote = normalizePacsNote(row.sonicDicomStudyNote);
+  const canExpandNote = pacsNote.length > 100 || pacsNote.includes("\n");
   return (
-    <button type="button" onClick={onOpen} className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
-      <div className="flex items-start gap-3">
+    <article className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm">
+      <button type="button" onClick={onOpen} className="w-full text-left">
+        <div className="flex items-start gap-3">
         <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white">
           <User size={22} />
         </div>
@@ -105,14 +117,22 @@ function CaseCard({ row, onOpen }: { row: ReportingBoardMobileCase; onOpen: () =
             </p>
           )}
         </div>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
-        <Info icon={<Calendar size={15} />} label="Date/Time" value={dateTime(row)} />
-        <Info icon={<UserCheck size={15} />} label="Assigned" value={row.assignedDoctor ?? "Unassigned"} />
-        <Info icon={<FileText size={15} />} label="Report" value={labelStatus(row.reportStatus)} />
-        <Info icon={<Clipboard size={15} />} label="Appointment" value={labelStatus(row.appointmentStatus)} />
-      </div>
-    </button>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
+          <Info icon={<Calendar size={15} />} label="Date/Time" value={dateTime(row)} />
+          <Info icon={<UserCheck size={15} />} label="Assigned" value={row.assignedDoctor ?? "Unassigned"} />
+          <Info icon={<FileText size={15} />} label="Report" value={labelStatus(row.reportStatus)} />
+          <Info icon={<Clipboard size={15} />} label="Appointment" value={labelStatus(row.appointmentStatus)} />
+        </div>
+      </button>
+      {pacsNote && (
+        <div className="mt-3 border-t border-slate-100 pt-3 text-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-amber-800">PACS note</p>
+          <p className={`mt-1 whitespace-pre-line text-slate-600 ${noteExpanded ? "" : "line-clamp-2"}`}>{pacsNote}</p>
+          {canExpandNote && <button type="button" aria-expanded={noteExpanded} onClick={() => setNoteExpanded((current) => !current)} className="mt-1 text-xs font-bold text-teal-700">{noteExpanded ? "Show less" : "Show more"}</button>}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -353,26 +373,31 @@ export function ReportingBoardMobilePage() {
   const unassignedLocked = lockedFilters.assignmentStatus === "assigned" || Boolean(lockedFilters.assignedDoctorId);
   const urgentLocked = Boolean(lockedFilters.priorityCode && !["urgent", "stat"].includes(String(lockedFilters.priorityCode).toLowerCase()));
   const overdueLocked = ["final", "no_report"].includes(String(lockedFilters.reportStatus ?? "").toLowerCase());
+  const activeTemporaryFilterCount = [filters.q, filters.caseCategory, filters.caseSource, filters.sortBy, filters.modalityCode, filters.priorityCode, filters.assignmentStatus, filters.reportStatus, filters.urgentOrStat, filters.overdue]
+    .filter((value) => value !== null && value !== undefined && value !== false && value !== "").length;
+  const selectedAssigned = filters.assignedDoctorId === assignedCasesDoctorId && filters.assignmentStatus === "assigned";
+  const scopeSummary = data.filterSummary.filter((item) => !(selectedAssigned && /assigned/i.test(item)));
+  const scopeDescription = selectedAssigned
+    ? `My assigned ${scopeSummary.join(" ") || "cases"} awaiting final reports`
+    : `${scopeSummary.join(" · ") || "Current"} cases awaiting reports`;
+  const notificationsSupported = pushSupported();
 
   return (
-    <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-5 text-slate-950">
+    <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 px-4 pb-6 pt-3 text-slate-950">
       <header className="mx-auto max-w-7xl">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white">RIS<br />pro</div>
-          <div>
-            <h1 className="text-xl font-bold leading-tight">{data.savedView.name} - Reporting Board</h1>
-            <p className="mt-1 text-sm text-slate-500">{data.savedView.linkKind === "doctor_worklist" ? "System-managed doctor scope" : "Administrator saved view"} · {data.filterSummary.join(" · ") || "Current scope"}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold leading-tight">Reporting Board</h1>
+            <p className="mt-0.5 text-sm font-semibold text-slate-700">Dr. {data.savedView.name}</p>
+            <p className="text-xs text-slate-500">Updated {lastUpdated}</p>
           </div>
-        </div>
-        <div className="mt-5 flex items-center justify-between">
-          <p className="text-sm text-slate-500">Last updated {lastUpdated}</p>
-          <button type="button" onClick={() => void refresh()} className="inline-flex items-center gap-2 text-sm font-bold text-teal-700">
-            <RefreshCw size={18} className={viewQuery.isFetching ? "animate-spin" : ""} /> Refresh
+          <button type="button" aria-label="Refresh reporting board" title="Refresh" onClick={() => void refresh()} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-teal-700 shadow-sm">
+            <RefreshCw size={18} className={viewQuery.isFetching ? "animate-spin" : ""} />
           </button>
         </div>
       </header>
 
-      <section className="mx-auto mt-5 flex max-w-7xl gap-3 overflow-x-auto pb-2">
+      <section className="mx-auto mt-5 hidden max-w-7xl gap-3 overflow-x-auto pb-2 min-[1200px]:flex" data-testid="reporting-board-kpi-cards">
         <Counter icon={<Clipboard size={18} />} label="Total" value={data.counters.total} />
         <Counter icon={<UserCheck size={18} />} label="Assigned cases" value={data.counters.assignedToMe} />
         <Counter icon={<Users size={18} />} label="Unassigned" value={data.counters.unassigned} />
@@ -380,7 +405,7 @@ export function ReportingBoardMobilePage() {
         <Counter icon={<Calendar size={18} />} label="Overdue" value={data.counters.overdue} />
       </section>
 
-      <section className="mx-auto mt-5 max-w-7xl">
+      <section className="sticky top-0 z-10 mx-auto mt-4 max-w-7xl bg-slate-50 pb-2">
         <div className="flex gap-2">
           <label className="flex h-12 flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 shadow-sm">
             <Search size={18} className="text-slate-500" />
@@ -392,40 +417,29 @@ export function ReportingBoardMobilePage() {
               className="w-full bg-transparent text-sm outline-none"
             />
           </label>
-          <button type="button" aria-label="Open mobile filters" onClick={() => setFilterDrawerOpen(true)} className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <SlidersHorizontal size={18} />
+          <button type="button" data-testid="reporting-board-filter-button" aria-label="Open mobile filters" onClick={() => setFilterDrawerOpen(true)} className="flex h-12 min-w-12 items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-bold shadow-sm">
+            <SlidersHorizontal size={18} /> <span>Filters{activeTemporaryFilterCount > 0 ? ` ${activeTemporaryFilterCount}` : ""}</span>
           </button>
         </div>
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {assignedCasesDoctorId && <button type="button" aria-pressed={filters.assignedDoctorId === assignedCasesDoctorId && filters.assignmentStatus === "assigned"} disabled={assignedCasesLocked} title={assignedCasesLocked ? "This saved view is locked to another assigned doctor." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignedDoctorId: assignedCasesDoctorId, assignmentStatus: "assigned", priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("teal", filters.assignedDoctorId === assignedCasesDoctorId && filters.assignmentStatus === "assigned")}>Assigned cases {data.counters.assignedToMe}</button>}
+          {assignedCasesDoctorId && <button type="button" aria-pressed={selectedAssigned} disabled={assignedCasesLocked} title={assignedCasesLocked ? "This saved view is locked to another assigned doctor." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignedDoctorId: assignedCasesDoctorId, assignmentStatus: "assigned", priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("teal", selectedAssigned)}>Assigned {data.counters.assignedToMe}</button>}
           <button type="button" aria-pressed={filters.assignmentStatus === "unassigned"} disabled={unassignedLocked} title={unassignedLocked ? "This saved view is locked to assigned cases." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, assignmentStatus: "unassigned", assignedDoctorId: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("slate", filters.assignmentStatus === "unassigned")}>Unassigned {data.counters.unassigned}</button>
           <button type="button" aria-pressed={filters.urgentOrStat === true} disabled={urgentLocked} title={urgentLocked ? "This saved view is locked to a non-urgent priority." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, urgentOrStat: true, priorityCode: null, assignmentStatus: null, assignedDoctorId: null, overdue: false, reportStatus: null }))} className={tabClass("orange", filters.urgentOrStat === true)}>Urgent {data.counters.urgent}</button>
           <button type="button" aria-pressed={filters.overdue === true} disabled={overdueLocked} title={overdueLocked ? "This saved view is locked to a report state that cannot be overdue." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, overdue: true, urgentOrStat: false, priorityCode: null, reportStatus: "required_not_final" }))} className={tabClass("red", filters.overdue === true)}>Overdue {data.counters.overdue}</button>
           <button type="button" aria-pressed={!filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat} onClick={resetTemporaryFilters} className={tabClass("blue", !filters.assignedDoctorId && !filters.assignmentStatus && !filters.priorityCode && !filters.reportStatus && !filters.overdue && !filters.urgentOrStat)}>All {data.counters.total}</button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="font-semibold text-slate-500">Permanent scope:</span>
-          {data.filterSummary.map((item) => <span key={item} className={chipClass("slate")}>{item}</span>)}
-          {(filters.q || filters.assignmentStatus || filters.priorityCode || filters.caseCategory || filters.caseSource || filters.sortBy) && <span className={chipClass("teal")}>Temporary filters active</span>}
+        <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+          <div className="min-w-0"><p className="font-semibold text-slate-700">{scopeDescription}</p><p className="mt-0.5 truncate text-slate-500">Scope: {scopeSummary.join(" · ") || "All cases"}</p></div>
+          <button type="button" onClick={() => setFilterDrawerOpen(true)} className="shrink-0 text-xs font-bold text-teal-700">Edit</button>
         </div>
       </section>
 
       {data.scopeMessage && <p className="mx-auto mt-4 max-w-7xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{data.scopeMessage}</p>}
 
-      <section className="mx-auto mt-4 grid max-w-7xl gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_auto]">
-        <div>
-          {data.allowedActions.readOnly && <p className="font-bold text-slate-950">Read-only saved view.</p>}
-          <p className="text-sm text-slate-500">
-            {data.allowedActions.readOnly ? data.allowedActions.readOnlyReason : "Assignment actions are available for your account."}
-          </p>
-        </div>
-        <p className="text-xs text-slate-500">Events: new matching cases, assigned to me, report final, urgent unassigned, and older than cutoff.</p>
-        {pushLastSuccessAt && <p className="text-xs text-slate-500">Last successful notification: {new Date(pushLastSuccessAt).toLocaleString()}</p>}
-        {!pushEnabled ? <button type="button" disabled={pushSubscribeMutation.isPending} onClick={() => pushSubscribeMutation.mutate()} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 text-sm font-bold text-white disabled:opacity-60"><Bell size={16} /> {pushSubscribeMutation.isPending ? "Enabling..." : "Enable notifications"}</button> : <><button type="button" disabled={pushDisableMutation.isPending} onClick={() => pushDisableMutation.mutate()} className="h-11 rounded-xl border border-slate-300 text-sm font-bold disabled:opacity-60">Disable notifications</button><button type="button" disabled={pushTestMutation.isPending} onClick={() => pushTestMutation.mutate()} className="h-11 rounded-xl border border-slate-300 text-sm font-bold disabled:opacity-60">Send test notification</button></>}
-        {pushMessage && <p className="text-sm font-medium text-teal-700">{pushMessage}</p>}
-      </section>
+      {notificationsSupported && !pushEnabled && <section className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 rounded-xl border border-teal-100 bg-teal-50 px-3 py-2 text-sm text-teal-900"><span>Receive alerts for newly assigned and urgent cases.</span><button type="button" disabled={pushSubscribeMutation.isPending} onClick={() => pushSubscribeMutation.mutate()} className="shrink-0 font-bold text-teal-700 disabled:opacity-60">{pushSubscribeMutation.isPending ? "Enabling..." : "Enable"}</button></section>}
+      {pushMessage && <p className="mx-auto mt-2 max-w-7xl text-sm font-medium text-teal-700">{pushMessage}</p>}
 
-      <section className="mx-auto mt-5 grid max-w-7xl gap-3">
+      <section className="mx-auto mt-3 grid max-w-7xl gap-3">
         {!desktopLayout && <div className="grid gap-3">{loadedCases.map((row) => <CaseCard key={row.caseKey} row={row} onOpen={() => setSelectedCase(row)} />)}</div>}
         {desktopLayout && loadedCases.length > 0 && <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="doctor-worklist-desktop-table">
           <table className="w-full min-w-[1050px] text-left text-sm">
@@ -451,6 +465,7 @@ export function ReportingBoardMobilePage() {
               <label className="grid gap-1 text-sm">Report state<select disabled={Boolean(lockedFilters.reportStatus)} value={filters.reportStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, reportStatus: (event.target.value || null) as ReportingBoardFilters["reportStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100"><option value="">All</option><option value="required_not_final">Required not final</option><option value="draft">Draft</option><option value="final">Final</option></select></label>
               <label className="grid gap-1 text-sm">Case source<select value={filters.caseSource ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, caseSource: (event.target.value || null) as ReportingBoardFilters["caseSource"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="appointments">Appointments</option><option value="comparisons">Comparison requests</option></select></label>
               <label className="grid gap-1 text-sm">Sort<select value={filters.sortBy ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, sortBy: (event.target.value || null) as ReportingBoardFilters["sortBy"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">Priority + study date</option><option value="study_date">Study date</option><option value="longest_unassigned">Longest unassigned</option><option value="oldest_completed">Oldest completed</option></select></label>
+              {notificationsSupported && pushEnabled && <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3"><span className="text-xs text-slate-500">Notifications enabled{pushLastSuccessAt ? ` · last sent ${new Date(pushLastSuccessAt).toLocaleString()}` : ""}</span><div className="flex gap-2"><button type="button" disabled={pushTestMutation.isPending} onClick={() => pushTestMutation.mutate()} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-60">Send test</button><button type="button" disabled={pushDisableMutation.isPending} onClick={() => pushDisableMutation.mutate()} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-60">Disable</button></div></div>}
               <button type="button" onClick={resetTemporaryFilters} className="h-10 rounded-lg border border-teal-600 text-sm font-bold text-teal-700">Reset temporary filters</button>
             </div>
           </section>

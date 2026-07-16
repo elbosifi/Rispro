@@ -65,6 +65,7 @@ const mobileResponse: ReportingBoardMobileResponse = {
       completedAt: "2026-05-25T10:24:00.000Z", firstAssignedAt: null, currentAssignedAt: "2026-05-25T11:00:00.000Z", reportFinalAt: null,
       completedToAssignedMinutes: null, currentAssignmentAgeMinutes: 20, completedUnassignedAgeMinutes: null, completedAgeMinutes: 30, overdue: false,
       canAssignToMe: false, canReassign: false, canUnassign: false, actionDisabledReason: "Open RISpro in this browser with supervisor access to manage assignments.",
+      sonicDicomStudyNote: "Compare with prior CT from May before finalizing.",
     },
     {
       caseType: "appointment",
@@ -90,6 +91,7 @@ const mobileResponse: ReportingBoardMobileResponse = {
       completedAt: "2026-05-25T12:18:00.000Z", firstAssignedAt: null, currentAssignedAt: null, reportFinalAt: null,
       completedToAssignedMinutes: null, currentAssignmentAgeMinutes: null, completedUnassignedAgeMinutes: 20, completedAgeMinutes: 30, overdue: false,
       canAssignToMe: false, canReassign: false, canUnassign: false, actionDisabledReason: "Open RISpro in this browser with supervisor access to manage assignments.",
+      sonicDicomStudyNote: "Long PACS note for the second patient. ".repeat(8),
     },
     {
       caseType: "comparison",
@@ -159,8 +161,10 @@ describe("ReportingBoardMobilePage", () => {
   it("renders a mobile read-only saved view without desktop navigation", async () => {
     renderPage();
 
-    expect(await screen.findByText("Seraj - Reporting Board")).toBeTruthy();
-    expect(screen.getByText("Total")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Reporting Board" })).toBeTruthy();
+    expect(screen.getByText("Dr. Seraj")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Refresh reporting board" })).toBeTruthy();
+    expect(screen.getByTestId("reporting-board-kpi-cards").className).toContain("hidden");
     expect(screen.getByText("Mohammed Bashir Meftah")).toBeTruthy();
     expect(screen.getByText("Comparison Patient")).toBeTruthy();
     expect(screen.getByText("Comparison request")).toBeTruthy();
@@ -169,7 +173,7 @@ describe("ReportingBoardMobilePage", () => {
     expect(screen.queryByText("Reporting Assignment Board")).toBeNull();
     expect(screen.queryByText("Saved views")).toBeNull();
     expect(screen.queryByText("Board settings")).toBeNull();
-    expect(screen.getByText("Read-only saved view.")).toBeTruthy();
+    expect(screen.queryByText("Read-only saved view.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Assign to me" })).toBeNull();
     expect(screen.queryByAltText(/QR code/i)).toBeNull();
   });
@@ -181,6 +185,54 @@ describe("ReportingBoardMobilePage", () => {
     expect(await screen.findByTestId("doctor-worklist-desktop-table")).toBeTruthy();
     expect(screen.getByText("Mohammed Bashir Meftah")).toBeTruthy();
     expect(screen.queryByAltText(/QR code/i)).toBeNull();
+    expect(screen.getByTestId("reporting-board-kpi-cards").className).toContain("min-[1200px]:flex");
+  });
+
+  it("shows the cached PACS note only on its matching patient card and expands notes independently", async () => {
+    renderPage();
+
+    const firstCard = (await screen.findByText("Mohammed Bashir Meftah")).closest("article")!;
+    const secondCard = screen.getByText("Abeer Farhat Salem Al-Sadeq").closest("article")!;
+    expect(within(firstCard).getByText("PACS note")).toBeTruthy();
+    expect(within(firstCard).getByText(/Compare with prior CT/)).toBeTruthy();
+    expect(within(secondCard).getByRole("button", { name: "Show more" }).getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(within(secondCard).getByRole("button", { name: "Show more" }));
+    expect(within(secondCard).getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe("true");
+    expect(within(firstCard).queryByRole("button", { name: "Show less" })).toBeNull();
+  });
+
+  it("renders no PACS-note placeholder when a case has no cached note", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      cases: mobileResponse.cases.map((row) => ({ ...row, sonicDicomStudyNote: null })),
+    });
+    renderPage();
+
+    await screen.findByText("Mohammed Bashir Meftah");
+    expect(screen.queryByText("PACS note")).toBeNull();
+    expect(screen.queryByText("No PACS note.")).toBeNull();
+  });
+
+  it("shows a compact active-filter count on the filter button", async () => {
+    renderPage();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search patient, MRN, accession, exam..."), { target: { value: "005279" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("Search patient, MRN, accession, exam..."), { key: "Enter" });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ q: "005279" })));
+    expect((await screen.findByTestId("reporting-board-filter-button")).textContent).toContain("Filters 1");
+    expect(screen.queryByText("Temporary filters active")).toBeNull();
+  });
+
+  it("keeps the patient card usable when a cached PACS note is absent after a retrieval failure", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue({
+      ...mobileResponse,
+      cases: [{ ...mobileResponse.cases[0], sonicDicomStudyNote: null }],
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Mohammed Bashir Meftah"));
+    expect(screen.getAllByText("CT Chest").length).toBeGreaterThan(0);
   });
 
   it("uses comparison identity for mobile saved-view actions", async () => {
@@ -203,7 +255,7 @@ describe("ReportingBoardMobilePage", () => {
   it("renders the QR reporting view as English LTR", async () => {
     renderPage();
 
-    const heading = await screen.findByRole("heading", { name: "Seraj - Reporting Board" });
+    const heading = await screen.findByRole("heading", { name: "Reporting Board" });
     const page = heading.closest("main");
     expect(page?.getAttribute("lang")).toBe("en");
     expect(page?.getAttribute("dir")).toBe("ltr");
@@ -213,32 +265,32 @@ describe("ReportingBoardMobilePage", () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue(doctorWorklistResponse);
     renderPage();
 
-    await screen.findByRole("button", { name: /Assigned cases 1/i });
+    await screen.findByRole("button", { name: /^Assigned 1$/i });
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
       "tok-9",
       expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: "assigned", reportStatus: null })
     ));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("true"));
-    expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("class")).toContain("ring-2");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("class")).toContain("ring-2");
 
     const all = screen.getByRole("button", { name: /^All 2$/i });
     fireEvent.click(all);
 
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", { limit: 40, offset: 0 }));
     expect(all.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("defaults an anonymous doctor worklist to the target doctor's Assigned cases", async () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue({ ...doctorWorklistResponse, currentDoctorId: null });
     renderPage();
 
-    await screen.findByRole("button", { name: /Assigned cases 1/i });
+    await screen.findByRole("button", { name: /^Assigned 1$/i });
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
       "tok-9",
       expect.objectContaining({ assignedDoctorId: 5, assignmentStatus: "assigned" })
     ));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("true"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("true"));
   });
 
   it("uses the opened worklist target when the target doctor is the authenticated viewer", async () => {
@@ -249,12 +301,12 @@ describe("ReportingBoardMobilePage", () => {
     });
     renderPage();
 
-    await screen.findByRole("button", { name: /Assigned cases 1/i });
+    await screen.findByRole("button", { name: /^Assigned 1$/i });
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith(
       "tok-9",
       expect.objectContaining({ assignedDoctorId: 9, assignmentStatus: "assigned" })
     ));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Assigned cases 1/i }).getAttribute("aria-pressed")).toBe("true"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("true"));
   });
 
   it("opens a mobile case detail sheet", async () => {
@@ -279,15 +331,12 @@ describe("ReportingBoardMobilePage", () => {
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenCalledTimes(3));
   });
 
-  it("does not pin the notification controls over the case list", async () => {
+  it("omits notification controls when the browser does not support them", async () => {
     renderPage();
 
-    const button = await screen.findByRole("button", { name: /Enable notifications/i });
-    expect(button.closest("footer")).toBeNull();
-    const container = button.closest("section");
-    const className = container?.getAttribute("class") ?? "";
-    expect(className).not.toContain("fixed");
-    expect(className).not.toContain("bottom-0");
+    await screen.findByText("Mohammed Bashir Meftah");
+    expect(screen.queryByText(/Receive alerts for newly assigned/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Enable$/i })).toBeNull();
   });
 
   it("does not show read-only copy when authenticated actions are available", async () => {
@@ -298,9 +347,8 @@ describe("ReportingBoardMobilePage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("button", { name: /Enable notifications/i })).toBeTruthy();
     expect(screen.queryByText("Read-only saved view.")).toBeNull();
-    expect(screen.getByText("Assignment actions are available for your account.")).toBeTruthy();
+    expect(await screen.findByText("Mohammed Bashir Meftah")).toBeTruthy();
   });
 
   it("returns an assigned mobile case to the waiting pool only for authenticated actions", async () => {
@@ -354,7 +402,8 @@ describe("ReportingBoardMobilePage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Enable notifications/i }));
+    expect(await screen.findByText("Receive alerts for newly assigned and urgent cases.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /^Enable$/i }));
 
     await waitFor(() => expect(fetchReportingBoardMobilePushConfigMock).toHaveBeenCalledWith("tok-9"));
     await waitFor(() => expect(subscribeReportingBoardMobilePushMock).toHaveBeenCalledWith("tok-9", expect.objectContaining({ endpoint: "https://push.example/sub" })));
