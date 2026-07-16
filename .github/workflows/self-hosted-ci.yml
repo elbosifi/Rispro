@@ -1,0 +1,86 @@
+name: RISpro self-hosted CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rispro-ci:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - rispro-ci
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://rispro:rispro_password@localhost:5432/rispro
+      TEST_DATABASE_URL: postgresql://rispro:rispro_password@localhost:5432/rispro
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: rispro
+      PGUSER: rispro
+      PGPASSWORD: rispro_password
+      JWT_SECRET: ci-test-secret
+      COOKIE_SECURE: "false"
+      COOKIE_SAME_SITE: lax
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Start PostgreSQL test container
+        run: |
+          docker rm -f rispro-ci-postgres 2>/dev/null || true
+          docker run -d \
+            --name rispro-ci-postgres \
+            -e POSTGRES_USER=rispro \
+            -e POSTGRES_PASSWORD=rispro_password \
+            -e POSTGRES_DB=rispro \
+            -p 5432:5432 \
+            postgres:16-alpine
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec rispro-ci-postgres pg_isready -U rispro -d rispro; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rispro-ci-postgres
+          exit 1
+
+      - name: Run migrations
+        run: npm run migrate
+
+      - name: Backend typecheck
+        run: npm run typecheck
+
+      - name: Backend unit tests
+        run: npm run test:backend:unit
+
+      - name: Backend DB-backed tests
+        run: npm run test:backend:db
+
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm run test
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npm run build -- --mode production
+
+      - name: Cleanup PostgreSQL
+        if: always()
+        run: docker rm -f rispro-ci-postgres || true
