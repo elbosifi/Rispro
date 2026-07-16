@@ -3,6 +3,10 @@ name: RISpro self-hosted CI
 on:
   workflow_dispatch:
 
+concurrency:
+  group: rispro-self-hosted-ci
+  cancel-in-progress: false
+
 jobs:
   rispro-ci:
     runs-on:
