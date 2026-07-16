@@ -2,6 +2,9 @@ name: RISpro self-hosted CI
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 concurrency:
   group: rispro-self-hosted-ci
