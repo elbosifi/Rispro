@@ -199,7 +199,7 @@ function formatClockValue(language: Language, value: string | null | undefined):
   if (/^\d{1,2}:\d{2}/.test(text)) return text.slice(0, 5);
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return text;
-  return date.toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return date.toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Tripoli" });
 }
 
 function formatArrivalColumn(language: Language, appointment: AppointmentWithDetails): string {
