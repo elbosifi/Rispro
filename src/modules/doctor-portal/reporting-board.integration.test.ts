@@ -811,6 +811,40 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     assert.equal(empty.data.cases[0].sonicDicomStudyNote, null);
   });
 
+  it("uses the requested non-first mobile case identity for detail, reassignment, and unassignment", async () => {
+    guard();
+    const date = addDays(8);
+    const label = uniq("mobile_identity");
+    const firstAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} first appointment` });
+    const targetAppointment = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: `${label} target appointment` });
+    const firstPrior = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(7), patientName: `${label} first prior` });
+    const targetPrior = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(7), patientName: `${label} target prior` });
+    const firstComparison = await createComparisonRequestForBooking(firstPrior, `${date}T08:00:00.000Z`, `${label} first comparison`);
+    const targetComparison = await createComparisonRequestForBooking(targetPrior, `${date}T08:05:00.000Z`, `${label} target comparison`);
+    [firstAppointment, targetAppointment].forEach((id) => statusByAppointmentId.set(id, "draft"));
+    await statusByAppointmentId.flush();
+    const view = await createSavedView(admin, false, { q: label });
+    const supervisorActor = { userId: supervisor.id, appRole: "supervisor" as const };
+    const baseline = await reportingBoardService.getPublicReportingBoardMobileView(null, view.token, { limit: 100 });
+    assert.equal(baseline.cases.some((row) => row.appointmentId === targetAppointment), true, JSON.stringify(baseline.cases.map((row) => row.appointmentId)));
+
+    const appointmentDetail = await reportingBoardService.getPublicReportingBoardMobileCase(null, view.token, { caseType: "appointment", appointmentId: targetAppointment });
+    assert.equal(appointmentDetail.case.appointmentId, targetAppointment);
+    const comparisonDetail = await reportingBoardService.getPublicReportingBoardMobileCase(null, view.token, { caseType: "comparison", comparisonRequestId: targetComparison });
+    assert.equal(comparisonDetail.case.comparisonRequestId, targetComparison);
+
+    await reportingBoardService.reassignReportingBoardMobileCase(supervisorActor, view.token, { caseType: "appointment", appointmentId: targetAppointment }, otherDoctor.doctorId, "identity regression test");
+    assert.equal(Number((await pool.query(`select assigned_doctor_id from doctor_portal.case_team_assignments where appointment_id = $1 and status = 'active'`, [targetAppointment])).rows[0].assigned_doctor_id), otherDoctor.doctorId);
+    await reportingBoardService.unassignReportingBoardMobileCase(supervisorActor, view.token, { caseType: "appointment", appointmentId: targetAppointment }, "identity regression test");
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.case_team_assignments where appointment_id = $1 and status = 'active'`, [targetAppointment])).rows[0].count, 0);
+
+    await reportingBoardService.reassignReportingBoardMobileCase(supervisorActor, view.token, { caseType: "comparison", comparisonRequestId: targetComparison }, otherDoctor.doctorId, "identity regression test");
+    assert.equal(Number((await pool.query(`select assigned_doctor_id from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active'`, [targetComparison])).rows[0].assigned_doctor_id), otherDoctor.doctorId);
+    await reportingBoardService.unassignReportingBoardMobileCase(supervisorActor, view.token, { caseType: "comparison", comparisonRequestId: targetComparison }, "identity regression test");
+    assert.equal((await pool.query(`select count(*)::int as count from doctor_portal.comparison_case_assignments where comparison_request_id = $1 and status = 'active'`, [targetComparison])).rows[0].count, 0);
+    assert.notEqual(firstComparison, targetComparison);
+  });
+
   it("applies default case-list scope, SonicDICOM status filtering, and normalized statuses", async () => {
     guard();
     const date = addDays(10);

@@ -988,7 +988,7 @@ async function getMobileIdentity(actor?: Actor | null) {
   }
 }
 
-export async function getPublicReportingBoardMobileView(actor: Actor | null, token: string, input: ReportingBoardFilters = {}) {
+export async function getPublicReportingBoardMobileView(actor: Actor | null, token: string, input: ReportingBoardFilters = {}, mobileIdentity: MobileCaseIdentity | null = null) {
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
   const identity = await getMobileIdentity(actor);
@@ -1007,7 +1007,8 @@ export async function getPublicReportingBoardMobileView(actor: Actor | null, tok
     effectiveModalityCodes = scope.effectiveModalityCodes;
     scopeMessage = scope.scopeMessage;
   } else {
-    filters = await effectiveFilters(narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 }));
+    const narrowed = narrowSavedViewFilters(view.filters, { ...input, limit: input.limit ?? 100 });
+    filters = await effectiveFilters(mobileIdentity ? withMobileCaseIdentity(narrowed, mobileIdentity) : narrowed);
     const scopedFilters = filters.modalityCode || filters.modalityId ? filters : { ...filters, modalityCodes: filters.modalityCodes ?? globalSettings.enabledModalityCodes };
     allCases = await listUnifiedReportingBoardCases(scopedFilters, { fullScope: true });
   }
@@ -1081,14 +1082,21 @@ type MobileCaseIdentity =
   | { caseType: "appointment"; appointmentId: number }
   | { caseType: "comparison"; comparisonRequestId: number };
 
+function withMobileCaseIdentity(filters: ReportingBoardFilters, identity: MobileCaseIdentity): ReportingBoardFilters {
+  const caseSource = !filters.caseSource || filters.caseSource === "all"
+    ? identity.caseType === "appointment" ? "appointments" : "comparisons"
+    : filters.caseSource;
+  return identity.caseType === "appointment"
+    ? { ...filters, caseSource, appointmentId: identity.appointmentId, comparisonRequestId: null }
+    : { ...filters, caseSource, appointmentId: null, comparisonRequestId: identity.comparisonRequestId };
+}
+
 export async function getPublicReportingBoardMobileCase(actor: Actor | null, token: string, identity: MobileCaseIdentity, input: ReportingBoardFilters = {}) {
   const view = await getPublicReportingBoardMobileView(actor, token, {
-    ...input,
-    appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,
-    comparisonRequestId: identity.caseType === "comparison" ? identity.comparisonRequestId : null,
+    ...withMobileCaseIdentity(input, identity),
     limit: 1,
     offset: 0,
-  });
+  }, identity);
   const found = view.cases.find((row) =>
     identity.caseType === "appointment"
       ? row.caseType === "appointment" && row.appointmentId === identity.appointmentId
@@ -1101,12 +1109,10 @@ export async function getPublicReportingBoardMobileCase(actor: Actor | null, tok
 async function ensureCaseInSavedViewScope(token: string, identity: MobileCaseIdentity): Promise<void> {
   const view = await findActiveSavedViewByToken(token);
   if (!view) throw new HttpError(404, "Saved view not found.");
-  const filters = await effectiveFilters(narrowSavedViewFilters(view.filters, {
-    appointmentId: identity.caseType === "appointment" ? identity.appointmentId : null,
-    comparisonRequestId: identity.caseType === "comparison" ? identity.comparisonRequestId : null,
+  const filters = await effectiveFilters(withMobileCaseIdentity(narrowSavedViewFilters(view.filters, {
     limit: 1,
     offset: 0,
-  }));
+  }), identity));
   const rows = identity.caseType === "appointment"
     ? await listReportingBoardCaseCandidates(filters)
     : await listComparisonReportingBoardRows(filters);
