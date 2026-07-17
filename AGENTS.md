@@ -35,7 +35,12 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 - Environment preflight: `npm run agent:preflight`
 - Backend typecheck: `npm run typecheck`
 - Frontend typecheck/build: `npm run typecheck:frontend` and `npm run build:frontend`
+- Frontend lint: `npm run lint:frontend`
 - Backend unit tests: `npm run test:backend:unit`
 - Frontend tests: `npm run test:frontend`
 - Harness checks: `npm run harness:all`
+- All test suites (requires the disposable DB to be reachable): `npm run test:suites`
+- Full local quality gate (requires the disposable DB to be reachable): `npm run quality:local`
 - DB-backed tests when local Docker is already ready: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`; otherwise delegate the full suite to required GitHub pull-request CI and report it as pending
+
+`quality:local` is for a complete local run; do not invoke it as an additional CI wrapper around individually reported CI steps. Pull-request CI is the authoritative before-merge result. A successful self-hosted CI run for the exact commit is additionally required before deployment.

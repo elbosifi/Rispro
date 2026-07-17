@@ -4,6 +4,31 @@ on:
   pull_request:
 
 jobs:
+  repository-contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Validate agent contract
+        run: npm run agent:contract
+
+      - name: Run repository harness
+        run: npm run harness:all
+
+      - name: Run deployment-gate regression
+        run: npm run test:deployment:gate
+
   backend-scheduling:
     runs-on: ubuntu-latest
 
@@ -78,9 +103,8 @@ jobs:
         run: >
           node --import tsx --test
           src/domain/scheduling/evaluator.test.ts
-          src/services/appointment-service.hardening.test.ts
-          src/services/appointment-service.integration.test.ts
           src/services/scheduling-settings-service.integration.test.ts
+          src/services/scheduling-settings-service.idempotent.test.ts
 
       - name: Run backup v3 DB restore integration
         env:

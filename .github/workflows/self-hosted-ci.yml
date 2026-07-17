@@ -59,6 +59,15 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Validate agent contract
+        run: npm run agent:contract
+
+      - name: Run repository harness
+        run: npm run harness:all
+
+      - name: Run deployment-gate regression
+        run: npm run test:deployment:gate
+
       - name: Start PostgreSQL test container
         run: |
           docker rm -f rispro-ci-postgres 2>/dev/null || true

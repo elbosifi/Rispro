@@ -11,20 +11,37 @@
 - Agent contract: `npm run agent:contract`
 - Environment preflight: `npm run agent:preflight`
 - Backend typecheck: `npm run typecheck`
-- Frontend typecheck/build: `npm run typecheck:frontend` and `npm run build:frontend`
+- Frontend typecheck/lint/build: `npm run typecheck:frontend`, `npm run lint:frontend`, and `npm run build:frontend`
 - Backend unit tests: `npm run test:backend:unit`
 - Frontend tests: `npm run test:frontend`
 - Harness checks: `npm run harness:all`
+- Deployment-gate regression: `npm run test:deployment:gate`
+- All test suites: `npm run test:suites`
+- Full local quality validation: `npm run quality:local`
+
+## Quality-Gate Command Names
+
+| Need | Command | Database requirement |
+| --- | --- | --- |
+| Fast focused validation | The smallest relevant test command, such as `node --import tsx --test <file>` or `cd frontend && npm run test -- <file>` | Only when the selected test is DB-backed |
+| Backend unit suite | `npm run test:backend:unit` | None |
+| Frontend suite | `npm run test:frontend` | None |
+| Complete test suites | `npm run test:suites` | Disposable Docker test DB must already be reachable |
+| Complete local quality gate | `npm run quality:local` | Disposable Docker test DB must already be reachable |
+
+`test:all` is retired because it did not represent the full quality gate. `test:suites` contains only the unit, frontend, and DB-backed test suites. `quality:local` additionally runs the repository contract, harness, deployment-gate regression, typechecks, frontend lint, and frontend production build.
 
 ## Validation Matrix
 
-| Change type | Local before push | CI before merge |
-| --- | --- | --- |
-| Non-DB changes | Agent contract, relevant typecheck, and targeted unit or frontend test | Required pull-request CI |
-| DB-affecting changes | Agent contract, relevant typecheck, targeted unit tests, and an optional targeted DB test only when Docker is already available and setup is immediate | Migrations, backend DB suite, relevant scheduling/integration gates, and frontend checks where applicable |
-| Environment/Docker tasks | `npm run agent:preflight`, `npm run db:test:up`, `npm run db:test:check`, and the relevant targeted DB test | Confirm the normal CI workflow remains green |
+| Validation context | Required behavior |
+| --- | --- |
+| Local developer validation | Run `npm run agent:contract`, relevant targeted checks, and relevant typechecks. When the disposable Docker DB is already available and a complete local run is warranted, run `npm run quality:local`. Do not start or repair Docker solely for a non-DB task. |
+| Pull-request required validation | The `repository-contract` job runs agent contract, harness, and deployment-gate regression without PostgreSQL. The backend job runs migrations, backend typecheck/unit/DB suites, the named scheduling gate, and the specially configured backup/restore integration. The frontend job runs lint, tests, and production build. A green required pull-request CI result is authoritative before merge. |
+| Self-hosted clean-environment validation | Runs the same repository contract, harness, and deployment-gate regression before starting its disposable PostgreSQL container, then runs migrations, backend typecheck/unit/DB suites, and frontend lint/tests/production build. Pull-request-only named scheduling and backup/restore gates remain visible in PR CI because they provide release-critical and special-environment signals. |
+| Deployment-gate regression validation | `npm run test:deployment:gate` is mandatory in PR and self-hosted CI. It protects workflow/script deployment invariants; it does not replace product tests. |
+| Deployment authorization | Deployment requires a full 40-character commit SHA and a successful self-hosted CI workflow run for that exact SHA, followed by readiness and running build-SHA verification. |
 
-CI delegation is permitted for full DB validation; it is not permission to skip all validation. Known relevant failures must be fixed locally and must not be deferred to CI. Do not copy CI setup, migration, or passing test output into the Codex conversation unless a failure requires diagnosis.
+CI delegation is permitted for full DB validation; it is not permission to skip all validation. Known relevant failures must be fixed locally and must not be deferred to CI. Pending, skipped, blocked, and failed CI checks are not passing. Docker unavailability never authorizes use of a production, personal, or otherwise non-disposable PostgreSQL database. Do not copy CI setup, migration, or passing test output into the Codex conversation unless a failure requires diagnosis.
 
 ## Local DB-Backed Tests
 

@@ -43,21 +43,15 @@ npm run db:test:down
 
 ## Validation Sequence
 
-When local Docker is already operational and focused DB validation is warranted, use this sequence:
+When local Docker is already operational and complete local validation is warranted, use this sequence:
 
 ```powershell
 npm run db:test:up
 npm run db:test:check
-npm run harness:all
-npm run typecheck
-npm run typecheck:frontend
-npm run test:backend:unit
-npm run test:backend:db
-npm run test:frontend
-npm run build:frontend
+npm run quality:local
 ```
 
-`npm run test:db` is the convenience wrapper for `db:test:check`, migrations, and `test:backend:db`.
+`npm run test:suites` runs the backend unit suite, frontend suite, DB readiness check, and backend DB suite. `npm run quality:local` adds the repository contract, harness, deployment-gate regression, typechecks, frontend lint, and production build. `npm run test:db` remains the DB-only convenience wrapper for `db:test:check` and `test:backend:db`.
 
 ## Failure Rules
 
