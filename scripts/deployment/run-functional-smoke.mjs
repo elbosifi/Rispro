@@ -6,6 +6,7 @@ const DEFAULT_READINESS_DELAY_MS = 500;
 const PUBLIC_ERROR_PATH = "/api/public/appointments/cancel-preview";
 const PROTECTED_READ_PATH = "/api/settings/appointment_slip";
 const DEFAULT_SESSION_COOKIE_NAME = "rispro_session";
+const HTTP_DATE_PATTERN = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 
 export class SmokeFailure extends Error {
   constructor(category) {
@@ -162,6 +163,13 @@ function cookieAttributes(cookie) {
   });
 }
 
+function parseValidExpiredCookieDate(value) {
+  if (!HTTP_DATE_PATTERN.test(value)) return null;
+  const expiresAt = Date.parse(value);
+  if (!Number.isFinite(expiresAt) || new Date(expiresAt).toUTCString() !== value) return null;
+  return expiresAt;
+}
+
 function sessionCookie(response, expectedName) {
   const setCookie = setCookieValues(response).find((cookie) => cookieName(cookie) === expectedName && cookieValue(cookie).length > 0);
   return setCookie ? `${expectedName}=${cookieValue(setCookie)}` : null;
@@ -173,8 +181,8 @@ function sessionCookieWasCleared(response, expectedName) {
     return cookieAttributes(cookie).some(({ name, value }) => {
       if (name === "max-age") return value === "0";
       if (name !== "expires") return false;
-      const expiresAt = Date.parse(value);
-      return Number.isFinite(expiresAt) && expiresAt < Date.now();
+      const expiresAt = parseValidExpiredCookieDate(value);
+      return expiresAt !== null && expiresAt < Date.now();
     });
   });
 }

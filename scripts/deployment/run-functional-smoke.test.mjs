@@ -280,6 +280,44 @@ test("requires a structurally valid session-cookie clearing attribute", async ()
   }
 });
 
+test("requires a complete valid past HTTP cookie expiry", async () => {
+  const actualPastExpiry = await startServer({ logoutSessionCookie: "rispro_session=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly" });
+  const zeroExpiry = await startServer({ logoutSessionCookie: "rispro_session=; Expires=0; HttpOnly" });
+  const emptyExpiry = await startServer({ logoutSessionCookie: "rispro_session=; Expires=; HttpOnly" });
+  const malformedExpiry = await startServer({ logoutSessionCookie: "rispro_session=; Expires=not-a-date; HttpOnly" });
+  const incompleteExpiry = await startServer({ logoutSessionCookie: "rispro_session=; Expires=Thu, 01 Jan 1970 00:00:00; HttpOnly" });
+  const trailingExpiry = await startServer({ logoutSessionCookie: "rispro_session=; Expires=Thu, 01 Jan 1970 00:00:00 GMT trailing; HttpOnly" });
+  const futureExpiry = await startServer({ logoutSessionCookie: `rispro_session=; Expires=${new Date(Date.now() + 60_000).toUTCString()}; HttpOnly` });
+  const authenticated = { RISPRO_SMOKE_AUTH_ENABLED: "true", RISPRO_SMOKE_USERNAME: "smoke", RISPRO_SMOKE_PASSWORD: PASSWORD };
+  try {
+    await runFunctionalSmoke(config(actualPastExpiry.baseUrl, authenticated), () => {});
+    for (const fixture of [zeroExpiry, emptyExpiry, malformedExpiry, incompleteExpiry, trailingExpiry, futureExpiry]) {
+      await expectFailure(config(fixture.baseUrl, authenticated), "AUTHENTICATION");
+    }
+  } finally {
+    await actualPastExpiry.close(); await zeroExpiry.close(); await emptyExpiry.close(); await malformedExpiry.close();
+    await incompleteExpiry.close(); await trailingExpiry.close(); await futureExpiry.close();
+  }
+});
+
+test("requires exact numeric Max-Age=0 for session clearing", async () => {
+  const exactMaxAge = await startServer({ logoutSessionCookie: "rispro_session=; MAX-AGE=0; HttpOnly" });
+  const decimalMaxAge = await startServer({ logoutSessionCookie: "rispro_session=; Max-Age=0.5; HttpOnly" });
+  const emptyMaxAge = await startServer({ logoutSessionCookie: "rispro_session=; Max-Age=; HttpOnly" });
+  const suffixMaxAge = await startServer({ logoutSessionCookie: "rispro_session=; Max-Age=0abc; HttpOnly" });
+  const malformedMaxAge = await startServer({ logoutSessionCookie: "rispro_session=; Max-Age=00x; HttpOnly" });
+  const authenticated = { RISPRO_SMOKE_AUTH_ENABLED: "true", RISPRO_SMOKE_USERNAME: "smoke", RISPRO_SMOKE_PASSWORD: PASSWORD };
+  try {
+    await runFunctionalSmoke(config(exactMaxAge.baseUrl, authenticated), () => {});
+    for (const fixture of [decimalMaxAge, emptyMaxAge, suffixMaxAge, malformedMaxAge]) {
+      await expectFailure(config(fixture.baseUrl, authenticated), "AUTHENTICATION");
+    }
+  } finally {
+    await exactMaxAge.close(); await decimalMaxAge.close(); await emptyMaxAge.close();
+    await suffixMaxAge.close(); await malformedMaxAge.close();
+  }
+});
+
 test("accepts a bounded transient readiness delay", async () => {
   const fixture = await startServer({ readyAfter: 1 });
   try { await runFunctionalSmoke(config(fixture.baseUrl), () => {}); } finally { await fixture.close(); }
