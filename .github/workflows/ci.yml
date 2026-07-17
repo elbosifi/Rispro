@@ -93,11 +93,25 @@ jobs:
       - name: Typecheck backend
         run: npm run typecheck
 
-      - name: Run backend unit tests
-        run: npm run test:backend:unit
+      - name: Run backend unit coverage
+        run: npm run test:backend:unit:coverage
 
-      - name: Run backend DB-backed tests
-        run: npm run test:backend:db
+      - name: Run backend DB-backed coverage
+        run: npm run test:backend:db:coverage
+
+      - name: Merge and enforce backend coverage
+        run: npm run coverage:backend:merge
+
+      - name: Write backend coverage summary
+        run: node scripts/coverage/write-summary.mjs backend
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage/backend/
+          if-no-files-found: ignore
 
       - name: Run scheduling test gate
         run: npm run test:backend:scheduling-gate
@@ -129,9 +143,20 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
-      - name: Frontend tests
+      - name: Frontend coverage
         working-directory: frontend
-        run: npm run test
+        run: npm run test:coverage
+
+      - name: Write frontend coverage summary
+        run: node scripts/coverage/write-summary.mjs frontend
+
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          if-no-files-found: ignore
 
       - name: Frontend production build
         working-directory: frontend

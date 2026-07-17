@@ -16,10 +16,24 @@ const requiredFiles = [
   "docs/agents/CANONICAL_FILES.md",
   "scripts/dev/preflight-env.mjs",
   "scripts/dev/test-one-db.mjs",
+  "coverage.config.json",
+  "coverage-thresholds.json",
+  "scripts/coverage/check-coverage.mjs",
+  "scripts/coverage/merge-backend-coverage.mjs",
+  "scripts/coverage/write-summary.mjs",
   "scripts/harness/check-agent-contract.mjs",
 ];
 
-const requiredScripts = ["agent:preflight", "test:db:one", "agent:contract", "test:backend:scheduling-gate"];
+const requiredScripts = [
+  "agent:preflight",
+  "test:db:one",
+  "agent:contract",
+  "test:backend:scheduling-gate",
+  "test:frontend:coverage",
+  "test:backend:unit:coverage",
+  "test:backend:db:coverage",
+  "coverage:backend:merge",
+];
 const requiredEnvKeys = ["DATABASE_URL", "TEST_DATABASE_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"];
 const absoluteLocalPathPattern = /(?:[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s)]+|\/Users\/[^/\s)]+)/g;
 
@@ -33,6 +47,7 @@ for (const script of requiredScripts) {
 }
 
 checkSchedulingGateContract(packageJson);
+checkCoverageContract(packageJson);
 checkE2eEnvironmentContract();
 checkEnv();
 checkDocsForLocalPaths();
@@ -80,6 +95,86 @@ function checkSchedulingGateContract(packageJson) {
   if (!schedulingStep || schedulingStep[1].trim() !== "npm run test:backend:scheduling-gate") {
     errors.push("Pull-request CI scheduling gate must invoke npm run test:backend:scheduling-gate.");
   }
+}
+
+function checkCoverageContract(packageJson) {
+  const thresholds = readJson("coverage-thresholds.json");
+  const metrics = ["statements", "branches", "functions", "lines"];
+  for (const scope of ["frontend", "backend"]) {
+    for (const metric of metrics) {
+      if (!(Number(thresholds?.[scope]?.[metric]) > 0)) {
+        errors.push(`Coverage threshold ${scope}.${metric} must be a nonzero number.`);
+      }
+    }
+  }
+  const domains = thresholds?.criticalDomains;
+  if (!domains || Object.keys(domains).length < 6) {
+    errors.push("Coverage thresholds must define all critical-domain baselines.");
+  } else {
+    for (const [name, domain] of Object.entries(domains)) {
+      if (!Array.isArray(domain.paths) || domain.paths.length === 0) {
+        errors.push(`Critical coverage domain ${name} must document its source scope.`);
+      }
+      for (const metric of metrics) {
+        if (!(Number(domain[metric]) > 0)) {
+          errors.push(`Critical coverage threshold ${name}.${metric} must be nonzero.`);
+        }
+      }
+    }
+  }
+
+  const frontendConfigPath = path.join(repoRoot, "frontend/vitest.config.ts");
+  const frontendConfig = existsSync(frontendConfigPath) ? readFileSync(frontendConfigPath, "utf8") : "";
+  if (!frontendConfig.includes('provider: "v8"') || !frontendConfig.includes("thresholds: coverageThresholds.frontend")) {
+    errors.push("Frontend coverage must use Vitest's V8 provider and the shared threshold configuration.");
+  }
+
+  for (const script of ["test:backend:unit:coverage", "test:backend:db:coverage"]) {
+    const command = packageJson?.scripts?.[script];
+    if (typeof command !== "string" || !command.includes("c8 --config coverage.config.json") || !command.includes("scripts/run-backend-tests.js")) {
+      errors.push(`${script} must collect V8 coverage through c8 around the existing backend runner.`);
+    }
+  }
+
+  const workflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
+  const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
+  const backendJob = jobBlock(workflow, "backend-scheduling");
+  const frontendJob = jobBlock(workflow, "frontend-build");
+  for (const command of ["npm run test:backend:unit:coverage", "npm run test:backend:db:coverage", "npm run coverage:backend:merge"]) {
+    if (countRunCommand(backendJob, command) !== 1) {
+      errors.push(`Pull-request backend CI must invoke ${command} exactly once.`);
+    }
+  }
+  if (countRunCommand(backendJob, "npm run test:backend:unit") !== 0 || countRunCommand(backendJob, "npm run test:backend:db") !== 0) {
+    errors.push("Pull-request backend CI must not duplicate complete normal and coverage suites.");
+  }
+  if (countRunCommand(frontendJob, "npm run test:coverage") !== 1 || countRunCommand(frontendJob, "npm run test") !== 0) {
+    errors.push("Pull-request frontend CI must run the coverage suite once instead of a normal duplicate suite.");
+  }
+  for (const artifact of ["backend-coverage", "frontend-coverage"]) {
+    if (!workflow.includes(`name: ${artifact}`)) errors.push(`Pull-request CI must upload the ${artifact} artifact.`);
+  }
+
+  const gitignorePath = path.join(repoRoot, ".gitignore");
+  const gitignore = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
+  if (!gitignore.includes("/coverage/") || !gitignore.includes("/frontend/coverage/")) {
+    errors.push("Coverage report directories must be ignored.");
+  }
+}
+
+function jobBlock(workflow, jobName) {
+  const marker = `  ${jobName}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start === -1) return "";
+  const nextJob = workflow.slice(start + marker.length).search(/\n  [A-Za-z0-9_-]+:\n/);
+  return nextJob === -1
+    ? workflow.slice(start + marker.length)
+    : workflow.slice(start + marker.length, start + marker.length + nextJob);
+}
+
+function countRunCommand(job, command) {
+  const escaped = command.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+  return (job.match(new RegExp(`^\\s*run: ${escaped}\\s*$`, "gm")) ?? []).length;
 }
 
 function checkE2eEnvironmentContract() {

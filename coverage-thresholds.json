@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "rounding": "Measured values are rounded down to one decimal place for insignificant V8 instrumentation variation.",
+  "frontend": {
+    "statements": 49.7,
+    "branches": 46.6,
+    "functions": 38.9,
+    "lines": 52.9
+  },
+  "backend": {
+    "statements": 62.4,
+    "branches": 68.7,
+    "functions": 66.3,
+    "lines": 62.4
+  },
+  "criticalDomains": {
+    "authentication-and-authorization": {
+      "paths": ["src/middleware/auth.ts", "src/middleware/page-access.ts", "src/routes/auth.ts", "src/services/auth-service.ts", "src/modules/ohif-viewer/validation.ts"],
+      "statements": 65.2,
+      "branches": 71.8,
+      "functions": 71.4,
+      "lines": 65.2
+    },
+    "patient-identity-and-duplicate-detection": {
+      "paths": ["src/services/patient-service.ts", "src/services/patient-directory-service.ts", "src/services/patient-duplicate-", "src/services/patient-not-allowed-name-words-service.ts", "src/services/patient-import-service.ts", "src/utils/identifier.ts", "src/utils/national-id.ts", "src/routes/patients.ts"],
+      "statements": 74.9,
+      "branches": 64.5,
+      "functions": 75,
+      "lines": 74.9
+    },
+    "scheduling-and-overrides": {
+      "paths": ["src/domain/scheduling/", "src/modules/appointments-v2/rules/", "src/modules/appointments-v2/scheduler/", "src/modules/appointments-v2/scheduling-override-requests/", "src/modules/appointments-v2/booking/services/override-authority.ts", "src/modules/appointments-v2/booking/repositories/override-audit.repo.ts"],
+      "statements": 74.6,
+      "branches": 74.7,
+      "functions": 84.5,
+      "lines": 74.6
+    },
+    "appointments": {
+      "paths": ["src/modules/appointments-v2/booking/", "src/modules/appointments-v2/api/routes/appointments-v2-routes.ts"],
+      "statements": 78.7,
+      "branches": 75.1,
+      "functions": 74.7,
+      "lines": 78.7
+    },
+    "queue-and-status-progression": {
+      "paths": ["src/services/queue-service.ts", "src/routes/queue.ts", "src/modules/appointments-v2/booking/services/status-booking.service.ts", "src/modules/appointments-v2/booking/services/no-show-review.service.ts", "src/modules/appointments-v2/booking/services/cancel-booking.service.ts", "src/modules/appointments-v2/booking/services/void-booking.service.ts"],
+      "statements": 52.6,
+      "branches": 75.1,
+      "functions": 46.1,
+      "lines": 52.6
+    },
+    "reporting-board": {
+      "paths": ["src/modules/doctor-portal/reporting-"],
+      "statements": 69.7,
+      "branches": 74.9,
+      "functions": 76.5,
+      "lines": 69.7
+    }
+  }
+}
