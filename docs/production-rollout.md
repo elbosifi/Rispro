@@ -90,7 +90,7 @@ In the GitHub repository, add these secrets:
 
 Add these GitHub Actions variables:
 
-- `DEPLOY_APP_DIR`: full path of the app on the server, for example `/srv/rispro`
+- `DEPLOY_APP_DIR`: full path of the app on the server; for the development environment, set it to `/opt/Rispro`
 - `DEPLOY_BRANCH`: usually `main`
 - `DEPLOY_PORT`: usually `22`
 - `RESTART_MODE`: `systemd`, `pm2`, or `none`

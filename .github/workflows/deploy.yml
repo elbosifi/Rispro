@@ -149,7 +149,10 @@ jobs:
       - name: Run post-deployment functional smoke gate
         env:
           RISPRO_SMOKE_AUTH_ENABLED: "false"
+          DEPLOY_APP_DIR: ${{ vars.DEPLOY_APP_DIR }}
         run: |
+          : "${DEPLOY_APP_DIR:?DEPLOY_APP_DIR GitHub Actions variable is required}"
+
           ssh \
             -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
             -o IdentitiesOnly=yes \
@@ -157,11 +160,18 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             rispro-deploy@192.9.101.250 \
-            bash -s -- "${DEPLOY_SHA}" "${RISPRO_SMOKE_AUTH_ENABLED}" <<'REMOTE_SMOKE'
+            bash -s -- "${DEPLOY_SHA}" "${RISPRO_SMOKE_AUTH_ENABLED}" "${DEPLOY_APP_DIR}" <<'REMOTE_SMOKE'
           set -euo pipefail
           expected_sha="$1"
           auth_enabled="$2"
-          cd /srv/rispro
+          app_dir="$3"
+
+          if [ ! -d "$app_dir" ]; then
+            echo "RISpro deployment directory does not exist: $app_dir" >&2
+            exit 1
+          fi
+
+          cd "$app_dir"
           RISPRO_SMOKE_BASE_URL="http://127.0.0.1:3000" \
           RISPRO_EXPECTED_COMMIT_SHA="$expected_sha" \
           RISPRO_SMOKE_AUTH_ENABLED="$auth_enabled" \

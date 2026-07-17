@@ -35,7 +35,15 @@ grep -q -- '--expected-sha ${DEPLOY_SHA}' "$workflow" || fail 'deployment workfl
 grep -q '/api/ready' "$workflow" || fail 'deployment workflow has no post-deployment readiness check'
 grep -q 'health.buildSha !== expectedSha' "$workflow" || fail 'deployment workflow does not verify the running build SHA'
 grep -q 'test:deployment:smoke' "$workflow" || fail 'deployment workflow does not run the functional smoke gate'
-grep -q 'cd /srv/rispro' "$workflow" || fail 'deployment smoke gate does not enter the deployed checkout'
+if grep -q 'cd /srv/rispro' "$workflow"; then
+  fail 'deployment smoke gate hardcodes the legacy application directory'
+fi
+grep -q 'DEPLOY_APP_DIR: \${{ vars.DEPLOY_APP_DIR }}' "$workflow" || fail 'deployment smoke gate does not read the DEPLOY_APP_DIR Actions variable'
+grep -q ': "\${DEPLOY_APP_DIR:?DEPLOY_APP_DIR GitHub Actions variable is required}"' "$workflow" || fail 'deployment smoke gate does not require a non-empty DEPLOY_APP_DIR'
+grep -q 'bash -s -- "\${DEPLOY_SHA}" "\${RISPRO_SMOKE_AUTH_ENABLED}" "\${DEPLOY_APP_DIR}"' "$workflow" || fail 'deployment smoke gate does not pass DEPLOY_APP_DIR to the remote shell'
+grep -q 'app_dir="\$3"' "$workflow" || fail 'deployment smoke gate does not read the remote application directory argument'
+grep -q '\[ ! -d "\$app_dir" \]' "$workflow" || fail 'deployment smoke gate does not validate the remote application directory'
+grep -q 'cd "\$app_dir"' "$workflow" || fail 'deployment smoke gate does not enter the configured application directory'
 grep -q 'RISPRO_SMOKE_BASE_URL="http://127.0.0.1:3000"' "$workflow" || fail 'deployment smoke gate does not use an explicit target URL'
 
 readiness_line="$(grep -n '/api/ready' "$workflow" | tail -n 1 | cut -d: -f1)"
