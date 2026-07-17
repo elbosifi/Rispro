@@ -21,7 +21,7 @@ Frontend reports are written to `frontend/coverage/`. Backend per-suite reports 
 
 ## Instrumentation and aggregation
 
-Frontend coverage uses Vitest's supported V8 provider through `@vitest/coverage-v8`. `test:frontend:coverage` runs the existing Vitest suite once; it does not run a normal suite first.
+Frontend coverage uses Vitest's supported V8 provider through `@vitest/coverage-v8`. `test:frontend:coverage` runs the existing Vitest suite once; it does not run a normal suite first. Its coverage-only command permits a 10-second test timeout because V8 instrumentation can add runner overhead on shared CI hardware; test assertions and the normal-suite timeout remain unchanged.
 
 Backend coverage uses `c8`, which consumes V8 data and works with Node 22 and the repository's `tsx` loader. The existing backend runner is left intact. `c8` sets `NODE_V8_COVERAGE`, inherited by every Node test child process. Unit and DB runs write separate raw data directories; `coverage:backend:merge` copies the raw reports into a deterministic merge directory, generates the merged reports, and enforces the global and critical-domain floors. This captures every sequential DB child without rerunning that suite.
 
