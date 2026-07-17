@@ -25,13 +25,20 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient, c
             englishFullName: patient.englishFullName,
             category: patient.category,
             identifierType: patient.identifierType,
-            identifierValue: patient.identifierValue,
+            identifierValue: patient.maskedPrimaryIdentifier ?? patient.identifierValue,
             nationalId: patient.nationalId,
             mrn: patient.mrn,
             sex: patient.sex,
             ageYears: patient.ageYears,
             demographicsEstimated: patient.demographicsEstimated,
             phone1: patient.phone1 ?? patient.phone ?? null,
+            estimatedDateOfBirth: patient.estimatedDateOfBirth,
+            identityRisk: patient.identityRisk,
+            similarPatientCount: patient.similarPatientCount,
+            availableVerificationMethods: patient.availableVerificationMethods,
+            patientIdentityVerificationProof: patient.patientIdentityVerificationProof,
+            patientIdentityVerificationMethod: patient.patientIdentityVerificationMethod,
+            patientIdentitySelectionSource: patient.patientIdentitySelectionSource ?? "search",
           });
         }}
         selectedPatient={value}

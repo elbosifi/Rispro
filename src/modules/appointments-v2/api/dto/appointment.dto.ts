@@ -24,6 +24,18 @@ export interface CreateAppointmentDto {
   isWalkIn?: boolean;
   policySetKey?: string;
   noShowAuthorizationReason?: string | null;
+  patientIdentityVerificationProof?: string | null;
+  /** Presentation source retained only for safe identity-selection audit metadata. */
+  patientIdentitySelectionSource?: "search" | "url_preselect";
+  /** Internal sanitized assertion used only by deferred scheduling approval. */
+  patientIdentityVerificationAssertion?: {
+    patientId: number;
+    verifierUserId: number;
+    verificationMethod: "primary_identifier" | "exact_dob" | "phone_suffix";
+    verifiedAt: string;
+    identityFingerprint: string;
+    ambiguityRuleVersion: "name_first_three_v1";
+  } | null;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;

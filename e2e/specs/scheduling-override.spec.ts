@@ -10,8 +10,10 @@ test("a reception capacity block requires supervisor approval and persists the a
   await test.step("reception requests the full-capacity exception", async () => {
     await signInWithSession(reception, "e2e_reception");
     await reception.goto("/appointments");
-    await reception.getByPlaceholder("Search patient by name, national ID, or MRN…").fill("E2E Similar Two");
-    await reception.getByRole("button", { name: /e2e similar two/i }).click();
+    await reception.getByPlaceholder("Search patient by name, national ID, or MRN…").fill("E2E Similar Patient Two");
+    await reception.getByRole("button", { name: /e2e similar patient two/i }).click();
+    await reception.getByPlaceholder("Enter identifier").fill("100000000002");
+    await reception.getByRole("button", { name: "Verify and select" }).click();
     await reception.getByLabel(/modality/i).selectOption({ label: "E2E CT — التصوير المقطعي E2E" });
     await reception.getByLabel(/exam type/i).selectOption({ label: "E2E CT Head — رأس E2E" });
     await reception.getByLabel(/start date/i).fill(fullFixtureDate);
@@ -32,7 +34,7 @@ test("a reception capacity block requires supervisor approval and persists the a
     await signInWithSession(approver, "e2e_super_admin");
     await approver.goto("/dashboard");
     await approver.getByRole("button", { name: /override/i }).click();
-    await expect(approver.getByText("E2E Similar Two")).toBeVisible();
+    await expect(approver.getByText("E2E Similar Patient Two")).toBeVisible();
     await approver.getByLabel(/approval note for request/i).fill("E2E super-admin approval for the total-capacity exception.");
     await approver.getByRole("button", { name: "Approve" }).click();
     await approver.locator('input[autocomplete="current-password"]').fill(E2E_PASSWORD);

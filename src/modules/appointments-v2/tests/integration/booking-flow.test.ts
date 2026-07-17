@@ -152,6 +152,28 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     return Number(patientResult.rows[0].id);
   }
 
+  async function createSimilarPatientsForIdentityTest(): Promise<{ firstPatientId: number; secondPatientId: number; firstIdentifier: string; searchTerm: string }> {
+    const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
+    const searchTerm = `BOOKING_ Similar Patient ${suffix}`;
+    const firstIdentifier = `3${randomUUID().replace(/-/g, "").slice(0, 11)}`;
+    const secondIdentifier = `4${randomUUID().replace(/-/g, "").slice(0, 11)}`;
+    const result = await pool.query<{ id: number }>(
+      `insert into patients (
+        arabic_full_name, english_full_name, national_id, normalized_arabic_name,
+        sex, age_years, estimated_date_of_birth, demographics_estimated, phone_1,
+        identifier_type, identifier_value
+      ) values
+        ($1, $2, $3, $4, 'M', 30, '1995-01-02', false, '0912345678', 'national_id', $3),
+        ($5, $6, $7, $8, 'F', 31, '1994-01-02', false, '0912345679', 'national_id', $7)
+      returning id`,
+      [
+        `مريض تشابه ${suffix} واحد`, `${searchTerm} One`, firstIdentifier, `مريض تشابه ${suffix} واحد`,
+        `مريض تشابه ${suffix} اثنان`, `${searchTerm} Two`, secondIdentifier, `مريض تشابه ${suffix} اثنان`,
+      ]
+    );
+    return { firstPatientId: Number(result.rows[0].id), secondPatientId: Number(result.rows[1].id), firstIdentifier, searchTerm };
+  }
+
   async function createBookingForStatusTest(date: string, patientId: number = testData.patientId): Promise<number> {
     const createResult = await fetch("/api/v2/appointments", {
       method: "POST",
@@ -189,6 +211,55 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   }
 
   describe("Create booking", () => {
+    it("requires a scoped non-name verification proof for an ambiguous patient and records safe audit metadata", async () => {
+      guard();
+      const similar = await createSimilarPatientsForIdentityTest();
+      const search = await fetch(`/api/v2/appointments/patient-selection/search?q=${encodeURIComponent(similar.searchTerm)}`);
+      assert.equal(search.status, 200);
+      const rows = (search.data as { patients: Array<Record<string, unknown>> }).patients;
+      const selected = rows.find((row) => Number(row.id) === similar.firstPatientId);
+      assert.equal(selected?.identityRisk, "ambiguous");
+      assert.equal(selected?.similarPatientCount, 1);
+      assert.equal(selected?.maskedPrimaryIdentifier, `••••${similar.firstIdentifier.slice(-4)}`);
+      assert.equal(JSON.stringify(selected).includes(similar.firstIdentifier), false);
+
+      const bookingPayload = {
+        patientId: similar.firstPatientId,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: "2026-06-07",
+        bookingTime: null,
+        caseCategory: "non_oncology",
+      };
+      const missingProof = await fetch("/api/v2/appointments", { method: "POST", body: bookingPayload });
+      assert.equal(missingProof.status, 422);
+      assert.match(JSON.stringify(missingProof.data), /patient_identity_verification_required/);
+
+      const verification = await fetch(`/api/v2/appointments/patient-selection/${similar.firstPatientId}/verify`, {
+        method: "POST",
+        body: { method: "primary_identifier", evidence: similar.firstIdentifier },
+      });
+      assert.equal(verification.status, 200);
+      const proof = (verification.data as { proof?: unknown }).proof;
+      assert.equal(typeof proof, "string");
+
+      const created = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: { ...bookingPayload, patientIdentityVerificationProof: proof },
+      });
+      assert.equal(created.status, 201);
+
+      const audit = await pool.query<{ action_type: string; new_values: unknown }>(
+        `select action_type, new_values from audit_log
+         where entity_type = 'appointment_patient_identity' and entity_id = $1
+         order by id asc`,
+        [similar.firstPatientId]
+      );
+      assert.ok(audit.rows.some((row) => row.action_type === "appointment_patient_identity_verification_rejected"));
+      assert.ok(audit.rows.some((row) => row.action_type === "appointment_patient_identity_verified"));
+      assert.equal(JSON.stringify(audit.rows).includes(similar.firstIdentifier), false);
+    });
+
     it("should create a booking successfully", async () => {
       guard();
       const { status, data } = await fetch("/api/v2/appointments", {

@@ -51,6 +51,16 @@ export interface CreateBookingPayload {
   notes?: string | null;
   isWalkIn?: boolean;
   noShowAuthorizationReason?: string | null;
+  patientIdentityVerificationProof?: string | null;
+  patientIdentitySelectionSource?: "search" | "url_preselect";
+  patientIdentityVerificationAssertion?: {
+    patientId: number;
+    verifierUserId: number;
+    verificationMethod: "primary_identifier" | "exact_dob" | "phone_suffix";
+    verifiedAt: string;
+    identityFingerprint: string;
+    ambiguityRuleVersion: "name_first_three_v1";
+  } | null;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;

@@ -14,6 +14,13 @@ export interface SelectedPatient {
   ageYears?: number | null;
   demographicsEstimated?: boolean;
   phone1?: string | null;
+  estimatedDateOfBirth?: string | null;
+  identityRisk?: "none" | "ambiguous";
+  similarPatientCount?: number;
+  availableVerificationMethods?: Array<"primary_identifier" | "exact_dob" | "phone_suffix">;
+  patientIdentityVerificationProof?: string | null;
+  patientIdentityVerificationMethod?: "primary_identifier" | "exact_dob" | "phone_suffix" | null;
+  patientIdentitySelectionSource?: "search" | "url_preselect";
 }
 
 export interface CreateAppointmentFormModel {
@@ -74,7 +81,7 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
       setForm((prev) => ({
         ...prev,
         patientId: patient?.id ?? null,
-        patient,
+        patient: patient ? { ...patient, patientIdentityVerificationProof: patient.patientIdentityVerificationProof ?? null, patientIdentityVerificationMethod: patient.patientIdentityVerificationMethod ?? null, patientIdentitySelectionSource: patient.patientIdentitySelectionSource ?? "search" } : null,
         caseCategory: defaultCategory,
         requiresReport: defaultRequiresReport,
         reportRequiredManuallyOverridden: false,

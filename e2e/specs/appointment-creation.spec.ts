@@ -5,8 +5,11 @@ test("reception creates a capacity-compliant appointment through the real schedu
   await signInWithSession(page, "e2e_reception");
   await page.goto("/appointments");
 
-  await page.getByPlaceholder("Search patient by name, national ID, or MRN…").fill("E2E Similar One");
-  await page.getByRole("button", { name: /e2e similar one/i }).click();
+  await page.getByPlaceholder("Search patient by name, national ID, or MRN…").fill("E2E Similar Patient One");
+  await page.getByRole("button", { name: /e2e similar patient one/i }).click();
+  await expect(page.getByRole("heading", { name: "Verify patient identity" })).toBeVisible();
+  await page.getByPlaceholder("Enter identifier").fill("100000000001");
+  await page.getByRole("button", { name: "Verify and select" }).click();
   await page.getByLabel(/modality/i).selectOption({ label: "E2E CT — التصوير المقطعي E2E" });
   await page.getByLabel(/exam type/i).selectOption({ label: "E2E CT Head — رأس E2E" });
 
@@ -16,7 +19,7 @@ test("reception creates a capacity-compliant appointment through the real schedu
   await page.getByRole("button", { name: /^create appointment$/i }).click();
 
   await expect(page.getByText(/appointment created|appointment successful/i)).toBeVisible();
-  await expect(page.getByText("E2E Similar One")).toBeVisible();
+  await expect(page.getByText("E2E Similar Patient One")).toBeVisible();
   await page.getByRole("button", { name: "Print View" }).click();
   await expect(page).toHaveURL(/\/print\?appointmentId=\d+/);
 });

@@ -49,6 +49,8 @@ import {
 } from "../../../../services/patient-no-show-restriction-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import { createPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
+import { logAuditEntry } from "../../../../services/audit-service.js";
+import { resolvePatientIdentityRisk, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion } from "../../../../services/patient-selection-safety-service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -56,19 +58,32 @@ export interface CreateBookingResult {
   wasOverride: boolean;
 }
 
+export interface CreateBookingIdentityVerificationOptions {
+  requirePatientIdentityVerification?: boolean;
+  selectionSource?: "search" | "url_preselect" | "deferred_override";
+  assertion?: PatientIdentityVerificationAssertion | null;
+}
+
 export async function createBooking(
   payload: CreateBookingPayload,
   userId: number,
   userRole: Role | undefined,
   policySetKey: string = "default",
-  approvedOverrideContext?: ApprovedOverrideContext
+  approvedOverrideContext?: ApprovedOverrideContext,
+  identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
-  const result = await withTransaction(async (client) => {
-    return createBookingInternal(client, payload, userId, userRole, policySetKey, approvedOverrideContext);
-  }, {
-    isolationLevel: "serializable",
-    operationName: "create_booking",
-  });
+  let result: CreateBookingResult;
+  try {
+    result = await withTransaction(async (client) => {
+      return createBookingInternal(client, payload, userId, userRole, policySetKey, approvedOverrideContext, identityVerificationOptions);
+    }, { isolationLevel: "serializable", operationName: "create_booking" });
+  } catch (error) {
+    const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;
+    if (details?.code?.startsWith("patient_identity_")) {
+      await logAuditEntry({ entityType: "appointment_patient_identity", entityId: payload.patientId, actionType: "appointment_patient_identity_verification_rejected", newValues: { outcome: "rejected", code: details.code, source: identityVerificationOptions.selectionSource ?? "search", ambiguityRuleVersion: "name_first_three_v1" }, changedByUserId: userId }).catch(() => undefined);
+    }
+    throw error;
+  }
 
   scheduleBookingWorklistSync(result.booking.id);
   return result;
@@ -108,11 +123,28 @@ export async function createBookingInternal(
   userId: number,
   userRole: Role | undefined,
   policySetKey: string,
-  approvedOverrideContext?: ApprovedOverrideContext
+  approvedOverrideContext?: ApprovedOverrideContext,
+  identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
 ): Promise<CreateBookingResult> {
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
   await assertPatientMeetsBookingQueueRequirements(client, payload.patientId, userRole);
+  let identityVerificationAssertion: PatientIdentityVerificationAssertion | null = null;
+  if (identityVerificationOptions.requirePatientIdentityVerification) {
+    const risk = await resolvePatientIdentityRisk(payload.patientId, client);
+    if (risk.identityRisk === "ambiguous") {
+      if (identityVerificationOptions.assertion) {
+        const assertion = identityVerificationOptions.assertion;
+        const expectedVerifierUserId = approvedOverrideContext?.requesterUserId ?? userId;
+        if (assertion.patientId !== payload.patientId || assertion.verifierUserId !== expectedVerifierUserId || assertion.identityFingerprint !== risk.identityFingerprint || assertion.ambiguityRuleVersion !== risk.ambiguityRuleVersion) {
+          throw new HttpError(422, "Patient identity verification is required again.", { code: "patient_identity_reverification_required" });
+        }
+        identityVerificationAssertion = assertion;
+      } else {
+        identityVerificationAssertion = validatePatientIdentityVerificationProof(payload.patientIdentityVerificationProof, { patientId: payload.patientId, userId, risk });
+      }
+    }
+  }
   let noShowAuthorization: { userId: number; reason: string; role: Role } | null = null;
   if (await isNoShowBookingBlocked(client, payload.patientId)) {
     if (payload.override) {
@@ -151,6 +183,7 @@ export async function createBookingInternal(
       throw new HttpError(400, "An intended reporting doctor requires requiresReport=true.");
     }
   }
+
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -434,6 +467,15 @@ export async function createBookingInternal(
       reason: payload.intendedReportingDoctorReason ?? null,
       createdFromContext: "appointment_create",
     });
+  }
+
+  if (identityVerificationAssertion) {
+    await logAuditEntry({
+      entityType: "appointment_patient_identity", entityId: payload.patientId,
+      actionType: "appointment_patient_identity_verified",
+      newValues: { outcome: "successful", bookingId: booking.id, patientId: payload.patientId, verificationMethod: identityVerificationAssertion.verificationMethod, ambiguityCount: (await resolvePatientIdentityRisk(payload.patientId, client)).similarPatientCount, ambiguityRuleVersion: identityVerificationAssertion.ambiguityRuleVersion, source: identityVerificationOptions.selectionSource ?? "search" },
+      changedByUserId: userId,
+    }, client);
   }
 
   // 10. Record override audit if applicable

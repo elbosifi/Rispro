@@ -1,4 +1,4 @@
-import { createV2Booking, evaluateV2Scheduling, useV2Lookups, useV2SpecialReasonCodes, useV2Priorities } from "./api";
+import { createV2Booking, evaluateV2Scheduling, fetchV2AppointmentPatientRisk, useV2Lookups, useV2SpecialReasonCodes, useV2Priorities } from "./api";
 import { CreateAppointmentTab } from "./components/CreateAppointmentTab";
 import { useAuth } from "@/providers/auth-provider";
 import { useSearchParams } from "react-router-dom";
@@ -27,24 +27,29 @@ export function AppointmentCreatePage() {
 
   const preloadPatientQuery = useQuery({
     queryKey: ["patient-by-id", parsedPatientId],
-    queryFn: () => fetchPatientById(parsedPatientId as number),
+    queryFn: () => Promise.all([fetchPatientById(parsedPatientId as number), fetchV2AppointmentPatientRisk(parsedPatientId as number)]),
     enabled: hasValidPatientId,
     staleTime: 1000 * 60 * 5
   });
 
   const initialSelectedPatient: SelectedPatient | null = preloadPatientQuery.data
     ? {
-        id: preloadPatientQuery.data.id,
-        arabicFullName: preloadPatientQuery.data.arabicFullName,
-        englishFullName: preloadPatientQuery.data.englishFullName,
-        category: preloadPatientQuery.data.category,
-        identifierType: preloadPatientQuery.data.identifierType,
-        identifierValue: preloadPatientQuery.data.identifierValue,
-        nationalId: preloadPatientQuery.data.nationalId,
-        mrn: preloadPatientQuery.data.mrn,
-        sex: preloadPatientQuery.data.sex,
-        ageYears: preloadPatientQuery.data.ageYears,
-        demographicsEstimated: preloadPatientQuery.data.demographicsEstimated
+        id: preloadPatientQuery.data[0].id,
+        arabicFullName: preloadPatientQuery.data[0].arabicFullName,
+        englishFullName: preloadPatientQuery.data[0].englishFullName,
+        category: preloadPatientQuery.data[0].category,
+        identifierType: preloadPatientQuery.data[0].identifierType,
+        identifierValue: preloadPatientQuery.data[1].maskedPrimaryIdentifier,
+        nationalId: null,
+        mrn: preloadPatientQuery.data[0].mrn,
+        sex: preloadPatientQuery.data[0].sex,
+        ageYears: preloadPatientQuery.data[0].ageYears,
+        demographicsEstimated: preloadPatientQuery.data[0].demographicsEstimated,
+        estimatedDateOfBirth: preloadPatientQuery.data[1].estimatedDateOfBirth,
+        identityRisk: preloadPatientQuery.data[1].identityRisk,
+        similarPatientCount: preloadPatientQuery.data[1].similarPatientCount,
+        availableVerificationMethods: preloadPatientQuery.data[1].availableVerificationMethods,
+        patientIdentitySelectionSource: "url_preselect"
       }
     : null;
 

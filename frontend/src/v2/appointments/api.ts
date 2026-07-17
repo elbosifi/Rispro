@@ -20,6 +20,8 @@ import type {
   RescheduleBookingResponse,
   SchedulingOverrideRequestDto,
   SchedulingOverrideRequestFilters,
+  AppointmentPatientSelection,
+  PatientIdentityVerificationMethod,
   CreateSchedulingOverrideRequestInput,
   ApproveSchedulingOverrideRequestInput,
   PolicyStatusDto,
@@ -29,6 +31,20 @@ import type {
   SpecialReasonCodeDto,
   IntendedReportingDoctorOption,
 } from "./types";
+
+export async function searchV2AppointmentPatients(query: string): Promise<AppointmentPatientSelection[]> {
+  const response = await api<{ patients: AppointmentPatientSelection[] }>(`/v2/appointments/patient-selection/search?q=${encodeURIComponent(query)}`);
+  return response.patients;
+}
+
+export async function fetchV2AppointmentPatientRisk(patientId: number): Promise<AppointmentPatientSelection> {
+  const response = await api<{ patient: AppointmentPatientSelection }>(`/v2/appointments/patient-selection/${patientId}/risk`);
+  return response.patient;
+}
+
+export async function verifyV2AppointmentPatientIdentity(patientId: number, method: PatientIdentityVerificationMethod, evidence: string): Promise<{ proof: string; verificationMethod: PatientIdentityVerificationMethod; verifiedAt: string }> {
+  return api(`/v2/appointments/patient-selection/${patientId}/verify`, { method: "POST", body: JSON.stringify({ method, evidence }) });
+}
 
 function toOptionalNumber(value: number | string | null | undefined): number | null {
   if (value == null || value === "") return null;

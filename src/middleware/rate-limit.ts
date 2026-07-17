@@ -5,9 +5,10 @@ interface RateLimiterOptions {
   windowMs: number;
   maxRequests: number;
   message: string;
+  errorCode?: string;
 }
 
-export function createRateLimiter({ windowMs, maxRequests, message }: RateLimiterOptions) {
+export function createRateLimiter({ windowMs, maxRequests, message, errorCode }: RateLimiterOptions) {
   const requestLog = new Map<string, number[]>();
 
   setInterval(() => {
@@ -32,7 +33,7 @@ export function createRateLimiter({ windowMs, maxRequests, message }: RateLimite
     const timestamps = (requestLog.get(key) ?? []).filter((timestamp) => timestamp > cutoff);
 
     if (timestamps.length >= maxRequests) {
-      return next(new HttpError(429, message));
+      return next(new HttpError(429, message, errorCode ? { code: errorCode } : null));
     }
 
     timestamps.push(now);

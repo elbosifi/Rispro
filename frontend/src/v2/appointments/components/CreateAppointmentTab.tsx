@@ -490,6 +490,9 @@ export function CreateAppointmentTab({
 
   function validateBaseFields(): string | null {
     if (!form.patientId) return t(language, "appointments.create.missingPatient");
+    if (form.patient?.identityRisk === "ambiguous" && !form.patient.patientIdentityVerificationProof) {
+      return language === "ar" ? "يجب التحقق من هوية المريض قبل إنشاء الموعد." : "Verify the patient identity before creating the appointment.";
+    }
     if (!form.modalityId) return t(language, "appointments.create.missingModality");
     if (!form.examTypeId) return t(language, "appointments.create.missingExamType");
     if (!form.appointmentDate) return t(language, "appointments.create.selectedDateUnavailable");
@@ -534,6 +537,8 @@ export function CreateAppointmentTab({
         patientNoShowSummary?.bookingRestricted && !override && canDirectlyAuthorizeNoShowRestriction
           ? noShowAuthorizationReason.trim()
           : null,
+      patientIdentityVerificationProof: form.patient?.patientIdentityVerificationProof ?? null,
+      patientIdentitySelectionSource: form.patient?.patientIdentitySelectionSource ?? "search",
     };
     if (showIntendedReportingDoctor && form.intendedReportingDoctorId) {
       request.intendedReportingDoctorId = form.intendedReportingDoctorId;
@@ -732,6 +737,7 @@ export function CreateAppointmentTab({
           requiresReport: form.requiresReport,
           notes: form.notes.trim() || null,
           isWalkIn: form.isWalkIn,
+          patientIdentityVerificationProof: form.patient?.patientIdentityVerificationProof ?? null,
         },
       });
       setRequestOverrideOpen(false);

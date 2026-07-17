@@ -179,11 +179,15 @@ router.post(
         notes: body.notes ?? null,
         isWalkIn: body.isWalkIn ?? false,
         noShowAuthorizationReason: body.noShowAuthorizationReason ?? null,
+        patientIdentityVerificationProof: body.patientIdentityVerificationProof ?? null,
+        patientIdentitySelectionSource: body.patientIdentitySelectionSource === "url_preselect" ? "url_preselect" : "search",
         override: body.override,
       },
       userId,
       userRole,
-      body.policySetKey ?? "default"
+      body.policySetKey ?? "default",
+      undefined,
+      { requirePatientIdentityVerification: true, selectionSource: body.patientIdentitySelectionSource === "url_preselect" ? "url_preselect" : "search" }
     );
 
     res.status(201).json({

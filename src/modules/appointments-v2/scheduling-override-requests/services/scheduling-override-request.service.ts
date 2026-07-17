@@ -12,6 +12,9 @@ import { createBookingInternal } from "../../booking/services/create-booking.ser
 import { rescheduleBookingInternal } from "../../booking/services/reschedule-booking.service.js";
 import { scheduleBookingWorklistSync, scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
+import { resolvePatientIdentityRisk, validatePatientIdentityVerificationProof } from "../../../../services/patient-selection-safety-service.js";
+import { logAuditEntry } from "../../../../services/audit-service.js";
+import { HttpError } from "../../../../utils/http-error.js";
 import {
   safeNotifySchedulingOverrideApprovalFailed,
   safeNotifySchedulingOverrideApproved,
@@ -519,6 +522,7 @@ function normalizeCreatePayload(payload: Record<string, unknown>): CreateAppoint
     notes: getString(payload.notes) || null,
     isWalkIn: payload.isWalkIn === true,
     policySetKey: normalizePolicySetKey(payload),
+    patientIdentityVerificationProof: getString(payload.patientIdentityVerificationProof) || null,
   };
 }
 
@@ -665,7 +669,9 @@ export async function createSchedulingOverrideRequest(
     throw new SchedulingError(400, "Requester reason is required.", ["requester_reason_required"]);
   }
 
-  const created = await withTransaction(async (client) => {
+  let created: SchedulingOverrideRequestRow;
+  try {
+    created = await withTransaction(async (client) => {
     if (role === "receptionist" && !(await canReceptionistCreateOverrideRequest(client, userId))) {
       throw new SchedulingError(403, "This reception user is not allowed to request scheduling override approval.", ["override_requests_disabled"]);
     }
@@ -687,6 +693,14 @@ export async function createSchedulingOverrideRequest(
 
     if (requestType === "create_booking") {
       const createPayload = normalizeCreatePayload(payloadRecord);
+      const identityRisk = await resolvePatientIdentityRisk(createPayload.patientId, client);
+      if (identityRisk.identityRisk === "ambiguous") {
+        createPayload.patientIdentityVerificationAssertion = validatePatientIdentityVerificationProof(
+          createPayload.patientIdentityVerificationProof,
+          { patientId: createPayload.patientId, userId, risk: identityRisk }
+        );
+      }
+      delete createPayload.patientIdentityVerificationProof;
       decision = await evaluateCreatePayload(client, createPayload);
       patientId = createPayload.patientId;
       modalityId = createPayload.modalityId;
@@ -744,7 +758,23 @@ export async function createSchedulingOverrideRequest(
       createdFromContext: input.createdFromContext ?? null,
     });
     return hydrateRequestForResponse(client, request);
-  }, { isolationLevel: "serializable", operationName: "create_scheduling_override_request" });
+    }, { isolationLevel: "serializable", operationName: "create_scheduling_override_request" });
+  } catch (error) {
+    const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;
+    if (details?.code?.startsWith("patient_identity_")) {
+      const payload = input.requestPayload && typeof input.requestPayload === "object" && !Array.isArray(input.requestPayload)
+        ? input.requestPayload as Record<string, unknown>
+        : {};
+      await logAuditEntry({
+        entityType: "appointment_patient_identity",
+        entityId: getNumber(payload.patientId) || null,
+        actionType: "appointment_patient_identity_verification_rejected",
+        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_first_three_v1" },
+        changedByUserId: userId,
+      }).catch(() => undefined);
+    }
+    throw error;
+  }
   safeNotifySchedulingOverrideCreated(created);
   return created;
 }
@@ -875,7 +905,8 @@ export async function approveSchedulingOverrideRequest(
         payload.policySetKey,
         requiredOverrideType
           ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideType: requiredOverrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
-          : undefined
+          : undefined,
+        { requirePatientIdentityVerification: true, selectionSource: "deferred_override", assertion: createPayload.patientIdentityVerificationAssertion ?? null }
       );
       booking = bookingResult.booking;
       createdOrUpdatedBookingId = bookingResult.booking.id;

@@ -12,6 +12,7 @@ import { adminSchedulingV2Router } from "./api/routes/admin-scheduling-v2-routes
 import { lookupsV2Router } from "./api/routes/lookups-v2-routes.js";
 import { readV2Router } from "./api/routes/read-v2-routes.js";
 import { schedulingOverrideRequestRouter } from "./api/routes/scheduling-override-request-routes.js";
+import { patientSelectionRouter } from "./api/routes/patient-selection-routes.js";
 
 /**
  * Create and return the complete V2 router tree.
@@ -26,6 +27,7 @@ export function createAppointmentsV2Router(): Router {
   const v2Router = Router();
 
   // Booking endpoints
+  v2Router.use("/appointments/patient-selection", patientSelectionRouter);
   v2Router.use("/appointments", appointmentsV2Router);
 
   // Scheduling decision + availability endpoints

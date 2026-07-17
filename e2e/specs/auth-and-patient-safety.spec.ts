@@ -31,18 +31,18 @@ test("similar synthetic patients remain distinguishable and duplicate entry warn
   await signInWithSession(page, "e2e_reception");
   await page.goto("/patients");
   await page.getByPlaceholder("Search patients by name, national ID, MRN, or phone...").fill("E2E Similar");
-  await expect(page.getByText("E2E Similar One")).toBeVisible();
-  await expect(page.getByText("E2E Similar Two")).toBeVisible();
+  await expect(page.getByText("E2E Similar Patient One")).toBeVisible();
+  await expect(page.getByText("E2E Similar Patient Two")).toBeVisible();
   await expect(page.getByText("0910000001").first()).toBeVisible();
   await expect(page.getByText("0910000002").first()).toBeVisible();
 
-  await page.getByText("E2E Similar Two").first().click();
+  await page.getByText("E2E Similar Patient Two").first().click();
   await expect(page.getByText("100000000002")).toBeVisible();
 
   await page.goto("/patients/new");
-  await page.getByLabel(/arabic full name/i).fill("اختبار تشابه واحد");
+  await page.getByLabel(/arabic full name/i).fill("اختبار تشابه مريض واحد");
   await page.getByLabel(/national id/i).fill("100000000001");
   await expect(page.getByRole("heading", { name: /possible duplicates/i })).toBeVisible();
-  await expect(page.getByText("E2E Similar One")).toBeVisible();
+  await expect(page.getByText("E2E Similar Patient One")).toBeVisible();
   await expect(page.getByText("100000000001")).toBeVisible();
 });

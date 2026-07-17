@@ -19,6 +19,26 @@ export type BookingStatus =
   | "no-show"
   | "cancelled"
   | "voided";
+export type PatientIdentityRisk = "none" | "ambiguous";
+export type PatientIdentityVerificationMethod = "primary_identifier" | "exact_dob" | "phone_suffix";
+
+export interface AppointmentPatientSelection {
+  id: number;
+  arabicFullName: string;
+  englishFullName: string | null;
+  mrn: string | null;
+  category: "oncology" | "non_oncology" | null;
+  sex: string | null;
+  estimatedDateOfBirth: string | null;
+  demographicsEstimated: boolean;
+  primaryIdentifierType: string | null;
+  maskedPrimaryIdentifier: string | null;
+  maskedPhone1: string | null;
+  identityRisk: PatientIdentityRisk;
+  similarPatientCount: number;
+  availableVerificationMethods: PatientIdentityVerificationMethod[];
+  ambiguityRuleVersion: "name_first_three_v1";
+}
 
 /**
  * Booking statuses that allow rescheduling.
@@ -159,6 +179,8 @@ export interface CreateBookingRequest {
   notes: string | null;
   isWalkIn?: boolean;
   noShowAuthorizationReason?: string | null;
+  patientIdentityVerificationProof?: string | null;
+  patientIdentitySelectionSource?: "search" | "url_preselect";
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;

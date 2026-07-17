@@ -106,10 +106,10 @@ try {
     );
   }
   await pool.query(
-    `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
+    `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, estimated_date_of_birth, demographics_estimated, phone_1, identifier_type, identifier_value)
      values
-       ('اختبار تشابه واحد', 'E2E Similar One', '100000000001', 'اختبار تشابه واحد', 'M', 41, '0910000001', 'national_id', '100000000001'),
-       ('اختبار تشابه اثنان', 'E2E Similar Two', '100000000002', 'اختبار تشابه اثنان', 'F', 39, '0910000002', 'national_id', '100000000002')`,
+       ('اختبار تشابه مريض واحد', 'E2E Similar Patient One', '100000000001', 'اختبار تشابه مريض واحد', 'M', 41, '1985-01-02', false, '0910000001', 'national_id', '100000000001'),
+       ('اختبار تشابه مريض اثنان', 'E2E Similar Patient Two', '100000000002', 'اختبار تشابه مريض اثنان', 'F', 39, '1987-02-03', false, '0910000002', 'national_id', '100000000002')`,
   );
   console.log("Seeded synthetic E2E users: reception, supervisor, super admin, doctor.");
 } finally {
