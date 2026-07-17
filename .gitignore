@@ -13,6 +13,8 @@ restore-v3-validation-*/
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 typecheck_*.txt
+playwright-report/
+test-results/
 
 # .NET scanner companion build outputs
 tools/rispro-scanner-app/**/bin/
