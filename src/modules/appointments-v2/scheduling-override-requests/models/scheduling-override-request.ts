@@ -19,6 +19,7 @@ export interface SchedulingOverrideRequestRow {
   bookingId: number | null;
   requestedPolicyVersionId: number | null;
   approvedPolicyVersionId: number | null;
+  patientIdentityVerificationFingerprint: string | null;
   requestPayloadJson: SchedulingOverrideStoredPayload;
   originalDecisionSnapshotJson: unknown;
   approvalDecisionSnapshotJson: unknown | null;

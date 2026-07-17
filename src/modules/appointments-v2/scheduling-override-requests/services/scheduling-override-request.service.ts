@@ -690,15 +690,24 @@ export async function createSchedulingOverrideRequest(
     let requestedBookingDate: string;
     let requestedBookingTime: string | null;
     let bookingId: number | null = null;
+    let patientIdentityVerificationFingerprint: string | null = null;
 
     if (requestType === "create_booking") {
       const createPayload = normalizeCreatePayload(payloadRecord);
       const identityRisk = await resolvePatientIdentityRisk(createPayload.patientId, client);
       if (identityRisk.identityRisk === "ambiguous") {
-        createPayload.patientIdentityVerificationAssertion = validatePatientIdentityVerificationProof(
+        const proofAssertion = validatePatientIdentityVerificationProof(
           createPayload.patientIdentityVerificationProof,
           { patientId: createPayload.patientId, userId, risk: identityRisk }
         );
+        patientIdentityVerificationFingerprint = proofAssertion.identityFingerprint;
+        createPayload.patientIdentityVerificationAssertion = {
+          patientId: proofAssertion.patientId,
+          verifierUserId: proofAssertion.verifierUserId,
+          verificationMethod: proofAssertion.verificationMethod,
+          verifiedAt: proofAssertion.verifiedAt,
+          ambiguityRuleVersion: proofAssertion.ambiguityRuleVersion,
+        };
       }
       delete createPayload.patientIdentityVerificationProof;
       decision = await evaluateCreatePayload(client, createPayload);
@@ -751,6 +760,7 @@ export async function createSchedulingOverrideRequest(
       requestedBookingTime,
       bookingId,
       requestedPolicyVersionId: policyVersionId(decision),
+      patientIdentityVerificationFingerprint,
       requestPayload: storedPayload,
       originalDecisionSnapshot: decision,
       requesterReason,
@@ -835,7 +845,9 @@ export async function approveSchedulingOverrideRequest(
   let createdOrUpdatedBookingId: number | null = null;
   let rescheduleNotification: RescheduleNotificationInfo | null = null;
 
-  const result = await withTransaction(async (client) => {
+  let result: { request: SchedulingOverrideRequestRow; booking?: unknown };
+  try {
+    result = await withTransaction(async (client) => {
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
@@ -906,7 +918,7 @@ export async function approveSchedulingOverrideRequest(
         requiredOverrideType
           ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideType: requiredOverrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
           : undefined,
-        { requirePatientIdentityVerification: true, selectionSource: "deferred_override", assertion: createPayload.patientIdentityVerificationAssertion ?? null }
+        { requirePatientIdentityVerification: true, selectionSource: "deferred_override", assertion: createPayload.patientIdentityVerificationAssertion ?? null, expectedIdentityFingerprint: request.patientIdentityVerificationFingerprint }
       );
       booking = bookingResult.booking;
       createdOrUpdatedBookingId = bookingResult.booking.id;
@@ -1005,7 +1017,24 @@ export async function approveSchedulingOverrideRequest(
       },
     });
     return { request: await hydrateRequestDisplayName(client, approved), booking };
-  }, { isolationLevel: "serializable", operationName: "approve_scheduling_override_request" });
+    }, { isolationLevel: "serializable", operationName: "approve_scheduling_override_request" });
+  } catch (error) {
+    const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;
+    if (details?.code?.startsWith("patient_identity_")) {
+      const patient = await pool.query<{ patient_id: number }>(
+        `select patient_id from appointments_v2.scheduling_override_requests where id = $1`,
+        [id]
+      );
+      await logAuditEntry({
+        entityType: "appointment_patient_identity",
+        entityId: Number(patient.rows[0]?.patient_id || 0) || null,
+        actionType: "appointment_patient_identity_verification_rejected",
+        newValues: { outcome: "rejected", code: details.code, source: "deferred_override", ambiguityRuleVersion: "name_first_three_v1" },
+        changedByUserId: approverUserId,
+      }).catch(() => undefined);
+    }
+    throw error;
+  }
 
   if (result.request.status === "failed") {
     safeNotifySchedulingOverrideApprovalFailed(result.request, approverUserId);

@@ -491,7 +491,7 @@ export function CreateAppointmentTab({
   function validateBaseFields(): string | null {
     if (!form.patientId) return t(language, "appointments.create.missingPatient");
     if (form.patient?.identityRisk === "ambiguous" && !form.patient.patientIdentityVerificationProof) {
-      return language === "ar" ? "يجب التحقق من هوية المريض قبل إنشاء الموعد." : "Verify the patient identity before creating the appointment.";
+      return t(language, "appointments.identity.verificationRequiredBeforeBooking");
     }
     if (!form.modalityId) return t(language, "appointments.create.missingModality");
     if (!form.examTypeId) return t(language, "appointments.create.missingExamType");

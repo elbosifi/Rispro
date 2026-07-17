@@ -50,7 +50,7 @@ import {
 import { HttpError } from "../../../../utils/http-error.js";
 import { createPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
-import { resolvePatientIdentityRisk, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion } from "../../../../services/patient-selection-safety-service.js";
+import { resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -61,7 +61,8 @@ export interface CreateBookingResult {
 export interface CreateBookingIdentityVerificationOptions {
   requirePatientIdentityVerification?: boolean;
   selectionSource?: "search" | "url_preselect" | "deferred_override";
-  assertion?: PatientIdentityVerificationAssertion | null;
+  assertion?: PatientIdentityVerificationStoredAssertion | null;
+  expectedIdentityFingerprint?: string | null;
 }
 
 export async function createBooking(
@@ -134,12 +135,13 @@ export async function createBookingInternal(
     const risk = await resolvePatientIdentityRisk(payload.patientId, client);
     if (risk.identityRisk === "ambiguous") {
       if (identityVerificationOptions.assertion) {
-        const assertion = identityVerificationOptions.assertion;
         const expectedVerifierUserId = approvedOverrideContext?.requesterUserId ?? userId;
-        if (assertion.patientId !== payload.patientId || assertion.verifierUserId !== expectedVerifierUserId || assertion.identityFingerprint !== risk.identityFingerprint || assertion.ambiguityRuleVersion !== risk.ambiguityRuleVersion) {
-          throw new HttpError(422, "Patient identity verification is required again.", { code: "patient_identity_reverification_required" });
-        }
-        identityVerificationAssertion = assertion;
+        identityVerificationAssertion = revalidateStoredPatientIdentityAssertion(identityVerificationOptions.assertion, {
+          patientId: payload.patientId,
+          verifierUserId: expectedVerifierUserId,
+          expectedIdentityFingerprint: identityVerificationOptions.expectedIdentityFingerprint,
+          risk,
+        });
       } else {
         identityVerificationAssertion = validatePatientIdentityVerificationProof(payload.patientIdentityVerificationProof, { patientId: payload.patientId, userId, risk });
       }

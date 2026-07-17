@@ -79,4 +79,23 @@ describe("PatientSearch", () => {
     expect(screen.getByText("No usable non-name identifier is recorded. Update the patient record before scheduling; name-only selection is not permitted.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Verify and select" }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("labels synthetic demographic dates as estimated rather than exact DOB", async () => {
+    searchPatients.mockResolvedValue([{
+      id: 10,
+      arabicFullName: "مريض بيانات تقديرية",
+      englishFullName: "Estimated Demographics Patient",
+      category: "non_oncology",
+      ageYears: 46,
+      estimatedDateOfBirth: "1980-01-02",
+      demographicsEstimated: true,
+      identityRisk: "none",
+      availableVerificationMethods: ["phone_suffix"],
+    }]);
+
+    render(<LanguageProvider><PatientSearch selectedPatient={null} onSelect={vi.fn()} onClear={vi.fn()} caseCategory="non_oncology" /></LanguageProvider>);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Estimated" } });
+    await waitFor(() => expect(searchPatients).toHaveBeenCalledWith("Estimated"));
+    expect(await screen.findByText(/Estimated DOB: 1980-01-02/)).toBeTruthy();
+  });
 });

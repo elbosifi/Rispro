@@ -6,9 +6,10 @@ interface RateLimiterOptions {
   maxRequests: number;
   message: string;
   errorCode?: string;
+  key?: (req: Request) => string;
 }
 
-export function createRateLimiter({ windowMs, maxRequests, message, errorCode }: RateLimiterOptions) {
+export function createRateLimiter({ windowMs, maxRequests, message, errorCode, key: getKey }: RateLimiterOptions) {
   const requestLog = new Map<string, number[]>();
 
   setInterval(() => {
@@ -27,7 +28,7 @@ export function createRateLimiter({ windowMs, maxRequests, message, errorCode }:
   }, windowMs).unref();
 
   return function rateLimiter(req: Request, _res: Response, next: NextFunction): void {
-    const key = req.ip ?? "unknown";
+    const key = getKey?.(req) ?? req.ip ?? "unknown";
     const now = Date.now();
     const cutoff = now - windowMs;
     const timestamps = (requestLog.get(key) ?? []).filter((timestamp) => timestamp > cutoff);

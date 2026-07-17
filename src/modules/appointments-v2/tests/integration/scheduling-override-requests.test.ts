@@ -251,6 +251,28 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     return Number(row.rows[0].id);
   }
 
+  async function createAmbiguousPatients() {
+    const { pool } = await import("../../../../db/pool.js");
+    const suffix = Math.random().toString().slice(2, 10);
+    const firstIdentifier = `8${suffix.padEnd(11, "0").slice(0, 11)}`;
+    const secondIdentifier = `9${suffix.padEnd(11, "1").slice(0, 11)}`;
+    const result = await pool.query<{ id: number }>(
+      `insert into patients (
+        arabic_full_name, english_full_name, national_id, normalized_arabic_name,
+        sex, age_years, estimated_date_of_birth, demographics_estimated, phone_1,
+        identifier_type, identifier_value
+      ) values
+        ($1, $2, $3, $4, 'M', 40, '1986-01-02', false, '0910001234', 'national_id', $3),
+        ($5, $6, $7, $8, 'F', 39, '1987-02-03', false, '0910005678', 'national_id', $7)
+      returning id`,
+      [
+        `OVREQ تشابه مريض ${suffix} واحد`, `OVREQ Similar Patient ${suffix} One`, firstIdentifier, `OVREQ تشابه مريض ${suffix} واحد`,
+        `OVREQ تشابه مريض ${suffix} اثنان`, `OVREQ Similar Patient ${suffix} Two`, secondIdentifier, `OVREQ تشابه مريض ${suffix} اثنان`,
+      ]
+    );
+    return { patientId: Number(result.rows[0].id), firstIdentifier, dateOfBirth: "1986-01-02", phoneSuffix: "1234" };
+  }
+
   async function fillNonOncologyCategory(date: string, count = 5) {
     for (let i = 0; i < count; i += 1) {
       const patientId = await createPatient();
@@ -269,7 +291,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     }
   }
 
-  async function requestCategoryOverride(date: string, patientId = 0, cookie = receptionistCookie) {
+  async function requestCategoryOverride(date: string, patientId = 0, cookie = receptionistCookie, patientIdentityVerificationProof: string | null = null) {
     const targetPatientId = patientId || await createPatient();
     return fetchAs(cookie, "/api/v2/scheduling-override-requests", {
       method: "POST",
@@ -284,6 +306,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
           bookingTime: null,
           caseCategory: "non_oncology",
           policySetKey: testData.policySetKey,
+          patientIdentityVerificationProof,
         },
         createdFromContext: "integration_test",
       },
@@ -331,6 +354,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
               requested_booking_date::text,
               requested_booking_time::text,
               request_payload_json,
+              patient_identity_verification_fingerprint,
               approval_decision_snapshot_json
        from appointments_v2.scheduling_override_requests
        where id = $1`,
@@ -343,6 +367,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       requested_booking_date: string;
       requested_booking_time: string | null;
       request_payload_json: any;
+      patient_identity_verification_fingerprint: string | null;
       approval_decision_snapshot_json: unknown | null;
     };
   }
@@ -421,6 +446,52 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(audit.rows[0].override_reason, "Approved for urgent clinical need");
     assert.equal(audit.rows[0].outcome, "approved_and_booked");
     assert.equal(Number(audit.rows[0].decision_snapshot.deferredApprovalRequestId), Number((requested.data as any).request.id));
+  });
+
+  it("stores only safe deferred identity metadata and rejects approval after the verified identity changes", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-02-08";
+    await fillNonOncologyCategory(date);
+    const patient = await createAmbiguousPatients();
+    const verification = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patient.patientId}/verify`, {
+      method: "POST",
+      body: { method: "primary_identifier", evidence: patient.firstIdentifier },
+    });
+    assert.equal(verification.status, 200);
+    const proof = String((verification.data as { proof?: unknown }).proof || "");
+    assert.ok(proof);
+
+    const requested = await requestCategoryOverride(date, patient.patientId, receptionistCookie, proof);
+    assert.equal(requested.status, 201, JSON.stringify(requested.data));
+    assert.equal(JSON.stringify(requested.data).includes("patientIdentityVerificationFingerprint"), false);
+    const requestId = Number((requested.data as any).request.id);
+    const stored = await getRequestFromDb(requestId);
+    const deferredJson = JSON.stringify(stored.request_payload_json);
+    assert.ok(stored.patient_identity_verification_fingerprint);
+    for (const secret of [patient.firstIdentifier, patient.dateOfBirth, patient.phoneSuffix, proof, "identityFingerprint"]) {
+      assert.equal(deferredJson.includes(secret), false);
+    }
+
+    const { pool } = await import("../../../../db/pool.js");
+    await pool.query(`update patients set phone_1 = '0910009999' where id = $1`, [patient.patientId]);
+    const approval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Verified identity changed after request." },
+    });
+    assert.equal(approval.status, 422);
+    assert.match(JSON.stringify(approval.data), /patient_identity_reverification_required/);
+    assert.equal(await countBookings(date, patient.patientId), 0);
+
+    const audit = await pool.query<{ new_values: unknown }>(
+      `select new_values from audit_log where entity_type = 'appointment_patient_identity' and entity_id = $1`,
+      [patient.patientId]
+    );
+    assert.equal(JSON.stringify(audit.rows).includes(patient.firstIdentifier), false);
+    assert.equal(JSON.stringify(audit.rows).includes(patient.dateOfBirth), false);
+    assert.equal(JSON.stringify(audit.rows).includes(patient.phoneSuffix), false);
+    assert.equal(JSON.stringify(audit.rows).includes(proof), false);
+    assert.equal(JSON.stringify(audit.rows).includes(stored.patient_identity_verification_fingerprint!), false);
   });
 
   it("approves a closed weekday deferred request without bypassing capacity rules", async () => {

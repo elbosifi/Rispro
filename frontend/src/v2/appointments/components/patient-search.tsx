@@ -91,6 +91,7 @@ function renderSex(sex?: string | null, language: "ar" | "en" = "en"): string {
 }
 
 interface IdentityVerificationDialogProps {
+  language: "ar" | "en";
   patient: Patient | null;
   method: PatientIdentityVerificationMethod | null;
   evidence: string;
@@ -103,6 +104,7 @@ interface IdentityVerificationDialogProps {
 }
 
 function IdentityVerificationDialog({
+  language,
   patient,
   method,
   evidence,
@@ -118,30 +120,30 @@ function IdentityVerificationDialog({
     <Dialog open={patient != null} onClose={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Verify patient identity</DialogTitle>
-          <DialogDescription>Another patient has a similar name. Verify a non-name identifier before selecting this patient.</DialogDescription>
+          <DialogTitle>{t(language, "appointments.identity.verifyTitle")}</DialogTitle>
+          <DialogDescription>{t(language, "appointments.identity.verifyDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           {methods.map((availableMethod) => (
             <label key={availableMethod} className="flex items-center gap-2 text-sm">
               <input type="radio" checked={method === availableMethod} onChange={() => onMethodChange(availableMethod)} />
-              {availableMethod === "primary_identifier" ? "Complete primary identifier" : availableMethod === "exact_dob" ? "Exact date of birth" : "Final four Phone 1 digits"}
+              {availableMethod === "primary_identifier" ? t(language, "appointments.identity.methodPrimaryIdentifier") : availableMethod === "exact_dob" ? t(language, "appointments.identity.methodExactDob") : t(language, "appointments.identity.methodPhoneSuffix")}
             </label>
           ))}
           {methods.length === 0 ? (
-            <p className="text-sm text-amber-700">No usable non-name identifier is recorded. Update the patient record before scheduling; name-only selection is not permitted.</p>
+            <p className="text-sm text-amber-700">{t(language, "appointments.identity.noUsableMethod")}</p>
           ) : (
             <Input
               value={evidence}
               onChange={(event) => onEvidenceChange(event.target.value)}
-              placeholder={method === "exact_dob" ? "YYYY-MM-DD" : method === "phone_suffix" ? "Last four digits" : "Enter identifier"}
+              placeholder={method === "exact_dob" ? "YYYY-MM-DD" : method === "phone_suffix" ? t(language, "appointments.identity.phoneSuffixPlaceholder") : t(language, "appointments.identity.primaryIdentifierPlaceholder")}
             />
           )}
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={onSubmit} disabled={verifying || !method || !evidence.trim()}>{verifying ? "Verifying…" : "Verify and select"}</Button>
+          <Button variant="secondary" onClick={onClose}>{t(language, "appointments.create.cancel")}</Button>
+          <Button onClick={onSubmit} disabled={verifying || !method || !evidence.trim()}>{verifying ? t(language, "appointments.identity.verifying") : t(language, "appointments.identity.verifyAndSelect")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -220,7 +222,7 @@ export function PatientSearch({
       onSelect({ ...verificationPatient, patientIdentityVerificationProof: result.proof, patientIdentityVerificationMethod: result.verificationMethod });
       setQuery(""); setResults([]); closeVerification();
     } catch (error) {
-      setVerificationError(error instanceof Error ? error.message : "Verification failed.");
+      setVerificationError(error instanceof Error ? error.message : t(language, "appointments.identity.verificationFailed"));
     } finally { setVerifying(false); }
   };
 
@@ -274,11 +276,11 @@ export function PatientSearch({
             <span>{t(language, "appointments.create.sex")}: {renderSex(selectedPatient.sex, language)}</span>
             <span>
               {t(language, "appointments.create.age")}: {selectedPatient.ageYears ?? "—"}
-              {selectedPatient.demographicsEstimated ? ` ${language === "ar" ? "(مقدّر)" : "(Estimated)"}` : ""}
+              {selectedPatient.demographicsEstimated ? ` (${t(language, "appointments.identity.estimated")})` : ""}
             </span>
             <span>{t(language, "appointments.create.categoryLabel")}: {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</span>
           </div>
-          {selectedPatient.identityRisk === "ambiguous" && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationMethod(selectedPatient.availableVerificationMethods?.[0] ?? null); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">Verify identity</Button> : null}
+          {selectedPatient.identityRisk === "ambiguous" && !selectedPatient.patientIdentityVerificationProof ? <Button variant="secondary" onClick={() => { setVerificationPatient(selectedPatient); setVerificationMethod(selectedPatient.availableVerificationMethods?.[0] ?? null); setVerificationEvidence(""); setVerificationError(null); }} className="mt-2">{t(language, "appointments.identity.verifyIdentity")}</Button> : null}
         </div>
         <button
           type="button"
@@ -295,7 +297,7 @@ export function PatientSearch({
           <X size={18} />
         </button>
       </div>
-      <IdentityVerificationDialog patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
+      <IdentityVerificationDialog language={language} patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
       </>
     );
   }
@@ -369,10 +371,14 @@ export function PatientSearch({
                     {language === "ar" ? (patient.englishFullName || patient.arabicFullName) : patient.arabicFullName}
                     {(patient.maskedPrimaryIdentifier || primaryIdentifier.value) ? ` · ${t(language, "appointments.create.primaryId")}: ${patient.maskedPrimaryIdentifier || primaryIdentifier.value}` : ""}
                     {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
-                    {patient.estimatedDateOfBirth ? ` · DOB: ${patient.estimatedDateOfBirth}` : ` · ${t(language, "appointments.create.age")}: ${patient.ageYears ?? "—"}${patient.demographicsEstimated ? " (Estimated)" : ""}`}
+                    {patient.estimatedDateOfBirth && !patient.demographicsEstimated
+                      ? ` · ${t(language, "appointments.identity.exactDob")}: ${patient.estimatedDateOfBirth}`
+                      : patient.demographicsEstimated && patient.estimatedDateOfBirth
+                        ? ` · ${t(language, "appointments.identity.estimatedDob")}: ${patient.estimatedDateOfBirth}`
+                        : ` · ${t(language, "appointments.create.age")}: ${patient.ageYears ?? "—"}${patient.demographicsEstimated ? ` (${t(language, "appointments.identity.estimated")})` : ""}`}
                     {patient.maskedPhone1 ? ` · ${patient.maskedPhone1}` : ""}
                   </div>
-                  {patient.identityRisk === "ambiguous" ? <div style={{ color: "#b45309", fontSize: 11, marginTop: 2 }}>Similar patient name — verification required</div> : null}
+                  {patient.identityRisk === "ambiguous" ? <div style={{ color: "#b45309", fontSize: 11, marginTop: 2 }}>{t(language, "appointments.identity.similarNameVerificationRequired")}</div> : null}
                 </button>
               </li>
             );
@@ -401,7 +407,7 @@ export function PatientSearch({
         </div>
       )}
     </div>
-    <IdentityVerificationDialog patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
+    <IdentityVerificationDialog language={language} patient={verificationPatient} method={verificationMethod} evidence={verificationEvidence} error={verificationError} verifying={verifying} onClose={closeVerification} onMethodChange={selectVerificationMethod} onEvidenceChange={setVerificationEvidence} onSubmit={submitVerification} />
     </>
   );
 }

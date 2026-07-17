@@ -9,6 +9,8 @@ import { HttpError } from "../utils/http-error.js";
 
 export const PATIENT_IDENTITY_RULE_VERSION = "name_first_three_v1";
 export const PATIENT_IDENTITY_PROOF_PURPOSE = "patient_identity_verification";
+/** Fixed-width safe display prefix for primary identifiers. */
+export const PATIENT_IDENTIFIER_MASK_PREFIX = "••••";
 const PROOF_TTL_SECONDS = 12 * 60;
 
 export type PatientIdentityVerificationMethod = "primary_identifier" | "exact_dob" | "phone_suffix";
@@ -46,6 +48,8 @@ export interface PatientIdentityVerificationAssertion {
   identityFingerprint: string;
   ambiguityRuleVersion: typeof PATIENT_IDENTITY_RULE_VERSION;
 }
+
+export type PatientIdentityVerificationStoredAssertion = Omit<PatientIdentityVerificationAssertion, "identityFingerprint">;
 
 type PatientIdentityDbRow = {
   id: number;
@@ -145,21 +149,81 @@ export function calculatePatientIdentityFingerprint(patient: PatientSelectionSaf
   return createHash("sha256").update(canonical).digest("hex");
 }
 
-async function loadRows(executor: DbExecutor): Promise<PatientIdentityDbRow[]> {
+const PATIENT_SELECTION_COLUMNS = `
+  select p.id, p.mrn, p.arabic_full_name, p.english_full_name, p.normalized_arabic_name,
+    p.normalized_arabic_name_compact, p.category, p.sex, p.age_years, p.estimated_date_of_birth::text,
+    p.demographics_estimated, p.phone_1,
+    coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
+    coalesce(primary_identifier.identifier_value, p.identifier_value, p.national_id) as identifier_value
+  from patients p
+  left join lateral (
+    select pit.code as identifier_type, pi.value as identifier_value
+    from patient_identifiers pi join patient_identifier_types pit on pit.id = pi.identifier_type_id
+    where pi.patient_id = p.id order by pi.is_primary desc, pi.id asc limit 1
+  ) primary_identifier on true
+`;
+
+async function loadRequestedRows(executor: DbExecutor, patientIds: number[]): Promise<PatientIdentityDbRow[]> {
   const { rows } = await executor.query<PatientIdentityDbRow>(`
-    select p.id, p.mrn, p.arabic_full_name, p.english_full_name, p.normalized_arabic_name,
-      p.normalized_arabic_name_compact, p.category, p.sex, p.age_years, p.estimated_date_of_birth::text,
-      p.demographics_estimated, p.phone_1,
-      coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
-      coalesce(primary_identifier.identifier_value, p.identifier_value, p.national_id) as identifier_value
-    from patients p
-    left join lateral (
-      select pit.code as identifier_type, pi.value as identifier_value
-      from patient_identifiers pi join patient_identifier_types pit on pit.id = pi.identifier_type_id
-      where pi.patient_id = p.id order by pi.is_primary desc, pi.id asc limit 1
-    ) primary_identifier on true
+    ${PATIENT_SELECTION_COLUMNS}
+    where p.id = any($1::bigint[])
     order by p.id asc
-  `);
+  `, [patientIds]);
+  return rows;
+}
+
+function buildCandidatePredicate(targets: PatientIdentityDbRow[]): { sql: string; values: string[] } {
+  const values: string[] = [];
+  const bind = (value: string) => {
+    values.push(value);
+    return `$${values.length + 1}`;
+  };
+  const arabicExpression = "p.normalized_arabic_name";
+  const compactArabicExpression = "p.normalized_arabic_name_compact";
+  const englishExpression = "lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g'))";
+  const clauses: string[] = [];
+
+  for (const target of targets) {
+    const arabic = normalizedArabic(target);
+    const arabicTokens = arabic.split(" ").filter(Boolean);
+    const english = normalizeEnglishName(target.english_full_name);
+    const targetClauses: string[] = [];
+
+    if (arabic) {
+      const arabicKey = nameKey(arabic);
+      if (arabicTokens.length < 3) {
+        targetClauses.push(`${arabicExpression} = ${bind(arabicKey)}`);
+      } else {
+        targetClauses.push(`(${arabicExpression} = ${bind(arabicKey)} or ${arabicExpression} like ${bind(`${arabicKey} %`)})`);
+        const compactKey = compactNameKey(arabic);
+        targetClauses.push(`(
+          cardinality(regexp_split_to_array(trim(${arabicExpression}), '\\s+')) >= 3
+          and (${compactArabicExpression} = ${bind(compactKey)} or ${compactArabicExpression} like ${bind(`${compactKey}%`)} or ${bind(compactKey)} like ${compactArabicExpression} || '%')
+        )`);
+      }
+    }
+
+    if (english) {
+      const englishTokens = english.split(" ").filter(Boolean);
+      const englishKey = nameKey(english);
+      targetClauses.push(englishTokens.length < 3
+        ? `${englishExpression} = ${bind(englishKey)}`
+        : `(${englishExpression} = ${bind(englishKey)} or ${englishExpression} like ${bind(`${englishKey} %`)})`);
+    }
+
+    if (targetClauses.length > 0) clauses.push(`(${targetClauses.join(" or ")})`);
+  }
+
+  return { sql: clauses.length > 0 ? clauses.join(" or ") : "false", values };
+}
+
+async function loadAmbiguityCandidateRows(executor: DbExecutor, patientIds: number[], targets: PatientIdentityDbRow[]): Promise<PatientIdentityDbRow[]> {
+  const predicate = buildCandidatePredicate(targets);
+  const { rows } = await executor.query<PatientIdentityDbRow>(`
+    ${PATIENT_SELECTION_COLUMNS}
+    where p.id = any($1::bigint[]) or (${predicate.sql})
+    order by p.id asc
+  `, [patientIds, ...predicate.values]);
   return rows;
 }
 
@@ -180,8 +244,10 @@ function resolvePatientIdentityRiskFromRows(patientId: number, rows: PatientIden
 
 export async function resolvePatientIdentityRisks(patientIds: number[], executor: DbExecutor = pool): Promise<Map<number, PatientIdentityRiskResult>> {
   const uniquePatientIds = [...new Set(patientIds.filter((patientId) => Number.isInteger(patientId) && patientId > 0))];
-  const rows = await loadRows(executor);
-  return new Map(uniquePatientIds.map((patientId) => [patientId, resolvePatientIdentityRiskFromRows(patientId, rows)]));
+  if (uniquePatientIds.length === 0) return new Map();
+  const targets = await loadRequestedRows(executor, uniquePatientIds);
+  const candidates = await loadAmbiguityCandidateRows(executor, uniquePatientIds, targets);
+  return new Map(uniquePatientIds.map((patientId) => [patientId, resolvePatientIdentityRiskFromRows(patientId, candidates)]));
 }
 
 export async function resolvePatientIdentityRisk(patientId: number, executor: DbExecutor = pool): Promise<PatientIdentityRiskResult> {
@@ -236,9 +302,26 @@ export function validatePatientIdentityVerificationProof(proof: string | null | 
   }
 }
 
+export function revalidateStoredPatientIdentityAssertion(
+  assertion: PatientIdentityVerificationStoredAssertion | null | undefined,
+  input: { patientId: number; verifierUserId: number; expectedIdentityFingerprint: string | null | undefined; risk: PatientIdentityRiskResult }
+): PatientIdentityVerificationAssertion {
+  if (
+    !assertion
+    || assertion.patientId !== input.patientId
+    || assertion.verifierUserId !== input.verifierUserId
+    || assertion.ambiguityRuleVersion !== PATIENT_IDENTITY_RULE_VERSION
+    || input.expectedIdentityFingerprint !== input.risk.identityFingerprint
+  ) {
+    throw new HttpError(422, "Patient identity verification is required again.", { code: "patient_identity_reverification_required" });
+  }
+  return { ...assertion, identityFingerprint: input.risk.identityFingerprint };
+}
+
 export function maskPatientIdentifier(value: string | null): string | null {
   const clean = String(value || "").trim();
-  return clean ? `${"•".repeat(Math.max(0, clean.length - 4))}${clean.slice(-4)}` : null;
+  // Never reveal more than the final four characters; short values reveal none.
+  return clean.length >= 4 ? `${PATIENT_IDENTIFIER_MASK_PREFIX}${clean.slice(-4)}` : clean ? PATIENT_IDENTIFIER_MASK_PREFIX : null;
 }
 
 export function maskPatientPhone(value: string | null): string | null {

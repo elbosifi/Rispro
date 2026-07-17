@@ -30,6 +30,11 @@ function requestId(req: Request): number {
   return id;
 }
 
+function presentRequest<T extends { patientIdentityVerificationFingerprint?: string | null }>(request: T): Omit<T, "patientIdentityVerificationFingerprint"> {
+  const { patientIdentityVerificationFingerprint: _fingerprint, ...safeRequest } = request;
+  return safeRequest;
+}
+
 export const schedulingOverrideRequestRouter = Router();
 schedulingOverrideRequestRouter.use(requireAuth);
 
@@ -48,7 +53,7 @@ schedulingOverrideRequestRouter.post(
       userId(req),
       req.user?.role
     );
-    res.status(201).json({ request });
+    res.status(201).json({ request: presentRequest(request) });
   })
 );
 
@@ -57,7 +62,7 @@ schedulingOverrideRequestRouter.get(
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const filters = parseSchedulingOverrideRequestFilters(req.query as Record<string, unknown>);
     const requests = await listSchedulingOverrideRequestsForUser(filters, userId(req), req.user?.role);
-    res.json({ requests });
+    res.json({ requests: requests.map(presentRequest) });
   })
 );
 
@@ -66,7 +71,7 @@ schedulingOverrideRequestRouter.get(
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const id = requestId(req);
     const request = await getSchedulingOverrideRequestForUser(id, userId(req), req.user?.role);
-    res.json({ request });
+    res.json({ request: presentRequest(request) });
   })
 );
 
@@ -87,7 +92,7 @@ schedulingOverrideRequestRouter.post(
         changedBookingTime: body.changedBookingTime == null ? null : String(body.changedBookingTime),
       }
     );
-    res.json(result);
+    res.json({ ...result, request: presentRequest(result.request) });
   })
 );
 
@@ -103,7 +108,7 @@ schedulingOverrideRequestRouter.post(
       req.user?.role,
       String(body.approverReason ?? "")
     );
-    res.json({ request });
+    res.json({ request: presentRequest(request) });
   })
 );
 
@@ -112,6 +117,6 @@ schedulingOverrideRequestRouter.post(
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const id = requestId(req);
     const request = await cancelSchedulingOverrideRequest(id, userId(req), req.user?.role);
-    res.json({ request });
+    res.json({ request: presentRequest(request) });
   })
 );

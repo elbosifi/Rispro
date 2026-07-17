@@ -10,8 +10,14 @@ import { HttpError } from "../../../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 
 interface AuthedRequest extends Request { user?: AuthenticatedUserContext; }
+
+function verificationRateLimitKey(req: Request): string {
+  const userId = Number((req as AuthedRequest).user?.sub ?? 0);
+  return Number.isInteger(userId) && userId > 0 ? `user:${userId}` : `ip:${req.ip ?? "unknown"}`;
+}
+
 export const patientSelectionRouter = Router();
-const verificationRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 12, message: "Too many patient identity verification attempts. Please wait before trying again.", errorCode: "patient_identity_verification_rate_limited" });
+const verificationRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, maxRequests: 12, message: "Too many patient identity verification attempts. Please wait before trying again.", errorCode: "patient_identity_verification_rate_limited", key: verificationRateLimitKey });
 patientSelectionRouter.use(requireAuth, requirePageAccess("appointments"));
 
 function toSelectionRow(risk: Awaited<ReturnType<typeof resolvePatientIdentityRisk>>) {

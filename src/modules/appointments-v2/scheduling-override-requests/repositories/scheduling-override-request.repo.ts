@@ -22,6 +22,7 @@ const SELECT_COLUMNS = `
   booking_id as "bookingId",
   requested_policy_version_id as "requestedPolicyVersionId",
   approved_policy_version_id as "approvedPolicyVersionId",
+  patient_identity_verification_fingerprint as "patientIdentityVerificationFingerprint",
   request_payload_json as "requestPayloadJson",
   original_decision_snapshot_json as "originalDecisionSnapshotJson",
   approval_decision_snapshot_json as "approvalDecisionSnapshotJson",
@@ -54,6 +55,7 @@ export async function insertSchedulingOverrideRequest(
     requestedBookingTime: string | null;
     bookingId: number | null;
     requestedPolicyVersionId: number | null;
+    patientIdentityVerificationFingerprint: string | null;
     requestPayload: SchedulingOverrideStoredPayload;
     originalDecisionSnapshot: unknown;
     requesterReason: string;
@@ -65,14 +67,14 @@ export async function insertSchedulingOverrideRequest(
     `
       insert into appointments_v2.scheduling_override_requests (
         request_type, override_type, requester_user_id, patient_id, modality_id, exam_type_id,
-        requested_booking_date, requested_booking_time, booking_id, requested_policy_version_id,
+        requested_booking_date, requested_booking_time, booking_id, requested_policy_version_id, patient_identity_verification_fingerprint,
         request_payload_json, original_decision_snapshot_json, requester_reason, expires_at,
         created_from_context
       ) values (
         $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10,
-        $11::jsonb, $12::jsonb, $13, $14,
-        $15
+        $7, $8, $9, $10, $11,
+        $12::jsonb, $13::jsonb, $14, $15,
+        $16
       )
       returning ${SELECT_COLUMNS}
     `,
@@ -87,6 +89,7 @@ export async function insertSchedulingOverrideRequest(
       input.requestedBookingTime,
       input.bookingId,
       input.requestedPolicyVersionId,
+      input.patientIdentityVerificationFingerprint,
       JSON.stringify(input.requestPayload),
       JSON.stringify(input.originalDecisionSnapshot),
       input.requesterReason,

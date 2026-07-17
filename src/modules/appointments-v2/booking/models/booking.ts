@@ -58,7 +58,6 @@ export interface CreateBookingPayload {
     verifierUserId: number;
     verificationMethod: "primary_identifier" | "exact_dob" | "phone_suffix";
     verifiedAt: string;
-    identityFingerprint: string;
     ambiguityRuleVersion: "name_first_three_v1";
   } | null;
   override?: {

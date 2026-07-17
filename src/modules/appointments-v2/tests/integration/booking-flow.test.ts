@@ -214,7 +214,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     it("requires a scoped non-name verification proof for an ambiguous patient and records safe audit metadata", async () => {
       guard();
       const similar = await createSimilarPatientsForIdentityTest();
-      const search = await fetch(`/api/v2/appointments/patient-selection/search?q=${encodeURIComponent(similar.searchTerm)}`);
+      // Search by this patient's identifier so the similarly named record is not in the visible result set.
+      const search = await fetch(`/api/v2/appointments/patient-selection/search?q=${encodeURIComponent(similar.firstIdentifier)}`);
       assert.equal(search.status, 200);
       const rows = (search.data as { patients: Array<Record<string, unknown>> }).patients;
       const selected = rows.find((row) => Number(row.id) === similar.firstPatientId);
