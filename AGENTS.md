@@ -16,6 +16,28 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
 11. Docker EPERM during preflight means the environment blocked Docker execution, not a RISpro test failure.
 
+## Default Git Workflow
+
+### Regular Codex jobs
+
+A regular, bounded Codex task works directly in the current local `main` working tree by default. Before editing, Codex must confirm the current branch is `main`, fetch `origin`, confirm that local `main` is neither behind nor diverged from `origin/main`, and confirm that the working tree is clean. Stop if unrelated local changes are present.
+
+Unless the current task explicitly authorizes otherwise, Codex must not create or switch branches, commit, push, open or update a pull request, merge, or deploy. It must leave completed changes uncommitted for manual user review, report the exact final `git status --short`, and the user reviews, commits, and pushes the changes manually.
+
+### Codex goals
+
+For broad, multi-milestone Codex goals, Codex may create a temporary local branch for implementation safety. The temporary branch must not be pushed and no pull request may be opened unless the current task explicitly authorizes it. Milestone commits are permitted only on that temporary local branch when they materially improve rollback or progress recovery.
+
+After all milestones and validation pass, Codex must confirm that local `main` has not changed or diverged, switch to `main`, and squash-apply the temporary branch to `main` without creating a commit. The resulting changes must remain uncommitted for manual review. Retain the temporary branch as a rollback point until the user confirms the final commit. If `main` changed, diverged, or produces a conflict, stop and report instead of resolving or merging automatically.
+
+### Explicit workflow exceptions
+
+Branch creation outside the goal-local workflow, commit, push, pull-request creation or update, merge, and deployment are allowed only when the current task explicitly authorizes them. Explicit instructions in the current task may override this default workflow; inferred intent must not.
+
+### CI wording
+
+Pull-request CI is authoritative before merge only when the selected workflow is `pull-request`. A regular-local task ends before commit or push; Codex must report locally completed work and pending validation accurately. Exact-commit self-hosted CI remains required before deployment. Codex must never describe pending, skipped, or unexecuted CI as passing.
+
 ## Repo Map
 
 | Need | Start Here |

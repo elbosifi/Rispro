@@ -49,6 +49,7 @@ for (const script of requiredScripts) {
 checkSchedulingGateContract(packageJson);
 checkCoverageContract(packageJson);
 checkE2eEnvironmentContract();
+checkGitWorkflowContract();
 checkEnv();
 checkDocsForLocalPaths();
 checkDicomWorklistSideEffects();
@@ -202,6 +203,53 @@ function checkE2eEnvironmentContract() {
   if (envCopyIndex === -1 || frontendInstallIndex === -1 || dbUpIndex === -1 || e2eTestIndex === -1 || !(frontendInstallIndex < envCopyIndex && envCopyIndex < dbUpIndex && dbUpIndex < e2eTestIndex)) {
     errors.push("Browser CI must install frontend dependencies, copy e2e/.env.example, and start the guarded E2E database before browser tests.");
   }
+}
+
+function checkGitWorkflowContract() {
+  const agents = readText("AGENTS.md");
+  const taskTemplate = readText("docs/agents/TASK_TEMPLATE.md");
+  const currentTask = readText("CURRENT_TASK.md");
+
+  requireMatch(agents, /^## Default Git Workflow$/m, "AGENTS.md must include a Default Git Workflow section.");
+  for (const workflow of ["regular-local", "goal-local", "pull-request", "deployment"]) {
+    requireMatch(agents, new RegExp(`\\b${escapeRegExp(workflow)}\\b`), `AGENTS.md Default Git Workflow must name ${workflow}.`);
+    requireMatch(taskTemplate, new RegExp(`\\b${escapeRegExp(workflow)}\\b`), `TASK_TEMPLATE.md Git workflow must allow ${workflow}.`);
+  }
+
+  for (const operation of ["commit", "push", "pull request"]) {
+    requireMatch(agents, new RegExp(`must not[^.\\n]*${escapeRegExp(operation)}|${escapeRegExp(operation)}[^.\\n]*must not`, "i"), `AGENTS.md must explicitly prohibit regular-job ${operation}.`);
+  }
+  requireMatch(agents, /leave completed changes uncommitted/i, "AGENTS.md must require regular-job changes to remain uncommitted.");
+  requireMatch(agents, /temporary local branch/i, "AGENTS.md must describe temporary local branch behavior for Codex goals.");
+  requireMatch(agents, /squash-apply[^.\n]*`main`[^.\n]*without creating a commit/i, "AGENTS.md must require squash application back to main without committing.");
+  requireMatch(agents, /merge[^.\n]*deployment[^.\n]*explicitly authorizes/i, "AGENTS.md must require explicit authorization for merge and deployment.");
+
+  requireMatch(taskTemplate, /^## Git workflow$/m, "TASK_TEMPLATE.md must include a Git workflow section.");
+  requireMatch(taskTemplate, /^Selected workflow:/m, "TASK_TEMPLATE.md must include a Selected workflow field.");
+  for (const operation of ["Branch", "Commit", "Push", "Pull request", "Merge", "Deploy"]) {
+    requireMatch(taskTemplate, new RegExp(`^- ${escapeRegExp(operation)}:`, "m"), `TASK_TEMPLATE.md must include an explicit authorization field for ${operation}.`);
+  }
+
+  const activeWorkflow = currentTask.match(/^Selected workflow:\s*`(regular-local|goal-local|pull-request|deployment)`\s*$/m);
+  if (activeWorkflow) {
+    for (const operation of ["Branch", "Commit", "Push", "Pull request", "Merge", "Deploy"]) {
+      requireMatch(currentTask, new RegExp(`^- ${escapeRegExp(operation)}:`, "m"), `CURRENT_TASK.md selected workflow requires an explicit authorization field for ${operation}.`);
+    }
+  }
+}
+
+function readText(relativePath) {
+  const fullPath = path.join(repoRoot, relativePath);
+  if (!existsSync(fullPath)) return "";
+  return readFileSync(fullPath, "utf8");
+}
+
+function requireMatch(value, pattern, error) {
+  if (!pattern.test(value)) errors.push(error);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function checkEnv() {
