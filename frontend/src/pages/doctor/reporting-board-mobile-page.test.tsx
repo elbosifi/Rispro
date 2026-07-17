@@ -319,12 +319,12 @@ describe("ReportingBoardMobilePage", () => {
 
     await screen.findByRole("button", { name: /^Assigned 2$/i });
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({ mobileQuickTab: "assigned", assignedDoctorId: 5, assignmentStatus: "assigned" })));
-    expect(screen.getByText("Loaded 1 of 2 cases")).toBeTruthy();
+    expect(await screen.findByText("Loaded 1 of 2 cases")).toBeTruthy();
 
     for (const [tab, patient, total] of [["Unassigned 3", "Abeer Farhat Salem Al-Sadeq", 3], ["Urgent 2", "Mohammed Bashir Meftah", 2], ["Overdue 1", "Abeer Farhat Salem Al-Sadeq", 1], ["All 5", "Comparison Patient", 5]] as const) {
       fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${tab}$`, "i") }));
       await screen.findByText(patient);
-      expect(screen.getByText(`Loaded ${tab === "All 5" ? 3 : 1} of ${total} cases`)).toBeTruthy();
+      expect(await screen.findByText(`Loaded ${tab === "All 5" ? 3 : 1} of ${total} cases`)).toBeTruthy();
       expect(screen.getByRole("button", { name: /^Assigned 2$/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /^Unassigned 3$/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /^Urgent 2$/i })).toBeTruthy();
