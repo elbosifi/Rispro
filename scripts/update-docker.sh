@@ -33,16 +33,45 @@ check_git_repo() {
     exit 1
   fi
 
+  if [ -n "${EXPECTED_SHA}" ]; then
+    if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+      err 'EXPECTED_SHA must be a full 40-character commit SHA.'
+      exit 1
+    fi
+    EXPECTED_SHA="$(printf '%s' "${EXPECTED_SHA}" | tr '[:upper:]' '[:lower:]')"
+  fi
+
+  warn "This update runs 'git reset --hard HEAD' and 'git clean -fd -e /storage/sante-hl7-outbox/' before deployment; local tracked and untracked repository changes will be discarded, except the persistent Sante HL7 outbox."
+  git reset --hard HEAD
+  git clean -fd -e '/storage/sante-hl7-outbox/'
+
+  if [ -z "${EXPECTED_SHA}" ]; then
+    log "Manual update mode: fetching origin/${DEPLOY_BRANCH} to resolve the deployment commit..."
+    if ! git fetch origin "${DEPLOY_BRANCH}"; then
+      err "Could not fetch origin/${DEPLOY_BRANCH}; manual update cannot continue."
+      exit 1
+    fi
+    if ! EXPECTED_SHA="$(git rev-parse --verify "origin/${DEPLOY_BRANCH}^{commit}")"; then
+      err "Could not resolve origin/${DEPLOY_BRANCH} to a commit SHA; manual update cannot continue."
+      exit 1
+    fi
+    log "Manual update will deploy branch origin/${DEPLOY_BRANCH} at resolved SHA ${EXPECTED_SHA}."
+    warn 'Manual mode does not itself prove CI is green; confirm the resolved SHA has the required successful CI before deploying.'
+  else
+    log "Exact-SHA update mode: deploying expected commit ${EXPECTED_SHA}."
+    if ! git fetch origin "${DEPLOY_BRANCH}"; then
+      err "Could not fetch origin/${DEPLOY_BRANCH}; exact-SHA update cannot continue."
+      exit 1
+    fi
+  fi
+
   if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    err 'EXPECTED_SHA must be a full 40-character commit SHA.'
+    err 'Resolved EXPECTED_SHA must be a full 40-character commit SHA.'
     exit 1
   fi
   EXPECTED_SHA="$(printf '%s' "${EXPECTED_SHA}" | tr '[:upper:]' '[:lower:]')"
 
   log "Forcing repository to match expected commit ${EXPECTED_SHA}..."
-  git reset --hard HEAD
-  git clean -fd -e '/storage/sante-hl7-outbox/'
-  git fetch origin "${DEPLOY_BRANCH}"
   git checkout --detach "${EXPECTED_SHA}"
   DEPLOY_COMMIT_SHA="$(git rev-parse HEAD)"
   if [ "${DEPLOY_COMMIT_SHA}" != "${EXPECTED_SHA}" ]; then

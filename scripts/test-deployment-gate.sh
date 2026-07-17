@@ -62,6 +62,9 @@ grep -q 'Checked-out commit' deploy.sh || fail 'direct deployment script does no
 grep -q 'Application-reported build SHA verified' deploy.sh || fail 'direct deployment script does not verify the running build SHA'
 grep -q 'git checkout --detach "${EXPECTED_SHA}"' scripts/update-docker.sh || fail 'Docker deployment script does not check out the expected SHA'
 grep -q 'verify_app_build_sha' scripts/update-docker.sh || fail 'Docker deployment script does not verify the running build SHA'
+grep -q 'Manual mode does not itself prove CI is green' scripts/update-docker.sh || fail 'Docker deployment script does not warn that manual mode is not CI proof'
+grep -q 'git rev-parse --verify "origin/${DEPLOY_BRANCH}^{commit}"' scripts/update-docker.sh || fail 'Docker deployment script does not resolve the manual branch to an exact SHA'
+grep -q "git reset --hard HEAD" scripts/update-docker.sh || fail 'Docker deployment script does not disclose its hard reset'
 pass 'repository deployment scripts enforce exact checkout and runtime SHA verification'
 
 test_root="$(mktemp -d)"
@@ -138,3 +141,101 @@ port="$(head -n 1 "$port_file")"
 ) >/dev/null
 grep -qx "RISPRO_BUILD_COMMIT_SHA=$expected_sha" "$test_root/.env" || fail 'deployment script did not persist the expected runtime build SHA'
 pass 'matching SHA is checked out and passes health/build-SHA verification'
+
+docker_fixture="$test_root/docker-update-fixture"
+docker_remote="$test_root/docker-update-remote.git"
+git init -q --bare "$docker_remote"
+git clone -q "$docker_remote" "$docker_fixture"
+git -C "$docker_fixture" config user.email test@example.invalid
+git -C "$docker_fixture" config user.name 'Docker Update Gate Test'
+printf 'first fixture\n' > "$docker_fixture/README"
+git -C "$docker_fixture" add README
+git -C "$docker_fixture" commit -qm first-fixture
+git -C "$docker_fixture" branch -M main
+git -C "$docker_fixture" push -qu origin main
+mkdir -p "$docker_fixture/scripts"
+cp scripts/update-docker.sh scripts/docker-deployment-lib.sh "$docker_fixture/scripts/"
+# Load the deployment helpers without invoking main; these checks exercise only the git gate.
+sed '$d' "$docker_fixture/scripts/update-docker.sh" > "$docker_fixture/scripts/update-docker-testable.sh"
+git -C "$docker_fixture" add scripts
+git -C "$docker_fixture" commit -qm docker-update-gate-fixture
+git -C "$docker_fixture" push -qu origin main
+docker_expected_sha="$(git -C "$docker_fixture" rev-parse HEAD)"
+
+manual_output="$(
+  cd "$docker_fixture"
+  unset EXPECTED_SHA RISPRO_EXPECTED_SHA
+  DEPLOY_BRANCH=main
+  source ./scripts/update-docker-testable.sh
+  check_git_repo
+)"
+grep -Fq "origin/main at resolved SHA ${docker_expected_sha}" <<<"$manual_output" || fail 'manual Docker update did not resolve origin/main to its full SHA'
+grep -Fq 'Manual mode does not itself prove CI is green' <<<"$manual_output" || fail 'manual Docker update did not warn that CI status remains unproven'
+pass 'Docker update manual mode resolves origin/main to an exact SHA'
+
+explicit_output="$(
+  cd "$docker_fixture"
+  DEPLOY_BRANCH=main
+  source ./scripts/update-docker-testable.sh
+  parse_deployment_args --expected-sha "$docker_expected_sha"
+  check_git_repo
+)"
+grep -Fq "Exact-SHA update mode: deploying expected commit ${docker_expected_sha}" <<<"$explicit_output" || fail 'Docker update explicit SHA mode did not retain the exact-SHA contract'
+pass 'Docker update explicit SHA mode retains exact-SHA checkout'
+
+compatibility_output="$(
+  cd "$docker_fixture"
+  unset EXPECTED_SHA
+  export RISPRO_EXPECTED_SHA="$docker_expected_sha"
+  DEPLOY_BRANCH=main
+  source ./scripts/update-docker-testable.sh
+  check_git_repo
+)"
+grep -Fq "Exact-SHA update mode: deploying expected commit ${docker_expected_sha}" <<<"$compatibility_output" || fail 'Docker update did not preserve RISPRO_EXPECTED_SHA compatibility'
+pass 'Docker update preserves RISPRO_EXPECTED_SHA compatibility'
+
+if (
+  cd "$docker_fixture"
+  DEPLOY_BRANCH=main
+  source ./scripts/update-docker-testable.sh
+  parse_deployment_args --expected-sha not-a-sha
+  check_git_repo
+) >/dev/null 2>&1; then
+  fail 'Docker update accepted a malformed explicit SHA'
+fi
+pass 'Docker update rejects malformed explicit SHA values'
+
+if (
+  cd "$docker_fixture"
+  unset EXPECTED_SHA RISPRO_EXPECTED_SHA
+  DEPLOY_BRANCH=missing-branch
+  source ./scripts/update-docker-testable.sh
+  check_git_repo
+) >/dev/null 2>&1; then
+  fail 'Docker update accepted an unresolvable manual remote branch'
+fi
+pass 'Docker update rejects an unresolvable manual remote branch'
+
+git_wrapper_dir="$test_root/git-wrapper"
+mkdir -p "$git_wrapper_dir"
+real_git="$(command -v git)"
+cat > "$git_wrapper_dir/git" <<'GIT_WRAPPER'
+#!/usr/bin/env bash
+if [ "$1" = "rev-parse" ] && [ "$2" = "HEAD" ]; then
+  printf '%040d\n' 0
+  exit 0
+fi
+exec "$RISPRO_REAL_GIT" "$@"
+GIT_WRAPPER
+chmod +x "$git_wrapper_dir/git"
+if (
+  cd "$docker_fixture"
+  PATH="$git_wrapper_dir:$PATH" RISPRO_REAL_GIT="$real_git" EXPECTED_SHA="$docker_expected_sha" DEPLOY_BRANCH=main \
+    bash -c 'source ./scripts/update-docker-testable.sh; check_git_repo'
+) >/dev/null 2>&1; then
+  fail 'Docker update accepted a checked-out SHA mismatch'
+fi
+pass 'Docker update rejects a checked-out SHA mismatch'
+
+grep -q -- '--expected-sha ${DEPLOY_SHA}' "$workflow" || fail 'automated deployment caller no longer passes an exact SHA'
+pass 'automated deployment caller continues to pass an exact SHA'
