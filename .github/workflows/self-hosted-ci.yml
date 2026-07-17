@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+      - "codex/**"
+      - "feature/**"
 
 concurrency:
   group: rispro-self-hosted-ci
@@ -34,6 +36,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Node.js and cache root dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Cache frontend npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-frontend-npm-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-npm-
 
       - name: Install backend dependencies
         run: npm ci

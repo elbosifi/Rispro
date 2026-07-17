@@ -16,7 +16,13 @@ The preflight reports:
 - common Docker credential-helper failures on Mac
 - missing required values in `codex-db-test.env`
 
-The preflight does not start containers, run migrations, or edit env files. If Docker is unavailable, start Docker Desktop and rerun the preflight. Do not route around Docker by using a production or personal PostgreSQL database.
+The preflight does not start containers, run migrations, or edit env files. Do not route around Docker by using a production or personal PostgreSQL database.
+
+## When CI should replace local Docker setup
+
+Do not initialize or repair local Docker solely to run a full DB suite when pull-request CI already provides a clean PostgreSQL environment. Use local Docker for focused iterative DB work only when it is already operational. Use GitHub CI for the authoritative clean-environment DB suite.
+
+Docker environment failures are environment findings, not product-code failures, and must not lead to product-code debugging. Push and rely on CI only after cheap relevant local checks pass. If CI fails, inspect only the failed job and the relevant log excerpt.
 
 ## Docker Classification
 
@@ -43,13 +49,13 @@ When Docker is `DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT`, stop debugging RISpro 
 
 1. Commit or create a patch before switching machines.
 2. On the new machine, run `git pull` or apply the patch.
-3. Run `npm run agent:preflight`.
-4. Run `npm run db:test:up` and `npm run db:test:check`.
-5. Run targeted DB tests with `npm run test:db:one -- <test-file>`.
+3. Run cheap relevant local checks.
+4. If Docker is already operational and focused DB validation is useful, run `npm run agent:preflight`, `npm run db:test:up`, `npm run db:test:check`, and `npm run test:db:one -- <test-file>`.
+5. Otherwise, use required GitHub pull-request CI for the full DB-backed suite and report it as pending.
 
 ## Stop or Continue
 
-- Stop when Docker is not installed, Docker Desktop is not running, Docker execution is blocked, or the credential helper is broken. Fix the environment first.
+- For an environment/Docker task, stop when Docker is not installed, Docker Desktop is not running, Docker execution is blocked, or the credential helper is broken. Fix the environment first.
 - Continue to targeted non-DB checks when the task does not need DB-backed validation.
-- Continue to DB-backed tests only after `npm run db:test:up` and `npm run db:test:check` confirm the disposable DB target.
+- For product work, do not repair Docker just to run the full DB suite; use local DB tests only after `npm run db:test:up` and `npm run db:test:check` confirm the disposable DB target, or delegate the full suite to required GitHub pull-request CI.
 - Never use a production or personal PostgreSQL database to bypass the portable Docker test DB flow.

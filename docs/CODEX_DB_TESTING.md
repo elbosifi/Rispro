@@ -43,7 +43,7 @@ npm run db:test:down
 
 ## Validation Sequence
 
-Use this sequence for DB-backed validation:
+When local Docker is already operational and focused DB validation is warranted, use this sequence:
 
 ```powershell
 npm run db:test:up
@@ -64,7 +64,7 @@ npm run build:frontend
 - Do not use or modify the production database.
 - Do not ask for the local PostgreSQL admin password.
 - If `5432` is occupied, use the Docker test database on `5433`.
-- If Docker is unavailable, report DB-backed validation as blocked by Docker availability.
+- If Docker is unavailable, do not repair it solely for a full DB suite. Report any local DB validation as not run and delegate the full suite to required GitHub pull-request CI as pending.
 - If `db:test:check` fails, DB-backed validation has not passed.
 
 ## Local PostgreSQL Repair

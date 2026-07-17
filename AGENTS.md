@@ -10,7 +10,7 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 4. Do not redesign UI, change product behavior, or refactor business logic unless the task explicitly asks for it.
 5. Run targeted tests first, then broader checks only when the change warrants them.
 6. Stop at the first unrelated failure. Report it clearly and do not hide it with workaround changes.
-7. Use the portable Docker test DB flow for DB-backed validation: `npm run db:test:up`, `npm run db:test:check`, then `codex-db-test.env`.
+7. Run the smallest targeted validation locally first. For DB-affecting work, use the portable Docker test DB flow when Docker is already functional and the targeted test is reasonably quick; do not spend Codex quota troubleshooting, installing, or provisioning Docker unless the task concerns the development environment. The required GitHub pull-request CI workflow may perform the full DB-backed validation. When it is delegated, report: `DB-backed validation delegated to GitHub CI and remains pending.` A green required GitHub CI check is the authoritative full-suite result before merge. Fix known relevant local failures before pushing; do not use CI delegation to hide them.
 8. Never ask for a local PostgreSQL admin password. Do not touch production DBs.
 9. Do not claim skipped, blocked, or failed tests as passing.
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
@@ -38,4 +38,4 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 - Backend unit tests: `npm run test:backend:unit`
 - Frontend tests: `npm run test:frontend`
 - Harness checks: `npm run harness:all`
-- DB-backed tests: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`
+- DB-backed tests when local Docker is already ready: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`; otherwise delegate the full suite to required GitHub pull-request CI and report it as pending
