@@ -125,7 +125,13 @@ export async function seedTestData(
     `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
      values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
      returning id`,
-    [`${dataPrefix}${runSuffix}مريض اختبار`, `${dataPrefix}${runSuffix}Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
+    [
+      `${dataPrefix}${runSuffix}مريض اختبار`,
+      `${dataPrefix}${runSuffix}Test Patient`,
+      uniqueNationalId,
+      `${dataPrefix}${runSuffix}مريض اختبار`,
+      uniqueNationalId,
+    ]
   );
   const patientId = Number(patientResult.rows[0].id);
 

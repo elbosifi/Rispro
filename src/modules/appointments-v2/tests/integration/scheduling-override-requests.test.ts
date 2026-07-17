@@ -242,11 +242,14 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     const { pool } = await import("../../../../db/pool.js");
     const nationalId = `7${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
     const phone = `09${Math.random().toString().slice(2, 10).padEnd(8, "0").slice(0, 8)}`;
+    const nameSuffix = Math.random().toString().slice(2, 10);
+    const arabicName = `${TEST_PREFIX}مريض ${nameSuffix}`;
+    const englishName = `${TEST_PREFIX} Patient ${nameSuffix}`;
     const row = await pool.query<{ id: number }>(
       `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
        values ($1, $2, $3, $4, 'M', 40, $5, 'national_id', $6)
        returning id`,
-      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, phone, nationalId]
+      [arabicName, englishName, nationalId, arabicName, phone, nationalId]
     );
     return Number(row.rows[0].id);
   }
@@ -262,8 +265,8 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
         sex, age_years, estimated_date_of_birth, demographics_estimated, phone_1,
         identifier_type, identifier_value
       ) values
-        ($1, $2, $3, $4, 'M', 40, '1986-01-02', false, '0910001234', 'national_id', $3),
-        ($5, $6, $7, $8, 'F', 39, '1987-02-03', false, '0910005678', 'national_id', $7)
+        ($1, $2, $3::varchar, $4, 'M', 40, '1986-01-02', false, '0910001234', 'national_id', $3::text),
+        ($5, $6, $7::varchar, $8, 'F', 39, '1987-02-03', false, '0910005678', 'national_id', $7::text)
       returning id`,
       [
         `OVREQ تشابه مريض ${suffix} واحد`, `OVREQ Similar Patient ${suffix} One`, firstIdentifier, `OVREQ تشابه مريض ${suffix} واحد`,
@@ -451,7 +454,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
   it("stores only safe deferred identity metadata and rejects approval after the verified identity changes", async () => {
     if (!testData) return;
     await setCapacityLimits();
-    const date = "2042-02-08";
+    const date = "2042-05-09";
     await fillNonOncologyCategory(date);
     const patient = await createAmbiguousPatients();
     const verification = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patient.patientId}/verify`, {

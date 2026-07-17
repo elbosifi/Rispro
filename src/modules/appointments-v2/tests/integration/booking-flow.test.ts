@@ -147,7 +147,13 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
        values ($1, $2, $3, $4, 'M', 30, '0912345678', 'national_id', $5)
        returning id`,
-      [`${TEST_PREFIX}${label} مريض اختبار`, `${TEST_PREFIX}${label} Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
+      [
+        `${TEST_PREFIX}${label} مريض اختبار`,
+        `${TEST_PREFIX}${label} Test Patient`,
+        uniqueNationalId,
+        `${TEST_PREFIX}${label} مريض اختبار`,
+        uniqueNationalId,
+      ]
     );
     return Number(patientResult.rows[0].id);
   }
@@ -163,8 +169,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         sex, age_years, estimated_date_of_birth, demographics_estimated, phone_1,
         identifier_type, identifier_value
       ) values
-        ($1, $2, $3, $4, 'M', 30, '1995-01-02', false, '0912345678', 'national_id', $3),
-        ($5, $6, $7, $8, 'F', 31, '1994-01-02', false, '0912345679', 'national_id', $7)
+        ($1, $2, $3::varchar, $4, 'M', 30, '1995-01-02', false, '0912345678', 'national_id', $3::text),
+        ($5, $6, $7::varchar, $8, 'F', 31, '1994-01-02', false, '0912345679', 'national_id', $7::text)
       returning id`,
       [
         `مريض تشابه ${suffix} واحد`, `${searchTerm} One`, firstIdentifier, `مريض تشابه ${suffix} واحد`,
