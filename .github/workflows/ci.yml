@@ -153,6 +153,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
       - name: Prepare synthetic E2E environment
         run: cp e2e/.env.example e2e/.env
 
