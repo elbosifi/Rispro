@@ -100,11 +100,7 @@ jobs:
         run: npm run test:backend:db
 
       - name: Run scheduling test gate
-        run: >
-          node --import tsx --test
-          src/domain/scheduling/evaluator.test.ts
-          src/services/scheduling-settings-service.integration.test.ts
-          src/services/scheduling-settings-service.idempotent.test.ts
+        run: npm run test:backend:scheduling-gate
 
       - name: Run backup v3 DB restore integration
         env:

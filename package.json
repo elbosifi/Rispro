@@ -28,6 +28,7 @@
     "test:unit": "npm run test:backend:unit",
     "test:backend:unit": "node scripts/run-backend-tests.js unit",
     "test:backend:db": "node scripts/run-backend-tests.js db",
+    "test:backend:scheduling-gate": "node --import tsx --test src/domain/scheduling/evaluator.test.ts && node scripts/run-backend-tests.js db src/services/scheduling-settings-service.integration.test.ts src/services/scheduling-settings-service.idempotent.test.ts",
     "test:db": "node scripts/run-db-tests.js",
     "test:frontend": "cd frontend && npm run test",
     "lint:frontend": "cd frontend && npm run lint",

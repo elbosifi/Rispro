@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2];
+const requestedTestPaths = process.argv.slice(3);
 const dbTestEnvPath = path.join(repoRoot, "codex-db-test.env");
 
 if (!["unit", "db"].includes(mode)) {
@@ -92,13 +93,15 @@ function isDbBackedTest(filePath) {
 }
 
 const allTests = walk(path.join(repoRoot, "src")).sort();
-const selectedTests = allTests.filter((filePath) => {
-  if (mode === "unit" && fs.readFileSync(filePath, "utf8").includes("frontend/src/")) {
-    return false;
-  }
+const selectedTests = requestedTestPaths.length > 0
+  ? selectExplicitDbTests(requestedTestPaths)
+  : allTests.filter((filePath) => {
+    if (mode === "unit" && fs.readFileSync(filePath, "utf8").includes("frontend/src/")) {
+      return false;
+    }
 
-  return isDbBackedTest(filePath) === (mode === "db");
-});
+    return isDbBackedTest(filePath) === (mode === "db");
+  });
 
 if (selectedTests.length === 0) {
   console.error(`No backend ${mode} tests found.`);
@@ -197,6 +200,34 @@ function npmScriptCommand(args) {
     return { command: process.execPath, args: [process.env.npm_execpath, ...args] };
   }
   return { command: process.platform === "win32" ? "npm.cmd" : "npm", args };
+}
+
+function selectExplicitDbTests(requestedPaths) {
+  if (mode !== "db") {
+    console.error("Explicit test-file selection is supported only for DB-backed tests.");
+    process.exit(1);
+  }
+
+  const selected = [];
+  const seen = new Set();
+  for (const requestedPath of requestedPaths) {
+    const filePath = path.resolve(repoRoot, requestedPath);
+    const relativePath = path.relative(repoRoot, filePath);
+    if (!allTests.includes(filePath)) {
+      console.error(`Requested DB test file does not exist: ${relativePath}`);
+      process.exit(1);
+    }
+    if (!isDbBackedTest(filePath)) {
+      console.error(`Requested test file is not DB-backed: ${relativePath}`);
+      process.exit(1);
+    }
+    if (!seen.has(filePath)) {
+      selected.push(filePath);
+      seen.add(filePath);
+    }
+  }
+
+  return selected;
 }
 
 for (const filePath of selectedTests) {
