@@ -140,11 +140,14 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
   async function createPatient() {
     const { pool } = await import("../../../../db/pool.js");
     const nationalId = `8${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
+    const nameSuffix = Math.random().toString().slice(2, 10);
+    const arabicName = `${TEST_PREFIX}مريض ${nameSuffix}`;
+    const englishName = `${TEST_PREFIX} Patient ${nameSuffix}`;
     const row = await pool.query<{ id: number }>(
       `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
        values ($1, $2, $3, $4, 'M', 40, $5, 'national_id', $6)
        returning id`,
-      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, "0912345678", nationalId]
+      [arabicName, englishName, nationalId, arabicName, "0912345678", nationalId]
     );
     return Number(row.rows[0].id);
   }
