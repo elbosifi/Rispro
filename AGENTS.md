@@ -42,5 +42,6 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 - All test suites (requires the disposable DB to be reachable): `npm run test:suites`
 - Full local quality gate (requires the disposable DB to be reachable): `npm run quality:local`
 - DB-backed tests when local Docker is already ready: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`; otherwise delegate the full suite to required GitHub pull-request CI and report it as pending
+- Browser critical journeys: `npm run e2e:db:up`, `npm run test:e2e`, then `npm run e2e:db:down`. This is guarded to the disposable E2E database only; see [docs/E2E_PLAYWRIGHT.md](docs/E2E_PLAYWRIGHT.md).
 
 `quality:local` is for a complete local run; do not invoke it as an additional CI wrapper around individually reported CI steps. Pull-request CI is the authoritative before-merge result. A successful self-hosted CI run for the exact commit is additionally required before deployment.
