@@ -1,0 +1,19 @@
+{
+  "all": true,
+  "extension": [".ts", ".tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude-after-remap": true,
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.d.ts",
+    "**/__fixtures__/**",
+    "**/fixtures/**",
+    "**/test-utils/**",
+    "**/tests/**",
+    "**/e2e/**",
+    "coverage/**",
+    "dist/**",
+    "build/**"
+  ]
+}

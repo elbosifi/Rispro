@@ -14,6 +14,8 @@
 - Frontend typecheck/lint/build: `npm run typecheck:frontend`, `npm run lint:frontend`, and `npm run build:frontend`
 - Backend unit tests: `npm run test:backend:unit`
 - Frontend tests: `npm run test:frontend`
+- Frontend coverage: `npm run test:frontend:coverage`
+- Backend coverage: `npm run test:backend:unit:coverage`, `npm run test:backend:db:coverage`, then `npm run coverage:backend:merge`
 - Harness checks: `npm run harness:all`
 - Deployment-gate regression: `npm run test:deployment:gate`
 - All test suites: `npm run test:suites`
@@ -26,6 +28,8 @@
 | Fast focused validation | The smallest relevant test command, such as `node --import tsx --test <file>` or `cd frontend && npm run test -- <file>` | Only when the selected test is DB-backed |
 | Backend unit suite | `npm run test:backend:unit` | None |
 | Frontend suite | `npm run test:frontend` | None |
+| Frontend coverage | `npm run test:frontend:coverage` | None |
+| Backend coverage | `npm run test:backend:unit:coverage`, `npm run test:backend:db:coverage`, then `npm run coverage:backend:merge` | Disposable Docker test DB for DB coverage |
 | Complete test suites | `npm run test:suites` | Disposable Docker test DB must already be reachable |
 | Complete local quality gate | `npm run quality:local` | Disposable Docker test DB must already be reachable |
 
@@ -36,8 +40,8 @@
 | Validation context | Required behavior |
 | --- | --- |
 | Local developer validation | Run `npm run agent:contract`, relevant targeted checks, and relevant typechecks. When the disposable Docker DB is already available and a complete local run is warranted, run `npm run quality:local`. Do not start or repair Docker solely for a non-DB task. |
-| Pull-request required validation | The `repository-contract` job runs agent contract, harness, and deployment-gate regression without PostgreSQL. The backend job runs migrations, backend typecheck/unit/DB suites, the named scheduling gate, and the specially configured backup/restore integration. The frontend job runs lint, tests, and production build. A green required pull-request CI result is authoritative before merge. |
-| Self-hosted clean-environment validation | Runs the same repository contract, harness, and deployment-gate regression before starting its disposable PostgreSQL container, then runs migrations, backend typecheck/unit/DB suites, and frontend lint/tests/production build. Pull-request-only named scheduling and backup/restore gates remain visible in PR CI because they provide release-critical and special-environment signals. |
+| Pull-request required validation | The `repository-contract` job runs agent contract, harness, and deployment-gate regression without PostgreSQL. The backend job runs migrations, backend typecheck, coverage-wrapped unit/DB suites, merged coverage thresholds, the named scheduling gate, and the specially configured backup/restore integration. The frontend job runs lint, coverage-wrapped tests, and production build. A green required pull-request CI result is authoritative before merge. |
+| Self-hosted clean-environment validation | Runs the same repository contract, harness, and deployment-gate regression before starting its disposable PostgreSQL container, then runs migrations, backend typecheck/unit/DB suites, and frontend lint/tests/production build. It intentionally does not repeat PR coverage enforcement. Pull-request-only coverage, named scheduling, and backup/restore gates remain visible in PR CI because they provide distinct authoritative signals. |
 | Deployment-gate regression validation | `npm run test:deployment:gate` is mandatory in PR and self-hosted CI. It protects workflow/script deployment invariants; it does not replace product tests. |
 | Deployment authorization | Deployment requires a full 40-character commit SHA and a successful self-hosted CI workflow run for that exact SHA, followed by readiness and running build-SHA verification. |
 

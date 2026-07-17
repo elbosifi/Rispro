@@ -38,6 +38,8 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 - Frontend lint: `npm run lint:frontend`
 - Backend unit tests: `npm run test:backend:unit`
 - Frontend tests: `npm run test:frontend`
+- Frontend coverage: `npm run test:frontend:coverage`
+- Backend coverage: `npm run test:backend:unit:coverage`, `npm run test:backend:db:coverage`, then `npm run coverage:backend:merge`
 - Harness checks: `npm run harness:all`
 - All test suites (requires the disposable DB to be reachable): `npm run test:suites`
 - Full local quality gate (requires the disposable DB to be reachable): `npm run quality:local`
@@ -45,3 +47,5 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 - Browser critical journeys: `npm run e2e:db:up`, `npm run test:e2e`, then `npm run e2e:db:down`. This is guarded to the disposable E2E database only; see [docs/E2E_PLAYWRIGHT.md](docs/E2E_PLAYWRIGHT.md).
 
 `quality:local` is for a complete local run; do not invoke it as an additional CI wrapper around individually reported CI steps. Pull-request CI is the authoritative before-merge result. A successful self-hosted CI run for the exact commit is additionally required before deployment.
+
+Coverage floors are regression evidence, not a replacement for unit, DB, browser, scheduling, backup/restore, contract, or deployment checks. See [docs/testing/COVERAGE.md](docs/testing/COVERAGE.md) for the disposable-DB safety rules, report locations, exclusions, and baseline-change process.
