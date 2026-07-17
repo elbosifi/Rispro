@@ -542,6 +542,56 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     }
   });
 
+  it("rejects a tampered ambiguous-patient proof without persisting secrets", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-05-11";
+    await fillNonOncologyCategory(date);
+    const patient = await createAmbiguousPatients();
+    const verification = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patient.patientId}/verify`, {
+      method: "POST",
+      body: { method: "primary_identifier", evidence: patient.firstIdentifier },
+    });
+    assert.equal(verification.status, 200);
+    const proof = String((verification.data as { proof?: unknown }).proof || "");
+    assert.ok(proof);
+    const tamperedProof = `${proof.slice(0, -1)}${proof.endsWith("a") ? "b" : "a"}`;
+
+    const requested = await requestCategoryOverride(date, patient.patientId, receptionistCookie, tamperedProof);
+    assert.equal(requested.status, 422, JSON.stringify(requested.data));
+    assert.match(JSON.stringify(requested.data), /patient_identity_reverification_required/);
+
+    const { pool } = await import("../../../../db/pool.js");
+    const requests = await pool.query<{ count: number }>(
+      `select count(*)::int as count
+       from appointments_v2.scheduling_override_requests
+       where patient_id = $1 and requested_booking_date = $2::date`,
+      [patient.patientId, date]
+    );
+    assert.equal(requests.rows[0]?.count ?? 0, 0);
+    assert.equal(await countBookings(date, patient.patientId), 0);
+
+    const audit = await pool.query<{ action_type: string; new_values: unknown }>(
+      `select action_type, new_values
+       from audit_log
+       where entity_type = 'appointment_patient_identity' and entity_id = $1
+       order by id asc`,
+      [patient.patientId]
+    );
+    const rejection = audit.rows.find((row) => row.action_type === "appointment_patient_identity_verification_rejected");
+    assert.ok(rejection);
+    const rejectionValues = rejection?.new_values as Record<string, unknown>;
+    assert.equal(rejectionValues.outcome, "rejected");
+    assert.equal(rejectionValues.code, "patient_identity_reverification_required");
+    assert.equal(rejectionValues.source, "deferred_override");
+    assert.equal(rejectionValues.ambiguityRuleVersion, "name_first_three_v1");
+
+    const auditJson = JSON.stringify(audit.rows);
+    for (const secret of [patient.firstIdentifier, patient.dateOfBirth, patient.phoneSuffix, proof, tamperedProof, "identityFingerprint"]) {
+      assert.equal(auditJson.includes(secret), false);
+    }
+  });
+
   it("approves a closed weekday deferred request without bypassing capacity rules", async () => {
     if (!testData) return;
     await setCapacityLimits(10, 5);
