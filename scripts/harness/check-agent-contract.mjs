@@ -100,7 +100,12 @@ function checkE2eEnvironmentContract() {
   }
   const workflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
   const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
-  if (!workflow.includes("cp e2e/.env.example e2e/.env")) errors.push("Browser CI must copy e2e/.env.example before running E2E commands.");
+  const envCopyIndex = workflow.indexOf("cp e2e/.env.example e2e/.env");
+  const dbUpIndex = workflow.indexOf("npm run e2e:db:up");
+  const e2eTestIndex = workflow.indexOf("npm run test:e2e:ci");
+  if (envCopyIndex === -1 || dbUpIndex === -1 || e2eTestIndex === -1 || !(envCopyIndex < dbUpIndex && dbUpIndex < e2eTestIndex)) {
+    errors.push("Browser CI must copy e2e/.env.example and start the guarded E2E database before browser tests.");
+  }
 }
 
 function checkEnv() {

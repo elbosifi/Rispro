@@ -159,8 +159,15 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Start guarded disposable E2E database
+        run: npm run e2e:db:up
+
       - name: Run critical browser journeys
         run: npm run test:e2e:ci
+
+      - name: Stop guarded disposable E2E database
+        if: always()
+        run: npm run e2e:db:down
 
       - name: Upload Playwright report
         if: always()
