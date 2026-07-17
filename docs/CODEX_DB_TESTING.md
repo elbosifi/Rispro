@@ -43,13 +43,16 @@ npm run db:test:down
 
 ## Validation Sequence
 
-When local Docker is already operational and complete local validation is warranted, use this sequence:
+For changes involving migrations, SQL, repositories, DB-backed services, booking/override persistence, or DB integration tests, use this mandatory sequence:
 
 ```powershell
+npm run agent:preflight
 npm run db:test:up
 npm run db:test:check
-npm run quality:local
+npm run db:test:required -- <test-file> [additional-test-files...]
 ```
+
+If preflight reports `DOCKER_OK`, always run `db:test:up` first, even if `db:test:check` initially reports that localhost port `5433` refused the connection. Then run `db:test:check` and every focused DB test relevant to the change. `db:test:required` performs the start/check sequence, invokes the existing safe `test:db:one` migration-and-serial-test command once per supplied file, prints command outcomes, and fails at the first failed test. It retains an already-running `rispro-test-postgres` container and removes only one it created.
 
 `npm run test:suites` runs the backend unit suite, frontend suite, DB readiness check, and backend DB suite. `npm run quality:local` adds the repository contract, harness, deployment-gate regression, typechecks, frontend lint, and production build. `npm run test:db` remains the DB-only convenience wrapper for `db:test:check` and `test:backend:db`.
 
@@ -58,7 +61,8 @@ npm run quality:local
 - Do not use or modify the production database.
 - Do not ask for the local PostgreSQL admin password.
 - If `5432` is occupied, use the Docker test database on `5433`.
-- If Docker is unavailable, do not repair it solely for a full DB suite. Report any local DB validation as not run and delegate the full suite to required GitHub CI as pending.
+- Do not delegate solely because `localhost:5433` was initially unreachable.
+- Delegation is permitted only when preflight explicitly reports Docker unavailable/not installed (`DOCKER_NOT_INSTALLED`), daemon not running (`DOCKER_DAEMON_NOT_RUNNING`), execution blocked (`DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT`), credential-helper broken (`DOCKER_CREDENTIAL_HELPER_BROKEN`), or one documented `db:test:up` attempt fails. Do not repair Docker beyond that attempt solely for a full DB suite.
 - If `db:test:check` fails, DB-backed validation has not passed.
 
 ## Local PostgreSQL Repair

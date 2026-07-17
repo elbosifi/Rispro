@@ -99,13 +99,21 @@ async function selectPort() {
   throw new Error('Neither localhost:5432 nor localhost:5433 is available for the disposable test PostgreSQL container.');
 }
 
-function removeContainerIfPresent() {
-  if (!dockerOk(['inspect', containerName])) return;
-  const result = runDocker(['rm', '-f', containerName]);
-  if (result.status !== 0) {
-    throw new Error(`Failed to remove existing disposable test container ${containerName}: ${result.stderr || result.stdout}`);
+function preserveRunningContainerIfPresent() {
+  const result = runDocker(['inspect', '--format', '{{.State.Running}}', containerName]);
+  if (result.status !== 0) return false;
+  if (result.stdout.trim() === 'true') {
+    console.log(`OK: preserving already-running disposable test container ${containerName}`);
+    return true;
   }
-  console.log(`OK: removed existing disposable test container ${containerName}`);
+
+  if (!dockerOk(['inspect', containerName])) return;
+  const removeResult = runDocker(['rm', '-f', containerName]);
+  if (removeResult.status !== 0) {
+    throw new Error(`Failed to remove stopped disposable test container ${containerName}: ${removeResult.stderr || removeResult.stdout}`);
+  }
+  console.log(`OK: removed stopped disposable test container ${containerName}`);
+  return false;
 }
 
 async function waitForPostgres(values) {
@@ -150,7 +158,7 @@ async function up() {
     throw new Error(`Docker is not available. Start Docker Desktop, then rerun npm run db:test:up. ${dockerVersion.stderr || dockerVersion.stdout}`);
   }
 
-  removeContainerIfPresent();
+  if (preserveRunningContainerIfPresent()) return;
   const port = await selectPort();
   const nextValues = {
     DATABASE_URL: '',

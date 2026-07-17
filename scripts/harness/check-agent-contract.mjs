@@ -16,6 +16,8 @@ const requiredFiles = [
   "docs/agents/CANONICAL_FILES.md",
   "scripts/dev/preflight-env.mjs",
   "scripts/dev/test-one-db.mjs",
+  "scripts/dev/required-db-test.mjs",
+  "scripts/dev/ci-inspect.mjs",
   "coverage.config.json",
   "coverage-thresholds.json",
   "scripts/coverage/check-coverage.mjs",
@@ -27,6 +29,9 @@ const requiredFiles = [
 const requiredScripts = [
   "agent:preflight",
   "test:db:one",
+  "db:test:required",
+  "ci:inspect",
+  "test:tooling",
   "agent:contract",
   "test:backend:scheduling-gate",
   "test:frontend:coverage",
@@ -50,6 +55,7 @@ checkSchedulingGateContract(packageJson);
 checkCoverageContract(packageJson);
 checkE2eEnvironmentContract();
 checkGitWorkflowContract();
+checkRequiredDbAndCiInspectionContract(packageJson);
 checkEnv();
 checkDocsForLocalPaths();
 checkDicomWorklistSideEffects();
@@ -96,6 +102,53 @@ function checkSchedulingGateContract(packageJson) {
   if (!schedulingStep || schedulingStep[1].trim() !== "npm run test:backend:scheduling-gate") {
     errors.push("Pull-request CI scheduling gate must invoke npm run test:backend:scheduling-gate.");
   }
+}
+
+function checkRequiredDbAndCiInspectionContract(packageJson) {
+  const requiredDb = packageJson?.scripts?.["db:test:required"];
+  if (requiredDb !== "node scripts/dev/required-db-test.mjs") {
+    errors.push("db:test:required must invoke the required disposable-DB wrapper.");
+  }
+  const ciInspect = packageJson?.scripts?.["ci:inspect"];
+  if (ciInspect !== "node scripts/dev/ci-inspect.mjs") {
+    errors.push("ci:inspect must invoke the exact-SHA read-only CI inspector.");
+  }
+
+  const requiredDbScript = readText("scripts/dev/required-db-test.mjs");
+  for (const requiredSnippet of [
+    "scripts/dev/preflight-env.mjs",
+    "db:test:up",
+    "db:test:check",
+    "test:db:one",
+    "DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT",
+  ]) {
+    if (!requiredDbScript.includes(requiredSnippet)) errors.push(`Required DB wrapper must include ${requiredSnippet}.`);
+  }
+  if (!readText("scripts/dev/test-one-db.mjs").includes("--test-concurrency=1")) {
+    errors.push("The focused DB test primitive must keep serial test concurrency.");
+  }
+
+  const ciScript = readText("scripts/dev/ci-inspect.mjs");
+  for (const requiredSnippet of [
+    "elbosifi/Rispro",
+    "RISpro self-hosted CI",
+    "headSha",
+    "--log-failed",
+    "gh auth status",
+  ]) {
+    if (!ciScript.includes(requiredSnippet)) errors.push(`CI inspector must include ${requiredSnippet}.`);
+  }
+
+  const agents = readText("AGENTS.md");
+  const validationRules = readText("docs/agents/VALIDATION_RULES.md");
+  const dbTesting = readText("docs/CODEX_DB_TESTING.md");
+  const operatingRules = readText("docs/agents/RISPRO_OPERATING_RULES.md");
+  for (const [name, document] of [["AGENTS.md", agents], ["VALIDATION_RULES.md", validationRules], ["CODEX_DB_TESTING.md", dbTesting], ["RISPRO_OPERATING_RULES.md", operatingRules]]) {
+    requireMatch(document, /DOCKER_OK/, `${name} must require the Docker-ready DB validation sequence.`);
+    requireMatch(document, /db:test:required/, `${name} must document the required DB wrapper.`);
+  }
+  requireMatch(agents, /ci:inspect[^\n]*--sha/, "AGENTS.md must require exact-SHA CI inspection after an authorized push.");
+  requireMatch(validationRules, /--log-failed/, "VALIDATION_RULES.md must document failed-log inspection.");
 }
 
 function checkCoverageContract(packageJson) {

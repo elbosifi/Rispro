@@ -10,7 +10,7 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 4. Do not redesign UI, change product behavior, or refactor business logic unless the task explicitly asks for it.
 5. Run targeted tests first, then broader checks only when the change warrants them.
 6. Stop at the first unrelated failure. Report it clearly and do not hide it with workaround changes.
-7. Run the smallest targeted validation locally first. For DB-affecting work, use the portable Docker test DB flow when Docker is already functional and the targeted test is reasonably quick; do not spend Codex quota troubleshooting, installing, or provisioning Docker unless the task concerns the development environment. The required GitHub CI workflow may perform the full DB-backed validation; it runs the same comprehensive matrix for pull requests and direct pushes to `main`. When it is delegated, report: `DB-backed validation delegated to GitHub CI and remains pending.` A green required GitHub CI check is the authoritative full-suite result before merge or deployment gating. Fix known relevant local failures before pushing; do not use CI delegation to hide them.
+7. Run the smallest targeted validation locally first. For changes involving migrations, SQL, repositories, DB-backed services, booking/override persistence, or DB integration tests, run `npm run agent:preflight`; when it reports `DOCKER_OK`, run `npm run db:test:up` even if `db:test:check` initially reports connection refused, then `npm run db:test:check` and all relevant focused DB tests (prefer `npm run db:test:required -- <test-file> [additional-test-files...]`). Do not delegate solely because `localhost:5433` was initially unreachable. Delegation is allowed only when preflight explicitly reports Docker unavailable/not installed, daemon not running, execution blocked, or credential-helper broken, or when one documented `db:test:up` attempt fails. Do not spend Codex quota troubleshooting, installing, or provisioning Docker beyond that attempt unless the task concerns the development environment. The required GitHub CI workflow may perform the full DB-backed validation; it runs the same comprehensive matrix for pull requests and direct pushes to `main`. When it is delegated, report: `DB-backed validation delegated to GitHub CI and remains pending.` A green required GitHub CI check is the authoritative full-suite result before merge or deployment gating. Fix known relevant local failures before commit or push; do not use CI delegation to hide them.
 8. Never ask for a local PostgreSQL admin password. Do not touch production DBs.
 9. Do not claim skipped, blocked, or failed tests as passing.
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
@@ -36,7 +36,9 @@ Branch creation outside the goal-local workflow, commit, push, pull-request crea
 
 ### CI wording
 
-Comprehensive CI is authoritative before merge and runs for both pull requests and direct pushes to `main`. A regular-local task ends before commit or push; Codex must report locally completed work and pending validation accurately. Deployment additionally requires successful comprehensive CI and self-hosted CI runs for the exact commit SHA. Codex must never describe pending, skipped, or unexecuted CI as passing.
+Comprehensive CI is authoritative before merge and runs for both pull requests and direct pushes to `main`. A regular-local task ends before commit or push; Codex must report locally completed work and pending validation accurately. When commit and push are explicitly authorized, record the pushed full SHA, run `npm run ci:inspect -- --sha <SHA>`, inspect failed logs, and summarize the first actionable failure. Do not claim completion while either required workflow is pending or failed, and do not rerun workflows or patch until the failure is diagnosed. Deployment additionally requires successful comprehensive CI and self-hosted CI runs for the exact commit SHA. Codex must never describe pending, skipped, or unexecuted CI as passing.
+
+When the user manually pushes after a regular-local Codex task, a separate low-reasoning CI-inspection task may run the same exact-SHA command without changing the repository or GitHub.
 
 ## Repo Map
 
@@ -65,7 +67,8 @@ Comprehensive CI is authoritative before merge and runs for both pull requests a
 - Harness checks: `npm run harness:all`
 - All test suites (requires the disposable DB to be reachable): `npm run test:suites`
 - Full local quality gate (requires the disposable DB to be reachable): `npm run quality:local`
-- DB-backed tests when local Docker is already ready: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`; otherwise delegate the full suite to required GitHub CI and report it as pending
+- Required focused DB tests: `npm run db:test:required -- <test-file> [additional-test-files...]` (runs preflight, starts/checks the disposable Docker DB, migrates, and executes each supplied test serially)
+- Exact pushed-SHA CI inspection: `npm run ci:inspect -- --sha <SHA|HEAD> [--wait [seconds]]`
 - Browser critical journeys: `npm run e2e:db:up`, `npm run test:e2e`, then `npm run e2e:db:down`. This is guarded to the disposable E2E database only; see [docs/E2E_PLAYWRIGHT.md](docs/E2E_PLAYWRIGHT.md).
 
 `quality:local` is for a complete local run; do not invoke it as an additional CI wrapper around individually reported CI steps. Comprehensive CI is the authoritative before-merge result and also validates direct pushes to `main`. A successful comprehensive CI run and a successful self-hosted CI run for the exact commit are both required before deployment.
