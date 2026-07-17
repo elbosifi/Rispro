@@ -497,6 +497,51 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(JSON.stringify(audit.rows).includes(stored.patient_identity_verification_fingerprint!), false);
   });
 
+  it("approves a deferred request after valid ambiguous-patient verification without retaining verification secrets", async () => {
+    if (!testData) return;
+    await setCapacityLimits();
+    const date = "2042-05-10";
+    await fillNonOncologyCategory(date);
+    const patient = await createAmbiguousPatients();
+    const verification = await fetchAs(receptionistCookie, `/api/v2/appointments/patient-selection/${patient.patientId}/verify`, {
+      method: "POST",
+      body: { method: "primary_identifier", evidence: patient.firstIdentifier },
+    });
+    assert.equal(verification.status, 200);
+    const proof = String((verification.data as { proof?: unknown }).proof || "");
+    assert.ok(proof);
+
+    const requested = await requestCategoryOverride(date, patient.patientId, receptionistCookie, proof);
+    assert.equal(requested.status, 201, JSON.stringify(requested.data));
+    const requestId = Number((requested.data as any).request.id);
+
+    const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${requestId}/approve`, {
+      method: "POST",
+      body: { approverReason: "Identity verified before deferred approval." },
+    });
+    assert.equal(approved.status, 200, JSON.stringify(approved.data));
+    assert.equal((approved.data as any).request.status, "approved");
+    assert.equal(Number((approved.data as any).booking.patientId), patient.patientId);
+    assert.equal(JSON.stringify(approved.data).includes(proof), false);
+
+    const stored = await getRequestFromDb(requestId);
+    assert.ok(stored.patient_identity_verification_fingerprint);
+    const deferredJson = JSON.stringify(stored.request_payload_json);
+    for (const secret of [patient.firstIdentifier, patient.dateOfBirth, patient.phoneSuffix, proof, "identityFingerprint"]) {
+      assert.equal(deferredJson.includes(secret), false);
+    }
+
+    const { pool } = await import("../../../../db/pool.js");
+    const audit = await pool.query<{ new_values: unknown }>(
+      `select new_values from audit_log where entity_type = 'appointment_patient_identity' and entity_id = $1`,
+      [patient.patientId]
+    );
+    const auditJson = JSON.stringify(audit.rows);
+    for (const secret of [patient.firstIdentifier, patient.dateOfBirth, patient.phoneSuffix, proof, stored.patient_identity_verification_fingerprint!]) {
+      assert.equal(auditJson.includes(secret), false);
+    }
+  });
+
   it("approves a closed weekday deferred request without bypassing capacity rules", async () => {
     if (!testData) return;
     await setCapacityLimits(10, 5);
