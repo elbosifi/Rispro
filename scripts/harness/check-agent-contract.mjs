@@ -19,7 +19,7 @@ const requiredFiles = [
   "scripts/harness/check-agent-contract.mjs",
 ];
 
-const requiredScripts = ["agent:preflight", "test:db:one", "agent:contract"];
+const requiredScripts = ["agent:preflight", "test:db:one", "agent:contract", "test:backend:scheduling-gate"];
 const requiredEnvKeys = ["DATABASE_URL", "TEST_DATABASE_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"];
 const absoluteLocalPathPattern = /(?:[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s)]+|\/Users\/[^/\s)]+)/g;
 
@@ -32,6 +32,7 @@ for (const script of requiredScripts) {
   if (!packageJson?.scripts?.[script]) errors.push(`Missing package script: ${script}`);
 }
 
+checkSchedulingGateContract(packageJson);
 checkEnv();
 checkDocsForLocalPaths();
 checkDicomWorklistSideEffects();
@@ -50,6 +51,33 @@ function readJson(relativePath) {
   } catch (error) {
     errors.push(`Unable to read ${relativePath}: ${error instanceof Error ? error.message : String(error)}`);
     return null;
+  }
+}
+
+function checkSchedulingGateContract(packageJson) {
+  const command = packageJson?.scripts?.["test:backend:scheduling-gate"];
+  const expectedDbTests = [
+    "src/services/scheduling-settings-service.integration.test.ts",
+    "src/services/scheduling-settings-service.idempotent.test.ts",
+  ];
+
+  if (typeof command !== "string") return;
+  if (!command.startsWith("node --import tsx --test src/domain/scheduling/evaluator.test.ts && node scripts/run-backend-tests.js db ")) {
+    errors.push("Scheduling gate must run the pure evaluator test and use the serial DB test runner.");
+  }
+  for (const testFile of expectedDbTests) {
+    if (!command.includes(testFile)) errors.push(`Scheduling gate must include ${testFile}.`);
+  }
+
+  const workflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
+  if (!existsSync(workflowPath)) {
+    errors.push("Missing pull-request CI workflow for scheduling gate validation.");
+    return;
+  }
+  const workflow = readFileSync(workflowPath, "utf8");
+  const schedulingStep = workflow.match(/- name: Run scheduling test gate\s+run: ([^\r\n]+)/);
+  if (!schedulingStep || schedulingStep[1].trim() !== "npm run test:backend:scheduling-gate") {
+    errors.push("Pull-request CI scheduling gate must invoke npm run test:backend:scheduling-gate.");
   }
 }
 
