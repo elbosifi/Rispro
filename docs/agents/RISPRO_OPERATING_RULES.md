@@ -24,7 +24,7 @@ These rules keep agent work small, verifiable, and safe for a production radiolo
 
 - Run cheap relevant local checks first for DB-affecting work.
 - Use the portable Docker PostgreSQL test flow only when Docker is already operational and a focused DB test is quick. Do not troubleshoot, install, or provision Docker solely to run the full suite unless the task concerns the environment.
-- Delegate full DB-backed validation to required GitHub pull-request CI when local Docker is not immediately available, and report it as pending rather than passing.
+- Delegate full DB-backed validation to required GitHub CI when local Docker is not immediately available, and report it as pending rather than passing. The comprehensive workflow runs for pull requests and direct pushes to `main`.
 - Use `codex-db-test.env` for DB test credentials.
 - Never ask for a local PostgreSQL admin password.
 - Never touch production DBs during agent validation.
@@ -40,4 +40,4 @@ These rules keep agent work small, verifiable, and safe for a production radiolo
 2. On the new machine, run `git pull` or apply the patch.
 3. Run cheap relevant local checks.
 4. When Docker is already operational and focused DB validation is useful, run `npm run agent:preflight`, `npm run db:test:up`, `npm run db:test:check`, and targeted DB tests.
-5. Otherwise, hand the full DB-backed suite to required GitHub pull-request CI and report its status accurately.
+5. Otherwise, hand the full DB-backed suite to required GitHub CI and report its status accurately.

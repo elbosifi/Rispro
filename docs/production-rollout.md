@@ -30,8 +30,8 @@ This repository now includes:
 - a GitHub Actions workflow at `.github/workflows/deploy.yml`
 
 The script is the real deployment logic. Every deployment now requires a full commit SHA
-with a successful `RISpro self-hosted CI` run for that exact SHA. The GitHub workflow
-checks that result before SSH and passes the SHA to the server script.
+with successful comprehensive `CI` and `RISpro self-hosted CI` runs for that exact SHA.
+The GitHub workflow checks both results before SSH and passes the SHA to the server script.
 
 The workflow is currently named and scoped as the development target because
 `192.9.101.250` is the configured development target. `/usr/local/sbin/deploy-rispro-production`
@@ -99,8 +99,9 @@ Add these GitHub Actions variables:
 - `DEPLOY_HEALTHCHECK_URL`: for example `http://127.0.0.1:3000/api/ready`
 
 The manual GitHub Actions deployment input is `commit_sha`. It must identify a commit
-that already has a successful self-hosted CI workflow run. The deployment checks both
-`/api/health` (including its `buildSha`) and `/api/ready` after restart.
+that already has successful comprehensive `CI` and self-hosted CI workflow runs. The
+deployment checks both exact workflow results, then verifies `/api/health` (including its
+`buildSha`) and `/api/ready` after restart.
 
 Optional variables:
 
@@ -262,7 +263,7 @@ Use your backup first.
 Rollback plan:
 
 1. Identify the previous deployed commit SHA from deployment records.
-2. Confirm that SHA has a successful self-hosted CI run.
+2. Confirm that SHA has successful comprehensive `CI` and self-hosted CI runs.
 3. Run the manual deployment workflow with that SHA as `commit_sha`.
 4. Let the exact-SHA checkout, migration, restart, health, readiness, and build-SHA checks complete.
 5. Restore the database backup only if the release included an incompatible migration or data change.

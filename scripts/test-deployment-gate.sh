@@ -16,12 +16,21 @@ pass() {
 
 cd "${PROJECT_ROOT}"
 
+ci_workflow='.github/workflows/ci.yml'
 workflow='.github/workflows/deploy.yml'
+grep -q '^  pull_request:$' "$ci_workflow" || fail 'comprehensive CI workflow does not run for pull requests'
+grep -q '^  push:$' "$ci_workflow" || fail 'comprehensive CI workflow does not run for pushes'
+grep -q '^      - main$' "$ci_workflow" || fail 'comprehensive CI workflow push trigger is not restricted to main'
+pass 'comprehensive CI workflow covers pull requests and direct main pushes'
+
 grep -q 'commit_sha:' "$workflow" || fail 'deployment workflow does not require a commit_sha input'
 grep -q 'listWorkflowRuns' "$workflow" || fail 'deployment workflow does not query workflow runs'
+grep -q 'workflow_id: "ci.yml"' "$workflow" || fail 'deployment workflow does not target comprehensive CI'
 grep -q 'workflow_id: "self-hosted-ci.yml"' "$workflow" || fail 'deployment workflow does not target self-hosted CI'
 grep -q 'run.head_sha.toLowerCase() === expectedSha' "$workflow" || fail 'deployment workflow does not compare the exact run SHA'
 grep -q 'run.conclusion === "success"' "$workflow" || fail 'deployment workflow does not require a successful CI conclusion'
+grep -q 'No successful RISpro comprehensive CI run exists' "$workflow" || fail 'deployment workflow does not fail when comprehensive CI is absent'
+grep -q 'No successful RISpro self-hosted CI run exists' "$workflow" || fail 'deployment workflow does not fail when self-hosted CI is absent'
 grep -q -- '--expected-sha ${DEPLOY_SHA}' "$workflow" || fail 'deployment workflow does not pass the expected SHA remotely'
 grep -q '/api/ready' "$workflow" || fail 'deployment workflow has no post-deployment readiness check'
 grep -q 'health.buildSha !== expectedSha' "$workflow" || fail 'deployment workflow does not verify the running build SHA'

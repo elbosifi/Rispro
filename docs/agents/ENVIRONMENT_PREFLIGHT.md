@@ -20,7 +20,7 @@ The preflight does not start containers, run migrations, or edit env files. Do n
 
 ## When CI should replace local Docker setup
 
-Do not initialize or repair local Docker solely to run a full DB suite when pull-request CI already provides a clean PostgreSQL environment. Use local Docker for focused iterative DB work only when it is already operational. Use GitHub CI for the authoritative clean-environment DB suite.
+Do not initialize or repair local Docker solely to run a full DB suite when comprehensive GitHub CI already provides a clean PostgreSQL environment. Use local Docker for focused iterative DB work only when it is already operational. Use GitHub CI for the authoritative clean-environment DB suite; it runs for pull requests and direct pushes to `main`.
 
 Docker environment failures are environment findings, not product-code failures, and must not lead to product-code debugging. Push and rely on CI only after cheap relevant local checks pass. If CI fails, inspect only the failed job and the relevant log excerpt.
 
@@ -51,11 +51,11 @@ When Docker is `DOCKER_EXECUTION_BLOCKED_BY_ENVIRONMENT`, stop debugging RISpro 
 2. On the new machine, run `git pull` or apply the patch.
 3. Run cheap relevant local checks.
 4. If Docker is already operational and focused DB validation is useful, run `npm run agent:preflight`, `npm run db:test:up`, `npm run db:test:check`, and `npm run test:db:one -- <test-file>`.
-5. Otherwise, use required GitHub pull-request CI for the full DB-backed suite and report it as pending.
+5. Otherwise, use required GitHub CI for the full DB-backed suite and report it as pending.
 
 ## Stop or Continue
 
 - For an environment/Docker task, stop when Docker is not installed, Docker Desktop is not running, Docker execution is blocked, or the credential helper is broken. Fix the environment first.
 - Continue to targeted non-DB checks when the task does not need DB-backed validation.
-- For product work, do not repair Docker just to run the full DB suite; use local DB tests only after `npm run db:test:up` and `npm run db:test:check` confirm the disposable DB target, or delegate the full suite to required GitHub pull-request CI.
+- For product work, do not repair Docker just to run the full DB suite; use local DB tests only after `npm run db:test:up` and `npm run db:test:check` confirm the disposable DB target, or delegate the full suite to required GitHub CI.
 - Never use a production or personal PostgreSQL database to bypass the portable Docker test DB flow.

@@ -53,9 +53,9 @@ Critical-domain coverage is computed from the explicit path prefixes in `coverag
 
 ## CI policy
 
-The pull-request workflow is authoritative for coverage enforcement. Its backend job runs the coverage-wrapped unit suite once and the coverage-wrapped DB suite once, merges/enforces once, uploads `backend-coverage`, and writes the global plus critical-domain table to the GitHub Actions summary. Its frontend job substitutes the Vitest coverage command for the previous normal test command, uploads `frontend-coverage`, and writes its summary. The named scheduling gate, backup/restore integration, Playwright Chromium E2E, repository contract, harness, deployment gate, migrations, lint, typechecks, and production build remain in place.
+The comprehensive `CI` workflow is authoritative for coverage enforcement. It runs for pull requests and direct pushes to `main`. Its backend job runs the coverage-wrapped unit suite once and the coverage-wrapped DB suite once, merges/enforces once, uploads `backend-coverage`, and writes the global plus critical-domain table to the GitHub Actions summary. Its frontend job substitutes the Vitest coverage command for the previous normal test command, uploads `frontend-coverage`, and writes its summary. The named scheduling gate, backup/restore integration, Playwright Chromium E2E, repository contract, harness, deployment gate, migrations, lint, typechecks, and production build remain in place.
 
-Self-hosted CI deliberately continues to run its existing normal suites and does not duplicate coverage enforcement. PR CI is the authoritative regression gate; making self-hosted CI also run complete coverage suites would duplicate expensive work without a distinct release signal.
+Self-hosted CI deliberately continues to run its existing normal suites and does not duplicate coverage enforcement. Comprehensive `CI` is the authoritative regression gate; making self-hosted CI also run complete coverage suites would duplicate expensive work without a distinct release signal.
 
 ## Maintaining the policy
 

@@ -10,7 +10,7 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 4. Do not redesign UI, change product behavior, or refactor business logic unless the task explicitly asks for it.
 5. Run targeted tests first, then broader checks only when the change warrants them.
 6. Stop at the first unrelated failure. Report it clearly and do not hide it with workaround changes.
-7. Run the smallest targeted validation locally first. For DB-affecting work, use the portable Docker test DB flow when Docker is already functional and the targeted test is reasonably quick; do not spend Codex quota troubleshooting, installing, or provisioning Docker unless the task concerns the development environment. The required GitHub pull-request CI workflow may perform the full DB-backed validation. When it is delegated, report: `DB-backed validation delegated to GitHub CI and remains pending.` A green required GitHub CI check is the authoritative full-suite result before merge. Fix known relevant local failures before pushing; do not use CI delegation to hide them.
+7. Run the smallest targeted validation locally first. For DB-affecting work, use the portable Docker test DB flow when Docker is already functional and the targeted test is reasonably quick; do not spend Codex quota troubleshooting, installing, or provisioning Docker unless the task concerns the development environment. The required GitHub CI workflow may perform the full DB-backed validation; it runs the same comprehensive matrix for pull requests and direct pushes to `main`. When it is delegated, report: `DB-backed validation delegated to GitHub CI and remains pending.` A green required GitHub CI check is the authoritative full-suite result before merge or deployment gating. Fix known relevant local failures before pushing; do not use CI delegation to hide them.
 8. Never ask for a local PostgreSQL admin password. Do not touch production DBs.
 9. Do not claim skipped, blocked, or failed tests as passing.
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
@@ -36,7 +36,7 @@ Branch creation outside the goal-local workflow, commit, push, pull-request crea
 
 ### CI wording
 
-Pull-request CI is authoritative before merge only when the selected workflow is `pull-request`. A regular-local task ends before commit or push; Codex must report locally completed work and pending validation accurately. Exact-commit self-hosted CI remains required before deployment. Codex must never describe pending, skipped, or unexecuted CI as passing.
+Comprehensive CI is authoritative before merge and runs for both pull requests and direct pushes to `main`. A regular-local task ends before commit or push; Codex must report locally completed work and pending validation accurately. Deployment additionally requires successful comprehensive CI and self-hosted CI runs for the exact commit SHA. Codex must never describe pending, skipped, or unexecuted CI as passing.
 
 ## Repo Map
 
@@ -65,9 +65,9 @@ Pull-request CI is authoritative before merge only when the selected workflow is
 - Harness checks: `npm run harness:all`
 - All test suites (requires the disposable DB to be reachable): `npm run test:suites`
 - Full local quality gate (requires the disposable DB to be reachable): `npm run quality:local`
-- DB-backed tests when local Docker is already ready: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`; otherwise delegate the full suite to required GitHub pull-request CI and report it as pending
+- DB-backed tests when local Docker is already ready: `npm run db:test:up`, `npm run db:test:check`, then `npm run test:db:one -- <test-file>`; otherwise delegate the full suite to required GitHub CI and report it as pending
 - Browser critical journeys: `npm run e2e:db:up`, `npm run test:e2e`, then `npm run e2e:db:down`. This is guarded to the disposable E2E database only; see [docs/E2E_PLAYWRIGHT.md](docs/E2E_PLAYWRIGHT.md).
 
-`quality:local` is for a complete local run; do not invoke it as an additional CI wrapper around individually reported CI steps. Pull-request CI is the authoritative before-merge result. A successful self-hosted CI run for the exact commit is additionally required before deployment.
+`quality:local` is for a complete local run; do not invoke it as an additional CI wrapper around individually reported CI steps. Comprehensive CI is the authoritative before-merge result and also validates direct pushes to `main`. A successful comprehensive CI run and a successful self-hosted CI run for the exact commit are both required before deployment.
 
 Coverage floors are regression evidence, not a replacement for unit, DB, browser, scheduling, backup/restore, contract, or deployment checks. See [docs/testing/COVERAGE.md](docs/testing/COVERAGE.md) for the disposable-DB safety rules, report locations, exclusions, and baseline-change process.
