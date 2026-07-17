@@ -1,40 +1,47 @@
 import { expect, test } from "@playwright/test";
 import { E2E_PASSWORD, signInWithSession } from "../helpers/auth";
+import { e2eTomorrowInTripoli } from "../helpers/fixtures";
 
 test("a reception capacity block requires supervisor approval and persists the approved booking", async ({ browser }) => {
+  test.setTimeout(90_000);
   const receptionContext = await browser.newContext();
   const reception = await receptionContext.newPage();
-  await signInWithSession(reception, "e2e_reception");
-  await reception.goto("/appointments");
-  await reception.getByPlaceholder(/search.*patient/i).fill("E2E Similar Two");
-  await reception.getByRole("button", { name: /e2e similar two/i }).click();
-  await reception.getByLabel(/modality/i).selectOption({ label: /e2e ct/i });
-  await reception.getByLabel(/exam type/i).selectOption({ label: /e2e ct head/i });
-  await reception.getByLabel(/start date/i).fill("2035-04-15");
+  const fullFixtureDate = e2eTomorrowInTripoli();
+  await test.step("reception requests the full-capacity exception", async () => {
+    await signInWithSession(reception, "e2e_reception");
+    await reception.goto("/appointments");
+    await reception.getByPlaceholder("Search patient by name, national ID, or MRN…").fill("E2E Similar Two");
+    await reception.getByRole("button", { name: /e2e similar two/i }).click();
+    await reception.getByLabel(/modality/i).selectOption({ label: "E2E CT — التصوير المقطعي E2E" });
+    await reception.getByLabel(/exam type/i).selectOption({ label: "E2E CT Head — رأس E2E" });
+    await reception.getByLabel(/start date/i).fill(fullFixtureDate);
+    await reception.getByRole("button", { name: "Show full days" }).click();
+    const fullSlot = reception.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") });
+    await expect(fullSlot).toBeVisible();
+    await fullSlot.click();
+    await reception.getByRole("button", { name: "Request override approval" }).click();
+    await expect(reception.getByRole("heading", { name: "Request override approval" })).toBeVisible();
+    await reception.getByLabel("Requester reason").fill("Synthetic E2E capacity exception requiring review.");
+    await reception.getByRole("button", { name: /submit request/i }).click();
+    await expect(reception.getByText(/submitted|pending/i).first()).toBeVisible();
+  });
 
-  const fullSlot = reception.getByRole("button", { name: "2035-04-15 full" });
-  await expect(fullSlot).toBeVisible();
-  await fullSlot.click();
-  await expect(reception.getByText(/approval|required|full/i).first()).toBeVisible();
-  await reception.getByRole("button", { name: /request approval/i }).click();
-  await reception.getByLabel(/reason for request/i).fill("Synthetic E2E capacity exception requiring review.");
-  await reception.getByRole("button", { name: /submit request/i }).click();
-  await expect(reception.getByText(/submitted|pending/i).first()).toBeVisible();
-
-  const supervisorContext = await browser.newContext();
-  const supervisor = await supervisorContext.newPage();
-  await signInWithSession(supervisor, "e2e_supervisor");
-  await supervisor.goto("/dashboard");
-  await supervisor.getByRole("button", { name: /override/i }).click();
-  await expect(supervisor.getByText("E2E Similar Two")).toBeVisible();
-  await supervisor.getByRole("button", { name: /^approve$/i }).click();
-  await supervisor.getByPlaceholder(/password/i).fill(E2E_PASSWORD);
-  await supervisor.getByRole("button", { name: /verify/i }).click();
-  await expect(supervisor.getByText(/approved/i).first()).toBeVisible();
-
-  await reception.reload();
-  await reception.getByRole("button", { name: /override/i }).click();
-  await expect(reception.getByText(/approved/i).first()).toBeVisible();
-  await supervisorContext.close();
+  const approverContext = await browser.newContext();
+  const approver = await approverContext.newPage();
+  await test.step("super administrator approves the total-capacity exception and reception observes it", async () => {
+    await signInWithSession(approver, "e2e_super_admin");
+    await approver.goto("/dashboard");
+    await approver.getByRole("button", { name: /override/i }).click();
+    await expect(approver.getByText("E2E Similar Two")).toBeVisible();
+    await approver.getByLabel(/approval note for request/i).fill("E2E super-admin approval for the total-capacity exception.");
+    await approver.getByRole("button", { name: "Approve" }).click();
+    await approver.locator('input[autocomplete="current-password"]').fill(E2E_PASSWORD);
+    await approver.getByRole("button", { name: "Verify" }).click();
+    await expect(approver.getByText("Override request approved")).toBeVisible();
+    await reception.reload();
+    await reception.getByRole("button", { name: /override/i }).click();
+    await expect(reception.getByText("approved", { exact: true }).last()).toBeVisible();
+  });
+  await approverContext.close();
   await receptionContext.close();
 });
