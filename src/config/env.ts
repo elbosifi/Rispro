@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
 
-dotenv.config({ override: true });
+// E2E is deliberately isolated from a developer's .env so its guard can never
+// be redirected to a local or deployed database by dotenv's override behavior.
+dotenv.config({ override: process.env.RISPRO_E2E !== "1" });
 
 function requireEnv(name: string, fallback = ""): string {
   const value = process.env[name] ?? fallback;

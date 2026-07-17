@@ -19,6 +19,13 @@
     "db:test:down": "node scripts/db-test-container.js down",
     "db:test:check": "node scripts/check-db-test.js",
     "db:test:repair": "node scripts/repair-db-test.js",
+    "e2e:db:up": "node --env-file=e2e/.env scripts/e2e-db-container.mjs up",
+    "e2e:db:down": "node --env-file=e2e/.env scripts/e2e-db-container.mjs down",
+    "e2e:db:reset": "node --env-file=e2e/.env scripts/e2e-db-reset.mjs",
+    "test:e2e": "npm run e2e:db:reset && playwright test",
+    "test:e2e:headed": "npm run e2e:db:reset && playwright test --headed",
+    "test:e2e:debug": "npm run e2e:db:reset && playwright test --debug",
+    "test:e2e:ci": "npm run e2e:db:reset && playwright test --reporter=line,html",
     "agent:preflight": "node scripts/dev/preflight-env.mjs",
     "test:deployment:gate": "bash scripts/test-deployment-gate.sh",
     "test:db:one": "node scripts/dev/test-one-db.mjs",
@@ -61,6 +68,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@playwright/test": "^1.61.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/busboy": "^1.5.4",
     "@types/cookie-parser": "^1.4.10",

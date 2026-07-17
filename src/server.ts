@@ -282,14 +282,18 @@ async function start(): Promise<void> {
     startupSummary.reporting_board_sonicdicom_cache = "initialization_failed";
   }
 
-  try {
-    const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
-    const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
-    startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
-  } catch (error) {
-    console.warn("Orthanc PACS modality sync failed. Continuing startup.");
-    logError(error);
-    startupSummary.orthanc_pacs_modalities = "sync_failed";
+  if (process.env.RISPRO_E2E === "1") {
+    startupSummary.orthanc_pacs_modalities = "disabled_by_e2e";
+  } else {
+    try {
+      const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
+      const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
+      startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
+    } catch (error) {
+      console.warn("Orthanc PACS modality sync failed. Continuing startup.");
+      logError(error);
+      startupSummary.orthanc_pacs_modalities = "sync_failed";
+    }
   }
 
   if (env.ohifEnabled) {

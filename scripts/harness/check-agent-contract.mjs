@@ -33,6 +33,7 @@ for (const script of requiredScripts) {
 }
 
 checkSchedulingGateContract(packageJson);
+checkE2eEnvironmentContract();
 checkEnv();
 checkDocsForLocalPaths();
 checkDicomWorklistSideEffects();
@@ -78,6 +79,33 @@ function checkSchedulingGateContract(packageJson) {
   const schedulingStep = workflow.match(/- name: Run scheduling test gate\s+run: ([^\r\n]+)/);
   if (!schedulingStep || schedulingStep[1].trim() !== "npm run test:backend:scheduling-gate") {
     errors.push("Pull-request CI scheduling gate must invoke npm run test:backend:scheduling-gate.");
+  }
+}
+
+function checkE2eEnvironmentContract() {
+  const templatePath = path.join(repoRoot, "e2e/.env.example");
+  if (!existsSync(templatePath)) {
+    errors.push("Missing tracked e2e/.env.example for browser CI.");
+    return;
+  }
+  const values = loadEnv(templatePath);
+  const required = ["RISPRO_E2E", "DATABASE_URL", "TEST_DATABASE_URL", "JWT_SECRET", "RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY"];
+  for (const key of required) {
+    if (!String(values[key] ?? "").trim()) errors.push(`Missing e2e/.env.example key: ${key}`);
+  }
+  if (values.RISPRO_E2E !== "1") errors.push("e2e/.env.example must set RISPRO_E2E=1.");
+  for (const key of ["DATABASE_URL", "TEST_DATABASE_URL"]) {
+    const value = String(values[key] ?? "");
+    if (!/127\.0\.0\.1|localhost/.test(value) || !/(test|e2e)/i.test(value)) errors.push(`e2e/.env.example ${key} must target a loopback test database.`);
+  }
+  const workflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
+  const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
+  const envCopyIndex = workflow.indexOf("cp e2e/.env.example e2e/.env");
+  const frontendInstallIndex = workflow.indexOf("working-directory: frontend\n        run: npm ci", workflow.indexOf("browser-e2e:"));
+  const dbUpIndex = workflow.indexOf("npm run e2e:db:up");
+  const e2eTestIndex = workflow.indexOf("npm run test:e2e:ci");
+  if (envCopyIndex === -1 || frontendInstallIndex === -1 || dbUpIndex === -1 || e2eTestIndex === -1 || !(frontendInstallIndex < envCopyIndex && envCopyIndex < dbUpIndex && dbUpIndex < e2eTestIndex)) {
+    errors.push("Browser CI must install frontend dependencies, copy e2e/.env.example, and start the guarded E2E database before browser tests.");
   }
 }
 
