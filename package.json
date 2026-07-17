@@ -27,6 +27,8 @@
     "test:e2e:debug": "npm run e2e:db:reset && playwright test --debug",
     "test:e2e:ci": "npm run e2e:db:reset && playwright test --reporter=line,html",
     "agent:preflight": "node scripts/dev/preflight-env.mjs",
+    "test:deployment:smoke": "node scripts/deployment/run-functional-smoke.mjs",
+    "test:deployment:smoke:unit": "node --test scripts/deployment/run-functional-smoke.test.mjs",
     "test:deployment:gate": "bash scripts/test-deployment-gate.sh",
     "test:db:one": "node scripts/dev/test-one-db.mjs",
     "agent:contract": "node scripts/harness/check-agent-contract.mjs",

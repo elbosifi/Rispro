@@ -25,7 +25,27 @@ grep -q 'run.conclusion === "success"' "$workflow" || fail 'deployment workflow 
 grep -q -- '--expected-sha ${DEPLOY_SHA}' "$workflow" || fail 'deployment workflow does not pass the expected SHA remotely'
 grep -q '/api/ready' "$workflow" || fail 'deployment workflow has no post-deployment readiness check'
 grep -q 'health.buildSha !== expectedSha' "$workflow" || fail 'deployment workflow does not verify the running build SHA'
-pass 'deployment workflow contains the exact-SHA CI, remote, health, and runtime gates'
+grep -q 'test:deployment:smoke' "$workflow" || fail 'deployment workflow does not run the functional smoke gate'
+grep -q 'cd /srv/rispro' "$workflow" || fail 'deployment smoke gate does not enter the deployed checkout'
+grep -q 'RISPRO_SMOKE_BASE_URL="http://127.0.0.1:3000"' "$workflow" || fail 'deployment smoke gate does not use an explicit target URL'
+
+readiness_line="$(grep -n '/api/ready' "$workflow" | tail -n 1 | cut -d: -f1)"
+build_sha_line="$(grep -n 'health.buildSha !== expectedSha' "$workflow" | tail -n 1 | cut -d: -f1)"
+smoke_line="$(grep -n '^      - name: Run post-deployment functional smoke gate$' "$workflow" | cut -d: -f1)"
+[ -n "$readiness_line" ] || fail 'deployment workflow readiness line could not be located'
+[ -n "$build_sha_line" ] || fail 'deployment workflow build-SHA line could not be located'
+[ -n "$smoke_line" ] || fail 'deployment workflow smoke step could not be located'
+if [ "$smoke_line" -le "$readiness_line" ] || [ "$smoke_line" -le "$build_sha_line" ]; then
+  fail 'functional smoke gate is not ordered after readiness and exact build-SHA verification'
+fi
+
+smoke_block="$(sed -n "${smoke_line},\$p" "$workflow")"
+grep -q 'set -euo pipefail' <<<"$smoke_block" || fail 'functional smoke step does not fail closed'
+grep -q 'RISPRO_EXPECTED_COMMIT_SHA="$expected_sha"' <<<"$smoke_block" || fail 'functional smoke step does not receive the expected SHA'
+if grep -Eq 'continue-on-error:[[:space:]]*true|\|\|[[:space:]]*true|[Ww][Aa][Rr][Nn][Ii][Nn][Gg]' <<<"$smoke_block"; then
+  fail 'functional smoke step can ignore or downgrade a failure'
+fi
+pass 'deployment workflow contains ordered, exact-SHA, fail-closed functional smoke gates'
 
 grep -q 'validate_expected_sha' deploy.sh || fail 'direct deployment script has no expected-SHA validation'
 grep -q 'git checkout --detach "$EXPECTED_SHA"' deploy.sh || fail 'direct deployment script does not check out the expected SHA'

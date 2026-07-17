@@ -116,3 +116,25 @@ jobs:
           console.log(`Post-deployment health and build SHA verified: ${expectedSha}`);
           NODE_VERIFY
           REMOTE_VERIFY
+
+      - name: Run post-deployment functional smoke gate
+        env:
+          RISPRO_SMOKE_AUTH_ENABLED: "false"
+        run: |
+          ssh \
+            -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            rispro-deploy@192.9.101.250 \
+            bash -s -- "${DEPLOY_SHA}" "${RISPRO_SMOKE_AUTH_ENABLED}" <<'REMOTE_SMOKE'
+          set -euo pipefail
+          expected_sha="$1"
+          auth_enabled="$2"
+          cd /srv/rispro
+          RISPRO_SMOKE_BASE_URL="http://127.0.0.1:3000" \
+          RISPRO_EXPECTED_COMMIT_SHA="$expected_sha" \
+          RISPRO_SMOKE_AUTH_ENABLED="$auth_enabled" \
+          npm run test:deployment:smoke
+          REMOTE_SMOKE

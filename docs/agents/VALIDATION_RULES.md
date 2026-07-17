@@ -18,6 +18,7 @@
 - Backend coverage: `npm run test:backend:unit:coverage`, `npm run test:backend:db:coverage`, then `npm run coverage:backend:merge`
 - Harness checks: `npm run harness:all`
 - Deployment-gate regression: `npm run test:deployment:gate`
+- Deployment functional-smoke unit test: `npm run test:deployment:smoke:unit`
 - All test suites: `npm run test:suites`
 - Full local quality validation: `npm run quality:local`
 
@@ -43,6 +44,7 @@
 | Pull-request required validation | The `repository-contract` job runs agent contract, harness, and deployment-gate regression without PostgreSQL. The backend job runs migrations, backend typecheck, coverage-wrapped unit/DB suites, merged coverage thresholds, the named scheduling gate, and the specially configured backup/restore integration. The frontend job runs lint, coverage-wrapped tests, and production build. A green required pull-request CI result is authoritative before merge. |
 | Self-hosted clean-environment validation | Runs the same repository contract, harness, and deployment-gate regression before starting its disposable PostgreSQL container, then runs migrations, backend typecheck/unit/DB suites, and frontend lint/tests/production build. It intentionally does not repeat PR coverage enforcement. Pull-request-only coverage, named scheduling, and backup/restore gates remain visible in PR CI because they provide distinct authoritative signals. |
 | Deployment-gate regression validation | `npm run test:deployment:gate` is mandatory in PR and self-hosted CI. It protects workflow/script deployment invariants; it does not replace product tests. |
+| Post-deployment functional smoke | `npm run test:deployment:smoke` targets an explicitly supplied deployed URL. It runs only after restart, readiness, and runtime SHA verification; it is not a local-stack or browser-E2E command. |
 | Deployment authorization | Deployment requires a full 40-character commit SHA and a successful self-hosted CI workflow run for that exact SHA, followed by readiness and running build-SHA verification. |
 
 CI delegation is permitted for full DB validation; it is not permission to skip all validation. Known relevant failures must be fixed locally and must not be deferred to CI. Pending, skipped, blocked, and failed CI checks are not passing. Docker unavailability never authorizes use of a production, personal, or otherwise non-disposable PostgreSQL database. Do not copy CI setup, migration, or passing test output into the Codex conversation unless a failure requires diagnosis.
