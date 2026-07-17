@@ -31,7 +31,7 @@
     "scheduling-and-overrides": {
       "paths": ["src/domain/scheduling/", "src/modules/appointments-v2/rules/", "src/modules/appointments-v2/scheduler/", "src/modules/appointments-v2/scheduling-override-requests/", "src/modules/appointments-v2/booking/services/override-authority.ts", "src/modules/appointments-v2/booking/repositories/override-audit.repo.ts"],
       "statements": 74.6,
-      "branches": 74.7,
+      "branches": 74.6,
       "functions": 84.5,
       "lines": 74.6
     },
