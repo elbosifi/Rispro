@@ -8,6 +8,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=./docker-deployment-lib.sh
 source "${SCRIPT_DIR}/docker-deployment-lib.sh"
 DEPLOY_COMMIT_SHA="unknown"
+EXPECTED_SHA="${EXPECTED_SHA:-${RISPRO_EXPECTED_SHA:-}}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 
 cleanup() {
   local exit_code=$?
@@ -27,26 +29,47 @@ check_git_repo() {
   cd "${PROJECT_ROOT}"
 
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    warn 'Not a git repository. Skipping git update.'
-    return 0
-  fi
-
-  local current_branch=""
-  current_branch="$(git branch --show-current)"
-
-  if [ -z "${current_branch}" ]; then
-    err 'Could not determine current git branch.'
+    err 'Deployment requires a git repository so the expected commit can be verified.'
     exit 1
   fi
 
-  log "Forcing repository to match origin/${current_branch}..."
+  if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    err 'EXPECTED_SHA must be a full 40-character commit SHA.'
+    exit 1
+  fi
+  EXPECTED_SHA="$(printf '%s' "${EXPECTED_SHA}" | tr '[:upper:]' '[:lower:]')"
+
+  log "Forcing repository to match expected commit ${EXPECTED_SHA}..."
   git reset --hard HEAD
   git clean -fd -e '/storage/sante-hl7-outbox/'
-  git fetch origin "${current_branch}"
-  git pull
+  git fetch origin "${DEPLOY_BRANCH}"
+  git checkout --detach "${EXPECTED_SHA}"
   DEPLOY_COMMIT_SHA="$(git rev-parse HEAD)"
-  log "Pulled commit SHA: ${DEPLOY_COMMIT_SHA}"
+  if [ "${DEPLOY_COMMIT_SHA}" != "${EXPECTED_SHA}" ]; then
+    err "Checked-out commit ${DEPLOY_COMMIT_SHA} does not match expected commit ${EXPECTED_SHA}."
+    exit 1
+  fi
+  log "Checked out exact commit SHA: ${DEPLOY_COMMIT_SHA}"
   ok 'Git update completed.'
+}
+
+parse_deployment_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --expected-sha)
+        if [ "$#" -lt 2 ]; then
+          err '--expected-sha requires a full commit SHA.'
+          exit 1
+        fi
+        EXPECTED_SHA="$2"
+        shift 2
+        ;;
+      *)
+        err "Unsupported deployment argument: $1"
+        exit 1
+        ;;
+    esac
+  done
 }
 
 build_and_restart() {
@@ -58,17 +81,19 @@ build_and_restart() {
 }
 
 should_reconfigure() {
-  case "${1:-}" in
-    --reconfigure|reconfigure)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --reconfigure|reconfigure)
+        return 0
+        ;;
+    esac
+  done
+  return 1
 }
 
 main() {
+  parse_deployment_args "$@"
   print_header
   require_cmd git
   require_cmd docker
@@ -83,7 +108,7 @@ main() {
   check_git_repo
   load_existing_config
 
-  if should_reconfigure "${1:-}"; then
+  if should_reconfigure "$@"; then
     warn 'Reconfigure mode enabled. Prompting for deployment settings.'
     collect_deployment_config
   else
@@ -103,6 +128,7 @@ main() {
       exit 1
     fi
   fi
+  verify_app_build_sha
   log 'Migration diagnostics from rispro-app startup:'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
   print_deployment_summary 'Update complete.'

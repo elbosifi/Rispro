@@ -880,6 +880,30 @@ wait_for_app_health() {
   return 1
 }
 
+verify_app_build_sha() {
+  local expected_sha="${EXPECTED_SHA:-}"
+  local health_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+  local health_json
+
+  if [[ ! "$expected_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    err 'EXPECTED_SHA must be a full 40-character commit SHA before runtime verification.'
+    return 1
+  fi
+
+  health_json="$(curl --fail --silent --show-error "$health_url")"
+  node - "$expected_sha" "$health_json" <<'NODE_VERIFY'
+const expectedSha = process.argv[2];
+const health = JSON.parse(process.argv[3]);
+
+if (health.ok !== true || health.buildSha !== expectedSha) {
+  console.error(`Running build mismatch: expected ${expectedSha}, received ${JSON.stringify(health)}`);
+  process.exit(1);
+}
+
+console.log(`Application-reported build SHA verified: ${expectedSha}`);
+NODE_VERIFY
+}
+
 wait_for_internal_orthanc_worklists() {
   if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
     return 0

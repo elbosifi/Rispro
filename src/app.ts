@@ -113,7 +113,8 @@ export function createApp(): Application {
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({
       ok: true,
-      environment: env.nodeEnv
+      environment: env.nodeEnv,
+      buildSha: process.env.RISPRO_BUILD_COMMIT_SHA || "unknown"
     });
   });
 

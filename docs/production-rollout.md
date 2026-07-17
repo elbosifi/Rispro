@@ -29,8 +29,16 @@ This repository now includes:
 - a server deployment script at `deploy.sh`
 - a GitHub Actions workflow at `.github/workflows/deploy.yml`
 
-The script is the real deployment logic.
-The GitHub workflow simply checks the code first and then tells the server to run that script.
+The script is the real deployment logic. Every deployment now requires a full commit SHA
+with a successful `RISpro self-hosted CI` run for that exact SHA. The GitHub workflow
+checks that result before SSH and passes the SHA to the server script.
+
+The workflow is currently named and scoped as the development target because
+`192.9.101.250` is the configured development target. `/usr/local/sbin/deploy-rispro-production`
+is the legacy name of the installed server-side entrypoint; it must accept and forward
+`--expected-sha <SHA>` to the repository deployment script. If that host is intended to
+be production instead, move the workflow to the `production` GitHub environment and rename
+the target/host configuration together before enabling production use.
 
 ## First-time server setup for the script
 
@@ -49,22 +57,26 @@ chmod +x deploy.sh
 ### Example manual run with systemd
 
 ```bash
+EXPECTED_SHA=<40-character-commit-sha> \
 APP_DIR=/srv/rispro \
 DEPLOY_BRANCH=main \
 RESTART_MODE=systemd \
 SERVICE_NAME=rispro \
-HEALTHCHECK_URL=http://127.0.0.1:3000/api/ready \
+HEALTHCHECK_URL=http://127.0.0.1:3000/api/health \
+READINESSCHECK_URL=http://127.0.0.1:3000/api/ready \
 ./deploy.sh
 ```
 
 ### Example manual run with PM2
 
 ```bash
+EXPECTED_SHA=<40-character-commit-sha> \
 APP_DIR=/srv/rispro \
 DEPLOY_BRANCH=main \
 RESTART_MODE=pm2 \
 PM2_NAME=rispro \
-HEALTHCHECK_URL=http://127.0.0.1:3000/api/ready \
+HEALTHCHECK_URL=http://127.0.0.1:3000/api/health \
+READINESSCHECK_URL=http://127.0.0.1:3000/api/ready \
 ./deploy.sh
 ```
 
@@ -85,6 +97,10 @@ Add these GitHub Actions variables:
 - `DEPLOY_SERVICE_NAME`: the service name when using `systemd`
 - `DEPLOY_PM2_NAME`: the process name when using `pm2`
 - `DEPLOY_HEALTHCHECK_URL`: for example `http://127.0.0.1:3000/api/ready`
+
+The manual GitHub Actions deployment input is `commit_sha`. It must identify a commit
+that already has a successful self-hosted CI workflow run. The deployment checks both
+`/api/health` (including its `buildSha`) and `/api/ready` after restart.
 
 Optional variables:
 
@@ -245,7 +261,8 @@ Use your backup first.
 
 Rollback plan:
 
-1. stop the new app version
-2. restore the previous code
-3. restore the database backup if needed
-4. start the previous version again
+1. Identify the previous deployed commit SHA from deployment records.
+2. Confirm that SHA has a successful self-hosted CI run.
+3. Run the manual deployment workflow with that SHA as `commit_sha`.
+4. Let the exact-SHA checkout, migration, restart, health, readiness, and build-SHA checks complete.
+5. Restore the database backup only if the release included an incompatible migration or data change.

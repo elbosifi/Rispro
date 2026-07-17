@@ -10,6 +10,8 @@ MIGRATE_CMD="${MIGRATE_CMD:-npm run migrate}"
 POST_MIGRATE_CMD="${POST_MIGRATE_CMD:-}"
 BACKUP_CMD="${BACKUP_CMD:-}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
+READINESSCHECK_URL="${READINESSCHECK_URL:-http://127.0.0.1:3000/api/ready}"
+BUILD_SHA_URL="${BUILD_SHA_URL:-http://127.0.0.1:3000/api/health}"
 RESTART_MODE="${RESTART_MODE:-systemd}"
 SERVICE_NAME="${SERVICE_NAME:-}"
 PM2_NAME="${PM2_NAME:-}"
@@ -19,6 +21,7 @@ DICOM_GATEWAY_SERVICE_NAME="${DICOM_GATEWAY_SERVICE_NAME:-rispro-dicom-gateway}"
 DICOM_GATEWAY_APP_USER="${DICOM_GATEWAY_APP_USER:-www-data}"
 DICOM_INSTALL_DCMTK="${DICOM_INSTALL_DCMTK:-1}"
 INSTALL_NATIVE_IMAGE_DEPS="${INSTALL_NATIVE_IMAGE_DEPS:-1}"
+EXPECTED_SHA="${EXPECTED_SHA:-${RISPRO_EXPECTED_SHA:-}}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
@@ -57,6 +60,77 @@ ensure_clean_worktree() {
   fi
 }
 
+validate_expected_sha() {
+  if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    error_exit "EXPECTED_SHA must be a full 40-character commit SHA."
+  fi
+
+  EXPECTED_SHA="$(printf '%s' "$EXPECTED_SHA" | tr '[:upper:]' '[:lower:]')"
+}
+
+parse_deployment_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --expected-sha)
+        if [ "$#" -lt 2 ]; then
+          error_exit "--expected-sha requires a full commit SHA."
+        fi
+        EXPECTED_SHA="$2"
+        shift 2
+        ;;
+      *)
+        error_exit "Unsupported deployment argument: $1"
+        ;;
+    esac
+  done
+}
+
+checkout_expected_commit() {
+  validate_expected_sha
+
+  if [ "$SKIP_GIT_PULL" != "1" ]; then
+    log "Fetching origin/$DEPLOY_BRANCH for exact deployment commit"
+    git fetch origin "$DEPLOY_BRANCH"
+    git checkout --detach "$EXPECTED_SHA"
+  fi
+
+  local checked_out_sha
+  checked_out_sha="$(git rev-parse HEAD)"
+  if [ "$checked_out_sha" != "$EXPECTED_SHA" ]; then
+    error_exit "Checked-out commit $checked_out_sha does not match expected commit $EXPECTED_SHA."
+  fi
+
+  log "Verified checked-out commit: $checked_out_sha"
+}
+
+persist_runtime_build_sha() {
+  local env_file="$APP_DIR/.env"
+  local temp_file
+
+  export RISPRO_BUILD_COMMIT_SHA="$EXPECTED_SHA"
+
+  if [ ! -f "$env_file" ]; then
+    log "No $env_file found; relying on the service environment for RISPRO_BUILD_COMMIT_SHA."
+    return 0
+  fi
+
+  temp_file="$(mktemp)"
+  awk -v expected_sha="$EXPECTED_SHA" '
+    BEGIN { replaced = 0 }
+    /^RISPRO_BUILD_COMMIT_SHA=/ {
+      print "RISPRO_BUILD_COMMIT_SHA=" expected_sha
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (!replaced) print "RISPRO_BUILD_COMMIT_SHA=" expected_sha
+    }
+  ' "$env_file" > "$temp_file"
+  mv "$temp_file" "$env_file"
+  log "Persisted RISPRO_BUILD_COMMIT_SHA=$EXPECTED_SHA in $env_file"
+}
+
 restart_app() {
   case "$RESTART_MODE" in
     systemd)
@@ -75,7 +149,7 @@ restart_app() {
       fi
 
       log "Restarting PM2 process: $PM2_NAME"
-      pm2 restart "$PM2_NAME"
+      RISPRO_BUILD_COMMIT_SHA="$EXPECTED_SHA" pm2 restart "$PM2_NAME" --update-env
       ;;
     none)
       log "Skipping restart because RESTART_MODE=none"
@@ -274,14 +348,15 @@ main() {
     INSTALL_CMD="npm ci"
   fi
 
+  parse_deployment_args "$@"
+  validate_expected_sha
+
   if [ "$SKIP_GIT_PULL" != "1" ]; then
     ensure_clean_worktree
-    log "Updating code from origin/$DEPLOY_BRANCH"
-    git fetch origin "$DEPLOY_BRANCH"
-    git checkout "$DEPLOY_BRANCH"
-    git pull --rebase origin "$DEPLOY_BRANCH"
+    checkout_expected_commit
   else
     log "Skipping git pull because SKIP_GIT_PULL=1"
+    checkout_expected_commit
   fi
 
   run_cmd "$BACKUP_CMD"
@@ -289,6 +364,7 @@ main() {
   run_cmd "$INSTALL_CMD"
   run_cmd "$MIGRATE_CMD"
   run_cmd "$POST_MIGRATE_CMD"
+  persist_runtime_build_sha
 
   if is_enabled "$ENABLE_DICOM_GATEWAY"; then
     ensure_dcmtk_tools || error_exit "DCMTK tools are required for DICOM gateway deployment."
@@ -310,12 +386,23 @@ main() {
     smoke_test_dicom_echo
   fi
 
-  if [ -n "$HEALTHCHECK_URL" ]; then
-    log "Checking health endpoint: $HEALTHCHECK_URL"
-    curl --fail --silent --show-error "$HEALTHCHECK_URL" >/dev/null
-  else
-    log "Skipping health check because HEALTHCHECK_URL is not set"
-  fi
+  log "Checking application health endpoint: ${HEALTHCHECK_URL:-http://127.0.0.1:3000/api/health}"
+  curl --fail --silent --show-error "${HEALTHCHECK_URL:-http://127.0.0.1:3000/api/health}" >/dev/null
+  log "Checking application readiness endpoint: $READINESSCHECK_URL"
+  curl --fail --silent --show-error "$READINESSCHECK_URL" >/dev/null
+  log "Verifying application-reported build SHA at $BUILD_SHA_URL"
+  health_json="$(curl --fail --silent --show-error "$BUILD_SHA_URL")"
+  node - "$EXPECTED_SHA" "$health_json" <<'NODE_VERIFY'
+const expectedSha = process.argv[2];
+const health = JSON.parse(process.argv[3]);
+
+if (health.ok !== true || health.buildSha !== expectedSha) {
+  console.error(`Running build mismatch: expected ${expectedSha}, received ${JSON.stringify(health)}`);
+  process.exit(1);
+}
+
+console.log(`Application-reported build SHA verified: ${expectedSha}`);
+NODE_VERIFY
 
   log "Deployment finished successfully"
 }

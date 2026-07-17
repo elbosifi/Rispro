@@ -20,6 +20,7 @@
     "db:test:check": "node scripts/check-db-test.js",
     "db:test:repair": "node scripts/repair-db-test.js",
     "agent:preflight": "node scripts/dev/preflight-env.mjs",
+    "test:deployment:gate": "bash scripts/test-deployment-gate.sh",
     "test:db:one": "node scripts/dev/test-one-db.mjs",
     "agent:contract": "node scripts/harness/check-agent-contract.mjs",
     "test:docker:deployment": "bash scripts/test-docker-deployment-regressions.sh",

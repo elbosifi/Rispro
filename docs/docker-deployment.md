@@ -16,26 +16,32 @@ After the script finishes, the summary shows the active deployment endpoints for
 
 The supervisor credentials are printed at the end of setup.
 
-### Updating to Latest Code
+### Updating to an exact CI-verified commit
 
 ```bash
-./scripts/update-docker.sh
+./scripts/update-docker.sh --expected-sha <40-character-commit-sha>
 ```
 
-This pulls the latest code, reuses the current `.env` deployment settings by default, validates the stack, rebuilds, restarts containers, and verifies health. Volumes are preserved. The deployed commit SHA is injected into the running app through Compose and is intentionally not baked into the early Docker dependency layers, so changing commits does not rebuild unchanged OS or npm dependency layers.
+The update reuses the current `.env` deployment settings by default, checks out exactly
+the supplied commit, validates the stack, rebuilds, restarts containers, and verifies
+health plus the application-reported build SHA. Volumes are preserved. The deployed
+commit SHA is injected into the running app through Compose and is intentionally not
+baked into the early Docker dependency layers, so changing commits does not rebuild
+unchanged OS or npm dependency layers.
 
 If you want to change deployment settings during an update, run:
 
 ```bash
-./scripts/update-docker.sh --reconfigure
+./scripts/update-docker.sh --expected-sha <40-character-commit-sha> --reconfigure
 ```
 
-The update script now force-syncs the working tree before pulling:
+The update script now force-syncs the working tree before checking out the expected SHA:
 
 ```bash
 git reset --hard HEAD
 git clean -fd -e '/storage/sante-hl7-outbox/'
-git pull origin <current-branch>
+git fetch origin main
+git checkout --detach <expected-sha>
 ```
 
 That means any local tracked changes or untracked files in the repository will be discarded during update, except the persistent Sante HL7 outbox. `storage/sante-hl7-outbox/` is runtime data bind-mounted into the app and must retain pending files across normal updates, reconfigure updates, rebuilds, and container recreation.
