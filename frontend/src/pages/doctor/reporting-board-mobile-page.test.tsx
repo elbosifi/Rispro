@@ -261,7 +261,7 @@ describe("ReportingBoardMobilePage", () => {
     expect(page?.getAttribute("dir")).toBe("ltr");
   });
 
-  it("defaults a doctor worklist to the target doctor's Assigned cases, not the authenticated viewer", async () => {
+  it("preserves explicit filters when leaving a doctor worklist's Assigned tab", async () => {
     fetchReportingBoardMobileViewMock.mockResolvedValue(doctorWorklistResponse);
     renderPage();
 
@@ -280,12 +280,78 @@ describe("ReportingBoardMobilePage", () => {
     await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({ q: "005279" })));
     expect((await screen.findByTestId("reporting-board-filter-button")).textContent).toContain("Filters 1");
 
-    const all = screen.getByRole("button", { name: /^All 2$/i });
+    const changeDrawerFilter = async (label: string, value: string, expected: Record<string, unknown>) => {
+      fireEvent.click(await screen.findByTestId("reporting-board-filter-button"));
+      await screen.findByRole("button", { name: "Close" });
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining(expected)));
+    };
+    await changeDrawerFilter("Modality code", "MR", { q: "005279", modalityCode: "MR" });
+    await changeDrawerFilter("Category", "neurology", { q: "005279", modalityCode: "MR", caseCategory: "neurology" });
+    await changeDrawerFilter("Case source", "comparisons", { q: "005279", modalityCode: "MR", caseCategory: "neurology", caseSource: "comparisons" });
+    await changeDrawerFilter("Sort", "study_date", { q: "005279", modalityCode: "MR", caseCategory: "neurology", caseSource: "comparisons", sortBy: "study_date" });
+    fireEvent.click(await screen.findByRole("button", { name: /^Assigned 1$/i }));
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({
+      mobileQuickTab: "assigned",
+      assignedDoctorId: 5,
+      assignmentStatus: "assigned",
+      q: "005279",
+      modalityCode: "MR",
+      caseCategory: "neurology",
+      caseSource: "comparisons",
+      sortBy: "study_date",
+    })));
+
+    const all = await screen.findByRole("button", { name: /^All 2$/i });
     fireEvent.click(all);
 
-    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", { limit: 40, offset: 0 }));
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({
+      limit: 40,
+      offset: 0,
+      q: "005279",
+      modalityCode: "MR",
+      caseCategory: "neurology",
+      caseSource: "comparisons",
+      sortBy: "study_date",
+    })));
+    const allFilters = fetchReportingBoardMobileViewMock.mock.calls[fetchReportingBoardMobileViewMock.mock.calls.length - 1][1] as Record<string, unknown>;
+    expect(allFilters).not.toHaveProperty("mobileQuickTab");
+    expect(allFilters).not.toHaveProperty("assignedDoctorId");
+    expect(allFilters).not.toHaveProperty("assignmentStatus");
     expect(all.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: /^Assigned 1$/i }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("clears the active quick-tab predicates before applying a drawer edit", async () => {
+    fetchReportingBoardMobileViewMock.mockResolvedValue(doctorWorklistResponse);
+    renderPage();
+
+    await screen.findByRole("button", { name: /^Assigned 1$/i });
+    await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({
+      mobileQuickTab: "assigned",
+      assignedDoctorId: 5,
+      assignmentStatus: "assigned",
+    })));
+    const transitions = [
+      { tab: /^Assigned 1$/i, quickTab: "assigned", value: "assigned-drawer", stale: ["assignedDoctorId", "assignmentStatus"] },
+      { tab: /^Unassigned 1$/i, quickTab: "unassigned", value: "unassigned-drawer", stale: ["assignedDoctorId", "assignmentStatus"] },
+      { tab: /^Urgent 1$/i, quickTab: "urgent", value: "urgent-drawer", stale: ["priorityCode", "urgentOrStat"] },
+      { tab: /^Overdue 0$/i, quickTab: "overdue", value: "overdue-drawer", stale: ["overdue", "reportStatus"] },
+    ] as const;
+
+    for (const transition of transitions) {
+      fireEvent.click(await screen.findByRole("button", { name: transition.tab }));
+      await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({
+        mobileQuickTab: transition.quickTab,
+      })));
+      fireEvent.click(await screen.findByTestId("reporting-board-filter-button"));
+      await screen.findByRole("button", { name: "Close" });
+      fireEvent.change(screen.getByLabelText("Category"), { target: { value: transition.value } });
+      await waitFor(() => expect(fetchReportingBoardMobileViewMock).toHaveBeenLastCalledWith("tok-9", expect.objectContaining({ caseCategory: transition.value })));
+      const drawerFilters = fetchReportingBoardMobileViewMock.mock.calls[fetchReportingBoardMobileViewMock.mock.calls.length - 1][1] as Record<string, unknown>;
+      expect(drawerFilters).not.toHaveProperty("mobileQuickTab");
+      for (const staleKey of transition.stale) expect(drawerFilters).not.toHaveProperty(staleKey);
+    }
   });
 
   it("defaults an anonymous doctor worklist to the target doctor's Assigned cases", async () => {

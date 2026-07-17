@@ -52,6 +52,27 @@ function mobileCaseIdentity(row: ReportingBoardMobileCase) {
     : { caseType: "appointment" as const, appointmentId: row.appointmentId };
 }
 
+function clearMobileQuickTabPredicates(filters: ReportingBoardFilters): ReportingBoardFilters {
+  const withoutQuickTab = { ...filters };
+  delete withoutQuickTab.mobileQuickTab;
+  if (filters.mobileQuickTab === "assigned" || filters.mobileQuickTab === "unassigned") {
+    delete withoutQuickTab.assignedDoctorId;
+    delete withoutQuickTab.assignmentStatus;
+    return withoutQuickTab;
+  }
+  if (filters.mobileQuickTab === "urgent") {
+    delete withoutQuickTab.priorityCode;
+    delete withoutQuickTab.urgentOrStat;
+    return withoutQuickTab;
+  }
+  if (filters.mobileQuickTab === "overdue") {
+    delete withoutQuickTab.overdue;
+    delete withoutQuickTab.reportStatus;
+    return withoutQuickTab;
+  }
+  return withoutQuickTab;
+}
+
 function urlBase64ToUint8Array(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
@@ -249,6 +270,7 @@ export function ReportingBoardMobilePage() {
     loadedOffsets.current = [0];
     setFilters((current) => ({ ...updater(current), limit: 40, offset: 0 }));
   };
+  const clearQuickTab = () => updateTemporaryFilters(clearMobileQuickTabPredicates);
   const resetTemporaryFilters = () => {
     setSearch("");
     setLoadedCases([]);
@@ -433,7 +455,7 @@ export function ReportingBoardMobilePage() {
           <button type="button" aria-pressed={filters.mobileQuickTab === "unassigned"} disabled={unassignedLocked} title={unassignedLocked ? "This saved view is locked to assigned cases." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: "unassigned", assignmentStatus: "unassigned", assignedDoctorId: null, priorityCode: null, urgentOrStat: false, overdue: false, reportStatus: null }))} className={tabClass("slate", filters.mobileQuickTab === "unassigned")}>Unassigned {data.counters.unassigned}</button>
           <button type="button" aria-pressed={filters.mobileQuickTab === "urgent"} disabled={urgentLocked} title={urgentLocked ? "This saved view is locked to a non-urgent priority." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: "urgent", urgentOrStat: true, priorityCode: null, assignmentStatus: null, assignedDoctorId: null, overdue: false, reportStatus: null }))} className={tabClass("orange", filters.mobileQuickTab === "urgent")}>Urgent {data.counters.urgent}</button>
           <button type="button" aria-pressed={filters.mobileQuickTab === "overdue"} disabled={overdueLocked} title={overdueLocked ? "This saved view is locked to a report state that cannot be overdue." : undefined} onClick={() => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: "overdue", assignedDoctorId: null, assignmentStatus: null, overdue: true, urgentOrStat: false, priorityCode: null, reportStatus: "required_not_final" }))} className={tabClass("red", filters.mobileQuickTab === "overdue")}>Overdue {data.counters.overdue}</button>
-          <button type="button" aria-pressed={!filters.mobileQuickTab} onClick={resetTemporaryFilters} className={tabClass("blue", !filters.mobileQuickTab)}>All {data.counters.total}</button>
+          <button type="button" aria-pressed={!filters.mobileQuickTab} onClick={clearQuickTab} className={tabClass("blue", !filters.mobileQuickTab)}>All {data.counters.total}</button>
         </div>
         <div className="mt-3 flex items-center justify-between gap-2 text-xs">
           <div className="min-w-0"><p className="font-semibold text-slate-700">{scopeDescription}</p><p className="mt-0.5 truncate text-slate-500">Scope: {scopeSummary.join(" · ") || "All cases"}</p></div>
@@ -465,13 +487,13 @@ export function ReportingBoardMobilePage() {
             <div className="mx-auto grid max-w-xl gap-3">
               <div className="flex items-center justify-between"><div><h2 className="font-bold">Filters</h2><p className="text-xs text-slate-500">Temporary filters narrow this saved-view scope only.</p></div><button type="button" onClick={() => setFilterDrawerOpen(false)} className="rounded-lg border px-3 py-1 text-sm">Close</button></div>
               <p className="text-xs font-semibold text-slate-500">Locked saved-view criteria: {data.filterSummary.join(", ") || "None"}</p>
-              <label className="grid gap-1 text-sm">Assignment state<select value={filters.assignmentStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, assignmentStatus: (event.target.value || null) as ReportingBoardFilters["assignmentStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></label>
-              <label className="grid gap-1 text-sm">Priority<select value={filters.priorityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, priorityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="stat">STAT</option><option value="urgent">Urgent</option></select></label>
-              <label className="grid gap-1 text-sm">Modality code<input disabled={Boolean(lockedFilters.modalityCode || lockedFilters.modalityId)} value={filters.modalityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, modalityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100" placeholder="Any modality" /></label>
-              <label className="grid gap-1 text-sm">Category<input value={filters.caseCategory ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, caseCategory: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3" placeholder="Any category" /></label>
-              <label className="grid gap-1 text-sm">Report state<select disabled={Boolean(lockedFilters.reportStatus)} value={filters.reportStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, reportStatus: (event.target.value || null) as ReportingBoardFilters["reportStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100"><option value="">All</option><option value="required_not_final">Required not final</option><option value="draft">Draft</option><option value="final">Final</option></select></label>
-              <label className="grid gap-1 text-sm">Case source<select value={filters.caseSource ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, caseSource: (event.target.value || null) as ReportingBoardFilters["caseSource"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="appointments">Appointments</option><option value="comparisons">Comparison requests</option></select></label>
-              <label className="grid gap-1 text-sm">Sort<select value={filters.sortBy ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...current, mobileQuickTab: null, sortBy: (event.target.value || null) as ReportingBoardFilters["sortBy"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">Priority + study date</option><option value="study_date">Study date</option><option value="longest_unassigned">Longest unassigned</option><option value="oldest_completed">Oldest completed</option></select></label>
+              <label className="grid gap-1 text-sm">Assignment state<select value={filters.assignmentStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), assignmentStatus: (event.target.value || null) as ReportingBoardFilters["assignmentStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></label>
+              <label className="grid gap-1 text-sm">Priority<select value={filters.priorityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), priorityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="stat">STAT</option><option value="urgent">Urgent</option></select></label>
+              <label className="grid gap-1 text-sm">Modality code<input disabled={Boolean(lockedFilters.modalityCode || lockedFilters.modalityId)} value={filters.modalityCode ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), modalityCode: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100" placeholder="Any modality" /></label>
+              <label className="grid gap-1 text-sm">Category<input value={filters.caseCategory ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), caseCategory: event.target.value || null }))} className="h-10 rounded-lg border border-slate-300 px-3" placeholder="Any category" /></label>
+              <label className="grid gap-1 text-sm">Report state<select disabled={Boolean(lockedFilters.reportStatus)} value={filters.reportStatus ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), reportStatus: (event.target.value || null) as ReportingBoardFilters["reportStatus"] }))} className="h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100"><option value="">All</option><option value="required_not_final">Required not final</option><option value="draft">Draft</option><option value="final">Final</option></select></label>
+              <label className="grid gap-1 text-sm">Case source<select value={filters.caseSource ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), caseSource: (event.target.value || null) as ReportingBoardFilters["caseSource"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">All</option><option value="appointments">Appointments</option><option value="comparisons">Comparison requests</option></select></label>
+              <label className="grid gap-1 text-sm">Sort<select value={filters.sortBy ?? ""} onChange={(event) => updateTemporaryFilters((current) => ({ ...clearMobileQuickTabPredicates(current), sortBy: (event.target.value || null) as ReportingBoardFilters["sortBy"] }))} className="h-10 rounded-lg border border-slate-300 px-3"><option value="">Priority + study date</option><option value="study_date">Study date</option><option value="longest_unassigned">Longest unassigned</option><option value="oldest_completed">Oldest completed</option></select></label>
               {notificationsSupported && pushEnabled && <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3"><span className="text-xs text-slate-500">Notifications enabled{pushLastSuccessAt ? ` · last sent ${new Date(pushLastSuccessAt).toLocaleString()}` : ""}</span><div className="flex gap-2"><button type="button" disabled={pushTestMutation.isPending} onClick={() => pushTestMutation.mutate()} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-60">Send test</button><button type="button" disabled={pushDisableMutation.isPending} onClick={() => pushDisableMutation.mutate()} className="rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-60">Disable</button></div></div>}
               <button type="button" onClick={resetTemporaryFilters} className="h-10 rounded-lg border border-teal-600 text-sm font-bold text-teal-700">Reset temporary filters</button>
             </div>
