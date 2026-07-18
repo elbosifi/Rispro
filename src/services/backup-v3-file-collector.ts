@@ -12,6 +12,11 @@ function normalizeArchiveRelativePath(relativePath: string): string {
   return relativePath.split(path.sep).join("/");
 }
 
+function isSameOrInside(child: string, parent: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 export async function collectBackupV3StorageFiles(
   roots: BackupV3StorageRoot[],
   limits: BackupV3ArchiveLimits,
@@ -20,8 +25,16 @@ export async function collectBackupV3StorageFiles(
   const files: CollectedBackupV3StorageFile[] = [];
   let totalBytes = 0;
   const seenArchivePaths = new Set<string>();
+  // project-storage is the complete application storage tree. Backup internals
+  // must never become backup input, regardless of their current child names.
+  const excludedBackupRoots = roots
+    .filter((root) => root.id === "project-storage" || root.kind === "project_storage")
+    .map((root) => path.resolve(root.absolutePath, "backups"));
 
   async function walk(root: BackupV3StorageRoot, currentPath: string): Promise<void> {
+    if (excludedBackupRoots.some((excludedRoot) => isSameOrInside(path.resolve(currentPath), excludedRoot))) {
+      return;
+    }
     let entries: Array<import("node:fs").Dirent>;
     try {
       entries = await fs.readdir(currentPath, { withFileTypes: true });

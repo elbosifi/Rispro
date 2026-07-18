@@ -251,6 +251,27 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/destinations/destination-1/retention/execute", expect.objectContaining({ method: "POST" }));
   });
 
+  it("labels a failed archived job as a destination-copy retry and keeps Run now distinct", async () => {
+    const job = { job_id: "job-1", status: "failed", archive_name: "backup.rispro.zip", created_at: "2026-05-27T12:00:00.000Z", completed_at: "2026-05-27T12:05:00.000Z", destination_copies: [], failure_message: "SMB archive transfer timed out." };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      if (url === "/api/backup-control/summary") return jsonResponse({ health: "warning", destinations: 1, enabled_destinations: 1, recent_failures: 1 });
+      if (url === "/api/backup-control/destinations") return jsonResponse({ destinations: [] });
+      if (url === "/api/backup-control/jobs") return jsonResponse({ jobs: [job] });
+      if (url === "/api/backup-control/schedules") return jsonResponse({ schedules: [] });
+      if (url === "/api/backup-control/restore-verifications") return jsonResponse({ verifications: [] });
+      if (url === "/api/backup-control/jobs/job-1/retry" && init?.method === "POST") return jsonResponse({ job: {} }, 202);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderSection();
+    await userEvent.click(await screen.findByRole("button", { name: "Retry destination copy" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/jobs/job-1/retry", expect.objectContaining({ method: "POST" }));
+    expect(screen.getByText("Run now")).toBeTruthy();
+    expect(screen.getByText("SMB archive transfer timed out.")).toBeTruthy();
+  });
+
   it("shows the Backup security setup card, permits one recovery download, and requires restart after secure save", async () => {
     let saved = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

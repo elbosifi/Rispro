@@ -7,6 +7,7 @@ import { logAuditEntry } from "./audit-service.js";
 import { decryptBackupV3Secret, encryptBackupV3Secret } from "./backup-v3-secret-service.js";
 import { getBackupV3MasterKeyStatus } from "./backup-v3-master-key-setup-service.js";
 import { getProjectRootDir } from "./document-storage-path.js";
+import { sha256File } from "./backup-v3-checksums.js";
 import { validateBackupV3WebDavConfig } from "./backup-v3-webdav-destination.js";
 import { validateBackupV3SftpConfig } from "./backup-v3-sftp-destination.js";
 import { validateBackupV3SmbConfig } from "./backup-v3-smb-destination.js";
@@ -323,16 +324,43 @@ export async function deleteBackupDestinationProfile(destinationId: string, user
   await logAuditEntry({ entityType: "backup_destination", actionType: "backup_destination_deleted", newValues: { destinationId: id }, changedByUserId: userId });
 }
 
-export async function queueBackupJob(input: { initiatedByUserId: NullableUserId; sourceScheduleId?: string | null; destinationIds: string[]; retryOfJobId?: string | null }) {
+interface ReusableBackupArtifact {
+  artifactId: string;
+  archiveName: string;
+  stagingPath: string;
+  byteSize: number;
+  sha256: string;
+}
+
+function isSafeArtifactPath(archiveName: string, stagingPath: string): boolean {
+  const artifactRoot = path.resolve(getProjectRootDir(), "storage", "backups", "artifacts");
+  const resolved = path.resolve(stagingPath);
+  const relative = path.relative(artifactRoot, resolved);
+  return /^[A-Za-z0-9._-]+\.rispro\.zip$/.test(archiveName) && !archiveName.includes("..")
+    && relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
+    && path.basename(resolved) === archiveName;
+}
+
+async function verifyReusableBackupArtifact(artifact: ReusableBackupArtifact): Promise<ReusableBackupArtifact> {
+  if (!isSafeArtifactPath(artifact.archiveName, artifact.stagingPath)) throw new HttpError(409, "The stored backup artifact is outside the approved artifact directory.");
+  const stat = await fs.stat(artifact.stagingPath).catch(() => null);
+  if (!stat?.isFile()) throw new HttpError(409, "The stored backup artifact is missing; use Run new backup.");
+  if (stat.size !== artifact.byteSize) throw new HttpError(409, "The stored backup artifact size does not match; use Run new backup.");
+  const digest = await sha256File(artifact.stagingPath);
+  if (digest.sha256 !== artifact.sha256) throw new HttpError(409, "The stored backup artifact checksum does not match; use Run new backup.");
+  return artifact;
+}
+
+export async function queueBackupJob(input: { initiatedByUserId: NullableUserId; sourceScheduleId?: string | null; destinationIds: string[]; retryOfJobId?: string | null; reuseArtifact?: ReusableBackupArtifact | null }) {
   const destinationIds = safeUuidArray(input.destinationIds, "destinationIds");
   if (!destinationIds.length) throw new HttpError(400, "Select at least one backup destination.");
   const enabled = await pool.query<{ destination_id: string }>("select destination_id from backup_destination_profiles where enabled=true and destination_id = any($1::uuid[])", [destinationIds]);
   if (enabled.rows.length !== destinationIds.length) throw new HttpError(400, "One or more selected backup destinations are disabled or unavailable.");
   const jobId = crypto.randomUUID();
   const { rows } = await pool.query(
-    `insert into backup_jobs (job_id,status,source_schedule_id,initiated_by_user_id,requested_destination_ids,retry_of_job_id)
-     values ($1,'queued',$2,$3,$4::uuid[],$5) returning *`,
-    [jobId, input.sourceScheduleId || null, input.initiatedByUserId, destinationIds, input.retryOfJobId || null]
+    `insert into backup_jobs (job_id,status,source_schedule_id,initiated_by_user_id,requested_destination_ids,retry_of_job_id,reused_artifact_id,archive_name,staging_path,archive_size_bytes,archive_sha256)
+     values ($1,'queued',$2,$3,$4::uuid[],$5,$6::uuid,$7,$8,$9,$10) returning *`,
+    [jobId, input.sourceScheduleId || null, input.initiatedByUserId, destinationIds, input.retryOfJobId || null, input.reuseArtifact?.artifactId || null, input.reuseArtifact?.archiveName || null, input.reuseArtifact?.stagingPath || null, input.reuseArtifact?.byteSize || null, input.reuseArtifact?.sha256 || null]
   );
   await logAuditEntry({ entityType: "backup_job", actionType: "backup_job_queued", newValues: { jobId, destinationCount: destinationIds.length, sourceScheduleId: input.sourceScheduleId || null }, changedByUserId: input.initiatedByUserId });
   return rows[0];
@@ -340,14 +368,23 @@ export async function queueBackupJob(input: { initiatedByUserId: NullableUserId;
 
 export async function retryBackupJob(jobId: string, input: { initiatedByUserId: NullableUserId; destinationIds?: string[] }): Promise<unknown> {
   const id = backupDestinationId(jobId);
-  const { rows } = await pool.query<{ status: BackupJobStatus; requested_destination_ids: string[] }>("select status,requested_destination_ids from backup_jobs where job_id=$1::uuid", [id]);
+  const { rows } = await pool.query<{ status: BackupJobStatus; requested_destination_ids: string[]; source_schedule_id: string | null; reused_artifact_id: string | null }>("select status,requested_destination_ids,source_schedule_id,reused_artifact_id from backup_jobs where job_id=$1::uuid", [id]);
   const original = rows[0];
   if (!original) throw new HttpError(404, "Backup job was not found.");
   if (original.status !== "failed" && original.status !== "cancelled") throw new HttpError(409, "Only failed or cancelled backup jobs can be retried.");
   const failed = await pool.query<{ destination_id: string }>("select destination_id from backup_destination_copy_attempts where job_id=$1::uuid and status='failed'", [id]);
   const requested = input.destinationIds?.length ? safeUuidArray(input.destinationIds, "destinationIds") : (failed.rows.length ? failed.rows.map((row) => row.destination_id) : original.requested_destination_ids);
   if (requested.some((destinationId) => !original.requested_destination_ids.includes(destinationId))) throw new HttpError(400, "Retry destinations must belong to the original backup job.");
-  return queueBackupJob({ initiatedByUserId: input.initiatedByUserId, destinationIds: requested, retryOfJobId: id });
+  const artifactResult = await pool.query<{ artifact_id: string; archive_name: string; staging_path: string; byte_size: string; sha256: string }>(
+    `select artifact.artifact_id,artifact.archive_name,artifact.staging_path,artifact.byte_size::text,artifact.sha256
+     from backup_jobs job join backup_artifacts artifact on artifact.artifact_id=coalesce(job.reused_artifact_id, (select source.artifact_id from backup_artifacts source where source.job_id=job.job_id))
+     where job.job_id=$1::uuid`,
+    [id]
+  );
+  const row = artifactResult.rows[0];
+  if (!row) throw new HttpError(409, "No stored backup artifact is available for destination-copy retry; use Run new backup.");
+  const reuseArtifact = await verifyReusableBackupArtifact({ artifactId: row.artifact_id, archiveName: row.archive_name, stagingPath: row.staging_path, byteSize: Number(row.byte_size), sha256: row.sha256 });
+  return queueBackupJob({ initiatedByUserId: input.initiatedByUserId, sourceScheduleId: original.source_schedule_id, destinationIds: requested, retryOfJobId: id, reuseArtifact });
 }
 
 export async function cancelQueuedBackupJob(jobId: string, userId: NullableUserId): Promise<void> {
@@ -359,12 +396,11 @@ export async function cancelQueuedBackupJob(jobId: string, userId: NullableUserI
 
 export async function getBackupArtifactForDownload(jobId: string): Promise<{ archiveName: string; filePath: string }> {
   const id = backupDestinationId(jobId);
-  const { rows } = await pool.query<{ archive_name: string; staging_path: string }>("select archive_name,staging_path from backup_artifacts where job_id=$1::uuid", [id]);
+  const { rows } = await pool.query<{ archive_name: string; staging_path: string }>("select artifact.archive_name,artifact.staging_path from backup_jobs job join backup_artifacts artifact on artifact.artifact_id=coalesce(job.reused_artifact_id,(select source.artifact_id from backup_artifacts source where source.job_id=job.job_id)) where job.job_id=$1::uuid", [id]);
   const artifact = rows[0];
   if (!artifact) throw new HttpError(404, "Backup archive was not found.");
-  const artifactRoot = path.resolve(getProjectRootDir(), "storage", "backups", "artifacts");
   const filePath = path.resolve(artifact.staging_path);
-  if (!filePath.startsWith(`${artifactRoot}${path.sep}`) || !filePath.endsWith(".rispro.zip")) throw new HttpError(409, "This backup archive is not available for download.");
+  if (!isSafeArtifactPath(artifact.archive_name, filePath)) throw new HttpError(409, "This backup archive is not available for download.");
   const stat = await fs.stat(filePath).catch(() => null);
   if (!stat?.isFile()) throw new HttpError(404, "The local stored backup archive is no longer available.");
   return { archiveName: artifact.archive_name, filePath };
@@ -377,7 +413,7 @@ export async function claimNextBackupJob() {
     const { rows } = await client.query(
       `with candidate as (
          select job_id from backup_jobs where job_kind='backup' and status='queued' order by created_at asc for update skip locked limit 1
-       ) update backup_jobs job set status='generating',started_at=coalesce(started_at,now()),heartbeat_at=now(),updated_at=now()
+       ) update backup_jobs job set status=case when job.reused_artifact_id is null then 'generating' else 'copying' end,started_at=coalesce(started_at,now()),heartbeat_at=now(),updated_at=now()
        from candidate where job.job_id=candidate.job_id returning job.*`
     );
     await client.query("commit");
@@ -388,6 +424,16 @@ export async function claimNextBackupJob() {
   } finally {
     client.release();
   }
+}
+
+export async function getBackupArtifactForCopyOnlyRetry(jobId: string): Promise<ReusableBackupArtifact> {
+  const { rows } = await pool.query<{ artifact_id: string; archive_name: string; staging_path: string; byte_size: string; sha256: string }>(
+    "select artifact_id,archive_name,staging_path,byte_size::text,sha256 from backup_artifacts where artifact_id=(select reused_artifact_id from backup_jobs where job_id=$1::uuid)",
+    [jobId]
+  );
+  const artifact = rows[0];
+  if (!artifact) throw new HttpError(409, "No stored backup artifact is available for destination-copy retry; use Run new backup.");
+  return verifyReusableBackupArtifact({ artifactId: artifact.artifact_id, archiveName: artifact.archive_name, stagingPath: artifact.staging_path, byteSize: Number(artifact.byte_size), sha256: artifact.sha256 });
 }
 
 export async function updateBackupJobHeartbeat(jobId: string): Promise<void> {
@@ -486,7 +532,7 @@ export async function listBackupJobs(limit = 50) {
   const { rows } = await pool.query(
     `select job.*, artifact.artifact_id, artifact.created_at as artifact_created_at,
        coalesce(json_agg(json_build_object('destinationId',copy.destination_id,'status',copy.status,'remotePath',copy.remote_path,'failureMessage',copy.failure_message)) filter (where copy.copy_attempt_id is not null), '[]'::json) as destination_copies
-     from backup_jobs job left join backup_artifacts artifact on artifact.job_id=job.job_id left join backup_destination_copy_attempts copy on copy.job_id=job.job_id
+     from backup_jobs job left join backup_artifacts artifact on artifact.artifact_id=coalesce(job.reused_artifact_id,(select source.artifact_id from backup_artifacts source where source.job_id=job.job_id)) left join backup_destination_copy_attempts copy on copy.job_id=job.job_id
      group by job.job_id,artifact.artifact_id order by job.created_at desc limit $1`,
     [Math.max(1, Math.min(limit, 200))]
   );

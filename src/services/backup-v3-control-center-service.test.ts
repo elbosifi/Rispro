@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -12,13 +13,16 @@ import {
   getBackupControlCenterSummary,
   listBackupSchedules,
   queueBackupJob,
+  recordBackupDestinationCopy,
   recordBackupWorkerHeartbeat,
   retryBackupJob,
+  getBackupArtifactForDownload,
   testBackupDestinationProfile,
   updateBackupArchivePassphrase,
   updateBackupDestinationProfile,
   updateBackupSchedule,
 } from "./backup-v3-control-center-service.js";
+import { sha256File } from "./backup-v3-checksums.js";
 
 test("Backup V3 Control Center persists masked local destinations, schedules, encrypted passphrases, and durable jobs", async () => {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -30,6 +34,8 @@ test("Backup V3 Control Center persists masked local destinations, schedules, en
   let scheduleId: string | null = null;
   let jobId: string | null = null;
   let retryJobId: string | null = null;
+  let copyRetrySourceJobId: string | null = null;
+  let artifactPath: string | null = null;
   try {
     const destination = await createBackupDestinationProfile({
       name: `Local test ${suffix}`,
@@ -74,12 +80,34 @@ test("Backup V3 Control Center persists masked local destinations, schedules, en
     await cancelQueuedBackupJob(jobId, null);
     const cancelled = await pool.query<{ status: string }>("select status from backup_jobs where job_id=$1::uuid", [jobId]);
     assert.equal(cancelled.rows[0]?.status, "cancelled");
-    const retried = await retryBackupJob(jobId, { initiatedByUserId: null });
+    await assert.rejects(() => retryBackupJob(jobId!, { initiatedByUserId: null }), /No stored backup artifact/);
+
+    const copyRetrySource = await queueBackupJob({ initiatedByUserId: null, sourceScheduleId: scheduleId, destinationIds: [destinationId] });
+    copyRetrySourceJobId = String(copyRetrySource.job_id);
+    const artifactId = crypto.randomUUID();
+    const artifactRoot = path.join(root, "artifacts");
+    await fs.mkdir(artifactRoot, { recursive: true });
+    artifactPath = path.join(artifactRoot, `retry-${suffix}.rispro.zip`);
+    await fs.writeFile(artifactPath, "canonical archive bytes");
+    const digest = await sha256File(artifactPath);
+    await pool.query("update backup_jobs set status='failed',archive_name=$2,staging_path=$3,archive_size_bytes=$4,archive_sha256=$5,completed_at=now() where job_id=$1::uuid", [copyRetrySourceJobId, path.basename(artifactPath), artifactPath, digest.byteSize, digest.sha256]);
+    await pool.query("insert into backup_artifacts (artifact_id,job_id,archive_name,staging_path,byte_size,sha256,manifest) values ($1::uuid,$2::uuid,$3,$4,$5,$6,'{}'::jsonb)", [artifactId, copyRetrySourceJobId, path.basename(artifactPath), artifactPath, digest.byteSize, digest.sha256]);
+    await recordBackupDestinationCopy({ jobId: copyRetrySourceJobId, artifactId, destinationId, status: "failed", failureMessage: "SMB archive transfer timed out." });
+    const retried = await retryBackupJob(copyRetrySourceJobId, { initiatedByUserId: null });
     retryJobId = String((retried as Record<string, unknown>).job_id);
-    assert.equal((retried as Record<string, unknown>).retry_of_job_id, jobId);
+    assert.equal((retried as Record<string, unknown>).retry_of_job_id, copyRetrySourceJobId);
+    assert.equal((retried as Record<string, unknown>).reused_artifact_id, artifactId);
+    const retryDestinations = await pool.query<{ requested_destination_ids: string[] }>("select requested_destination_ids from backup_jobs where job_id=$1::uuid", [retryJobId]);
+    assert.deepEqual(retryDestinations.rows[0]?.requested_destination_ids, [destinationId]);
+    const downloadable = await getBackupArtifactForDownload(retryJobId);
+    assert.equal(downloadable.filePath, artifactPath);
+    await fs.writeFile(artifactPath, "corrupted archive bytes");
+    await assert.rejects(() => retryBackupJob(copyRetrySourceJobId!, { initiatedByUserId: null }), /checksum does not match/);
   } finally {
     if (retryJobId) await pool.query("delete from backup_jobs where job_id=$1::uuid", [retryJobId]);
+    if (copyRetrySourceJobId) await pool.query("delete from backup_jobs where job_id=$1::uuid", [copyRetrySourceJobId]);
     if (jobId) await pool.query("delete from backup_jobs where job_id=$1::uuid", [jobId]);
+    if (artifactPath) await fs.rm(artifactPath, { force: true });
     if (scheduleId) await deleteBackupSchedule(scheduleId, null).catch(() => undefined);
     if (destinationId) await pool.query("delete from backup_destination_profiles where destination_id=$1::uuid", [destinationId]);
     await pool.query("delete from backup_control_secrets where secret_name='archive_passphrase'");

@@ -60,7 +60,35 @@ export function validateBackupV3SmbConfig(value: unknown): BackupV3SmbConfig {
   return { server, share, subfolder, ...(domain ? { domain } : {}), timeoutSeconds };
 }
 
-function classifySmbError(error: unknown): HttpError {
+type SmbOperationKind = "metadata" | "transfer";
+
+const SMB_TRANSFER_MIN_PROCESS_TIMEOUT_MS = 10 * 60 * 1_000;
+const SMB_TRANSFER_MAX_PROCESS_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
+const SMB_TRANSFER_ASSUMED_MIN_BYTES_PER_SECOND = 2 * 1024 * 1024;
+const SMB_TRANSFER_OVERHEAD_MS = 5 * 60 * 1_000;
+
+/**
+ * The smbclient `-t` option is a network-stall timeout, not an archive deadline.
+ * Allow a deliberately conservative 2 MiB/s plus five minutes for each verified
+ * upload/download, with a ten minute minimum and two hour hard ceiling.
+ */
+export function backupV3SmbTransferProcessTimeoutMs(expectedByteSize: number): number {
+  const bytes = Number.isSafeInteger(expectedByteSize) && expectedByteSize > 0 ? expectedByteSize : 0;
+  return Math.min(SMB_TRANSFER_MAX_PROCESS_TIMEOUT_MS, Math.max(
+    SMB_TRANSFER_MIN_PROCESS_TIMEOUT_MS,
+    Math.ceil((bytes / SMB_TRANSFER_ASSUMED_MIN_BYTES_PER_SECOND) * 1_000) + SMB_TRANSFER_OVERHEAD_MS
+  ));
+}
+
+function isChildProcessTimeout(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const child = error as NodeJS.ErrnoException & { killed?: unknown; signal?: unknown };
+  const text = error instanceof Error ? error.message : String(error);
+  return child.code === "ETIMEDOUT" || (child.killed === true && typeof child.signal === "string") || /(?:process|command|child).*tim(?:e|ed)[ -]?out|ETIMEDOUT/i.test(text);
+}
+
+function classifySmbError(error: unknown, operation: SmbOperationKind): HttpError {
+  if (operation === "transfer" && isChildProcessTimeout(error)) return new HttpError(504, "SMB archive transfer timed out.");
   const text = error instanceof Error ? `${error.message} ${String((error as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "")}`.toUpperCase() : String(error).toUpperCase();
   if (/LOGON_FAILURE|NT_STATUS_WRONG_PASSWORD|AUTHENTICATION/.test(text)) return new HttpError(502, "SMB authentication failed.");
   if (/BAD_NETWORK_NAME|NO_SUCH_SHARE/.test(text)) return new HttpError(502, "SMB share was not found.");
@@ -70,25 +98,28 @@ function classifySmbError(error: unknown): HttpError {
   return new HttpError(502, "SMB destination operation failed.");
 }
 
-async function withSmb<T>(configInput: unknown, credentials: BackupV3SmbCredentials, action: (run: (command: string) => Promise<void>, config: BackupV3SmbConfig, tempDir: string) => Promise<T>, dependencies: BackupV3SmbDependencies = defaultDependencies): Promise<T> {
+async function withSmb<T>(configInput: unknown, credentials: BackupV3SmbCredentials, action: (run: (command: string, operation?: SmbOperationKind, expectedByteSize?: number) => Promise<void>, config: BackupV3SmbConfig, tempDir: string) => Promise<T>, dependencies: BackupV3SmbDependencies = defaultDependencies): Promise<T> {
   const config = validateBackupV3SmbConfig(configInput);
   if (!credentials.username || /[\r\n\0]/.test(credentials.username) || !credentials.password || /[\r\n\0]/.test(credentials.password)) throw new HttpError(400, "SMB username and password are required.");
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-smb-"));
   const authPath = path.join(tempDir, "credentials");
   await fs.writeFile(authPath, `username = ${credentials.username}\npassword = ${credentials.password}\n${config.domain ? `domain = ${config.domain}\n` : ""}`, { mode: 0o600 });
   const share = `//${config.server}/${config.share}`;
-  const run = async (command: string): Promise<void> => {
+  const run = async (command: string, operation: SmbOperationKind = "metadata", expectedByteSize?: number): Promise<void> => {
+    const processTimeout = operation === "transfer"
+      ? backupV3SmbTransferProcessTimeoutMs(expectedByteSize || 0)
+      : (config.timeoutSeconds + 5) * 1_000;
     try {
-      await dependencies.execFile("smbclient", [share, "-A", authPath, "-m", "SMB3", "--option=client min protocol=SMB2", "--option=client max protocol=SMB3", "-t", String(config.timeoutSeconds), "-c", command], { timeout: (config.timeoutSeconds + 5) * 1_000, maxBuffer: 1024 * 1024 });
+      await dependencies.execFile("smbclient", [share, "-A", authPath, "-m", "SMB3", "--option=client min protocol=SMB2", "--option=client max protocol=SMB3", "-t", String(config.timeoutSeconds), "-c", command], { timeout: processTimeout, maxBuffer: 1024 * 1024 });
     } catch (error) {
-      throw classifySmbError(error);
+      throw classifySmbError(error, operation);
     }
   };
   try { return await action(run, config, tempDir); }
   finally { await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
 }
 
-async function ensureRemoteDirectory(run: (command: string) => Promise<void>, config: BackupV3SmbConfig): Promise<void> {
+async function ensureRemoteDirectory(run: (command: string, operation?: SmbOperationKind, expectedByteSize?: number) => Promise<void>, config: BackupV3SmbConfig): Promise<void> {
   const segments = config.subfolder ? config.subfolder.split("\\") : [];
   let current = "";
   for (const segment of segments) {
@@ -134,14 +165,18 @@ export async function copyBackupV3ToSmbDestination(input: {
     const remoteFinal = config.subfolder ? `${config.subfolder}\\${archiveName}` : archiveName;
     const readBackPath = path.join(tempDir, "read-back.bin");
     try {
-      await run(`put ${smbQuote(input.sourcePath)} ${smbQuote(remoteTemp)}`);
-      await run(`get ${smbQuote(remoteTemp)} ${smbQuote(readBackPath)}`);
+      await run(`put ${smbQuote(input.sourcePath)} ${smbQuote(remoteTemp)}`, "transfer", input.expectedByteSize);
+      await run(`get ${smbQuote(remoteTemp)} ${smbQuote(readBackPath)}`, "transfer", input.expectedByteSize);
       const readBack = await sha256File(readBackPath);
       if (readBack.byteSize !== input.expectedByteSize || readBack.sha256 !== input.expectedSha256) throw new HttpError(500, "SMB upload verification failed.");
       await run(`rename ${smbQuote(remoteTemp)} ${smbQuote(remoteFinal)}`);
       return { remotePath: remoteFinal, byteSize: readBack.byteSize, sha256: readBack.sha256 };
     } catch (error) {
-      await run(`del ${smbQuote(remoteTemp)}`).catch(() => undefined);
+      let cleanupFailed = false;
+      await run(`del ${smbQuote(remoteTemp)}`).catch(() => { cleanupFailed = true; });
+      if (cleanupFailed && error instanceof HttpError) {
+        throw new HttpError(error.statusCode, `${error.message} Remote temporary-file cleanup also failed.`);
+      }
       throw error;
     }
   }, input.dependencies);

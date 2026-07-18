@@ -4,14 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { sha256File } from "./backup-v3-checksums.js";
-import { copyBackupV3ToSmbDestination, deleteBackupV3SmbDestinationCopy, testBackupV3SmbDestination, validateBackupV3SmbConfig, type BackupV3SmbDependencies } from "./backup-v3-smb-destination.js";
+import { backupV3SmbTransferProcessTimeoutMs, copyBackupV3ToSmbDestination, deleteBackupV3SmbDestinationCopy, testBackupV3SmbDestination, validateBackupV3SmbConfig, type BackupV3SmbDependencies } from "./backup-v3-smb-destination.js";
 
-function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, Buffer>; commands: string[]; authFiles: string[] } {
+function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, Buffer>; commands: string[]; authFiles: string[]; timeouts: Array<{ command: string; timeout: number }> } {
   const files = new Map<string, Buffer>();
   const commands: string[] = [];
   const authFiles: string[] = [];
+  const timeouts: Array<{ command: string; timeout: number }> = [];
   const dependencies: BackupV3SmbDependencies = {
-    async execFile(command, args) {
+    async execFile(command, args, options) {
       assert.equal(command, "smbclient");
       assert.ok(args.includes("SMB3"));
       assert.ok(args.includes("--option=client min protocol=SMB2"));
@@ -20,6 +21,7 @@ function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, 
       authFiles.push(await fs.readFile(authPath, "utf8"));
       const smbCommand = String(args[args.indexOf("-c") + 1] || "");
       commands.push(smbCommand);
+      timeouts.push({ command: smbCommand, timeout: options.timeout });
       const parts = [...smbCommand.matchAll(/"((?:\\.|[^"\\])*)"/g)].map((match) => match[1]!.replace(/\\(.)/g, "$1"));
       if (smbCommand.startsWith("put ")) {
         files.set(parts[1]!, await fs.readFile(parts[0]!));
@@ -35,7 +37,7 @@ function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, 
       }
     },
   };
-  return { dependencies, files, commands, authFiles };
+  return { dependencies, files, commands, authFiles, timeouts };
 }
 
 const config = { server: "nas.example", share: "RISpro Backups", subfolder: "daily/rispro", domain: "WORKGROUP", timeoutSeconds: 12 };
@@ -54,7 +56,10 @@ test("SMB adapter restricts protocol to SMB2/3, uses an auth file, and verifies 
     assert.ok(fake.authFiles.every((content) => content.includes("password = super-secret")));
     assert.equal(fake.commands.some((command) => command.includes("super-secret")), false);
     assert.ok(fake.commands.some((command) => command.startsWith("get ")));
-    assert.ok(fake.commands.some((command) => command.startsWith("rename ")));
+  assert.ok(fake.commands.some((command) => command.startsWith("rename ")));
+  const metadataTimeout = (config.timeoutSeconds + 5) * 1_000;
+  assert.ok(fake.timeouts.filter(({ command }) => command.startsWith("put ") || command.startsWith("get ")).every(({ timeout }) => timeout > metadataTimeout));
+  assert.ok(fake.timeouts.filter(({ command }) => command.startsWith("mkdir ") || command.startsWith("rename ")).every(({ timeout }) => timeout === metadataTimeout));
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -64,6 +69,37 @@ test("SMB connection test writes and deletes a temporary remote file", async () 
   const fake = fakeSmb();
   await testBackupV3SmbDestination(config, { username: "backup-user", password: "super-secret" }, fake.dependencies);
   assert.equal(fake.files.size, 0);
+  assert.ok(fake.timeouts.every(({ timeout }) => timeout === (config.timeoutSeconds + 5) * 1_000));
+});
+
+test("SMB transfer deadline scales safely and classifies child-process timeouts without exposing credentials", async () => {
+  assert.ok(backupV3SmbTransferProcessTimeoutMs(900 * 1024 * 1024) > 10 * 60 * 1_000);
+  assert.ok(backupV3SmbTransferProcessTimeoutMs(3 * 1024 * 1024 * 1024) <= 2 * 60 * 60 * 1_000);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-smb-timeout-"));
+  const source = path.join(root, "backup.rispro.zip");
+  await fs.writeFile(source, "archive");
+  const digest = await sha256File(source);
+  try {
+    await assert.rejects(
+      () => copyBackupV3ToSmbDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile(_command, args) { if (String(args.at(-1)).startsWith("put ")) { const error = new Error("Command timed out") as Error & { code: string; killed: boolean; signal: string }; error.code = "ETIMEDOUT"; error.killed = true; error.signal = "SIGTERM"; throw error; } } } }),
+      (error: Error) => error.message === "SMB archive transfer timed out." && !error.message.includes("super-secret")
+    );
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test("SMB cleanup is attempted after verification or rename failure and cannot replace the primary failure", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-smb-cleanup-"));
+  const source = path.join(root, "backup.rispro.zip");
+  await fs.writeFile(source, "archive");
+  const digest = await sha256File(source);
+  const commands: string[] = [];
+  try {
+    await assert.rejects(
+      () => copyBackupV3ToSmbDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile(_command, args) { const command = String(args.at(-1)); commands.push(command); if (command.startsWith("get ")) throw new Error("read-back failed"); if (command.startsWith("del ")) throw new Error("cleanup failed"); } } }),
+      /SMB destination operation failed\. Remote temporary-file cleanup also failed\./
+    );
+    assert.ok(commands.some((command) => command.startsWith("del ")));
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test("SMB retention deletion rejects paths outside the configured archive name", async () => {

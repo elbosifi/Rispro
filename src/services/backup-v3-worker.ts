@@ -20,6 +20,7 @@ import {
   ensureBackupArtifactDirectory,
   failBackupJob,
   getBackupArchivePassphrase,
+  getBackupArtifactForCopyOnlyRetry,
   getBackupDestinationCredentials,
   getBackupJobDestinations,
   markBackupJobGenerated,
@@ -74,25 +75,37 @@ async function generateAndCopyJob(): Promise<void> {
     if (!job) return;
     let temporaryArchivePath: string | null = null;
     try {
-      const stagingDir = await ensureBackupStagingDirectory();
-      const artifactDir = await ensureBackupArtifactDirectory();
-      const archiveName = `rispro-backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${job.job_id}.rispro.zip`;
-      temporaryArchivePath = path.join(stagingDir, `.${archiveName}.${crypto.randomUUID()}.part`);
-      const archivePath = path.join(artifactDir, archiveName);
-      const output = fs.createWriteStream(temporaryArchivePath, { flags: "wx" });
-      const passphrase = await getBackupArchivePassphrase();
-      const result = await streamBackupV3Archive({
-        currentUserId: job.initiated_by_user_id,
-        passphrase,
-        output,
-        backupName: archiveName,
-        includePostgresDump: true,
-      });
-      await fsp.rename(temporaryArchivePath, archivePath);
-      temporaryArchivePath = null;
-      await updateBackupJobHeartbeat(job.job_id);
-      const digest = await sha256File(archivePath);
-      const artifactId = await markBackupJobGenerated({ jobId: job.job_id, archiveName, stagingPath: archivePath, byteSize: digest.byteSize, sha256: digest.sha256, manifest: result.manifest });
+      let archiveName: string;
+      let archivePath: string;
+      let artifactId: string;
+      let digest: Awaited<ReturnType<typeof sha256File>>;
+      if (job.reused_artifact_id) {
+        const artifact = await getBackupArtifactForCopyOnlyRetry(job.job_id);
+        archiveName = artifact.archiveName;
+        archivePath = artifact.stagingPath;
+        artifactId = artifact.artifactId;
+        digest = { byteSize: artifact.byteSize, sha256: artifact.sha256, crc32: 0 };
+      } else {
+        const stagingDir = await ensureBackupStagingDirectory();
+        const artifactDir = await ensureBackupArtifactDirectory();
+        archiveName = `rispro-backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${job.job_id}.rispro.zip`;
+        temporaryArchivePath = path.join(stagingDir, `.${archiveName}.${crypto.randomUUID()}.part`);
+        archivePath = path.join(artifactDir, archiveName);
+        const output = fs.createWriteStream(temporaryArchivePath, { flags: "wx" });
+        const passphrase = await getBackupArchivePassphrase();
+        const result = await streamBackupV3Archive({
+          currentUserId: job.initiated_by_user_id,
+          passphrase,
+          output,
+          backupName: archiveName,
+          includePostgresDump: true,
+        });
+        await fsp.rename(temporaryArchivePath, archivePath);
+        temporaryArchivePath = null;
+        await updateBackupJobHeartbeat(job.job_id);
+        digest = await sha256File(archivePath);
+        artifactId = await markBackupJobGenerated({ jobId: job.job_id, archiveName, stagingPath: archivePath, byteSize: digest.byteSize, sha256: digest.sha256, manifest: result.manifest });
+      }
       const destinations = await getBackupJobDestinations(job.job_id);
       for (const destination of destinations) {
         await recordBackupDestinationCopy({ jobId: job.job_id, artifactId, destinationId: destination.destination_id, status: "copying" });

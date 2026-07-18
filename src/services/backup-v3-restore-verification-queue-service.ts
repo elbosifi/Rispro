@@ -9,7 +9,7 @@ import type { NullableUserId } from "../types/http.js";
 export async function queueScheduledBackupV3RestoreVerification(jobId: string): Promise<string | null> {
   const { rows } = await pool.query<{ artifact_id: string; source_schedule_id: string; restore_verification_frequency: "disabled" | "weekly" | "monthly" }>(
     `select artifact.artifact_id,job.source_schedule_id,schedule.restore_verification_frequency
-     from backup_jobs job join backup_artifacts artifact on artifact.job_id=job.job_id join backup_schedules schedule on schedule.schedule_id=job.source_schedule_id
+     from backup_jobs job join backup_artifacts artifact on artifact.artifact_id=coalesce(job.reused_artifact_id,(select source.artifact_id from backup_artifacts source where source.job_id=job.job_id)) join backup_schedules schedule on schedule.schedule_id=job.source_schedule_id
      where job.job_id=$1::uuid and job.status='completed'`,
     [jobId]
   );
@@ -25,7 +25,7 @@ export async function queueScheduledBackupV3RestoreVerification(jobId: string): 
 
 export async function queueManualBackupV3RestoreVerification(jobId: string, userId: NullableUserId): Promise<string> {
   const { rows } = await pool.query<{ artifact_id: string; source_schedule_id: string | null }>(
-    `select artifact.artifact_id,job.source_schedule_id from backup_jobs job join backup_artifacts artifact on artifact.job_id=job.job_id
+    `select artifact.artifact_id,job.source_schedule_id from backup_jobs job join backup_artifacts artifact on artifact.artifact_id=coalesce(job.reused_artifact_id,(select source.artifact_id from backup_artifacts source where source.job_id=job.job_id))
      where job.job_id=$1::uuid and job.status='completed'`,
     [jobId]
   );

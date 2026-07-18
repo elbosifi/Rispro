@@ -130,6 +130,45 @@ Entra app registration, a deployment redirect URI, and delegated
 the UI and must never require a Microsoft password or RISpro environment-file
 editing.
 
+### SMB transfer behavior and destination-copy retry
+
+**Test** is a short connection and small write/delete probe. It proves the
+application can authenticate and use the selected share; it is not a benchmark
+for transferring a full archive. SMB2/SMB3 remains mandatory and credentials
+are passed to `smbclient` only through a mode-restricted credential file.
+
+Directory, rename, deletion, and Test operations use the configured short
+connection/process timeout. Archive `put` and verified `get` retain that
+`smbclient -t` network-stall guard, but use a separate whole-process deadline:
+at least 10 minutes, calculated as archive size at a conservative 2 MiB/s plus
+five minutes, and capped at two hours. A process deadline produces the safe
+message `SMB archive transfer timed out.` rather than an authentication or
+permission diagnosis. Promotion from `.partial` to the final filename occurs
+only after successful read-back size and SHA-256 verification.
+
+If a generated archive copied unsuccessfully to one or more destinations,
+**Retry destination copy** queues a new auditable copy-only job for just the
+failed/requested destinations. Before it runs, RISpro verifies the canonical
+artifact is a `.rispro.zip` file inside `storage/backups/artifacts` with its
+recorded size and SHA-256. It reuses those bytes and never regenerates an
+archive. If the artifact is missing or changed, retry fails safely and the
+operator must use **Run now** to intentionally generate a fresh backup.
+
+`storage/backups` is intentionally excluded from archive content. This covers
+staging `.part` files, retained artifacts, restore-verification scratch files,
+and future backup-internal directories, while ordinary application files such
+as uploads and worklists remain included.
+
+For deployments running the old build, after confirming no backup job is
+active, an operator may remove clearly identified orphaned remote `.partial`
+files from the configured RISpro backup folder using the share's normal
+administrative tools. Do not remove final `.rispro.zip` files selected by
+retention. Review failed jobs and local `storage/backups/artifacts` before
+removing older failed artifacts: preserve any artifact referenced by a failed
+job that may need **Retry destination copy**. Old staging `.part` files left
+by a stopped worker can be removed only after confirming no worker/job owns
+them; they are never valid backup archives.
+
 Schedules are persisted in `Africa/Tripoli` by default and use a persisted
 `next_run_at`, so a restart or a delayed worker tick does not silently miss a
 run. The default control-center retention preset is 7 daily, 4 weekly, and 12

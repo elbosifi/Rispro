@@ -173,6 +173,32 @@ test("collectBackupV3StorageFiles enforces file count, single-file, and total-si
   );
 });
 
+test("collectBackupV3StorageFiles excludes path-safe Backup V3 internals but keeps sibling application storage", async () => {
+  const storage = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-v3-storage-"));
+  try {
+    await fs.mkdir(path.join(storage, "uploads"), { recursive: true });
+    await fs.mkdir(path.join(storage, "dicom", "worklist-source"), { recursive: true });
+    await fs.mkdir(path.join(storage, "backups", "staging"), { recursive: true });
+    await fs.mkdir(path.join(storage, "backups", "artifacts"), { recursive: true });
+    await fs.mkdir(path.join(storage, "backups", "restore-verification", "scratch"), { recursive: true });
+    await fs.mkdir(path.join(storage, "backups-other"), { recursive: true });
+    await fs.writeFile(path.join(storage, "uploads", "patient.pdf"), "upload");
+    await fs.writeFile(path.join(storage, "dicom", "worklist-source", "mwl.wl"), "worklist");
+    await fs.writeFile(path.join(storage, "backups", "staging", ".current.part"), "part");
+    await fs.writeFile(path.join(storage, "backups", "artifacts", "old.rispro.zip"), "archive");
+    await fs.writeFile(path.join(storage, "backups", "restore-verification", "scratch", "result.txt"), "scratch");
+    await fs.writeFile(path.join(storage, "backups-other", "keep.txt"), "sibling");
+    const files = await collectBackupV3StorageFiles([{ id: "project-storage", kind: "project_storage", absolutePath: storage, archivePrefix: "storage/project", appOwned: true }], { maxFiles: 20, maxFileBytes: 100, maxTotalUncompressedBytes: 1_000 });
+    const archivePaths = files.map((file) => file.archivePath);
+    assert.ok(archivePaths.includes("storage/project/uploads/patient.pdf"));
+    assert.ok(archivePaths.includes("storage/project/dicom/worklist-source/mwl.wl"));
+    assert.ok(archivePaths.includes("storage/project/backups-other/keep.txt"));
+    assert.equal(archivePaths.some((entry) => entry.includes("/backups/")), false);
+  } finally {
+    await fs.rm(storage, { recursive: true, force: true });
+  }
+});
+
 test("admin route source keeps v2 backup and adds separate v3 archive endpoint", async () => {
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
 
