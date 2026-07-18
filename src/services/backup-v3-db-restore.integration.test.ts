@@ -41,7 +41,8 @@ const allTables = [
   table("public", "loop_a", ["id", "b_id"], 1),
   table("public", "loop_b", ["id", "a_id"], 1),
   table("public", "strict_child", ["id", "user_id"], 1),
-  table("appointments_v2", "bookings", ["id", "patient_id"], 1),
+  table("appointments_v2", "bookings", ["id", "patient_id", "auto_completion_check_id"], 1),
+  table("appointments_v2", "pacs_auto_completion_verification_history", ["id", "booking_id"], 1),
 ];
 
 function manifest(tables = allTables): BackupV3Manifest {
@@ -83,11 +84,15 @@ async function setupDatabase(pool: pg.Pool): Promise<void> {
   await pool.query("create table public.loop_b (id bigserial primary key, a_id bigint references public.loop_a(id) deferrable initially immediate)");
   await pool.query("alter table public.loop_a add constraint loop_a_b_fk foreign key (b_id) references public.loop_b(id) deferrable initially immediate");
   await pool.query("create table public.strict_child (id bigserial primary key, user_id bigint not null references public.users(id) not deferrable)");
-  await pool.query("create table appointments_v2.bookings (id bigserial primary key, patient_id bigint references public.patients(id) deferrable initially immediate)");
+  await pool.query("create table appointments_v2.bookings (id bigserial primary key, patient_id bigint references public.patients(id) deferrable initially immediate, auto_completion_check_id bigint)");
+  await pool.query("create table appointments_v2.pacs_auto_completion_verification_history (id bigserial primary key, booking_id bigint references appointments_v2.bookings(id) on delete cascade deferrable initially immediate)");
+  await pool.query("alter table appointments_v2.bookings add constraint bookings_auto_completion_check_fk foreign key (auto_completion_check_id) references appointments_v2.pacs_auto_completion_verification_history(id) on delete set null deferrable initially immediate");
   await pool.query("insert into public.users (id, username) values (10, 'old')");
   await pool.query("insert into public.patients (id, created_by_user_id) values (10, 10)");
   await pool.query("insert into public.strict_child (id, user_id) values (10, 10)");
   await pool.query("insert into appointments_v2.bookings (id, patient_id) values (10, 10)");
+  await pool.query("insert into appointments_v2.pacs_auto_completion_verification_history (id, booking_id) values (10, 10)");
+  await pool.query("update appointments_v2.bookings set auto_completion_check_id = 10 where id = 10");
   await pool.query("select setval('public.users_id_seq', 10, true)");
 }
 
@@ -133,7 +138,8 @@ maybeTest("live v3 DB restore validates before mutation, restores, reseeds, defe
       "public.loop_a": [{ id: 1, b_id: 1 }],
       "public.loop_b": [{ id: 1, a_id: 1 }],
       "public.strict_child": [{ id: 1, user_id: 1 }],
-      "appointments_v2.bookings": [{ id: 1, patient_id: 1 }],
+      "appointments_v2.bookings": [{ id: 1, patient_id: 1, auto_completion_check_id: 1 }],
+      "appointments_v2.pacs_auto_completion_verification_history": [{ id: 1, booking_id: 1 }],
     });
     const client = await pool.connect();
     try {
@@ -181,7 +187,8 @@ maybeTest("live v3 DB restore validates before mutation, restores, reseeds, defe
       "public.loop_a": [{ id: 1, b_id: 1 }],
       "public.loop_b": [{ id: 1, a_id: 1 }],
       "public.strict_child": [{ id: 1, user_id: 999 }],
-      "appointments_v2.bookings": [{ id: 1, patient_id: 1 }],
+      "appointments_v2.bookings": [{ id: 1, patient_id: 1, auto_completion_check_id: 1 }],
+      "appointments_v2.pacs_auto_completion_verification_history": [{ id: 1, booking_id: 1 }],
     });
     const oldRows = await pool.query("select id, username from public.users order by id");
     const failClient = await pool.connect();

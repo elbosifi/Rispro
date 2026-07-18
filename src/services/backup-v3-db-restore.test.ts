@@ -207,3 +207,12 @@ test("restoreBackupV3DatabaseOnly rejects unknown row columns before transaction
   assert.ok(!client.calls.some((call) => call.sql === "begin"));
   assert.ok(!client.calls.some((call) => /truncate table/i.test(call.sql)));
 });
+
+test("PACS auto-completion booking cycle is deferrable for atomic Backup V3 restore", async () => {
+  const migration = await fs.readFile(
+    path.join(process.cwd(), "src/db/migrations/129_backup_v3_restore_cyclic_fk_deferral.sql"),
+    "utf8"
+  );
+  assert.match(migration, /alter constraint bookings_auto_completion_check_fk\s+deferrable initially immediate/i);
+  assert.match(migration, /alter constraint pacs_auto_completion_verification_history_booking_id_fkey\s+deferrable initially immediate/i);
+});
