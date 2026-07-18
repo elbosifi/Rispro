@@ -95,6 +95,25 @@ test("Backup V3 Control Center rejects unapproved local destination paths", asyn
   );
 });
 
+test("Backup V3 Control Center rejects malformed destination and passphrase requests before persistence", async () => {
+  await assert.rejects(
+    () => createBackupDestinationProfile({ name: "", destinationType: "local", config: {} }, null),
+    /Destination name is required/
+  );
+  await assert.rejects(
+    () => createBackupDestinationProfile({ name: "Unsupported", destinationType: "tape", config: {} }, null),
+    /Unsupported backup destination type/
+  );
+  await assert.rejects(
+    () => updateBackupDestinationProfile("not-a-uuid", {}, null),
+    /Invalid backup destination identifier/
+  );
+  await assert.rejects(
+    () => updateBackupArchivePassphrase("short", null),
+    /at least 8 characters/
+  );
+});
+
 test("Backup V3 worker heartbeat accepts both successful and failed ticks", async () => {
   await recordBackupWorkerHeartbeat(`backup-v3-test-${Date.now()}`);
   let state = await pool.query<{ last_failure_message: string | null; last_successful_tick_at: Date | null }>("select last_failure_message,last_successful_tick_at from backup_worker_state where singleton_key=true");

@@ -215,6 +215,42 @@ describe("BackupRestoreSection v3 UI", () => {
     await waitFor(() => expect(screen.getAllByText("Restart required for this setting to take effect.").length).toBeGreaterThan(0));
   });
 
+  it("runs the automated destination controls through the guarded control-center API", async () => {
+    const destination = { destination_id: "destination-1", name: "Primary local", destination_type: "local", enabled: true, credentialsConfigured: false, last_connection_status: null, last_failure_message: null };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      if (url === "/api/backup-control/summary") return jsonResponse({ health: "healthy", destinations: 1, enabled_destinations: 1, recent_failures: 0 });
+      if (url === "/api/backup-control/destinations") return jsonResponse({ destinations: [destination] });
+      if (url === "/api/backup-control/jobs") return jsonResponse({ jobs: [] });
+      if (url === "/api/backup-control/schedules") return jsonResponse({ schedules: [] });
+      if (url === "/api/backup-control/restore-verifications") return jsonResponse({ verifications: [] });
+      if (url === "/api/backup-control/run-now" && init?.method === "POST") return jsonResponse({});
+      if (url === "/api/backup-control/destinations/destination-1/test") return jsonResponse({});
+      if (url === "/api/backup-control/destinations/destination-1/retention/preview") return jsonResponse({ plan: { keep: ["recent"], delete: ["expired"] } });
+      if (url === "/api/backup-control/destinations/destination-1/retention/execute") return jsonResponse({});
+      if (url === "/api/backup-control/destinations/destination-1" && init?.method === "PATCH") return jsonResponse({});
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderSection();
+    await screen.findByText("Primary local");
+    await userEvent.click(screen.getByRole("checkbox", { name: /primary local/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Run now" }));
+    await userEvent.click(screen.getByRole("button", { name: "Test" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await userEvent.click(screen.getByRole("button", { name: "Retention preview" }));
+    expect(await screen.findByText(/Retention preview: 1 copies retained and 1 eligible for safe deletion/i)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Apply retention" }));
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/run-now", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/destinations/destination-1/test", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/destinations/destination-1", expect.objectContaining({ method: "PATCH" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/destinations/destination-1/retention/execute", expect.objectContaining({ method: "POST" }));
+  });
+
   it("requires exact confirmation before executing restore", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
