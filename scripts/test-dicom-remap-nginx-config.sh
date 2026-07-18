@@ -46,7 +46,7 @@ pass 'process-multipart route has the dedicated streaming limit and timeouts'
   || fail 'multi-gigabyte body limit must exist only on the exact remap route'
 pass 'other API routes retain the global 75m limit'
 
-for restore_route in /api/admin/restore/v3/preview /api/admin/restore/v3/restore; do
+for restore_route in /api/admin/restore/v3/preview /api/admin/restore/v3; do
   restore_line="$(grep -nF "location = ${restore_route} {" "${CONFIG_FILE}" | cut -d: -f1)"
   [[ -n "${restore_line}" ]] || fail "missing exact V3 restore upload route: ${restore_route}"
   [[ "${restore_line}" -lt "${root_line}" ]] || fail "V3 restore upload route must precede the general location / route"
