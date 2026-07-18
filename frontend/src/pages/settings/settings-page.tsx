@@ -2657,6 +2657,7 @@ type BackupControlSummary = {
   recent_failures?: number;
   overdue_schedules?: number;
   health?: "healthy" | "warning" | "critical";
+  health_reasons?: string[];
   staging_free_bytes?: string | number | null;
   active_job?: { status?: string; archive_name?: string | null } | null;
   last_successful_backup?: { archive_name?: string | null; completed_at?: string | null; archive_size_bytes?: string | number | null } | null;
@@ -2664,6 +2665,13 @@ type BackupControlSummary = {
   last_successful_restore_verification?: { completed_at?: string | null } | null;
   next_schedule?: { name?: string; next_run_at?: string | null } | null;
   worker?: { heartbeat_at?: string | null; last_failure_message?: string | null } | null;
+  encryption?: {
+    encryptionReady: boolean;
+    setupRequired: boolean;
+    restartRequired: boolean;
+    setupAvailable: boolean;
+    limitation?: string;
+  };
 };
 
 type BackupControlSchedule = {
@@ -2742,6 +2750,9 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [selectedBackupDestinationIds, setSelectedBackupDestinationIds] = useState<string[]>([]);
   const [backupControlBusy, setBackupControlBusy] = useState(false);
   const [backupControlMessage, setBackupControlMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [backupKeySetupId, setBackupKeySetupId] = useState<string | null>(null);
+  const [backupRecoveryDownloaded, setBackupRecoveryDownloaded] = useState(false);
+  const [backupRecoveryConfirmed, setBackupRecoveryConfirmed] = useState(false);
   const [destinationForm, setDestinationForm] = useState({ name: "", type: "local" as BackupControlDestination["destination_type"], rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" });
   const [editingDestinationId, setEditingDestinationId] = useState<string | null>(null);
   const [automatedPassphrase, setAutomatedPassphrase] = useState("");
@@ -2894,6 +2905,10 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       setBackupControlMessage({ type: "error", text: "Recent supervisor re-authentication is required to change backup destinations." });
       return;
     }
+    if (!backupControlSummary?.encryption?.encryptionReady) {
+      setBackupControlMessage({ type: "error", text: "Complete Backup security setup and restart RISpro before saving protected destination settings." });
+      return;
+    }
     const config = destinationForm.type === "local"
       ? { rootPath: destinationForm.rootPath }
       : destinationForm.type === "nextcloud"
@@ -2970,6 +2985,10 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       onReAuthRequired(["backup-control", "passphrase"]);
       return;
     }
+    if (!backupControlSummary?.encryption?.encryptionReady) {
+      setBackupControlMessage({ type: "error", text: "Complete Backup security setup and restart RISpro before saving the automated archive passphrase." });
+      return;
+    }
     setBackupControlBusy(true);
     try {
       const response = await fetch("/api/backup-control/encryption-passphrase", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ passphrase: automatedPassphrase }) });
@@ -2978,6 +2997,66 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       setBackupControlMessage({ type: "success", text: "Automated archive passphrase is configured and stored encrypted." });
     } catch (error) {
       setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not save automated archive passphrase." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const generateBackupSecurityRecovery = async () => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "security-setup"]);
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch("/api/backup-control/encryption-setup", { method: "POST", credentials: "include" });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      const result = (await response.json()) as { setupId: string };
+      setBackupKeySetupId(result.setupId);
+      setBackupRecoveryDownloaded(false);
+      setBackupRecoveryConfirmed(false);
+      setBackupControlMessage({ type: "success", text: "A one-time recovery copy is ready. Download it and store it separately from this server before saving setup." });
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not generate Backup security setup." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const downloadBackupSecurityRecovery = async () => {
+    if (!backupKeySetupId) return;
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(`/api/backup-control/encryption-setup/${backupKeySetupId}/recovery`, { credentials: "include" });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = "rispro-backup-v3-encryption-key-recovery.txt";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setBackupRecoveryDownloaded(true);
+      setBackupRecoveryConfirmed(false);
+      setBackupControlMessage({ type: "success", text: "Recovery copy downloaded once. Confirm it is stored separately, then save Backup security setup." });
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not download the Backup recovery copy." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const saveBackupSecuritySetup = async () => {
+    if (!backupKeySetupId || !backupRecoveryDownloaded || !backupRecoveryConfirmed) return;
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(`/api/backup-control/encryption-setup/${backupKeySetupId}/confirm`, { method: "POST", credentials: "include" });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setBackupKeySetupId(null);
+      setBackupRecoveryDownloaded(false);
+      setBackupRecoveryConfirmed(false);
+      setBackupControlMessage({ type: "success", text: "Backup security setup was saved securely. Restart RISpro now, then this page will confirm encryption is ready." });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not save Backup security setup." });
     } finally {
       setBackupControlBusy(false);
     }
@@ -3462,6 +3541,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
 
       const result = await response.json();
       setRestartRequested(true);
+      window.setTimeout(() => { void refreshBackupControl(); }, 5_000);
       setRestoreMessage({
         type: "success",
         text: result.message || "RISpro restart requested. Wait a few seconds, then refresh if needed."
@@ -3518,9 +3598,14 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
 
         {backupControlSummary?.active_job && <p className="rounded border border-sky-200 bg-sky-100 p-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-100">Active backup job: {backupControlSummary.active_job.status}{backupControlSummary.active_job.archive_name ? ` · ${backupControlSummary.active_job.archive_name}` : ""}</p>}
         {backupControlSummary?.overdue_schedules ? <p className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">{backupControlSummary.overdue_schedules} automatic backup schedule{backupControlSummary.overdue_schedules === 1 ? " is" : "s are"} overdue.</p> : null}
+        {backupControlSummary?.health_reasons?.length ? <ul className="list-disc space-y-1 pl-5 text-xs text-stone-700 dark:text-stone-300">{backupControlSummary.health_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}
         {backupControlSummary?.staging_free_bytes != null && <p className="text-xs text-stone-600 dark:text-stone-300">Local staging space available: {Math.floor(Number(backupControlSummary.staging_free_bytes) / (1024 * 1024))} MiB.</p>}
         {backupControlSummary?.worker?.last_failure_message && <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">Worker warning: {backupControlSummary.worker.last_failure_message}</p>}
         {backupControlMessage && <p className={`rounded border p-2 text-xs ${backupControlMessage.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200" : "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200"}`}>{backupControlMessage.text}</p>}
+
+        {backupControlSummary?.encryption?.setupRequired && <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"><p className="font-semibold">Backup security setup required</p><p className="mt-1 text-xs">RISpro needs a permanent encryption key before it can safely store backup destination passwords and automated backup passphrases.</p>{backupControlSummary.encryption.limitation ? <p className="mt-2 text-xs">{backupControlSummary.encryption.limitation}</p> : isSuperAdmin ? <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => void generateBackupSecurityRecovery()} disabled={backupControlBusy || !user?.recentSupervisorReauth || !backupControlSummary.encryption?.setupAvailable} className="btn-primary text-xs disabled:opacity-50">Generate secure encryption key</button>{backupKeySetupId && <button type="button" onClick={() => void downloadBackupSecurityRecovery()} disabled={backupControlBusy || backupRecoveryDownloaded} className="btn-secondary text-xs disabled:opacity-50">{backupRecoveryDownloaded ? "Recovery copy downloaded" : "Download one-time recovery copy"}</button>}{backupKeySetupId && backupRecoveryDownloaded && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={backupRecoveryConfirmed} onChange={(event) => setBackupRecoveryConfirmed(event.target.checked)} />I saved the recovery copy separately from this server.</label>}{backupKeySetupId && <button type="button" onClick={() => void saveBackupSecuritySetup()} disabled={backupControlBusy || !backupRecoveryDownloaded || !backupRecoveryConfirmed} className="btn-primary text-xs disabled:opacity-50">Save securely</button>}</div> : <p className="mt-2 text-xs">A recently re-authenticated super administrator must complete this setup.</p>}{isSuperAdmin && !user?.recentSupervisorReauth && <p className="mt-2 text-xs">Recent supervisor re-authentication is required before setup can begin.</p>}</div>}
+        {backupControlSummary?.encryption?.restartRequired && <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"><p className="font-semibold">Backup security setup saved — restart required</p><p className="mt-1 text-xs">Restart RISpro safely to load the encryption key. This page will show Ready after the restarted service confirms it.</p>{isSuperAdmin && <button type="button" onClick={() => void handleSystemRestart()} disabled={restartBusy || !user?.recentSupervisorReauth} className="btn-primary mt-3 text-xs disabled:opacity-50">{restartBusy ? "Restarting..." : "Restart RISpro safely"}</button>}</div>}
+        {backupControlSummary?.encryption?.encryptionReady && <p className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">Backup credential encryption: Ready</p>}
 
         <div className="rounded border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900">
           <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium text-stone-900 dark:text-white">Run an encrypted backup now</p><button type="button" onClick={() => void runAutomatedBackupNow()} disabled={backupControlBusy || !selectedBackupDestinationIds.length} className="btn-primary text-xs disabled:opacity-50">{backupControlBusy ? "Working..." : "Run now"}</button></div>
@@ -3555,7 +3640,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
             {destinationForm.type === "sftp" && <><input aria-label="SFTP host" value={destinationForm.host} onChange={(event) => setDestinationForm((current) => ({ ...current, host: event.target.value }))} placeholder="SFTP host" className="input-premium text-xs" /><input aria-label="SFTP port" value={destinationForm.port} onChange={(event) => setDestinationForm((current) => ({ ...current, port: event.target.value }))} placeholder="22" className="input-premium text-xs" /><input aria-label="SFTP username" value={destinationForm.username} onChange={(event) => setDestinationForm((current) => ({ ...current, username: event.target.value }))} placeholder="SFTP username" className="input-premium text-xs" /><input aria-label="SFTP remote path" value={destinationForm.remotePath} onChange={(event) => setDestinationForm((current) => ({ ...current, remotePath: event.target.value }))} placeholder="/backups" className="input-premium text-xs" /><input aria-label="SFTP SHA256 host fingerprint" value={destinationForm.hostFingerprint} onChange={(event) => setDestinationForm((current) => ({ ...current, hostFingerprint: event.target.value }))} placeholder="SHA256 host fingerprint" className="input-premium text-xs" /><input aria-label="SFTP password" type="password" value={destinationForm.password} onChange={(event) => setDestinationForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password (or private key below)" className="input-premium text-xs" /><textarea aria-label="SFTP private key" value={destinationForm.privateKey} onChange={(event) => setDestinationForm((current) => ({ ...current, privateKey: event.target.value }))} placeholder="Private key (optional; never shown after save)" className="input-premium min-h-16 text-xs sm:col-span-2" /></>}
             {destinationForm.type === "smb" && <><input aria-label="SMB server" value={destinationForm.server} onChange={(event) => setDestinationForm((current) => ({ ...current, server: event.target.value }))} placeholder="SMB server" className="input-premium text-xs" /><input aria-label="SMB share" value={destinationForm.share} onChange={(event) => setDestinationForm((current) => ({ ...current, share: event.target.value }))} placeholder="Share" className="input-premium text-xs" /><input aria-label="SMB subfolder" value={destinationForm.subfolder} onChange={(event) => setDestinationForm((current) => ({ ...current, subfolder: event.target.value }))} placeholder="Subfolder" className="input-premium text-xs" /><input aria-label="SMB domain" value={destinationForm.domain} onChange={(event) => setDestinationForm((current) => ({ ...current, domain: event.target.value }))} placeholder="Domain (optional)" className="input-premium text-xs" /><input aria-label="SMB username" value={destinationForm.username} onChange={(event) => setDestinationForm((current) => ({ ...current, username: event.target.value }))} placeholder="Username" className="input-premium text-xs" /><input aria-label="SMB password" type="password" value={destinationForm.password} onChange={(event) => setDestinationForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" className="input-premium text-xs" /></>}
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => void createAutomatedDestination()} disabled={backupControlBusy || !user?.recentSupervisorReauth || destinationForm.type === "onedrive"} className="btn-primary text-xs disabled:opacity-50">{editingDestinationId ? "Update destination" : "Save destination"}</button>{editingDestinationId && <button type="button" onClick={() => { setEditingDestinationId(null); setDestinationForm({ name: "", type: "local", rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" }); }} className="btn-secondary text-xs">Cancel edit</button>}<input aria-label="Automated archive passphrase" type="password" value={automatedPassphrase} onChange={(event) => setAutomatedPassphrase(event.target.value)} placeholder="Automated archive passphrase" className="input-premium text-xs" /><button type="button" onClick={() => void saveAutomatedPassphrase()} disabled={backupControlBusy || automatedPassphrase.length < 8 || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Store encrypted passphrase</button></div>
+          <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => void createAutomatedDestination()} disabled={backupControlBusy || !backupControlSummary?.encryption?.encryptionReady || !user?.recentSupervisorReauth || destinationForm.type === "onedrive"} className="btn-primary text-xs disabled:opacity-50">{editingDestinationId ? "Update destination" : "Save destination"}</button>{editingDestinationId && <button type="button" onClick={() => { setEditingDestinationId(null); setDestinationForm({ name: "", type: "local", rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" }); }} className="btn-secondary text-xs">Cancel edit</button>}<input aria-label="Automated archive passphrase" type="password" value={automatedPassphrase} onChange={(event) => setAutomatedPassphrase(event.target.value)} placeholder="Automated archive passphrase" className="input-premium text-xs" /><button type="button" onClick={() => void saveAutomatedPassphrase()} disabled={backupControlBusy || !backupControlSummary?.encryption?.encryptionReady || automatedPassphrase.length < 8 || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Store encrypted passphrase</button></div>
           <p className="mt-3 text-xs text-stone-600 dark:text-stone-300">OneDrive is deliberately isolated as the final destination milestone. It will require a Microsoft Entra app registration and delegated Files.ReadWrite.AppFolder consent; RISpro will provide the browser authorization flow and never ask for a Microsoft password. Local, SMB, SFTP, and Nextcloud do not require this portal step.</p>
           {!user?.recentSupervisorReauth && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Recent supervisor re-authentication is required before these settings can be saved or tested.</p>}
         </details>}

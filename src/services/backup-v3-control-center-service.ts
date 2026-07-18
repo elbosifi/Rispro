@@ -5,6 +5,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import { decryptBackupV3Secret, encryptBackupV3Secret } from "./backup-v3-secret-service.js";
+import { getBackupV3MasterKeyStatus } from "./backup-v3-master-key-setup-service.js";
 import { getProjectRootDir } from "./document-storage-path.js";
 import { validateBackupV3WebDavConfig } from "./backup-v3-webdav-destination.js";
 import { validateBackupV3SftpConfig } from "./backup-v3-sftp-destination.js";
@@ -516,10 +517,21 @@ export async function getBackupControlCenterSummary() {
       (select row_to_json(state) from (select instance_id,heartbeat_at,last_successful_tick_at,last_failure_message from backup_worker_state where singleton_key=true) state) as worker`
   );
   const summary = rows[0] || {};
-  const health = !summary.last_successful_backup || Number(summary.recent_failures || 0) > 0 || Number(summary.overdue_schedules || 0) > 0
-    ? (!summary.last_successful_backup || Number(summary.overdue_schedules || 0) > 0 ? "critical" : "warning")
+  const encryption = await getBackupV3MasterKeyStatus();
+  const healthReasons = [
+    ...(encryption.setupRequired ? ["Backup credential encryption is not configured."] : []),
+    ...(encryption.restartRequired ? ["Backup credential encryption is waiting for a RISpro restart."] : []),
+    ...(Number(summary.enabled_destinations || 0) === 0 ? ["No enabled backup destination is configured."] : []),
+    ...(!summary.last_successful_backup ? ["No successful backup has run yet."] : []),
+    ...(!summary.worker?.heartbeat_at ? ["Backup worker has not reported a heartbeat."] : []),
+    ...(Number(summary.recent_failures || 0) > 0 ? ["A recent backup failed."] : []),
+  ];
+  const health = encryption.setupRequired || encryption.restartRequired || !summary.last_successful_backup || Number(summary.overdue_schedules || 0) > 0
+    ? "critical"
+    : Number(summary.recent_failures || 0) > 0 || !summary.worker?.heartbeat_at
+      ? "warning"
     : "healthy";
-  return { ...summary, health, staging_free_bytes: stagingFreeBytes };
+  return { ...summary, health, health_reasons: healthReasons, staging_free_bytes: stagingFreeBytes, encryption };
 }
 
 export async function ensureBackupStagingDirectory(): Promise<string> {

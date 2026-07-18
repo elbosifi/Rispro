@@ -22,6 +22,9 @@ import {
 } from "../services/backup-v3-control-center-service.js";
 import { listBackupV3RestoreVerifications, queueManualBackupV3RestoreVerification, retryFailedBackupV3RestoreVerification } from "../services/backup-v3-restore-verification-queue-service.js";
 import { executeBackupV3Retention, previewLocalBackupV3Retention } from "../services/backup-v3-retention-service.js";
+import { beginBackupV3MasterKeySetup, confirmBackupV3MasterKeySetup, consumeBackupV3MasterKeyRecovery } from "../services/backup-v3-master-key-setup-service.js";
+import { logAuditEntry } from "../services/audit-service.js";
+import { recordDiagnosticEvent } from "../services/system-diagnostics-service.js";
 
 /** Routine backup operations are deliberately separate from destructive restore controls. */
 export const backupControlRouter = express.Router();
@@ -75,6 +78,46 @@ backupControlRouter.get(
 );
 
 backupControlRouter.use(requireAnyRole(["super_admin"]), requireRecentSupervisorReauth);
+
+backupControlRouter.post(
+  "/encryption-setup",
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      const result = await beginBackupV3MasterKeySetup(String(req.user!.sub));
+      recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "backup_master_key", operation: "setup_generated", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup security recovery copy generated." });
+      res.status(201).json(result);
+    } catch (error) {
+      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "backup_master_key", operation: "setup_generation_failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup security setup could not be generated." });
+      throw error;
+    }
+  })
+);
+
+backupControlRouter.get(
+  "/encryption-setup/:setupId/recovery",
+  asyncRoute(async (req: Request, res: Response) => {
+    const setupId = Array.isArray(req.params.setupId) ? req.params.setupId[0] || "" : req.params.setupId || "";
+    const recovery = consumeBackupV3MasterKeyRecovery(setupId, String(req.user!.sub));
+    res.type("text/plain").attachment("rispro-backup-v3-encryption-key-recovery.txt").send(recovery);
+  })
+);
+
+backupControlRouter.post(
+  "/encryption-setup/:setupId/confirm",
+  asyncRoute(async (req: Request, res: Response) => {
+    const setupId = Array.isArray(req.params.setupId) ? req.params.setupId[0] || "" : req.params.setupId || "";
+    try {
+      const result = await confirmBackupV3MasterKeySetup(setupId, String(req.user!.sub));
+      await logAuditEntry({ entityType: "backup_configuration", actionType: "backup_master_key_initialized", newValues: { outcome: "success", restartRequired: true }, changedByUserId: req.user!.sub });
+      recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "backup_master_key", operation: "setup_saved", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup security setup was saved and requires restart.", metadata: { restartRequired: true } });
+      res.json(result);
+    } catch (error) {
+      await logAuditEntry({ entityType: "backup_configuration", actionType: "backup_master_key_initialization_failed", newValues: { outcome: "failed" }, changedByUserId: req.user!.sub }).catch(() => undefined);
+      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "backup_master_key", operation: "setup_save_failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup security setup could not be saved." });
+      throw error;
+    }
+  })
+);
 
 backupControlRouter.post(
   "/destinations",

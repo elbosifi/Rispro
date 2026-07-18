@@ -251,6 +251,49 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/destinations/destination-1/retention/execute", expect.objectContaining({ method: "POST" }));
   });
 
+  it("shows the Backup security setup card, permits one recovery download, and requires restart after secure save", async () => {
+    let saved = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      if (url === "/api/backup-control/summary") return jsonResponse({
+        health: "critical", destinations: 0, enabled_destinations: 0, recent_failures: 0,
+        encryption: saved
+          ? { encryptionReady: false, setupRequired: false, restartRequired: true, setupAvailable: false }
+          : { encryptionReady: false, setupRequired: true, restartRequired: false, setupAvailable: true },
+      });
+      if (["/api/backup-control/destinations", "/api/backup-control/jobs", "/api/backup-control/schedules", "/api/backup-control/restore-verifications"].includes(url)) return jsonResponse({});
+      if (url === "/api/backup-control/encryption-setup" && init?.method === "POST") return jsonResponse({ setupId: "setup-1", createdAt: "2026-07-18T00:00:00.000Z", recoveryAvailable: true }, 201);
+      if (url === "/api/backup-control/encryption-setup/setup-1/recovery") return new Response("BACKUP_V3_MASTER_KEY=test", { status: 200, headers: { "Content-Type": "text/plain" } });
+      if (url === "/api/backup-control/encryption-setup/setup-1/confirm" && init?.method === "POST") { saved = true; return jsonResponse({ restartRequired: true }); }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSection();
+    expect(await screen.findByText("Backup security setup required")).toBeTruthy();
+    expect((screen.getByRole("button", { name: /save destination/i }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: /generate secure encryption key/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /download one-time recovery copy/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /i saved the recovery copy/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save securely/i }));
+    expect(await screen.findByText(/restart required/i)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/encryption-setup/setup-1/confirm", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("shows Backup credential encryption as ready without offering replacement", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      if (url === "/api/backup-control/summary") return jsonResponse({ health: "critical", destinations: 0, enabled_destinations: 0, recent_failures: 0, encryption: { encryptionReady: true, setupRequired: false, restartRequired: false, setupAvailable: false } });
+      if (["/api/backup-control/destinations", "/api/backup-control/jobs", "/api/backup-control/schedules", "/api/backup-control/restore-verifications"].includes(url)) return jsonResponse({});
+      return jsonResponse({}, 404);
+    }));
+    renderSection();
+    expect(await screen.findByText("Backup credential encryption: Ready")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /generate secure encryption key/i })).toBeNull();
+  });
+
   it("requires exact confirmation before executing restore", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
