@@ -102,7 +102,19 @@ export async function getDiagnosticsSummary() {
   const database = await health("Database", async () => { const start = performance.now(); await pool.query("select 1"); return { reachable: true, latencyMs: Math.round(performance.now() - start) }; });
   const storage = await health("Storage", async () => { const root = env.uploadsDir; const stat = await fs.stat(root); await fs.access(root, fs.constants.W_OK); const space = await fs.statfs(root); return { roots: [{ name: "uploads", exists: stat.isDirectory(), writable: true, freeBytes: Number(space.bavail) * Number(space.bsize), totalBytes: Number(space.blocks) * Number(space.bsize) }] }; });
   const counts = await health("Diagnostics", async () => { const { rows } = await pool.query("select count(*) filter (where severity='error' and occurred_at > now()-interval '24 hours')::int as errors_24h, count(*) filter (where severity='critical' and occurred_at > now()-interval '24 hours')::int as critical_24h, count(*) filter (where resolved_at is null)::int as unresolved, max(occurred_at) filter (where severity in ('error','critical')) as latest_error_time from system_diagnostic_events"); return rows[0] || {}; });
-  const backupRestore = await health("Backup/restore", async () => { const { rows } = await pool.query("select max(occurred_at) filter (where source='backup_restore' and severity='info') as last_success, max(occurred_at) filter (where source='backup_restore' and severity in ('error','critical')) as last_failure, (array_agg(operation order by occurred_at desc) filter (where source='backup_restore'))[1] as latest_restore_state from system_diagnostic_events"); return { v3RestoreEnabled: process.env.RESTORE_V3_FULL_ENABLED === "true", ...(rows[0] || {}) }; });
+  const backupRestore = await health("Backup/restore", async () => {
+    const { rows } = await pool.query(`select
+      (select max(completed_at) from backup_jobs where status='completed') as last_success,
+      (select max(completed_at) from backup_jobs where status='failed') as last_failure,
+      (select count(*)::int from backup_jobs where status in ('queued','generating','copying','verifying')) as active_jobs,
+      (select count(*)::int from backup_jobs where status='failed' and created_at > now()-interval '24 hours') as failed_jobs_24h,
+      (select archive_name from backup_jobs where status='completed' order by completed_at desc nulls last limit 1) as latest_archive_name,
+      (select row_to_json(worker) from (select heartbeat_at,last_successful_tick_at,last_failure_message from backup_worker_state where singleton_key=true) worker) as worker,
+      (select row_to_json(verification) from (select status,completed_at,failure_message from backup_restore_verification_jobs order by created_at desc limit 1) verification) as latest_restore_verification,
+      (select count(*)::int from backup_retention_actions where action='delete' and created_at > now()-interval '24 hours') as retention_deletes_24h,
+      (select count(*)::int from backup_retention_actions where action='failed' and created_at > now()-interval '24 hours') as retention_failures_24h`);
+    return { v3RestoreEnabled: process.env.RESTORE_V3_FULL_ENABLED === "true", ...(rows[0] || {}) };
+  });
   const ohifViewer = await health("OHIF Viewer", async () => {
     const { rows } = await pool.query(`select settings.enabled,settings.selected_pacs_node_id,settings.access_strategy,
       endpoint.last_test_status,endpoint.qido_last_status,endpoint.wado_metadata_last_status,endpoint.wado_frame_last_status,

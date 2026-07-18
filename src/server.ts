@@ -13,6 +13,7 @@ import type { NoShowWorker } from "./services/no-show-worker.js";
 import type { DicomRemapSendWorker } from "./services/dicom-remap-send-worker.js";
 import type { DicomRemapProcessingWorker } from "./services/dicom-remap-processing-worker.js";
 import type { OhifRetrievalWorker } from "./modules/ohif-viewer/worker.js";
+import type { BackupV3Worker } from "./services/backup-v3-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -28,6 +29,7 @@ let noShowWorker: NoShowWorker | null = null;
 let dicomRemapSendWorker: DicomRemapSendWorker | null = null;
 let dicomRemapProcessingWorker: DicomRemapProcessingWorker | null = null;
 let ohifRetrievalWorker: OhifRetrievalWorker | null = null;
+let backupV3Worker: BackupV3Worker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -109,6 +111,10 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
     try { await ohifRetrievalWorker.stop(); } catch (error) { console.error("Failed to stop OHIF retrieval worker.", error); }
   }
 
+  if (backupV3Worker) {
+    try { await backupV3Worker.stop(); } catch (error) { console.error("Failed to stop Backup V3 worker.", error); }
+  }
+
   server.close(async (serverError?: Error) => {
     try {
       await pool.end();
@@ -188,6 +194,16 @@ async function start(): Promise<void> {
     console.error("No-show worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.no_show_worker = "initialization_failed";
+  }
+
+  try {
+    const { startBackupV3Worker } = await import("./services/backup-v3-worker.js");
+    backupV3Worker = await startBackupV3Worker();
+    startupSummary.backup_v3_worker = "started";
+  } catch (error) {
+    console.error("Backup V3 worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.backup_v3_worker = "initialization_failed";
   }
 
   try {
@@ -354,6 +370,10 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  Sante Worklist HL7:");
     console.log(`    Worker:         ${startupSummary.sante_hl7 || "disabled"}`);
+
+    console.log("");
+    console.log("  Backup V3:");
+    console.log(`    Worker:         ${startupSummary.backup_v3_worker || "disabled"}`);
 
     console.log("");
     console.log("  PACS Auto-Completion:");

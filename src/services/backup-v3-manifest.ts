@@ -3,6 +3,7 @@ import type {
   BackupV3ArchiveManifestEntry,
   BackupV3FileManifestEntry,
   BackupV3Manifest,
+  BackupV3PostgresDumpManifestEntry,
   BackupV3SchemaMetadata,
   BackupV3StorageRoot,
 } from "./backup-v3-types.js";
@@ -23,6 +24,7 @@ export interface BuildBackupV3ManifestInput {
   database: BackupV3SchemaMetadata;
   storageRoots: BackupV3StorageRoot[];
   archiveEntries?: BackupV3ArchiveManifestEntry[];
+  postgresDump?: BackupV3PostgresDumpManifestEntry;
   files: BackupV3FileManifestEntry[];
   envVariableNames: string[];
   limits?: Partial<BackupV3ArchiveLimits>;
@@ -41,6 +43,7 @@ export function buildBackupV3Manifest(input: BuildBackupV3ManifestInput): Backup
     database: input.database,
     storageRoots: [...input.storageRoots].sort((a, b) => a.id.localeCompare(b.id)),
     archiveEntries: [...(input.archiveEntries || [])].sort((a, b) => a.archivePath.localeCompare(b.archivePath)),
+    ...(input.postgresDump ? { postgresDump: { ...input.postgresDump } } : {}),
     files: [...input.files]
       .map((file) => ({
         archivePath: file.archivePath,

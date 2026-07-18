@@ -6,8 +6,12 @@ Arbitrary compressed ZIP archives are rejected.
 Restore preview validates ZIP entry metadata before writing any file to staging:
 path, prefix, entry type, compression method, duplicate status, per-file size, file count, and total uncompressed size are accepted first. Only then are entries extracted to a temporary staging directory.
 
-ZIP64 is not implemented. v3 defaults stay below classic ZIP boundaries:
-max files 60000, max single file 3 GiB, and max total uncompressed size 3 GiB.
+Automated and manual V3 archives use stored-entry ZIP64 metadata. This removes
+classic ZIP's 4 GiB and 65,535-entry format ceilings while restore preview still
+enforces the archive limits recorded in `manifest.json`: 60,000 files, 3 GiB
+per entry, and 3 GiB total uncompressed content. Operators should size staging
+storage for at least 120% of the largest completed archive and may set
+`BACKUP_V3_MIN_STAGING_FREE_BYTES` to a stricter site floor.
 
 Pre-restore database safety backup prefers `pg_dump -Fc` using `execFile` arguments.
 The database URL is passed through the child process environment and is not logged
@@ -91,3 +95,159 @@ docker run --rm rispro-restore-smoke pg_dump --version
 
 If Docker is unavailable on the validation machine, this remains a required
 deployment smoke before enabling `RESTORE_V3_FULL_ENABLED=true` in production.
+
+## Automated Backup V3 Control Center
+
+Settings → Backup and Restore contains the automated control center. Supervisors
+can select enabled destinations and queue a backup; only a recently
+re-authenticated `super_admin` can save, test, pause, or edit a destination,
+store the automated archive passphrase, or change a schedule. The server stores
+destination credentials and the automated passphrase as AES-256-GCM encrypted
+blobs; list and diagnostics responses expose only whether credentials are
+configured, never their values.
+
+`BACKUP_V3_MASTER_KEY` is the encryption root for these blobs. Preserve it in
+the deployment secret manager and an independently protected recovery record.
+Replacing or losing it intentionally makes old destination credentials and the
+automated archive passphrase unreadable; RISpro fails closed until a
+super-administrator re-enters credentials after key recovery or rotation.
+
+An automated archive includes a PostgreSQL custom dump, app-owned storage,
+selected document files, encrypted managed configuration, and a manifest with
+checksums. PACS/Orthanc study data is intentionally excluded. Temporary archives
+are written under `storage/backups/staging`; the worker refuses to begin when
+free capacity is below the larger of one GiB (or
+`BACKUP_V3_MIN_STAGING_FREE_BYTES`) and 120% of the largest prior archive.
+
+Supported destinations are local approved roots, SMB, SFTP with a pinned SHA256
+host key, and Nextcloud WebDAV with HTTPS and an app password. SMB uses
+SMB2/SMB3 only. Copy is temporary-name → read-back checksum → atomic promotion;
+a job is successful only when every selected destination verifies. OneDrive is
+shown as unavailable until its delegated OAuth implementation is deployed.
+It is isolated rather than emulated: the final integration requires a Microsoft
+Entra app registration, a deployment redirect URI, and delegated
+`Files.ReadWrite.AppFolder` consent. Routine destination operation remains in
+the UI and must never require a Microsoft password or RISpro environment-file
+editing.
+
+Schedules are persisted in `Africa/Tripoli` by default and use a persisted
+`next_run_at`, so a restart or a delayed worker tick does not silently miss a
+run. The default control-center retention preset is 7 daily, 4 weekly, and 12
+monthly copies; the newest verified copy and an artifact's only verified copy
+are never candidates for deletion. Retention deletions are recorded in the
+audit trail. Local, SMB, SFTP, and Nextcloud deletion is limited to a verified
+RISpro archive filename under the configured destination folder; unrelated
+files are never selected. OneDrive retention remains unavailable until its
+OAuth destination is configured.
+
+## Routine UI operation and destination setup
+
+Routine automated backup operation is entirely in **Settings → Backup and
+Restore → Automated Backup V3 control center**. A recently re-authenticated
+super administrator creates destinations, stores the automated archive
+passphrase, creates schedules, chooses retention, runs a backup, reviews copy
+verification, and queues restore verification. A supervisor may view health,
+history, and downloads, and may queue an allowed manual backup without seeing
+or changing credentials. The emergency command-line procedures below are not
+needed for normal operation.
+
+### Local storage
+
+Choose **Local approved path** and enter an approved server path. By default
+the approved root is `storage/backups`; deployments can additionally approve
+roots with `BACKUP_V3_LOCAL_ROOTS`. RISpro rejects traversal and paths outside
+those roots. Use **Test** to confirm read/write access and available space,
+then select the destination for a Run now or schedule. The worker stages an
+incomplete archive under `storage/backups/staging` and retains completed local
+artifacts under `storage/backups/artifacts` for durable history, download, and
+restore verification.
+
+### Windows, NAS, and SMB/CIFS
+
+Choose **SMB share** for Windows Server, Samba, Synology, QNAP, TrueNAS, or
+another SMB2/SMB3 endpoint. Enter server/IP, share, optional subfolder,
+username, password, and optional domain/workgroup, then use **Test**. RISpro
+connects from the application itself; do not mount the share on the host and
+do not enable SMB1. A failed test reports the safe server-side classification
+without returning or logging the password. Check share permissions and free
+space when a test cannot write a temporary probe file.
+
+### Linux, NAS, and SFTP
+
+Choose **SFTP** and enter host, port, username, an absolute remote folder, and
+the server SHA256 host-key fingerprint. Select password or private-key
+authentication; an optional private-key passphrase is stored only encrypted.
+RISpro refuses an unknown or mismatched host key rather than silently trusting
+it. Use **Test** to create, read, and remove a temporary probe file. SFTP
+paths cannot escape the configured remote directory.
+
+### Nextcloud WebDAV
+
+Choose **Nextcloud WebDAV**, enter the HTTPS server URL, Nextcloud username,
+remote folder, and a Nextcloud-generated app password. Do not use the normal
+Nextcloud account password. RISpro creates the WebDAV folder when permitted,
+uploads to a temporary name, reads it back for checksum verification, and then
+promotes the completed archive. Certificate verification is always enforced;
+an invalid certificate, authentication failure, or unavailable server appears
+as a safe destination failure in the UI and diagnostics.
+
+### OneDrive final milestone
+
+OneDrive is intentionally isolated until a Microsoft Graph OAuth destination
+is enabled. Its required Microsoft portal step is an Entra application
+registration with a deployment redirect URI and delegated
+`Files.ReadWrite.AppFolder` consent. The intended authorization flow is
+browser-based and never asks for a Microsoft password or an RISpro environment
+file edit. Once implemented, the UI will start authorization, show the account
+identity and selected folder, and offer reconnect/revoke actions while keeping
+tokens encrypted and masked. Until then select Local, SMB, SFTP, or Nextcloud.
+
+### Scheduling, retention, and health
+
+Schedules use `Africa/Tripoli` by default and support daily, weekdays, weekly,
+and monthly timing. The available retention presets are 7 daily / 4 weekly /
+12 monthly, 14 daily / 12 monthly, and 30 daily; custom daily, weekly, and
+monthly counts are also supported. The newest verified archive and the only
+verified copy of an artifact are never candidates for deletion. Retention
+previews and deletions require recent supervisor re-authentication, record an
+audit action, and never select files outside the configured RISpro folder.
+
+The overview reports health, worker heartbeat, active work, last completed
+backup, last verified copy, last successful restore verification, next run,
+overdue schedules, and staging capacity. A warning or critical state should be
+investigated before relying on a schedule. Common safe messages include missing
+archive passphrase, low staging space, destination authentication failure,
+host-key mismatch, WebDAV certificate/connectivity failure, and an overdue
+schedule. Resolve the underlying configuration and use **Retry** rather than
+editing history records.
+
+### Server-loss and encryption-key recovery
+
+Keep the encrypted archives, the automated archive passphrase recovery record,
+and `BACKUP_V3_MASTER_KEY` in independently protected locations. Losing or
+replacing the master key intentionally makes saved destination credentials and
+the stored automated passphrase unreadable; restore the original key from the
+deployment secret manager/recovery record, or re-enter each credential and
+passphrase after a deliberate key rotation. If the main RISpro server is
+unavailable, recover the application and database on isolated infrastructure,
+then use the existing full Restore V3 preview, exact confirmation, safety
+backup, and restart procedure. Do not point restore verification or recovery
+at production storage until the normal restore safeguards are satisfied.
+
+## Disposable Scheduled Restore Verification
+
+Do not point restore verification at the live application database or
+`/app/storage`. The optional compose override creates an isolated PostgreSQL 16
+database named `rispro_restore_verify` and a separate verification volume:
+
+```sh
+export BACKUP_V3_RESTORE_VERIFY_PASSWORD='a-long-deployment-secret'
+docker compose -f docker-compose.yml -f docker-compose.backup-verify.yml --profile backup-verify up -d --build
+```
+
+For a scheduled job with weekly or monthly restore verification, the worker
+decrypts and validates the stored archive, restores only the PostgreSQL custom
+dump to that disposable database, compares row counts with the manifest, and
+copies files into a throwaway verification run directory for checksum checks.
+The report, failure reason, worker heartbeat, latest successful archive, and
+retention activity appear in System Diagnostics without secret values.

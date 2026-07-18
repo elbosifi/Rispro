@@ -1,0 +1,37 @@
+# Optional disposable Restore Verification target for scheduled Backup V3 checks.
+# Run with the base stack; this database and volume must never be reused by RISpro.
+# docker compose -f docker-compose.yml -f docker-compose.backup-verify.yml --profile backup-verify up -d
+services:
+  app:
+    depends_on:
+      restore-verify-postgres:
+        condition: service_healthy
+    environment:
+      BACKUP_V3_RESTORE_VERIFY_DATABASE_URL: postgresql://rispro_verify:${BACKUP_V3_RESTORE_VERIFY_PASSWORD:?set BACKUP_V3_RESTORE_VERIFY_PASSWORD in deployment secrets}@restore-verify-postgres:5432/rispro_restore_verify
+      BACKUP_V3_RESTORE_VERIFY_STORAGE_ROOT: /var/lib/rispro-restore-verify
+    volumes:
+      - rispro-storage:/app/storage
+      - rispro-restore-verify:/var/lib/rispro-restore-verify
+      - ./storage/sante-hl7-outbox:/app/storage/sante-hl7-outbox
+
+  restore-verify-postgres:
+    profiles: ["backup-verify"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rispro_verify
+      POSTGRES_PASSWORD: ${BACKUP_V3_RESTORE_VERIFY_PASSWORD:?set BACKUP_V3_RESTORE_VERIFY_PASSWORD in deployment secrets}
+      POSTGRES_DB: rispro_restore_verify
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rispro_verify -d rispro_restore_verify"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: "no"
+    networks:
+      - rispro-network
+
+volumes:
+  rispro-restore-verify:
+    driver: local

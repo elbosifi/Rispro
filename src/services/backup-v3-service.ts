@@ -34,11 +34,68 @@ export interface StreamBackupV3Options {
   output: Writable;
   backupName?: string;
   limits?: Partial<BackupV3ArchiveLimits>;
+  /** Required by automated jobs; omitted for the existing emergency browser download. */
+  includePostgresDump?: boolean;
 }
 
 export interface BackupV3ArchiveResult {
   backupName: string;
   manifest: ReturnType<typeof buildBackupV3Manifest>;
+}
+
+export interface BackupV3PostgresDumpDependencies {
+  execFile(command: string, args: string[], options: { env: NodeJS.ProcessEnv }): Promise<unknown>;
+}
+
+const defaultPostgresDumpDependencies: BackupV3PostgresDumpDependencies = {
+  execFile(command, args, options) {
+    return execFileAsync(command, args, options);
+  },
+};
+
+function postgresDumpEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
+  let parsed: URL;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    throw new HttpError(500, "PostgreSQL custom dump could not be configured.");
+  }
+
+  const database = parsed.pathname.replace(/^\//, "");
+  if (!database) {
+    throw new HttpError(500, "PostgreSQL custom dump could not be configured.");
+  }
+
+  return {
+    ...process.env,
+    PGHOST: parsed.hostname,
+    PGPORT: parsed.port || "5432",
+    PGUSER: decodeURIComponent(parsed.username),
+    PGPASSWORD: decodeURIComponent(parsed.password),
+    PGDATABASE: database,
+    ...(env.databaseSsl ? { PGSSLMODE: env.databaseSslRejectUnauthorized ? "verify-full" : "require" } : {}),
+  };
+}
+
+/** Creates a custom PostgreSQL dump without putting credentials in command arguments. */
+export async function createBackupV3PostgresCustomDump(
+  targetPath: string,
+  dependencies: BackupV3PostgresDumpDependencies = defaultPostgresDumpDependencies
+): Promise<{ byteSize: number; sha256: string; crc32: number }> {
+  try {
+    await dependencies.execFile("pg_dump", ["-Fc", "--file", targetPath], {
+      env: postgresDumpEnvironment(env.databaseUrl),
+    });
+    const stat = await fs.stat(targetPath);
+    if (!stat.isFile() || stat.size <= 0) {
+      throw new Error("pg_dump did not create a non-empty custom dump.");
+    }
+    const digest = await import("./backup-v3-checksums.js").then(({ sha256File }) => sha256File(targetPath));
+    return { byteSize: digest.byteSize, sha256: digest.sha256, crc32: digest.crc32 };
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(500, "PostgreSQL custom dump failed. Check database connectivity and pg_dump availability.");
+  }
 }
 
 async function endWritable(output: Writable): Promise<void> {
@@ -56,18 +113,6 @@ function requirePassphrase(passphrase: unknown): string {
     throw new HttpError(400, "Backup passphrase must be at least 8 characters.");
   }
   return value;
-}
-
-function requireClassicZipLimits(limits: BackupV3ArchiveLimits): void {
-  if (limits.maxFiles >= 65_535) {
-    throw new HttpError(400, "Backup max file count must be below 65535 because ZIP64 is not enabled.");
-  }
-  if (limits.maxFileBytes >= 4 * 1024 * 1024 * 1024) {
-    throw new HttpError(400, "Backup max file size must be below 4 GiB because ZIP64 is not enabled.");
-  }
-  if (limits.maxTotalUncompressedBytes >= 4 * 1024 * 1024 * 1024) {
-    throw new HttpError(400, "Backup max total size must be below 4 GiB because ZIP64 is not enabled.");
-  }
 }
 
 async function readPackageMetadata(): Promise<{ name: string; version: string | null }> {
@@ -145,7 +190,6 @@ function archiveEntryForBuffer(archivePath: string, content: Buffer): BackupV3Ar
 export async function streamBackupV3Archive(options: StreamBackupV3Options): Promise<BackupV3ArchiveResult> {
   const passphrase = requirePassphrase(options.passphrase);
   const limits = { ...DEFAULT_BACKUP_V3_ARCHIVE_LIMITS, ...options.limits };
-  requireClassicZipLimits(limits);
   const client = await pool.connect();
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-v3-stage-"));
   const createdAt = new Date().toISOString();
@@ -185,6 +229,10 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
       santeHl7OutputFolderPath: settings.get("sante_worklist.output_folder_path") || env.santeHl7OutputFolderPath,
     });
     const storageFiles = await collectBackupV3StorageFiles(storageRoots, limits, stagingDir);
+    const postgresDumpPath = path.join(stagingDir, "database.postgresql.dump");
+    const postgresDump = options.includePostgresDump
+      ? await createBackupV3PostgresCustomDump(postgresDumpPath)
+      : null;
     const envVariables = await collectEnvVariables();
     const envBundle = encryptBackupV3EnvPayload(
       { createdAt, variables: envVariables },
@@ -201,6 +249,12 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
     archiveEntries.push(archiveEntryForBuffer("database/schema.json", schemaBuffer));
     await zip.addBuffer("config/env.enc.json", envBuffer);
     await zip.addBuffer("database/schema.json", schemaBuffer);
+
+    if (postgresDump) {
+      trackArchiveEntry("database/postgresql.dump", postgresDump.byteSize);
+      archiveEntries.push({ archivePath: "database/postgresql.dump", byteSize: postgresDump.byteSize, sha256: postgresDump.sha256 });
+      await zip.addFile("database/postgresql.dump", postgresDumpPath, postgresDump.byteSize, postgresDump.crc32);
+    }
 
     for (const table of database.tables) {
       const rows = await listRows(client, table.schema, table.name);
@@ -236,6 +290,7 @@ export async function streamBackupV3Archive(options: StreamBackupV3Options): Pro
       database,
       storageRoots,
       archiveEntries,
+      ...(postgresDump ? { postgresDump: { archivePath: "database/postgresql.dump", byteSize: postgresDump.byteSize, sha256: postgresDump.sha256, format: "custom" as const } } : {}),
       files: storageFiles,
       envVariableNames: Object.keys(envVariables),
       limits,

@@ -2627,6 +2627,70 @@ type BackupV3RestoreFlagStatus = {
   safetyBackupPath?: string;
 };
 
+type BackupControlDestination = {
+  destination_id: string;
+  name: string;
+  destination_type: "local" | "smb" | "sftp" | "nextcloud" | "onedrive";
+  enabled: boolean;
+  config: Record<string, unknown>;
+  credentialsConfigured: boolean;
+  last_connection_at: string | null;
+  last_connection_status: string | null;
+  last_failure_message: string | null;
+};
+
+type BackupControlJob = {
+  job_id: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  archive_name: string | null;
+  archive_size_bytes: string | number | null;
+  failure_message: string | null;
+  source_schedule_id?: string | null;
+  destination_copies?: Array<{ destinationId: string; status: string; remotePath?: string | null; failureMessage?: string | null }>;
+};
+
+type BackupControlSummary = {
+  destinations?: number;
+  enabled_destinations?: number;
+  recent_failures?: number;
+  overdue_schedules?: number;
+  health?: "healthy" | "warning" | "critical";
+  staging_free_bytes?: string | number | null;
+  active_job?: { status?: string; archive_name?: string | null } | null;
+  last_successful_backup?: { archive_name?: string | null; completed_at?: string | null; archive_size_bytes?: string | number | null } | null;
+  last_verified_copy?: { destination_name?: string; destination_type?: string; completed_at?: string | null } | null;
+  last_successful_restore_verification?: { completed_at?: string | null } | null;
+  next_schedule?: { name?: string; next_run_at?: string | null } | null;
+  worker?: { heartbeat_at?: string | null; last_failure_message?: string | null } | null;
+};
+
+type BackupControlSchedule = {
+  schedule_id: string;
+  name: string;
+  frequency: "daily" | "weekdays" | "weekly" | "monthly";
+  time_of_day: string;
+  timezone: string;
+  selected_weekdays: number[];
+  selected_day_of_month: number | null;
+  destination_ids: string[];
+  retention_policy: Record<string, unknown>;
+  restore_verification_frequency: "disabled" | "weekly" | "monthly";
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+};
+
+type BackupControlRestoreVerification = {
+  restore_verification_job_id: string;
+  job_id: string | null;
+  archive_name: string | null;
+  status: string;
+  completed_at: string | null;
+  failure_message: string | null;
+};
+
 const RESTORE_CONFIRMATION_TEXT = "RESTORE RISPRO";
 
 function isSensitiveText(value: unknown): boolean {
@@ -2670,6 +2734,19 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [restoreV3FlagBusy, setRestoreV3FlagBusy] = useState(false);
   const [fullRestoreStatus, setFullRestoreStatus] = useState("Checking v3 restore availability...");
   const [restoreV3Preview, setRestoreV3Preview] = useState<BackupV3Preview | null>(null);
+  const [backupControlSummary, setBackupControlSummary] = useState<BackupControlSummary | null>(null);
+  const [backupDestinations, setBackupDestinations] = useState<BackupControlDestination[]>([]);
+  const [backupJobs, setBackupJobs] = useState<BackupControlJob[]>([]);
+  const [backupSchedules, setBackupSchedules] = useState<BackupControlSchedule[]>([]);
+  const [backupRestoreVerifications, setBackupRestoreVerifications] = useState<BackupControlRestoreVerification[]>([]);
+  const [selectedBackupDestinationIds, setSelectedBackupDestinationIds] = useState<string[]>([]);
+  const [backupControlBusy, setBackupControlBusy] = useState(false);
+  const [backupControlMessage, setBackupControlMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [destinationForm, setDestinationForm] = useState({ name: "", type: "local" as BackupControlDestination["destination_type"], rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" });
+  const [editingDestinationId, setEditingDestinationId] = useState<string | null>(null);
+  const [automatedPassphrase, setAutomatedPassphrase] = useState("");
+  const [scheduleForm, setScheduleForm] = useState({ name: "", frequency: "daily" as BackupControlSchedule["frequency"], timeOfDay: "02:00", weekday: "1", dayOfMonth: "1", retentionPreset: "7_daily_4_weekly_12_monthly", retentionDaily: "7", retentionWeekly: "4", retentionMonthly: "12", restoreVerificationFrequency: "weekly" as BackupControlSchedule["restore_verification_frequency"] });
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [restorePreview, setRestorePreview] = useState<{
     manifest: {
       createdAt: string;
@@ -2715,6 +2792,30 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
       `HTTP ${response.status}`
     );
+  }, []);
+
+  const refreshBackupControl = useCallback(async () => {
+    try {
+      const [summaryResponse, destinationsResponse, jobsResponse, schedulesResponse, restoreVerificationsResponse] = await Promise.all([
+        fetch("/api/backup-control/summary", { credentials: "include" }),
+        fetch("/api/backup-control/destinations", { credentials: "include" }),
+        fetch("/api/backup-control/jobs", { credentials: "include" }),
+        fetch("/api/backup-control/schedules", { credentials: "include" }),
+        fetch("/api/backup-control/restore-verifications", { credentials: "include" }),
+      ]);
+      if (summaryResponse.ok) setBackupControlSummary((await summaryResponse.json()) as BackupControlSummary);
+      if (destinationsResponse.ok) {
+        const result = (await destinationsResponse.json()) as { destinations?: BackupControlDestination[] };
+        const destinations = result.destinations || [];
+        setBackupDestinations(destinations);
+        setSelectedBackupDestinationIds((current) => current.filter((id) => destinations.some((destination) => destination.destination_id === id)));
+      }
+      if (jobsResponse.ok) setBackupJobs(((await jobsResponse.json()) as { jobs?: BackupControlJob[] }).jobs || []);
+      if (schedulesResponse.ok) setBackupSchedules(((await schedulesResponse.json()) as { schedules?: BackupControlSchedule[] }).schedules || []);
+      if (restoreVerificationsResponse.ok) setBackupRestoreVerifications(((await restoreVerificationsResponse.json()) as { verifications?: BackupControlRestoreVerification[] }).verifications || []);
+    } catch {
+      // The legacy backup/restore controls remain available if the control API is temporarily unavailable.
+    }
   }, []);
 
   const probeV3RestoreAvailability = useCallback(async () => {
@@ -2766,7 +2867,247 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   useEffect(() => {
     void probeV3RestoreAvailability();
     void fetchRestoreV3FlagStatus();
-  }, [fetchRestoreV3FlagStatus, probeV3RestoreAvailability, user?.recentSupervisorReauth]);
+    void refreshBackupControl();
+  }, [fetchRestoreV3FlagStatus, probeV3RestoreAvailability, refreshBackupControl, user?.recentSupervisorReauth]);
+
+  const runAutomatedBackupNow = async () => {
+    if (!selectedBackupDestinationIds.length) {
+      setBackupControlMessage({ type: "error", text: "Select at least one enabled destination." });
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch("/api/backup-control/run-now", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationIds: selectedBackupDestinationIds }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setBackupControlMessage({ type: "success", text: "Backup job queued. The worker will generate and verify copies in the background." });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not queue backup job." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const createAutomatedDestination = async () => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "destination"]);
+      setBackupControlMessage({ type: "error", text: "Recent supervisor re-authentication is required to change backup destinations." });
+      return;
+    }
+    const config = destinationForm.type === "local"
+      ? { rootPath: destinationForm.rootPath }
+      : destinationForm.type === "nextcloud"
+        ? { serverUrl: destinationForm.baseUrl, username: destinationForm.username, remoteDirectory: destinationForm.remotePath }
+        : destinationForm.type === "sftp"
+          ? { host: destinationForm.host, port: Number(destinationForm.port), username: destinationForm.username, authenticationType: destinationForm.privateKey ? "private_key" : "password", remoteDirectory: destinationForm.remotePath, hostKeyFingerprint: destinationForm.hostFingerprint }
+          : destinationForm.type === "smb"
+            ? { server: destinationForm.server, share: destinationForm.share, subfolder: destinationForm.subfolder, domain: destinationForm.domain || undefined }
+            : {};
+    const enteredCredentials = destinationForm.type === "local"
+      ? undefined
+      : destinationForm.type === "nextcloud"
+      ? { appPassword: destinationForm.appPassword }
+      : destinationForm.type === "sftp"
+        ? (destinationForm.privateKey ? { privateKey: destinationForm.privateKey } : { password: destinationForm.password })
+        : destinationForm.type === "smb"
+          ? { username: destinationForm.username, password: destinationForm.password }
+          : undefined;
+    const hasEnteredCredentials = Object.values(enteredCredentials || {}).some((value) => typeof value === "string" && value.length > 0);
+    const credentials = editingDestinationId && !hasEnteredCredentials ? undefined : enteredCredentials;
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(editingDestinationId ? `/api/backup-control/destinations/${editingDestinationId}` : "/api/backup-control/destinations", { method: editingDestinationId ? "PATCH" : "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: destinationForm.name, destinationType: destinationForm.type, config, ...(credentials === undefined ? {} : { credentials }) }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setDestinationForm({ name: "", type: "local", rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" });
+      setEditingDestinationId(null);
+      setBackupControlMessage({ type: "success", text: `Destination ${editingDestinationId ? "updated" : "saved"}. Test it before relying on a schedule.` });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not save destination." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const editAutomatedDestination = (destination: BackupControlDestination) => {
+    const config = destination.config;
+    setEditingDestinationId(destination.destination_id);
+    setDestinationForm({
+      name: destination.name,
+      type: destination.destination_type,
+      rootPath: typeof config.rootPath === "string" ? config.rootPath : "",
+      baseUrl: typeof config.serverUrl === "string" ? config.serverUrl : "",
+      username: typeof config.username === "string" ? config.username : "",
+      remotePath: typeof config.remoteDirectory === "string" ? config.remoteDirectory : "",
+      host: typeof config.host === "string" ? config.host : "",
+      port: typeof config.port === "number" ? String(config.port) : "22",
+      hostFingerprint: typeof config.hostKeyFingerprint === "string" ? config.hostKeyFingerprint : "",
+      server: typeof config.server === "string" ? config.server : "",
+      share: typeof config.share === "string" ? config.share : "",
+      subfolder: typeof config.subfolder === "string" ? config.subfolder : "",
+      domain: typeof config.domain === "string" ? config.domain : "",
+      password: "", appPassword: "", privateKey: "",
+    });
+  };
+
+  const testAutomatedDestination = async (destinationId: string) => {
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(`/api/backup-control/destinations/${destinationId}/test`, { method: "POST", credentials: "include" });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setBackupControlMessage({ type: "success", text: "Destination connection and permissions verified." });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Destination test failed." });
+      await refreshBackupControl();
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const saveAutomatedPassphrase = async () => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "passphrase"]);
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch("/api/backup-control/encryption-passphrase", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ passphrase: automatedPassphrase }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setAutomatedPassphrase("");
+      setBackupControlMessage({ type: "success", text: "Automated archive passphrase is configured and stored encrypted." });
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not save automated archive passphrase." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const createAutomatedSchedule = async () => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "schedule"]);
+      setBackupControlMessage({ type: "error", text: "Recent supervisor re-authentication is required to save a backup schedule." });
+      return;
+    }
+    if (!selectedBackupDestinationIds.length) {
+      setBackupControlMessage({ type: "error", text: "Select the enabled destinations this schedule should protect." });
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const retentionPolicy = scheduleForm.retentionPreset === "custom"
+        ? { daily: Number(scheduleForm.retentionDaily), weekly: Number(scheduleForm.retentionWeekly), monthly: Number(scheduleForm.retentionMonthly) }
+        : { preset: scheduleForm.retentionPreset };
+      const response = await fetch(editingScheduleId ? `/api/backup-control/schedules/${editingScheduleId}` : "/api/backup-control/schedules", { method: editingScheduleId ? "PATCH" : "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: scheduleForm.name, frequency: scheduleForm.frequency, timeOfDay: scheduleForm.timeOfDay, timezone: "Africa/Tripoli", selectedWeekdays: scheduleForm.frequency === "weekly" ? [Number(scheduleForm.weekday)] : [], selectedDayOfMonth: scheduleForm.frequency === "monthly" ? Number(scheduleForm.dayOfMonth) : null, destinationIds: selectedBackupDestinationIds, retentionPolicy, restoreVerificationFrequency: scheduleForm.restoreVerificationFrequency }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setScheduleForm({ name: "", frequency: "daily", timeOfDay: "02:00", weekday: "1", dayOfMonth: "1", retentionPreset: "7_daily_4_weekly_12_monthly", retentionDaily: "7", retentionWeekly: "4", retentionMonthly: "12", restoreVerificationFrequency: "weekly" });
+      setEditingScheduleId(null);
+      setBackupControlMessage({ type: "success", text: `Backup schedule ${editingScheduleId ? "updated" : "saved"} with weekly isolated restore verification.` });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not save backup schedule." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const toggleAutomatedSchedule = async (schedule: BackupControlSchedule) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "schedule"]);
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(`/api/backup-control/schedules/${schedule.schedule_id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !schedule.enabled }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setBackupControlMessage({ type: "success", text: `Schedule ${schedule.enabled ? "paused" : "resumed"}.` });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not update schedule." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const runBackupControlAction = async (url: string, init: RequestInit, successMessage: string) => {
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(url, { credentials: "include", ...init });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setBackupControlMessage({ type: "success", text: successMessage });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Backup control action failed." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const toggleAutomatedDestination = async (destination: BackupControlDestination) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "destination"]);
+      return;
+    }
+    await runBackupControlAction(`/api/backup-control/destinations/${destination.destination_id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !destination.enabled }) }, `Destination ${destination.enabled ? "paused" : "resumed"}.`);
+  };
+
+  const deleteAutomatedSchedule = async (schedule: BackupControlSchedule) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth || !confirm(`Delete backup schedule ${schedule.name}?`)) return;
+    await runBackupControlAction(`/api/backup-control/schedules/${schedule.schedule_id}`, { method: "DELETE" }, "Backup schedule deleted.");
+  };
+
+  const editAutomatedSchedule = (schedule: BackupControlSchedule) => {
+    setEditingScheduleId(schedule.schedule_id);
+    const savedPreset = typeof schedule.retention_policy.preset === "string" ? schedule.retention_policy.preset : "custom";
+    const retentionPreset = savedPreset === "14_daily_12_monthly" || savedPreset === "30_daily" || savedPreset === "7_daily_4_weekly_12_monthly" ? savedPreset : "custom";
+    setScheduleForm({ name: schedule.name, frequency: schedule.frequency, timeOfDay: schedule.time_of_day, weekday: String(schedule.selected_weekdays[0] ?? 1), dayOfMonth: String(schedule.selected_day_of_month ?? 1), retentionPreset, retentionDaily: String(schedule.retention_policy.daily ?? 0), retentionWeekly: String(schedule.retention_policy.weekly ?? 0), retentionMonthly: String(schedule.retention_policy.monthly ?? 0), restoreVerificationFrequency: schedule.restore_verification_frequency });
+    setSelectedBackupDestinationIds(schedule.destination_ids);
+  };
+
+  const deleteAutomatedDestination = async (destination: BackupControlDestination) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth || !confirm(`Remove backup destination ${destination.name}? Destinations with backup history must be paused instead.`)) return;
+    await runBackupControlAction(`/api/backup-control/destinations/${destination.destination_id}`, { method: "DELETE" }, "Backup destination removed.");
+  };
+
+  const retryAutomatedJob = async (job: BackupControlJob) => {
+    await runBackupControlAction(`/api/backup-control/jobs/${job.job_id}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }, "Backup retry queued.");
+  };
+
+  const cancelAutomatedJob = async (job: BackupControlJob) => {
+    if (!confirm("Cancel this queued backup before generation begins?")) return;
+    await runBackupControlAction(`/api/backup-control/jobs/${job.job_id}/cancel`, { method: "POST" }, "Queued backup cancelled.");
+  };
+
+  const queueManualRestoreVerification = async (job: BackupControlJob) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "restore-verification"]);
+      return;
+    }
+    await runBackupControlAction(`/api/backup-control/jobs/${job.job_id}/verify`, { method: "POST" }, "Restore verification queued against disposable resources.");
+  };
+
+  const previewAutomatedRetention = async (destination: BackupControlDestination) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "retention"]);
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch(`/api/backup-control/destinations/${destination.destination_id}/retention/preview`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policy: { preset: "7_daily_4_weekly_12_monthly" } }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      const result = (await response.json()) as { plan?: { keep?: unknown[]; delete?: unknown[] } };
+      setBackupControlMessage({ type: "success", text: `Retention preview: ${result.plan?.keep?.length || 0} copies retained and ${result.plan?.delete?.length || 0} eligible for safe deletion.` });
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not preview retention." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const executeAutomatedRetention = async (destination: BackupControlDestination) => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth || !confirm(`Apply the configured retention policy to ${destination.name}? Only eligible verified RISpro backups may be deleted.`)) return;
+    await runBackupControlAction(`/api/backup-control/destinations/${destination.destination_id}/retention/execute`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policy: { preset: "7_daily_4_weekly_12_monthly" } }) }, "Retention policy applied.");
+  };
 
   const downloadBackup = async () => {
     if (backupPassphrase.length < 8) {
@@ -3153,6 +3494,82 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   return (
     <div className="space-y-4">
       <p className="description-center">{t("settings.backupInfo")}</p>
+
+      <section className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-900 dark:bg-sky-950/20">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-stone-900 dark:text-white">Automated Backup V3 control center</h4>
+            <p className="mt-1 text-xs text-stone-700 dark:text-stone-300">RISpro backup does not include the Orthanc PACS image-storage tank. PACS studies require a separate backup or replication plan.</p>
+          </div>
+          <button type="button" onClick={() => void refreshBackupControl()} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Refresh</button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Backup health</span><p className={`font-semibold ${backupControlSummary?.health === "critical" ? "text-red-700 dark:text-red-300" : backupControlSummary?.health === "warning" ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>{backupControlSummary?.health ? backupControlSummary.health[0].toUpperCase() + backupControlSummary.health.slice(1) : "Not assessed"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Destinations</span><p className="font-semibold">{backupControlSummary?.enabled_destinations ?? 0} enabled / {backupControlSummary?.destinations ?? 0}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Recent failures</span><p className="font-semibold">{backupControlSummary?.recent_failures ?? 0}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Worker heartbeat</span><p className="font-semibold">{backupControlSummary?.worker?.heartbeat_at ? formatDateTimeLy(backupControlSummary.worker.heartbeat_at) : "Not reported"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Last backup</span><p className="font-semibold">{backupControlSummary?.last_successful_backup?.completed_at ? formatDateTimeLy(backupControlSummary.last_successful_backup.completed_at) : "Never"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Last verified copy</span><p className="font-semibold">{backupControlSummary?.last_verified_copy?.destination_name || "Never"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Restore verification</span><p className="font-semibold">{backupControlSummary?.last_successful_restore_verification?.completed_at ? formatDateTimeLy(backupControlSummary.last_successful_restore_verification.completed_at) : "Never"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Next schedule</span><p className="font-semibold">{backupControlSummary?.next_schedule?.next_run_at ? formatDateTimeLy(backupControlSummary.next_schedule.next_run_at) : "Not scheduled"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Archive limits</span><p className="font-semibold">Encrypted ZIP64 · 3 GiB content / file · 60,000 files</p></div>
+        </div>
+
+        {backupControlSummary?.active_job && <p className="rounded border border-sky-200 bg-sky-100 p-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-100">Active backup job: {backupControlSummary.active_job.status}{backupControlSummary.active_job.archive_name ? ` · ${backupControlSummary.active_job.archive_name}` : ""}</p>}
+        {backupControlSummary?.overdue_schedules ? <p className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">{backupControlSummary.overdue_schedules} automatic backup schedule{backupControlSummary.overdue_schedules === 1 ? " is" : "s are"} overdue.</p> : null}
+        {backupControlSummary?.staging_free_bytes != null && <p className="text-xs text-stone-600 dark:text-stone-300">Local staging space available: {Math.floor(Number(backupControlSummary.staging_free_bytes) / (1024 * 1024))} MiB.</p>}
+        {backupControlSummary?.worker?.last_failure_message && <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">Worker warning: {backupControlSummary.worker.last_failure_message}</p>}
+        {backupControlMessage && <p className={`rounded border p-2 text-xs ${backupControlMessage.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200" : "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200"}`}>{backupControlMessage.text}</p>}
+
+        <div className="rounded border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900">
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium text-stone-900 dark:text-white">Run an encrypted backup now</p><button type="button" onClick={() => void runAutomatedBackupNow()} disabled={backupControlBusy || !selectedBackupDestinationIds.length} className="btn-primary text-xs disabled:opacity-50">{backupControlBusy ? "Working..." : "Run now"}</button></div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+            {backupDestinations.filter((destination) => destination.enabled).map((destination) => (
+              <label key={destination.destination_id} className="flex items-center gap-1 text-xs text-stone-700 dark:text-stone-300">
+                <input type="checkbox" checked={selectedBackupDestinationIds.includes(destination.destination_id)} onChange={(event) => setSelectedBackupDestinationIds((current) => event.target.checked ? [...current, destination.destination_id] : current.filter((id) => id !== destination.destination_id))} />
+                {destination.name} ({destination.destination_type})
+              </label>
+            ))}
+            {!backupDestinations.some((destination) => destination.enabled) && <span className="text-xs text-stone-500">Create and test an enabled destination first.</span>}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded border border-stone-200 dark:border-stone-700">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300"><tr><th className="p-2">Destination</th><th className="p-2">Protection</th><th className="p-2">Last test</th><th className="p-2">Action</th></tr></thead>
+            <tbody>
+              {backupDestinations.map((destination) => <tr key={destination.destination_id} className="border-t border-stone-200 dark:border-stone-700"><td className="p-2"><p className="font-medium">{destination.name}</p><p className="text-stone-500">{destination.destination_type} · {destination.enabled ? "enabled" : "paused"}</p></td><td className="p-2">{destination.credentialsConfigured ? "Credentials configured" : "No credentials"}</td><td className="p-2">{destination.last_connection_status || "Not tested"}{destination.last_failure_message ? <p className="mt-1 text-red-700 dark:text-red-300">{destination.last_failure_message}</p> : null}</td><td className="flex flex-wrap gap-1 p-2"><button type="button" onClick={() => void testAutomatedDestination(destination.destination_id)} disabled={!isSuperAdmin || !user?.recentSupervisorReauth || backupControlBusy || destination.destination_type === "onedrive"} className="btn-secondary text-xs disabled:opacity-50">Test</button>{isSuperAdmin && <><button type="button" onClick={() => editAutomatedDestination(destination)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Edit</button><button type="button" onClick={() => void toggleAutomatedDestination(destination)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">{destination.enabled ? "Pause" : "Resume"}</button><button type="button" onClick={() => void previewAutomatedRetention(destination)} disabled={backupControlBusy || !user?.recentSupervisorReauth || destination.destination_type === "onedrive"} className="btn-secondary text-xs disabled:opacity-50">Retention preview</button><button type="button" onClick={() => void executeAutomatedRetention(destination)} disabled={backupControlBusy || !user?.recentSupervisorReauth || destination.destination_type === "onedrive"} className="btn-secondary text-xs disabled:opacity-50">Apply retention</button><button type="button" onClick={() => void deleteAutomatedDestination(destination)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Remove</button></>}</td></tr>)}
+              {!backupDestinations.length && <tr><td colSpan={4} className="p-3 text-stone-500">No automated destinations configured.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        {isSuperAdmin && <details className="rounded border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900">
+          <summary className="cursor-pointer text-xs font-medium text-stone-900 dark:text-white">Protected destination and encryption settings</summary>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input aria-label="Automated destination name" value={destinationForm.name} onChange={(event) => setDestinationForm((current) => ({ ...current, name: event.target.value }))} placeholder="Destination name" className="input-premium text-xs" />
+            <select aria-label="Automated destination type" value={destinationForm.type} onChange={(event) => setDestinationForm((current) => ({ ...current, type: event.target.value as BackupControlDestination["destination_type"] }))} className="input-premium text-xs"><option value="local">Local approved path</option><option value="smb">SMB share</option><option value="sftp">SFTP</option><option value="nextcloud">Nextcloud WebDAV</option><option value="onedrive" disabled>OneDrive (not yet available)</option></select>
+            {destinationForm.type === "local" && <input aria-label="Automated local root" value={destinationForm.rootPath} onChange={(event) => setDestinationForm((current) => ({ ...current, rootPath: event.target.value }))} placeholder="Approved local backup root" className="input-premium text-xs sm:col-span-2" />}
+            {destinationForm.type === "nextcloud" && <><input aria-label="Nextcloud base URL" value={destinationForm.baseUrl} onChange={(event) => setDestinationForm((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://cloud.example" className="input-premium text-xs" /><input aria-label="Nextcloud username" value={destinationForm.username} onChange={(event) => setDestinationForm((current) => ({ ...current, username: event.target.value }))} placeholder="Nextcloud username" className="input-premium text-xs" /><input aria-label="Nextcloud remote path" value={destinationForm.remotePath} onChange={(event) => setDestinationForm((current) => ({ ...current, remotePath: event.target.value }))} placeholder="/RISpro-backups" className="input-premium text-xs" /><input aria-label="Nextcloud app password" type="password" value={destinationForm.appPassword} onChange={(event) => setDestinationForm((current) => ({ ...current, appPassword: event.target.value }))} placeholder="App password" className="input-premium text-xs" /></>}
+            {destinationForm.type === "sftp" && <><input aria-label="SFTP host" value={destinationForm.host} onChange={(event) => setDestinationForm((current) => ({ ...current, host: event.target.value }))} placeholder="SFTP host" className="input-premium text-xs" /><input aria-label="SFTP port" value={destinationForm.port} onChange={(event) => setDestinationForm((current) => ({ ...current, port: event.target.value }))} placeholder="22" className="input-premium text-xs" /><input aria-label="SFTP username" value={destinationForm.username} onChange={(event) => setDestinationForm((current) => ({ ...current, username: event.target.value }))} placeholder="SFTP username" className="input-premium text-xs" /><input aria-label="SFTP remote path" value={destinationForm.remotePath} onChange={(event) => setDestinationForm((current) => ({ ...current, remotePath: event.target.value }))} placeholder="/backups" className="input-premium text-xs" /><input aria-label="SFTP SHA256 host fingerprint" value={destinationForm.hostFingerprint} onChange={(event) => setDestinationForm((current) => ({ ...current, hostFingerprint: event.target.value }))} placeholder="SHA256 host fingerprint" className="input-premium text-xs" /><input aria-label="SFTP password" type="password" value={destinationForm.password} onChange={(event) => setDestinationForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password (or private key below)" className="input-premium text-xs" /><textarea aria-label="SFTP private key" value={destinationForm.privateKey} onChange={(event) => setDestinationForm((current) => ({ ...current, privateKey: event.target.value }))} placeholder="Private key (optional; never shown after save)" className="input-premium min-h-16 text-xs sm:col-span-2" /></>}
+            {destinationForm.type === "smb" && <><input aria-label="SMB server" value={destinationForm.server} onChange={(event) => setDestinationForm((current) => ({ ...current, server: event.target.value }))} placeholder="SMB server" className="input-premium text-xs" /><input aria-label="SMB share" value={destinationForm.share} onChange={(event) => setDestinationForm((current) => ({ ...current, share: event.target.value }))} placeholder="Share" className="input-premium text-xs" /><input aria-label="SMB subfolder" value={destinationForm.subfolder} onChange={(event) => setDestinationForm((current) => ({ ...current, subfolder: event.target.value }))} placeholder="Subfolder" className="input-premium text-xs" /><input aria-label="SMB domain" value={destinationForm.domain} onChange={(event) => setDestinationForm((current) => ({ ...current, domain: event.target.value }))} placeholder="Domain (optional)" className="input-premium text-xs" /><input aria-label="SMB username" value={destinationForm.username} onChange={(event) => setDestinationForm((current) => ({ ...current, username: event.target.value }))} placeholder="Username" className="input-premium text-xs" /><input aria-label="SMB password" type="password" value={destinationForm.password} onChange={(event) => setDestinationForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" className="input-premium text-xs" /></>}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => void createAutomatedDestination()} disabled={backupControlBusy || !user?.recentSupervisorReauth || destinationForm.type === "onedrive"} className="btn-primary text-xs disabled:opacity-50">{editingDestinationId ? "Update destination" : "Save destination"}</button>{editingDestinationId && <button type="button" onClick={() => { setEditingDestinationId(null); setDestinationForm({ name: "", type: "local", rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" }); }} className="btn-secondary text-xs">Cancel edit</button>}<input aria-label="Automated archive passphrase" type="password" value={automatedPassphrase} onChange={(event) => setAutomatedPassphrase(event.target.value)} placeholder="Automated archive passphrase" className="input-premium text-xs" /><button type="button" onClick={() => void saveAutomatedPassphrase()} disabled={backupControlBusy || automatedPassphrase.length < 8 || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Store encrypted passphrase</button></div>
+          <p className="mt-3 text-xs text-stone-600 dark:text-stone-300">OneDrive is deliberately isolated as the final destination milestone. It will require a Microsoft Entra app registration and delegated Files.ReadWrite.AppFolder consent; RISpro will provide the browser authorization flow and never ask for a Microsoft password. Local, SMB, SFTP, and Nextcloud do not require this portal step.</p>
+          {!user?.recentSupervisorReauth && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Recent supervisor re-authentication is required before these settings can be saved or tested.</p>}
+        </details>}
+
+        <details className="rounded border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900">
+          <summary className="cursor-pointer text-xs font-medium text-stone-900 dark:text-white">Schedules, retention, and isolated restore verification</summary>
+          <p className="mt-2 text-xs text-stone-600 dark:text-stone-300">Schedules use Africa/Tripoli time, retain 7 daily / 4 weekly / 12 monthly copies by default, and queue a weekly disposable restore verification after successful scheduled archives.</p>
+          {isSuperAdmin && <div className="mt-3 flex flex-wrap gap-2"><input aria-label="Automated schedule name" value={scheduleForm.name} onChange={(event) => setScheduleForm((current) => ({ ...current, name: event.target.value }))} placeholder="Schedule name" className="input-premium text-xs" /><select aria-label="Automated schedule frequency" value={scheduleForm.frequency} onChange={(event) => setScheduleForm((current) => ({ ...current, frequency: event.target.value as BackupControlSchedule["frequency"] }))} className="input-premium text-xs"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>{scheduleForm.frequency === "weekly" && <select aria-label="Automated schedule weekday" value={scheduleForm.weekday} onChange={(event) => setScheduleForm((current) => ({ ...current, weekday: event.target.value }))} className="input-premium text-xs"><option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select>}{scheduleForm.frequency === "monthly" && <input aria-label="Automated schedule day of month" type="number" min="1" max="31" value={scheduleForm.dayOfMonth} onChange={(event) => setScheduleForm((current) => ({ ...current, dayOfMonth: event.target.value }))} className="input-premium w-20 text-xs" />}<input aria-label="Automated schedule time" type="time" value={scheduleForm.timeOfDay} onChange={(event) => setScheduleForm((current) => ({ ...current, timeOfDay: event.target.value }))} className="input-premium text-xs" /><select aria-label="Automated retention policy" value={scheduleForm.retentionPreset} onChange={(event) => setScheduleForm((current) => ({ ...current, retentionPreset: event.target.value }))} className="input-premium text-xs"><option value="7_daily_4_weekly_12_monthly">7 daily / 4 weekly / 12 monthly</option><option value="14_daily_12_monthly">14 daily / 12 monthly</option><option value="30_daily">30 daily</option><option value="custom">Custom retention</option></select>{scheduleForm.retentionPreset === "custom" && <><input aria-label="Custom daily retention" type="number" min="0" max="3650" value={scheduleForm.retentionDaily} onChange={(event) => setScheduleForm((current) => ({ ...current, retentionDaily: event.target.value }))} placeholder="Daily" className="input-premium w-20 text-xs" /><input aria-label="Custom weekly retention" type="number" min="0" max="3650" value={scheduleForm.retentionWeekly} onChange={(event) => setScheduleForm((current) => ({ ...current, retentionWeekly: event.target.value }))} placeholder="Weekly" className="input-premium w-20 text-xs" /><input aria-label="Custom monthly retention" type="number" min="0" max="3650" value={scheduleForm.retentionMonthly} onChange={(event) => setScheduleForm((current) => ({ ...current, retentionMonthly: event.target.value }))} placeholder="Monthly" className="input-premium w-20 text-xs" /></>}<select aria-label="Automated restore verification frequency" value={scheduleForm.restoreVerificationFrequency} onChange={(event) => setScheduleForm((current) => ({ ...current, restoreVerificationFrequency: event.target.value as BackupControlSchedule["restore_verification_frequency"] }))} className="input-premium text-xs"><option value="weekly">Verify weekly</option><option value="monthly">Verify monthly</option><option value="disabled">Verification disabled</option></select><button type="button" onClick={() => void createAutomatedSchedule()} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-primary text-xs disabled:opacity-50">{editingScheduleId ? "Update schedule" : "Save schedule for selected destinations"}</button>{editingScheduleId && <button type="button" onClick={() => { setEditingScheduleId(null); setScheduleForm({ name: "", frequency: "daily", timeOfDay: "02:00", weekday: "1", dayOfMonth: "1", retentionPreset: "7_daily_4_weekly_12_monthly", retentionDaily: "7", retentionWeekly: "4", retentionMonthly: "12", restoreVerificationFrequency: "weekly" }); }} className="btn-secondary text-xs">Cancel edit</button>}</div>}
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs"><thead className="text-stone-500"><tr><th className="p-1">Schedule</th><th className="p-1">Next run</th><th className="p-1">Destinations</th><th className="p-1">State</th></tr></thead><tbody>{backupSchedules.map((schedule) => <tr key={schedule.schedule_id} className="border-t border-stone-200 dark:border-stone-700"><td className="p-1">{schedule.name}<p className="text-stone-500">{schedule.frequency} · {schedule.time_of_day} {schedule.timezone}</p></td><td className="p-1">{schedule.next_run_at ? formatDateTimeLy(schedule.next_run_at) : "Paused"}</td><td className="p-1">{schedule.destination_ids.length}</td><td className="flex flex-wrap gap-1 p-1">{isSuperAdmin ? <><button type="button" onClick={() => editAutomatedSchedule(schedule)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Edit</button><button type="button" onClick={() => void toggleAutomatedSchedule(schedule)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">{schedule.enabled ? "Pause" : "Resume"}</button><button type="button" onClick={() => void deleteAutomatedSchedule(schedule)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Delete</button></> : (schedule.enabled ? "Enabled" : "Paused")}</td></tr>)}{!backupSchedules.length && <tr><td colSpan={4} className="p-2 text-stone-500">No schedules configured.</td></tr>}</tbody></table></div>
+        </details>
+
+        <div className="overflow-x-auto rounded border border-stone-200 dark:border-stone-700"><table className="w-full text-left text-xs"><thead className="bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300"><tr><th className="p-2">Recent job</th><th className="p-2">Status</th><th className="p-2">Archive</th><th className="p-2">Destination copies</th><th className="p-2">Completed</th><th className="p-2">Actions</th></tr></thead><tbody>{backupJobs.slice(0, 8).map((job) => <tr key={job.job_id} className="border-t border-stone-200 dark:border-stone-700"><td className="p-2">{formatDateTimeLy(job.created_at)}{job.source_schedule_id ? <p className="text-stone-500">Scheduled</p> : <p className="text-stone-500">Manual</p>}</td><td className="p-2">{job.status}{job.failure_message ? <p className="mt-1 text-red-700 dark:text-red-300">{job.failure_message}</p> : null}</td><td className="p-2">{job.archive_name || "-"}</td><td className="p-2">{job.destination_copies?.length ? job.destination_copies.map((copy) => <p key={copy.destinationId} className={copy.status === "failed" ? "text-red-700 dark:text-red-300" : ""}>{backupDestinations.find((destination) => destination.destination_id === copy.destinationId)?.name || copy.destinationId.slice(0, 8)}: {copy.status}{copy.failureMessage ? ` · ${copy.failureMessage}` : ""}</p>) : "No copy attempts yet"}</td><td className="p-2">{job.completed_at ? formatDateTimeLy(job.completed_at) : "-"}</td><td className="flex flex-wrap gap-1 p-2">{job.archive_name && <a href={`/api/backup-control/jobs/${job.job_id}/download`} className="btn-secondary text-xs">Download</a>}{(job.status === "failed" || job.status === "cancelled") && <button type="button" onClick={() => void retryAutomatedJob(job)} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Retry</button>}{job.status === "queued" && <button type="button" onClick={() => void cancelAutomatedJob(job)} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Cancel</button>}{job.status === "completed" && isSuperAdmin && <button type="button" onClick={() => void queueManualRestoreVerification(job)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Verify</button>}</td></tr>)}{!backupJobs.length && <tr><td colSpan={6} className="p-3 text-stone-500">No automated backup jobs yet.</td></tr>}</tbody></table></div>
+        {backupRestoreVerifications.length > 0 && <p className="text-xs text-stone-600 dark:text-stone-300">Latest restore verification: <span className="font-medium">{backupRestoreVerifications[0]?.status}</span>{backupRestoreVerifications[0]?.completed_at ? ` · ${formatDateTimeLy(backupRestoreVerifications[0].completed_at)}` : ""}{backupRestoreVerifications[0]?.failure_message ? ` · ${backupRestoreVerifications[0].failure_message}` : ""}</p>}
+      </section>
 
       {restoreMessage && (
         <div className={`p-3 rounded-lg border text-sm ${

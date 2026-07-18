@@ -94,6 +94,7 @@ RUN set -eux; \
     libsndfile1 \
     libjpeg62-turbo \
     postgresql-client-16 \
+    smbclient \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

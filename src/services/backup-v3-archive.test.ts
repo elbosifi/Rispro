@@ -10,6 +10,7 @@ import { collectBackupV3StorageFiles } from "./backup-v3-file-collector.js";
 import { setBackupV3DownloadHeaders } from "./backup-v3-http.js";
 import { buildBackupV3Manifest } from "./backup-v3-manifest.js";
 import { BackupV3ZipWriter } from "./backup-v3-zip-writer.js";
+import { createBackupV3PostgresCustomDump } from "./backup-v3-service.js";
 import type { BackupV3FileManifestEntry, BackupV3SchemaMetadata } from "./backup-v3-types.js";
 
 async function collectStream(stream: PassThrough): Promise<Buffer> {
@@ -23,10 +24,16 @@ function readZipEntries(zip: Buffer): Map<string, Buffer> {
   const entries = new Map<string, Buffer>();
   let offset = 0;
   while (offset < zip.length && zip.readUInt32LE(offset) === 0x04034b50) {
-    const compressedSize = zip.readUInt32LE(offset + 18);
+    let compressedSize = zip.readUInt32LE(offset + 18);
     const nameLength = zip.readUInt16LE(offset + 26);
     const extraLength = zip.readUInt16LE(offset + 28);
     const name = zip.subarray(offset + 30, offset + 30 + nameLength).toString("utf8");
+    if (compressedSize === 0xffffffff) {
+      const extra = zip.subarray(offset + 30 + nameLength, offset + 30 + nameLength + extraLength);
+      assert.equal(extra.readUInt16LE(0), 0x0001);
+      assert.ok(extra.readUInt16LE(2) >= 16);
+      compressedSize = Number(extra.readBigUInt64LE(12));
+    }
     const contentStart = offset + 30 + nameLength + extraLength;
     const contentEnd = contentStart + compressedSize;
     entries.set(name, zip.subarray(contentStart, contentEnd));
@@ -190,4 +197,41 @@ test("setBackupV3DownloadHeaders returns zip attachment headers with rispro zip 
 
   assert.equal(headers.get("Content-Type"), "application/zip");
   assert.equal(headers.get("Content-Disposition"), 'attachment; filename="rispro-backup-test.rispro.zip"');
+});
+
+test("automated Backup V3 PostgreSQL dump uses process environment instead of credentials in arguments", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-v3-pg-dump-"));
+  const target = path.join(tempDir, "database.postgresql.dump");
+  let receivedArgs: string[] = [];
+  let receivedEnvironment: NodeJS.ProcessEnv | undefined;
+  try {
+    const result = await createBackupV3PostgresCustomDump(target, {
+      async execFile(_command, args, options) {
+        receivedArgs = args;
+        receivedEnvironment = options.env;
+        await fs.writeFile(target, "PGDMP custom-format fixture");
+      },
+    });
+    assert.deepEqual(receivedArgs, ["-Fc", "--file", target]);
+    assert.ok(receivedEnvironment?.PGHOST);
+    assert.ok(receivedEnvironment?.PGDATABASE);
+    assert.ok(receivedEnvironment?.PGPASSWORD);
+    assert.equal(receivedArgs.some((arg) => arg.includes(receivedEnvironment?.PGPASSWORD || "")), false);
+    assert.ok(result.byteSize > 0);
+    assert.equal(result.sha256, (await sha256File(target)).sha256);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("automated Backup V3 PostgreSQL dump fails clearly when pg_dump does not produce an archive", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-v3-pg-dump-"));
+  try {
+    await assert.rejects(
+      () => createBackupV3PostgresCustomDump(path.join(tempDir, "missing.dump"), { async execFile() {} }),
+      /PostgreSQL custom dump failed/
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });

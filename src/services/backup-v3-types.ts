@@ -64,6 +64,11 @@ export interface BackupV3ArchiveManifestEntry {
   sha256: string;
 }
 
+/** PostgreSQL custom-format dump bundled with automated Backup V3 archives. */
+export interface BackupV3PostgresDumpManifestEntry extends BackupV3ArchiveManifestEntry {
+  format: "custom";
+}
+
 export interface BackupV3ArchiveLimits {
   maxFiles: number;
   maxFileBytes: number;
@@ -82,6 +87,8 @@ export interface BackupV3Manifest {
   database: BackupV3SchemaMetadata;
   storageRoots: BackupV3StorageRoot[];
   archiveEntries: BackupV3ArchiveManifestEntry[];
+  /** Present for automated archives. Manual browser downloads remain compatible without it. */
+  postgresDump?: BackupV3PostgresDumpManifestEntry;
   files: BackupV3FileManifestEntry[];
   env: {
     archivePath: "config/env.enc.json";

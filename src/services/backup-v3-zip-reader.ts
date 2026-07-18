@@ -9,6 +9,23 @@ interface StoredZipEntry extends BackupV3ArchiveEntry {
   dataOffset: number;
 }
 
+function readZip64UncompressedSize(extra: Buffer): number {
+  let offset = 0;
+  while (offset + 4 <= extra.length) {
+    const headerId = extra.readUInt16LE(offset);
+    const size = extra.readUInt16LE(offset + 2);
+    const dataStart = offset + 4;
+    if (dataStart + size > extra.length) break;
+    if (headerId === 0x0001 && size >= 8) {
+      const value = extra.readBigUInt64LE(dataStart);
+      if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new HttpError(400, "ZIP64 entry is too large for this runtime.");
+      return Number(value);
+    }
+    offset = dataStart + size;
+  }
+  throw new HttpError(400, "ZIP64 entry is missing its uncompressed-size metadata.");
+}
+
 async function readExact(handle: fs.FileHandle, position: number, length: number): Promise<Buffer> {
   const buffer = Buffer.alloc(length);
   const { bytesRead } = await handle.read(buffer, 0, length, position);
@@ -50,7 +67,7 @@ export async function extractStoredBackupV3ZipToStaging(
       const header = await readExact(handle, offset, 30);
       const flags = header.readUInt16LE(6);
       const method = header.readUInt16LE(8);
-      const uncompressedSize = header.readUInt32LE(22);
+      let uncompressedSize = header.readUInt32LE(22);
       const nameLength = header.readUInt16LE(26);
       const extraLength = header.readUInt16LE(28);
       if ((flags & 0x0001) !== 0 || (flags & 0x0008) !== 0) {
@@ -61,6 +78,9 @@ export async function extractStoredBackupV3ZipToStaging(
       }
       const nameBuffer = await readExact(handle, offset + 30, nameLength);
       const entryPath = nameBuffer.toString("utf8");
+      if (uncompressedSize === 0xffffffff) {
+        uncompressedSize = readZip64UncompressedSize(await readExact(handle, offset + 30 + nameLength, extraLength));
+      }
       const dataOffset = offset + 30 + nameLength + extraLength;
       entries.push({
         path: entryPath,
