@@ -8,6 +8,9 @@ ORTHANC_CONFIG_DIR="${PROJECT_ROOT}/docker/orthanc/generated"
 ORTHANC_CONFIG_FILE="${ORTHANC_CONFIG_DIR}/orthanc.json"
 SANTE_HL7_HOST_OUTBOX_DIR="${PROJECT_ROOT}/storage/sante-hl7-outbox"
 SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
+# Keep deployment configuration backups outside the checkout: update-docker's
+# git clean intentionally removes untracked repository files.
+RISPRO_CONFIG_BACKUP_DIR="${RISPRO_CONFIG_BACKUP_DIR:-${PROJECT_ROOT}/../rispro-config-backups}"
 
 windows_path_hint() {
   local value="$1"
@@ -594,7 +597,17 @@ preflight_validate_env() {
 }
 
 write_env_file() {
-  cat > "${ENV_FILE}" <<EOF_ENV
+  local env_dir generated temporary safety existing_key rendered_key
+  env_dir="$(dirname "${ENV_FILE}")"
+  generated="${env_dir}/.env.rispro-rendered.$$.tmp"
+  temporary="${env_dir}/.env.rispro-merge.$$.tmp"
+  safety="${RISPRO_CONFIG_BACKUP_DIR}/env.$(date -u '+%Y%m%dT%H%M%SZ').$$.bak"
+  mkdir -p "${env_dir}" "${RISPRO_CONFIG_BACKUP_DIR}"
+  chmod 700 "${RISPRO_CONFIG_BACKUP_DIR}"
+  umask 077
+  # Render only deployment-owned settings. The merge below preserves every
+  # application-owned and future setting from the prior .env.
+  cat > "${generated}" <<EOF_ENV
 # =============================================================================
 # NCCB Diagnostic Radiology - Auto-generated Configuration
 # =============================================================================
@@ -695,6 +708,56 @@ MPPS_AUTH_ENABLED=${MPPS_AUTH_ENABLED}
 MPPS_USERNAME=${MPPS_USERNAME}
 MPPS_PASSWORD=${MPPS_PASSWORD}
 EOF_ENV
+
+  # A previous installation key is immutable during deployment rendering. Use
+  # fingerprints only; neither values nor complete environment content are
+  # printed by this function.
+  existing_key="$(read_env_value BACKUP_V3_MASTER_KEY)"
+  if [ -f "${ENV_FILE}" ]; then
+    cp -p "${ENV_FILE}" "${safety}"
+    chmod 600 "${safety}"
+  fi
+
+  ENV_EXISTING="${ENV_FILE}" ENV_RENDERED="${generated}" ENV_OUTPUT="${temporary}" node <<'EOF_NODE'
+const fs = require('fs');
+const existingPath = process.env.ENV_EXISTING;
+const renderedPath = process.env.ENV_RENDERED;
+const outputPath = process.env.ENV_OUTPUT;
+const keyPattern = /^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$/;
+const rendered = fs.readFileSync(renderedPath, 'utf8');
+const existing = fs.existsSync(existingPath) ? fs.readFileSync(existingPath, 'utf8') : '';
+const owned = new Map();
+for (const line of rendered.split(/\r?\n/)) {
+  const match = line.match(keyPattern);
+  if (match) owned.set(match[1], line.replace(/^\s*(?:export\s+)?/, ''));
+}
+const emitted = new Set();
+const output = [];
+for (const line of existing.split(/\r?\n/)) {
+  const match = line.match(keyPattern);
+  if (!match) { output.push(line); continue; }
+  const key = match[1];
+  if (emitted.has(key)) continue; // normalize duplicate active definitions
+  emitted.add(key);
+  output.push(owned.get(key) || line);
+}
+if (output.length && output.at(-1) !== '') output.push('');
+for (const [key, line] of owned) if (!emitted.has(key)) output.push(line);
+fs.writeFileSync(outputPath, `${output.join('\n').replace(/\n*$/, '')}\n`, { mode: 0o600 });
+const fd = fs.openSync(outputPath, 'r');
+try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+EOF_NODE
+
+  rendered_key="$(grep -E '^BACKUP_V3_MASTER_KEY=' "${temporary}" | tail -n1 | cut -d '=' -f2- || true)"
+  if [ -n "${existing_key}" ] && { [ -z "${rendered_key}" ] || [ "${existing_key}" != "${rendered_key}" ]; }; then
+    rm -f "${generated}" "${temporary}"
+    err 'Deployment refused to remove or change the existing Backup V3 installation key.'
+    return 1
+  fi
+  mv -f "${temporary}" "${ENV_FILE}"
+  # Best-effort directory fsync is unsupported on some hosts/filesystems.
+  node -e 'const fs=require("fs"); try { const fd=fs.openSync(process.argv[1],"r"); fs.fsyncSync(fd); fs.closeSync(fd); } catch {}' "${env_dir}" || true
+  rm -f "${generated}"
 }
 
 render_orthanc_config() {

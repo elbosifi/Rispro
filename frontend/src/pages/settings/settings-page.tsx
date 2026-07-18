@@ -2620,13 +2620,6 @@ type BackupV3RestoreStatus = {
   disabledReason?: string;
 };
 
-type BackupV3RestoreFlagStatus = {
-  enabledInEnvFile: boolean;
-  enabledInRuntime: boolean;
-  restartRequired: boolean;
-  safetyBackupPath?: string;
-};
-
 type BackupControlDestination = {
   destination_id: string;
   name: string;
@@ -2662,10 +2655,12 @@ type BackupControlSummary = {
   active_job?: { status?: string; archive_name?: string | null } | null;
   last_successful_backup?: { archive_name?: string | null; completed_at?: string | null; archive_size_bytes?: string | number | null } | null;
   last_verified_copy?: { destination_name?: string; destination_type?: string; completed_at?: string | null } | null;
+  latest_restore_verification_attempt?: { status?: string; created_at?: string | null; started_at?: string | null; completed_at?: string | null; failure_message?: string | null } | null;
   last_successful_restore_verification?: { completed_at?: string | null } | null;
   next_schedule?: { name?: string; next_run_at?: string | null } | null;
   worker?: { heartbeat_at?: string | null; last_failure_message?: string | null } | null;
   encryption?: {
+    state?: "fresh_setup_required" | "ready" | "restart_required" | "recovery_required" | "invalid_key" | "deliberate_reset_required";
     encryptionReady: boolean;
     setupRequired: boolean;
     restartRequired: boolean;
@@ -2738,8 +2733,6 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
   const [, setFullRestoreEnabled] = useState<boolean | null>(null);
   const [restoreV3Status, setRestoreV3Status] = useState<BackupV3RestoreStatus | null>(null);
-  const [restoreV3FlagStatus, setRestoreV3FlagStatus] = useState<BackupV3RestoreFlagStatus | null>(null);
-  const [restoreV3FlagBusy, setRestoreV3FlagBusy] = useState(false);
   const [fullRestoreStatus, setFullRestoreStatus] = useState("Checking v3 restore availability...");
   const [restoreV3Preview, setRestoreV3Preview] = useState<BackupV3Preview | null>(null);
   const [backupControlSummary, setBackupControlSummary] = useState<BackupControlSummary | null>(null);
@@ -2753,6 +2746,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [backupKeySetupId, setBackupKeySetupId] = useState<string | null>(null);
   const [backupRecoveryDownloaded, setBackupRecoveryDownloaded] = useState(false);
   const [backupRecoveryConfirmed, setBackupRecoveryConfirmed] = useState(false);
+  const [backupInstallationRecoveryValue, setBackupInstallationRecoveryValue] = useState("");
   const [destinationForm, setDestinationForm] = useState({ name: "", type: "local" as BackupControlDestination["destination_type"], rootPath: "", baseUrl: "", username: "", remotePath: "", host: "", port: "22", hostFingerprint: "", server: "", share: "", subfolder: "", domain: "", password: "", appPassword: "", privateKey: "" });
   const [editingDestinationId, setEditingDestinationId] = useState<string | null>(null);
   const [automatedPassphrase, setAutomatedPassphrase] = useState("");
@@ -2790,6 +2784,8 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     restoreV3Status.recentReauthSatisfied === true;
   const v3PreviewHasErrors = Boolean(restoreV3Preview && (!restoreV3Preview.ok || restoreV3Preview.errors.length > 0));
   const isSuperAdmin = user?.role === "super_admin";
+  // Deprecated V2 compatibility endpoints intentionally have no normal UI.
+  const showDeprecatedV2Controls = new URLSearchParams(window.location.search).has("deprecated-v2");
 
   useImperativeHandle(ref, () => ({
     onReAuthSuccess: handleReAuthSuccess
@@ -2855,31 +2851,16 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     }
   }, [parseErrorMessage]);
 
-  const fetchRestoreV3FlagStatus = useCallback(async () => {
-    if (!isSuperAdmin) {
-      setRestoreV3FlagStatus(null);
-      return;
-    }
-    try {
-      const response = await fetch("/api/admin/restore/v3/flag", {
-        method: "GET",
-        credentials: "include"
-      });
-      if (!response.ok) {
-        setRestoreV3FlagStatus(null);
-        return;
-      }
-      setRestoreV3FlagStatus((await response.json()) as BackupV3RestoreFlagStatus);
-    } catch {
-      setRestoreV3FlagStatus(null);
-    }
-  }, [isSuperAdmin]);
-
   useEffect(() => {
     void probeV3RestoreAvailability();
-    void fetchRestoreV3FlagStatus();
     void refreshBackupControl();
-  }, [fetchRestoreV3FlagStatus, probeV3RestoreAvailability, refreshBackupControl, user?.recentSupervisorReauth]);
+  }, [probeV3RestoreAvailability, refreshBackupControl, user?.recentSupervisorReauth]);
+
+  useEffect(() => {
+    if (!backupRestoreVerifications.some((verification) => verification.status === "queued" || verification.status === "running")) return;
+    const timer = window.setInterval(() => { void refreshBackupControl(); }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [backupRestoreVerifications, refreshBackupControl]);
 
   const runAutomatedBackupNow = async () => {
     if (!selectedBackupDestinationIds.length) {
@@ -3057,6 +3038,25 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       await refreshBackupControl();
     } catch (error) {
       setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not save Backup security setup." });
+    } finally {
+      setBackupControlBusy(false);
+    }
+  };
+
+  const recoverBackupInstallationKey = async () => {
+    if (!isSuperAdmin || !user?.recentSupervisorReauth) {
+      onReAuthRequired(["backup-control", "security-recovery"]);
+      return;
+    }
+    setBackupControlBusy(true);
+    try {
+      const response = await fetch("/api/backup-control/encryption-recovery", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recoveryValue: backupInstallationRecoveryValue }) });
+      if (!response.ok) throw new Error(await parseErrorMessage(response));
+      setBackupInstallationRecoveryValue("");
+      setBackupControlMessage({ type: "success", text: "The installation credential-encryption key was validated and saved. Restart RISpro to load it." });
+      await refreshBackupControl();
+    } catch (error) {
+      setBackupControlMessage({ type: "error", text: error instanceof Error ? error.message : "Could not recover the installation credential-encryption key." });
     } finally {
       setBackupControlBusy(false);
     }
@@ -3363,42 +3363,6 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     }
   };
 
-  const handleRestoreV3FlagChange = async (enabled: boolean) => {
-    if (!isSuperAdmin) return;
-    if (!user?.recentSupervisorReauth) {
-      onReAuthRequired(["admin", "restore", "v3", "flag"]);
-      setRestoreMessage({ type: "error", text: "Recent supervisor re-authentication is required before changing v3 restore availability." });
-      return;
-    }
-    if (enabled && !confirm("Enable V3 full restore? This destructive capability can replace the database, mirror app-owned storage, restore external documents, update RISpro-managed .env keys, and requires restart.")) {
-      return;
-    }
-
-    setRestoreV3FlagBusy(true);
-    setRestoreMessage(null);
-    try {
-      const response = await fetch("/api/admin/restore/v3/flag", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled })
-      });
-      if (!response.ok) {
-        if (response.status === 403) {
-          onReAuthRequired(["admin", "restore", "v3", "flag"]);
-        }
-        throw new Error(await parseErrorMessage(response));
-      }
-      setRestoreV3FlagStatus((await response.json()) as BackupV3RestoreFlagStatus);
-      setRestoreMessage({ type: "success", text: "Restart required for this setting to take effect." });
-      await probeV3RestoreAvailability();
-    } catch (err) {
-      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Could not update v3 full restore setting." });
-    } finally {
-      setRestoreV3FlagBusy(false);
-    }
-  };
-
   const doRestore = async (payload: unknown) => {
     const response = await fetch("/api/admin/restore", {
       method: "POST",
@@ -3556,7 +3520,6 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   // Auto-retry restore after successful re-auth
   const handleReAuthSuccess = async () => {
     await probeV3RestoreAvailability();
-    await fetchRestoreV3FlagStatus();
     if (pendingPayload) {
       setRestoreBusy(true);
       setRestoreMessage({ type: "success", text: "Re-authenticated. Retrying restore..." });
@@ -3587,13 +3550,13 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
           <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Backup health</span><p className={`font-semibold ${backupControlSummary?.health === "critical" ? "text-red-700 dark:text-red-300" : backupControlSummary?.health === "warning" ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>{backupControlSummary?.health ? backupControlSummary.health[0].toUpperCase() + backupControlSummary.health.slice(1) : "Not assessed"}</p></div>
           <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Destinations</span><p className="font-semibold">{backupControlSummary?.enabled_destinations ?? 0} enabled / {backupControlSummary?.destinations ?? 0}</p></div>
-          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Recent failures</span><p className="font-semibold">{backupControlSummary?.recent_failures ?? 0}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Failed jobs in the last 7 days</span><p className="font-semibold">{backupControlSummary?.recent_failures ?? 0}</p></div>
           <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Worker heartbeat</span><p className="font-semibold">{backupControlSummary?.worker?.heartbeat_at ? formatDateTimeLy(backupControlSummary.worker.heartbeat_at) : "Not reported"}</p></div>
           <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Last backup</span><p className="font-semibold">{backupControlSummary?.last_successful_backup?.completed_at ? formatDateTimeLy(backupControlSummary.last_successful_backup.completed_at) : "Never"}</p></div>
-          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Last verified copy</span><p className="font-semibold">{backupControlSummary?.last_verified_copy?.destination_name || "Never"}</p></div>
-          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Restore verification</span><p className="font-semibold">{backupControlSummary?.last_successful_restore_verification?.completed_at ? formatDateTimeLy(backupControlSummary.last_successful_restore_verification.completed_at) : "Never"}</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Last verified copy</span><p className="font-semibold">{backupControlSummary?.last_verified_copy?.destination_name || "Never"}</p>{backupControlSummary?.last_verified_copy?.completed_at ? <p className="mt-1 text-stone-500">{formatDateTimeLy(backupControlSummary.last_verified_copy.completed_at)}</p> : null}</div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Last successful restore verification</span><p className="font-semibold">{backupControlSummary?.last_successful_restore_verification?.completed_at ? formatDateTimeLy(backupControlSummary.last_successful_restore_verification.completed_at) : "Never"}</p>{backupControlSummary?.latest_restore_verification_attempt ? <p className="mt-1 text-stone-500">Latest attempt: {backupControlSummary.latest_restore_verification_attempt.status}{backupControlSummary.latest_restore_verification_attempt.completed_at ? ` · ${formatDateTimeLy(backupControlSummary.latest_restore_verification_attempt.completed_at)}` : ""}</p> : null}</div>
           <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Next schedule</span><p className="font-semibold">{backupControlSummary?.next_schedule?.next_run_at ? formatDateTimeLy(backupControlSummary.next_schedule.next_run_at) : "Not scheduled"}</p></div>
-          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Archive limits</span><p className="font-semibold">Encrypted ZIP64 · 3 GiB content / file · 60,000 files</p></div>
+          <div className="rounded bg-white/80 p-2 dark:bg-stone-900/60"><span className="text-stone-500">Archive limits</span><p className="font-semibold">ZIP64 · 3 GiB content / file · 60,000 files</p></div>
         </div>
 
         {backupControlSummary?.active_job && <p className="rounded border border-sky-200 bg-sky-100 p-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-100">Active backup job: {backupControlSummary.active_job.status}{backupControlSummary.active_job.archive_name ? ` · ${backupControlSummary.active_job.archive_name}` : ""}</p>}
@@ -3604,11 +3567,12 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
         {backupControlMessage && <p className={`rounded border p-2 text-xs ${backupControlMessage.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200" : "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200"}`}>{backupControlMessage.text}</p>}
 
         {backupControlSummary?.encryption?.setupRequired && <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"><p className="font-semibold">Backup security setup required</p><p className="mt-1 text-xs">RISpro needs a permanent encryption key before it can safely store backup destination passwords and automated backup passphrases.</p>{backupControlSummary.encryption.limitation ? <p className="mt-2 text-xs">{backupControlSummary.encryption.limitation}</p> : isSuperAdmin ? <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => void generateBackupSecurityRecovery()} disabled={backupControlBusy || !user?.recentSupervisorReauth || !backupControlSummary.encryption?.setupAvailable} className="btn-primary text-xs disabled:opacity-50">Generate secure encryption key</button>{backupKeySetupId && <button type="button" onClick={() => void downloadBackupSecurityRecovery()} disabled={backupControlBusy || backupRecoveryDownloaded} className="btn-secondary text-xs disabled:opacity-50">{backupRecoveryDownloaded ? "Recovery copy downloaded" : "Download one-time recovery copy"}</button>}{backupKeySetupId && backupRecoveryDownloaded && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={backupRecoveryConfirmed} onChange={(event) => setBackupRecoveryConfirmed(event.target.checked)} />I saved the recovery copy separately from this server.</label>}{backupKeySetupId && <button type="button" onClick={() => void saveBackupSecuritySetup()} disabled={backupControlBusy || !backupRecoveryDownloaded || !backupRecoveryConfirmed} className="btn-primary text-xs disabled:opacity-50">Save securely</button>}</div> : <p className="mt-2 text-xs">A recently re-authenticated super administrator must complete this setup.</p>}{isSuperAdmin && !user?.recentSupervisorReauth && <p className="mt-2 text-xs">Recent supervisor re-authentication is required before setup can begin.</p>}</div>}
+        {(backupControlSummary?.encryption?.state === "recovery_required" || backupControlSummary?.encryption?.state === "invalid_key") && <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"><p className="font-semibold">Backup credential-encryption key recovery required</p><p className="mt-1 text-xs">This installation already contains encrypted backup credentials. Restore the original installation key. Generating a new key will not recover them.</p>{backupControlSummary.encryption.limitation ? <p className="mt-2 text-xs">{backupControlSummary.encryption.limitation}</p> : isSuperAdmin ? <div className="mt-3 flex flex-wrap items-center gap-2"><textarea aria-label="Installation credential-encryption key recovery value" value={backupInstallationRecoveryValue} onChange={(event) => setBackupInstallationRecoveryValue(event.target.value)} placeholder="Paste the original BACKUP_V3_MASTER_KEY recovery value" className="input-premium min-h-16 text-xs" /><button type="button" onClick={() => void recoverBackupInstallationKey()} disabled={backupControlBusy || !user?.recentSupervisorReauth || !backupInstallationRecoveryValue.trim()} className="btn-primary text-xs disabled:opacity-50">Validate and restore key</button></div> : <p className="mt-2 text-xs">A recently re-authenticated super administrator must restore the original key.</p>}</div>}
         {backupControlSummary?.encryption?.restartRequired && <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"><p className="font-semibold">Backup security setup saved — restart required</p><p className="mt-1 text-xs">Restart RISpro safely to load the encryption key. This page will show Ready after the restarted service confirms it.</p>{isSuperAdmin && <button type="button" onClick={() => void handleSystemRestart()} disabled={restartBusy || !user?.recentSupervisorReauth} className="btn-primary mt-3 text-xs disabled:opacity-50">{restartBusy ? "Restarting..." : "Restart RISpro safely"}</button>}</div>}
         {backupControlSummary?.encryption?.encryptionReady && <p className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">Backup credential encryption: Ready</p>}
 
         <div className="rounded border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900">
-          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium text-stone-900 dark:text-white">Run an encrypted backup now</p><button type="button" onClick={() => void runAutomatedBackupNow()} disabled={backupControlBusy || !selectedBackupDestinationIds.length} className="btn-primary text-xs disabled:opacity-50">{backupControlBusy ? "Working..." : "Run now"}</button></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium text-stone-900 dark:text-white">Run Backup V3 now</p><button type="button" onClick={() => void runAutomatedBackupNow()} disabled={backupControlBusy || !selectedBackupDestinationIds.length} className="btn-primary text-xs disabled:opacity-50">{backupControlBusy ? "Working..." : "Run now"}</button></div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
             {backupDestinations.filter((destination) => destination.enabled).map((destination) => (
               <label key={destination.destination_id} className="flex items-center gap-1 text-xs text-stone-700 dark:text-stone-300">
@@ -3652,7 +3616,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
           <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs"><thead className="text-stone-500"><tr><th className="p-1">Schedule</th><th className="p-1">Next run</th><th className="p-1">Destinations</th><th className="p-1">State</th></tr></thead><tbody>{backupSchedules.map((schedule) => <tr key={schedule.schedule_id} className="border-t border-stone-200 dark:border-stone-700"><td className="p-1">{schedule.name}<p className="text-stone-500">{schedule.frequency} · {schedule.time_of_day} {schedule.timezone}</p></td><td className="p-1">{schedule.next_run_at ? formatDateTimeLy(schedule.next_run_at) : "Paused"}</td><td className="p-1">{schedule.destination_ids.length}</td><td className="flex flex-wrap gap-1 p-1">{isSuperAdmin ? <><button type="button" onClick={() => editAutomatedSchedule(schedule)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Edit</button><button type="button" onClick={() => void toggleAutomatedSchedule(schedule)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">{schedule.enabled ? "Pause" : "Resume"}</button><button type="button" onClick={() => void deleteAutomatedSchedule(schedule)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Delete</button></> : (schedule.enabled ? "Enabled" : "Paused")}</td></tr>)}{!backupSchedules.length && <tr><td colSpan={4} className="p-2 text-stone-500">No schedules configured.</td></tr>}</tbody></table></div>
         </details>
 
-        <div className="overflow-x-auto rounded border border-stone-200 dark:border-stone-700"><table className="w-full text-left text-xs"><thead className="bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300"><tr><th className="p-2">Recent job</th><th className="p-2">Status</th><th className="p-2">Archive</th><th className="p-2">Destination copies</th><th className="p-2">Completed</th><th className="p-2">Actions</th></tr></thead><tbody>{backupJobs.slice(0, 8).map((job) => <tr key={job.job_id} className="border-t border-stone-200 dark:border-stone-700"><td className="p-2">{formatDateTimeLy(job.created_at)}{job.source_schedule_id ? <p className="text-stone-500">Scheduled</p> : <p className="text-stone-500">Manual</p>}</td><td className="p-2">{job.status}{job.failure_message ? <p className="mt-1 text-red-700 dark:text-red-300">{job.failure_message}</p> : null}</td><td className="p-2">{job.archive_name || "-"}</td><td className="p-2">{job.destination_copies?.length ? job.destination_copies.map((copy) => <p key={copy.destinationId} className={copy.status === "failed" ? "text-red-700 dark:text-red-300" : ""}>{backupDestinations.find((destination) => destination.destination_id === copy.destinationId)?.name || copy.destinationId.slice(0, 8)}: {copy.status}{copy.failureMessage ? ` · ${copy.failureMessage}` : ""}</p>) : "No copy attempts yet"}</td><td className="p-2">{job.completed_at ? formatDateTimeLy(job.completed_at) : "-"}</td><td className="flex flex-wrap gap-1 p-2">{job.archive_name && <a href={`/api/backup-control/jobs/${job.job_id}/download`} className="btn-secondary text-xs">Download</a>}{(job.status === "failed" || job.status === "cancelled") && job.archive_name && <button type="button" onClick={() => void retryAutomatedJob(job)} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Retry destination copy</button>}{job.status === "queued" && <button type="button" onClick={() => void cancelAutomatedJob(job)} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Cancel</button>}{job.status === "completed" && isSuperAdmin && <button type="button" onClick={() => void queueManualRestoreVerification(job)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Verify</button>}</td></tr>)}{!backupJobs.length && <tr><td colSpan={6} className="p-3 text-stone-500">No automated backup jobs yet.</td></tr>}</tbody></table></div>
+        <div className="overflow-x-auto rounded border border-stone-200 dark:border-stone-700"><table className="w-full text-left text-xs"><thead className="bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300"><tr><th className="p-2">Recent job</th><th className="p-2">Status</th><th className="p-2">Archive</th><th className="p-2">Destination copies</th><th className="p-2">Completed</th><th className="p-2">Actions</th></tr></thead><tbody>{backupJobs.slice(0, 8).map((job) => <tr key={job.job_id} className="border-t border-stone-200 dark:border-stone-700"><td className="p-2">{formatDateTimeLy(job.created_at)}{job.source_schedule_id ? <p className="text-stone-500">Scheduled</p> : <p className="text-stone-500">Manual</p>}</td><td className="p-2">{job.status}{job.failure_message ? <p className="mt-1 text-red-700 dark:text-red-300">{job.failure_message}</p> : null}</td><td className="p-2">{job.archive_name || "-"}</td><td className="p-2">{job.destination_copies?.length ? job.destination_copies.map((copy) => <p key={copy.destinationId} className={copy.status === "failed" ? "text-red-700 dark:text-red-300" : ""}>{backupDestinations.find((destination) => destination.destination_id === copy.destinationId)?.name || copy.destinationId.slice(0, 8)}: {copy.status}{copy.failureMessage ? ` · ${copy.failureMessage}` : ""}</p>) : "No copy attempts yet"}</td><td className="p-2">{job.completed_at ? formatDateTimeLy(job.completed_at) : "-"}</td><td className="flex flex-wrap gap-1 p-2">{job.archive_name && <a href={`/api/backup-control/jobs/${job.job_id}/download`} className="btn-secondary text-xs">Download</a>}{(job.status === "failed" || job.status === "cancelled") && job.archive_name && <button type="button" onClick={() => void retryAutomatedJob(job)} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Retry destination copy</button>}{job.status === "queued" && <button type="button" onClick={() => void cancelAutomatedJob(job)} disabled={backupControlBusy} className="btn-secondary text-xs disabled:opacity-50">Cancel</button>}{job.status === "completed" && isSuperAdmin && <button type="button" onClick={() => void queueManualRestoreVerification(job)} disabled={backupControlBusy || !user?.recentSupervisorReauth} className="btn-secondary text-xs disabled:opacity-50">Run restore verification</button>}</td></tr>)}{!backupJobs.length && <tr><td colSpan={6} className="p-3 text-stone-500">No automated backup jobs yet.</td></tr>}</tbody></table></div>
         {backupRestoreVerifications.length > 0 && <p className="text-xs text-stone-600 dark:text-stone-300">Latest restore verification: <span className="font-medium">{backupRestoreVerifications[0]?.status}</span>{backupRestoreVerifications[0]?.completed_at ? ` · ${formatDateTimeLy(backupRestoreVerifications[0].completed_at)}` : ""}{backupRestoreVerifications[0]?.failure_message ? ` · ${backupRestoreVerifications[0].failure_message}` : ""}</p>}
       </section>
 
@@ -3686,7 +3650,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
         <div>
           <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">V3 full app-stack backup</h4>
           <p className="mb-3 text-xs text-stone-600 dark:text-stone-300">
-            Downloads a <strong>.rispro.zip</strong> archive containing the database, app-owned storage, selected document files, and encrypted RISpro-managed config.
+            Downloads a ZIP64 <strong>.rispro.zip</strong> archive containing the database, app-owned storage, selected document files, and passphrase-protected managed configuration. Other archive entries are not currently encrypted.
           </p>
           <div className="mb-3">
             <div className="h-2 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
@@ -3717,7 +3681,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
           </div>
         </div>
 
-        <div>
+        {showDeprecatedV2Controls && <div>
           <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Legacy v2 JSON backup</h4>
           <div className="mb-3">
             <div className="h-2 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
@@ -3752,7 +3716,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
             Existing v2 JSON backup remains available for compatibility. Prefer v3 for full app-stack coverage.
           </p>
-        </div>
+        </div>}
 
         <hr className="border-stone-200 dark:border-stone-700" />
 
@@ -3770,26 +3734,6 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
           }`}>
             {fullRestoreStatus}
           </div>
-          {isSuperAdmin && (
-            <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
-              <label className="flex items-center gap-2 font-medium text-stone-900 dark:text-white">
-                <input
-                  type="checkbox"
-                  checked={restoreV3FlagStatus?.enabledInEnvFile === true}
-                  onChange={(event) => void handleRestoreV3FlagChange(event.target.checked)}
-                  disabled={restoreV3FlagBusy}
-                />
-                Enable V3 full restore
-              </label>
-              <p className="mt-2">
-                Saved: {restoreV3FlagStatus?.enabledInEnvFile ? "enabled" : "disabled"}.
-                Runtime: {restoreV3FlagStatus?.enabledInRuntime ? "enabled" : "disabled"}.
-              </p>
-              {restoreV3FlagStatus?.restartRequired && (
-                <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">Restart required for this setting to take effect.</p>
-              )}
-            </div>
-          )}
           <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
             <input
               aria-label="V3 restore archive"
@@ -3913,6 +3857,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
             )}
           </div>
 
+          {showDeprecatedV2Controls && <>
           <hr className="my-4 border-stone-200 dark:border-stone-700" />
           <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Legacy v2 JSON restore</h4>
           <div className="space-y-3">
@@ -4045,6 +3990,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
             Restoring deletes current data and replaces database rows, documents, and .env variables from the backup. Restart RISpro after restore.
           </p>
+          </>}
         </div>
       </div>
     </div>

@@ -14,13 +14,13 @@ import {
   runBackupV3DatabaseRestoreOnly,
 } from "../services/backup-v3-safety-service.js";
 import { restoreBackupV3FullService } from "../services/backup-v3-full-restore.js";
-import { getBackupV3RestoreFlagStatus, updateBackupV3RestoreFlag } from "../services/backup-v3-restore-flag-service.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
   testConfiguredStorageConnectivity,
 } from "../services/document-service.js";
 import { recordDiagnosticEvent } from "../services/system-diagnostics-service.js";
+import { logAuditEntry } from "../services/audit-service.js";
 
 export const adminRouter = express.Router();
 
@@ -29,13 +29,11 @@ adminRouter.use(requireAuth, requireSupervisor);
 adminRouter.get(
   "/restore/v3/status",
   asyncRoute(async (req: Request, res: Response) => {
-    const enabled = process.env.RESTORE_V3_FULL_ENABLED === "true";
+    const enabled = true;
     const dbOnlyEnabled = process.env.RESTORE_V3_DB_ONLY_ENABLED === "true";
     const recentReauthSatisfied = hasRecentSupervisorReauth(req);
     const userCanExecute = req.user?.role === "super_admin";
-    const disabledReason = !enabled
-      ? "V3 full restore is disabled by configuration."
-      : !userCanExecute
+    const disabledReason = !userCanExecute
         ? "V3 full restore requires super_admin."
         : !recentReauthSatisfied
           ? "Recent supervisor re-authentication is required."
@@ -55,28 +53,7 @@ adminRouter.get(
   })
 );
 
-adminRouter.get(
-  "/restore/v3/flag",
-  requireAnyRole(["super_admin"]),
-  asyncRoute(async (_req: Request, res: Response) => {
-    res.json(await getBackupV3RestoreFlagStatus());
-  })
-);
-
 adminRouter.use(requireRecentSupervisorReauth);
-
-adminRouter.post(
-  "/restore/v3/flag",
-  requireAnyRole(["super_admin"]),
-  express.json({ limit: "10kb" }),
-  asyncRoute(async (req: Request, res: Response) => {
-    const body = asUnknownRecord(req.body);
-    if (typeof body.enabled !== "boolean") {
-      throw new HttpError(400, "enabled must be boolean.");
-    }
-    res.json(await updateBackupV3RestoreFlag(body.enabled));
-  })
-);
 
 adminRouter.get(
   "/backup/v3",
@@ -96,10 +73,14 @@ adminRouter.get(
 
 adminRouter.get(
   "/backup",
+  // Deprecated compatibility route; remove after one release with zero audited use.
+  requireAnyRole(["super_admin"]),
   asyncRoute(async (req: Request, res: Response) => {
     const passphrase = req.header("x-backup-passphrase");
     const result = await buildBackupSnapshot(req.user!.sub, passphrase);
     res.setHeader("Content-Disposition", `attachment; filename="${result.backupName}"`);
+    await logAuditEntry({ entityType: "backup_v2", actionType: "deprecated_backup_downloaded", newValues: { deprecated: true }, changedByUserId: req.user!.sub });
+    recordDiagnosticEvent({ severity: "warning", source: "backup_restore", component: "backup_v2", operation: "deprecated_backup", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Deprecated V2 backup compatibility route was used." });
     res.json(result.backup);
   })
 );
@@ -156,9 +137,6 @@ adminRouter.post(
   "/restore/v3",
   requireAnyRole(["super_admin"]),
   asyncRoute(async (req: Request, res: Response) => {
-    if (process.env.RESTORE_V3_FULL_ENABLED !== "true") {
-      throw new HttpError(403, "V3 full restore is disabled by configuration.");
-    }
     recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "full_restore", operation: "started", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 full restore started." });
     const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-full-");
     try {
@@ -186,6 +164,7 @@ adminRouter.post(
 
 adminRouter.post(
   "/restore/preview",
+  requireAnyRole(["super_admin"]),
   express.json({ limit: "500mb" }),
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
@@ -196,10 +175,14 @@ adminRouter.post(
 
 adminRouter.post(
   "/restore",
+  // Deprecated compatibility route; preserve historical V2 restores temporarily.
+  requireAnyRole(["super_admin"]),
   express.json({ limit: "500mb" }),
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
     const result = await restoreBackupSnapshot(body.backup, req.user!.sub, body.passphrase, body.confirmation);
+    await logAuditEntry({ entityType: "backup_v2", actionType: "deprecated_restore_executed", newValues: { deprecated: true }, changedByUserId: req.user!.sub });
+    recordDiagnosticEvent({ severity: "warning", source: "backup_restore", component: "backup_v2", operation: "deprecated_restore", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Deprecated V2 restore compatibility route was used." });
     res.json(result);
   })
 );

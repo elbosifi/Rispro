@@ -51,12 +51,6 @@ const disabledFlag = {
   restartRequired: false,
 };
 
-const enabledFlagNeedsRestart = {
-  enabledInEnvFile: true,
-  enabledInRuntime: false,
-  restartRequired: true,
-};
-
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
@@ -88,19 +82,13 @@ describe("BackupRestoreSection v3 UI", () => {
     });
   });
 
-  it("downloads a v3 full app-stack backup without changing legacy v2 backup", async () => {
+  it("downloads a v3 full app-stack backup without rendering legacy v2 controls", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
       if (url === "/api/admin/backup/v3") {
         return new Response(new Blob(["zip"]), {
           status: 200,
           headers: { "Content-Disposition": 'attachment; filename="backup.rispro.zip"' },
-        });
-      }
-      if (url === "/api/admin/backup") {
-        return new Response(new Blob(["json"]), {
-          status: 200,
-          headers: { "Content-Disposition": 'attachment; filename="backup.json"' },
         });
       }
       return jsonResponse({}, 404);
@@ -112,9 +100,8 @@ describe("BackupRestoreSection v3 UI", () => {
     await userEvent.click(screen.getByRole("button", { name: /download v3 full app-stack backup/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/backup/v3", expect.any(Object)));
 
-    await userEvent.type(screen.getByPlaceholderText("Legacy v2 backup passphrase"), "legacy-passphrase");
-    await userEvent.click(screen.getByRole("button", { name: /download legacy v2 backup/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/backup", expect.any(Object)));
+    expect(screen.queryByText(/Legacy v2 JSON backup/i)).toBeNull();
+    expect(screen.queryByText(/Legacy v2 JSON restore/i)).toBeNull();
   });
 
   it("requires preview before restore execution and blocks preview errors", async () => {
@@ -173,47 +160,6 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/admin/restore/v3")).toBe(false);
   });
 
-  it("shows the v3 full restore flag toggle only for super_admin", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
-      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
-      return jsonResponse({}, 404);
-    }));
-
-    renderSection();
-    expect(await screen.findByLabelText("Enable V3 full restore")).toBeTruthy();
-
-    useAuthMock.mockReturnValue({
-      user: { id: 3, username: "sup", fullName: "Supervisor", role: "supervisor", recentSupervisorReauth: true },
-    });
-    cleanup();
-    renderSection();
-    expect(screen.queryByLabelText("Enable V3 full restore")).toBeNull();
-  });
-
-  it("updates the v3 full restore flag and shows restart required", async () => {
-    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/admin/restore/v3/status") return jsonResponse(disabledStatus);
-      if (url === "/api/admin/restore/v3/flag" && init?.method === "POST") return jsonResponse(enabledFlagNeedsRestart);
-      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
-      return jsonResponse({}, 404);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderSection();
-    await userEvent.click(await screen.findByLabelText("Enable V3 full restore"));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/restore/v3/flag",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ enabled: true }),
-      })
-    ));
-    expect(confirmMock).toHaveBeenCalled();
-    await waitFor(() => expect(screen.getAllByText("Restart required for this setting to take effect.").length).toBeGreaterThan(0));
-  });
 
   it("runs the automated destination controls through the guarded control-center API", async () => {
     const destination = { destination_id: "destination-1", name: "Primary local", destination_type: "local", enabled: true, credentialsConfigured: false, last_connection_status: null, last_failure_message: null };
@@ -366,35 +312,4 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(screen.queryByText(/postgresql:\/\/secret/i)).toBeNull();
   });
 
-  it("keeps legacy v2 restore preview and execution on JSON endpoints", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === "/api/admin/restore/v3/status") return jsonResponse(disabledStatus);
-      if (url === "/api/admin/restore/preview") {
-        return jsonResponse({
-          manifest: {
-            createdAt: "2026-05-27T12:00:00.000Z",
-            schemas: ["public"],
-            tableCounts: { users: 1 },
-            documents: { rows: 0, filesIncluded: 0, filesMissing: 0 },
-          },
-          tables: [{ name: "users", rows: 1 }],
-          documents: { rows: 0, filesIncluded: 0, filesMissing: 0 },
-          env: [],
-          warnings: [],
-        });
-      }
-      if (url === "/api/admin/restore") return jsonResponse({ envVarsRestored: 2 });
-      return jsonResponse({}, 404);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderSection();
-    await userEvent.upload(screen.getByLabelText("Legacy v2 restore file"), new File(['{"tables":{}}'], "backup.json", { type: "application/json" }));
-    await userEvent.type(screen.getByLabelText("Legacy v2 restore passphrase"), "legacy-passphrase");
-    await userEvent.click(screen.getByRole("button", { name: /validate backup/i }));
-    expect(await screen.findByText(/Backup validated/i)).toBeTruthy();
-    await userEvent.type(screen.getByPlaceholderText("Type RESTORE RISPRO"), "RESTORE RISPRO");
-    await userEvent.click(screen.getByRole("button", { name: /restore full system/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/restore", expect.any(Object)));
-  });
 });

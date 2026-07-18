@@ -113,7 +113,7 @@ export async function getDiagnosticsSummary() {
       (select row_to_json(verification) from (select status,completed_at,failure_message from backup_restore_verification_jobs order by created_at desc limit 1) verification) as latest_restore_verification,
       (select count(*)::int from backup_retention_actions where action='delete' and created_at > now()-interval '24 hours') as retention_deletes_24h,
       (select count(*)::int from backup_retention_actions where action='failed' and created_at > now()-interval '24 hours') as retention_failures_24h`);
-    return { v3RestoreEnabled: process.env.RESTORE_V3_FULL_ENABLED === "true", ...(rows[0] || {}) };
+    return { v3RestoreEnabled: true, ...(rows[0] || {}) };
   });
   const ohifViewer = await health("OHIF Viewer", async () => {
     const { rows } = await pool.query(`select settings.enabled,settings.selected_pacs_node_id,settings.access_strategy,

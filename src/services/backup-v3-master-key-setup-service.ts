@@ -4,6 +4,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { HttpError } from "../utils/http-error.js";
 import { getProjectRootDir } from "./document-storage-path.js";
+import { pool } from "../db/pool.js";
+import { decryptBackupV3SecretWithKey, validateBackupV3RecoveryKey } from "./backup-v3-secret-service.js";
 
 const MASTER_KEY_NAME = "BACKUP_V3_MASTER_KEY";
 const SETUP_TTL_MS = 30 * 60 * 1_000;
@@ -19,12 +21,29 @@ type PendingSetup = {
 const pendingSetups = new Map<string, PendingSetup>();
 
 export type BackupV3MasterKeyStatus = {
+  state: "fresh_setup_required" | "ready" | "restart_required" | "recovery_required" | "invalid_key" | "deliberate_reset_required";
   encryptionReady: boolean;
   setupRequired: boolean;
   restartRequired: boolean;
   setupAvailable: boolean;
   limitation?: string;
 };
+
+async function representativeEncryptedValue(): Promise<string | null> {
+  const { rows } = await pool.query<{ value: string | null }>(
+    `select encrypted_credentials as value from backup_destination_profiles where encrypted_credentials is not null
+     union all select encrypted_value as value from backup_control_secrets where encrypted_value is not null limit 1`
+  );
+  return rows[0]?.value || null;
+}
+
+export type BackupV3MasterKeyDependencies = {
+  representativeEncryptedValue?: () => Promise<string | null>;
+};
+
+async function loadRepresentativeEncryptedValue(dependencies: BackupV3MasterKeyDependencies): Promise<string | null> {
+  return (dependencies.representativeEncryptedValue || representativeEncryptedValue)();
+}
 
 function defaultEnvPath(): string {
   return path.join(getProjectRootDir(), ".env");
@@ -137,7 +156,7 @@ async function persistMasterKey(key: Buffer, envPath: string): Promise<void> {
   }
 }
 
-export async function getBackupV3MasterKeyStatus(envPath = defaultEnvPath()): Promise<BackupV3MasterKeyStatus> {
+export async function getBackupV3MasterKeyStatus(envPath = defaultEnvPath(), dependencies: BackupV3MasterKeyDependencies = {}): Promise<BackupV3MasterKeyStatus> {
   const runtime = configuredRuntimeKey();
   let envFile = false;
   let limitation: string | undefined;
@@ -146,24 +165,61 @@ export async function getBackupV3MasterKeyStatus(envPath = defaultEnvPath()): Pr
   } catch {
     limitation = "RISpro could not read its protected configuration file. Backup security setup cannot continue until the deployment configuration is accessible.";
   }
+  let encryptedValue: string | null = null;
+  let encryptedStateUnknown = false;
+  try { encryptedValue = await loadRepresentativeEncryptedValue(dependencies); }
+  catch {
+    encryptedStateUnknown = true;
+    limitation = "RISpro could not safely inspect existing encrypted backup credentials. Backup security setup is unavailable until the database is reachable.";
+  }
   if (!runtime && !envFile && !limitation) limitation = await setupLimitation(envPath);
+  const invalidKey = Boolean(runtime && encryptedValue && (() => { try { decryptBackupV3SecretWithKey(encryptedValue!, String(process.env[MASTER_KEY_NAME] || "")); return false; } catch { return true; } })());
+  const state = invalidKey ? "invalid_key"
+    : runtime ? "ready"
+      : envFile ? "restart_required"
+        : encryptedStateUnknown ? "recovery_required"
+        : encryptedValue ? "recovery_required"
+          : "fresh_setup_required";
   return {
-    encryptionReady: runtime,
-    setupRequired: !runtime && !envFile,
-    restartRequired: !runtime && envFile,
-    setupAvailable: !runtime && !envFile && !limitation,
+    state,
+    encryptionReady: runtime && !invalidKey,
+    setupRequired: state === "fresh_setup_required",
+    restartRequired: state === "restart_required",
+    setupAvailable: state === "fresh_setup_required" && !limitation,
     ...(limitation ? { limitation } : {}),
   };
 }
 
-export async function beginBackupV3MasterKeySetup(userId: string, envPath = defaultEnvPath()): Promise<{ setupId: string; createdAt: string; recoveryAvailable: true }> {
-  const status = await getBackupV3MasterKeyStatus(envPath);
-  if (status.encryptionReady || status.restartRequired) throw new HttpError(409, "Backup credential encryption is already configured and cannot be replaced through setup.");
+export async function beginBackupV3MasterKeySetup(userId: string, envPath = defaultEnvPath(), dependencies: BackupV3MasterKeyDependencies = {}): Promise<{ setupId: string; createdAt: string; recoveryAvailable: true }> {
+  const status = await getBackupV3MasterKeyStatus(envPath, dependencies);
+  if (status.state !== "fresh_setup_required") throw new HttpError(409, "This installation already contains encrypted backup credentials. Restore the original installation key. Generating a new key will not recover them.");
   if (!status.setupAvailable) throw new HttpError(503, status.limitation || "Backup security setup is unavailable in this deployment.");
   const setupId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   pendingSetups.set(setupId, { userId, key: crypto.randomBytes(32), createdAt, recoveryDownloaded: false, expiresAt: Date.now() + SETUP_TTL_MS });
   return { setupId, createdAt, recoveryAvailable: true };
+}
+
+/** Validates a historical recovery key against encrypted database values before persisting it. */
+export async function recoverBackupV3MasterKey(recoveryValue: string, envPath = defaultEnvPath(), dependencies: BackupV3MasterKeyDependencies = {}): Promise<{ restartRequired: true }> {
+  const key = validateBackupV3RecoveryKey(recoveryValue);
+  const encryptedValue = await loadRepresentativeEncryptedValue(dependencies);
+  if (!encryptedValue) throw new HttpError(409, "No encrypted backup credentials were found; use fresh installation key setup instead.");
+  try { decryptBackupV3SecretWithKey(encryptedValue, key); }
+  catch { throw new HttpError(409, "The supplied installation credential-encryption key cannot decrypt existing backup credentials."); }
+  const existing = await readEnvFile(envPath);
+  if (configuredEnvFileKey(existing) || configuredRuntimeKey()) throw new HttpError(409, "A configured installation key cannot be replaced through recovery. Use the deliberate reset workflow if recovery is impossible.");
+  const envDir = path.dirname(envPath);
+  await fs.mkdir(envDir, { recursive: true });
+  const safetyPath = path.join(envDir, `.env.backup-v3-recovery.${timestampForPath()}.bak`);
+  await writeSynced(safetyPath, existing, true);
+  const temporaryPath = path.join(envDir, `.env.backup-v3-recovery.${process.pid}.${Date.now()}.tmp`);
+  try {
+    await writeSynced(temporaryPath, replaceMasterKey(existing, key), true);
+    await fs.rename(temporaryPath, envPath);
+    await fsyncDirectory(envDir);
+  } catch (error) { await fs.rm(temporaryPath, { force: true }).catch(() => undefined); throw error; }
+  return { restartRequired: true };
 }
 
 export function consumeBackupV3MasterKeyRecovery(setupId: string, userId: string, installationIdentity = "RISpro installation"): string {

@@ -3,6 +3,14 @@
 v3 backup and restore preview support RISpro-generated stored ZIP archives only.
 Arbitrary compressed ZIP archives are rejected.
 
+Current V3 archives are ZIP64 archives, not fully encrypted archive containers.
+The managed configuration payload (`config/env.enc.json`) is passphrase-protected;
+database dumps, table JSON, storage, document, and manifest entries are stored as
+ordinary ZIP entries. Full authenticated archive encryption requires a versioned
+format, streaming authenticated encryption, a strong passphrase KDF,
+backward-compatible restore handling, and disaster-recovery testing; it is a
+separate security milestone.
+
 Restore preview validates ZIP entry metadata before writing any file to staging:
 path, prefix, entry type, compression method, duplicate status, per-file size, file count, and total uncompressed size are accepted first. Only then are entries extracted to a temporary staging directory.
 
@@ -21,9 +29,10 @@ available in app containers. If `pg_dump` is unavailable at runtime, RISpro fall
 back to a current v3 snapshot safety backup and records that fallback method in
 the safety metadata.
 
-`POST /api/admin/restore/v3` is implemented behind the release flag
-`RESTORE_V3_FULL_ENABLED=true`. The default is disabled and returns
-`V3 full restore is disabled by configuration.`
+`POST /api/admin/restore/v3` is available only to a recently re-authenticated
+`super_admin`, after a successful preview, an archive restore passphrase, and
+the exact `RESTORE RISPRO` confirmation. The experimental DB-only endpoint
+remains separately disabled unless `RESTORE_V3_DB_ONLY_ENABLED=true`.
 
 The DB-only endpoint is experimental. It is not a full RISpro restore because it
 does not replace app-owned storage, restore external documents, or write `.env`.
@@ -45,7 +54,7 @@ Run this only against disposable resources. Never point it at live RISpro data.
 2. Create a disposable app-owned storage root.
 3. Create a disposable allowlisted external document root.
 4. Create a disposable `.env` path.
-5. Start RISpro with `RESTORE_V3_FULL_ENABLED=true` and disposable config paths.
+5. Start RISpro with disposable restore-verification configuration paths.
 6. Generate a v3 backup from known fixture data.
 7. Mutate DB rows, app-owned storage files, external document files, and `.env`.
 8. Upload the backup to `POST /api/admin/restore/v3` with multipart fields:
@@ -94,7 +103,7 @@ docker run --rm rispro-restore-smoke pg_dump --version
 ```
 
 If Docker is unavailable on the validation machine, this remains a required
-deployment smoke before enabling `RESTORE_V3_FULL_ENABLED=true` in production.
+deployment smoke before production restore operations.
 
 ## Automated Backup V3 Control Center
 
@@ -272,6 +281,23 @@ unavailable, recover the application and database on isolated infrastructure,
 then use the existing full Restore V3 preview, exact confirmation, safety
 backup, and restart procedure. Do not point restore verification or recovery
 at production storage until the normal restore safeguards are satisfied.
+
+`BACKUP_V3_MASTER_KEY` is the installation credential-encryption key: it is
+created once per RISpro installation, not once per archive or update. Docker
+updates atomically merge deployment-owned configuration with the existing
+`.env`, preserve application-owned and unknown values, and retain a protected
+mode-0600 configuration safety copy outside the checkout. If an older update
+removed this key, restore the exact recovery value through the guarded Backup
+V3 recovery action, validate it against the encrypted credentials, then restart
+RISpro. Do not generate a replacement key: it cannot decrypt existing values.
+
+For pre-fix cleanup, first retain any local artifact needed for an auditable
+download, restore drill, or destination-copy retry. After that retention review,
+an administrator may remove stale files from `storage/backups/staging` and
+unreferenced failed artifacts from `storage/backups/artifacts`. On SMB shares,
+old-build failures can leave `*.partial` files; confirm that the matching final
+archive is absent or verified elsewhere before manually deleting those remote
+temporary files.
 
 ## Disposable Scheduled Restore Verification
 

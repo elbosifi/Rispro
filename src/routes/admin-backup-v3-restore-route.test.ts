@@ -15,18 +15,17 @@ async function combinedRestoreSource(): Promise<string> {
   ].join("\n");
 }
 
-test("v3 full restore endpoint is disabled by default and requires release flag", async () => {
+test("v3 full restore is guarded by authorization and does not require a release flag", async () => {
   const source = await combinedRestoreSource();
   assert.match(source, /"\/restore\/v3"/);
-  assert.match(source, /process\.env\.RESTORE_V3_FULL_ENABLED !== "true"/);
-  assert.match(source, /V3 full restore is disabled by configuration/);
+  assert.doesNotMatch(source, /RESTORE_V3_FULL_ENABLED/);
 });
 
 test("v3 restore status endpoint reports flags and capability without upload or mutation", async () => {
   const source = await adminRouteSource();
   assert.match(source, /"\/restore\/v3\/status"/);
   assert.match(source, /method: "GET"|adminRouter\.get\(/);
-  assert.match(source, /enabled = process\.env\.RESTORE_V3_FULL_ENABLED === "true"/);
+  assert.match(source, /const enabled = true/);
   assert.match(source, /dbOnlyEnabled = process\.env\.RESTORE_V3_DB_ONLY_ENABLED === "true"/);
   assert.match(source, /requiresSuperAdmin: true/);
   assert.match(source, /userCanExecute/);
@@ -38,20 +37,16 @@ test("v3 restore status endpoint reports flags and capability without upload or 
   assert.doesNotMatch(source.match(/"\/restore\/v3\/status"[\s\S]*?\n\);/)?.[0] || "", /stageBackupV3MultipartUpload|restoreBackupV3FullService|restoreBackupSnapshot/);
 });
 
-test("v3 restore status documents disabled, enabled, non-super_admin, and reauth states", async () => {
+test("v3 restore status documents super_admin and reauth states", async () => {
   const source = await adminRouteSource();
-  assert.match(source, /!enabled[\s\S]*V3 full restore is disabled by configuration/);
   assert.match(source, /!userCanExecute[\s\S]*requires super_admin/);
   assert.match(source, /!recentReauthSatisfied[\s\S]*Recent supervisor re-authentication is required/);
   assert.match(source, /req\.user\?\.role === "super_admin"/);
 });
 
-test("v3 full restore flag endpoints are super_admin-only and POST requires recent reauth", async () => {
+test("v3 full restore flag endpoints are absent", async () => {
   const source = await adminRouteSource();
-  assert.match(source, /"\/restore\/v3\/flag",\s*\n\s*requireAnyRole\(\["super_admin"\]\)/);
-  assert.match(source, /getBackupV3RestoreFlagStatus\(\)/);
-  assert.match(source, /adminRouter\.use\(requireRecentSupervisorReauth\)[\s\S]*"\/restore\/v3\/flag"[\s\S]*updateBackupV3RestoreFlag\(body\.enabled\)/);
-  assert.match(source, /typeof body\.enabled !== "boolean"/);
+  assert.doesNotMatch(source, /"\/restore\/v3\/flag"/);
 });
 
 test("v3 full restore endpoint requires super_admin, confirmation, passphrase, and archive upload", async () => {
@@ -67,7 +62,7 @@ test("v3 full restore endpoint calls orchestration only after gates and cleans s
   const source = await adminRouteSource();
   assert.match(
     source,
-    /RESTORE_V3_FULL_ENABLED[\s\S]*stageBackupV3MultipartUpload[\s\S]*requireBackupV3RestoreConfirmation[\s\S]*Backup passphrase is required[\s\S]*restoreBackupV3FullService/
+    /"\/restore\/v3"[\s\S]*requireAnyRole\(\["super_admin"\]\)[\s\S]*stageBackupV3MultipartUpload[\s\S]*requireBackupV3RestoreConfirmation[\s\S]*Backup passphrase is required[\s\S]*restoreBackupV3FullService/
   );
   assert.match(source, /cleanupBackupV3StagedUpload\(staged\)/);
 });
@@ -87,8 +82,9 @@ test("db-only endpoint remains experimental and disabled unless explicitly flagg
   assert.match(source, /restoreIncomplete: true/);
 });
 
-test("v2 restore behavior remains unchanged", async () => {
+test("deprecated v2 restore remains guarded for compatibility", async () => {
   const source = await adminRouteSource();
-  assert.match(source, /"\/restore",\s*\n\s*express\.json\(\{ limit: "500mb" \}\)/);
+  assert.match(source, /"\/restore",[\s\S]*requireAnyRole\(\["super_admin"\]\)[\s\S]*express\.json\(\{ limit: "500mb" \}\)/);
   assert.match(source, /restoreBackupSnapshot\(body\.backup, req\.user!\.sub, body\.passphrase, body\.confirmation\)/);
+  assert.match(source, /deprecated_restore_executed/);
 });

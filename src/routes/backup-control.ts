@@ -22,7 +22,7 @@ import {
 } from "../services/backup-v3-control-center-service.js";
 import { listBackupV3RestoreVerifications, queueManualBackupV3RestoreVerification, retryFailedBackupV3RestoreVerification } from "../services/backup-v3-restore-verification-queue-service.js";
 import { executeBackupV3Retention, previewLocalBackupV3Retention } from "../services/backup-v3-retention-service.js";
-import { beginBackupV3MasterKeySetup, confirmBackupV3MasterKeySetup, consumeBackupV3MasterKeyRecovery } from "../services/backup-v3-master-key-setup-service.js";
+import { beginBackupV3MasterKeySetup, confirmBackupV3MasterKeySetup, consumeBackupV3MasterKeyRecovery, recoverBackupV3MasterKey } from "../services/backup-v3-master-key-setup-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import { recordDiagnosticEvent } from "../services/system-diagnostics-service.js";
 
@@ -116,6 +116,19 @@ backupControlRouter.post(
       recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "backup_master_key", operation: "setup_save_failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup security setup could not be saved." });
       throw error;
     }
+  })
+);
+
+backupControlRouter.post(
+  "/encryption-recovery",
+  express.json({ limit: "10kb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const recoveryValue = typeof body.recoveryValue === "string" ? body.recoveryValue : "";
+    const result = await recoverBackupV3MasterKey(recoveryValue);
+    await logAuditEntry({ entityType: "backup_configuration", actionType: "backup_master_key_recovered", newValues: { outcome: "validated", restartRequired: true }, changedByUserId: req.user!.sub });
+    recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "backup_master_key", operation: "recovered", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup installation credential-encryption key recovery was validated and saved." });
+    res.json(result);
   })
 );
 
