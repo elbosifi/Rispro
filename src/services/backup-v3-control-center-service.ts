@@ -531,7 +531,7 @@ export async function recordBackupWorkerHeartbeat(instanceId: string, failureMes
 export async function listBackupJobs(limit = 50) {
   const { rows } = await pool.query(
     `select job.*, artifact.artifact_id, artifact.created_at as artifact_created_at,
-       coalesce(json_agg(json_build_object('destinationId',copy.destination_id,'status',copy.status,'remotePath',copy.remote_path,'failureMessage',copy.failure_message)) filter (where copy.copy_attempt_id is not null), '[]'::json) as destination_copies
+       coalesce(json_agg(json_build_object('destinationId',copy.destination_id,'copyAttemptId',copy.copy_attempt_id,'status',copy.status,'remotePath',copy.remote_path,'failureMessage',copy.failure_message)) filter (where copy.copy_attempt_id is not null), '[]'::json) as destination_copies
      from backup_jobs job left join backup_artifacts artifact on artifact.artifact_id=coalesce(job.reused_artifact_id,(select source.artifact_id from backup_artifacts source where source.job_id=job.job_id)) left join backup_destination_copy_attempts copy on copy.job_id=job.job_id
      group by job.job_id,artifact.artifact_id order by job.created_at desc limit $1`,
     [Math.max(1, Math.min(limit, 200))]

@@ -24,7 +24,7 @@ test("Backup V3 key setup reports missing encryption, preserves env values, and 
   const { dir, envPath } = await tempEnv();
   try {
     await fs.writeFile(envPath, "NODE_ENV=production\nUNRELATED_VALUE=keep-me\n", "utf8");
-    const noSecrets = { representativeEncryptedValue: async () => null };
+    const noSecrets = { representativeEncryptedValue: async () => null, configBackupDir: () => path.join(dir, "config-backups") };
     const initial = await getBackupV3MasterKeyStatus(envPath, noSecrets);
     assert.deepEqual(initial, { state: "fresh_setup_required", encryptionReady: false, setupRequired: true, restartRequired: false, setupAvailable: true });
 
@@ -44,7 +44,8 @@ test("Backup V3 key setup reports missing encryption, preserves env values, and 
     assert.match(content, /^UNRELATED_VALUE=keep-me$/m);
     assert.match(content, /^BACKUP_V3_MASTER_KEY=[A-Za-z0-9_-]{43}$/m);
     const entries = await fs.readdir(dir);
-    assert.ok(entries.some((entry) => entry.startsWith(".env.backup-v3-master-key.") && entry.endsWith(".bak")));
+    const externalBackupDir = path.join(dir, "config-backups");
+    assert.ok((await fs.readdir(externalBackupDir)).some((entry) => entry.startsWith("env.") && entry.endsWith(".bak")));
     assert.equal(entries.some((entry) => entry.endsWith(".tmp")), false);
     assert.deepEqual(await getBackupV3MasterKeyStatus(envPath, noSecrets), { state: "restart_required", encryptionReady: false, setupRequired: false, restartRequired: true, setupAvailable: false });
   } finally {
@@ -59,7 +60,7 @@ test("Backup V3 key setup refuses confirmation before recovery and never replace
   delete process.env.BACKUP_V3_MASTER_KEY;
   const { dir, envPath } = await tempEnv();
   try {
-    const noSecrets = { representativeEncryptedValue: async () => null };
+    const noSecrets = { representativeEncryptedValue: async () => null, configBackupDir: () => path.join(dir, "config-backups") };
     const started = await beginBackupV3MasterKeySetup("super-admin-1", envPath, noSecrets);
     await assert.rejects(() => confirmBackupV3MasterKeySetup(started.setupId, "super-admin-1", envPath), /Download and save/);
     consumeBackupV3MasterKeyRecovery(started.setupId, "super-admin-1");
@@ -76,7 +77,8 @@ test("Backup V3 setup implementation uses cryptographic random generation and at
   const source = await fs.readFile(path.join(process.cwd(), "src/services/backup-v3-master-key-setup-service.ts"), "utf8");
   assert.match(source, /crypto\.randomBytes\(32\)/);
   assert.match(source, /await fs\.rename\(temporaryPath, envPath\)/);
-  assert.match(source, /await writeSynced\(safetyPath, existing, true\)/);
+  assert.match(source, /await protectedConfigBackup\(existing, envPath, dependencies\)/);
+  assert.match(source, /await fs\.chmod\(backupDir, 0o700\)/);
 });
 
 test("Backup V3 recovery validates a historical key before saving and rejects an incorrect key", async () => {
@@ -89,10 +91,40 @@ test("Backup V3 recovery validates a historical key before saving and rejects an
   const encrypted = Buffer.concat([cipher.update("credential", "utf8"), cipher.final()]);
   const payload = `v1:${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${encrypted.toString("base64")}`;
   try {
-    await assert.rejects(() => recoverBackupV3MasterKey(crypto.randomBytes(32).toString("base64url"), envPath, { representativeEncryptedValue: async () => payload }), /cannot decrypt/);
-    await recoverBackupV3MasterKey(`BACKUP_V3_MASTER_KEY=${correctKey}`, envPath, { representativeEncryptedValue: async () => payload });
+    const dependencies = { representativeEncryptedValue: async () => payload, configBackupDir: () => path.join(dir, "config-backups") };
+    await assert.rejects(() => recoverBackupV3MasterKey(crypto.randomBytes(32).toString("base64url"), envPath, dependencies), /cannot decrypt/);
+    await recoverBackupV3MasterKey(`BACKUP_V3_MASTER_KEY=${correctKey}`, envPath, dependencies);
     const content = await fs.readFile(envPath, "utf8");
     assert.match(content, new RegExp(`^BACKUP_V3_MASTER_KEY=${correctKey}$`, "m"));
+  } finally {
+    if (original === undefined) delete process.env.BACKUP_V3_MASTER_KEY;
+    else process.env.BACKUP_V3_MASTER_KEY = original;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Backup V3 key status requires a matching runtime/env key and a complete decrypt audit", async () => {
+  const original = process.env.BACKUP_V3_MASTER_KEY;
+  const { dir, envPath } = await tempEnv();
+  const key = crypto.randomBytes(32).toString("base64url");
+  const otherKey = crypto.randomBytes(32).toString("base64url");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", backupV3MasterKeyMaterial(key), iv);
+  const encrypted = Buffer.concat([cipher.update("credential", "utf8"), cipher.final()]);
+  const payload = `v1:${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${encrypted.toString("base64")}`;
+  try {
+    process.env.BACKUP_V3_MASTER_KEY = key;
+    const rows = [{ source: "destination" as const, id: "one", value: payload }, { source: "control_secret" as const, id: "two", value: payload }];
+    assert.equal((await getBackupV3MasterKeyStatus(envPath, { encryptedValues: async () => rows })).state, "runtime_key_persistence_required");
+    await fs.writeFile(envPath, `BACKUP_V3_MASTER_KEY=${key}\n`);
+    assert.equal((await getBackupV3MasterKeyStatus(envPath, { encryptedValues: async () => rows })).state, "ready");
+    await fs.writeFile(envPath, `BACKUP_V3_MASTER_KEY=${otherKey}\n`);
+    assert.equal((await getBackupV3MasterKeyStatus(envPath, { encryptedValues: async () => rows })).state, "recovery_required");
+    await fs.writeFile(envPath, `BACKUP_V3_MASTER_KEY=${key}\n`);
+    assert.equal((await getBackupV3MasterKeyStatus(envPath, { encryptedValues: async () => [...rows, { source: "control_secret" as const, id: "bad", value: "v1:bad" }] })).state, "invalid_key");
+    assert.equal((await getBackupV3MasterKeyStatus(envPath, { encryptedValues: async () => { throw new Error("unavailable"); } })).state, "validation_unavailable");
+    delete process.env.BACKUP_V3_MASTER_KEY;
+    assert.equal((await getBackupV3MasterKeyStatus(envPath, { encryptedValues: async () => rows })).state, "restart_required");
   } finally {
     if (original === undefined) delete process.env.BACKUP_V3_MASTER_KEY;
     else process.env.BACKUP_V3_MASTER_KEY = original;

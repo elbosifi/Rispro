@@ -2641,7 +2641,7 @@ type BackupControlJob = {
   archive_size_bytes: string | number | null;
   failure_message: string | null;
   source_schedule_id?: string | null;
-  destination_copies?: Array<{ destinationId: string; status: string; remotePath?: string | null; failureMessage?: string | null }>;
+  destination_copies?: Array<{ destinationId: string; copyAttemptId?: string; status: string; remotePath?: string | null; failureMessage?: string | null }>;
 };
 
 type BackupControlSummary = {
@@ -2660,7 +2660,7 @@ type BackupControlSummary = {
   next_schedule?: { name?: string; next_run_at?: string | null } | null;
   worker?: { heartbeat_at?: string | null; last_failure_message?: string | null } | null;
   encryption?: {
-    state?: "fresh_setup_required" | "ready" | "restart_required" | "recovery_required" | "invalid_key" | "deliberate_reset_required";
+    state?: "fresh_setup_required" | "ready" | "restart_required" | "runtime_key_persistence_required" | "recovery_required" | "invalid_key" | "validation_unavailable" | "deliberate_reset_required";
     encryptionReady: boolean;
     setupRequired: boolean;
     restartRequired: boolean;
@@ -2692,6 +2692,10 @@ type BackupControlRestoreVerification = {
   status: string;
   completed_at: string | null;
   failure_message: string | null;
+  destination_name?: string | null;
+  destination_type?: string | null;
+  remote_path?: string | null;
+  retrieval?: { fallbackToLocal?: boolean; retrievedSha256?: string; retrievedByteSize?: number; cleanupStatus?: string; restoreDrillStatus?: string };
 };
 
 const RESTORE_CONFIRMATION_TEXT = "RESTORE RISPRO";
@@ -3008,7 +3012,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     if (!backupKeySetupId) return;
     setBackupControlBusy(true);
     try {
-      const response = await fetch(`/api/backup-control/encryption-setup/${backupKeySetupId}/recovery`, { credentials: "include" });
+      const response = await fetch(`/api/backup-control/encryption-setup/${backupKeySetupId}/recovery`, { method: "POST", credentials: "include" });
       if (!response.ok) throw new Error(await parseErrorMessage(response));
       const link = document.createElement("a");
       link.href = URL.createObjectURL(await response.blob());
@@ -3162,7 +3166,9 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       onReAuthRequired(["backup-control", "restore-verification"]);
       return;
     }
-    await runBackupControlAction(`/api/backup-control/jobs/${job.job_id}/verify`, { method: "POST" }, "Restore verification queued against disposable resources.");
+    const copyAttemptId = job.destination_copies?.find((copy) => copy.status === "verified")?.copyAttemptId;
+    if (!copyAttemptId) { setBackupControlMessage({ type: "error", text: "Select a verified destination copy before running restore verification." }); return; }
+    await runBackupControlAction(`/api/backup-control/jobs/${job.job_id}/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ copyAttemptId }) }, "Restore verification queued against the selected destination copy.");
   };
 
   const previewAutomatedRetention = async (destination: BackupControlDestination) => {

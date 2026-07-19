@@ -8,7 +8,11 @@ test("Backup V3 master-key setup remains super_admin and recent-reauth protected
   assert.match(source, /backupControlRouter\.use\(requireAnyRole\(\["super_admin"\]\), requireRecentSupervisorReauth\);/);
   assert.match(source, /"\/encryption-setup"/);
   assert.match(source, /"\/encryption-setup\/:setupId\/recovery"/);
+  assert.match(source, /backupControlRouter\.post\(\s*"\/encryption-setup\/:setupId\/recovery"/);
+  assert.match(source, /Cache-Control": "no-store, private, max-age=0"/);
   assert.match(source, /"\/encryption-setup\/:setupId\/confirm"/);
+  assert.match(source, /"\/encryption-deliberate-reset"/);
+  assert.match(source, /DISCARD BACKUP CREDENTIALS/);
   assert.match(source, /backup_master_key_initialized/);
   assert.doesNotMatch(source, /res\.(?:json|status\([^)]*\)\.json)\([^\n]*key/i);
 });

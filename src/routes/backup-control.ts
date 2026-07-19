@@ -22,9 +22,10 @@ import {
 } from "../services/backup-v3-control-center-service.js";
 import { listBackupV3RestoreVerifications, queueManualBackupV3RestoreVerification, retryFailedBackupV3RestoreVerification } from "../services/backup-v3-restore-verification-queue-service.js";
 import { executeBackupV3Retention, previewLocalBackupV3Retention } from "../services/backup-v3-retention-service.js";
-import { beginBackupV3MasterKeySetup, confirmBackupV3MasterKeySetup, consumeBackupV3MasterKeyRecovery, recoverBackupV3MasterKey } from "../services/backup-v3-master-key-setup-service.js";
+import { beginBackupV3MasterKeySetup, confirmBackupV3MasterKeySetup, consumeBackupV3MasterKeyRecovery, deliberatelyResetBackupV3MasterKey, recoverBackupV3MasterKey } from "../services/backup-v3-master-key-setup-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import { recordDiagnosticEvent } from "../services/system-diagnostics-service.js";
+import { HttpError } from "../utils/http-error.js";
 
 /** Routine backup operations are deliberately separate from destructive restore controls. */
 export const backupControlRouter = express.Router();
@@ -93,11 +94,12 @@ backupControlRouter.post(
   })
 );
 
-backupControlRouter.get(
+backupControlRouter.post(
   "/encryption-setup/:setupId/recovery",
   asyncRoute(async (req: Request, res: Response) => {
     const setupId = Array.isArray(req.params.setupId) ? req.params.setupId[0] || "" : req.params.setupId || "";
     const recovery = consumeBackupV3MasterKeyRecovery(setupId, String(req.user!.sub));
+    res.set({ "Cache-Control": "no-store, private, max-age=0", Pragma: "no-cache", Expires: "0", "X-Content-Type-Options": "nosniff" });
     res.type("text/plain").attachment("rispro-backup-v3-encryption-key-recovery.txt").send(recovery);
   })
 );
@@ -133,6 +135,26 @@ backupControlRouter.post(
 );
 
 backupControlRouter.post(
+  "/encryption-deliberate-reset",
+  express.json({ limit: "10kb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    if (body.confirmation !== "DISCARD BACKUP CREDENTIALS") {
+      throw new HttpError(400, "Type DISCARD BACKUP CREDENTIALS to discard all saved backup destination credentials and automated backup passphrases.");
+    }
+    try {
+      const result = await deliberatelyResetBackupV3MasterKey();
+      await logAuditEntry({ entityType: "backup_configuration", actionType: "backup_master_key_deliberately_reset", newValues: { outcome: "credentials_discarded", restartRequired: true }, changedByUserId: req.user!.sub });
+      recordDiagnosticEvent({ severity: "warning", source: "backup_restore", component: "backup_master_key", operation: "deliberate_reset", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "Backup credential encryption was deliberately reset; encrypted credentials were discarded.", metadata: { restartRequired: true } });
+      res.json(result);
+    } catch (error) {
+      await logAuditEntry({ entityType: "backup_configuration", actionType: "backup_master_key_deliberate_reset_failed", newValues: { outcome: "failed" }, changedByUserId: req.user!.sub }).catch(() => undefined);
+      throw error;
+    }
+  })
+);
+
+backupControlRouter.post(
   "/destinations",
   express.json({ limit: "100kb" }),
   asyncRoute(async (req: Request, res: Response) => {
@@ -162,9 +184,11 @@ backupControlRouter.delete(
 
 backupControlRouter.post(
   "/jobs/:jobId/verify",
+  express.json({ limit: "10kb" }),
   asyncRoute(async (req: Request, res: Response) => {
     const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] || "" : req.params.jobId || "";
-    res.status(202).json({ restoreVerificationJobId: await queueManualBackupV3RestoreVerification(jobId, req.user!.sub) });
+    const body = asUnknownRecord(req.body);
+    res.status(202).json({ restoreVerificationJobId: await queueManualBackupV3RestoreVerification(jobId, req.user!.sub, typeof body.copyAttemptId === "string" ? body.copyAttemptId : undefined) });
   })
 );
 

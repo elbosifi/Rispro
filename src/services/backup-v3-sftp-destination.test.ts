@@ -18,8 +18,11 @@ function fakeSftp(): { factory: BackupV3SftpClientFactory; files: Map<string, Bu
   const client: BackupV3SftpClient = {
     async connect(value) { options = value; const verifier = value.hostVerifier as ((key: Buffer) => boolean) | undefined; assert.equal(verifier?.(hostKey), true); },
     async mkdir() { return "created"; },
-    async put(input, remotePath) { files.set(remotePath, Buffer.isBuffer(input) ? input : await fs.readFile(input)); return "uploaded"; },
-    async get(remotePath) { return files.get(remotePath) || Buffer.alloc(0); },
+    async put(input, remotePath) {
+      const content = Buffer.isBuffer(input) ? input : typeof input === "string" ? await fs.readFile(input) : Buffer.concat(await (async () => { const chunks: Buffer[] = []; for await (const chunk of input) chunks.push(Buffer.from(chunk)); return chunks; })());
+      files.set(remotePath, content); return "uploaded";
+    },
+    async get(remotePath, destination) { const content = files.get(remotePath) || Buffer.alloc(0); if (destination) { destination.end(content); return destination; } return content; },
     async rename(from, to) { const content = files.get(from); if (!content) throw new Error("missing"); files.delete(from); files.set(to, content); return "renamed"; },
     async posixRename(from, to) { return this.rename(from, to); },
     async delete(remotePath) { files.delete(remotePath); return "deleted"; },

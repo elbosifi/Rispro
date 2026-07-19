@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import test from "node:test";
 import { sha256File } from "./backup-v3-checksums.js";
 import { copyBackupV3ToWebDavDestination, deleteBackupV3WebDavDestinationCopy, testBackupV3WebDavDestination, validateBackupV3WebDavConfig } from "./backup-v3-webdav-destination.js";
@@ -16,7 +17,9 @@ function inMemoryWebDav(options: { corruptReadBack?: boolean } = {}) {
     if (method === "MKCOL") return new Response(null, { status: 201 });
     if (method === "PUT") {
       const body = init?.body;
-      const content = Buffer.isBuffer(body) ? body : Buffer.from(body instanceof Uint8Array ? body : String(body || ""));
+      const content = Buffer.isBuffer(body) ? body : body && typeof (body as ReadableStream).getReader === "function"
+        ? Buffer.concat(await (async () => { const chunks: Buffer[] = []; for await (const chunk of Readable.fromWeb(body as never)) chunks.push(Buffer.from(chunk)); return chunks; })())
+        : Buffer.from(body instanceof Uint8Array ? body : String(body || ""));
       files.set(url, content);
       return new Response(null, { status: 201 });
     }
@@ -65,7 +68,7 @@ test("Nextcloud WebDAV rejects changed read-back data and cleans the temporary u
   const digest = await sha256File(source);
   const remote = inMemoryWebDav({ corruptReadBack: true });
   try {
-    await assert.rejects(() => copyBackupV3ToWebDavDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { appPassword: "app-password" }, fetcher: remote.fetcher }), /verification failed/);
+    await assert.rejects(() => copyBackupV3ToWebDavDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { appPassword: "app-password" }, fetcher: remote.fetcher }), /checksum or size/);
     assert.equal(remote.files.size, 0);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

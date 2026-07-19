@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import path from "node:path";
+import { Readable } from "node:stream";
 import { HttpError } from "../utils/http-error.js";
-import { sha256Buffer } from "./backup-v3-checksums.js";
+import { sha256File } from "./backup-v3-checksums.js";
+import { stageBackupV3RetrievedStream, type BackupV3RetrievedCopy } from "./backup-v3-retrieval.js";
 
 export interface BackupV3WebDavConfig {
   serverUrl: string;
@@ -57,8 +60,8 @@ function authorization(config: BackupV3WebDavConfig, credentials: BackupV3WebDav
   return `Basic ${Buffer.from(`${config.username}:${credentials.appPassword}`, "utf8").toString("base64")}`;
 }
 
-async function request(fetcher: BackupV3Fetch, url: URL, method: string, authorizationHeader: string, options: RequestInit = {}): Promise<Response> {
-  return fetcher(url, { ...options, method, headers: { Authorization: authorizationHeader, ...(options.headers || {}) } });
+async function request(fetcher: BackupV3Fetch, url: URL, method: string, authorizationHeader: string, options: RequestInit & { duplex?: "half" } = {}): Promise<Response> {
+  return fetcher(url, { ...options, method, headers: { Authorization: authorizationHeader, ...(options.headers || {}) } } as RequestInit);
 }
 
 async function ensureDirectory(fetcher: BackupV3Fetch, config: BackupV3WebDavConfig, auth: string): Promise<void> {
@@ -100,21 +103,35 @@ export async function copyBackupV3ToWebDavDestination(input: {
   const temporaryUrl = webDavUrl(config, [...directory, temporaryName]);
   const finalUrl = webDavUrl(config, [...directory, input.archiveName]);
   try {
-    const content = await fs.readFile(input.sourcePath);
-    if (content.byteLength !== input.expectedByteSize || sha256Buffer(content) !== input.expectedSha256) throw new HttpError(500, "Local backup archive changed before upload.");
-    const put = await request(fetcher, temporaryUrl, "PUT", auth, { body: content, headers: { "Content-Type": "application/octet-stream" } });
+    const content = await sha256File(input.sourcePath);
+    if (content.byteSize !== input.expectedByteSize || content.sha256 !== input.expectedSha256) throw new HttpError(500, "Local backup archive changed before upload.");
+    const put = await request(fetcher, temporaryUrl, "PUT", auth, { body: Readable.toWeb(fs.createReadStream(input.sourcePath)) as BodyInit, duplex: "half", headers: { "Content-Type": "application/octet-stream" } });
     acceptable(put.status, [201, 204]);
     const readBack = await request(fetcher, temporaryUrl, "GET", auth);
     acceptable(readBack.status, [200]);
-    const readBackContent = Buffer.from(await readBack.arrayBuffer());
-    if (readBackContent.byteLength !== input.expectedByteSize || sha256Buffer(readBackContent) !== input.expectedSha256) throw new HttpError(500, "Nextcloud upload verification failed.");
+    if (!readBack.body) throw new HttpError(502, "Nextcloud upload verification did not return a readable stream.");
+    const readBackPath = `${input.sourcePath}.${crypto.randomUUID()}.webdav-readback`;
+    const staged = await stageBackupV3RetrievedStream({ source: Readable.fromWeb(readBack.body as never), stagingDir: path.dirname(readBackPath), archiveName: path.basename(readBackPath).replace(/[^A-Za-z0-9._-]/g, "-") + ".rispro.zip", expectedByteSize: input.expectedByteSize, expectedSha256: input.expectedSha256, maximumByteSize: input.expectedByteSize });
+    await fs.promises.rm(staged.stagingPath, { force: true });
     const move = await request(fetcher, temporaryUrl, "MOVE", auth, { headers: { Destination: finalUrl.toString(), Overwrite: "F" } });
     acceptable(move.status, [201, 204]);
-    return { remotePath: finalUrl.pathname, byteSize: readBackContent.byteLength, sha256: sha256Buffer(readBackContent) };
+    return { remotePath: finalUrl.pathname, byteSize: content.byteSize, sha256: content.sha256 };
   } catch (error) {
     await request(fetcher, temporaryUrl, "DELETE", auth).catch(() => undefined);
     throw error;
   }
+}
+
+export async function retrieveBackupV3FromWebDavDestination(input: { remotePath: string; archiveName: string; expectedSha256: string; expectedByteSize: number; maximumByteSize: number; stagingDir: string; config: unknown; credentials: BackupV3WebDavCredentials; fetcher?: BackupV3Fetch }): Promise<BackupV3RetrievedCopy> {
+  const config = validateBackupV3WebDavConfig(input.config);
+  const name = input.remotePath.split("/").filter(Boolean).pop() || "";
+  if (name !== input.archiveName || !/^[A-Za-z0-9._-]+\.rispro\.zip$/.test(name)) throw new HttpError(400, "Remote backup archive path is unsafe.");
+  const target = webDavUrl(config, [...safeRemoteSegments(config.remoteDirectory, "Nextcloud remote directory"), name]);
+  if (target.pathname !== input.remotePath) throw new HttpError(400, "Remote backup archive path is unsafe.");
+  const response = await request(input.fetcher || fetch, target, "GET", authorization(config, input.credentials));
+  acceptable(response.status, [200]);
+  if (!response.body) throw new HttpError(502, "Nextcloud destination did not return a readable archive stream.");
+  return stageBackupV3RetrievedStream({ source: Readable.fromWeb(response.body as never), stagingDir: input.stagingDir, archiveName: input.archiveName, expectedByteSize: input.expectedByteSize, expectedSha256: input.expectedSha256, maximumByteSize: input.maximumByteSize });
 }
 
 /** Deletes only a RISpro archive name under the configured WebDAV directory. */

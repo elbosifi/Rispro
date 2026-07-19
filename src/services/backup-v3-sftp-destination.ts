@@ -1,8 +1,13 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { PassThrough, type Readable } from "node:stream";
 import SftpClient from "ssh2-sftp-client";
 import { HttpError } from "../utils/http-error.js";
-import { sha256Buffer } from "./backup-v3-checksums.js";
+import { sha256File } from "./backup-v3-checksums.js";
+import { cleanupBackupV3RetrievedCopy, stageBackupV3RetrievedStream, type BackupV3RetrievedCopy } from "./backup-v3-retrieval.js";
 
 export interface BackupV3SftpConfig {
   host: string;
@@ -23,8 +28,8 @@ export interface BackupV3SftpCredentials {
 export interface BackupV3SftpClient {
   connect(options: Parameters<SftpClient["connect"]>[0]): Promise<unknown>;
   mkdir(remoteFilePath: string, recursive?: boolean): Promise<string>;
-  put(input: string | Buffer, remoteFilePath: string): Promise<string>;
-  get(remoteFilePath: string): Promise<string | NodeJS.WritableStream | Buffer>;
+  put(input: string | NodeJS.ReadableStream | Buffer, remoteFilePath: string): Promise<string>;
+  get(remoteFilePath: string, destination?: NodeJS.WritableStream): Promise<string | NodeJS.WritableStream | Buffer>;
   rename(remoteSourcePath: string, remoteDestPath: string): Promise<string>;
   posixRename(remoteSourcePath: string, remoteDestPath: string): Promise<string>;
   delete(remoteFilePath: string, noErrorOK?: boolean): Promise<string>;
@@ -100,8 +105,9 @@ export async function testBackupV3SftpDestination(config: unknown, credentials: 
     await client.mkdir(parsed.remoteDirectory, true);
     const testPath = safeRemoteFile(parsed.remoteDirectory, `.rispro-write-test-${crypto.randomUUID()}`);
     await client.put(Buffer.from("RISpro backup destination test"), testPath);
-    const content = await client.get(testPath);
-    if (!Buffer.isBuffer(content)) throw new HttpError(502, "SFTP destination did not return a readable test file.");
+    const sink = new PassThrough(); let byteSize = 0; sink.on("data", (chunk: Buffer) => { byteSize += chunk.length; });
+    await client.get(testPath, sink);
+    if (!byteSize) throw new HttpError(502, "SFTP destination did not return a readable test file.");
     await client.delete(testPath, true);
   }, factory);
 }
@@ -116,21 +122,37 @@ export async function copyBackupV3ToSftpDestination(input: {
   factory?: BackupV3SftpClientFactory;
 }): Promise<{ remotePath: string; byteSize: number; sha256: string }> {
   return withSftp(input.config, input.credentials, async (client, config) => {
-    const archive = await fs.readFile(input.sourcePath);
-    if (archive.byteLength !== input.expectedByteSize || sha256Buffer(archive) !== input.expectedSha256) throw new HttpError(500, "Local backup archive changed before upload.");
+    const archive = await sha256File(input.sourcePath);
+    if (archive.byteSize !== input.expectedByteSize || archive.sha256 !== input.expectedSha256) throw new HttpError(500, "Local backup archive changed before upload.");
     await client.mkdir(config.remoteDirectory, true);
     const finalPath = safeRemoteFile(config.remoteDirectory, input.archiveName);
     const temporaryPath = safeRemoteFile(config.remoteDirectory, `.${input.archiveName}.${crypto.randomUUID()}.partial`);
     try {
-      await client.put(archive, temporaryPath);
-      const readBack = await client.get(temporaryPath);
-      if (!Buffer.isBuffer(readBack) || readBack.byteLength !== input.expectedByteSize || sha256Buffer(readBack) !== input.expectedSha256) throw new HttpError(500, "SFTP upload verification failed.");
+      await client.put(fs.createReadStream(input.sourcePath), temporaryPath);
+      const stagingDir = await fsp.mkdtemp(path.join(os.tmpdir(), "rispro-backup-sftp-readback-"));
+      const destination = new PassThrough();
+      const staged = stageBackupV3RetrievedStream({ source: destination, stagingDir, archiveName: input.archiveName, expectedByteSize: input.expectedByteSize, expectedSha256: input.expectedSha256, maximumByteSize: input.expectedByteSize });
+      await client.get(temporaryPath, destination);
+      const readBack = await staged;
       await client.posixRename(temporaryPath, finalPath).catch(() => client.rename(temporaryPath, finalPath));
-      return { remotePath: finalPath, byteSize: readBack.byteLength, sha256: sha256Buffer(readBack) };
+      await cleanupBackupV3RetrievedCopy(stagingDir);
+      return { remotePath: finalPath, byteSize: readBack.byteSize, sha256: readBack.sha256 };
     } catch (error) {
       await client.delete(temporaryPath, true).catch(() => undefined);
       throw error;
     }
+  }, input.factory);
+}
+
+export async function retrieveBackupV3FromSftpDestination(input: { remotePath: string; archiveName: string; expectedSha256: string; expectedByteSize: number; maximumByteSize: number; stagingDir: string; config: unknown; credentials: BackupV3SftpCredentials; factory?: BackupV3SftpClientFactory }): Promise<BackupV3RetrievedCopy> {
+  return withSftp(input.config, input.credentials, async (client, config) => {
+    const name = input.remotePath.split("/").filter(Boolean).pop() || "";
+    const remotePath = safeRemoteFile(config.remoteDirectory, name);
+    if (remotePath !== input.remotePath || name !== input.archiveName) throw new HttpError(400, "Remote backup archive path is unsafe.");
+    const destination = new PassThrough();
+    const staged = stageBackupV3RetrievedStream({ source: destination, stagingDir: input.stagingDir, archiveName: input.archiveName, expectedByteSize: input.expectedByteSize, expectedSha256: input.expectedSha256, maximumByteSize: input.maximumByteSize });
+    await client.get(remotePath, destination);
+    return staged;
   }, input.factory);
 }
 

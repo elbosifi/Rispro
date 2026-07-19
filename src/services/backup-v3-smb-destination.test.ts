@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { sha256File } from "./backup-v3-checksums.js";
-import { backupV3SmbTransferProcessTimeoutMs, copyBackupV3ToSmbDestination, deleteBackupV3SmbDestinationCopy, testBackupV3SmbDestination, validateBackupV3SmbConfig, type BackupV3SmbDependencies } from "./backup-v3-smb-destination.js";
+import { backupV3SmbTransferProcessTimeoutMs, copyBackupV3ToSmbDestination, deleteBackupV3SmbDestinationCopy, retrieveBackupV3FromSmbDestination, testBackupV3SmbDestination, validateBackupV3SmbConfig, type BackupV3SmbDependencies } from "./backup-v3-smb-destination.js";
 
 function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, Buffer>; commands: string[]; authFiles: string[]; timeouts: Array<{ command: string; timeout: number }> } {
   const files = new Map<string, Buffer>();
@@ -123,4 +123,14 @@ test("SMB rejects traversal and reports authentication failures without exposing
     () => testBackupV3SmbDestination(config, { username: "backup-user", password: "super-secret" }, dependencies),
     (error: Error) => /authentication failed/.test(error.message) && !error.message.includes("super-secret")
   );
+});
+
+test("SMB retrieval rejects declared oversize copies before transfer and removes partial data", async () => {
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-smb-retrieve-"));
+  let downloaded = false;
+  try {
+    await assert.rejects(() => retrieveBackupV3FromSmbDestination({ remotePath: "daily\\rispro\\backup.rispro.zip", archiveName: "backup.rispro.zip", expectedSha256: "a".repeat(64), expectedByteSize: 1, maximumByteSize: 10, stagingDir, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile() { return { stdout: "size: 11" }; }, async downloadFile() { downloaded = true; } } }), /maximum archive size/);
+    assert.equal(downloaded, false);
+    assert.equal((await fs.readdir(stagingDir)).some((name) => name.endsWith(".partial")), false);
+  } finally { await fs.rm(stagingDir, { recursive: true, force: true }); }
 });
