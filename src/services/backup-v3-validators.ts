@@ -141,11 +141,20 @@ export function validateBackupV3Compatibility(
   }
 
   if (manifest.database.migrationVersion !== runtime.database.migrationVersion) {
-    issues.push({
-      severity: "error",
-      code: "migration_version_mismatch",
-      message: "Backup migration version differs from the running database.",
-    });
+    const restoreCompatibleMigrationPair =
+      manifest.database.migrationVersion === "128_backup_v3_copy_only_retry.sql" &&
+      runtime.database.migrationVersion === "129_backup_v3_restore_cyclic_fk_deferral.sql";
+    issues.push(restoreCompatibleMigrationPair
+      ? {
+          severity: "warning",
+          code: "migration_version_compatible_upgrade",
+          message: "Backup migration 128 is restore-compatible with running migration 129; cyclic foreign keys will remain validated at transaction commit.",
+        }
+      : {
+          severity: "error",
+          code: "migration_version_mismatch",
+          message: "Backup migration version differs from the running database.",
+        });
   }
 
   const runtimeTables = new Map(runtime.database.tables.map((table) => [`${table.schema}.${table.name}`, table]));

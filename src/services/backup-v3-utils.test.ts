@@ -221,3 +221,35 @@ test("validateBackupV3Compatibility warns on version mismatch and rejects schema
   assert.ok(result.issues.some((issue) => issue.code === "migration_version_mismatch" && issue.severity === "error"));
   assert.ok(result.issues.some((issue) => issue.code === "missing_runtime_column" && issue.severity === "error"));
 });
+
+test("validateBackupV3Compatibility allows only the audited migration 128 to 129 restore pair", () => {
+  const manifest = buildBackupV3Manifest({
+    appName: "rispro-reception",
+    packageVersion: "0.1.0",
+    gitCommit: null,
+    createdAt: "2026-07-19T00:00:00.000Z",
+    initiatedByUserId: null,
+    database: { ...schemaMetadata, migrationVersion: "128_backup_v3_copy_only_retry.sql" },
+    storageRoots: [],
+    files: [],
+    envVariableNames: [],
+  });
+
+  const compatible = validateBackupV3Compatibility(manifest, {
+    appName: "rispro-reception",
+    packageVersion: "0.1.0",
+    gitCommit: null,
+    database: { ...schemaMetadata, migrationVersion: "129_backup_v3_restore_cyclic_fk_deferral.sql" },
+  });
+  assert.equal(compatible.ok, true);
+  assert.ok(compatible.issues.some((issue) => issue.code === "migration_version_compatible_upgrade" && issue.severity === "warning"));
+
+  const unrelated = validateBackupV3Compatibility(manifest, {
+    appName: "rispro-reception",
+    packageVersion: "0.1.0",
+    gitCommit: null,
+    database: { ...schemaMetadata, migrationVersion: "130_unrelated_schema_change.sql" },
+  });
+  assert.equal(unrelated.ok, false);
+  assert.ok(unrelated.issues.some((issue) => issue.code === "migration_version_mismatch" && issue.severity === "error"));
+});

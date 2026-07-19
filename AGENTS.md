@@ -15,6 +15,7 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 9. Do not claim skipped, blocked, or failed tests as passing.
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
 11. Docker EPERM during preflight means the environment blocked Docker execution, not a RISpro test failure.
+12. No Over-Engineering: Choose the simplest appropriate solution that fully and reliably meets the specific requirements and fits the existing architecture. Avoid premature abstractions, unnecessary layers, hypothetical edge-case handling, and functionality that is not required for the current task. Account for real and likely edge cases, but do not add complexity for purely hypothetical future scenarios. Keep changes small, direct, and easy to understand. Use more complex approaches only when the actual requirements make them necessary.
 
 ## Default Git Workflow
 
