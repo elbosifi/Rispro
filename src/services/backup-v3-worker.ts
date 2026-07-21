@@ -12,6 +12,7 @@ import { copyBackupV3ToSftpDestination } from "./backup-v3-sftp-destination.js";
 import { copyBackupV3ToSmbDestination } from "./backup-v3-smb-destination.js";
 import { runAutomaticBackupV3Retention } from "./backup-v3-retention-service.js";
 import { queueScheduledBackupV3RestoreVerification, runNextBackupV3RestoreVerification } from "./backup-v3-restore-verification-queue-service.js";
+import { cleanupBackupV3RestoreJobs, runNextBackupV3RestorePreviewJob } from "./backup-v3-restore-jobs-service.js";
 import { backupV3ScheduleSlot, nextBackupV3ScheduleRun } from "./backup-v3-scheduling.js";
 import {
   claimNextBackupJob,
@@ -177,6 +178,8 @@ export async function runBackupV3WorkerTick(): Promise<void> {
     await queueDueSchedules();
     await generateAndCopyJob();
     await runNextBackupV3RestoreVerification();
+    await runNextBackupV3RestorePreviewJob();
+    await cleanupBackupV3RestoreJobs();
     await recordBackupWorkerHeartbeat(instanceId);
   } catch (error) {
     await recordBackupWorkerHeartbeat(instanceId, error instanceof Error ? error.message.slice(0, 1_000) : "Backup worker tick failed.").catch(() => undefined);

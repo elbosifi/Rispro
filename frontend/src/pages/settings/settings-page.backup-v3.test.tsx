@@ -28,6 +28,11 @@ const okPreview = {
   errors: [],
 };
 
+const completedUpload = { uploadSessionId: "upload-1", status: "completed", receivedOffset: 3, expectedSizeBytes: 3, expiresAt: "2026-07-20T12:00:00.000Z" };
+function previewJob(preview: { ok: boolean; manifest: typeof okPreview.manifest; counts: typeof okPreview.counts; warnings: string[]; errors: string[] } = okPreview) {
+  return { previewJobId: "preview-1", status: preview.ok ? "succeeded" : "failed", progress: 100, manifest: preview.manifest, counts: preview.counts, warnings: preview.warnings, errors: preview.errors, failureDiagnostics: preview.ok ? null : preview.errors.join("; ") };
+}
+
 const enabledStatus = {
   enabled: true,
   dbOnlyEnabled: false,
@@ -107,9 +112,9 @@ describe("BackupRestoreSection v3 UI", () => {
   it("requires preview before restore execution and blocks preview errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
-      if (url === "/api/admin/restore/v3/preview") {
-        return jsonResponse({ ...okPreview, ok: false, errors: ["Schema mismatch"] });
-      }
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") return jsonResponse(previewJob({ ...okPreview, ok: false, errors: ["Schema mismatch"] }), 202);
       return jsonResponse({}, 404);
     }));
 
@@ -130,7 +135,9 @@ describe("BackupRestoreSection v3 UI", () => {
           disabledReason: "V3 full restore requires super_admin.",
         });
       }
-      if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") return jsonResponse(previewJob(), 202);
       return jsonResponse({}, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -265,7 +272,9 @@ describe("BackupRestoreSection v3 UI", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
       if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
-      if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") return jsonResponse(previewJob(), 202);
       return jsonResponse({}, 404);
     }));
 
@@ -280,7 +289,9 @@ describe("BackupRestoreSection v3 UI", () => {
   it("displays partial failure, restartRequired, safety paths, and masks secrets", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
-      if (url === "/api/admin/restore/v3/preview") return jsonResponse(okPreview);
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") return jsonResponse(previewJob(), 202);
       if (url === "/api/admin/restore/v3") {
         return jsonResponse({
           ok: false,

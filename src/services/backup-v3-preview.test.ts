@@ -113,12 +113,13 @@ test("decryptBackupV3EnvPayload validates the backup passphrase", () => {
   assert.equal(decryptBackupV3EnvPayload(bundle, "right-pass").variables.DATABASE_URL, "x");
 });
 
-test("admin route source adds v3 multipart preview without changing v2 restore", async () => {
+test("admin route queues durable v3 preview jobs without changing v2 restore", async () => {
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
-  const uploadSource = await fs.readFile(path.join(process.cwd(), "src/services/backup-v3-upload.ts"), "utf8");
+  const jobsSource = await fs.readFile(path.join(process.cwd(), "src/services/backup-v3-restore-jobs-service.ts"), "utf8");
 
   assert.match(source, /"\/restore\/v3\/preview"/);
-  assert.match(uploadSource, /Busboy/);
-  assert.match(source, /previewBackupV3RestoreFromArchive/);
-  assert.match(source, /"\/restore\/preview",\s*\n\s*express\.json/);
+  assert.match(source, /createBackupV3PreviewJob/);
+  assert.match(source, /"\/restore\/v3\/preview\/:previewJobId"/);
+  assert.match(jobsSource, /runNextBackupV3RestorePreviewJob/);
+  assert.match(source, /"\/restore\/preview"[\s\S]*express\.json/);
 });

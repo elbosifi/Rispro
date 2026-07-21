@@ -11,6 +11,7 @@ import {
 } from "./backup-v3-external-document-restore.js";
 import { restoreBackupV3EnvOnly, type BackupV3EnvRestoreResult } from "./backup-v3-env-restore.js";
 import { getProjectRootDir } from "./document-storage-path.js";
+import { sha256File } from "./backup-v3-checksums.js";
 
 export interface BackupV3FullRestoreInput {
   currentUserId: NullableUserId;
@@ -21,6 +22,8 @@ export interface BackupV3FullRestoreInput {
   appOwnedStorageRoots?: BackupV3StorageRoot[];
   approvedDocumentRoots?: BackupV3StorageRoot[];
   envPath?: string;
+  /** Digest captured by the durable preview job. Rechecked after the restore lock. */
+  expectedArchiveDigest?: { sha256: string; byteSize: number };
 }
 
 export interface BackupV3FullRestoreResult {
@@ -56,6 +59,7 @@ interface ValidatedArchive {
 export interface BackupV3FullRestoreDependencies {
   validateArchive(input: BackupV3FullRestoreInput): Promise<ValidatedArchive>;
   acquireRestoreLock(): Promise<{ release(): Promise<void> }>;
+  verifyArchiveUnchanged(input: BackupV3FullRestoreInput): Promise<void>;
   createSafetyBackups(input: BackupV3FullRestoreInput): Promise<BackupV3SafetyMetadata>;
   restoreDatabase(input: BackupV3FullRestoreInput, manifest: BackupV3Manifest): Promise<BackupV3DbRestoreResult>;
   restoreStorage(
@@ -120,6 +124,13 @@ export const defaultBackupV3FullRestoreDependencies: BackupV3FullRestoreDependen
       throw error;
     }
   },
+  async verifyArchiveUnchanged(input) {
+    if (!input.expectedArchiveDigest) return;
+    const actual = await sha256File(input.uploadedArchivePath);
+    if (actual.byteSize !== input.expectedArchiveDigest.byteSize || actual.sha256.toLowerCase() !== input.expectedArchiveDigest.sha256.toLowerCase()) {
+      throw new Error("Reviewed restore artifact changed after preview and cannot be restored.");
+    }
+  },
   async createSafetyBackups(input) {
     const { createBackupV3PreRestoreSafetyBackups } = await import("./backup-v3-safety-service.js");
     const safety = await createBackupV3PreRestoreSafetyBackups(input);
@@ -172,6 +183,9 @@ export async function restoreBackupV3FullService(
   try {
     const lock = await dependencies.acquireRestoreLock();
     try {
+      // This is deliberately after the exclusive lock and immediately before
+      // the first mutable restore step, so a reviewed artifact cannot drift.
+      await dependencies.verifyArchiveUnchanged(input);
       const safetyBackupsCreated = await dependencies.createSafetyBackups(input);
       const db = await dependencies.restoreDatabase(input, validated.manifest);
       const base = {

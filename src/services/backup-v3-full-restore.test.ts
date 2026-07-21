@@ -67,6 +67,9 @@ function deps(overrides: Partial<BackupV3FullRestoreDependencies> = {}, calls: s
         },
       };
     },
+    async verifyArchiveUnchanged() {
+      calls.push("digest");
+    },
     async createSafetyBackups() {
       calls.push("safety");
       return safety();
@@ -128,7 +131,21 @@ test("safety-backup failure changes nothing", async () => {
     }, calls)),
     /safety failed/
   );
-  assert.deepEqual(calls, ["validate", "lock", "safety", "unlock"]);
+  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "unlock"]);
+});
+
+test("changed reviewed artifact stops restore before safety backups", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    () => restoreBackupV3FullService(input(), deps({
+      async verifyArchiveUnchanged() {
+        calls.push("digest");
+        throw new Error("Reviewed restore artifact changed after preview and cannot be restored.");
+      },
+    }, calls)),
+    /artifact changed after preview/
+  );
+  assert.deepEqual(calls, ["validate", "lock", "digest", "unlock"]);
 });
 
 test("DB failure rolls back through DB restore service and does not touch storage or env", async () => {
@@ -142,7 +159,7 @@ test("DB failure rolls back through DB restore service and does not touch storag
     }, calls)),
     /db rollback complete/
   );
-  assert.deepEqual(calls, ["validate", "lock", "safety", "db", "unlock"]);
+  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "db", "unlock"]);
 });
 
 test("storage failure after DB commit reports partial failure and safety paths", async () => {
@@ -170,7 +187,7 @@ test("storage failure after DB commit reports partial failure and safety paths",
   assert.equal(result.restartRequired, true);
   assert.equal(result.safetyBackupsCreated.storageSafetyRoot, "safety/storage");
   assert.equal(result.partialFailure?.component, "storage");
-  assert.deepEqual(calls, ["validate", "lock", "safety", "db", "storage", "unlock"]);
+  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "db", "storage", "unlock"]);
 });
 
 test("external document partial failure reports restored and failed file metadata", async () => {
@@ -221,7 +238,7 @@ test("successful orchestration calls components in order and returns complete re
   const calls: string[] = [];
   const result = await restoreBackupV3FullService(input(), deps({}, calls));
 
-  assert.deepEqual(calls, ["validate", "lock", "safety", "db", "storage", "external", "env", "unlock"]);
+  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "db", "storage", "external", "env", "unlock"]);
   assert.equal(result.ok, true);
   assert.equal(result.dbRestored, true);
   assert.equal(result.storageRestored, true);
@@ -288,10 +305,10 @@ test("secrets are not exposed in orchestration result", async () => {
   assert.match(JSON.stringify(result), /\*{8}/);
 });
 
-test("full v3 endpoint remains blocked and v2 restore behavior remains unchanged", async () => {
+test("full v3 endpoint requires a reviewed artifact and v2 restore behavior remains unchanged", async () => {
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
   assert.match(source, /"\/restore\/v3"/);
-  assert.match(source, /V3 full restore is disabled by configuration/);
-  assert.match(source, /"\/restore",\s*\n\s*express\.json\(\{ limit: "500mb" \}\)/);
+  assert.match(source, /claimBackupV3PreviewForRestore/);
+  assert.match(source, /"\/restore"[\s\S]*express\.json\(\{ limit: "500mb" \}\)/);
   assert.match(source, /restoreBackupSnapshot\(body\.backup, req\.user!\.sub, body\.passphrase, body\.confirmation\)/);
 });

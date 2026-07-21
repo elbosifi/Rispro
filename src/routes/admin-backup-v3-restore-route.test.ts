@@ -49,22 +49,32 @@ test("v3 full restore flag endpoints are absent", async () => {
   assert.doesNotMatch(source, /"\/restore\/v3\/flag"/);
 });
 
-test("v3 full restore endpoint requires super_admin, confirmation, passphrase, and archive upload", async () => {
+test("v3 full restore endpoint requires super_admin, confirmation, passphrase, and a successful preview job", async () => {
   const source = await combinedRestoreSource();
   assert.match(source, /"\/restore\/v3",\s*\n\s*requireAnyRole\(\["super_admin"\]\)/);
-  assert.match(source, /stageBackupV3MultipartUpload\(req, "rispro-restore-v3-full-"\)/);
-  assert.match(source, /requireBackupV3RestoreConfirmation\(staged\.confirmation\)/);
+  assert.match(source, /claimBackupV3PreviewForRestore/);
+  assert.match(source, /requireBackupV3RestoreConfirmation\(body\.confirmation\)/);
   assert.match(source, /Backup passphrase is required/);
-  assert.match(source, /A backup archive file is required/);
+  assert.match(source, /expectedArchiveDigest/);
 });
 
-test("v3 full restore endpoint calls orchestration only after gates and cleans staged upload", async () => {
+test("v3 full restore endpoint calls orchestration only after the preview is atomically consumed", async () => {
   const source = await adminRouteSource();
   assert.match(
     source,
-    /"\/restore\/v3"[\s\S]*requireAnyRole\(\["super_admin"\]\)[\s\S]*stageBackupV3MultipartUpload[\s\S]*requireBackupV3RestoreConfirmation[\s\S]*Backup passphrase is required[\s\S]*restoreBackupV3FullService/
+    /"\/restore\/v3"[\s\S]*requireAnyRole\(\["super_admin"\]\)[\s\S]*requireBackupV3RestoreConfirmation[\s\S]*Backup passphrase is required[\s\S]*claimBackupV3PreviewForRestore[\s\S]*restoreBackupV3FullService/
   );
-  assert.match(source, /cleanupBackupV3StagedUpload\(staged\)/);
+  assert.doesNotMatch(source.match(/"\/restore\/v3"[\s\S]*?\n\);/)?.[0] || "", /stageBackupV3MultipartUpload/);
+});
+
+test("v3 upload and preview routes are durable and use a bounded chunk protocol", async () => {
+  const source = await adminRouteSource();
+  assert.match(source, /"\/restore\/v3\/upload-sessions"/);
+  assert.match(source, /upload-sessions\/:uploadSessionId\/chunks/);
+  assert.match(source, /appendBackupV3UploadChunk/);
+  assert.match(source, /completeBackupV3UploadSession/);
+  assert.match(source, /"\/restore\/v3\/preview\/:previewJobId"/);
+  assert.match(source, /createBackupV3PreviewJob/);
 });
 
 test("v3 full restore response is orchestration result and does not add secret values", async () => {

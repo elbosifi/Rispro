@@ -15,6 +15,16 @@ import {
 } from "../services/backup-v3-safety-service.js";
 import { restoreBackupV3FullService } from "../services/backup-v3-full-restore.js";
 import {
+  appendBackupV3UploadChunk,
+  cancelBackupV3UploadSession,
+  claimBackupV3PreviewForRestore,
+  completeBackupV3UploadSession,
+  createBackupV3PreviewJob,
+  createBackupV3UploadSession,
+  getBackupV3PreviewJob,
+  getBackupV3UploadSession,
+} from "../services/backup-v3-restore-jobs-service.js";
+import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
   testConfiguredStorageConnectivity,
@@ -86,22 +96,33 @@ adminRouter.get(
 );
 
 adminRouter.post(
-  "/restore/v3/preview",
+  "/restore/v3/upload-sessions",
+  express.json({ limit: "64kb" }),
   asyncRoute(async (req: Request, res: Response) => {
-    recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "v3_preview", operation: "started", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 restore preview started." });
-    const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-preview-");
-    try {
-      const result = await previewBackupV3RestoreFromArchive(staged.archivePath, staged.stagingDir, staged.passphrase);
-      recordDiagnosticEvent({ severity: result.ok ? "info" : "warning", source: "backup_restore", component: "v3_preview", operation: result.ok ? "succeeded" : "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: result.ok ? "V3 restore preview succeeded." : "V3 restore preview failed validation." });
-      res.json(result);
-    } catch (error) {
-      recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "v3_preview", operation: "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 restore preview failed.", technicalDetails: error instanceof Error ? error.stack : error });
-      throw error;
-    } finally {
-      await cleanupBackupV3StagedUpload(staged).catch(() => undefined);
-    }
+    const body = asUnknownRecord(req.body);
+    res.status(201).json(await createBackupV3UploadSession({ userId: req.user!.sub, archiveName: body.archiveName, expectedSizeBytes: body.expectedSizeBytes, expectedSha256: body.expectedSha256 }));
   })
 );
+
+adminRouter.get("/restore/v3/upload-sessions/:uploadSessionId", asyncRoute(async (req, res) => res.json(await getBackupV3UploadSession(String(req.params.uploadSessionId)))));
+adminRouter.put("/restore/v3/upload-sessions/:uploadSessionId/chunks", asyncRoute(async (req, res) => res.json(await appendBackupV3UploadChunk(String(req.params.uploadSessionId), req.header("x-upload-offset"), req))));
+adminRouter.post("/restore/v3/upload-sessions/:uploadSessionId/complete", asyncRoute(async (req, res) => res.json(await completeBackupV3UploadSession(String(req.params.uploadSessionId)))));
+adminRouter.delete("/restore/v3/upload-sessions/:uploadSessionId", asyncRoute(async (req, res) => res.json(await cancelBackupV3UploadSession(String(req.params.uploadSessionId)))));
+
+adminRouter.post(
+  "/restore/v3/preview",
+  express.json({ limit: "64kb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body); const source = asUnknownRecord(body.source);
+    const type = String(source.type || "");
+    const selected = type === "artifact" ? { type, artifactId: String(source.artifactId || "") } : type === "destination_copy" ? { type, copyAttemptId: String(source.copyAttemptId || "") } : type === "upload_session" ? { type, uploadSessionId: String(source.uploadSessionId || "") } : null;
+    if (!selected) throw new HttpError(400, "Preview source must be an artifact, verified destination copy, or completed upload session.");
+    const job = await createBackupV3PreviewJob({ userId: req.user!.sub, source: selected as never, passphrase: body.passphrase });
+    recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "v3_preview", operation: "queued", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 restore preview queued.", metadata: { previewJobId: job.previewJobId, sourceType: type } });
+    res.status(202).json(job);
+  })
+);
+adminRouter.get("/restore/v3/preview/:previewJobId", asyncRoute(async (req, res) => res.json(await getBackupV3PreviewJob(String(req.params.previewJobId)))));
 
 adminRouter.post(
   "/restore/v3/db-only",
@@ -136,28 +157,30 @@ adminRouter.post(
 adminRouter.post(
   "/restore/v3",
   requireAnyRole(["super_admin"]),
+  express.json({ limit: "64kb" }),
   asyncRoute(async (req: Request, res: Response) => {
     recordDiagnosticEvent({ severity: "info", source: "backup_restore", component: "full_restore", operation: "started", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 full restore started." });
-    const staged = await stageBackupV3MultipartUpload(req, "rispro-restore-v3-full-");
+    const body = asUnknownRecord(req.body);
     try {
-      requireBackupV3RestoreConfirmation(staged.confirmation);
-      if (!staged.passphrase) {
+      requireBackupV3RestoreConfirmation(body.confirmation);
+      const passphrase = String(body.passphrase || "");
+      if (!passphrase) {
         throw new HttpError(400, "Backup passphrase is required.");
       }
+      const preview = await claimBackupV3PreviewForRestore(String(body.previewJobId || ""));
       const result = await restoreBackupV3FullService({
         currentUserId: req.user!.sub,
-        uploadedArchivePath: staged.archivePath,
-        uploadedArchiveName: staged.archiveFileName,
-        passphrase: staged.passphrase,
-        stagingDir: staged.stagingDir,
+        uploadedArchivePath: preview.archivePath,
+        uploadedArchiveName: null,
+        passphrase,
+        stagingDir: preview.stagingDir,
+        expectedArchiveDigest: { sha256: preview.archiveSha256, byteSize: preview.archiveSizeBytes },
       });
       recordDiagnosticEvent({ severity: result.ok ? "info" : "error", source: "backup_restore", component: "full_restore", operation: result.ok ? "succeeded" : "partial_failure", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: result.ok ? "V3 full restore succeeded." : "V3 full restore completed with a partial failure.", metadata: { partialComponent: result.partialFailure?.component } });
       res.json(result);
     } catch (error) {
       recordDiagnosticEvent({ severity: "error", source: "backup_restore", component: "full_restore", operation: "failed", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: "V3 full restore failed.", technicalDetails: error instanceof Error ? error.stack : error });
       throw error;
-    } finally {
-      await cleanupBackupV3StagedUpload(staged).catch(() => undefined);
     }
   })
 );

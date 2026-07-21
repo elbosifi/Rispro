@@ -2589,6 +2589,19 @@ type BackupV3Preview = {
   errors: string[];
 };
 
+type BackupV3PreviewJob = {
+  previewJobId: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "expired" | "consumed";
+  progress: number;
+  manifest: BackupV3Preview["manifest"] | null;
+  counts: BackupV3Preview["counts"] | null;
+  warnings: string[];
+  errors: string[];
+  failureDiagnostics: string | null;
+};
+
+type BackupV3UploadSession = { uploadSessionId: string; status: string; receivedOffset: number; expectedSizeBytes: number; expiresAt: string; failureMessage?: string | null };
+
 type BackupV3RestoreResult = {
   ok: boolean;
   dbRestored?: boolean;
@@ -2634,6 +2647,7 @@ type BackupControlDestination = {
 
 type BackupControlJob = {
   job_id: string;
+  artifact_id?: string | null;
   status: string;
   created_at: string;
   completed_at: string | null;
@@ -2717,6 +2731,11 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const { user } = useAuth();
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreV3File, setRestoreV3File] = useState<File | null>(null);
+  const [restoreV3SourceType, setRestoreV3SourceType] = useState<"artifact" | "destination_copy" | "upload_session">("upload_session");
+  const [restoreV3ArtifactId, setRestoreV3ArtifactId] = useState("");
+  const [restoreV3CopyAttemptId, setRestoreV3CopyAttemptId] = useState("");
+  const [restoreV3Upload, setRestoreV3Upload] = useState<BackupV3UploadSession | null>(null);
+  const [restoreV3PreviewJob, setRestoreV3PreviewJob] = useState<BackupV3PreviewJob | null>(null);
   const [backupPassphrase, setBackupPassphrase] = useState("");
   const [backupV3Passphrase, setBackupV3Passphrase] = useState("");
   const [restorePassphrase, setRestorePassphrase] = useState("");
@@ -3325,27 +3344,45 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   };
 
   const handleV3Preview = async () => {
-    if (!restoreV3File) {
-      setRestoreMessage({ type: "error", text: "Select a .rispro.zip backup first." });
-      return;
-    }
     if (restoreV3Passphrase.length < 8) {
       setRestoreMessage({ type: "error", text: "Restore passphrase must be at least 8 characters." });
       return;
     }
+    if (restoreV3SourceType === "artifact" && !restoreV3ArtifactId) { setRestoreMessage({ type: "error", text: "Select an existing local backup artifact." }); return; }
+    if (restoreV3SourceType === "destination_copy" && !restoreV3CopyAttemptId) { setRestoreMessage({ type: "error", text: "Select a verified destination copy." }); return; }
+    if (restoreV3SourceType === "upload_session" && !restoreV3File && !restoreV3Upload) { setRestoreMessage({ type: "error", text: "Select a .rispro.zip archive first." }); return; }
 
     setPreviewV3Busy(true);
     setRestoreMessage(null);
     setRestoreV3Preview(null);
     setRestoreV3Result(null);
     try {
-      const formData = new FormData();
-      formData.append("archive", restoreV3File, restoreV3File.name || "backup.rispro.zip");
-      formData.append("passphrase", restoreV3Passphrase);
+      let upload = restoreV3Upload;
+      if (restoreV3SourceType === "upload_session" && (!upload || upload.status !== "completed")) {
+        if (!restoreV3File) throw new Error("Select a .rispro.zip archive first.");
+        const created = await fetch("/api/admin/restore/v3/upload-sessions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveName: restoreV3File.name, expectedSizeBytes: restoreV3File.size }) });
+        if (!created.ok) throw new Error(await parseErrorMessage(created));
+        upload = await created.json() as BackupV3UploadSession;
+        setRestoreV3Upload(upload);
+        const chunkBytes = 4 * 1024 * 1024;
+        while (upload.receivedOffset < restoreV3File.size) {
+          const chunk = restoreV3File.slice(upload.receivedOffset, Math.min(upload.receivedOffset + chunkBytes, restoreV3File.size));
+          const chunkResponse = await fetch(`/api/admin/restore/v3/upload-sessions/${upload.uploadSessionId}/chunks`, { method: "PUT", credentials: "include", headers: { "X-Upload-Offset": String(upload.receivedOffset), "Content-Type": "application/octet-stream" }, body: chunk });
+          if (!chunkResponse.ok) throw new Error(await parseErrorMessage(chunkResponse));
+          upload = await chunkResponse.json() as BackupV3UploadSession;
+          setRestoreV3Upload(upload);
+        }
+        const completed = await fetch(`/api/admin/restore/v3/upload-sessions/${upload.uploadSessionId}/complete`, { method: "POST", credentials: "include" });
+        if (!completed.ok) throw new Error(await parseErrorMessage(completed));
+        upload = await completed.json() as BackupV3UploadSession;
+        setRestoreV3Upload(upload);
+      }
+      const source = restoreV3SourceType === "artifact" ? { type: "artifact", artifactId: restoreV3ArtifactId } : restoreV3SourceType === "destination_copy" ? { type: "destination_copy", copyAttemptId: restoreV3CopyAttemptId } : { type: "upload_session", uploadSessionId: upload!.uploadSessionId };
       const response = await fetch("/api/admin/restore/v3/preview", {
         method: "POST",
         credentials: "include",
-        body: formData
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, passphrase: restoreV3Passphrase })
       });
 
       if (!response.ok) {
@@ -3356,7 +3393,17 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
         throw new Error(await parseErrorMessage(response));
       }
 
-      const preview = (await response.json()) as BackupV3Preview;
+      let job = await response.json() as BackupV3PreviewJob;
+      setRestoreV3PreviewJob(job);
+      for (let attempts = 0; attempts < 180 && (job.status === "queued" || job.status === "running"); attempts += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        const statusResponse = await fetch(`/api/admin/restore/v3/preview/${job.previewJobId}`, { method: "GET", credentials: "include" });
+        if (!statusResponse.ok) throw new Error(await parseErrorMessage(statusResponse));
+        job = await statusResponse.json() as BackupV3PreviewJob;
+        setRestoreV3PreviewJob(job);
+      }
+      if (!job.manifest || !job.counts) throw new Error(job.failureDiagnostics || "Preview did not complete before polling timed out.");
+      const preview: BackupV3Preview = { ok: job.status === "succeeded" && job.errors.length === 0, manifest: job.manifest, counts: job.counts, warnings: job.warnings, errors: job.errors };
       setRestoreV3Preview(preview);
       setRestoreMessage({
         type: preview.ok ? "success" : "error",
@@ -3443,8 +3490,8 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
       setRestoreMessage({ type: "error", text: fullRestoreStatus });
       return;
     }
-    if (!restoreV3File) {
-      setRestoreMessage({ type: "error", text: "Select the .rispro.zip archive again before restore." });
+    if (!restoreV3PreviewJob || restoreV3PreviewJob.status !== "succeeded") {
+      setRestoreMessage({ type: "error", text: "The successful preview job is no longer available. Preview again before restoring." });
       return;
     }
     if (restoreV3Confirmation !== RESTORE_CONFIRMATION_TEXT) {
@@ -3456,14 +3503,11 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     setRestoreMessage(null);
     setRestoreV3Result(null);
     try {
-      const formData = new FormData();
-      formData.append("archive", restoreV3File, restoreV3File.name || "backup.rispro.zip");
-      formData.append("passphrase", restoreV3Passphrase);
-      formData.append("confirmation", restoreV3Confirmation);
       const response = await fetch("/api/admin/restore/v3", {
         method: "POST",
         credentials: "include",
-        body: formData
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ previewJobId: restoreV3PreviewJob.previewJobId, passphrase: restoreV3Passphrase, confirmation: restoreV3Confirmation })
       });
 
       if (!response.ok) {
@@ -3743,19 +3787,29 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
             {fullRestoreStatus}
           </div>
           <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
-            <input
+            <select aria-label="V3 restore source" value={restoreV3SourceType} onChange={(event) => { setRestoreV3SourceType(event.target.value as typeof restoreV3SourceType); setRestoreV3Preview(null); setRestoreV3PreviewJob(null); setRestoreV3Result(null); setRestoreV3Confirmation(""); }} className="input-premium text-sm" disabled={restoreV3Busy || previewV3Busy}>
+              <option value="upload_session">External archive upload</option>
+              <option value="artifact">Existing local Backup V3 artifact</option>
+              <option value="destination_copy">Verified destination copy</option>
+            </select>
+            {restoreV3SourceType === "artifact" && <select aria-label="Existing Backup V3 artifact" value={restoreV3ArtifactId} onChange={(event) => setRestoreV3ArtifactId(event.target.value)} className="input-premium text-sm"><option value="">Select completed local artifact</option>{backupJobs.filter((job) => job.status === "completed" && job.artifact_id).map((job) => <option key={job.artifact_id} value={job.artifact_id || ""}>{job.archive_name || job.job_id}</option>)}</select>}
+            {restoreV3SourceType === "destination_copy" && <select aria-label="Verified Backup V3 destination copy" value={restoreV3CopyAttemptId} onChange={(event) => setRestoreV3CopyAttemptId(event.target.value)} className="input-premium text-sm"><option value="">Select verified destination copy</option>{backupJobs.flatMap((job) => (job.destination_copies || []).filter((copy) => copy.status === "verified" && copy.copyAttemptId).map((copy) => <option key={copy.copyAttemptId} value={copy.copyAttemptId}>{job.archive_name || job.job_id} · {copy.remotePath || copy.copyAttemptId}</option>))}</select>}
+            {restoreV3SourceType === "upload_session" && <input
               aria-label="V3 restore archive"
               type="file"
               accept=".rispro.zip,application/zip"
               onChange={(e) => {
                 setRestoreV3File(e.target.files?.[0] || null);
+                setRestoreV3Upload(null);
                 setRestoreV3Preview(null);
+                setRestoreV3PreviewJob(null);
                 setRestoreV3Result(null);
                 setRestoreV3Confirmation("");
               }}
               className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-stone-100 dark:file:bg-stone-700 file:text-stone-700 dark:file:text-stone-300"
               disabled={restoreV3Busy || previewV3Busy}
-            />
+            />}
+            {restoreV3Upload && <p className="text-xs text-stone-600 dark:text-stone-300">External upload: {restoreV3Upload.status} · {restoreV3Upload.receivedOffset.toLocaleString()} / {restoreV3Upload.expectedSizeBytes.toLocaleString()} bytes{restoreV3Upload.failureMessage ? ` · ${restoreV3Upload.failureMessage}` : ""}</p>}
             <div className="flex flex-col sm:flex-row gap-3">
               <input
                 aria-label="V3 restore passphrase"
@@ -3780,6 +3834,8 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
                 {previewV3Busy ? "Previewing..." : "Preview v3 restore"}
               </button>
             </div>
+
+            {restoreV3PreviewJob && (restoreV3PreviewJob.status === "queued" || restoreV3PreviewJob.status === "running") && <p className="text-xs text-stone-600 dark:text-stone-300">Preview job {restoreV3PreviewJob.status}: {restoreV3PreviewJob.progress}%</p>}
 
             {restoreV3Preview && (
               <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm">
