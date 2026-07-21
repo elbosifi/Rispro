@@ -84,11 +84,29 @@ export async function buildBackupV3DatabaseMetadata(client: PoolClient): Promise
     columns: columnsByTable.get(`${row.table_schema}.${row.table_name}`) || [],
   }));
 
+  const migrationHistory = await readMigrationHistory(client);
+  const postgres = await readPostgresMetadata(client);
   return {
     schemas: [...BACKUP_V3_TABLE_SCHEMAS],
-    migrationVersion: await readMigrationVersion(client),
+    migrationVersion: migrationHistory.at(-1) || null,
+    migrationHistory,
+    postgres,
     tables,
   };
+}
+
+async function readMigrationHistory(client: PoolClient): Promise<string[]> {
+  const exists = await client.query<{ exists: boolean }>(`select to_regclass('public.schema_migrations') is not null as exists`);
+  if (!exists.rows[0]?.exists) return [];
+  const rows = await client.query<{ filename: string }>(`select filename from public.schema_migrations order by applied_at, filename`);
+  return rows.rows.map((row) => row.filename);
+}
+
+async function readPostgresMetadata(client: PoolClient) {
+  const database = await client.query<{ server_version_num: string; encoding: string; locale: string; collation: string }>(`select current_setting('server_version_num') as server_version_num, pg_encoding_to_char(encoding) as encoding, datcollate as collation, datcollate as locale from pg_database where datname=current_database()`);
+  const extensions = await client.query<{ extname: string }>(`select extname from pg_extension order by extname`);
+  const row = database.rows[0];
+  return { serverMajor: row ? Math.floor(Number(row.server_version_num) / 10000) : null, pgDumpVersion: null, encoding: row?.encoding || null, locale: row?.locale || null, collation: row?.collation || null, extensions: extensions.rows.map((entry) => entry.extname) };
 }
 
 async function readMigrationVersion(client: PoolClient): Promise<string | null> {

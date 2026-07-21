@@ -67,6 +67,10 @@ function deps(overrides: Partial<BackupV3FullRestoreDependencies> = {}, calls: s
         },
       };
     },
+    async resolveReviewedArtifact(restoreInput) {
+      calls.push("claim");
+      return restoreInput;
+    },
     async verifyArchiveUnchanged() {
       calls.push("digest");
     },
@@ -117,7 +121,7 @@ test("validation failure changes nothing", async () => {
     }, calls)),
     /invalid archive/
   );
-  assert.deepEqual(calls, ["validate"]);
+  assert.deepEqual(calls, ["lock", "claim", "validate", "unlock"]);
 });
 
 test("safety-backup failure changes nothing", async () => {
@@ -131,7 +135,7 @@ test("safety-backup failure changes nothing", async () => {
     }, calls)),
     /safety failed/
   );
-  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "unlock"]);
+  assert.deepEqual(calls, ["lock", "claim", "validate", "digest", "safety", "unlock"]);
 });
 
 test("changed reviewed artifact stops restore before safety backups", async () => {
@@ -145,7 +149,7 @@ test("changed reviewed artifact stops restore before safety backups", async () =
     }, calls)),
     /artifact changed after preview/
   );
-  assert.deepEqual(calls, ["validate", "lock", "digest", "unlock"]);
+  assert.deepEqual(calls, ["lock", "claim", "validate", "digest", "unlock"]);
 });
 
 test("DB failure rolls back through DB restore service and does not touch storage or env", async () => {
@@ -159,7 +163,7 @@ test("DB failure rolls back through DB restore service and does not touch storag
     }, calls)),
     /db rollback complete/
   );
-  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "db", "unlock"]);
+  assert.deepEqual(calls, ["lock", "claim", "validate", "digest", "safety", "db", "unlock"]);
 });
 
 test("storage failure after DB commit reports partial failure and safety paths", async () => {
@@ -187,7 +191,7 @@ test("storage failure after DB commit reports partial failure and safety paths",
   assert.equal(result.restartRequired, true);
   assert.equal(result.safetyBackupsCreated.storageSafetyRoot, "safety/storage");
   assert.equal(result.partialFailure?.component, "storage");
-  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "db", "storage", "unlock"]);
+  assert.deepEqual(calls, ["lock", "claim", "validate", "digest", "safety", "db", "storage", "unlock"]);
 });
 
 test("external document partial failure reports restored and failed file metadata", async () => {
@@ -238,7 +242,7 @@ test("successful orchestration calls components in order and returns complete re
   const calls: string[] = [];
   const result = await restoreBackupV3FullService(input(), deps({}, calls));
 
-  assert.deepEqual(calls, ["validate", "lock", "digest", "safety", "db", "storage", "external", "env", "unlock"]);
+  assert.deepEqual(calls, ["lock", "claim", "validate", "digest", "safety", "db", "storage", "external", "env", "unlock"]);
   assert.equal(result.ok, true);
   assert.equal(result.dbRestored, true);
   assert.equal(result.storageRestored, true);
@@ -279,7 +283,7 @@ test("restore lock prevents concurrent full restore before safety backups", asyn
     }, calls)),
     /Another restore/
   );
-  assert.deepEqual(calls, ["validate", "lock"]);
+  assert.deepEqual(calls, ["lock"]);
 });
 
 test("secrets are not exposed in orchestration result", async () => {
@@ -307,8 +311,9 @@ test("secrets are not exposed in orchestration result", async () => {
 
 test("full v3 endpoint requires a reviewed artifact and v2 restore behavior remains unchanged", async () => {
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
+  const restoreSource = await fs.readFile(path.join(process.cwd(), "src/services/backup-v3-full-restore.ts"), "utf8");
   assert.match(source, /"\/restore\/v3"/);
-  assert.match(source, /claimBackupV3PreviewForRestore/);
+  assert.match(restoreSource, /claimBackupV3PreviewForRestore/);
   assert.match(source, /"\/restore"[\s\S]*express\.json\(\{ limit: "500mb" \}\)/);
   assert.match(source, /restoreBackupSnapshot\(body\.backup, req\.user!\.sub, body\.passphrase, body\.confirmation\)/);
 });

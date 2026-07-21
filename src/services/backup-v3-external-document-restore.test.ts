@@ -320,6 +320,6 @@ test("failure before write leaves existing file unchanged", async (t) => {
 
 test("v2 restore route remains JSON-based and unchanged", async () => {
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
-  assert.match(source, /"\/restore",\s*\n\s*express\.json\(\{ limit: "500mb" \}\)/);
+    assert.match(source, /"\/restore",[\s\S]*express\.json\(\{ limit: "500mb" \}\)/);
   assert.match(source, /restoreBackupSnapshot\(body\.backup, req\.user!\.sub, body\.passphrase, body\.confirmation\)/);
 });

@@ -206,7 +206,7 @@ test("admin route source keeps v2 backup and adds separate v3 archive endpoint",
   assert.match(source, /\.rispro\.zip/);
   assert.match(source, /setBackupV3DownloadHeaders/);
   assert.match(source, /streamBackupV3Archive/);
-  assert.match(source, /"\/backup",\s*\n\s*asyncRoute/);
+  assert.match(source, /"\/backup",[\s\S]*?requireAnyRole\(\["super_admin"\]\),[\s\S]*?asyncRoute/);
   assert.match(source, /res\.json\(result\.backup\)/);
 });
 

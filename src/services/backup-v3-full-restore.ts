@@ -24,6 +24,8 @@ export interface BackupV3FullRestoreInput {
   envPath?: string;
   /** Digest captured by the durable preview job. Rechecked after the restore lock. */
   expectedArchiveDigest?: { sha256: string; byteSize: number };
+  /** Durable preview is claimed only after the restore lock is acquired. */
+  previewJobId?: string;
 }
 
 export interface BackupV3FullRestoreResult {
@@ -59,6 +61,7 @@ interface ValidatedArchive {
 export interface BackupV3FullRestoreDependencies {
   validateArchive(input: BackupV3FullRestoreInput): Promise<ValidatedArchive>;
   acquireRestoreLock(): Promise<{ release(): Promise<void> }>;
+  resolveReviewedArtifact(input: BackupV3FullRestoreInput): Promise<BackupV3FullRestoreInput>;
   verifyArchiveUnchanged(input: BackupV3FullRestoreInput): Promise<void>;
   createSafetyBackups(input: BackupV3FullRestoreInput): Promise<BackupV3SafetyMetadata>;
   restoreDatabase(input: BackupV3FullRestoreInput, manifest: BackupV3Manifest): Promise<BackupV3DbRestoreResult>;
@@ -124,6 +127,17 @@ export const defaultBackupV3FullRestoreDependencies: BackupV3FullRestoreDependen
       throw error;
     }
   },
+  async resolveReviewedArtifact(input) {
+    if (!input.previewJobId) return input;
+    const { claimBackupV3PreviewForRestore } = await import("./backup-v3-restore-jobs-service.js");
+    const preview = await claimBackupV3PreviewForRestore(input.previewJobId);
+    return {
+      ...input,
+      uploadedArchivePath: preview.archivePath,
+      stagingDir: preview.stagingDir,
+      expectedArchiveDigest: { sha256: preview.archiveSha256, byteSize: preview.archiveSizeBytes },
+    };
+  },
   async verifyArchiveUnchanged(input) {
     if (!input.expectedArchiveDigest) return;
     const actual = await sha256File(input.uploadedArchivePath);
@@ -179,15 +193,18 @@ export async function restoreBackupV3FullService(
   input: BackupV3FullRestoreInput,
   dependencies: BackupV3FullRestoreDependencies = defaultBackupV3FullRestoreDependencies
 ): Promise<BackupV3FullRestoreResult> {
-  const validated = await dependencies.validateArchive(input);
   try {
     const lock = await dependencies.acquireRestoreLock();
     try {
+      // Claiming is deliberately inside the restore lock: a second restore
+      // cannot consume the same reviewed artifact while this one is waiting.
+      const restoreInput = await dependencies.resolveReviewedArtifact(input);
+      const validated = await dependencies.validateArchive(restoreInput);
       // This is deliberately after the exclusive lock and immediately before
       // the first mutable restore step, so a reviewed artifact cannot drift.
-      await dependencies.verifyArchiveUnchanged(input);
-      const safetyBackupsCreated = await dependencies.createSafetyBackups(input);
-      const db = await dependencies.restoreDatabase(input, validated.manifest);
+      await dependencies.verifyArchiveUnchanged(restoreInput);
+      const safetyBackupsCreated = await dependencies.createSafetyBackups(restoreInput);
+      const db = await dependencies.restoreDatabase(restoreInput, validated.manifest);
       const base = {
         safetyBackupsCreated,
         warnings: validated.warnings,
@@ -202,7 +219,7 @@ export async function restoreBackupV3FullService(
 
       let storage;
       try {
-        storage = await dependencies.restoreStorage(input, validated.manifest, safetyBackupsCreated);
+        storage = await dependencies.restoreStorage(restoreInput, validated.manifest, safetyBackupsCreated);
         base.restoredCounts.storageFiles = storage.filesRestored;
       } catch (error) {
         const details = error instanceof BackupV3StoragePartialFailureError ? error.result : undefined;
@@ -224,7 +241,7 @@ export async function restoreBackupV3FullService(
       }
 
       try {
-        const externalDocuments = await dependencies.restoreExternalDocuments(input, validated.manifest, safetyBackupsCreated);
+        const externalDocuments = await dependencies.restoreExternalDocuments(restoreInput, validated.manifest, safetyBackupsCreated);
         base.restoredCounts.externalDocumentFiles = externalDocuments.filesRestored;
       } catch (error) {
         const details = error instanceof BackupV3ExternalDocumentPartialFailureError ? error.result : undefined;
@@ -246,7 +263,7 @@ export async function restoreBackupV3FullService(
       }
 
       try {
-        const envRestore = await dependencies.restoreEnv(input, safetyBackupsCreated);
+        const envRestore = await dependencies.restoreEnv(restoreInput, safetyBackupsCreated);
         base.restoredCounts.envVars = envRestore.envVarsRestored.length;
         return {
           ok: true,

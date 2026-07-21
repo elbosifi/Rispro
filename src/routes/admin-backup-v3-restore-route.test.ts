@@ -62,7 +62,7 @@ test("v3 full restore endpoint calls orchestration only after the preview is ato
   const source = await adminRouteSource();
   assert.match(
     source,
-    /"\/restore\/v3"[\s\S]*requireAnyRole\(\["super_admin"\]\)[\s\S]*requireBackupV3RestoreConfirmation[\s\S]*Backup passphrase is required[\s\S]*claimBackupV3PreviewForRestore[\s\S]*restoreBackupV3FullService/
+    /"\/restore\/v3"[\s\S]*requireAnyRole\(\["super_admin"\]\)[\s\S]*requireBackupV3RestoreConfirmation[\s\S]*Backup passphrase is required[\s\S]*restoreBackupV3FullService[\s\S]*previewJobId/
   );
   assert.doesNotMatch(source.match(/"\/restore\/v3"[\s\S]*?\n\);/)?.[0] || "", /stageBackupV3MultipartUpload/);
 });

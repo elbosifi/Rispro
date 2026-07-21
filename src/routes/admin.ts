@@ -17,13 +17,13 @@ import { restoreBackupV3FullService } from "../services/backup-v3-full-restore.j
 import {
   appendBackupV3UploadChunk,
   cancelBackupV3UploadSession,
-  claimBackupV3PreviewForRestore,
   completeBackupV3UploadSession,
   createBackupV3PreviewJob,
   createBackupV3UploadSession,
   getBackupV3PreviewJob,
   getBackupV3UploadSession,
 } from "../services/backup-v3-restore-jobs-service.js";
+import { createBackupV3MigrationRehearsal, getBackupV3MigrationRehearsal } from "../services/backup-v3-migration-rehearsal-service.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
@@ -123,6 +123,8 @@ adminRouter.post(
   })
 );
 adminRouter.get("/restore/v3/preview/:previewJobId", asyncRoute(async (req, res) => res.json(await getBackupV3PreviewJob(String(req.params.previewJobId)))));
+adminRouter.post("/restore/v3/preview/:previewJobId/migration-rehearsals", asyncRoute(async (req, res) => res.status(202).json(await createBackupV3MigrationRehearsal(String(req.params.previewJobId)))));
+adminRouter.get("/restore/v3/migration-rehearsals/:rehearsalId", asyncRoute(async (req, res) => res.json(await getBackupV3MigrationRehearsal(String(req.params.rehearsalId)))));
 
 adminRouter.post(
   "/restore/v3/db-only",
@@ -167,14 +169,13 @@ adminRouter.post(
       if (!passphrase) {
         throw new HttpError(400, "Backup passphrase is required.");
       }
-      const preview = await claimBackupV3PreviewForRestore(String(body.previewJobId || ""));
       const result = await restoreBackupV3FullService({
         currentUserId: req.user!.sub,
-        uploadedArchivePath: preview.archivePath,
+        uploadedArchivePath: "",
         uploadedArchiveName: null,
         passphrase,
-        stagingDir: preview.stagingDir,
-        expectedArchiveDigest: { sha256: preview.archiveSha256, byteSize: preview.archiveSizeBytes },
+        stagingDir: "",
+        previewJobId: String(body.previewJobId || ""),
       });
       recordDiagnosticEvent({ severity: result.ok ? "info" : "error", source: "backup_restore", component: "full_restore", operation: result.ok ? "succeeded" : "partial_failure", requestId: req.requestId, route: req.path, httpMethod: req.method, userId: req.user!.sub, message: result.ok ? "V3 full restore succeeded." : "V3 full restore completed with a partial failure.", metadata: { partialComponent: result.partialFailure?.component } });
       res.json(result);

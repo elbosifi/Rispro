@@ -2598,6 +2598,8 @@ type BackupV3PreviewJob = {
   warnings: string[];
   errors: string[];
   failureDiagnostics: string | null;
+  compatibilityClassification?: "same_version" | "older_supported" | "newer_than_runtime" | "unsupported_history" | null;
+  compatibilityMessage?: string | null;
 };
 
 type BackupV3UploadSession = { uploadSessionId: string; status: string; receivedOffset: number; expectedSizeBytes: number; expiresAt: string; failureMessage?: string | null };
@@ -2758,6 +2760,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   const [restoreV3Status, setRestoreV3Status] = useState<BackupV3RestoreStatus | null>(null);
   const [fullRestoreStatus, setFullRestoreStatus] = useState("Checking v3 restore availability...");
   const [restoreV3Preview, setRestoreV3Preview] = useState<BackupV3Preview | null>(null);
+  const [migrationRehearsal, setMigrationRehearsal] = useState<{ rehearsal_id: string; status: string; progress: number; promotion_ready: boolean; errors: string[]; validation_results: Record<string, unknown> } | null>(null);
   const [backupControlSummary, setBackupControlSummary] = useState<BackupControlSummary | null>(null);
   const [backupDestinations, setBackupDestinations] = useState<BackupControlDestination[]>([]);
   const [backupJobs, setBackupJobs] = useState<BackupControlJob[]>([]);
@@ -3477,6 +3480,20 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
     }
   };
 
+  const startMigrationRehearsal = async () => {
+    if (!restoreV3PreviewJob) return;
+    try {
+      const started = await fetch(`/api/admin/restore/v3/preview/${restoreV3PreviewJob.previewJobId}/migration-rehearsals`, { method: "POST", credentials: "include" });
+      if (!started.ok) throw new Error(await parseErrorMessage(started));
+      let rehearsal = await started.json(); setMigrationRehearsal(rehearsal);
+      for (let attempt = 0; attempt < 60 && ["queued", "running"].includes(rehearsal.status); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const status = await fetch(`/api/admin/restore/v3/migration-rehearsals/${rehearsal.rehearsal_id}`, { credentials: "include" });
+        if (!status.ok) throw new Error(await parseErrorMessage(status)); rehearsal = await status.json(); setMigrationRehearsal(rehearsal);
+      }
+    } catch (error) { setRestoreMessage({ type: "error", text: error instanceof Error ? error.message : "Migration rehearsal could not start." }); }
+  };
+
   const handleV3Restore = async () => {
     if (!restoreV3Preview) {
       setRestoreMessage({ type: "error", text: "Run v3 restore preview before restoring." });
@@ -3836,6 +3853,8 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
             </div>
 
             {restoreV3PreviewJob && (restoreV3PreviewJob.status === "queued" || restoreV3PreviewJob.status === "running") && <p className="text-xs text-stone-600 dark:text-stone-300">Preview job {restoreV3PreviewJob.status}: {restoreV3PreviewJob.progress}%</p>}
+            {restoreV3PreviewJob?.compatibilityClassification && <div className="rounded border p-2 text-xs"><p>Compatibility: <strong>{restoreV3PreviewJob.compatibilityClassification}</strong> — {restoreV3PreviewJob.compatibilityMessage}</p>{restoreV3PreviewJob.compatibilityClassification === "older_supported" && <button type="button" className="btn-secondary mt-2 text-xs" onClick={() => void startMigrationRehearsal()}>Run isolated migration rehearsal</button>}</div>}
+            {migrationRehearsal && <div className="rounded border p-2 text-xs">Migration rehearsal: {migrationRehearsal.status} · {migrationRehearsal.progress}% · {migrationRehearsal.promotion_ready ? "promotion-ready (not restored to production)" : "not promotion-ready"}{migrationRehearsal.errors?.length ? <p className="text-red-700">{migrationRehearsal.errors.join("; ")}</p> : null}</div>}
 
             {restoreV3Preview && (
               <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm">

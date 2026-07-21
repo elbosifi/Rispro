@@ -38,6 +38,9 @@ export interface BackupV3TableMetadata {
 export interface BackupV3SchemaMetadata {
   schemas: string[];
   migrationVersion: string | null;
+  /** Complete ordered schema_migrations list; older V3 archives may omit it. */
+  migrationHistory?: string[];
+  postgres?: { serverMajor: number | null; pgDumpVersion: string | null; encoding: string | null; locale: string | null; collation: string | null; extensions: string[] };
   tables: BackupV3TableMetadata[];
 }
 

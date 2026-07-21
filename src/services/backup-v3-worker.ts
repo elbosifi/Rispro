@@ -12,7 +12,8 @@ import { copyBackupV3ToSftpDestination } from "./backup-v3-sftp-destination.js";
 import { copyBackupV3ToSmbDestination } from "./backup-v3-smb-destination.js";
 import { runAutomaticBackupV3Retention } from "./backup-v3-retention-service.js";
 import { queueScheduledBackupV3RestoreVerification, runNextBackupV3RestoreVerification } from "./backup-v3-restore-verification-queue-service.js";
-import { cleanupBackupV3RestoreJobs, runNextBackupV3RestorePreviewJob } from "./backup-v3-restore-jobs-service.js";
+import { cleanupBackupV3RestoreJobs, recoverInterruptedBackupV3RestorePreviewJobs, runNextBackupV3RestorePreviewJob } from "./backup-v3-restore-jobs-service.js";
+import { runNextBackupV3MigrationRehearsal } from "./backup-v3-migration-rehearsal-service.js";
 import { backupV3ScheduleSlot, nextBackupV3ScheduleRun } from "./backup-v3-scheduling.js";
 import {
   claimNextBackupJob,
@@ -179,6 +180,7 @@ export async function runBackupV3WorkerTick(): Promise<void> {
     await generateAndCopyJob();
     await runNextBackupV3RestoreVerification();
     await runNextBackupV3RestorePreviewJob();
+    await runNextBackupV3MigrationRehearsal();
     await cleanupBackupV3RestoreJobs();
     await recordBackupWorkerHeartbeat(instanceId);
   } catch (error) {
@@ -191,6 +193,7 @@ export async function runBackupV3WorkerTick(): Promise<void> {
 
 export async function startBackupV3Worker(): Promise<BackupV3Worker> {
   stopped = false;
+  await recoverInterruptedBackupV3RestorePreviewJobs();
   await runBackupV3WorkerTick().catch((error) => console.error("Backup V3 worker startup tick failed.", error));
   intervalHandle = setInterval(() => { void runBackupV3WorkerTick().catch((error) => console.error("Backup V3 worker tick failed.", error)); }, intervalMs());
   intervalHandle.unref();

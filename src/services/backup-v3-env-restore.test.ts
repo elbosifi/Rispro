@@ -225,7 +225,7 @@ test("DB, storage, external documents, and v2 restore behavior are not touched",
   assert.equal(await fs.readFile(documentMarker, "utf8"), "documents");
   const source = await fs.readFile(path.join(process.cwd(), "src/routes/admin.ts"), "utf8");
   assert.match(source, /"\/restore\/v3"/);
-  assert.match(source, /V3 full restore is disabled by configuration/);
-  assert.match(source, /"\/restore",\s*\n\s*express\.json\(\{ limit: "500mb" \}\)/);
+  assert.match(source, /V3 DB-only restore is experimental and disabled by configuration/);
+  assert.match(source, /"\/restore",[\s\S]*express\.json\(\{ limit: "500mb" \}\)/);
   assert.match(source, /restoreBackupSnapshot\(body\.backup, req\.user!\.sub, body\.passphrase, body\.confirmation\)/);
 });
