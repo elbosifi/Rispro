@@ -186,7 +186,9 @@ jobs:
         run: npm ci
 
       - name: Prepare synthetic E2E environment
-        run: cp e2e/.env.example e2e/.env
+        run: |
+          cp e2e/.env.example .env
+          cp e2e/.env.example e2e/.env
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium

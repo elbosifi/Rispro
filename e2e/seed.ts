@@ -21,6 +21,15 @@ try {
     );
   }
   const supervisorId = Number((await pool.query<{ id: number }>("select id from users where username = 'e2e_supervisor'")).rows[0].id);
+  await pool.query(
+    `update system_settings
+     set setting_value = jsonb_set(
+       setting_value,
+       '{value,settings}',
+       coalesce(setting_value->'value'->'settings', '[]'::jsonb) || '["supervisor"]'::jsonb
+     )
+     where category = 'users_and_roles' and setting_key = 'page_visibility_by_role'`,
+  );
   await pool.query("update users set can_request_scheduling_override = true where username = 'e2e_reception'");
   const modality = await pool.query<{ id: number }>(
     `insert into modalities (name_ar, name_en, code, daily_capacity, is_active)

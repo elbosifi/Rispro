@@ -22,6 +22,28 @@ test("rehearsal database URL must be dedicated and different from production", (
   );
 });
 
+test("rehearsal database URL validation rejects missing, malformed, and unsafe targets", () => {
+  const previousRehearsalUrl = process.env.BACKUP_V3_REHEARSAL_DATABASE_URL;
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+  try {
+    delete process.env.BACKUP_V3_REHEARSAL_DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    assert.throws(() => validateBackupV3RehearsalDatabaseUrl(), /requires BACKUP_V3_REHEARSAL_DATABASE_URL/i);
+    assert.throws(() => validateBackupV3RehearsalDatabaseUrl("not-a-url"), /valid PostgreSQL URL/i);
+    assert.throws(() => validateBackupV3RehearsalDatabaseUrl("mysql://rehearsal:secret@db.example:5432/rispro_rehearsal"), /dedicated rehearsal database/i);
+    assert.throws(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/"), /dedicated rehearsal database/i);
+    assert.throws(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/rispro"), /dedicated rehearsal database/i);
+    assert.throws(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/rispro_rehearsal", "not-a-url"), /Production database configuration is invalid/i);
+    assert.doesNotThrow(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/rispro_rehearsal"));
+    assert.doesNotThrow(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/rispro_rehearsal", "postgresql://app:secret@other.example:5432/rispro"));
+    assert.doesNotThrow(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/rispro_rehearsal", "postgresql://app:secret@db.example:5433/rispro_rehearsal"));
+    assert.doesNotThrow(() => validateBackupV3RehearsalDatabaseUrl("postgresql://rehearsal:secret@db.example:5432/rispro_rehearsal", "postgresql://app:secret@db.example:5432/rispro_other"));
+  } finally {
+    if (previousRehearsalUrl === undefined) delete process.env.BACKUP_V3_REHEARSAL_DATABASE_URL; else process.env.BACKUP_V3_REHEARSAL_DATABASE_URL = previousRehearsalUrl;
+    if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previousDatabaseUrl;
+  }
+});
+
 test("migration rehearsal rejects same-version previews before queueing", async () => {
   const previewJobId = crypto.randomUUID();
   const uploadSessionId = crypto.randomUUID();

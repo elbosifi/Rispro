@@ -225,6 +225,55 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(screen.getByText("SMB archive transfer timed out.")).toBeTruthy();
   });
 
+  it("covers protected destination, passphrase, schedule, and verification controls when encryption is ready", async () => {
+    const destination = { destination_id: "destination-1", name: "Primary local", destination_type: "local", enabled: true, credentialsConfigured: false, config: { rootPath: "storage/backups" }, last_connection_status: null, last_failure_message: null };
+    const schedule = { schedule_id: "schedule-1", name: "Nightly", frequency: "daily", time_of_day: "02:00", timezone: "Africa/Tripoli", next_run_at: null, destination_ids: ["destination-1"], enabled: true, selected_weekdays: [], selected_day_of_month: null, retention_policy: { preset: "7_daily_4_weekly_12_monthly" }, restore_verification_frequency: "weekly" };
+    const job = { job_id: "job-1", status: "completed", archive_name: "backup.rispro.zip", created_at: "2026-05-27T12:00:00.000Z", completed_at: "2026-05-27T12:05:00.000Z", source_schedule_id: "schedule-1", destination_copies: [{ destinationId: "destination-1", status: "verified", copyAttemptId: "copy-1", remotePath: "backup.rispro.zip" }], failure_message: null };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/flag") return jsonResponse(disabledFlag);
+      if (url === "/api/backup-control/summary") return jsonResponse({ health: "healthy", destinations: 1, enabled_destinations: 1, recent_failures: 0, encryption: { encryptionReady: true, setupRequired: false, restartRequired: false, setupAvailable: false } });
+      if (url === "/api/backup-control/destinations") return jsonResponse({ destinations: [destination] });
+      if (url === "/api/backup-control/schedules") return jsonResponse({ schedules: [schedule] });
+      if (url === "/api/backup-control/jobs") return jsonResponse({ jobs: [job] });
+      if (url === "/api/backup-control/restore-verifications") return jsonResponse({ verifications: [] });
+      if (url === "/api/backup-control/destinations" && init?.method === "POST") return jsonResponse({ destination }, 201);
+      if (url === "/api/backup-control/encryption-passphrase" && init?.method === "POST") return jsonResponse({});
+      if (url === "/api/backup-control/schedules" && init?.method === "POST") return jsonResponse({ schedule }, 201);
+      if (url.includes("/destinations/destination-1") || url.includes("/schedules/schedule-1") || url.includes("/jobs/job-1/verify")) return jsonResponse({});
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderSection();
+    await screen.findByText("Primary local");
+    await userEvent.click(screen.getByRole("checkbox", { name: /primary local/i }));
+    await userEvent.click(screen.getByText("Protected destination and encryption settings"));
+    await userEvent.type(screen.getByLabelText("Automated destination name"), "New local");
+    await userEvent.type(screen.getByLabelText("Automated local root"), "storage/new-backups");
+    await userEvent.click(screen.getByRole("button", { name: "Save destination" }));
+    await screen.findByText(/Destination saved/i);
+    await userEvent.type(screen.getByLabelText("Automated archive passphrase"), "valid-passphrase");
+    await userEvent.click(screen.getByRole("button", { name: "Store encrypted passphrase" }));
+    await userEvent.click(screen.getByText("Schedules, retention, and isolated restore verification"));
+    await userEvent.clear(screen.getByLabelText("Automated schedule name"));
+    await userEvent.type(screen.getByLabelText("Automated schedule name"), "Nightly updated");
+    await userEvent.click(screen.getByRole("button", { name: "Save schedule for selected destinations" }));
+    await screen.findByText(/Backup schedule saved/i);
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[1]);
+    await userEvent.click(screen.getByRole("button", { name: "Update schedule" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Pause" })[1]);
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Run restore verification" }));
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/encryption-passphrase", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/jobs/job-1/verify", expect.objectContaining({ method: "POST" }));
+  });
+
   it("shows the Backup security setup card, permits one recovery download, and requires restart after secure save", async () => {
     let saved = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -321,6 +370,74 @@ describe("BackupRestoreSection v3 UI", () => {
     expect(screen.getAllByText(/Restart required/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/metadata.json/i)).toBeTruthy();
     expect(screen.queryByText(/postgresql:\/\/secret/i)).toBeNull();
+  });
+
+  it("runs an isolated migration rehearsal for an older supported preview", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") {
+        return jsonResponse({
+          ...previewJob(),
+          compatibilityClassification: "older_supported",
+          compatibilityMessage: "Older supported backup.",
+        }, 202);
+      }
+      if (url.endsWith("/migration-rehearsals") && init?.method === "POST") {
+        return jsonResponse({ rehearsal_id: "rehearsal-1", status: "succeeded", progress: 100, promotion_ready: true, errors: [], validation_results: {} }, 201);
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSection();
+    await uploadV3AndPreview();
+    await userEvent.click(await screen.findByRole("button", { name: /run isolated migration rehearsal/i }));
+
+    expect(await screen.findByText(/Migration rehearsal: succeeded · 100% · promotion-ready/i)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/restore/v3/preview/preview-1/migration-rehearsals",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("polls a queued migration rehearsal and renders a failed result", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") return jsonResponse({ ...previewJob(), compatibilityClassification: "older_supported", compatibilityMessage: "Older supported backup." }, 202);
+      if (url.endsWith("/migration-rehearsals") && init?.method === "POST") return jsonResponse({ rehearsal_id: "rehearsal-1", status: "queued", progress: 0, promotion_ready: false, errors: [], validation_results: {} }, 201);
+      if (url.endsWith("/migration-rehearsals/rehearsal-1")) return jsonResponse({ rehearsal_id: "rehearsal-1", status: "failed", progress: 100, promotion_ready: false, errors: ["Migration failed"], validation_results: {} });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSection();
+    await uploadV3AndPreview();
+    await userEvent.click(await screen.findByRole("button", { name: /run isolated migration rehearsal/i }));
+
+    expect(await screen.findByText(/Migration rehearsal: failed · 100% · not promotion-ready/i)).toBeTruthy();
+    expect(screen.getByText("Migration failed")).toBeTruthy();
+  });
+
+  it("surfaces migration rehearsal start errors", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/admin/restore/v3/status") return jsonResponse(enabledStatus);
+      if (url === "/api/admin/restore/v3/upload-sessions") return jsonResponse(completedUpload, 201);
+      if (url.includes("/chunks") || url.endsWith("/complete")) return jsonResponse(completedUpload);
+      if (url === "/api/admin/restore/v3/preview") return jsonResponse({ ...previewJob(), compatibilityClassification: "older_supported", compatibilityMessage: "Older supported backup." }, 202);
+      if (url.endsWith("/migration-rehearsals") && init?.method === "POST") return jsonResponse({ message: "Rehearsal unavailable" }, 500);
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSection();
+    await uploadV3AndPreview();
+    await userEvent.click(await screen.findByRole("button", { name: /run isolated migration rehearsal/i }));
+
+    expect(await screen.findByText("Rehearsal unavailable")).toBeTruthy();
   });
 
 });
