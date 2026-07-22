@@ -225,6 +225,7 @@ test("after attachment succeeds and SMB moves fail, the next worker cycle record
   const second = dependencies({ ok: true, accession: booking.accession }, { uploads });
   second.listRequestScanFiles = async () => [{ filename: failed.filename, relativePath: failed.source_relative_path, modifiedAt: null }];
   const cycle = await runRequestScanCycle(settings, second);
+  assert.equal(cycle.discovered, 1);
   assert.equal(cycle.duplicates, 1);
   assert.equal((await getRequestScanJob(jobId)).status, "duplicate");
   assert.equal(uploads.length, 1);

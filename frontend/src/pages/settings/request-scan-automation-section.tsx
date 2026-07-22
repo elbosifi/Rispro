@@ -31,14 +31,17 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!response.ok) {
-    const data = await response.json().catch(() => ({})) as { error?: { message?: unknown } | string; message?: unknown };
-    const message = typeof data.error === "object" && data.error !== null && typeof data.error.message === "string"
+    const fallback = path === "/test"
+      ? `SMB connection test failed with HTTP ${response.status}.`
+      : `Request Scan settings action failed with HTTP ${response.status}.`;
+    const data = await response.json().catch(() => null) as { error?: { message?: unknown } | string; message?: unknown } | null;
+    const message = data && typeof data.error === "object" && data.error !== null && typeof data.error.message === "string"
       ? data.error.message
-      : typeof data.error === "string"
+      : data && typeof data.error === "string"
         ? data.error
-        : typeof data.message === "string"
+        : data && typeof data.message === "string"
           ? data.message
-          : "Request Scan settings action failed";
+          : fallback;
     throw new ApiError(message, response.status, data);
   }
   return response.json() as Promise<T>;

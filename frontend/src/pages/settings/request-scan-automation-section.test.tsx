@@ -51,6 +51,10 @@ describe("RequestScanAutomationSection", () => {
       password: "draft-password",
       share: "stored-share",
     }));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/settings/request-scan-automation",
+      expect.objectContaining({ method: "PUT" })
+    );
     expect(screen.getByText("SMB connection succeeded.")).toBeTruthy();
   });
 
@@ -71,5 +75,22 @@ describe("RequestScanAutomationSection", () => {
 
     expect(await screen.findByText("Recent supervisor re-authentication is required.")).toBeTruthy();
     expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "request-scan-automation"]);
+  });
+
+  it("shows a clear SMB test error when an upstream response is not JSON", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings/request-scan-automation") return response({ settings: storedSettings });
+      if (url === "/api/settings/request-scan-automation/test" && init?.method === "POST") {
+        return new Response("Bad Gateway", { status: 502, headers: { "Content-Type": "text/plain" } });
+      }
+      return response({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<RequestScanAutomationSection onReAuthRequired={vi.fn()} />);
+    await screen.findByLabelText("SMB server");
+    await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    expect(await screen.findByText("SMB connection test failed with HTTP 502.")).toBeTruthy();
   });
 });

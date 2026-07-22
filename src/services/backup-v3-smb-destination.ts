@@ -104,10 +104,11 @@ function classifySmbError(error: unknown, operation: SmbOperationKind): HttpErro
   if (operation === "transfer" && isChildProcessTimeout(error)) return new HttpError(504, "SMB archive transfer timed out.");
   const text = error instanceof Error ? `${error.message} ${String((error as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "")}`.toUpperCase() : String(error).toUpperCase();
   if (/LOGON_FAILURE|NT_STATUS_WRONG_PASSWORD|AUTHENTICATION/.test(text)) return new HttpError(502, "SMB authentication failed.");
-  if (/BAD_NETWORK_NAME|NO_SUCH_SHARE/.test(text)) return new HttpError(502, "SMB share was not found.");
-  if (/ACCESS_DENIED|PERMISSION_DENIED/.test(text)) return new HttpError(502, "SMB permission was denied.");
+  if (/BAD_NETWORK_NAME|NO_SUCH_SHARE/.test(text)) return new HttpError(502, "SMB share not found.");
+  if (/ACCESS_DENIED|PERMISSION_DENIED/.test(text)) return new HttpError(502, "SMB permission denied.");
+  if (/OBJECT_(?:NAME|PATH)_NOT_FOUND/.test(text)) return new HttpError(502, "Configured SMB folder was not found or could not be created.");
   if (/DISK_FULL|NO_SPACE/.test(text)) return new HttpError(507, "SMB destination storage is full.");
-  if (/CONNECTION_REFUSED|TIMED_OUT|NO_ROUTE|HOST_UNREACH|NETWORK_UNREACH/.test(text)) return new HttpError(502, "SMB server is unavailable.");
+  if (/CONNECTION_REFUSED|ETIMEDOUT|TIMED_OUT|NO_ROUTE|HOST_UNREACH|NETWORK_UNREACH|EHOSTUNREACH|ENETUNREACH/.test(text)) return new HttpError(502, "SMB server unavailable.");
   return new HttpError(502, "SMB destination operation failed.");
 }
 
@@ -139,7 +140,7 @@ export async function withBackupV3SmbSession<T>(configInput: unknown, credential
   finally { await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
 }
 
-async function ensureRemoteDirectory(run: (command: string, operation?: SmbOperationKind, expectedByteSize?: number) => Promise<unknown>, config: BackupV3SmbConfig): Promise<void> {
+export async function ensureBackupV3SmbDirectory(run: (command: string, operation?: SmbOperationKind, expectedByteSize?: number) => Promise<unknown>, config: BackupV3SmbConfig): Promise<void> {
   const segments = config.subfolder ? config.subfolder.split("\\") : [];
   let current = "";
   for (const segment of segments) {
@@ -156,7 +157,7 @@ async function ensureRemoteDirectory(run: (command: string, operation?: SmbOpera
 
 export async function testBackupV3SmbDestination(config: unknown, credentials: BackupV3SmbCredentials, dependencies?: BackupV3SmbDependencies): Promise<void> {
   await withBackupV3SmbSession(config, credentials, async (run, parsed, tempDir) => {
-    await ensureRemoteDirectory(run, parsed);
+    await ensureBackupV3SmbDirectory(run, parsed);
     const localPath = path.join(tempDir, "write-test.bin");
     const remoteName = `.rispro-write-test-${crypto.randomUUID()}`;
     const remotePath = parsed.subfolder ? `${parsed.subfolder}\\${remoteName}` : remoteName;
@@ -179,7 +180,7 @@ export async function copyBackupV3ToSmbDestination(input: {
   return withBackupV3SmbSession(input.config, input.credentials, async (run, config, tempDir) => {
     const source = await sha256File(input.sourcePath);
     if (source.byteSize !== input.expectedByteSize || source.sha256 !== input.expectedSha256) throw new HttpError(500, "Local backup archive changed before upload.");
-    await ensureRemoteDirectory(run, config);
+    await ensureBackupV3SmbDirectory(run, config);
     const temporaryName = `.${archiveName}.${crypto.randomUUID()}.partial`;
     const remoteTemp = config.subfolder ? `${config.subfolder}\\${temporaryName}` : temporaryName;
     const remoteFinal = config.subfolder ? `${config.subfolder}\\${archiveName}` : archiveName;

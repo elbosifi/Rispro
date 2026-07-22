@@ -76,9 +76,11 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
   } finally { await fs.rm(tempDir, { recursive: true, force: true }); }
 }
 
-export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<{ processed: number; failed: number; duplicates: number; skipped: number }> {
-  const settings = suppliedSettings ?? await readRequestScanSettings(); if (!settings.enabled) return { processed: 0, failed: 0, duplicates: 0, skipped: 0 };
-  const files = await dependencies.listRequestScanFiles(settings); const result = { processed: 0, failed: 0, duplicates: 0, skipped: 0 };
+export type RequestScanCycleResult = { discovered: number; processed: number; failed: number; duplicates: number; skipped: number };
+
+export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanCycleResult> {
+  const settings = suppliedSettings ?? await readRequestScanSettings(); if (!settings.enabled) return { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 };
+  const files = await dependencies.listRequestScanFiles(settings); const result: RequestScanCycleResult = { discovered: files.length, processed: 0, failed: 0, duplicates: 0, skipped: 0 };
   for (const file of files) {
     if (file.modifiedAt && Date.now() - file.modifiedAt.getTime() < settings.fileReadyDelaySeconds * 1000) { result.skipped += 1; continue; }
     const job = await createOrGetJob(file.filename, file.relativePath); if (!["pending", "failed"].includes(job.status)) { result.skipped += 1; continue; }
