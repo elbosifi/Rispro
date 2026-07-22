@@ -10,7 +10,7 @@
  */
 
 import express, { Request, Response } from "express";
-import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { requireAnyRole, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { HttpError } from "../utils/http-error.js";
 import { asBooleanFlag, asString } from "../utils/request-coercion.js";
@@ -86,6 +86,8 @@ import {
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import { getUserSchedulingOverridePermission } from "../services/user-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
+import { readRequestScanSettingsForDisplay, saveRequestScanSettings, readRequestScanSettings } from "../services/request-scan-settings-service.js";
+import { testRequestScanSmb } from "../services/request-scan-smb-service.js";
 
 function validateNoShowSettings(entries: Array<{ key: string; value?: unknown }>): void {
   const values = new Map(entries.map((entry) => [entry.key, String(entry.value ?? "").trim().toLowerCase()]));
@@ -225,6 +227,8 @@ settingsRouter.get(
   })
 );
 
+settingsRouter.get("/request-scan-automation", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (_req: Request, res: Response) => { res.json({ settings: await readRequestScanSettingsForDisplay() }); }));
+
 settingsRouter.get(
   "/passkeys/config",
   requireSupervisor,
@@ -238,6 +242,9 @@ settingsRouter.get(
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
+
+settingsRouter.put("/request-scan-automation", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update Request Scan Automation settings."); res.json({ settings: await saveRequestScanSettings(asUnknownRecord(request.body ?? {}), request.user.sub as UserId) }); }));
+settingsRouter.post("/request-scan-automation/test", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can test Request Scan Automation settings."); await testRequestScanSmb(await readRequestScanSettings()); res.json({ ok: true }); }));
 
 settingsRouter.put(
   "/passkeys/config",

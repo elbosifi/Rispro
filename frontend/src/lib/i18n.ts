@@ -278,6 +278,7 @@ const en = {
   "nav.appointmentsV2Admin": "Scheduling policy",
   "nav.calendar": "Calendar",
   "nav.registrations": "Registrations",
+  "nav.requestScans": "Request Scans",
   "nav.queue": "Queue",
   "nav.queueCheckIn": "شاشة تسجيل الحضور",
   "queue.openFullScreenCheckIn": "فتح شاشة تسجيل الحضور بملء الشاشة",
@@ -330,6 +331,7 @@ const en = {
   "routeTitle.pacs": "PACS",
   "routeTitle.legacy": "Legacy Reception",
   "routeTitle.appointmentAdmin": "Appointment Admin",
+  "routeTitle.requestScans": "Request Scans",
 
   "dashboard.welcome": "Welcome, {name}",
   "dashboard.subtitle": "Reception operations overview for today",
@@ -2032,6 +2034,7 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "nav.appointmentsV2Admin": "إدارة سياسة الجدولة",
   "nav.calendar": "التقويم",
   "nav.registrations": "التسجيلات",
+  "nav.requestScans": "مسح الطلبات",
   "nav.queue": "قائمة الانتظار",
   "nav.queueCheckIn": "شاشة تسجيل الحضور",
   "queue.openFullScreenCheckIn": "فتح شاشة تسجيل الحضور بملء الشاشة",
@@ -2084,6 +2087,7 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "routeTitle.pacs": "PACS",
   "routeTitle.legacy": "واجهة الاستقبال القديمة",
   "routeTitle.appointmentAdmin": "إدارة المواعيد",
+  "routeTitle.requestScans": "مسح الطلبات",
 
   "dashboard.welcome": "مرحباً، {name}",
   "dashboard.subtitle": "نظرة تشغيلية سريعة لعمليات الاستقبال اليوم",

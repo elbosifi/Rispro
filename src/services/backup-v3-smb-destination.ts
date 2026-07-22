@@ -53,7 +53,7 @@ function safeRemoteFilename(value: string): string {
   return value;
 }
 
-function smbQuote(value: string): string {
+export function smbQuote(value: string): string {
   if (/[\r\n\0]/.test(value)) throw new HttpError(400, "SMB command contains unsafe text.");
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
 }
@@ -73,7 +73,7 @@ export function validateBackupV3SmbConfig(value: unknown): BackupV3SmbConfig {
   return { server, share, subfolder, ...(domain ? { domain } : {}), timeoutSeconds };
 }
 
-type SmbOperationKind = "metadata" | "transfer";
+export type SmbOperationKind = "metadata" | "transfer";
 
 const SMB_TRANSFER_MIN_PROCESS_TIMEOUT_MS = 10 * 60 * 1_000;
 const SMB_TRANSFER_MAX_PROCESS_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
@@ -111,7 +111,8 @@ function classifySmbError(error: unknown, operation: SmbOperationKind): HttpErro
   return new HttpError(502, "SMB destination operation failed.");
 }
 
-async function withSmb<T>(configInput: unknown, credentials: BackupV3SmbCredentials, action: (run: (command: string, operation?: SmbOperationKind, expectedByteSize?: number) => Promise<unknown>, config: BackupV3SmbConfig, tempDir: string, download: (remote: string, local: string, maxBytes: number) => Promise<void>) => Promise<T>, dependencies: BackupV3SmbDependencies = defaultDependencies): Promise<T> {
+/** Shared SMB session for narrowly scoped internal integrations. Commands must use smbQuote for dynamic paths. */
+export async function withBackupV3SmbSession<T>(configInput: unknown, credentials: BackupV3SmbCredentials, action: (run: (command: string, operation?: SmbOperationKind, expectedByteSize?: number) => Promise<unknown>, config: BackupV3SmbConfig, tempDir: string, download: (remote: string, local: string, maxBytes: number) => Promise<void>) => Promise<T>, dependencies: BackupV3SmbDependencies = defaultDependencies): Promise<T> {
   const config = validateBackupV3SmbConfig(configInput);
   if (!credentials.username || /[\r\n\0]/.test(credentials.username) || !credentials.password || /[\r\n\0]/.test(credentials.password)) throw new HttpError(400, "SMB username and password are required.");
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-backup-smb-"));
@@ -154,7 +155,7 @@ async function ensureRemoteDirectory(run: (command: string, operation?: SmbOpera
 }
 
 export async function testBackupV3SmbDestination(config: unknown, credentials: BackupV3SmbCredentials, dependencies?: BackupV3SmbDependencies): Promise<void> {
-  await withSmb(config, credentials, async (run, parsed, tempDir) => {
+  await withBackupV3SmbSession(config, credentials, async (run, parsed, tempDir) => {
     await ensureRemoteDirectory(run, parsed);
     const localPath = path.join(tempDir, "write-test.bin");
     const remoteName = `.rispro-write-test-${crypto.randomUUID()}`;
@@ -175,7 +176,7 @@ export async function copyBackupV3ToSmbDestination(input: {
   dependencies?: BackupV3SmbDependencies;
 }): Promise<{ remotePath: string; byteSize: number; sha256: string }> {
   const archiveName = safeRemoteFilename(input.archiveName);
-  return withSmb(input.config, input.credentials, async (run, config, tempDir) => {
+  return withBackupV3SmbSession(input.config, input.credentials, async (run, config, tempDir) => {
     const source = await sha256File(input.sourcePath);
     if (source.byteSize !== input.expectedByteSize || source.sha256 !== input.expectedSha256) throw new HttpError(500, "Local backup archive changed before upload.");
     await ensureRemoteDirectory(run, config);
@@ -206,7 +207,7 @@ export async function deleteBackupV3SmbDestinationCopy(input: { remotePath: stri
   const name = input.remotePath.split(/[\\/]/).filter(Boolean).pop() || "";
   const archiveName = safeRemoteFilename(name);
   if (!archiveName.endsWith(".rispro.zip")) throw new HttpError(400, "Remote backup archive path is unsafe.");
-  await withSmb(input.config, input.credentials, async (run, config) => {
+  await withBackupV3SmbSession(input.config, input.credentials, async (run, config) => {
     const target = config.subfolder ? `${config.subfolder}\\${archiveName}` : archiveName;
     await run(`del ${smbQuote(target)}`);
   }, input.dependencies);
@@ -214,7 +215,7 @@ export async function deleteBackupV3SmbDestinationCopy(input: { remotePath: stri
 
 export async function retrieveBackupV3FromSmbDestination(input: { remotePath: string; archiveName: string; expectedSha256: string; expectedByteSize: number; maximumByteSize: number; stagingDir: string; config: unknown; credentials: BackupV3SmbCredentials; dependencies?: BackupV3SmbDependencies }): Promise<BackupV3RetrievedCopy> {
   const archiveName = safeRemoteFilename(input.archiveName);
-  return withSmb(input.config, input.credentials, async (run, config, _tempDir, download) => {
+  return withBackupV3SmbSession(input.config, input.credentials, async (run, config, _tempDir, download) => {
     const remotePath = config.subfolder ? `${config.subfolder}\\${archiveName}` : archiveName;
     if (remotePath !== input.remotePath) throw new HttpError(400, "Remote backup archive path is unsafe.");
     await fs.mkdir(input.stagingDir, { recursive: true, mode: 0o700 }); await fs.chmod(input.stagingDir, 0o700);

@@ -52,6 +52,7 @@ import {
 import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
+import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -1282,6 +1283,9 @@ function ProtocolAssignmentModal({
               <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Cancel</button>
             </div>
             {detail?.assignmentDetail && <ProtocolAssignmentSummary detail={detail} />}
+            <div className="mt-4">
+              <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" enablePreviewModal />
+            </div>
           </>
         )}
       </section>

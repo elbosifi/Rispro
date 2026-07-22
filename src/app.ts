@@ -35,6 +35,7 @@ import { cleanupExpiredDiagnosticEvents } from "./services/system-diagnostics-se
 import { systemDiagnosticsRouter } from "./routes/system-diagnostics.js";
 import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer/routes.js";
 import { backupControlRouter } from "./routes/backup-control.js";
+import { requestScansRouter } from "./routes/request-scans.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,6 +140,7 @@ export function createApp(): Application {
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/backup-control", backupControlRouter);
+  app.use("/api/request-scans", requestScansRouter);
   app.use("/api/admin/system-diagnostics", systemDiagnosticsRouter);
   app.use("/api/modality", modalityRouter);
   app.use("/api/audit", auditRouter);

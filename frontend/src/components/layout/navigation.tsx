@@ -86,6 +86,7 @@ const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
   appointmentsV2Admin: Settings,
   calendar: ClipboardList,
   registrations: ListOrdered,
+  requestScans: ClipboardList,
   queue: ListOrdered,
   queueCheckIn: ListOrdered,
   modality: Monitor,
@@ -238,7 +239,7 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
   });
   return [
     group("quick", "navGroup.quickActions", [["patients.new"], ["appointments", "nav.newAppointment"]], true),
-    group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["queue"]], true),
+    group("reception", "navGroup.frontDesk", [["patients", "nav.patients"], ["calendar"], ["registrations"], ["request.scans"], ["queue"]], true),
     group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["queue.checkin"]], true),
     group("reporting", "navGroup.reporting", [["print"], ["statistics"]], false),
     group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["settings"]], false),

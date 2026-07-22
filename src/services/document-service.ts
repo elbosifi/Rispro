@@ -44,7 +44,7 @@ export interface DocumentRow {
   mime_type: string;
   file_size: number;
   storage_location_type: "network" | "local_fallback";
-  source: "manual_upload" | "naps2_webscan" | "scanner_app";
+  source: "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation";
   scan_session_id?: number | null;
   page_count?: number | null;
   scanner_name?: string | null;
@@ -216,10 +216,11 @@ function isTruthyFlag(raw: string): boolean {
   return ["true", "1", "yes", "enabled", "on"].includes(String(raw || "").trim().toLowerCase());
 }
 
-function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" | "scanner_app" {
+function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" {
   const normalized = String(source || "").trim();
   if (normalized === "naps2_webscan") return "naps2_webscan";
   if (normalized === "scanner_app") return "scanner_app";
+  if (normalized === "request_scan_automation") return "request_scan_automation";
   return "manual_upload";
 }
 

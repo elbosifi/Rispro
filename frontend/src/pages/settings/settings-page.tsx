@@ -65,6 +65,7 @@ import ActionPinPolicySection from "./action-pin-policy-section";
 import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
+import RequestScanAutomationSection from "./request-scan-automation-section";
 import ExamTypesSection from "./exam-types-section";
 import { isReAuthRequiredError } from "./settings-page.helpers";
 import type {
@@ -184,7 +185,8 @@ type SettingsSection =
   | "ohif_viewer"
   | "documents_and_uploads"
   | "backup_restore"
-  | "system_diagnostics";
+  | "system_diagnostics"
+  | "request_scan_automation";
 
 const SECTION_KEYS: SettingsSection[] = [
   "patient_registration",
@@ -213,7 +215,8 @@ const SECTION_KEYS: SettingsSection[] = [
   "ohif_viewer",
   "documents_and_uploads",
   "backup_restore",
-  "system_diagnostics"
+  "system_diagnostics",
+  "request_scan_automation"
 ];
 
 type SettingsMenuSection = Exclude<SettingsSection, "menu">;
@@ -248,6 +251,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   documents_and_uploads: "system",
   backup_restore: "system",
   system_diagnostics: "system",
+  request_scan_automation: "integrations",
 };
 
 const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
@@ -283,6 +287,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "system_diagnostics") {
     return "System Diagnostics";
+  }
+  if (section === "request_scan_automation") {
+    return "Request Scan Automation";
   }
   return _t(`settings.section.${section}` as TranslationKey);
 }
@@ -467,6 +474,7 @@ export default function SettingsPage() {
             {section === "sante_worklist_hl7" && <SanteWorklistSection onReAuthRequired={requestReAuth} />}
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
             {section === "system_diagnostics" && user?.role === "super_admin" && <SystemDiagnosticsSection onReAuthRequired={requestReAuth} />}
+            {section === "request_scan_automation" && user?.role === "super_admin" && <RequestScanAutomationSection />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
           </Card>
@@ -4936,6 +4944,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   "v2.appointments.admin": "Scheduling Policy Admin",
   calendar: "Calendar",
   registrations: "Registrations",
+  "request.scans": "Request Scans",
   queue: "Queue",
   "queue.checkin": "Queue Check-In",
   modality: "Modality",

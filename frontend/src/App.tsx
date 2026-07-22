@@ -33,6 +33,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import PacsRemapPage from "@/pages/pacs/pacs-remap-page";
 import WorklistMonitorPage from "@/pages/worklist-monitor/worklist-monitor-page";
+import RequestScansPage from "@/pages/request-scans/request-scans-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
@@ -292,6 +293,7 @@ function AppContent() {
             <Route path="/appointments/legacy" element={<Navigate to="/appointments" replace />} />
             <Route path="/calendar" element={guardedPage("calendar", <CalendarPage />)} />
             <Route path="/registrations" element={guardedPage("registrations", <RegistrationsPage />)} />
+            <Route path="/request-scans" element={guardedPage("request.scans", <RequestScansPage />)} />
             <Route path="/queue" element={guardedPage("queue", <QueuePage />)} />
             <Route path="/queue/no-shows" element={guardedPage("queue", <NoShowReviewPage />)} />
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />

@@ -14,6 +14,7 @@ import type { DicomRemapSendWorker } from "./services/dicom-remap-send-worker.js
 import type { DicomRemapProcessingWorker } from "./services/dicom-remap-processing-worker.js";
 import type { OhifRetrievalWorker } from "./modules/ohif-viewer/worker.js";
 import type { BackupV3Worker } from "./services/backup-v3-worker.js";
+import type { RequestScanWorker } from "./services/request-scan-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -30,6 +31,7 @@ let dicomRemapSendWorker: DicomRemapSendWorker | null = null;
 let dicomRemapProcessingWorker: DicomRemapProcessingWorker | null = null;
 let ohifRetrievalWorker: OhifRetrievalWorker | null = null;
 let backupV3Worker: BackupV3Worker | null = null;
+let requestScanWorker: RequestScanWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -114,6 +116,7 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   if (backupV3Worker) {
     try { await backupV3Worker.stop(); } catch (error) { console.error("Failed to stop Backup V3 worker.", error); }
   }
+  if (requestScanWorker) { try { await requestScanWorker.stop(); } catch (error) { console.error("Failed to stop Request Scan worker.", error); } }
 
   server.close(async (serverError?: Error) => {
     try {
@@ -204,6 +207,16 @@ async function start(): Promise<void> {
     console.error("Backup V3 worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.backup_v3_worker = "initialization_failed";
+  }
+
+  try {
+    const { startRequestScanWorker } = await import("./services/request-scan-worker.js");
+    requestScanWorker = await startRequestScanWorker();
+    startupSummary.request_scan_worker = "started";
+  } catch (error) {
+    console.error("Request Scan worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.request_scan_worker = "initialization_failed";
   }
 
   try {
@@ -374,6 +387,10 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  Backup V3:");
     console.log(`    Worker:         ${startupSummary.backup_v3_worker || "disabled"}`);
+
+    console.log("");
+    console.log("  Request Scan Automation:");
+    console.log(`    Worker:         ${startupSummary.request_scan_worker || "disabled"}`);
 
     console.log("");
     console.log("  PACS Auto-Completion:");

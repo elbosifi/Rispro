@@ -95,6 +95,8 @@ RUN set -eux; \
     libjpeg62-turbo \
     postgresql-client-16 \
     smbclient \
+    poppler-utils \
+    zbar-tools \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -122,6 +124,9 @@ RUN set -eux; \
 # Fail the build unless the MWL-required DCMTK tools are present and executable.
 # Print resolved paths to make build failures easier to diagnose.
 RUN set -eux; \
+    command -v smbclient; \
+    command -v pdftoppm; \
+    command -v zbarimg; \
     for tool in wlmscpfs dump2dcm dcmdump echoscu findscu; do \
       tool_path="$(command -v "$tool")"; \
       echo "$tool: $tool_path"; \

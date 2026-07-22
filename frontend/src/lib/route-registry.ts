@@ -12,6 +12,7 @@ export type AppRouteKey =
   | "v2.appointments.admin"
   | "calendar"
   | "registrations"
+  | "request.scans"
   | "queue"
   | "queue.checkin"
   | "modality"
@@ -38,6 +39,7 @@ export type AppNavIcon =
   | "appointmentsV2Admin"
   | "calendar"
   | "registrations"
+  | "requestScans"
   | "queue"
   | "queueCheckIn"
   | "modality"
@@ -167,6 +169,15 @@ const ROUTE_REGISTRY: readonly AppRouteRegistryEntry[] = [
     defaultRoles: ["receptionist", "supervisor", "super_admin"],
     navLabelKey: "nav.registrations",
     navIcon: "registrations",
+  },
+  {
+    key: "request.scans",
+    path: "/request-scans",
+    titleKey: "routeTitle.requestScans",
+    accessKey: "request.scans",
+    defaultRoles: ["receptionist", "supervisor", "doctor", "super_admin"],
+    navLabelKey: "nav.requestScans",
+    navIcon: "requestScans",
   },
   {
     key: "queue",
