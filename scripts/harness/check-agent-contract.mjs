@@ -97,7 +97,7 @@ function checkSchedulingGateContract(packageJson) {
     errors.push("Missing pull-request CI workflow for scheduling gate validation.");
     return;
   }
-  const workflow = readFileSync(workflowPath, "utf8");
+  const workflow = readText(".github/workflows/ci.yml");
   const schedulingStep = workflow.match(/- name: Run scheduling test gate\s+run: ([^\r\n]+)/);
   if (!schedulingStep || schedulingStep[1].trim() !== "npm run test:backend:scheduling-gate") {
     errors.push("Pull-request CI scheduling gate must invoke npm run test:backend:scheduling-gate.");
@@ -191,7 +191,7 @@ function checkCoverageContract(packageJson) {
   }
 
   const workflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
-  const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
+  const workflow = existsSync(workflowPath) ? readText(".github/workflows/ci.yml") : "";
   const backendJob = jobBlock(workflow, "backend-scheduling");
   const frontendJob = jobBlock(workflow, "frontend-build");
   for (const command of ["npm run test:backend:unit:coverage", "npm run test:backend:db:coverage", "npm run coverage:backend:merge"]) {
@@ -248,7 +248,7 @@ function checkE2eEnvironmentContract() {
     if (!/127\.0\.0\.1|localhost/.test(value) || !/(test|e2e)/i.test(value)) errors.push(`e2e/.env.example ${key} must target a loopback test database.`);
   }
   const workflowPath = path.join(repoRoot, ".github/workflows/ci.yml");
-  const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
+  const workflow = existsSync(workflowPath) ? readText(".github/workflows/ci.yml") : "";
   const envCopyIndex = workflow.indexOf("cp e2e/.env.example e2e/.env");
   const frontendInstallIndex = workflow.indexOf("working-directory: frontend\n        run: npm ci", workflow.indexOf("browser-e2e:"));
   const dbUpIndex = workflow.indexOf("npm run e2e:db:up");
@@ -294,7 +294,7 @@ function checkGitWorkflowContract() {
 function readText(relativePath) {
   const fullPath = path.join(repoRoot, relativePath);
   if (!existsSync(fullPath)) return "";
-  return readFileSync(fullPath, "utf8");
+  return readFileSync(fullPath, "utf8").replace(/\r\n/g, "\n");
 }
 
 function requireMatch(value, pattern, error) {
