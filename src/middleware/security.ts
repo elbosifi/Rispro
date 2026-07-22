@@ -33,7 +33,7 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data:",
+      "img-src 'self' data: blob:",
       "font-src 'self' data:",
       `connect-src ${connectSources.join(" ")}`,
       "object-src 'none'",

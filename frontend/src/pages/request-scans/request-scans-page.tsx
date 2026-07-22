@@ -1,18 +1,99 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 type Job = { id: number; filename: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; attempt_count: number; created_at: string; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null };
 type Appointment = { id: number; accession_number: string; patient_name: string | null };
-async function request<T>(url: string, options?: RequestInit): Promise<T> { const response = await fetch(`/api/request-scans${url}`, { credentials: "include", headers: { "Content-Type": "application/json" }, ...options }); if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "Request Scan action failed"); } return response.json() as Promise<T>; }
+
+function isPdf(job: Job): boolean { return job.filename.toLowerCase().endsWith(".pdf"); }
+
+async function responseMessage(response: Response, fallback: string): Promise<string> {
+  const body = await response.json().catch(() => null) as { error?: { message?: unknown } | string; message?: unknown } | null;
+  if (body && typeof body.error === "object" && body.error !== null && typeof body.error.message === "string") return body.error.message;
+  if (body && typeof body.error === "string") return body.error;
+  if (body && typeof body.message === "string") return body.message;
+  return fallback;
+}
+
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`/api/request-scans${url}`, { credentials: "include", headers: { "Content-Type": "application/json" }, ...options });
+  if (!response.ok) throw new Error(await responseMessage(response, "Request Scan action failed"));
+  return response.json() as Promise<T>;
+}
 
 export default function RequestScansPage() {
-  const [tab, setTab] = useState<Job["status"]>("pending"); const [preview, setPreview] = useState<Job | null>(null); const [assign, setAssign] = useState<Job | null>(null); const [query, setQuery] = useState(""); const [appointmentId, setAppointmentId] = useState(""); const navigate = useNavigate(); const client = useQueryClient();
+  const [tab, setTab] = useState<Job["status"]>("pending");
+  const [preview, setPreview] = useState<Job | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [assign, setAssign] = useState<Job | null>(null);
+  const [query, setQuery] = useState("");
+  const [appointmentId, setAppointmentId] = useState("");
+  const objectUrl = useRef<string | null>(null);
+  const previewRequest = useRef(0);
+  const navigate = useNavigate();
+  const client = useQueryClient();
+
+  const revokePreview = () => {
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+    setPreviewUrl(null);
+  };
+
+  useEffect(() => () => {
+    previewRequest.current += 1;
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+  }, []);
+
   const jobs = useQuery({ queryKey: ["request-scans", tab], queryFn: () => request<{ jobs: Job[] }>(`?status=${tab}`) });
   const status = useQuery({ queryKey: ["request-scans-status"], queryFn: () => request<{ enabled: boolean; lastRunAt: string | null; pending: number; processedToday: number; failed: number }>("/status") });
   const appointments = useQuery({ queryKey: ["request-scan-appointments", query], queryFn: () => request<{ appointments: Appointment[] }>(`/eligible-appointments?q=${encodeURIComponent(query)}`), enabled: Boolean(assign) });
   const refresh = () => { void client.invalidateQueries({ queryKey: ["request-scans"] }); void client.invalidateQueries({ queryKey: ["request-scans-status"] }); };
   const action = useMutation({ mutationFn: ({ url, body }: { url: string; body?: unknown }) => request(url, { method: "POST", body: body ? JSON.stringify(body) : undefined }), onSuccess: refresh });
   const cards = [["Automation", status.data?.enabled ? "Enabled" : "Disabled"], ["Last worker run", status.data?.lastRunAt ? new Date(status.data.lastRunAt).toLocaleString() : "Not run"], ["Pending", String(status.data?.pending ?? 0)], ["Processed today", String(status.data?.processedToday ?? 0)], ["Failed", String(status.data?.failed ?? 0)]];
-  return <main className="space-y-4 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold">Request Scans</h1><p className="text-sm text-muted-foreground">Automated appointment-request scan monitoring and exception recovery.</p></div><button className="btn-primary" onClick={() => action.mutate({ url: "/run-now" })} disabled={action.isPending}>Scan folder now</button></div><div className="grid gap-3 sm:grid-cols-5">{cards.map(([label, value]) => <section key={label} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></section>)}</div><div className="flex gap-2 border-b">{(["pending", "processed", "duplicate", "failed"] as const).map((value) => <button key={value} className={`px-3 py-2 text-sm font-medium ${tab === value ? "border-b-2 border-teal-600" : ""}`} onClick={() => setTab(value)}>{value === "duplicate" ? "Duplicates" : value[0].toUpperCase() + value.slice(1)}</button>)}</div>{jobs.isLoading ? <p>Loading request scans…</p> : jobs.isError ? <p className="text-red-700">{jobs.error.message}</p> : <div className="overflow-x-auto rounded-lg border"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Time</th><th>Filename</th><th>Barcode/accession</th><th>Patient</th><th>Modality/examination</th><th>Status</th><th>Attempts</th><th>Error</th><th className="p-2">Actions</th></tr></thead><tbody>{jobs.data?.jobs.map((job) => <tr key={job.id} className="border-b"><td className="p-2">{new Date(job.created_at).toLocaleString()}</td><td>{job.filename}</td><td>{job.barcode_value ?? "-"}</td><td>{job.patient_name ?? "-"}</td><td>{[job.modality_name, job.exam_name].filter(Boolean).join(" · ") || "-"}</td><td>{job.status}</td><td>{job.attempt_count}</td><td className="max-w-52 text-red-700">{job.error_message ?? "-"}</td><td className="flex flex-wrap gap-1 p-2"><button className="btn-secondary text-xs" onClick={() => setPreview(job)}>Preview</button>{job.appointment_id && <button className="btn-secondary text-xs" onClick={() => navigate(`/registrations?appointmentId=${job.appointment_id}`)}>Open appointment</button>}{job.document_id && <a className="btn-secondary text-xs" href={`/api/documents/${job.document_id}/view`} target="_blank" rel="noreferrer">Open document</a>}{job.status === "failed" && <><button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/retry` })}>Retry</button><button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/return-to-incoming` })}>Return</button><button className="btn-secondary text-xs" onClick={() => { setAssign(job); setAppointmentId(""); }}>Manually assign</button></>}</td></tr>)}</tbody></table></div>}{preview && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={() => setPreview(null)}><section className="mx-auto h-full max-w-5xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><div className="mb-3 flex justify-between"><h2 className="font-semibold">{preview.filename}</h2><button className="btn-secondary" onClick={() => setPreview(null)}>Close</button></div>{preview.filename.toLowerCase().endsWith(".pdf") ? <iframe className="h-[85%] w-full" src={`/api/request-scans/${preview.id}/file`} title="Request scan preview" /> : <img className="max-h-[85%] max-w-full object-contain" src={`/api/request-scans/${preview.id}/file`} alt={preview.filename} />}</section></div>}{assign && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={() => setAssign(null)}><section className="mx-auto max-w-xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><h2 className="text-lg font-semibold">Manually assign request scan</h2><p className="mt-1 text-sm text-muted-foreground">{assign.filename}</p><input className="input-premium mt-3 w-full" placeholder="Search accession or patient" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input-premium mt-3 w-full" value={appointmentId} onChange={(event) => setAppointmentId(event.target.value)}><option value="">Select an eligible V2 appointment</option>{appointments.data?.appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{appointment.accession_number} · {appointment.patient_name ?? "Patient"}</option>)}</select><div className="mt-4 flex gap-2"><button className="btn-primary" disabled={!appointmentId || action.isPending} onClick={() => action.mutate({ url: `/${assign.id}/manual-assign`, body: { appointmentId: Number(appointmentId) } }, { onSuccess: () => setAssign(null) })}>Attach and process</button><button className="btn-secondary" onClick={() => setAssign(null)}>Cancel</button></div></section></div>}</main>;
+
+  const closePreview = () => {
+    previewRequest.current += 1;
+    revokePreview();
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setPreview(null);
+  };
+
+  const openPreview = async (job: Job) => {
+    previewRequest.current += 1;
+    const requestId = previewRequest.current;
+    revokePreview();
+    setPreview(job);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const response = await fetch(`/api/request-scans/${job.id}/file`, { credentials: "include" });
+      if (!response.ok) throw new Error(await responseMessage(response, "Preview could not be loaded."));
+      const url = URL.createObjectURL(await response.blob());
+      if (requestId !== previewRequest.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      objectUrl.current = url;
+      setPreviewUrl(url);
+    } catch (error) {
+      if (requestId === previewRequest.current) setPreviewError(error instanceof Error ? error.message : "Preview could not be loaded.");
+    } finally {
+      if (requestId === previewRequest.current) setPreviewLoading(false);
+    }
+  };
+
+  return <main className="space-y-4 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><h1 className="text-2xl font-semibold">Request Scans</h1><p className="text-sm text-muted-foreground">Automated appointment-request scan monitoring and exception recovery.</p></div>
+      <button className="btn-primary" onClick={() => action.mutate({ url: "/run-now" })} disabled={action.isPending}>Scan folder now</button>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-5">{cards.map(([label, value]) => <section key={label} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></section>)}</div>
+    <div className="flex gap-2 border-b">{(["pending", "processed", "duplicate", "failed"] as const).map((value) => <button key={value} className={`px-3 py-2 text-sm font-medium ${tab === value ? "border-b-2 border-teal-600" : ""}`} onClick={() => setTab(value)}>{value === "duplicate" ? "Duplicates" : value[0].toUpperCase() + value.slice(1)}</button>)}</div>
+    {jobs.isLoading ? <p>Loading request scans…</p> : jobs.isError ? <p className="text-red-700">{jobs.error.message}</p> : <div className="overflow-x-auto rounded-lg border"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Time</th><th>Filename</th><th>Barcode/accession</th><th>Patient</th><th>Modality/examination</th><th>Status</th><th>Attempts</th><th>Error</th><th className="p-2">Actions</th></tr></thead><tbody>{jobs.data?.jobs.map((job) => <tr key={job.id} className="border-b"><td className="p-2">{new Date(job.created_at).toLocaleString()}</td><td>{job.filename}</td><td>{job.barcode_value ?? "-"}</td><td>{job.patient_name ?? "-"}</td><td>{[job.modality_name, job.exam_name].filter(Boolean).join(" · ") || "-"}</td><td>{job.status}</td><td>{job.attempt_count}</td><td className="max-w-52 text-red-700">{job.error_message ?? "-"}</td><td className="flex flex-wrap gap-1 p-2"><button className="btn-secondary text-xs" onClick={() => void openPreview(job)}>Preview</button>{job.appointment_id && <button className="btn-secondary text-xs" onClick={() => navigate(`/registrations?appointmentId=${job.appointment_id}`)}>Open appointment</button>}{job.document_id && <a className="btn-secondary text-xs" href={`/api/documents/${job.document_id}/view`} target="_blank" rel="noreferrer">Open document</a>}{job.status === "failed" && <><button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/retry` })}>Retry</button><button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/return-to-incoming` })}>Return</button><button className="btn-secondary text-xs" onClick={() => { setAssign(job); setAppointmentId(""); }}>Manually assign</button></>}</td></tr>)}</tbody></table></div>}
+    {preview && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={closePreview}><section className="mx-auto h-full max-w-5xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><div className="mb-3 flex justify-between"><h2 className="font-semibold">{preview.filename}</h2><button className="btn-secondary" onClick={closePreview}>Close</button></div>{previewLoading ? <p>Loading preview…</p> : previewError ? <p className="text-red-700">Preview could not be loaded: {previewError}</p> : previewUrl && (isPdf(preview) ? <iframe className="h-[85%] w-full" src={previewUrl} title="Request scan preview" /> : <img className="max-h-[85%] max-w-full object-contain" src={previewUrl} alt={preview.filename} />)}</section></div>}
+    {assign && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={() => setAssign(null)}><section className="mx-auto max-w-xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><h2 className="text-lg font-semibold">Manually assign request scan</h2><p className="mt-1 text-sm text-muted-foreground">{assign.filename}</p><input className="input-premium mt-3 w-full" placeholder="Search accession or patient" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input-premium mt-3 w-full" value={appointmentId} onChange={(event) => setAppointmentId(event.target.value)}><option value="">Select an eligible V2 appointment</option>{appointments.data?.appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{appointment.accession_number} · {appointment.patient_name ?? "Patient"}</option>)}</select><div className="mt-4 flex gap-2"><button className="btn-primary" disabled={!appointmentId || action.isPending} onClick={() => action.mutate({ url: `/${assign.id}/manual-assign`, body: { appointmentId: Number(appointmentId) } }, { onSuccess: () => setAssign(null) })}>Attach and process</button><button className="btn-secondary" onClick={() => setAssign(null)}>Cancel</button></div></section></div>}
+  </main>;
 }

@@ -17,24 +17,39 @@ export function interpretRequestScanBarcodes(output: string): RequestScanBarcode
   const accepted = decoded
     .map((line) => line.match(/^(?:CODE-?39|CODE-?128)\s*:\s*(.+)$/i)?.[1]?.replace(/\s+/g, "").toUpperCase() || null)
     .filter((value): value is string => Boolean(value));
-  if (!accepted.length) return { ok: false, reason: "no_barcode" };
+  if (!accepted.length) return { ok: false, reason: "no_valid_accession" };
   const accessions = [...new Set(accepted.filter((value) => ACCESSION.test(value)))];
   if (!accessions.length) return { ok: false, reason: "no_valid_accession" };
   if (accessions.length > 1) return { ok: false, reason: "multiple_accessions" };
   return { ok: true, accession: accessions[0] };
 }
 
-async function zbar(filePath: string, dependencies: RequestScanBarcodeDependencies): Promise<string> {
-  const result = await dependencies.execFile("zbarimg", ["--quiet", "--set", "*.enable=0", "--set", "code39.enable=1", "--set", "code128.enable=1", filePath], { timeout: 30_000, maxBuffer: 1024 * 1024 });
-  return String(result.stdout || "");
+type ZbarResult = { kind: "decoded"; output: string } | { kind: "no_symbol" } | { kind: "failure" };
+
+function zbarNoSymbol(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const processError = error as NodeJS.ErrnoException & { stdout?: unknown; stderr?: unknown; killed?: unknown; signal?: unknown; timedOut?: unknown };
+  if (processError.killed || processError.signal || processError.timedOut || processError.code === "ETIMEDOUT") return false;
+  const text = `${String(processError.stdout || "")} ${String(processError.stderr || "")} ${processError.message || ""}`;
+  return Number(processError.code) === 4 || /no symbols? found/i.test(text);
+}
+
+async function zbar(filePath: string, dependencies: RequestScanBarcodeDependencies): Promise<ZbarResult> {
+  try {
+    const result = await dependencies.execFile("zbarimg", ["--quiet", "--set", "*.enable=0", "--set", "code39.enable=1", "--set", "code128.enable=1", filePath], { timeout: 30_000, maxBuffer: 1024 * 1024 });
+    const output = String(result.stdout || "");
+    return output.trim() ? { kind: "decoded", output } : { kind: "no_symbol" };
+  } catch (error) {
+    return zbarNoSymbol(error) ? { kind: "no_symbol" } : { kind: "failure" };
+  }
 }
 
 export async function extractRequestScanBarcode(filePath: string, dependencies: RequestScanBarcodeDependencies = defaultDependencies): Promise<RequestScanBarcodeResult> {
   const extension = path.extname(filePath).toLowerCase();
   if (![".pdf", ".jpg", ".jpeg"].includes(extension)) return { ok: false, reason: "unsupported_file" };
   if (extension !== ".pdf") {
-    try { return interpretRequestScanBarcodes(await zbar(filePath, dependencies)); }
-    catch { return { ok: false, reason: "barcode_tool_failed" }; }
+    const result = await zbar(filePath, dependencies);
+    return result.kind === "failure" ? { ok: false, reason: "barcode_tool_failed" } : interpretRequestScanBarcodes(result.kind === "decoded" ? result.output : "");
   }
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-"));
   try {
@@ -45,8 +60,9 @@ export async function extractRequestScanBarcode(filePath: string, dependencies: 
     if (!pages.length) return { ok: false, reason: "corrupt_file" };
     const output: string[] = [];
     for (const page of pages) {
-      try { output.push(await zbar(path.join(tempDir, page), dependencies)); }
-      catch { return { ok: false, reason: "barcode_tool_failed" }; }
+      const result = await zbar(path.join(tempDir, page), dependencies);
+      if (result.kind === "failure") return { ok: false, reason: "barcode_tool_failed" };
+      if (result.kind === "decoded") output.push(result.output);
     }
     return interpretRequestScanBarcodes(output.join("\n"));
   } finally { await fs.rm(tempDir, { recursive: true, force: true }); }
