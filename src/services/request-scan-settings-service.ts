@@ -1,4 +1,3 @@
-import { decryptBackupV3Secret, encryptBackupV3Secret } from "./backup-v3-secret-service.js";
 import { validateBackupV3SmbConfig } from "./backup-v3-smb-destination.js";
 import { loadSettingsMap, upsertSettings } from "./settings-service.js";
 import { HttpError } from "../utils/http-error.js";
@@ -31,11 +30,10 @@ function settingsFrom(values: Record<string, string>): RequestScanSettings {
   const incomingSubfolder = String(values.incoming_subfolder || "Requests/Incoming").trim();
   const processedSubfolder = String(values.processed_subfolder || "Requests/Processed").trim();
   const failedSubfolder = String(values.failed_subfolder || "Requests/Failed").trim();
-  const passwordEncrypted = String(values.password_encrypted || "");
   return {
     enabled: enabled(values.enabled), server: String(values.server || "").trim(), share: String(values.share || "").trim(),
     domain: String(values.domain || "").trim(), username: String(values.username || "").trim(),
-    password: passwordEncrypted ? decryptBackupV3Secret(passwordEncrypted) : "", incomingSubfolder, processedSubfolder, failedSubfolder,
+    password: String(values.password || ""), incomingSubfolder, processedSubfolder, failedSubfolder,
     pollingIntervalSeconds: positive(values.polling_interval_seconds, 15, "Polling interval"), fileReadyDelaySeconds: positive(values.file_ready_delay_seconds, 15, "File-ready delay"),
   };
 }
@@ -75,7 +73,7 @@ export async function readRequestScanSettingsForDisplay(): Promise<Omit<RequestS
   const values = map[REQUEST_SCAN_SETTINGS_CATEGORY] || {};
   const value = settingsFrom(values);
   const { password: _password, ...display } = value;
-  return { ...display, passwordConfigured: Boolean(values.password_encrypted) };
+  return { ...display, passwordConfigured: Boolean(values.password) };
 }
 
 export async function resolveRequestScanSettingsForTest(input: Record<string, unknown>): Promise<RequestScanSettings> {
@@ -92,7 +90,7 @@ export async function saveRequestScanSettings(input: Record<string, unknown>, us
     { key: "enabled", value: candidate.enabled ? "enabled" : "disabled" }, { key: "server", value: candidate.server }, { key: "share", value: candidate.share }, { key: "domain", value: candidate.domain }, { key: "username", value: candidate.username },
     { key: "incoming_subfolder", value: candidate.incomingSubfolder }, { key: "processed_subfolder", value: candidate.processedSubfolder }, { key: "failed_subfolder", value: candidate.failedSubfolder },
     { key: "polling_interval_seconds", value: String(candidate.pollingIntervalSeconds) }, { key: "file_ready_delay_seconds", value: String(candidate.fileReadyDelaySeconds) },
-    ...(password ? [{ key: "password_encrypted", value: encryptBackupV3Secret(password) }] : []),
+    ...(password ? [{ key: "password", value: password }] : []),
   ], userId);
   return readRequestScanSettingsForDisplay();
 }

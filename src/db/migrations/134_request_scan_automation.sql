@@ -28,7 +28,7 @@ values
   ('request_scan_automation', 'share', '{"value":""}'::jsonb),
   ('request_scan_automation', 'domain', '{"value":""}'::jsonb),
   ('request_scan_automation', 'username', '{"value":""}'::jsonb),
-  ('request_scan_automation', 'password_encrypted', '{"value":""}'::jsonb),
+  ('request_scan_automation', 'password', '{"value":""}'::jsonb),
   ('request_scan_automation', 'incoming_subfolder', '{"value":"Requests/Incoming"}'::jsonb),
   ('request_scan_automation', 'processed_subfolder', '{"value":"Requests/Processed"}'::jsonb),
   ('request_scan_automation', 'failed_subfolder', '{"value":"Requests/Failed"}'::jsonb),
