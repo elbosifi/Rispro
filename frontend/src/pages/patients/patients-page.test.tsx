@@ -45,6 +45,7 @@ function renderPatientsPage() {
     user: { id: 1, username: "supervisor", fullName: "Supervisor", role: "supervisor" as const },
     isLoading: false,
     login: vi.fn(),
+    loginWithPasskey: vi.fn(),
     logout: vi.fn(),
     reAuth: vi.fn(),
     changePassword: vi.fn(),

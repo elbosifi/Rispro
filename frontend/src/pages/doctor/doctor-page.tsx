@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
+import { PasskeySettingsButton } from "@/components/auth/passkey-settings-button";
 import { NoShowReviewTopBarAction, TopBar } from "@/components/layout/navigation";
 import { hasDoctorWorkspaceAccess } from "@/components/layout/navigation.helpers";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
@@ -498,7 +499,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
             {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
           </>
         )}
-        accountMenuActions={<ActionPinSettingsButton variant="drawer" />}
+        accountMenuActions={<><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
         canAccessSettings={canAccessSettings}
         onSettings={() => navigate("/settings")}
         onUndo={() => navigate(-1)}

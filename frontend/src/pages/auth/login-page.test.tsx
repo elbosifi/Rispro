@@ -7,11 +7,13 @@ import { LoginPage } from "./login-page";
 const testState = vi.hoisted(() => ({
   fetchDoctorMe: vi.fn(),
   login: vi.fn(),
+  loginWithPasskey: vi.fn(),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({
     login: testState.login,
+    loginWithPasskey: testState.loginWithPasskey,
     isLoading: false,
   }),
 }));
@@ -54,12 +56,13 @@ async function submitLogin(container: HTMLElement) {
 
   fireEvent.change(username, { target: { value: "doctor" } });
   fireEvent.change(password, { target: { value: "password" } });
-  fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+  fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
 }
 
 describe("LoginPage routing", () => {
   beforeEach(() => {
     testState.login.mockResolvedValue({ mustChangePassword: false });
+    testState.loginWithPasskey.mockResolvedValue({ mustChangePassword: false });
     testState.fetchDoctorMe.mockReset();
   });
 
@@ -104,5 +107,19 @@ describe("LoginPage routing", () => {
     await submitLogin(container);
 
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/appointments"));
+  });
+
+  it("uses the same redirect behavior after passkey sign-in", async () => {
+    testState.fetchDoctorMe.mockResolvedValue({
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: false,
+      doctorPortalAutoRedirect: true,
+    });
+    renderLogin("/");
+
+    fireEvent.click(screen.getByRole("button", { name: /sign in with passkey/i }));
+
+    await waitFor(() => expect(testState.loginWithPasskey).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/doctor/dashboard"));
   });
 });

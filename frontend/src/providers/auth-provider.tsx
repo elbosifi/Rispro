@@ -5,6 +5,7 @@ export interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<User>;
+  loginWithPasskey: () => Promise<User>;
   logout: () => Promise<void>;
   reAuth: (password: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;

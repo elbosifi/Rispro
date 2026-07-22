@@ -4,11 +4,11 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { fetchDoctorMe } from "@/lib/api-hooks";
-import { Lock, User, Power } from "lucide-react";
+import { Lock, User, Power, KeyRound } from "lucide-react";
 
 export function LoginPage() {
   const { language } = useLanguage();
-  const { login, isLoading } = useAuth();
+  const { login, loginWithPasskey, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState("");
@@ -22,24 +22,36 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     try {
-      const user = await login(username, password);
-      if (user.mustChangePassword) {
-        navigate(from, { replace: true });
-        return;
-      }
-      const doctorMe = await fetchDoctorMe().catch(() => null);
-      if (
-        doctorMe?.doctorPortalAutoRedirect !== false &&
-        doctorMe?.hasActiveDoctorProfile &&
-        !doctorMe.canAccessCoreWorkspace &&
-        (from === "/" || from === "/login")
-      ) {
-        navigate("/doctor/dashboard", { replace: true });
-        return;
-      }
-      navigate(from, { replace: true });
+      await completeLogin(await login(username, password));
     } catch (err) {
       setError(err instanceof Error ? err.message : t(language, "login.failed"));
+    }
+  };
+
+  const completeLogin = async (user: { mustChangePassword?: boolean }) => {
+    if (user.mustChangePassword) {
+      navigate(from, { replace: true });
+      return;
+    }
+    const doctorMe = await fetchDoctorMe().catch(() => null);
+    if (
+      doctorMe?.doctorPortalAutoRedirect !== false &&
+      doctorMe?.hasActiveDoctorProfile &&
+      !doctorMe.canAccessCoreWorkspace &&
+      (from === "/" || from === "/login")
+    ) {
+      navigate("/doctor/dashboard", { replace: true });
+      return;
+    }
+    navigate(from, { replace: true });
+  };
+
+  const handlePasskeyLogin = async () => {
+    setError("");
+    try {
+      await completeLogin(await loginWithPasskey());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Passkey sign-in failed.");
     }
   };
 
@@ -167,6 +179,21 @@ export function LoginPage() {
                   {t(language, "login.signIn")}
                 </>
               )}
+            </button>
+
+            <div className="flex items-center gap-3 text-xs" style={{ color: "var(--text-muted)" }}>
+              <span className="h-px flex-1" style={{ backgroundColor: "var(--border)" }} />
+              <span>or</span>
+              <span className="h-px flex-1" style={{ backgroundColor: "var(--border)" }} />
+            </div>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => void handlePasskeyLogin()}
+              className="btn-secondary w-full"
+            >
+              <KeyRound size={16} />
+              Sign in with passkey
             </button>
           </form>
         </div>

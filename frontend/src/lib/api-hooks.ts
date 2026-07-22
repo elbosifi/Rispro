@@ -3693,6 +3693,23 @@ export async function fetchModalitiesSettings(includeInactive = false): Promise<
   return raw;
 }
 
+export async function getPasskeyRegistrationOptions(): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/auth/passkeys/register/options", { method: "POST" });
+}
+
+export async function verifyPasskeyRegistration(response: unknown): Promise<void> {
+  await api("/auth/passkeys/register/verify", { method: "POST", body: JSON.stringify({ response }) });
+}
+
+export async function getPasskeyLoginOptions(): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/auth/passkeys/login/options", { method: "POST" });
+}
+
+export async function verifyPasskeyLogin(response: unknown): Promise<User> {
+  const result = await api<{ user: RawRecord }>("/auth/passkeys/login/verify", { method: "POST", body: JSON.stringify({ response }) });
+  return mapUser(result.user);
+}
+
 export async function fetchNameDictionary(): Promise<{ entries: PersistedDictionaryEntry[]; meta: RawRecord }> {
   const raw = await api<{ entries: RawRecord[]; meta?: RawRecord }>("/settings/name-dictionary");
   return {

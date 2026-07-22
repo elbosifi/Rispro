@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { changeOwnPassword, fetchCurrentSession, login as loginApi, logout as logoutApi, reAuthSupervisor } from "@/lib/api-hooks";
+import { changeOwnPassword, fetchCurrentSession, getPasskeyLoginOptions, login as loginApi, logout as logoutApi, reAuthSupervisor, verifyPasskeyLogin } from "@/lib/api-hooks";
+import { startAuthentication } from "@simplewebauthn/browser";
 import type { User } from "@/types/api";
 import { AuthContext } from "./auth-provider";
 
@@ -67,6 +68,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return loginMutation.mutateAsync({ username, password });
   };
 
+  const loginWithPasskey = async (): Promise<User> => {
+    setIsTransitioning(true);
+    try {
+      const options = await getPasskeyLoginOptions();
+      const response = await startAuthentication({ optionsJSON: options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+      const userData = await verifyPasskeyLogin(response);
+      queryClient.setQueryData(["auth-session"], userData);
+      return userData;
+    } finally {
+      setIsTransitioning(false);
+    }
+  };
+
   const logout = async () => {
     await logoutMutation.mutateAsync();
   };
@@ -85,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user: user ?? null,
         isLoading: isLoading || isTransitioning || changePasswordMutation.isPending,
         login,
+        loginWithPasskey,
         logout,
         reAuth,
         changePassword

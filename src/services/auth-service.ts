@@ -26,6 +26,19 @@ interface ClearCookieResponse {
   clearCookie: (name: string, options: object) => void;
 }
 
+interface CookieRequest {
+  cookies?: Record<string, string | undefined>;
+}
+
+export interface PasskeyChallengeSession {
+  type: "registration" | "authentication";
+  challenge: string;
+  userId?: UserId;
+}
+
+const PASSKEY_CHALLENGE_COOKIE_NAME = "rispro_passkey_challenge";
+const PASSKEY_CHALLENGE_TTL_SECONDS = 5 * 60;
+
 export async function authenticateUser(
   username: string,
   password: string
@@ -112,6 +125,22 @@ function reauthCookieOptions(): {
   };
 }
 
+function passkeyChallengeCookieOptions(): {
+  httpOnly: boolean;
+  sameSite: "lax" | "strict" | "none";
+  secure: boolean;
+  maxAge: number;
+  path: "/";
+} {
+  return {
+    httpOnly: true,
+    sameSite: env.cookieSameSite,
+    secure: env.cookieSecure,
+    maxAge: PASSKEY_CHALLENGE_TTL_SECONDS * 1000,
+    path: "/"
+  };
+}
+
 export function writeSessionCookie(res: CookieResponse, token: string): void {
   res.cookie(env.cookieName, token, sessionCookieOptions());
 }
@@ -126,4 +155,37 @@ export function clearSessionCookie(res: ClearCookieResponse): void {
 
 export function clearSupervisorReauthCookie(res: ClearCookieResponse): void {
   res.clearCookie(env.reauthCookieName, reauthCookieOptions());
+}
+
+export function writePasskeyChallengeCookie(res: CookieResponse, challenge: PasskeyChallengeSession): void {
+  const token = jwt.sign({ purpose: "passkey-challenge", ...challenge }, env.jwtSecret, {
+    expiresIn: PASSKEY_CHALLENGE_TTL_SECONDS
+  });
+  res.cookie(PASSKEY_CHALLENGE_COOKIE_NAME, token, passkeyChallengeCookieOptions());
+}
+
+export function readPasskeyChallengeCookie(req: CookieRequest): PasskeyChallengeSession | null {
+  try {
+    const token = req.cookies?.[PASSKEY_CHALLENGE_COOKIE_NAME];
+    if (!token) return null;
+    const payload = jwt.verify(token, env.jwtSecret) as Record<string, unknown>;
+    if (
+      payload.purpose !== "passkey-challenge" ||
+      (payload.type !== "registration" && payload.type !== "authentication") ||
+      typeof payload.challenge !== "string"
+    ) {
+      return null;
+    }
+    return {
+      type: payload.type,
+      challenge: payload.challenge,
+      ...(payload.userId == null ? {} : { userId: payload.userId as UserId })
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearPasskeyChallengeCookie(res: ClearCookieResponse): void {
+  res.clearCookie(PASSKEY_CHALLENGE_COOKIE_NAME, passkeyChallengeCookieOptions());
 }

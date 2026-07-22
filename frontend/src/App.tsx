@@ -8,6 +8,7 @@ import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-pro
 import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
+import { PasskeySettingsButton } from "@/components/auth/passkey-settings-button";
 import { LoginPage } from "@/pages/auth/login-page";
 import { DashboardPage } from "@/pages/dashboard/dashboard-page";
 import SearchPage from "@/pages/search/search-page";
@@ -249,7 +250,7 @@ function AppContent() {
             <SchedulingOverrideApprovalCenter user={user} />
           </>
         )}
-        accountMenuActions={<ActionPinSettingsButton variant="drawer" />}
+        accountMenuActions={<><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
         canAccessSettings={canRoleAccessRoute(normalizedMatrix, "settings", user.role)}
         onSettings={() => navigate("/settings")}
         onUndo={() => navigate(-1)}
@@ -327,7 +328,7 @@ function AppContent() {
         onClose={() => setMobileNavOpen(false)}
         onToggleLanguage={toggleLanguage}
         onLogout={logout}
-        accountActions={<ActionPinSettingsButton variant="drawer" />}
+        accountActions={<><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
       />
 
       <ToastViewport />

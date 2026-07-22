@@ -17,6 +17,7 @@ import { asString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import type { Role } from "../types/domain.js";
 import { updateOwnPassword } from "../services/user-service.js";
+import { createPasskeyRouter } from "./passkeys.js";
 
 interface AuthSessionRequest extends Request {
   body: Record<string, unknown>;
@@ -31,6 +32,7 @@ interface AuthenticatedUser {
 }
 
 export const authRouter: Router = express.Router();
+authRouter.use("/passkeys", createPasskeyRouter());
 const loginRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   maxRequests: 10,
