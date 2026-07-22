@@ -15,11 +15,13 @@ function remoteFilename(value: string): string { if (!/^[A-Za-z0-9._ -]+$/.test(
 function parseListing(output: string, folder: string): RequestScanRemoteFile[] {
   const found: RequestScanRemoteFile[] = [];
   for (const line of output.split(/\r?\n/)) {
-    const match = line.match(/^\s*(.*?)\s{2,}([A-Z]+)\s+\d+/);
-    if (!match || /^(\.|\.\.)$/.test(match[1].trim()) || match[2].includes("D")) continue;
+    const match = line.match(/^\s*(.*?)\s{2,}([A-Za-z]+)\s+\d+\s+(.+?)\s*$/);
+    const attributes = match?.[2]?.toUpperCase();
+    if (!match || /^(\.|\.\.)$/.test(match[1].trim()) || attributes?.includes("D")) continue;
     const filename = match[1].trim();
     if (!/\.(pdf|jpe?g)$/i.test(filename)) continue;
-    found.push({ filename, relativePath: joinRemote(folder, filename), modifiedAt: null });
+    const modifiedAt = new Date(match[3]);
+    found.push({ filename, relativePath: joinRemote(folder, filename), modifiedAt: Number.isNaN(modifiedAt.getTime()) ? null : modifiedAt });
   }
   return found;
 }
@@ -28,14 +30,7 @@ export async function listRequestScanFiles(settings: RequestScanSettings, depend
   const folder = settings.incomingSubfolder;
   return withBackupV3SmbSession(config(settings), credentials(settings), async (run) => {
     const result = await run(`cd ${smbQuote(folder)}; ls`) as { stdout?: string };
-    const files = parseListing(String(result.stdout || ""), folder);
-    for (const file of files) {
-      const info = await run(`allinfo ${smbQuote(file.relativePath)}`) as { stdout?: string };
-      const timestamp = String(info.stdout || "").match(/(?:write_time|mtime)\s*:\s*(.+)$/im)?.[1]?.trim();
-      const parsed = timestamp ? new Date(timestamp) : null;
-      file.modifiedAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
-    }
-    return files;
+    return parseListing(String(result.stdout || ""), folder);
   }, dependencies);
 }
 

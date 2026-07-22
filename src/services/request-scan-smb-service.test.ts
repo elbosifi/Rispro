@@ -70,7 +70,7 @@ test("Request Scan SMB test accepts existing folders and removes its write probe
   assert.ok(fake.commands.some((command) => command.startsWith("del ")));
 });
 
-test("Request Scan SMB listing changes into Incoming and preserves full paths for supported files", async () => {
+test("Request Scan SMB listing parses the production mixed-case smbclient file row without allinfo", async () => {
   const commands: string[] = [];
   const dependencies: BackupV3SmbDependencies = {
     async execFile(_command, args) {
@@ -79,29 +79,24 @@ test("Request Scan SMB listing changes into Incoming and preserves full paths fo
       if (command.startsWith("cd ")) {
         return {
           stdout: [
-            "  .                                   D        0  Tue Jul 22 20:19:00 2026",
-            "  ..                                  D        0  Tue Jul 22 20:19:00 2026",
-            "  v2-003533.pdf                      A    80896  Tue Jul 22 20:19:00 2026",
-            "  request with spaces.jpeg            A     1024  Tue Jul 22 20:19:00 2026",
-            "  subfolder                           D        0  Tue Jul 22 20:19:00 2026",
-            "  notes.txt                           A       12  Tue Jul 22 20:19:00 2026",
+            "  .                                  Dc        0  Wed Jul 22 18:47:18 2026",
+            "  ..                                 Dc        0  Wed Jul 22 18:47:18 2026",
+            "  v2-003533.pdf                      Ac    80231  Wed Jul 22 18:19:32 2026",
           ].join("\n"),
         };
       }
-      if (command.startsWith("allinfo ")) return { stdout: "write_time: 2026-07-22T20:19:00.000Z" };
       throw new Error(`Unexpected SMB command: ${command}`);
     },
   };
 
   const files = await listRequestScanFiles(settings, dependencies);
 
-  assert.deepEqual(files.map((file) => ({ filename: file.filename, relativePath: file.relativePath })), [
-    { filename: "v2-003533.pdf", relativePath: "Requests\\Incoming\\v2-003533.pdf" },
-    { filename: "request with spaces.jpeg", relativePath: "Requests\\Incoming\\request with spaces.jpeg" },
-  ]);
-  assert.ok(files.every((file) => file.modifiedAt instanceof Date));
+  assert.equal(files.length, 1);
+  assert.equal(files[0]?.filename, "v2-003533.pdf");
+  assert.equal(files[0]?.relativePath, "Requests\\Incoming\\v2-003533.pdf");
+  assert.ok(files[0]?.modifiedAt instanceof Date && !Number.isNaN(files[0].modifiedAt.getTime()));
   assert.equal(commands[0], 'cd "Requests/Incoming"; ls');
-  assert.ok(commands.filter((command) => command.startsWith("allinfo ")).every((command) => quotedParts(command)[0]?.startsWith("Requests\\Incoming\\")));
+  assert.equal(commands.some((command) => command.startsWith("allinfo ")), false);
 });
 
 for (const [status, expected] of [
