@@ -99,9 +99,6 @@ export interface EnvConfig {
   cookieSameSite: "lax" | "strict" | "none";
   sessionHours: number;
   supervisorReauthMinutes: number;
-  webAuthnRpName: string;
-  webAuthnRpId: string;
-  webAuthnOrigin: string;
   requestBodyLimit: string;
   trustProxy: boolean | number | string;
   uploadsDir: string;
@@ -188,9 +185,6 @@ export const env: EnvConfig = {
   cookieSameSite: readSameSite("COOKIE_SAME_SITE", "lax"),
   sessionHours: readPositiveInteger("SESSION_HOURS", 8),
   supervisorReauthMinutes: readPositiveInteger("SUPERVISOR_REAUTH_MINUTES", 10),
-  webAuthnRpName: String(process.env.WEBAUTHN_RP_NAME || "RISpro Development").trim(),
-  webAuthnRpId: String(process.env.WEBAUTHN_RP_ID || "").trim(),
-  webAuthnOrigin: String(process.env.WEBAUTHN_ORIGIN || "").trim(),
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "75mb",
   trustProxy: readTrustProxy(),
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",

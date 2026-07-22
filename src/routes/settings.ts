@@ -12,6 +12,7 @@
 import express, { Request, Response } from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { HttpError } from "../utils/http-error.js";
 import { asBooleanFlag, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../services/settings-service.js";
@@ -72,6 +73,7 @@ import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-servic
 import { readPageVisibilityMatrix, savePageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
 import { readActionPinPolicy, saveActionPinPolicy } from "../services/action-pin-policy-service.js";
 import { ensurePatientWebPushConfig } from "../services/patient-web-push-service.js";
+import { PASSKEY_SETTINGS_CATEGORY, readPasskeyConfiguration, validatePasskeyConfiguration } from "../services/passkey-settings-service.js";
 import {
   dismissPatientDuplicateCandidate,
   getPatientDuplicateDetail,
@@ -223,9 +225,37 @@ settingsRouter.get(
   })
 );
 
+settingsRouter.get(
+  "/passkeys/config",
+  requireSupervisor,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can view passkey configuration.");
+    res.json({ configuration: await readPasskeyConfiguration() });
+  })
+);
+
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
+
+settingsRouter.put(
+  "/passkeys/config",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update passkey configuration.");
+    const configuration = validatePasskeyConfiguration(asUnknownRecord(request.body ?? {}));
+    await upsertSettings(
+      PASSKEY_SETTINGS_CATEGORY,
+      [
+        { key: "rp_name", value: configuration.rpName },
+        { key: "origin", value: configuration.origin }
+      ],
+      request.user.sub as UserId
+    );
+    res.json({ configuration });
+  })
+);
 
 settingsRouter.post(
   "/not-allowed-name-words",

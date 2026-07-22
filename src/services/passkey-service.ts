@@ -8,8 +8,8 @@ import {
   type RegistrationResponseJSON,
   type WebAuthnCredential
 } from "@simplewebauthn/server";
-import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
+import type { PasskeyConfiguration } from "./passkey-settings-service.js";
 import type { DbNumeric, DbQueryResult } from "../types/db.js";
 import type { Role } from "../types/domain.js";
 import type { UserId } from "../types/http.js";
@@ -50,12 +50,6 @@ export const simpleWebAuthn: PasskeyWebAuthn = {
   verifyAuthenticationResponse
 };
 
-function requirePasskeyConfig(): void {
-  if (!env.webAuthnRpName || !env.webAuthnRpId || !env.webAuthnOrigin) {
-    throw new HttpError(503, "Passkey sign-in is not configured.");
-  }
-}
-
 function asCounter(value: DbNumeric): number {
   const counter = Number(value);
   return Number.isSafeInteger(counter) && counter >= 0 ? counter : 0;
@@ -75,15 +69,14 @@ function assertResponse(value: unknown, message: string): Record<string, unknown
   return value as Record<string, unknown>;
 }
 
-export async function registrationOptionsForUser(user: PasskeyUser, webauthn: PasskeyWebAuthn = simpleWebAuthn) {
-  requirePasskeyConfig();
+export async function registrationOptionsForUser(user: PasskeyUser, configuration: PasskeyConfiguration, webauthn: PasskeyWebAuthn = simpleWebAuthn) {
   const credentials = await pool.query<{ credential_id: string; transports: unknown }>(
     "select credential_id, transports from user_passkeys where user_id = $1 order by id",
     [user.id]
   );
   return webauthn.generateRegistrationOptions({
-    rpName: env.webAuthnRpName,
-    rpID: env.webAuthnRpId,
+    rpName: configuration.rpName,
+    rpID: configuration.rpId,
     userID: new TextEncoder().encode(String(user.id)),
     userName: user.username,
     userDisplayName: user.fullName || user.username,
@@ -96,10 +89,9 @@ export async function registrationOptionsForUser(user: PasskeyUser, webauthn: Pa
   });
 }
 
-export async function authenticationOptions(webauthn: PasskeyWebAuthn = simpleWebAuthn) {
-  requirePasskeyConfig();
+export async function authenticationOptions(configuration: PasskeyConfiguration, webauthn: PasskeyWebAuthn = simpleWebAuthn) {
   return webauthn.generateAuthenticationOptions({
-    rpID: env.webAuthnRpId,
+    rpID: configuration.rpId,
     userVerification: "required"
   });
 }
@@ -108,17 +100,17 @@ export async function verifyAndStoreRegistration(
   userId: UserId,
   responseValue: unknown,
   expectedChallenge: string,
+  configuration: PasskeyConfiguration,
   webauthn: PasskeyWebAuthn = simpleWebAuthn
 ): Promise<void> {
-  requirePasskeyConfig();
   const response = assertResponse(responseValue, "Passkey registration response is required.") as unknown as RegistrationResponseJSON;
   let verification: Awaited<ReturnType<typeof verifyRegistrationResponse>>;
   try {
     verification = await webauthn.verifyRegistrationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: env.webAuthnOrigin,
-      expectedRPID: env.webAuthnRpId,
+      expectedOrigin: configuration.origin,
+      expectedRPID: configuration.rpId,
       requireUserVerification: true
     });
   } catch {
@@ -152,9 +144,9 @@ export async function verifyAndStoreRegistration(
 export async function verifyPasskeyLogin(
   responseValue: unknown,
   expectedChallenge: string,
+  configuration: PasskeyConfiguration,
   webauthn: PasskeyWebAuthn = simpleWebAuthn
 ): Promise<PasskeyUser> {
-  requirePasskeyConfig();
   const response = assertResponse(responseValue, "Passkey sign-in response is required.") as unknown as AuthenticationResponseJSON;
   if (!response.id) throw new HttpError(400, "Passkey sign-in response is required.");
   const stored = (await pool.query(
@@ -180,8 +172,8 @@ export async function verifyPasskeyLogin(
     verification = await webauthn.verifyAuthenticationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: env.webAuthnOrigin,
-      expectedRPID: env.webAuthnRpId,
+      expectedOrigin: configuration.origin,
+      expectedRPID: configuration.rpId,
       credential,
       requireUserVerification: true
     });

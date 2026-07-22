@@ -8,9 +8,6 @@ import { randomUUID } from "node:crypto";
 
 process.env.DATABASE_URL ||= "postgresql://rispro_test:rispro_test_password@localhost:5433/rispro_test";
 process.env.JWT_SECRET ||= "passkey-test-secret";
-process.env.WEBAUTHN_RP_NAME ||= "RISpro Development";
-process.env.WEBAUTHN_RP_ID ||= "localhost";
-process.env.WEBAUTHN_ORIGIN ||= "http://localhost";
 
 type RequestResult<T> = { status: number; data: T; cookies: string[] };
 
@@ -83,6 +80,15 @@ test("passkey routes require auth for registration options, store registrations,
 
   const active = await makeUser(activeUsername, true);
   const disabled = await makeUser(disabledUsername, false);
+  const previousConfiguration = await pool.query<{ setting_key: string; setting_value: unknown; updated_by_user_id: string | null }>(
+    "select setting_key, setting_value, updated_by_user_id::text as updated_by_user_id from system_settings where category = 'passkey'"
+  );
+  await pool.query("delete from system_settings where category = 'passkey'");
+  await pool.query(
+    `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+     values ('passkey', 'rp_name', $1::jsonb, $3), ('passkey', 'origin', $2::jsonb, $3)`,
+    [JSON.stringify({ value: "RISpro Development" }), JSON.stringify({ value: "http://localhost" }), active.id]
+  );
   await pool.query(
     `insert into user_passkeys (user_id, credential_id, public_key, counter, transports)
      values ($1, $2, $3, 0, '[]'::jsonb)`,
@@ -158,6 +164,14 @@ test("passkey routes require auth for registration options, store registrations,
   } finally {
     await server.close();
     await pool.query("delete from audit_log where changed_by_user_id = any($1::bigint[])", [createdUsers]);
+    await pool.query("delete from system_settings where category = 'passkey'");
     await pool.query("delete from users where id = any($1::bigint[])", [createdUsers]);
+    for (const setting of previousConfiguration.rows) {
+      await pool.query(
+        `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+         values ('passkey', $1, $2::jsonb, $3)`,
+        [setting.setting_key, JSON.stringify(setting.setting_value), setting.updated_by_user_id]
+      );
+    }
   }
 });

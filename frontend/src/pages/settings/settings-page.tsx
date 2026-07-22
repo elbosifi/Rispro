@@ -58,6 +58,7 @@ import SanteWorklistSection from "./sante-worklist-section";
 import PacsSettingsSection from "./pacs-settings-section";
 import AppointmentSlipSettingsSection from "./appointment-slip-settings-section";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
+import PasskeyConfigurationSection from "./passkey-configuration-section";
 import PatientDuplicateResolverSection from "./patient-duplicate-resolver-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import ActionPinPolicySection from "./action-pin-policy-section";
@@ -178,6 +179,7 @@ type SettingsSection =
   | "not_allowed_name_words"
   | "appointment_slip"
   | "patient_qr_self_service"
+  | "passkey_configuration"
   | "sonicdicom_reports"
   | "ohif_viewer"
   | "documents_and_uploads"
@@ -206,6 +208,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "not_allowed_name_words",
   "appointment_slip",
   "patient_qr_self_service",
+  "passkey_configuration",
   "sonicdicom_reports",
   "ohif_viewer",
   "documents_and_uploads",
@@ -226,6 +229,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   not_allowed_name_words: "clinical",
   appointment_slip: "clinical",
   patient_qr_self_service: "clinical",
+  passkey_configuration: "admin",
   scheduling_and_capacity: "scheduling",
   queue_and_arrival: "scheduling",
   scheduling_engine_config: "scheduling",
@@ -258,6 +262,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "patient_qr_self_service") {
     return "إعدادات صفحة المريض ورمز QR";
+  }
+  if (section === "passkey_configuration") {
+    return "Passkey Configuration";
   }
   if (section === "appointment_slip") {
     return "Appointment Slip Settings";
@@ -320,6 +327,7 @@ export default function SettingsPage() {
 
   const visibleSections = SETTINGS_MENU_SECTIONS.filter((key) => {
     if (key === "system_diagnostics" && user?.role !== "super_admin") return false;
+    if (key === "passkey_configuration" && user?.role !== "super_admin") return false;
     const label = sectionLabel(t, key);
     const query = settingsQuery.trim().toLowerCase();
     const matchesGroup = settingsGroup === "all" || SECTION_GROUPS[key] === settingsGroup;
@@ -441,6 +449,7 @@ export default function SettingsPage() {
             {section === "not_allowed_name_words" && <NotAllowedNameWordsSection onReAuthRequired={requestReAuth} />}
             {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
+            {section === "passkey_configuration" && user?.role === "super_admin" && <PasskeyConfigurationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "patient_duplicate_resolver" && <PatientDuplicateResolverSection onReAuthRequired={requestReAuth} />}
             {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
             {section === "ohif_viewer" && <OhifViewerSection onReAuthRequired={requestReAuth} />}

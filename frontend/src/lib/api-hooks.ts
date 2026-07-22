@@ -3693,6 +3693,25 @@ export async function fetchModalitiesSettings(includeInactive = false): Promise<
   return raw;
 }
 
+export interface PasskeyConfiguration {
+  rpName: string;
+  rpId: string;
+  origin: string;
+}
+
+export async function fetchPasskeyConfiguration(): Promise<PasskeyConfiguration | null> {
+  const raw = await api<{ configuration: PasskeyConfiguration | null }>("/settings/passkeys/config");
+  return raw.configuration;
+}
+
+export async function savePasskeyConfiguration(configuration: Pick<PasskeyConfiguration, "rpName" | "origin">): Promise<PasskeyConfiguration> {
+  const raw = await api<{ configuration: PasskeyConfiguration }>("/settings/passkeys/config", {
+    method: "PUT",
+    body: JSON.stringify(configuration),
+  });
+  return raw.configuration;
+}
+
 export async function getPasskeyRegistrationOptions(): Promise<Record<string, unknown>> {
   return api<Record<string, unknown>>("/auth/passkeys/register/options", { method: "POST" });
 }

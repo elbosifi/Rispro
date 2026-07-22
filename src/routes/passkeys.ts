@@ -10,6 +10,7 @@ import {
   writeSessionCookie
 } from "../services/auth-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
+import { requirePasskeyConfiguration } from "../services/passkey-settings-service.js";
 import {
   authenticationOptions,
   registrationOptionsForUser,
@@ -75,7 +76,8 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
     requireAuth,
     asyncRoute(async (req: Request, res: Response) => {
       const user = currentUser(req as PasskeyRequest);
-      const options = await registrationOptionsForUser(user, webauthn);
+      const configuration = await requirePasskeyConfiguration();
+      const options = await registrationOptionsForUser(user, configuration, webauthn);
       writePasskeyChallengeCookie(res, { type: "registration", challenge: options.challenge, userId: user.id });
       res.json(options);
     })
@@ -88,7 +90,8 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
       const request = req as PasskeyRequest;
       const user = currentUser(request);
       const challenge = readChallenge(request, "registration", user.id);
-      await verifyAndStoreRegistration(user.id, request.body?.response, challenge, webauthn);
+      const configuration = await requirePasskeyConfiguration();
+      await verifyAndStoreRegistration(user.id, request.body?.response, challenge, configuration, webauthn);
       clearPasskeyChallengeCookie(res);
       res.json({ verified: true });
     })
@@ -98,7 +101,8 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
     "/login/options",
     loginRateLimiter,
     asyncRoute(async (_req: Request, res: Response) => {
-      const options = await authenticationOptions(webauthn);
+      const configuration = await requirePasskeyConfiguration();
+      const options = await authenticationOptions(configuration, webauthn);
       writePasskeyChallengeCookie(res, { type: "authentication", challenge: options.challenge });
       res.json(options);
     })
@@ -110,7 +114,8 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
     asyncRoute(async (req: Request, res: Response) => {
       const request = req as PasskeyRequest;
       const challenge = readChallenge(request, "authentication");
-      const user = await verifyPasskeyLogin(request.body?.response, challenge, webauthn);
+      const configuration = await requirePasskeyConfiguration();
+      const user = await verifyPasskeyLogin(request.body?.response, challenge, configuration, webauthn);
       const token = buildSessionToken({
         id: user.id,
         username: user.username,
