@@ -40,6 +40,31 @@ function settingsFrom(values: Record<string, string>): RequestScanSettings {
   };
 }
 
+function resolveRequestScanSettings(input: Record<string, unknown>, current: Record<string, string>): RequestScanSettings {
+  const stored = settingsFrom(current);
+  const password = typeof input.password === "string" && input.password.trim() ? input.password : stored.password;
+  const candidate: RequestScanSettings = {
+    enabled: enabled(input.enabled ?? current.enabled ?? "disabled"),
+    server: String(input.server ?? current.server ?? "").trim(),
+    share: String(input.share ?? current.share ?? "").trim(),
+    domain: String(input.domain ?? current.domain ?? "").trim(),
+    username: String(input.username ?? current.username ?? "").trim(),
+    password,
+    incomingSubfolder: String(input.incomingSubfolder ?? input.incoming_subfolder ?? current.incoming_subfolder ?? "Requests/Incoming").trim(),
+    processedSubfolder: String(input.processedSubfolder ?? input.processed_subfolder ?? current.processed_subfolder ?? "Requests/Processed").trim(),
+    failedSubfolder: String(input.failedSubfolder ?? input.failed_subfolder ?? current.failed_subfolder ?? "Requests/Failed").trim(),
+    pollingIntervalSeconds: positive(input.pollingIntervalSeconds ?? input.polling_interval_seconds ?? current.polling_interval_seconds, 15, "Polling interval"),
+    fileReadyDelaySeconds: positive(input.fileReadyDelaySeconds ?? input.file_ready_delay_seconds ?? current.file_ready_delay_seconds, 15, "File-ready delay"),
+  };
+  for (const folder of [candidate.incomingSubfolder, candidate.processedSubfolder, candidate.failedSubfolder]) {
+    validateBackupV3SmbConfig({ server: candidate.server || "placeholder", share: candidate.share || "placeholder", subfolder: folder, domain: candidate.domain, timeoutSeconds: 15 });
+  }
+  if (candidate.enabled && (!candidate.server || !candidate.share || !candidate.username || !candidate.password)) {
+    throw new HttpError(400, "SMB server, share, username, and password are required when automation is enabled.");
+  }
+  return candidate;
+}
+
 export async function readRequestScanSettings(): Promise<RequestScanSettings> {
   const map = await loadSettingsMap([REQUEST_SCAN_SETTINGS_CATEGORY]);
   return settingsFrom(map[REQUEST_SCAN_SETTINGS_CATEGORY] || {});
@@ -53,23 +78,18 @@ export async function readRequestScanSettingsForDisplay(): Promise<Omit<RequestS
   return { ...display, passwordConfigured: Boolean(values.password_encrypted) };
 }
 
+export async function resolveRequestScanSettingsForTest(input: Record<string, unknown>): Promise<RequestScanSettings> {
+  const map = await loadSettingsMap([REQUEST_SCAN_SETTINGS_CATEGORY]);
+  return resolveRequestScanSettings(input, map[REQUEST_SCAN_SETTINGS_CATEGORY] || {});
+}
+
 export async function saveRequestScanSettings(input: Record<string, unknown>, userId: UserId): Promise<ReturnType<typeof readRequestScanSettingsForDisplay>> {
   const currentMap = await loadSettingsMap([REQUEST_SCAN_SETTINGS_CATEGORY]);
   const current = currentMap[REQUEST_SCAN_SETTINGS_CATEGORY] || {};
+  const candidate = resolveRequestScanSettings(input, current);
   const password = typeof input.password === "string" && input.password.trim() ? input.password : "";
-  const candidate = {
-    enabled: input.enabled ?? current.enabled ?? "disabled", server: String(input.server ?? current.server ?? "").trim(), share: String(input.share ?? current.share ?? "").trim(),
-    domain: String(input.domain ?? current.domain ?? "").trim(), username: String(input.username ?? current.username ?? "").trim(),
-    incomingSubfolder: String(input.incomingSubfolder ?? input.incoming_subfolder ?? current.incoming_subfolder ?? "Requests/Incoming").trim(),
-    processedSubfolder: String(input.processedSubfolder ?? input.processed_subfolder ?? current.processed_subfolder ?? "Requests/Processed").trim(),
-    failedSubfolder: String(input.failedSubfolder ?? input.failed_subfolder ?? current.failed_subfolder ?? "Requests/Failed").trim(),
-    pollingIntervalSeconds: positive(input.pollingIntervalSeconds ?? input.polling_interval_seconds ?? current.polling_interval_seconds, 15, "Polling interval"),
-    fileReadyDelaySeconds: positive(input.fileReadyDelaySeconds ?? input.file_ready_delay_seconds ?? current.file_ready_delay_seconds, 15, "File-ready delay"),
-  };
-  for (const folder of [candidate.incomingSubfolder, candidate.processedSubfolder, candidate.failedSubfolder]) validateBackupV3SmbConfig({ server: candidate.server || "placeholder", share: candidate.share || "placeholder", subfolder: folder, domain: candidate.domain, timeoutSeconds: 15 });
-  if (enabled(candidate.enabled) && (!candidate.server || !candidate.share || !candidate.username || !(password || current.password_encrypted))) throw new HttpError(400, "SMB server, share, username, and password are required when automation is enabled.");
   await upsertSettings(REQUEST_SCAN_SETTINGS_CATEGORY, [
-    { key: "enabled", value: enabled(candidate.enabled) ? "enabled" : "disabled" }, { key: "server", value: candidate.server }, { key: "share", value: candidate.share }, { key: "domain", value: candidate.domain }, { key: "username", value: candidate.username },
+    { key: "enabled", value: candidate.enabled ? "enabled" : "disabled" }, { key: "server", value: candidate.server }, { key: "share", value: candidate.share }, { key: "domain", value: candidate.domain }, { key: "username", value: candidate.username },
     { key: "incoming_subfolder", value: candidate.incomingSubfolder }, { key: "processed_subfolder", value: candidate.processedSubfolder }, { key: "failed_subfolder", value: candidate.failedSubfolder },
     { key: "polling_interval_seconds", value: String(candidate.pollingIntervalSeconds) }, { key: "file_ready_delay_seconds", value: String(candidate.fileReadyDelaySeconds) },
     ...(password ? [{ key: "password_encrypted", value: encryptBackupV3Secret(password) }] : []),
