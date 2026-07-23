@@ -8,6 +8,7 @@ import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { uploadDocument } from "./document-service.js";
 import { extractRequestScanBarcode, type RequestScanBarcodeFailure } from "./request-scan-barcode-service.js";
+import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import {
   decideRequestScanFilenameEvidence,
   parseRequestScanFilenameIdentifiers,
@@ -237,7 +238,10 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
         ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
       });
       await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
-      const barcode = await dependencies.extractRequestScanBarcode(localPath);
+      const patientQrSettings = await readPatientQrSettings();
+      const barcode = await dependencies.extractRequestScanBarcode(localPath, undefined, {
+        risproPublicBaseUrl: patientQrSettings.risproPublicBaseUrl,
+      });
       if (!barcode.ok) {
         if (barcode.ignoredQrCount) {
           logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_QR_IGNORED", {
