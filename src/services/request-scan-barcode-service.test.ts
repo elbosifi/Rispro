@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpretRequestScanBarcodes, trustedRequestScanQrOrigins, type RequestScanBarcodeDependencies } from "./request-scan-barcode-service.js";
+import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpretRequestScanBarcodes, nativeTiles, trustedRequestScanQrOrigins, MAX_NATIVE_TILES, type RequestScanBarcodeDependencies } from "./request-scan-barcode-service.js";
 
 function noSymbol(): Error & { code: number } { return Object.assign(new Error("no symbols found"), { code: 4 }); }
 const QR_TOKEN = "pa_ab_CD-12_ef";
@@ -32,6 +32,18 @@ function dependencies(decode: Decode, options: Options = {}): RequestScanBarcode
 async function withImage(t: (filePath: string) => Promise<void>): Promise<void> { const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-barcode-test-")); const image = path.join(dir, "request.jpg"); await fs.writeFile(image, "original upload bytes"); try { await t(image); } finally { await fs.rm(dir, { recursive: true, force: true }); } }
 
 test("accepts single-page Code 128 and Code 39 V2 accessions", () => { assert.deepEqual(interpretRequestScanBarcodes("CODE-128:V2-003628\n"), { ok: true, accession: "V2-003628" }); assert.deepEqual(interpretRequestScanBarcodes("CODE-39:v2-003628\n"), { ok: true, accession: "V2-003628" }); });
+test("native QR tiles retain all corners and far-right coverage within the bounded 4 by 4 grid", () => {
+  const width = 400; const height = 610; const tiles = nativeTiles(width, height);
+  assert.equal(MAX_NATIVE_TILES, 16);
+  assert.equal(tiles.length, 16);
+  assert.equal(new Set(tiles.map((tile) => `${tile.left}:${tile.top}:${tile.width}:${tile.height}`)).size, 16);
+  assert.ok(tiles.every((tile) => tile.left >= 0 && tile.top >= 0 && tile.left + tile.width <= width && tile.top + tile.height <= height));
+  assert.ok(tiles.some((tile) => tile.left === 0 && tile.top === 0));
+  assert.ok(tiles.some((tile) => tile.left + tile.width === width && tile.top === 0));
+  assert.ok(tiles.some((tile) => tile.left === 0 && tile.top + tile.height === height));
+  assert.ok(tiles.some((tile) => tile.left + tile.width === width && tile.top + tile.height === height));
+  assert.ok(tiles.some((tile) => tile.left === 240 && tile.top === 305 && tile.width === 160 && tile.height === 214));
+});
 test("accepts only configured RISpro public appointment origins and preserves the token exactly", () => {
   assert.equal(extractRisproPublicAppointmentToken(QR_URL), QR_TOKEN);
   assert.equal(extractRisproPublicAppointmentToken(`https://example.com/public/appointment?t=${QR_TOKEN}`), null);

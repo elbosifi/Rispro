@@ -219,14 +219,25 @@ async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 60
 }
 const NATIVE_FALLBACK_TIMEOUT_MS = 120_000;
 const MAX_NATIVE_IMAGES_PER_PAGE = 2;
-const MAX_NATIVE_TILES = 12;
+export const MAX_NATIVE_TILES = 16;
 const NATIVE_MIN_DIMENSION = 120;
 const NATIVE_MAX_DIMENSION = 2_800;
-function nativeTiles(width: number, height: number): Array<{ left: number; top: number; width: number; height: number }> {
+export type NativeTile = { left: number; top: number; width: number; height: number };
+export function prioritizeNativeTiles(tiles: NativeTile[], imageWidth: number, imageHeight: number): NativeTile[] {
+  const isLeft = (tile: NativeTile) => tile.left === 0;
+  const isRight = (tile: NativeTile) => tile.left + tile.width === imageWidth;
+  const isTop = (tile: NativeTile) => tile.top === 0;
+  const isBottom = (tile: NativeTile) => tile.top + tile.height === imageHeight;
+  const priority = (tile: NativeTile) => (isLeft(tile) || isRight(tile)) && (isTop(tile) || isBottom(tile)) ? 0 : isLeft(tile) || isRight(tile) || isTop(tile) || isBottom(tile) ? 1 : 2;
+  return [...tiles].sort((left, right) => priority(left) - priority(right));
+}
+export function nativeTiles(width: number, height: number): NativeTile[] {
   const cropWidth = Math.min(width, Math.max(1, Math.round(width * 0.4))); const cropHeight = Math.min(height, Math.max(1, Math.round(height * 0.35)));
   const xs = [...new Set([0, Math.max(0, Math.round(width * 0.25)), Math.max(0, Math.round(width * 0.5)), Math.max(0, width - cropWidth)])];
   const ys = [...new Set([0, Math.max(0, Math.round(height * 0.25)), Math.max(0, Math.round(height * 0.5)), Math.max(0, height - cropHeight)])];
-  return xs.flatMap((left) => ys.map((top) => ({ left: Math.min(left, width - cropWidth), top: Math.min(top, height - cropHeight), width: cropWidth, height: cropHeight }))).filter((tile, index, tiles) => tiles.findIndex((other) => other.left === tile.left && other.top === tile.top) === index).slice(0, MAX_NATIVE_TILES);
+  const unique = xs.flatMap((left) => ys.map((top) => ({ left: Math.min(left, width - cropWidth), top: Math.min(top, height - cropHeight), width: cropWidth, height: cropHeight }))).filter((tile, index, tiles) => tiles.findIndex((other) => other.left === tile.left && other.top === tile.top) === index);
+  // Keep all edge and corner coverage before any future bound can remove interiors.
+  return prioritizeNativeTiles(unique, width, height).slice(0, MAX_NATIVE_TILES);
 }
 async function scanNativePdfImages(pdfPath: string, pages: RenderedPage[], rootTempDir: string, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
   const accessions = new Set<string>(); const qrTokens = new Set<string>(); let ignoredQrCount = 0; let decoded = false; let attempts = 0; const deadline = Date.now() + NATIVE_FALLBACK_TIMEOUT_MS; const nativeDir = path.join(rootTempDir, "native-images"); await fs.mkdir(nativeDir);
