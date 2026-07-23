@@ -78,7 +78,7 @@ describe("RequestScansPage", () => {
     expect(await screen.findByText("No active request scans. New scans and retries will appear here automatically.")).toBeTruthy();
   });
 
-  it("queues one failed retry, switches to Active, and does not wait for worker completion", async () => {
+  it("queues one failed retry, remains on Failed, and does not wait for worker completion", async () => {
     let resolveRetry!: (value: Response) => void;
     let activeJobs: typeof pendingJob[] = [];
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
@@ -103,9 +103,9 @@ describe("RequestScansPage", () => {
     activeJobs = [{ ...failedJob, status: "pending", error_message: null }];
     resolveRetry(response({ job: activeJobs[0], trigger: { status: "accepted" } }));
 
-    expect(await screen.findByText("Retry queued. The worker will process this file.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Active (2)" }).className).toContain("border-teal-600");
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/request-scans?status=active", expect.anything()));
+    expect(await screen.findByText("failed.jpg was queued for retry.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Failed (1)" }).className).toContain("border-teal-600");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/request-scans?status=failed", expect.anything()));
     expect(await screen.findByText("failed.jpg")).toBeTruthy();
   });
 

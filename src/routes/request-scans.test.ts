@@ -26,10 +26,10 @@ test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker 
     query: async (text, params) => {
       query = text;
       values = params;
-      return { rows: [{ pending: 4, processing: 2, processed_today: 301, duplicates_today: 5, failed: 409 }] };
+      return { rows: [{ pending: 4, processing: 2, processed_today: 301, duplicates_today: 5, failed: 409, dismissed: 7 }] };
     },
   });
-  assert.deepEqual(status, { enabled: true, lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", running: true, pending: 4, processing: 2, processedToday: 301, duplicatesToday: 5, failed: 409 });
+  assert.deepEqual(status, { enabled: true, lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", running: true, pending: 4, processing: 2, processedToday: 301, duplicatesToday: 5, failed: 409, dismissed: 7 });
   assert.deepEqual(values, ["2026-07-23"]);
   assert.match(query, /count\(\*\) filter \(where status = 'pending'\)/);
   assert.match(query, /count\(\*\) filter \(where status = 'processing'\)/);

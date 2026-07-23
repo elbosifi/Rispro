@@ -34,7 +34,7 @@ export async function finishRequestScanJob(jobId: number, lease: RequestScanLeas
   return rows[0] as RequestScanJob | undefined ?? null;
 }
 export async function recoverExpiredRequestScanJobs(): Promise<{ requeued: number; failed: number }> {
-  const failed = await pool.query(`update request_scan_jobs set status='failed',processing_stage='failed',error_message='Processing was interrupted repeatedly. Retry or assign the document manually.',completed_at=now(),worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where status='processing' and lease_expires_at < now() and recovery_count >= $1`, [REQUEST_SCAN_MAX_RECOVERIES - 1]);
+  const failed = await pool.query(`update request_scan_jobs set status='failed',processing_stage='failed',error_message='Processing was interrupted repeatedly. Retry or assign the document manually.',failure_category='processing_interrupted',completed_at=now(),worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where status='processing' and lease_expires_at < now() and recovery_count >= $1`, [REQUEST_SCAN_MAX_RECOVERIES - 1]);
   const requeued = await pool.query(`update request_scan_jobs set status='pending',processing_stage='queued',stage_started_at=now(),worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,recovery_count=recovery_count+1,completed_at=null,updated_at=now() where status='processing' and lease_expires_at < now() and recovery_count < $1`, [REQUEST_SCAN_MAX_RECOVERIES - 1]);
   return { requeued: requeued.rowCount ?? 0, failed: failed.rowCount ?? 0 };
 }

@@ -6,6 +6,14 @@ import { ensureBackupV3SmbDirectory, smbQuote, validateBackupV3SmbConfig, withBa
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 
 export type RequestScanRemoteFile = { relativePath: string; filename: string; modifiedAt: Date | null };
+export type RequestScanSmbFailureKind = "source_missing" | "smb_storage";
+
+export function classifyRequestScanSmbError(error: unknown): RequestScanSmbFailureKind {
+  const value = error as { code?: unknown; message?: unknown; status?: unknown } | null;
+  const code = String(value?.code ?? value?.status ?? "").toUpperCase();
+  const message = String(value?.message ?? "").toUpperCase();
+  return code === "ENOENT" || code === "STATUS_NO_SUCH_FILE" || code === "NT_STATUS_NO_SUCH_FILE" || /NO SUCH FILE|OBJECT NAME NOT FOUND|FILE NOT FOUND/.test(message) ? "source_missing" : "smb_storage";
+}
 
 function config(settings: RequestScanSettings, subfolder = "") { return { server: settings.server, share: settings.share, domain: settings.domain, subfolder, timeoutSeconds: 30 }; }
 function credentials(settings: RequestScanSettings): BackupV3SmbCredentials { return { username: settings.username, password: settings.password }; }

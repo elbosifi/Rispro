@@ -551,7 +551,7 @@ test("retry moves a failed Request Scan back to the durable pending queue withou
   await assert.rejects(() => retryRequestScanJob(jobId, {
     readSettings: async () => settings,
     moveFile: async () => { throw new Error("must not move"); },
-  }), /Only failed request scans can be retried/);
+  }), /Only visible failed request scans can be retried/);
 });
 
 test("manually assigns a failed request to an eligible V2 appointment through the document service", async (t) => {

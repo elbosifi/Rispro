@@ -15,12 +15,15 @@ import {
   requestScanSafeDisplayFilename,
   type RequestScanFilenameDecision,
 } from "./request-scan-filename-identifier.js";
-import { downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile } from "./request-scan-smb-service.js";
+import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile } from "./request-scan-smb-service.js";
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
+import { logAuditEntry } from "./audit-service.js";
 import { claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, updateRequestScanProgress, type RequestScanLease } from "./request-scan-processing-service.js";
 
-export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
-export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "all";
+export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
+export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
+export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
+export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "dismissed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; accession_number: string };
 export type RequestScanServiceDependencies = {
   listRequestScanFiles: typeof listRequestScanFiles;
@@ -54,6 +57,15 @@ const errorMessage: Record<RequestScanBarcodeFailure, string> = {
   barcode_processing_failed: "The barcode could not be processed automatically. Assign the document manually.",
 };
 export function requestScanBarcodeErrorMessage(reason: RequestScanBarcodeFailure): string { return errorMessage[reason]; }
+export function requestScanFailureCategory(message: string): RequestScanFailureCategory {
+  const value = message.toLowerCase();
+  if (value.includes("multiple") || value.includes("conflict") || value.includes("disagreement")) return "identifier_conflict";
+  if (value.includes("source scan file could not be found")) return "source_missing";
+  if (value.includes("smb") || value.includes("destination") || value.includes("incoming")) return "smb_storage";
+  if (value.includes("interrupted repeatedly")) return "processing_interrupted";
+  if (value.includes("barcode") || value.includes("identifier") || value.includes("pdf") || value.includes("scan")) return "recognition";
+  return "internal_processing";
+}
 const defaultDependencies: RequestScanServiceDependencies = {
   listRequestScanFiles,
   downloadRequestScanFile,
@@ -70,25 +82,32 @@ function destination(folder: string, duplicate = false): string { return `${fold
 
 export function parseRequestScanJobFilter(value: unknown): RequestScanJobFilter {
   const normalized = value == null || value === "" ? "all" : String(value).toLowerCase();
-  if (!["active", "processed", "duplicate", "failed", "all"].includes(normalized)) {
+  if (!["active", "processed", "duplicate", "failed", "dismissed", "all"].includes(normalized)) {
     throw new HttpError(400, "Invalid Request Scan status filter.");
   }
   return normalized as RequestScanJobFilter;
 }
 
-export async function listRequestScanJobs(filterInput?: unknown): Promise<RequestScanJob[]> {
+export async function listRequestScanJobs(filterInput?: unknown, categoryInput?: unknown): Promise<RequestScanJob[]> {
   const filter = parseRequestScanJobFilter(filterInput);
   const values: unknown[] = [];
+  const category = categoryInput == null || categoryInput === "" ? null : String(categoryInput);
+  if (category && !["recognition","identifier_conflict","smb_storage","source_missing","processing_interrupted","duplicate_or_existing","internal_processing","unknown"].includes(category)) throw new HttpError(400, "Invalid Request Scan failure category.");
   const where = filter === "active"
     ? "where j.status in ('pending', 'processing')"
     : filter === "all"
       ? ""
+      : filter === "dismissed"
+        ? "where j.status = 'failed' and j.dismissed_at is not null"
+        : filter === "failed"
+          ? "where j.status = 'failed' and j.dismissed_at is null"
       : "where j.status = $1";
-  if (!["active", "all"].includes(filter)) values.push(filter);
+  if (!["active", "all", "failed", "dismissed"].includes(filter)) values.push(filter);
+  const finalWhere = category ? `${where || "where"}${where ? " and" : ""} j.failure_category = $${values.push(category)}` : where;
   const order = filter === "active"
     ? "case when j.status = 'processing' then 0 else 1 end, j.created_at asc, j.id asc"
     : "j.created_at desc, j.id desc";
-  const { rows } = await pool.query(`select j.*, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, coalesce(p.english_full_name, p.arabic_full_name) as patient_name, m.name_en as modality_name, e.name_en as exam_name from request_scan_jobs j left join appointments_v2.bookings b on b.id=j.appointment_id left join patients p on p.id=b.patient_id left join modalities m on m.id=b.modality_id left join exam_types e on e.id=b.exam_type_id ${where} order by ${order} limit 250`, values);
+  const { rows } = await pool.query(`select j.*, u.full_name as dismissed_by_name, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, coalesce(p.english_full_name, p.arabic_full_name) as patient_name, m.name_en as modality_name, e.name_en as exam_name from request_scan_jobs j left join users u on u.id=j.dismissed_by left join appointments_v2.bookings b on b.id=j.appointment_id left join patients p on p.id=b.patient_id left join modalities m on m.id=b.modality_id left join exam_types e on e.id=b.exam_type_id ${finalWhere} order by ${order} limit 250`, values);
   return rows as RequestScanJob[];
 }
 
@@ -109,6 +128,8 @@ export async function findEligibleRequestScanAppointment(accession: string): Pro
 }
 async function automatedDocumentExists(appointmentId: number): Promise<boolean> { const result = await pool.query("select 1 from documents where v2_booking_id=$1 and document_type='appointment_request' and source='request_scan_automation' limit 1", [appointmentId]); return Boolean(result.rowCount); }
 function concise(error: unknown): string { return error instanceof HttpError ? error.message : "Request scan processing failed"; }
+function failureCategory(error: unknown): RequestScanFailureCategory { return error instanceof RequestScanProcessingError ? error.category : error instanceof HttpError ? requestScanFailureCategory(error.message) : "internal_processing"; }
+async function downloadRequestScanSource(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, localPath: string): Promise<void> { try { await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath); } catch (error) { const category = classifyRequestScanSmbError(error); throw new RequestScanProcessingError(category === "source_missing" ? "The source scan file could not be found." : "SMB destination operation failed.", category, { cause: error }); } }
 
 type ResolvedFilenameEvidence = {
   decision: RequestScanFilenameDecision;
@@ -234,7 +255,7 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
           ? "IDENTIFIER_SUCCESS_FILENAME_QR"
           : "IDENTIFIER_SUCCESS_FILENAME_CONSENSUS";
       logIdentifier(dependencies, code, { ...baseMetadata(), sourcesAgreed: true });
-      await stage({ stage: "downloading" }); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
+      await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
     } else {
       const initialCode = filenameEvidence.accessionCandidateCount + filenameEvidence.qrCandidateCount === 0
         ? "IDENTIFIER_FILENAME_NOT_FOUND"
@@ -245,7 +266,7 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
       logIdentifier(dependencies, "IDENTIFIER_FALLBACK_DOCUMENT_SCAN", {
         ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
       });
-      await stage({ stage: "downloading" }); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
+      await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
       const patientQrSettings = await readPatientQrSettings();
       await stage({ stage: "verifying_identifier" }); const barcode = await dependencies.extractRequestScanBarcode(localPath, undefined, {
         risproPublicBaseUrl: patientQrSettings.risproPublicBaseUrl,
@@ -364,10 +385,10 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
     await stage({ stage: "moving_file" }); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder);
     const completed = await finishRequestScanJob(job.id, lease, { status: "processed", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); if (!completed) throw new HttpError(409, "Request Scan lease was lost."); return completed;
   } catch (error) {
-    const message = concise(error); let moved = job.source_relative_path;
+    const category = failureCategory(error); const message = error instanceof RequestScanProcessingError ? error.message : concise(error); let moved = job.source_relative_path;
     try { moved = await moveOutcome(dependencies, settings, job, settings.failedSubfolder); } catch { /* keep the original path so recovery can retry it */ }
     if (leaseLost) return getRequestScanJob(job.id);
-    return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: message, completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
+    return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: message, failure_category: category, completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
   } finally { clearInterval(heartbeat); await fs.rm(tempDir, { recursive: true, force: true }); }
 }
 
@@ -389,9 +410,16 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
   return result;
 }
 
-export async function retryRequestScanJob(id: number, overrides: Partial<RequestScanRetryDependencies> = {}): Promise<RequestScanJob> { const dependencies: RequestScanRetryDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, moveFile: moveRequestScanFile, updateJob, ...overrides }; const settings = await dependencies.readSettings(); const job = await dependencies.getJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be retried."); const moved = await dependencies.moveFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return dependencies.updateJob(id, { status: "pending", source_relative_path: moved, error_message: null, completed_at: null }); }
-export async function returnRequestScanToIncoming(id: number): Promise<RequestScanJob> { const settings = await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be returned."); const moved = await moveRequestScanFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return updateJob(id, { status: "pending", source_relative_path: moved, error_message: null, completed_at: null }); }
-export async function manuallyAssignRequestScan(id: number, appointmentId: number, userId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> { const settings = suppliedSettings ?? await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be assigned manually."); const appointment = await findEligibleRequestScanAppointment(`V2-${String(appointmentId).padStart(6, "0")}`); const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-manual-")); try { const localPath = path.join(tempDir, job.filename); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath); const document = await dependencies.uploadDocument({ patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: await fs.readFile(localPath), source: "request_scan_automation" }, userId); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder); return updateJob(id, { status: "processed", appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }
+const pendingRetryFields = { status: "pending" as const, error_message: null, failure_category: null, dismissed_at: null, dismissed_by: null, dismiss_reason: null, completed_at: null, processing_stage: "queued", processing_started_at: null, heartbeat_at: null, worker_id: null, lease_token: null, lease_expires_at: null, progress_current: null, progress_total: null };
+export async function retryRequestScanJob(id: number, overrides: Partial<RequestScanRetryDependencies> = {}): Promise<RequestScanJob> { const dependencies: RequestScanRetryDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, moveFile: moveRequestScanFile, updateJob, ...overrides }; const settings = await dependencies.readSettings(); const job = await dependencies.getJob(id); if (job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Only visible failed request scans can be retried."); const moved = await dependencies.moveFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return dependencies.updateJob(id, { ...pendingRetryFields, source_relative_path: moved, stage_started_at: new Date().toISOString() }); }
+function cleanDismissReason(value: unknown): string | null { const reason = String(value ?? "").trim(); if (reason.length > 500) throw new HttpError(400, "Dismiss reason must be 500 characters or fewer."); return reason || null; }
+export async function dismissRequestScanJob(id: number, userId: number, reason?: unknown): Promise<RequestScanJob> { const { rows } = await pool.query("update request_scan_jobs set dismissed_at=now(),dismissed_by=$2,dismiss_reason=$3,updated_at=now() where id=$1 and status='failed' and dismissed_at is null returning *", [id, userId, cleanDismissReason(reason)]); if (!rows[0]) throw new HttpError(409, "Only visible failed request scans can be dismissed."); const job = rows[0] as RequestScanJob; await logAuditEntry({ entityType: "request_scan_job", entityId: id, actionType: "request_scan_dismissed", newValues: { failure_category: job.failure_category }, changedByUserId: userId }); return job; }
+export async function restoreDismissedRequestScanJob(id: number, userId: number): Promise<RequestScanJob> { const { rows } = await pool.query("update request_scan_jobs set dismissed_at=null,dismissed_by=null,dismiss_reason=null,updated_at=now() where id=$1 and status='failed' and dismissed_at is not null returning *", [id]); if (!rows[0]) throw new HttpError(409, "Only dismissed failed request scans can be restored."); const job = rows[0] as RequestScanJob; await logAuditEntry({ entityType: "request_scan_job", entityId: id, actionType: "request_scan_restored", newValues: { failure_category: job.failure_category }, changedByUserId: userId }); return job; }
+export async function bulkDismissRequestScanJobs(ids: number[], userId: number, reason?: unknown): Promise<RequestScanJob[]> { const unique = [...new Set(ids)]; if (!unique.length || unique.length > 50) throw new HttpError(400, "Select between 1 and 50 request scans."); const clean = cleanDismissReason(reason); const client = await pool.connect(); try { await client.query("begin"); const locked = await client.query("select id from request_scan_jobs where id=any($1::bigint[]) and status='failed' and dismissed_at is null for update", [unique]); if (locked.rows.length !== unique.length) throw new HttpError(409, "All selected jobs must be visible failed request scans."); const { rows } = await client.query("update request_scan_jobs set dismissed_at=now(),dismissed_by=$2,dismiss_reason=$3,updated_at=now() where id=any($1::bigint[]) returning *", [unique, userId, clean]); await client.query("commit"); await logAuditEntry({ entityType: "request_scan_job", actionType: "request_scan_bulk_dismissed", newValues: { count: rows.length }, changedByUserId: userId }); return rows as RequestScanJob[]; } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); } }
+export async function bulkRetryRequestScanJobs(ids: number[]): Promise<{ requestedCount: number; queued: RequestScanJob[]; failed: Array<{ id: number; message: string }> }> { const unique = [...new Set(ids)]; if (!unique.length || unique.length > 50) throw new HttpError(400, "Select between 1 and 50 request scans."); const queued: RequestScanJob[] = []; const failed: Array<{ id: number; message: string }> = []; for (const id of unique) { try { queued.push(await retryRequestScanJob(id)); } catch { failed.push({ id, message: "The source scan file could not be returned to Incoming." }); } } return { requestedCount: unique.length, queued, failed }; }
+export async function auditBulkRequestScanRetry(result: { requestedCount: number; queued: RequestScanJob[]; failed: Array<{ id: number }> }, userId: number, triggerStatus: "accepted" | "already_running" | "disabled" | "not_triggered"): Promise<void> { await logAuditEntry({ entityType: "request_scan_job", actionType: "request_scan_bulk_retried", newValues: { requestedCount: result.requestedCount, queuedCount: result.queued.length, failedCount: result.failed.length, triggerStatus }, changedByUserId: userId }); }
+export async function returnRequestScanToIncoming(id: number): Promise<RequestScanJob> { const settings = await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Only visible failed request scans can be returned."); const moved = await moveRequestScanFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return updateJob(id, { ...pendingRetryFields, source_relative_path: moved, stage_started_at: new Date().toISOString() }); }
+export async function manuallyAssignRequestScan(id: number, appointmentId: number, userId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> { const settings = suppliedSettings ?? await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Restore this dismissed request scan before manual assignment."); const appointment = await findEligibleRequestScanAppointment(`V2-${String(appointmentId).padStart(6, "0")}`); const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-manual-")); try { const localPath = path.join(tempDir, job.filename); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath); const document = await dependencies.uploadDocument({ patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: await fs.readFile(localPath), source: "request_scan_automation" }, userId); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder); return updateJob(id, { status: "processed", appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }
 export async function downloadRequestScanJobFile(id: number): Promise<{ job: RequestScanJob; buffer: Buffer }> { const settings = await readRequestScanSettings(); const job = await getRequestScanJob(id); const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-preview-")); try { const localPath = path.join(tempDir, job.filename); await downloadRequestScanFile(settings, job.source_relative_path, localPath); return { job, buffer: await fs.readFile(localPath) }; } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }
 
 export function withSafeRequestScanFilename<T extends Pick<RequestScanJob, "filename">>(job: T): T {
