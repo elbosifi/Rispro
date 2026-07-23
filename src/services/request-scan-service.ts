@@ -372,15 +372,20 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
 }
 
 export type RequestScanCycleResult = { discovered: number; processed: number; failed: number; duplicates: number; skipped: number };
+const REQUEST_SCAN_MAX_JOBS_PER_CYCLE = 100;
+async function nextPendingRequestScanJob(): Promise<RequestScanJob | null> { const { rows } = await pool.query("select * from request_scan_jobs where status='pending' order by priority_requested_at asc nulls last,created_at asc,id asc limit 1"); return rows[0] as RequestScanJob | undefined ?? null; }
+export async function prioritizePendingRequestScanJob(id: number): Promise<RequestScanJob> { const { rows } = await pool.query("update request_scan_jobs set priority_requested_at=coalesce(priority_requested_at,now()),updated_at=now() where id=$1 and status='pending' returning *", [id]); if (rows[0]) return rows[0] as RequestScanJob; const job = await getRequestScanJob(id); if (job.status !== "pending") throw new HttpError(409, "Only queued request scans can be started."); throw new HttpError(404, "Request scan not found."); }
+async function drainPendingRequestScanJobs(settings: RequestScanSettings, dependencies: RequestScanServiceDependencies, result: RequestScanCycleResult, limit: number): Promise<number> { let count = 0; for (; count < limit; count += 1) { const job = await nextPendingRequestScanJob(); if (!job) break; const completed = await processRequestScanJob(job.id, settings, dependencies); if (completed.status === "processed") result.processed += 1; else if (completed.status === "duplicate") result.duplicates += 1; else if (completed.status === "failed") result.failed += 1; else result.skipped += 1; } return count; }
 
 export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanCycleResult> {
   const settings = suppliedSettings ?? await readRequestScanSettings(); if (!settings.enabled) return { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 };
-  const files = await dependencies.listRequestScanFiles(settings); const result: RequestScanCycleResult = { discovered: files.length, processed: 0, failed: 0, duplicates: 0, skipped: 0 };
+  const result: RequestScanCycleResult = { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 }; const queuedAtStart = await drainPendingRequestScanJobs(settings, dependencies, result, REQUEST_SCAN_MAX_JOBS_PER_CYCLE);
+  const files = await dependencies.listRequestScanFiles(settings); result.discovered = files.length;
   for (const file of files) {
     if (file.modifiedAt && Date.now() - file.modifiedAt.getTime() < settings.fileReadyDelaySeconds * 1000) { result.skipped += 1; continue; }
-    const job = await createOrGetJob(file.filename, file.relativePath); if (!["pending", "failed"].includes(job.status)) { result.skipped += 1; continue; }
-    const completed = await processRequestScanJob(job.id, settings, dependencies); if (completed.status === "processed") result.processed += 1; else if (completed.status === "duplicate") result.duplicates += 1; else result.failed += 1;
+    const job = await createOrGetJob(file.filename, file.relativePath); if (job.status !== "pending") result.skipped += 1;
   }
+  await drainPendingRequestScanJobs(settings, dependencies, result, REQUEST_SCAN_MAX_JOBS_PER_CYCLE - queuedAtStart);
   return result;
 }
 

@@ -12,7 +12,7 @@ export type RequestScanLease = { workerId: string; token: string };
 export function createRequestScanWorkerId(): string { return `${process.env.COMPUTERNAME || process.env.HOSTNAME || "worker"}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`; }
 export async function claimRequestScanJob(jobId: number, workerId: string): Promise<{ job: RequestScanJob; lease: RequestScanLease } | null> {
   const token = crypto.randomUUID();
-  const { rows } = await pool.query(`update request_scan_jobs set status='processing',processing_stage='downloading',processing_started_at=coalesce(processing_started_at,now()),stage_started_at=now(),heartbeat_at=now(),worker_id=$2,lease_token=$3::uuid,lease_expires_at=now()+($4::int * interval '1 millisecond'),progress_current=null,progress_total=null,error_message=null,attempt_count=attempt_count+1,updated_at=now() where id=$1 and status='pending' returning *`, [jobId, workerId, token, REQUEST_SCAN_LEASE_MS]);
+  const { rows } = await pool.query(`update request_scan_jobs set status='processing',processing_stage='downloading',processing_started_at=coalesce(processing_started_at,now()),stage_started_at=now(),heartbeat_at=now(),worker_id=$2,lease_token=$3::uuid,lease_expires_at=now()+($4::int * interval '1 millisecond'),priority_requested_at=null,progress_current=null,progress_total=null,error_message=null,attempt_count=attempt_count+1,updated_at=now() where id=$1 and status='pending' returning *`, [jobId, workerId, token, REQUEST_SCAN_LEASE_MS]);
   return rows[0] ? { job: rows[0] as RequestScanJob, lease: { workerId, token } } : null;
 }
 export async function renewRequestScanLease(jobId: number, lease: RequestScanLease): Promise<boolean> {

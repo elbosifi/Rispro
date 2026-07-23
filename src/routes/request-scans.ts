@@ -4,7 +4,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { HttpError } from "../utils/http-error.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { pool } from "../db/pool.js";
-import { downloadRequestScanJobFile, getRequestScanJob, listRequestScanJobs, manuallyAssignRequestScan, retryRequestScanJob, returnRequestScanToIncoming, withSafeRequestScanFilename } from "../services/request-scan-service.js";
+import { downloadRequestScanJobFile, getRequestScanJob, listRequestScanJobs, manuallyAssignRequestScan, prioritizePendingRequestScanJob, retryRequestScanJob, returnRequestScanToIncoming, withSafeRequestScanFilename } from "../services/request-scan-service.js";
 import { readRequestScanSettings } from "../services/request-scan-settings-service.js";
 import { getRequestScanWorkerStatus, requestRequestScanWorkerRun } from "../services/request-scan-worker.js";
 import type { RequestScanJob } from "../services/request-scan-service.js";
@@ -47,6 +47,7 @@ requestScansRouter.get("/status", asyncRoute(async (_req: Request, res: Response
 requestScansRouter.get("/eligible-appointments", asyncRoute(async (req: Request, res: Response) => { const q = String(req.query.q || "").trim(); const { rows } = await pool.query(`select b.id, ('V2-' || lpad(b.id::text,6,'0')) as accession_number, coalesce(p.english_full_name,p.arabic_full_name) as patient_name from appointments_v2.bookings b join patients p on p.id=b.patient_id where b.status not in ('cancelled','discontinued','voided') and ($1='' or ('V2-' || lpad(b.id::text,6,'0')) ilike $2 or p.english_full_name ilike $2 or p.arabic_full_name ilike $2) order by b.booking_date desc,b.id desc limit 20`, [q, `%${q}%`]); res.json({ appointments: rows }); }));
 requestScansRouter.get("/:id/file", asyncRoute(async (req: Request, res: Response) => { const { job, buffer } = await downloadRequestScanJobFile(positive(req.params.id, "id")); setRequestScanFileHeaders(res, job); res.send(buffer); }));
 requestScansRouter.post("/run-now", asyncRoute(async (_req: Request, res: Response) => { res.status(202).json({ ok: true, trigger: await requestRequestScanRunNow() }); }));
+requestScansRouter.post("/:id/start-now", asyncRoute(async (req: Request, res: Response) => { const job = await prioritizePendingRequestScanJob(positive(req.params.id, "id")); res.status(202).json({ job: withSafeRequestScanFilename(job), trigger: await requestRequestScanRunNow() }); }));
 requestScansRouter.post("/:id/retry", asyncRoute(async (req: Request, res: Response) => { res.status(202).json(await queueRequestScanRetry(positive(req.params.id, "id"))); }));
 requestScansRouter.post("/:id/return-to-incoming", asyncRoute(async (req: Request, res: Response) => { res.json({ job: withSafeRequestScanFilename(await returnRequestScanToIncoming(positive(req.params.id, "id"))) }); }));
 requestScansRouter.post("/:id/manual-assign", asyncRoute(async (req: Request, res: Response) => { const body = asUnknownRecord(req.body); res.json({ job: withSafeRequestScanFilename(await manuallyAssignRequestScan(positive(req.params.id, "id"), positive(body.appointmentId ?? body.appointment_id, "appointmentId"), Number(req.user!.sub))) }); }));

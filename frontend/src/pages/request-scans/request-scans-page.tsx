@@ -141,14 +141,14 @@ export default function RequestScansPage() {
   const retry = useMutation({
     mutationFn: (jobId: number) => request<{ job: Job; trigger: WorkerTrigger }>(`/${jobId}/retry`, { method: "POST" }),
     onSuccess: ({ job }) => {
-      setTab("active");
       setHighlightedJobId(job.id);
-      setNotice("Retry queued. The worker will process this file.");
+      setNotice(`${job.filename} was queued for retry.`);
       void client.invalidateQueries({ queryKey: ["request-scans", "active"] });
       void client.invalidateQueries({ queryKey: ["request-scans", "failed"] });
       void client.invalidateQueries({ queryKey: ["request-scans-status"] });
     },
   });
+  const startJob = useMutation({ mutationFn: (jobId: number) => request<{ job: Job; trigger: WorkerTrigger }>(`/${jobId}/start-now`, { method: "POST" }), onSuccess: ({ trigger }) => { setNotice(trigger.status === "accepted" ? "This request scan was prioritized and the worker was started." : trigger.status === "already_running" ? "This request scan was prioritized and will run next." : "This request scan was prioritized, but automation is disabled."); void client.invalidateQueries({ queryKey: ["request-scans", "active"] }); void client.invalidateQueries({ queryKey: ["request-scans-status"] }); } });
   const runNow = useMutation({
     mutationFn: () => request<{ ok: true; trigger: WorkerTrigger }>("/run-now", { method: "POST" }),
     onSuccess: ({ trigger }) => {
@@ -208,6 +208,7 @@ export default function RequestScansPage() {
   };
 
   const workerRunning = Boolean(statusData?.enabled && statusData.running);
+  const idleWithQueued = Boolean(statusData?.enabled && !statusData.running && statusData.processing === 0 && statusData.pending > 0);
   const visibleJobs = jobs.data?.jobs ?? [];
   const emptyMessage = tab === "active"
     ? "No active request scans. New scans and retries will appear here automatically."
@@ -217,7 +218,7 @@ export default function RequestScansPage() {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h1 className="text-2xl font-semibold">Request Scans</h1><p className="text-sm text-muted-foreground">Automated appointment-request scan monitoring and exception recovery.</p></div>
       <button className="btn-primary" onClick={() => runNow.mutate()} disabled={runNow.isPending || workerRunning}>
-        {runNow.isPending ? "Starting..." : workerRunning ? "Processing" : "Scan folder now"}
+        {runNow.isPending ? "Starting..." : workerRunning ? "Processing" : statusData?.pending ? `Start queued jobs (${statusData.pending})` : "Scan folder now"}
       </button>
     </div>
     {notice && <p role="status" className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-800">{notice}</p>}
@@ -226,6 +227,8 @@ export default function RequestScansPage() {
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">{cards.map(([label, value]) => <section key={label} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></section>)}</div>
     {status.isError && <p className="text-sm text-red-700">Request Scan status could not be loaded: {status.error.message}</p>}
     {!status.isLoading && !status.isError && statusData?.lastError && <p className="text-sm text-amber-700">Latest worker error: {statusData.lastError}</p>}
+    {idleWithQueued && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">{statusData!.pending} request scans are queued and the worker is idle. <button className="btn-secondary ml-2 text-xs" onClick={() => runNow.mutate()}>Start queued jobs</button></div>}
+    {!status.isLoading && !status.isError && statusData && !statusData.enabled && statusData.pending > 0 && <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">{statusData.pending} request scans are queued, but automation is disabled.</p>}
     <div className="flex flex-wrap gap-2 border-b">{tabs.map(({ value, label }) => <button key={value} className={`px-3 py-2 text-sm font-medium ${tab === value ? "border-b-2 border-teal-600" : ""}`} onClick={() => setTab(value)}>{label}</button>)}</div>
     {jobs.isLoading
       ? <p>Loading request scans...</p>
@@ -238,6 +241,7 @@ export default function RequestScansPage() {
               <thead><tr className="border-b"><th className="p-2">Time</th><th>Filename</th><th>Barcode/accession</th><th>Patient</th><th>Modality/examination</th><th>Status</th><th>Attempts</th><th>Error</th><th className="p-2">Actions</th></tr></thead>
               <tbody>{visibleJobs.map((job) => {
                 const queuing = retry.isPending && retry.variables === job.id;
+                const starting = startJob.isPending && startJob.variables === job.id;
                 return <tr key={job.id} className={`border-b ${highlightedJobId === job.id ? "bg-teal-50" : ""}`}>
                   <td className="p-2">{new Date(job.created_at).toLocaleString()}</td>
                   <td>{job.filename}</td>
@@ -249,6 +253,7 @@ export default function RequestScansPage() {
                   <td className="max-w-52 text-red-700">{job.error_message ?? "-"}</td>
                   <td className="flex flex-wrap gap-1 p-2">
                     <button className="btn-secondary text-xs" onClick={() => void openPreview(job)}>Preview</button>
+                    {job.status === "pending" && <button className="btn-secondary text-xs" disabled={starting} onClick={() => startJob.mutate(job.id)}>{starting ? "Starting..." : "Start now"}</button>}
                     {job.appointment_id && <button className="btn-secondary text-xs" onClick={() => navigate(`/registrations?appointmentId=${job.appointment_id}`)}>Open appointment</button>}
                     {job.document_id && <a className="btn-secondary text-xs" href={`/api/documents/${job.document_id}/view`} target="_blank" rel="noreferrer">Open document</a>}
                     {job.status === "failed" && <>
