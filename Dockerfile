@@ -126,6 +126,7 @@ RUN set -eux; \
 RUN set -eux; \
     command -v smbclient; \
     command -v pdftoppm; \
+    command -v pdfimages; \
     command -v zbarimg; \
     for tool in wlmscpfs dump2dcm dcmdump echoscu findscu; do \
       tool_path="$(command -v "$tool")"; \

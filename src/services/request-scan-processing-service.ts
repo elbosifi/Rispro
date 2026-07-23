@@ -5,7 +5,7 @@ import type { RequestScanJob } from "./request-scan-service.js";
 export const REQUEST_SCAN_HEARTBEAT_MS = 12_000;
 export const REQUEST_SCAN_LEASE_MS = 60_000;
 export const REQUEST_SCAN_MAX_RECOVERIES = 3;
-export type RequestScanProcessingStage = "queued" | "downloading" | "checking_filename" | "rendering_300_dpi" | "scanning_original_300_dpi" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi" | "verifying_identifier" | "resolving_appointment" | "checking_duplicate" | "attaching_document" | "moving_file" | "completed" | "failed";
+export type RequestScanProcessingStage = "queued" | "downloading" | "checking_filename" | "rendering_300_dpi" | "scanning_original_300_dpi" | "extracting_native_pdf_image" | "scanning_native_pdf_image" | "scanning_qr_crops" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi" | "verifying_identifier" | "resolving_appointment" | "checking_duplicate" | "attaching_document" | "moving_file" | "completed" | "failed";
 export type RequestScanProgressUpdate = { stage: RequestScanProcessingStage; current?: number | null; total?: number | null };
 export type RequestScanLease = { workerId: string; token: string };
 
@@ -26,9 +26,10 @@ export async function updateRequestScanProgress(jobId: number, lease: RequestSca
   return Boolean(ownership.rowCount);
 }
 export async function finishRequestScanJob(jobId: number, lease: RequestScanLease, values: Record<string, unknown>): Promise<RequestScanJob | null> {
-  const names = Object.keys(values); const params = names.map((name) => values[name]);
+  const terminalValues = { ...values }; delete terminalValues.completed_at;
+  const names = Object.keys(terminalValues); const params = names.map((name) => terminalValues[name]);
   const sets = names.map((name, index) => `${name}=$${index + 3}`).join(", ");
-  const finalStage = values.status === "processed" || values.status === "duplicate" ? "completed" : "failed";
+  const finalStage = terminalValues.status === "processed" || terminalValues.status === "duplicate" ? "completed" : "failed";
   const { rows } = await pool.query(`update request_scan_jobs set ${sets},processing_stage=$${params.length + 3},stage_started_at=now(),completed_at=coalesce(completed_at,now()),worker_id=null,lease_token=null,lease_expires_at=null,updated_at=now() where id=$1 and lease_token=$2::uuid returning *`, [jobId, lease.token, ...params, finalStage]);
   return rows[0] as RequestScanJob | undefined ?? null;
 }

@@ -20,7 +20,7 @@ export type RequestScanQrOriginConfiguration = {
   risproPublicBaseUrl?: string;
   publicAppBaseUrl?: string;
   explicitAllowedOrigins?: string;
-  onProgress?: (stage: "rendering_300_dpi" | "scanning_original_300_dpi" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi", current?: number, total?: number) => void | Promise<void>;
+  onProgress?: (stage: "rendering_300_dpi" | "scanning_original_300_dpi" | "extracting_native_pdf_image" | "scanning_native_pdf_image" | "scanning_qr_crops" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi", current?: number, total?: number) => void | Promise<void>;
 };
 
 const defaultImageProcessor = {
@@ -217,6 +217,36 @@ async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 60
   }
   return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
 }
+const NATIVE_FALLBACK_TIMEOUT_MS = 120_000;
+const MAX_NATIVE_IMAGES_PER_PAGE = 2;
+const MAX_NATIVE_TILES = 12;
+const NATIVE_MIN_DIMENSION = 120;
+const NATIVE_MAX_DIMENSION = 2_800;
+function nativeTiles(width: number, height: number): Array<{ left: number; top: number; width: number; height: number }> {
+  const cropWidth = Math.min(width, Math.max(1, Math.round(width * 0.4))); const cropHeight = Math.min(height, Math.max(1, Math.round(height * 0.35)));
+  const xs = [...new Set([0, Math.max(0, Math.round(width * 0.25)), Math.max(0, Math.round(width * 0.5)), Math.max(0, width - cropWidth)])];
+  const ys = [...new Set([0, Math.max(0, Math.round(height * 0.25)), Math.max(0, Math.round(height * 0.5)), Math.max(0, height - cropHeight)])];
+  return xs.flatMap((left) => ys.map((top) => ({ left: Math.min(left, width - cropWidth), top: Math.min(top, height - cropHeight), width: cropWidth, height: cropHeight }))).filter((tile, index, tiles) => tiles.findIndex((other) => other.left === tile.left && other.top === tile.top) === index).slice(0, MAX_NATIVE_TILES);
+}
+async function scanNativePdfImages(pdfPath: string, pages: RenderedPage[], rootTempDir: string, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
+  const accessions = new Set<string>(); const qrTokens = new Set<string>(); let ignoredQrCount = 0; let decoded = false; let attempts = 0; const deadline = Date.now() + NATIVE_FALLBACK_TIMEOUT_MS; const nativeDir = path.join(rootTempDir, "native-images"); await fs.mkdir(nativeDir);
+  const collect = async (candidate: string) => { attempts += 1; const result = await decodeBarcodeCandidates(candidate, dependencies); if (result.kind !== "decoded") return; const values = decodedBarcodeValues(result.output, allowedOrigins); decoded ||= values.decoded; ignoredQrCount += values.ignoredQrCount; values.accessions.forEach((value) => accessions.add(value)); values.qrTokens.forEach((value) => qrTokens.add(value)); };
+  try {
+    for (const [pageIndex, page] of pages.entries()) {
+      if (Date.now() > deadline) { log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", currentPass: "native_fallback", pagesExamined: pageIndex, totalPageCount: pages.length, processingStoppedByTimeout: true }); break; }
+      await onProgress?.("extracting_native_pdf_image", pageIndex, pages.length);
+      const pageDir = path.join(nativeDir, `page-${page.pageNumber}`); await fs.mkdir(pageDir); const prefix = path.join(pageDir, "image");
+      try { await dependencies.execFile("pdfimages", ["-f", String(page.pageNumber), "-l", String(page.pageNumber), "-j", pdfPath, prefix], PDF_OPTIONS); } catch { log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", currentPass: "native_extraction_failed", pageNumber: page.pageNumber }); continue; }
+      const candidates = (await fs.readdir(pageDir)).map((name) => path.join(pageDir, name)); const ranked = (await Promise.all(candidates.map(async (candidate) => { try { const metadata = await sharp(candidate).metadata(); return { candidate, width: metadata.width ?? 0, height: metadata.height ?? 0 }; } catch { return null; } }))).filter((value): value is { candidate: string; width: number; height: number } => value !== null && value.width >= NATIVE_MIN_DIMENSION && value.height >= NATIVE_MIN_DIMENSION).sort((a, b) => b.width * b.height - a.width * a.height).slice(0, MAX_NATIVE_IMAGES_PER_PAGE);
+      for (const [rank, image] of ranked.entries()) {
+        await onProgress?.("scanning_native_pdf_image", rank + 1, ranked.length); await collect(image.candidate); if (accessions.size || qrTokens.size) continue;
+        const full = path.join(pageDir, `upscaled-${rank}.png`); const scale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(image.width, image.height)); await sharp(image.candidate).resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)), { kernel: sharp.kernel.lanczos3 }).png().toFile(full); await collect(full); if (accessions.size || qrTokens.size) continue;
+        const tiles = nativeTiles(image.width, image.height); for (const [tileIndex, tile] of tiles.entries()) { if (Date.now() > deadline) break; await onProgress?.("scanning_qr_crops", tileIndex + 1, tiles.length); const cropped = path.join(pageDir, `crop-${rank}-${tileIndex}.png`); const cropScale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(tile.width, tile.height)); await sharp(image.candidate).extract(tile).resize(Math.max(1, Math.round(tile.width * cropScale)), Math.max(1, Math.round(tile.height * cropScale)), { kernel: sharp.kernel.lanczos3 }).png().toFile(cropped); await collect(cropped); if (accessions.size || qrTokens.size) break; const normalized = path.join(pageDir, `crop-normalized-${rank}-${tileIndex}.png`); await sharp(cropped).grayscale().normalise().png().toFile(normalized); await collect(normalized); if (accessions.size || qrTokens.size) break; for (const angle of [90, 180, 270]) { const rotated = path.join(pageDir, `crop-rotated-${rank}-${tileIndex}-${angle}.png`); await sharp(normalized).rotate(angle).png().toFile(rotated); await collect(rotated); if (accessions.size || qrTokens.size) break; } if (accessions.size || qrTokens.size) break; }
+      }
+    }
+    return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
+  } finally { await fs.rm(nativeDir, { recursive: true, force: true }); }
+}
 async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir: string, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
   const stageDir = path.join(rootTempDir, `pdf-${dpi}`); await fs.mkdir(stageDir); const started = Date.now();
   const empty = (failure: RequestScanBarcodeFailure): ResolutionResult => ({ accessions: new Set(), qrTokens: new Set(), ignoredQrCount: 0, decoded: false, attempts: 0, failure });
@@ -235,6 +265,10 @@ async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir:
     const deadline = Date.now() + PDF_STAGE_TIMEOUT_MS;
     const original = await scanPdfPass(pages, stageDir, dpi, "original_sweep", deadline, dependencies, allowedOrigins, onProgress);
     if (original.failure || original.accessions.size || original.qrTokens.size) return original;
+    if (dpi === 300) {
+      const native = await scanNativePdfImages(pdfPath, pages, rootTempDir, dependencies, allowedOrigins, onProgress);
+      if (native.accessions.size || native.qrTokens.size) return { ...native, ignoredQrCount: original.ignoredQrCount + native.ignoredQrCount, decoded: original.decoded || native.decoded, attempts: original.attempts + native.attempts };
+    }
     const enhanced = await scanPdfPass(pages, stageDir, dpi, "enhanced_sweep", deadline, dependencies, allowedOrigins, onProgress);
     return { ...enhanced, ignoredQrCount: original.ignoredQrCount + enhanced.ignoredQrCount, decoded: original.decoded || enhanced.decoded, attempts: original.attempts + enhanced.attempts };
   } finally { await fs.rm(stageDir, { recursive: true, force: true }); }

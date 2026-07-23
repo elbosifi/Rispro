@@ -128,7 +128,7 @@ test("uses enhanced PDF processing only after an empty original sweep and retrie
   assert.deepEqual(enhanced, { ok: true, accession: "V2-003628" });
   assert.deepEqual(renders, [300]);
   const firstDerivative = calls.findIndex((filePath) => filePath.includes("processed-"));
-  assert.equal(firstDerivative, 9);
+  assert.equal(firstDerivative, 18);
   assert.ok(derivatives.some((filePath) => filePath.includes("processed-9.png")));
   const fallbackRenders: number[] = [];
   await extractRequestScanBarcode("no-candidates.pdf", dependencies(() => noSymbol(), { renders: fallbackRenders }));
