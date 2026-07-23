@@ -21,7 +21,19 @@ export type RequestScanServiceDependencies = {
 };
 
 const MIME_BY_EXTENSION: Record<string, string> = { ".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
-const errorMessage: Record<RequestScanBarcodeFailure, string> = { no_barcode: "No supported barcode found", no_valid_accession: "No valid V2 accession found", multiple_accessions: "More than one accession was detected", unsupported_file: "Unsupported file", corrupt_file: "The file could not be read", barcode_tool_failed: "Barcode detection failed", pdf_render_failed: "The PDF could not be rendered", image_preprocess_failed: "Barcode image processing failed" };
+const errorMessage: Record<RequestScanBarcodeFailure, string> = {
+  no_barcode: "No readable appointment barcode was found.",
+  no_valid_accession: "A barcode was detected, but it did not contain a valid RISpro accession number.",
+  multiple_accessions: "Multiple different appointment barcodes were detected. Assign the document manually.",
+  unsupported_file: "Unsupported file",
+  corrupt_file: "The barcode could not be processed automatically. Assign the document manually.",
+  barcode_decoder_timeout: "The barcode could not be processed automatically. Assign the document manually.",
+  barcode_decoder_failed: "The barcode could not be processed automatically. Assign the document manually.",
+  pdf_render_failed: "The scanned PDF could not be prepared for barcode recognition. Assign the document manually.",
+  image_preprocess_failed: "The barcode could not be processed automatically. Assign the document manually.",
+  barcode_processing_failed: "The barcode could not be processed automatically. Assign the document manually.",
+};
+export function requestScanBarcodeErrorMessage(reason: RequestScanBarcodeFailure): string { return errorMessage[reason]; }
 const defaultDependencies: RequestScanServiceDependencies = { listRequestScanFiles, downloadRequestScanFile, extractRequestScanBarcode, moveRequestScanFile, uploadDocument, automatedDocumentExists };
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
 function destination(folder: string, duplicate = false): string { return `${folder.replace(/[\\/]+$/g, "")}\\${duplicate ? "Duplicates\\" : ""}${getTripoliToday()}`; }
@@ -59,7 +71,7 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
   try {
     await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
     const barcode = await dependencies.extractRequestScanBarcode(localPath);
-    if (!barcode.ok) throw new HttpError(422, errorMessage[barcode.reason]);
+    if (!barcode.ok) throw new HttpError(422, requestScanBarcodeErrorMessage(barcode.reason));
     const appointment = await findEligibleRequestScanAppointment(barcode.accession);
     if (await dependencies.automatedDocumentExists(appointment.id)) {
       const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true);

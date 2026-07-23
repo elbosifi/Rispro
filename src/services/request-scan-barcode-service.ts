@@ -6,173 +6,58 @@ import { promisify } from "node:util";
 import sharp from "sharp";
 
 const execFile = promisify(execFileCallback);
-export type RequestScanBarcodeFailure = "no_barcode" | "no_valid_accession" | "multiple_accessions" | "unsupported_file" | "corrupt_file" | "barcode_tool_failed" | "pdf_render_failed" | "image_preprocess_failed";
+export type RequestScanBarcodeFailure = "no_barcode" | "no_valid_accession" | "multiple_accessions" | "unsupported_file" | "corrupt_file" | "barcode_decoder_timeout" | "barcode_decoder_failed" | "pdf_render_failed" | "image_preprocess_failed" | "barcode_processing_failed";
 export type RequestScanBarcodeResult = { ok: true; accession: string } | { ok: false; reason: RequestScanBarcodeFailure };
 export type RequestScanBarcodeDependencies = {
   execFile(command: string, args: string[], options: { timeout: number; maxBuffer: number }): Promise<{ stdout?: string; stderr?: string }>;
-  imageProcessor?: {
-    preprocess(sourcePath: string, destinationPath: string): Promise<void>;
-    rotate(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string): Promise<void>;
-  };
+  imageProcessor?: { preprocess(sourcePath: string, destinationPath: string): Promise<void>; rotate(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string): Promise<void> };
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
 };
 
 const defaultImageProcessor = {
-  async preprocess(sourcePath: string, destinationPath: string): Promise<void> {
-    await sharp(sourcePath).grayscale().normalise().sharpen({ sigma: 1, m1: 0.5, m2: 0 }).png().toFile(destinationPath);
-  },
-  async rotate(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string): Promise<void> {
-    await sharp(sourcePath).rotate(angle).png().toFile(destinationPath);
-  },
+  async preprocess(sourcePath: string, destinationPath: string): Promise<void> { await sharp(sourcePath).grayscale().normalise().sharpen({ sigma: 1, m1: 0.5, m2: 0 }).png().toFile(destinationPath); },
+  async rotate(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string): Promise<void> { await sharp(sourcePath).rotate(angle).png().toFile(destinationPath); },
 };
-const defaultDependencies: RequestScanBarcodeDependencies = {
-  execFile,
-  imageProcessor: defaultImageProcessor,
-  logDiagnostic(event, metadata) { console.info("[RequestScanBarcode]", event, metadata); },
-};
+const defaultDependencies: RequestScanBarcodeDependencies = { execFile, imageProcessor: defaultImageProcessor, logDiagnostic(event, metadata) { console.info("[RequestScanBarcode]", event, metadata); } };
 const ACCESSION = /^V2-\d{6,}$/i;
 const ZBAR_OPTIONS = { timeout: 30_000, maxBuffer: 1024 * 1024 };
 const PDF_OPTIONS = { timeout: 120_000, maxBuffer: 1024 * 1024 };
 const IMAGE_PROCESSING_TIMEOUT_MS = 30_000;
+const PDF_STAGE_TIMEOUT_MS = 300_000;
+type FileType = "image" | "pdf";
+type SuccessAttempt = "original" | "preprocessed" | "rotated";
+type DiagnosticCode = "BARCODE_SUCCESS_ORIGINAL" | "BARCODE_SUCCESS_PREPROCESSED" | "BARCODE_SUCCESS_ROTATED" | "BARCODE_SUCCESS_PDF_600_DPI" | "BARCODE_NOT_DETECTED" | "BARCODE_DETECTED_INVALID_ACCESSION" | "BARCODE_MULTIPLE_VALID_ACCESSIONS" | "BARCODE_PREPROCESSING_FAILED" | "BARCODE_DECODER_TIMEOUT" | "BARCODE_DECODER_FAILED" | "BARCODE_PDF_RENDER_FAILED" | "BARCODE_PROCESSING_FAILED";
 
-export function normalizeAndValidateAccession(candidate: string): string | null {
-  const normalized = candidate.replace(/\s+/g, "").toUpperCase();
-  return ACCESSION.test(normalized) ? normalized : null;
-}
-
+export function normalizeAndValidateAccession(candidate: string): string | null { const normalized = candidate.replace(/\s+/g, "").toUpperCase(); return ACCESSION.test(normalized) ? normalized : null; }
 function decodedBarcodeValues(output: string): { decoded: boolean; accessions: string[] } {
   const decoded = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const accessions = decoded
-    .map((line) => line.match(/^(?:CODE-?39|CODE-?128)\s*:\s*(.+)$/i)?.[1] || null)
-    .map((candidate) => candidate ? normalizeAndValidateAccession(candidate) : null)
-    .filter((value): value is string => Boolean(value));
+  const accessions = decoded.map((line) => line.match(/^(?:CODE-?39|CODE-?128)\s*:\s*(.+)$/i)?.[1] || null).map((candidate) => candidate ? normalizeAndValidateAccession(candidate) : null).filter((value): value is string => Boolean(value));
   return { decoded: decoded.length > 0, accessions: [...new Set(accessions)] };
 }
+export function interpretRequestScanBarcodes(output: string): RequestScanBarcodeResult { const result = decodedBarcodeValues(output); return !result.decoded ? { ok: false, reason: "no_barcode" } : !result.accessions.length ? { ok: false, reason: "no_valid_accession" } : result.accessions.length > 1 ? { ok: false, reason: "multiple_accessions" } : { ok: true, accession: result.accessions[0] }; }
 
-export function interpretRequestScanBarcodes(output: string): RequestScanBarcodeResult {
-  const result = decodedBarcodeValues(output);
-  if (!result.decoded) return { ok: false, reason: "no_barcode" };
-  if (!result.accessions.length) return { ok: false, reason: "no_valid_accession" };
-  if (result.accessions.length > 1) return { ok: false, reason: "multiple_accessions" };
-  return { ok: true, accession: result.accessions[0] };
+type ZbarResult = { kind: "decoded"; output: string } | { kind: "no_symbol" } | { kind: "timeout" } | { kind: "failure" };
+type PageFailure = "barcode_decoder_timeout" | "barcode_decoder_failed" | "image_preprocess_failed" | "barcode_processing_failed";
+type PageDecodeResult = { accessions: string[]; decoded: boolean; attempts: number; successfulAttempt: SuccessAttempt | null; rotation: 0 | 90 | 180 | 270 | null; failure?: PageFailure };
+type ResolutionResult = { accessions: Set<string>; decoded: boolean; attempts: number; failure?: RequestScanBarcodeFailure };
+function log(dependencies: RequestScanBarcodeDependencies, code: DiagnosticCode, metadata: Record<string, string | number | boolean>): void { dependencies.logDiagnostic?.("barcode_recognition", { code, ...metadata }); }
+function processTimedOut(error: unknown): boolean { return Boolean(error && typeof error === "object" && ((error as NodeJS.ErrnoException & { killed?: unknown; signal?: unknown; timedOut?: unknown }).killed || (error as NodeJS.ErrnoException & { signal?: unknown }).signal || (error as NodeJS.ErrnoException & { timedOut?: unknown }).timedOut || (error as NodeJS.ErrnoException).code === "ETIMEDOUT")); }
+function zbarNoSymbol(error: unknown): boolean { if (!error || typeof error !== "object" || processTimedOut(error)) return false; const value = error as NodeJS.ErrnoException & { stdout?: unknown; stderr?: unknown }; return Number(value.code) === 4 || /no symbols? found/i.test(`${String(value.stdout || "")} ${String(value.stderr || "")} ${value.message || ""}`); }
+async function decodeBarcodeCandidates(filePath: string, dependencies: RequestScanBarcodeDependencies): Promise<ZbarResult> { try { const result = await dependencies.execFile("zbarimg", ["--quiet", "--set", "*.enable=0", "--set", "code39.enable=1", "--set", "code128.enable=1", filePath], ZBAR_OPTIONS); const output = String(result.stdout || ""); return output.trim() ? { kind: "decoded", output } : { kind: "no_symbol" }; } catch (error) { return zbarNoSymbol(error) ? { kind: "no_symbol" } : processTimedOut(error) ? { kind: "timeout" } : { kind: "failure" }; } }
+async function withImageProcessingTimeout(operation: Promise<void>): Promise<void> { let timeout: NodeJS.Timeout | undefined; try { await Promise.race([operation, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Barcode image processing timed out")), IMAGE_PROCESSING_TIMEOUT_MS); })]); } finally { if (timeout) clearTimeout(timeout); } }
+async function decodePageWithFallbacks(pagePath: string, tempDir: string, pageNumber: number, fileType: FileType, dpi: number | "source", dependencies: RequestScanBarcodeDependencies): Promise<PageDecodeResult> {
+  let decoded = false; let attempts = 0; let preprocessingFailed = false;
+  const attempt = async (candidatePath: string): Promise<{ accessions: string[] } | { failure: PageFailure }> => { attempts += 1; const result = await decodeBarcodeCandidates(candidatePath, dependencies); if (result.kind === "timeout") return { failure: "barcode_decoder_timeout" }; if (result.kind === "failure") return { failure: "barcode_decoder_failed" }; if (result.kind === "no_symbol") return { accessions: [] }; const parsed = decodedBarcodeValues(result.output); decoded ||= parsed.decoded; return { accessions: parsed.accessions }; };
+  const original = await attempt(pagePath); if ("failure" in original) return { accessions: [], decoded, attempts, successfulAttempt: null, rotation: null, failure: original.failure }; if (original.accessions.length) return { accessions: original.accessions, decoded, attempts, successfulAttempt: "original", rotation: 0 };
+  const processor = dependencies.imageProcessor ?? defaultImageProcessor; const processedPath = path.join(tempDir, `processed-${pageNumber}.png`);
+  try { await withImageProcessingTimeout(processor.preprocess(pagePath, processedPath)); } catch { preprocessingFailed = true; log(dependencies, "BARCODE_PREPROCESSING_FAILED", { fileType, pageNumber, dpi, attempt: "preprocessed", rotation: 0 }); }
+  if (!preprocessingFailed) { const processed = await attempt(processedPath); if ("failure" in processed) return { accessions: [], decoded, attempts, successfulAttempt: null, rotation: null, failure: processed.failure }; if (processed.accessions.length) return { accessions: processed.accessions, decoded, attempts, successfulAttempt: "preprocessed", rotation: 0 }; }
+  if (!preprocessingFailed) for (const angle of [90, 180, 270] as const) { const rotatedPath = path.join(tempDir, `processed-${pageNumber}-rotated-${angle}.png`); try { await withImageProcessingTimeout(processor.rotate(processedPath, angle, rotatedPath)); } catch { preprocessingFailed = true; log(dependencies, "BARCODE_PREPROCESSING_FAILED", { fileType, pageNumber, dpi, attempt: "rotated", rotation: angle }); continue; } const rotated = await attempt(rotatedPath); if ("failure" in rotated) return { accessions: [], decoded, attempts, successfulAttempt: null, rotation: null, failure: rotated.failure }; if (rotated.accessions.length) return { accessions: rotated.accessions, decoded, attempts, successfulAttempt: "rotated", rotation: angle }; }
+  return { accessions: [], decoded, attempts, successfulAttempt: null, rotation: null, failure: preprocessingFailed ? "image_preprocess_failed" : undefined };
 }
-
-type ZbarResult = { kind: "decoded"; output: string } | { kind: "no_symbol" } | { kind: "failure" };
-type PageDecodeResult = { accessions: string[]; decoded: boolean; attempts: number; successfulAttempt: "original" | "preprocessed" | "rotation" | null; rotation: number | null } | { failure: "barcode_tool_failed" | "image_preprocess_failed"; attempts: number };
-type DecodeAttemptResult = { accessions: string[] } | { failure: "barcode_tool_failed" };
-
-function zbarNoSymbol(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const processError = error as NodeJS.ErrnoException & { stdout?: unknown; stderr?: unknown; killed?: unknown; signal?: unknown; timedOut?: unknown };
-  if (processError.killed || processError.signal || processError.timedOut || processError.code === "ETIMEDOUT") return false;
-  const text = `${String(processError.stdout || "")} ${String(processError.stderr || "")} ${processError.message || ""}`;
-  return Number(processError.code) === 4 || /no symbols? found/i.test(text);
-}
-
-async function decodeBarcodeCandidates(filePath: string, dependencies: RequestScanBarcodeDependencies): Promise<ZbarResult> {
-  try {
-    const result = await dependencies.execFile("zbarimg", ["--quiet", "--set", "*.enable=0", "--set", "code39.enable=1", "--set", "code128.enable=1", filePath], ZBAR_OPTIONS);
-    const output = String(result.stdout || "");
-    return output.trim() ? { kind: "decoded", output } : { kind: "no_symbol" };
-  } catch (error) {
-    return zbarNoSymbol(error) ? { kind: "no_symbol" } : { kind: "failure" };
-  }
-}
-
-async function preprocessBarcodeImage(sourcePath: string, destinationPath: string, dependencies: RequestScanBarcodeDependencies): Promise<void> {
-  await withImageProcessingTimeout((dependencies.imageProcessor ?? defaultImageProcessor).preprocess(sourcePath, destinationPath));
-}
-
-async function rotateBarcodeImage(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string, dependencies: RequestScanBarcodeDependencies): Promise<void> {
-  await withImageProcessingTimeout((dependencies.imageProcessor ?? defaultImageProcessor).rotate(sourcePath, angle, destinationPath));
-}
-
-async function withImageProcessingTimeout(operation: Promise<void>): Promise<void> {
-  let timeout: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      operation,
-      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Barcode image processing timed out")), IMAGE_PROCESSING_TIMEOUT_MS); }),
-    ]);
-  } finally { if (timeout) clearTimeout(timeout); }
-}
-
-async function decodePageWithFallbacks(pagePath: string, tempDir: string, pageNumber: number, fileType: "image" | "pdf", dependencies: RequestScanBarcodeDependencies): Promise<PageDecodeResult> {
-  let decoded = false;
-  let attempts = 0;
-  const attempt = async (filePath: string): Promise<DecodeAttemptResult> => {
-    attempts += 1;
-    const result = await decodeBarcodeCandidates(filePath, dependencies);
-    if (result.kind === "failure") return { failure: "barcode_tool_failed" as const };
-    if (result.kind === "no_symbol") return { accessions: [] };
-    const parsed = decodedBarcodeValues(result.output);
-    decoded ||= parsed.decoded;
-    return { accessions: parsed.accessions };
-  };
-
-  const original = await attempt(pagePath);
-  if ("failure" in original) return { failure: original.failure, attempts };
-  if (original.accessions.length) {
-    dependencies.logDiagnostic?.("recognition_succeeded", { fileType, pageNumber, attempt: "original", rotation: 0, attemptCount: attempts });
-    return { accessions: original.accessions, decoded, attempts, successfulAttempt: "original", rotation: 0 };
-  }
-
-  const processedPath = path.join(tempDir, `processed-${pageNumber}.png`);
-  try { await preprocessBarcodeImage(pagePath, processedPath, dependencies); }
-  catch { return { failure: "image_preprocess_failed", attempts }; }
-  const processed = await attempt(processedPath);
-  if ("failure" in processed) return { failure: processed.failure, attempts };
-  if (processed.accessions.length) {
-    dependencies.logDiagnostic?.("recognition_succeeded", { fileType, pageNumber, attempt: "preprocessed", rotation: 0, attemptCount: attempts });
-    return { accessions: processed.accessions, decoded, attempts, successfulAttempt: "preprocessed", rotation: 0 };
-  }
-
-  for (const angle of [90, 180, 270] as const) {
-    const rotatedPath = path.join(tempDir, `processed-${pageNumber}-rotated-${angle}.png`);
-    try { await rotateBarcodeImage(processedPath, angle, rotatedPath, dependencies); }
-    catch { return { failure: "image_preprocess_failed", attempts }; }
-    const rotated = await attempt(rotatedPath);
-    if ("failure" in rotated) return { failure: rotated.failure, attempts };
-    if (rotated.accessions.length) {
-      dependencies.logDiagnostic?.("recognition_succeeded", { fileType, pageNumber, attempt: "rotation", rotation: angle, attemptCount: attempts });
-      return { accessions: rotated.accessions, decoded, attempts, successfulAttempt: "rotation", rotation: angle };
-    }
-  }
-  return { accessions: [], decoded, attempts, successfulAttempt: null, rotation: null };
-}
-
-export async function extractRequestScanBarcode(filePath: string, dependencies: RequestScanBarcodeDependencies = defaultDependencies): Promise<RequestScanBarcodeResult> {
-  const extension = path.extname(filePath).toLowerCase();
-  if (![".pdf", ".jpg", ".jpeg"].includes(extension)) return { ok: false, reason: "unsupported_file" };
-  const fileType = extension === ".pdf" ? "pdf" : "image";
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-"));
-  try {
-    let pages: string[];
-    if (fileType === "pdf") {
-      const prefix = path.join(tempDir, "page");
-      try { await dependencies.execFile("pdftoppm", ["-r", "300", "-png", filePath, prefix], PDF_OPTIONS); }
-      catch { return { ok: false, reason: "pdf_render_failed" }; }
-      pages = (await fs.readdir(tempDir)).filter((name) => /^page-\d+\.png$/i.test(name)).sort().map((name) => path.join(tempDir, name));
-      if (!pages.length) return { ok: false, reason: "corrupt_file" };
-    } else pages = [filePath];
-
-    const accessions = new Set<string>();
-    let decoded = false;
-    let attemptCount = 0;
-    for (const [index, page] of pages.entries()) {
-      const pageResult = await decodePageWithFallbacks(page, tempDir, index + 1, fileType, dependencies);
-      if ("failure" in pageResult) {
-        dependencies.logDiagnostic?.("recognition_failed", { fileType, pageNumber: index + 1, category: pageResult.failure, attemptCount: attemptCount + pageResult.attempts });
-        return { ok: false, reason: pageResult.failure };
-      }
-      decoded ||= pageResult.decoded;
-      attemptCount += pageResult.attempts;
-      for (const accession of pageResult.accessions) accessions.add(accession);
-    }
-    const result = !accessions.size ? { ok: false as const, reason: decoded ? "no_valid_accession" as const : "no_barcode" as const }
-      : accessions.size > 1 ? { ok: false as const, reason: "multiple_accessions" as const }
-      : { ok: true as const, accession: [...accessions][0] };
-    dependencies.logDiagnostic?.("recognition_complete", { fileType, pageCount: pages.length, attemptCount, category: result.ok ? "success" : result.reason, uniqueAccessions: accessions.size });
-    return result;
-  } finally { await fs.rm(tempDir, { recursive: true, force: true }); }
-}
+function pageFailureCode(failure: PageFailure): DiagnosticCode { return failure === "barcode_decoder_timeout" ? "BARCODE_DECODER_TIMEOUT" : failure === "barcode_decoder_failed" ? "BARCODE_DECODER_FAILED" : failure === "image_preprocess_failed" ? "BARCODE_PREPROCESSING_FAILED" : "BARCODE_PROCESSING_FAILED"; }
+async function scanRenderedPages(pagePaths: string[], tempDir: string, dpi: number, dependencies: RequestScanBarcodeDependencies): Promise<ResolutionResult> { const accessions = new Set<string>(); let decoded = false; let attempts = 0; const deadline = Date.now() + PDF_STAGE_TIMEOUT_MS; for (const [index, pagePath] of pagePaths.entries()) { if (Date.now() > deadline) { log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", pageNumber: index + 1, dpi, failureCategory: "stage_timeout" }); return { accessions, decoded, attempts, failure: "barcode_processing_failed" }; } const page = await decodePageWithFallbacks(pagePath, tempDir, index + 1, "pdf", dpi, dependencies); attempts += page.attempts; decoded ||= page.decoded; if (page.failure) { log(dependencies, pageFailureCode(page.failure), { fileType: "pdf", pageNumber: index + 1, dpi, attemptCount: attempts }); return { accessions, decoded, attempts, failure: page.failure }; } page.accessions.forEach((accession) => accessions.add(accession)); if (page.successfulAttempt) log(dependencies, dpi === 600 ? "BARCODE_SUCCESS_PDF_600_DPI" : page.successfulAttempt === "original" ? "BARCODE_SUCCESS_ORIGINAL" : page.successfulAttempt === "preprocessed" ? "BARCODE_SUCCESS_PREPROCESSED" : "BARCODE_SUCCESS_ROTATED", { fileType: "pdf", pageNumber: index + 1, dpi, attempt: page.successfulAttempt, rotation: page.rotation!, attemptCount: page.attempts, fallbackUsed: dpi === 600 }); } return { accessions, decoded, attempts }; }
+async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir: string, dependencies: RequestScanBarcodeDependencies): Promise<ResolutionResult> { const stageDir = path.join(rootTempDir, `pdf-${dpi}`); await fs.mkdir(stageDir); const started = Date.now(); try { const prefix = path.join(stageDir, "page"); try { await dependencies.execFile("pdftoppm", ["-r", String(dpi), "-png", pdfPath, prefix], PDF_OPTIONS); } catch (error) { log(dependencies, "BARCODE_PDF_RENDER_FAILED", { fileType: "pdf", dpi, failureCategory: processTimedOut(error) ? "timeout" : "executable_failure", elapsedMs: Date.now() - started }); return { accessions: new Set(), decoded: false, attempts: 0, failure: "pdf_render_failed" }; } const pages = (await fs.readdir(stageDir)).filter((name) => /^page-\d+\.png$/i.test(name)).sort().map((name) => path.join(stageDir, name)); if (!pages.length) { log(dependencies, "BARCODE_PDF_RENDER_FAILED", { fileType: "pdf", dpi, failureCategory: "no_pages", elapsedMs: Date.now() - started }); return { accessions: new Set(), decoded: false, attempts: 0, failure: "pdf_render_failed" }; } return await scanRenderedPages(pages, stageDir, dpi, dependencies); } finally { await fs.rm(stageDir, { recursive: true, force: true }); } }
+function summarize(result: ResolutionResult): RequestScanBarcodeResult { return result.failure ? { ok: false, reason: result.failure } : result.accessions.size > 1 ? { ok: false, reason: "multiple_accessions" } : result.accessions.size === 1 ? { ok: true, accession: [...result.accessions][0] } : { ok: false, reason: result.decoded ? "no_valid_accession" : "no_barcode" }; }
+function terminalDiagnostic(result: RequestScanBarcodeResult): DiagnosticCode | null { return result.ok ? null : result.reason === "no_barcode" ? "BARCODE_NOT_DETECTED" : result.reason === "no_valid_accession" ? "BARCODE_DETECTED_INVALID_ACCESSION" : result.reason === "multiple_accessions" ? "BARCODE_MULTIPLE_VALID_ACCESSIONS" : result.reason === "pdf_render_failed" ? "BARCODE_PDF_RENDER_FAILED" : result.reason === "barcode_decoder_timeout" ? "BARCODE_DECODER_TIMEOUT" : result.reason === "barcode_decoder_failed" ? "BARCODE_DECODER_FAILED" : result.reason === "image_preprocess_failed" ? "BARCODE_PREPROCESSING_FAILED" : "BARCODE_PROCESSING_FAILED"; }
+export async function extractRequestScanBarcode(filePath: string, dependencies: RequestScanBarcodeDependencies = defaultDependencies): Promise<RequestScanBarcodeResult> { const extension = path.extname(filePath).toLowerCase(); if (![".pdf", ".jpg", ".jpeg"].includes(extension)) return { ok: false, reason: "unsupported_file" }; const fileType: FileType = extension === ".pdf" ? "pdf" : "image"; const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-")); const started = Date.now(); try { let result: RequestScanBarcodeResult; let attempts = 0; let fallbackUsed = false; if (fileType === "pdf") { const first = await scanPdfAtResolution(filePath, 300, tempDir, dependencies); attempts += first.attempts; result = summarize(first); if (!first.failure && first.accessions.size === 0) { fallbackUsed = true; const fallback = await scanPdfAtResolution(filePath, 600, tempDir, dependencies); attempts += fallback.attempts; result = summarize(fallback); } } else { const page = await decodePageWithFallbacks(filePath, tempDir, 1, "image", "source", dependencies); attempts = page.attempts; result = page.failure ? { ok: false, reason: page.failure } : summarize({ accessions: new Set(page.accessions), decoded: page.decoded, attempts }); if (page.successfulAttempt) log(dependencies, page.successfulAttempt === "original" ? "BARCODE_SUCCESS_ORIGINAL" : page.successfulAttempt === "preprocessed" ? "BARCODE_SUCCESS_PREPROCESSED" : "BARCODE_SUCCESS_ROTATED", { fileType, pageNumber: 1, dpi: "source", attempt: page.successfulAttempt, rotation: page.rotation!, attemptCount: attempts, fallbackUsed: false }); } const terminal = terminalDiagnostic(result); if (terminal) log(dependencies, terminal, { fileType, attemptCount: attempts, elapsedMs: Date.now() - started, fallbackUsed, successfulDpi: "none" }); dependencies.logDiagnostic?.("recognition_complete", { fileType, outcome: result.ok ? "success" : result.reason, attemptCount: attempts, elapsedMs: Date.now() - started, fallbackUsed, successfulDpi: result.ok && fileType === "pdf" ? (fallbackUsed ? 600 : 300) : "none" }); return result; } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }

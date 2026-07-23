@@ -186,7 +186,7 @@ test("persists a failed job with its concise barcode error", async (t) => {
   const jobId = await createJob();
   const job = await processRequestScanJob(jobId, settings, dependencies({ ok: false, reason: "no_barcode" }));
   assert.equal(job.status, "failed");
-  assert.equal(job.error_message, "No supported barcode found");
+  assert.equal(job.error_message, "No readable appointment barcode was found.");
   assert.equal(job.attempt_count, 1);
   assert.match(job.source_relative_path, /^Requests\/Failed\\/);
   assert.equal((await getRequestScanJob(jobId)).status, "failed");
