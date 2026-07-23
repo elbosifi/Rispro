@@ -11,6 +11,9 @@ test("Request Scan file response is private and inline for PDF and JPEG previews
   assert.equal(headers.get("Cache-Control"), "private, no-store");
   setRequestScanFileHeaders(response as never, { filename: "request.jpg", mime_type: "image/jpeg" });
   assert.equal(headers.get("Content-Type"), "image/jpeg");
+  setRequestScanFileHeaders(response as never, { filename: "https___rispro.nccb.com.ly_public_appointment_t=pa_private_token.pdf", mime_type: "application/pdf" });
+  assert.equal(headers.get("Content-Disposition"), 'inline; filename="Patient appointment QR.pdf"');
+  assert.equal([...headers.values()].some((value) => value.includes("pa_private_token")), false);
 });
 
 test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker runtime state", async () => {

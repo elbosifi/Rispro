@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import fs from "node:fs/promises";
 import { pool } from "../db/pool.js";
+import { issueLegacyPublicCancelToken, issuePublicCancelToken, verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
 import type { DocumentRow, DocumentUploadPayload } from "./document-service.js";
 import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js";
 import {
@@ -89,22 +90,31 @@ async function createBooking(status = "scheduled") {
   return { id, patientId, userId, accession: `V2-${String(id).padStart(6, "0")}` };
 }
 
-async function createJob(status = "pending") {
+async function createJob(status = "pending", filename?: string) {
   const marker = suffix();
+  const storedFilename = filename ?? `request-${marker}.jpg`;
   const result = await pool.query<{ id: number }>(
     "insert into request_scan_jobs(filename,source_relative_path,mime_type,status) values($1,$2,'image/jpeg',$3) returning id",
-    [`request-${marker}.jpg`, `Requests\\Incoming\\request-${marker}.jpg`, status]
+    [storedFilename, `Requests\\Incoming\\request-${marker}.jpg`, status]
   );
   const id = Number(result.rows[0].id);
   created.jobs.push(id);
   return id;
 }
 
-function dependencies(result: RequestScanBarcodeResult, options: { existingDocument?: () => boolean; failProcessedMove?: boolean; failAllMoves?: boolean; uploads?: Array<{ payload: unknown; userId: string | number | null }> } = {}): RequestScanServiceDependencies {
+function dependencies(result: RequestScanBarcodeResult, options: {
+  existingDocument?: () => boolean;
+  failProcessedMove?: boolean;
+  failAllMoves?: boolean;
+  uploads?: Array<{ payload: unknown; userId: string | number | null }>;
+  recognitionCalls?: string[];
+  diagnostics?: Array<{ event: string; metadata: Record<string, string | number | boolean> }>;
+  verifyToken?: typeof verifyPublicCancelToken;
+} = {}): RequestScanServiceDependencies {
   return {
     listRequestScanFiles: async () => [],
     downloadRequestScanFile: async (_settings, _remotePath, localPath) => { await fs.writeFile(localPath, "request scan"); },
-    extractRequestScanBarcode: async () => result,
+    extractRequestScanBarcode: async (localPath) => { options.recognitionCalls?.push(localPath); return result; },
     moveRequestScanFile: async (_settings, _sourcePath, destinationFolder, filename) => {
       if (options.failAllMoves || (options.failProcessedMove && destinationFolder.includes("Processed") && !destinationFolder.includes("Duplicates"))) throw new Error("SMB move failed");
       return `${destinationFolder}\\${filename}`;
@@ -123,6 +133,9 @@ function dependencies(result: RequestScanBarcodeResult, options: { existingDocum
       const existing = await pool.query("select 1 from documents where v2_booking_id=$1 and document_type='appointment_request' and source='request_scan_automation' limit 1", [appointmentId]);
       return Boolean(existing.rowCount);
     },
+    findEligibleAppointment: findEligibleRequestScanAppointment,
+    verifyPublicAppointmentToken: options.verifyToken ?? verifyPublicCancelToken,
+    logDiagnostic(event, metadata) { options.diagnostics?.push({ event, metadata }); },
   };
 }
 
@@ -181,12 +194,305 @@ test("marks an existing automated request as a duplicate without attaching anoth
   assert.match(job.source_relative_path, /^Requests\/Processed\\Duplicates\\/);
 });
 
+test("uses an exact accession filename as a fast path while preserving eligibility and duplicate checks", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob("pending", `${booking.accession}.pdf`);
+  const recognitionCalls: string[] = [];
+  const uploads: Array<{ payload: DocumentUploadPayload; userId: string | number | null }> = [];
+  const job = await processRequestScanJob(
+    jobId,
+    settings,
+    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls, uploads })
+  );
+  assert.equal(job.status, "processed");
+  assert.equal(Number(job.appointment_id), booking.id);
+  assert.equal(job.barcode_value, booking.accession);
+  assert.deepEqual(recognitionCalls, []);
+  assert.equal(uploads.length, 1);
+
+  const duplicateJobId = await createJob("pending", `Scan_${booking.accession}_Page1.jpg`);
+  const duplicateRecognitionCalls: string[] = [];
+  const duplicate = await processRequestScanJob(
+    duplicateJobId,
+    settings,
+    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls: duplicateRecognitionCalls })
+  );
+  assert.equal(duplicate.status, "duplicate");
+  assert.deepEqual(duplicateRecognitionCalls, []);
+});
+
+test("verifies scanner-safe patient QR filenames and skips document recognition", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const token = await issuePublicCancelToken(booking.id);
+  assert.ok(token);
+  const filename = `https___rispro.nccb.com.ly_public_appointment_t=${token}.pdf`;
+  const jobId = await createJob("pending", filename);
+  const recognitionCalls: string[] = [];
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const job = await processRequestScanJob(
+    jobId,
+    settings,
+    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls, diagnostics })
+  );
+  assert.equal(job.status, "processed");
+  assert.equal(Number(job.appointment_id), booking.id);
+  assert.deepEqual(recognitionCalls, []);
+  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_SUCCESS_FILENAME_QR"));
+  assert.equal(JSON.stringify(diagnostics).includes(token), false);
+  assert.equal(job.error_message, null);
+
+  const normalUrlJobId = await createJob("pending", `https://rispro.nccb.com.ly/public/appointment?t=${token}.pdf`);
+  const normalUrlRecognitionCalls: string[] = [];
+  const normalUrlDependencies = dependencies(
+    { ok: false, reason: "barcode_processing_failed" },
+    { existingDocument: () => true, recognitionCalls: normalUrlRecognitionCalls }
+  );
+  normalUrlDependencies.downloadRequestScanFile = async () => {};
+  const normalUrlJob = await processRequestScanJob(normalUrlJobId, settings, normalUrlDependencies);
+  assert.equal(normalUrlJob.status, "duplicate");
+  assert.equal(Number(normalUrlJob.appointment_id), booking.id);
+  assert.deepEqual(normalUrlRecognitionCalls, []);
+});
+
+test("treats matching accession and QR evidence as consensus and conflicting evidence as manual review", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking();
+  const second = await createBooking();
+  const firstToken = await issuePublicCancelToken(first.id);
+  const secondToken = await issuePublicCancelToken(second.id);
+  assert.ok(firstToken);
+  assert.ok(secondToken);
+
+  const consensusId = await createJob("pending", `${first.accession}_https___rispro.nccb.com.ly_public_appointment_t=${firstToken}.pdf`);
+  const consensusRecognitionCalls: string[] = [];
+  const consensus = await processRequestScanJob(
+    consensusId,
+    settings,
+    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls: consensusRecognitionCalls })
+  );
+  assert.equal(consensus.status, "processed");
+  assert.equal(Number(consensus.appointment_id), first.id);
+  assert.deepEqual(consensusRecognitionCalls, []);
+
+  const conflictId = await createJob("pending", `${first.accession}_https___rispro.nccb.com.ly_public_appointment_t=${secondToken}.pdf`);
+  const conflictRecognitionCalls: string[] = [];
+  const conflict = await processRequestScanJob(
+    conflictId,
+    settings,
+    dependencies({ ok: true, accession: first.accession }, { recognitionCalls: conflictRecognitionCalls })
+  );
+  assert.equal(conflict.status, "failed");
+  assert.equal(conflict.error_message, "The filename contains conflicting appointment information. Assign the document manually.");
+  assert.deepEqual(conflictRecognitionCalls, []);
+});
+
+test("requires document confirmation for partial filename evidence and rejects disagreement", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking();
+  const second = await createBooking();
+  const invalidToken = "pa_invalid_token_value";
+  const matchingId = await createJob("pending", `${first.accession}_https___rispro.nccb.com.ly_public_appointment_t=${invalidToken}.jpg`);
+  const matchingCalls: string[] = [];
+  const matching = await processRequestScanJob(
+    matchingId,
+    settings,
+    dependencies({ ok: true, accession: first.accession }, { recognitionCalls: matchingCalls })
+  );
+  assert.equal(matching.status, "processed");
+  assert.equal(Number(matching.appointment_id), first.id);
+  assert.equal(matchingCalls.length, 1);
+
+  const disagreementId = await createJob("pending", `${first.accession}_https___rispro.nccb.com.ly_public_appointment_t=${invalidToken}.jpg`);
+  const disagreement = await processRequestScanJob(
+    disagreementId,
+    settings,
+    dependencies({ ok: true, accession: second.accession })
+  );
+  assert.equal(disagreement.status, "failed");
+  assert.equal(disagreement.error_message, "The filename and scanned barcode identify different appointments. Assign the document manually.");
+});
+
+test("invalid, expired, and wrong-action filename tokens all invoke document fallback", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const tokens = [
+    { rejection: "invalid", token: "pa_invalid_private_value" },
+    { rejection: "expired", token: issueLegacyPublicCancelToken(booking.id, { expiresInSeconds: -1 }) },
+    { rejection: "wrong-action", token: issueLegacyPublicCancelToken(booking.id, { action: "view" }) },
+  ];
+  for (const { rejection, token } of tokens) {
+    assert.ok(token);
+    const filename = `https___rispro.nccb.com.ly_public_appointment_t=${token}.jpg`;
+    const jobId = await createJob("pending", filename);
+    const recognitionCalls: string[] = [];
+    const uploads: Array<{ payload: DocumentUploadPayload; userId: string | number | null }> = [];
+    const job = await processRequestScanJob(
+      jobId,
+      settings,
+      dependencies(
+        { ok: true, accession: booking.accession },
+        {
+          recognitionCalls,
+          uploads,
+        }
+      )
+    );
+    assert.equal(job.status, rejection === "invalid" ? "processed" : "duplicate");
+    assert.equal(recognitionCalls.length, 1);
+    assert.equal(String(job.error_message ?? "").includes(token), false);
+    if (uploads[0]) assert.equal(uploads[0].payload.originalFilename, filename);
+  }
+});
+
+test("multiple filename accessions resolving to different appointments require manual review", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking();
+  const second = await createBooking();
+  const jobId = await createJob("pending", `${first.accession}_${second.accession}.pdf`);
+  const recognitionCalls: string[] = [];
+  const job = await processRequestScanJob(
+    jobId,
+    settings,
+    dependencies({ ok: true, accession: first.accession }, { recognitionCalls })
+  );
+  assert.equal(job.status, "failed");
+  assert.equal(job.error_message, "The filename contains conflicting appointment information. Assign the document manually.");
+  assert.deepEqual(recognitionCalls, []);
+});
+
+test("an unreadable document never promotes incomplete filename evidence", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const token = "pa_unverified_private_value";
+  const filename = `${booking.accession}_https___rispro.nccb.com.ly_public_appointment_t=${token}.jpg`;
+  const jobId = await createJob("pending", filename);
+  const job = await processRequestScanJob(jobId, settings, dependencies({ ok: false, reason: "no_barcode" }));
+  assert.equal(job.status, "failed");
+  assert.equal(job.error_message, "No valid appointment identifier could be confirmed. Assign the document manually.");
+  assert.equal(job.error_message.includes(token), false);
+  assert.equal(job.appointment_id, null);
+});
+
+test("resolves a patient appointment QR detected in the document through the authoritative verifier", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const token = await issuePublicCancelToken(booking.id);
+  assert.ok(token);
+  const jobId = await createJob();
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const job = await processRequestScanJob(
+    jobId,
+    settings,
+    dependencies({ ok: true, qrTokens: [token] }, { diagnostics })
+  );
+  assert.equal(job.status, "processed");
+  assert.equal(Number(job.appointment_id), booking.id);
+  assert.equal(job.barcode_value, booking.accession);
+  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_SUCCESS_DOCUMENT_QR"));
+  assert.equal(JSON.stringify(diagnostics).includes(token), false);
+});
+
+test("reconciles document accession and QR evidence as consensus or conflict", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking();
+  const second = await createBooking();
+  const firstToken = await issuePublicCancelToken(first.id);
+  const secondToken = await issuePublicCancelToken(second.id);
+  assert.ok(firstToken);
+  assert.ok(secondToken);
+
+  const consensusId = await createJob();
+  const consensusDiagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const consensus = await processRequestScanJob(
+    consensusId,
+    settings,
+    dependencies({ ok: true, accession: first.accession, qrTokens: [firstToken] }, { diagnostics: consensusDiagnostics })
+  );
+  assert.equal(consensus.status, "processed");
+  assert.equal(Number(consensus.appointment_id), first.id);
+  assert.ok(consensusDiagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_SUCCESS_DOCUMENT_CONSENSUS"));
+
+  const conflictId = await createJob();
+  const conflict = await processRequestScanJob(
+    conflictId,
+    settings,
+    dependencies({ ok: true, accession: first.accession, qrTokens: [secondToken] })
+  );
+  assert.equal(conflict.status, "failed");
+  assert.equal(conflict.error_message, "The scanned document contains conflicting appointment information. Assign the document manually.");
+  assert.equal(conflict.error_message.includes(secondToken), false);
+});
+
+test("multiple document QR tokens resolving differently require manual review", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking();
+  const second = await createBooking();
+  const firstToken = await issuePublicCancelToken(first.id);
+  const secondToken = await issuePublicCancelToken(second.id);
+  assert.ok(firstToken);
+  assert.ok(secondToken);
+  const jobId = await createJob();
+  const job = await processRequestScanJob(
+    jobId,
+    settings,
+    dependencies({ ok: true, qrTokens: [firstToken, secondToken] })
+  );
+  assert.equal(job.status, "failed");
+  assert.equal(job.error_message, "The scanned document contains conflicting appointment information. Assign the document manually.");
+});
+
+test("invalid, expired, and wrong-action document QR tokens are rejected without disclosure", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const tokens = [
+    "pa_invalid_document_private_value",
+    issueLegacyPublicCancelToken(booking.id, { expiresInSeconds: -1 }),
+    issueLegacyPublicCancelToken(booking.id, { action: "view" }),
+  ];
+  for (const token of tokens) {
+    assert.ok(token);
+    const jobId = await createJob();
+    const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+    const job = await processRequestScanJob(jobId, settings, dependencies({ ok: true, qrTokens: [token] }, { diagnostics }));
+    assert.equal(job.status, "failed");
+    assert.equal(job.error_message, "No valid appointment identifier could be confirmed. Assign the document manually.");
+    assert.equal(job.error_message.includes(token), false);
+    assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_DOCUMENT_QR_INVALID"));
+    assert.equal(JSON.stringify(diagnostics).includes(token), false);
+  }
+
+  const accessionJobId = await createJob();
+  const accessionJob = await processRequestScanJob(
+    accessionJobId,
+    settings,
+    dependencies({ ok: true, accession: booking.accession, qrTokens: ["pa_invalid_but_ignored"] })
+  );
+  assert.equal(accessionJob.status, "processed");
+  assert.equal(Number(accessionJob.appointment_id), booking.id);
+});
+
+test("ignored unrelated document QR payloads remain manual and emit only safe diagnostics", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const jobId = await createJob();
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const job = await processRequestScanJob(
+    jobId,
+    settings,
+    dependencies({ ok: false, reason: "no_valid_accession", ignoredQrCount: 1 }, { diagnostics })
+  );
+  assert.equal(job.status, "failed");
+  assert.equal(job.error_message, "No valid appointment identifier could be confirmed. Assign the document manually.");
+  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_DOCUMENT_QR_IGNORED"));
+});
+
 test("persists a failed job with its concise barcode error", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const jobId = await createJob();
   const job = await processRequestScanJob(jobId, settings, dependencies({ ok: false, reason: "no_barcode" }));
   assert.equal(job.status, "failed");
-  assert.equal(job.error_message, "No readable appointment barcode was found.");
+  assert.equal(job.error_message, "No valid appointment identifier could be confirmed. Assign the document manually.");
   assert.equal(job.attempt_count, 1);
   assert.match(job.source_relative_path, /^Requests\/Failed\\/);
   assert.equal((await getRequestScanJob(jobId)).status, "failed");

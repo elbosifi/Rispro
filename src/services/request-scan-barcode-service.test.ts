@@ -3,9 +3,11 @@ import test from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { extractRequestScanBarcode, interpretRequestScanBarcodes, type RequestScanBarcodeDependencies } from "./request-scan-barcode-service.js";
+import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpretRequestScanBarcodes, type RequestScanBarcodeDependencies } from "./request-scan-barcode-service.js";
 
 function noSymbol(): Error & { code: number } { return Object.assign(new Error("no symbols found"), { code: 4 }); }
+const QR_TOKEN = "pa_ab_CD-12_ef";
+const QR_URL = `https://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`;
 type Decode = (filePath: string) => string | Error;
 type Options = { preprocessError?: boolean; rotateError?: number; derivativePaths?: string[]; renderedPaths?: string[]; calls?: string[]; renders?: number[]; diagnostics?: Record<string, string | number | boolean>[] };
 function dependencies(decode: Decode, options: Options = {}): RequestScanBarcodeDependencies {
@@ -29,6 +31,68 @@ function dependencies(decode: Decode, options: Options = {}): RequestScanBarcode
 async function withImage(t: (filePath: string) => Promise<void>): Promise<void> { const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-barcode-test-")); const image = path.join(dir, "request.jpg"); await fs.writeFile(image, "original upload bytes"); try { await t(image); } finally { await fs.rm(dir, { recursive: true, force: true }); } }
 
 test("accepts single-page Code 128 and Code 39 V2 accessions", () => { assert.deepEqual(interpretRequestScanBarcodes("CODE-128:V2-003628\n"), { ok: true, accession: "V2-003628" }); assert.deepEqual(interpretRequestScanBarcodes("CODE-39:v2-003628\n"), { ok: true, accession: "V2-003628" }); });
+test("accepts only the RISpro public appointment URL and preserves the token exactly", () => {
+  assert.equal(extractRisproPublicAppointmentToken(QR_URL), QR_TOKEN);
+  assert.equal(extractRisproPublicAppointmentToken(`https://example.com/public/appointment?t=${QR_TOKEN}`), null);
+  assert.equal(extractRisproPublicAppointmentToken(`http://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}`), null);
+  assert.equal(extractRisproPublicAppointmentToken(`https://rispro.nccb.com.ly/public/appointment?t=${QR_TOKEN}&t=other`), null);
+  assert.deepEqual(interpretRequestScanBarcodes(`QR-Code:${QR_URL}`), { ok: true, qrTokens: [QR_TOKEN] });
+  assert.deepEqual(interpretRequestScanBarcodes("QR-Code:https://example.com/unrelated?t=private"), { ok: false, reason: "no_valid_accession", ignoredQrCount: 1 });
+});
+test("enables QR in the existing zbar invocation and resolves a clear patient QR", async () => {
+  await withImage(async (image) => {
+    let zbarArgs: string[] = [];
+    const result = await extractRequestScanBarcode(image, {
+      ...dependencies(() => `QR-Code:${QR_URL}`),
+      async execFile(_command, args) { zbarArgs = args; return { stdout: `QR-Code:${QR_URL}` }; },
+    });
+    assert.deepEqual(result, { ok: true, qrTokens: [QR_TOKEN] });
+    assert.ok(zbarArgs.includes("qrcode.enable=1"));
+  });
+});
+test("resolves patient QR evidence through existing preprocessing and rotation fallbacks", async () => {
+  await withImage(async (image) => {
+    const preprocessed = await extractRequestScanBarcode(image, dependencies((filePath) => filePath.includes("processed-1.png") && !filePath.includes("rotated") ? `QR-Code:${QR_URL}` : noSymbol()));
+    assert.deepEqual(preprocessed, { ok: true, qrTokens: [QR_TOKEN] });
+  });
+  await withImage(async (image) => {
+    const rotated = await extractRequestScanBarcode(image, dependencies((filePath) => filePath.includes("rotated-270.png") ? `QR-Code:${QR_URL}` : noSymbol()));
+    assert.deepEqual(rotated, { ok: true, qrTokens: [QR_TOKEN] });
+  });
+});
+test("resolves a patient QR visible only in the bounded 600-DPI PDF stage", async () => {
+  const renders: number[] = [];
+  const result = await extractRequestScanBarcode("qr-600.pdf", dependencies((filePath) => filePath.includes("pdf-600") ? `QR-Code:${QR_URL}` : noSymbol(), { renders }));
+  assert.deepEqual(result, { ok: true, qrTokens: [QR_TOKEN] });
+  assert.deepEqual(renders, [300, 600]);
+});
+test("collects accession and QR evidence together, deduplicates QR detections, and keeps diagnostics secret-free", async () => {
+  await withImage(async (image) => {
+    const diagnostics: Record<string, string | number | boolean>[] = [];
+    const result = await extractRequestScanBarcode(image, dependencies(() => `CODE-128:V2-003628\nQR-Code:${QR_URL}\nQR-Code:${QR_URL}`, { diagnostics }));
+    assert.deepEqual(result, { ok: true, accession: "V2-003628", qrTokens: [QR_TOKEN] });
+    assert.equal(JSON.stringify(diagnostics).includes(QR_TOKEN), false);
+    assert.equal(JSON.stringify(diagnostics).includes(QR_URL), false);
+  });
+});
+test("QR-only evidence does not suppress later bounded accession fallbacks", async () => {
+  await withImage(async (image) => {
+    const result = await extractRequestScanBarcode(image, dependencies((filePath) => {
+      if (filePath === image) return `QR-Code:${QR_URL}`;
+      if (filePath.includes("processed-1.png") && !filePath.includes("rotated")) return "CODE-128:V2-003628";
+      return noSymbol();
+    }));
+    assert.deepEqual(result, { ok: true, accession: "V2-003628", qrTokens: [QR_TOKEN] });
+  });
+  const renders: number[] = [];
+  const pdf = await extractRequestScanBarcode("qr-then-accession.pdf", dependencies((filePath) => {
+    if (filePath.includes("pdf-300")) return `QR-Code:${QR_URL}`;
+    if (filePath.includes("pdf-600")) return "CODE-128:V2-003628";
+    return noSymbol();
+  }, { renders }));
+  assert.deepEqual(pdf, { ok: true, accession: "V2-003628", qrTokens: [QR_TOKEN] });
+  assert.deepEqual(renders, [300, 600]);
+});
 test("uses the unchanged upright image as the original fast path", async () => { await withImage(async (image) => { const calls: string[] = []; assert.deepEqual(await extractRequestScanBarcode(image, dependencies(() => "CODE-128:V2-003628", { calls })), { ok: true, accession: "V2-003628" }); assert.deepEqual(calls, [image]); }); });
 test("uses preprocessing and each bounded rotation when needed", async () => { for (const angle of [0, 90, 180, 270]) await withImage(async (image) => { const result = await extractRequestScanBarcode(image, dependencies((filePath) => angle === 0 ? (filePath.includes("processed-1.png") && !filePath.includes("rotated") ? "CODE-128:V2-003628" : noSymbol()) : (filePath.includes(`rotated-${angle}.png`) ? "CODE-39:V2-003628" : noSymbol()))); assert.deepEqual(result, { ok: true, accession: "V2-003628" }); }); });
 
