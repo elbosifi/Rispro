@@ -21,7 +21,7 @@ export type RequestScanServiceDependencies = {
 };
 
 const MIME_BY_EXTENSION: Record<string, string> = { ".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
-const errorMessage: Record<RequestScanBarcodeFailure, string> = { no_barcode: "No supported barcode found", no_valid_accession: "No valid V2 accession found", multiple_accessions: "More than one accession was detected", unsupported_file: "Unsupported file", corrupt_file: "The file could not be read", barcode_tool_failed: "Barcode detection failed", pdf_render_failed: "The PDF could not be rendered" };
+const errorMessage: Record<RequestScanBarcodeFailure, string> = { no_barcode: "No supported barcode found", no_valid_accession: "No valid V2 accession found", multiple_accessions: "More than one accession was detected", unsupported_file: "Unsupported file", corrupt_file: "The file could not be read", barcode_tool_failed: "Barcode detection failed", pdf_render_failed: "The PDF could not be rendered", image_preprocess_failed: "Barcode image processing failed" };
 const defaultDependencies: RequestScanServiceDependencies = { listRequestScanFiles, downloadRequestScanFile, extractRequestScanBarcode, moveRequestScanFile, uploadDocument, automatedDocumentExists };
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
 function destination(folder: string, duplicate = false): string { return `${folder.replace(/[\\/]+$/g, "")}\\${duplicate ? "Duplicates\\" : ""}${getTripoliToday()}`; }
