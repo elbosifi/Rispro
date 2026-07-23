@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getRequestScanStatus, setRequestScanFileHeaders } from "./request-scans.js";
+import { getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, setRequestScanFileHeaders } from "./request-scans.js";
+import { parseRequestScanJobFilter, type RequestScanJob } from "../services/request-scan-service.js";
 
 test("Request Scan file response is private and inline for PDF and JPEG previews", () => {
   const headers = new Map<string, string>();
@@ -42,4 +43,62 @@ test("Request Scan status propagates aggregate query failures to the standard ro
     () => getRequestScanStatus(new Date(), { readSettings: async () => ({ enabled: true } as never), workerStatus: () => ({ lastRunAt: null, lastError: null, running: false }), query: async () => { throw new Error("database unavailable"); } }),
     /database unavailable/
   );
+});
+
+test("Request Scan status filter accepts only explicit API values", () => {
+  assert.equal(parseRequestScanJobFilter("active"), "active");
+  assert.equal(parseRequestScanJobFilter("processed"), "processed");
+  assert.equal(parseRequestScanJobFilter("duplicate"), "duplicate");
+  assert.equal(parseRequestScanJobFilter("failed"), "failed");
+  assert.equal(parseRequestScanJobFilter("all"), "all");
+  assert.equal(parseRequestScanJobFilter(undefined), "all");
+  assert.throws(() => parseRequestScanJobFilter("processing"), /Invalid Request Scan status filter/);
+  assert.throws(() => parseRequestScanJobFilter("pending' or true --"), /Invalid Request Scan status filter/);
+});
+
+test("Run Now delegates to the controlled worker trigger", async () => {
+  let triggerCalls = 0;
+  const result = await requestRequestScanRunNow({
+    triggerWorker: async () => {
+      triggerCalls += 1;
+      return { status: "accepted" };
+    },
+  });
+  assert.deepEqual(result, { status: "accepted" });
+  assert.equal(triggerCalls, 1);
+});
+
+test("Retry queues the failed job and requests the controlled worker", async () => {
+  const events: string[] = [];
+  const queuedJob = {
+    id: 7,
+    filename: "failed-request.pdf",
+    source_relative_path: "Incoming\\failed-request.pdf",
+    mime_type: "application/pdf",
+    status: "pending",
+    barcode_value: null,
+    appointment_id: null,
+    document_id: null,
+    error_message: null,
+    attempt_count: 2,
+    created_at: "2026-07-23T10:00:00.000Z",
+    updated_at: "2026-07-23T10:01:00.000Z",
+    completed_at: null,
+  } satisfies RequestScanJob;
+
+  const result = await queueRequestScanRetry(7, {
+    retryJob: async (id) => {
+      assert.equal(id, 7);
+      events.push("queued");
+      return queuedJob;
+    },
+    triggerWorker: async () => {
+      events.push("triggered");
+      return { status: "accepted" };
+    },
+  });
+
+  assert.deepEqual(events, ["queued", "triggered"]);
+  assert.equal(result.job.status, "pending");
+  assert.deepEqual(result.trigger, { status: "accepted" });
 });

@@ -18,6 +18,7 @@ import { downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile } fr
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
 
 export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
+export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; accession_number: string };
 export type RequestScanServiceDependencies = {
   listRequestScanFiles: typeof listRequestScanFiles;
@@ -29,6 +30,12 @@ export type RequestScanServiceDependencies = {
   findEligibleAppointment: (accession: string) => Promise<EligibleAppointment>;
   verifyPublicAppointmentToken: typeof verifyPublicCancelToken;
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
+};
+type RequestScanRetryDependencies = {
+  readSettings: typeof readRequestScanSettings;
+  getJob: typeof getRequestScanJob;
+  moveFile: typeof moveRequestScanFile;
+  updateJob: typeof updateJob;
 };
 
 const MIME_BY_EXTENSION: Record<string, string> = { ".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg" };
@@ -59,9 +66,27 @@ const defaultDependencies: RequestScanServiceDependencies = {
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
 function destination(folder: string, duplicate = false): string { return `${folder.replace(/[\\/]+$/g, "")}\\${duplicate ? "Duplicates\\" : ""}${getTripoliToday()}`; }
 
-export async function listRequestScanJobs(status?: string): Promise<RequestScanJob[]> {
-  const values: unknown[] = []; const where = status ? "where j.status = $1" : ""; if (status) values.push(status);
-  const { rows } = await pool.query(`select j.*, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, coalesce(p.english_full_name, p.arabic_full_name) as patient_name, m.name_en as modality_name, e.name_en as exam_name from request_scan_jobs j left join appointments_v2.bookings b on b.id=j.appointment_id left join patients p on p.id=b.patient_id left join modalities m on m.id=b.modality_id left join exam_types e on e.id=b.exam_type_id ${where} order by j.created_at desc limit 250`, values);
+export function parseRequestScanJobFilter(value: unknown): RequestScanJobFilter {
+  const normalized = value == null || value === "" ? "all" : String(value).toLowerCase();
+  if (!["active", "processed", "duplicate", "failed", "all"].includes(normalized)) {
+    throw new HttpError(400, "Invalid Request Scan status filter.");
+  }
+  return normalized as RequestScanJobFilter;
+}
+
+export async function listRequestScanJobs(filterInput?: unknown): Promise<RequestScanJob[]> {
+  const filter = parseRequestScanJobFilter(filterInput);
+  const values: unknown[] = [];
+  const where = filter === "active"
+    ? "where j.status in ('pending', 'processing')"
+    : filter === "all"
+      ? ""
+      : "where j.status = $1";
+  if (!["active", "all"].includes(filter)) values.push(filter);
+  const order = filter === "active"
+    ? "case when j.status = 'processing' then 0 else 1 end, j.created_at asc, j.id asc"
+    : "j.created_at desc, j.id desc";
+  const { rows } = await pool.query(`select j.*, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, coalesce(p.english_full_name, p.arabic_full_name) as patient_name, m.name_en as modality_name, e.name_en as exam_name from request_scan_jobs j left join appointments_v2.bookings b on b.id=j.appointment_id left join patients p on p.id=b.patient_id left join modalities m on m.id=b.modality_id left join exam_types e on e.id=b.exam_type_id ${where} order by ${order} limit 250`, values);
   return rows as RequestScanJob[];
 }
 
@@ -345,7 +370,7 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
   return result;
 }
 
-export async function retryRequestScanJob(id: number): Promise<RequestScanJob> { const settings = await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be retried."); const moved = await moveRequestScanFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); const pending = await updateJob(id, { status: "pending", source_relative_path: moved, error_message: null, completed_at: null }); return processRequestScanJob(pending.id, settings); }
+export async function retryRequestScanJob(id: number, overrides: Partial<RequestScanRetryDependencies> = {}): Promise<RequestScanJob> { const dependencies: RequestScanRetryDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, moveFile: moveRequestScanFile, updateJob, ...overrides }; const settings = await dependencies.readSettings(); const job = await dependencies.getJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be retried."); const moved = await dependencies.moveFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return dependencies.updateJob(id, { status: "pending", source_relative_path: moved, error_message: null, completed_at: null }); }
 export async function returnRequestScanToIncoming(id: number): Promise<RequestScanJob> { const settings = await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be returned."); const moved = await moveRequestScanFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return updateJob(id, { status: "pending", source_relative_path: moved, error_message: null, completed_at: null }); }
 export async function manuallyAssignRequestScan(id: number, appointmentId: number, userId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> { const settings = suppliedSettings ?? await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed") throw new HttpError(409, "Only failed request scans can be assigned manually."); const appointment = await findEligibleRequestScanAppointment(`V2-${String(appointmentId).padStart(6, "0")}`); const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-manual-")); try { const localPath = path.join(tempDir, job.filename); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath); const document = await dependencies.uploadDocument({ patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: await fs.readFile(localPath), source: "request_scan_automation" }, userId); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder); return updateJob(id, { status: "processed", appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }
 export async function downloadRequestScanJobFile(id: number): Promise<{ job: RequestScanJob; buffer: Buffer }> { const settings = await readRequestScanSettings(); const job = await getRequestScanJob(id); const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-preview-")); try { const localPath = path.join(tempDir, job.filename); await downloadRequestScanFile(settings, job.source_relative_path, localPath); return { job, buffer: await fs.readFile(localPath) }; } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }

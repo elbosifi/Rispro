@@ -8,8 +8,10 @@ import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js
 import {
   findEligibleRequestScanAppointment,
   getRequestScanJob,
+  listRequestScanJobs,
   manuallyAssignRequestScan,
   processRequestScanJob,
+  retryRequestScanJob,
   runRequestScanCycle,
   type RequestScanServiceDependencies,
 } from "./request-scan-service.js";
@@ -496,6 +498,57 @@ test("persists a failed job with its concise barcode error", async (t) => {
   assert.equal(job.attempt_count, 1);
   assert.match(job.source_relative_path, /^Requests\/Failed\\/);
   assert.equal((await getRequestScanJob(jobId)).status, "failed");
+});
+
+test("active Request Scan filtering returns processing first and pending oldest-first", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const olderPendingId = await createJob("pending");
+  const processingId = await createJob("processing");
+  const newerPendingId = await createJob("pending");
+  const failedId = await createJob("failed");
+  const processedId = await createJob("processed");
+  const duplicateId = await createJob("duplicate");
+  await pool.query("update request_scan_jobs set created_at=$2 where id=$1", [olderPendingId, "2026-07-23T08:00:00.000Z"]);
+  await pool.query("update request_scan_jobs set created_at=$2 where id=$1", [processingId, "2026-07-23T10:00:00.000Z"]);
+  await pool.query("update request_scan_jobs set created_at=$2 where id=$1", [newerPendingId, "2026-07-23T09:00:00.000Z"]);
+
+  const active = await listRequestScanJobs("active");
+  const relevant = active.filter(({ id }) => [olderPendingId, processingId, newerPendingId, failedId].includes(Number(id)));
+  assert.deepEqual(relevant.map(({ id }) => Number(id)), [processingId, olderPendingId, newerPendingId]);
+  assert.deepEqual(relevant.map(({ status }) => status), ["processing", "pending", "pending"]);
+
+  assert.ok((await listRequestScanJobs("failed")).some(({ id }) => Number(id) === failedId));
+  assert.ok((await listRequestScanJobs("processed")).some(({ id }) => Number(id) === processedId));
+  assert.ok((await listRequestScanJobs("duplicate")).some(({ id }) => Number(id) === duplicateId));
+  assert.ok((await listRequestScanJobs("all")).some(({ id }) => Number(id) === failedId));
+});
+
+test("retry moves a failed Request Scan back to the durable pending queue without processing it", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const jobId = await createJob("failed");
+  await pool.query("update request_scan_jobs set attempt_count=3,error_message='Previous failure',completed_at=now() where id=$1", [jobId]);
+  let moveCalls = 0;
+
+  const queued = await retryRequestScanJob(jobId, {
+    readSettings: async () => settings,
+    moveFile: async (_settings, sourcePath, destinationFolder, filename) => {
+      moveCalls += 1;
+      assert.match(sourcePath, /Incoming/);
+      assert.equal(destinationFolder, settings.incomingSubfolder);
+      return `${destinationFolder}\\${filename}`;
+    },
+  });
+
+  assert.equal(moveCalls, 1);
+  assert.equal(queued.status, "pending");
+  assert.equal(queued.attempt_count, 3);
+  assert.equal(queued.error_message, null);
+  assert.equal(queued.completed_at, null);
+  assert.match(queued.source_relative_path, /^Requests\/Incoming\\/);
+  await assert.rejects(() => retryRequestScanJob(jobId, {
+    readSettings: async () => settings,
+    moveFile: async () => { throw new Error("must not move"); },
+  }), /Only failed request scans can be retried/);
 });
 
 test("manually assigns a failed request to an eligible V2 appointment through the document service", async (t) => {
