@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 type Job = { id: number; filename: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; attempt_count: number; created_at: string; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null };
 type Appointment = { id: number; accession_number: string; patient_name: string | null };
+type RequestScanStatus = { enabled: boolean; lastRunAt: string | null; lastError: string | null; running: boolean; pending: number; processing: number; processedToday: number; duplicatesToday: number; failed: number };
 
 function isPdf(job: Job): boolean { return job.filename.toLowerCase().endsWith(".pdf"); }
 
@@ -47,11 +48,16 @@ export default function RequestScansPage() {
   }, []);
 
   const jobs = useQuery({ queryKey: ["request-scans", tab], queryFn: () => request<{ jobs: Job[] }>(`?status=${tab}`) });
-  const status = useQuery({ queryKey: ["request-scans-status"], queryFn: () => request<{ enabled: boolean; lastRunAt: string | null; pending: number; processedToday: number; failed: number }>("/status") });
+  const status = useQuery({ queryKey: ["request-scans-status"], queryFn: () => request<RequestScanStatus>("/status"), refetchInterval: 15_000, refetchIntervalInBackground: false });
   const appointments = useQuery({ queryKey: ["request-scan-appointments", query], queryFn: () => request<{ appointments: Appointment[] }>(`/eligible-appointments?q=${encodeURIComponent(query)}`), enabled: Boolean(assign) });
   const refresh = () => { void client.invalidateQueries({ queryKey: ["request-scans"] }); void client.invalidateQueries({ queryKey: ["request-scans-status"] }); };
   const action = useMutation({ mutationFn: ({ url, body }: { url: string; body?: unknown }) => request(url, { method: "POST", body: body ? JSON.stringify(body) : undefined }), onSuccess: refresh });
-  const cards = [["Automation", status.data?.enabled ? "Enabled" : "Disabled"], ["Last worker run", status.data?.lastRunAt ? new Date(status.data.lastRunAt).toLocaleString() : "Not run"], ["Pending", String(status.data?.pending ?? 0)], ["Processed today", String(status.data?.processedToday ?? 0)], ["Failed", String(status.data?.failed ?? 0)]];
+  const statusData = status.data;
+  const cards = status.isLoading
+    ? [["Automation", "Loading…"], ["Last worker run", "Loading…"], ["Pending", "—"], ["Processed today", "—"], ["Failed", "—"]]
+    : status.isError || !statusData
+      ? [["Automation", "Unavailable"], ["Last worker run", "Unavailable"], ["Pending", "—"], ["Processed today", "—"], ["Failed", "—"]]
+      : [["Automation", statusData.running ? "Running…" : statusData.enabled ? "Enabled" : "Disabled"], ["Last worker run", statusData.lastRunAt ? new Date(statusData.lastRunAt).toLocaleString() : "Not run"], ["Pending", String(statusData.pending)], ["Processed today", String(statusData.processedToday)], ["Failed", String(statusData.failed)]];
 
   const closePreview = () => {
     previewRequest.current += 1;
@@ -91,6 +97,8 @@ export default function RequestScansPage() {
       <button className="btn-primary" onClick={() => action.mutate({ url: "/run-now" })} disabled={action.isPending}>Scan folder now</button>
     </div>
     <div className="grid gap-3 sm:grid-cols-5">{cards.map(([label, value]) => <section key={label} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></section>)}</div>
+    {status.isError && <p className="text-sm text-red-700">Request Scan status could not be loaded: {status.error.message}</p>}
+    {!status.isLoading && !status.isError && statusData?.lastError && <p className="text-sm text-amber-700">Latest worker error: {statusData.lastError}</p>}
     <div className="flex gap-2 border-b">{(["pending", "processed", "duplicate", "failed"] as const).map((value) => <button key={value} className={`px-3 py-2 text-sm font-medium ${tab === value ? "border-b-2 border-teal-600" : ""}`} onClick={() => setTab(value)}>{value === "duplicate" ? "Duplicates" : value[0].toUpperCase() + value.slice(1)}</button>)}</div>
     {jobs.isLoading ? <p>Loading request scans…</p> : jobs.isError ? <p className="text-red-700">{jobs.error.message}</p> : <div className="overflow-x-auto rounded-lg border"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Time</th><th>Filename</th><th>Barcode/accession</th><th>Patient</th><th>Modality/examination</th><th>Status</th><th>Attempts</th><th>Error</th><th className="p-2">Actions</th></tr></thead><tbody>{jobs.data?.jobs.map((job) => <tr key={job.id} className="border-b"><td className="p-2">{new Date(job.created_at).toLocaleString()}</td><td>{job.filename}</td><td>{job.barcode_value ?? "-"}</td><td>{job.patient_name ?? "-"}</td><td>{[job.modality_name, job.exam_name].filter(Boolean).join(" · ") || "-"}</td><td>{job.status}</td><td>{job.attempt_count}</td><td className="max-w-52 text-red-700">{job.error_message ?? "-"}</td><td className="flex flex-wrap gap-1 p-2"><button className="btn-secondary text-xs" onClick={() => void openPreview(job)}>Preview</button>{job.appointment_id && <button className="btn-secondary text-xs" onClick={() => navigate(`/registrations?appointmentId=${job.appointment_id}`)}>Open appointment</button>}{job.document_id && <a className="btn-secondary text-xs" href={`/api/documents/${job.document_id}/view`} target="_blank" rel="noreferrer">Open document</a>}{job.status === "failed" && <><button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/retry` })}>Retry</button><button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/return-to-incoming` })}>Return</button><button className="btn-secondary text-xs" onClick={() => { setAssign(job); setAppointmentId(""); }}>Manually assign</button></>}</td></tr>)}</tbody></table></div>}
     {preview && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={closePreview}><section className="mx-auto h-full max-w-5xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><div className="mb-3 flex justify-between"><h2 className="font-semibold">{preview.filename}</h2><button className="btn-secondary" onClick={closePreview}>Close</button></div>{previewLoading ? <p>Loading preview…</p> : previewError ? <p className="text-red-700">Preview could not be loaded: {previewError}</p> : previewUrl && (isPdf(preview) ? <iframe className="h-[85%] w-full" src={previewUrl} title="Request scan preview" /> : <img className="max-h-[85%] max-w-full object-contain" src={previewUrl} alt={preview.filename} />)}</section></div>}

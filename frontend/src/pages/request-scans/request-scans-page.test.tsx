@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import RequestScansPage from "./request-scans-page";
 
 const response = (value: unknown) => ({ ok: true, json: async () => value }) as Response;
@@ -74,5 +76,50 @@ describe("RequestScansPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByText("Preview could not be loaded: Request file is unavailable.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/request-scans/7/file", { credentials: "include" });
+  });
+
+  it("does not display disabled or zero counters while status is loading", async () => {
+    let resolveStatus: (value: Response) => void = () => undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/status")) return new Promise<Response>((resolve) => { resolveStatus = resolve; });
+      if (url.includes("?status=pending")) return Promise.resolve(response({ jobs }));
+      return Promise.resolve(response({ jobs: [] }));
+    });
+    renderPage();
+    expect(screen.getAllByText("Loading…").length).toBe(2);
+    expect(screen.getAllByText("—").length).toBe(3);
+    resolveStatus(response({ enabled: true, lastRunAt: null, lastError: null, running: false, pending: 0, processing: 0, processedToday: 0, duplicatesToday: 0, failed: 0 }));
+  });
+
+  it("shows unavailable status while retaining the job table when status fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/status")) return { ok: false, json: async () => ({ error: { message: "Status service unavailable." } }) } as Response;
+      if (url.includes("?status=pending")) return response({ jobs: [jobs[0]] });
+      return response({ jobs: [] });
+    });
+    renderPage();
+    expect((await screen.findAllByText("Unavailable")).length).toBe(2);
+    expect(screen.getByText("Request Scan status could not be loaded: Status service unavailable.")).toBeTruthy();
+    expect(await screen.findByText("request.pdf")).toBeTruthy();
+  });
+
+  it.each([[true, "Enabled"], [false, "Disabled"]])("renders explicit enabled=%s status as %s", async (enabled, label) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/status")) return response({ enabled, lastRunAt: null, lastError: null, running: false, pending: 3, processing: 1, processedToday: 2, duplicatesToday: 4, failed: 9 });
+      if (url.includes("?status=pending")) return response({ jobs: [] });
+      return response({ jobs: [] });
+    });
+    renderPage();
+    expect(await screen.findByText(label)).toBeTruthy();
+    expect(screen.getByText("9")).toBeTruthy();
+  });
+
+  it("configures status polling and refreshes status with all successful actions", () => {
+    const source = readFileSync(path.join(process.cwd(), "src/pages/request-scans/request-scans-page.tsx"), "utf8");
+    expect(source).toContain("refetchInterval: 15_000");
+    expect(source).toContain('invalidateQueries({ queryKey: ["request-scans-status"] })');
   });
 });
