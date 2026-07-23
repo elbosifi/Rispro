@@ -17,8 +17,9 @@ import {
 } from "./request-scan-filename-identifier.js";
 import { downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile } from "./request-scan-smb-service.js";
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
+import { claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, updateRequestScanProgress, type RequestScanLease } from "./request-scan-processing-service.js";
 
-export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
+export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
 export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; accession_number: string };
 export type RequestScanServiceDependencies = {
@@ -203,12 +204,19 @@ async function resolveFilenameEvidence(
 
 async function moveOutcome(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, folder: string, duplicate = false): Promise<string> { return dependencies.moveRequestScanFile(settings, job.source_relative_path, destination(folder, duplicate), job.filename); }
 
-export async function processRequestScanJob(jobId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> {
+const requestScanWorkerId = createRequestScanWorkerId();
+export async function processRequestScanJob(jobId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId): Promise<RequestScanJob> {
   const settings = suppliedSettings ?? await readRequestScanSettings();
-  let job = await getRequestScanJob(jobId); await updateJob(job.id, { status: "processing", error_message: null, attempt_count: job.attempt_count + 1 }); job = await getRequestScanJob(job.id);
+  const claimed = await claimRequestScanJob(jobId, workerId);
+  if (!claimed) return getRequestScanJob(jobId);
+  let job = claimed.job; const lease: RequestScanLease = claimed.lease;
+  let leaseLost = false;
+  const heartbeat = setInterval(() => { void renewRequestScanLease(jobId, lease).then((owned) => { leaseLost ||= !owned; }); }, 12_000);
+  const stage = async (value: Parameters<typeof updateRequestScanProgress>[2]) => { if (leaseLost || !(await updateRequestScanProgress(jobId, lease, value))) { leaseLost = true; throw new HttpError(409, "Request Scan lease was lost."); } };
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-file-")); const localPath = path.join(tempDir, job.filename);
   const identifierStarted = Date.now();
   try {
+    await stage({ stage: "checking_filename" });
     const filenameEvidence = await resolveFilenameEvidence(job.filename, dependencies);
     const baseMetadata = () => identifierMetadata(job.filename, filenameEvidence, identifierStarted, false, false);
     let appointment: EligibleAppointment;
@@ -226,7 +234,7 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
           ? "IDENTIFIER_SUCCESS_FILENAME_QR"
           : "IDENTIFIER_SUCCESS_FILENAME_CONSENSUS";
       logIdentifier(dependencies, code, { ...baseMetadata(), sourcesAgreed: true });
-      await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
+      await stage({ stage: "downloading" }); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
     } else {
       const initialCode = filenameEvidence.accessionCandidateCount + filenameEvidence.qrCandidateCount === 0
         ? "IDENTIFIER_FILENAME_NOT_FOUND"
@@ -237,10 +245,11 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
       logIdentifier(dependencies, "IDENTIFIER_FALLBACK_DOCUMENT_SCAN", {
         ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
       });
-      await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
+      await stage({ stage: "downloading" }); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath);
       const patientQrSettings = await readPatientQrSettings();
-      const barcode = await dependencies.extractRequestScanBarcode(localPath, undefined, {
+      await stage({ stage: "verifying_identifier" }); const barcode = await dependencies.extractRequestScanBarcode(localPath, undefined, {
         risproPublicBaseUrl: patientQrSettings.risproPublicBaseUrl,
+        onProgress: (processingStage, current, total) => stage({ stage: processingStage, current, total }),
       });
       if (!barcode.ok) {
         if (barcode.ignoredQrCount) {
@@ -346,19 +355,20 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
       }
     }
 
-    if (await dependencies.automatedDocumentExists(appointment.id)) {
+    await stage({ stage: "checking_duplicate" }); if (await dependencies.automatedDocumentExists(appointment.id)) {
       const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true);
-      return updateJob(job.id, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() });
+      const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); if (!completed) throw new HttpError(409, "Request Scan lease was lost."); return completed;
     }
-    const buffer = await fs.readFile(localPath);
+    await stage({ stage: "attaching_document" }); const buffer = await fs.readFile(localPath);
     const document = await dependencies.uploadDocument({ patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: buffer, source: "request_scan_automation" }, null);
-    const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder);
-    return updateJob(job.id, { status: "processed", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() });
+    await stage({ stage: "moving_file" }); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder);
+    const completed = await finishRequestScanJob(job.id, lease, { status: "processed", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); if (!completed) throw new HttpError(409, "Request Scan lease was lost."); return completed;
   } catch (error) {
     const message = concise(error); let moved = job.source_relative_path;
     try { moved = await moveOutcome(dependencies, settings, job, settings.failedSubfolder); } catch { /* keep the original path so recovery can retry it */ }
-    return updateJob(job.id, { status: "failed", source_relative_path: moved, error_message: message, completed_at: new Date().toISOString() });
-  } finally { await fs.rm(tempDir, { recursive: true, force: true }); }
+    if (leaseLost) return getRequestScanJob(job.id);
+    return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: message, completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
+  } finally { clearInterval(heartbeat); await fs.rm(tempDir, { recursive: true, force: true }); }
 }
 
 export type RequestScanCycleResult = { discovered: number; processed: number; failed: number; duplicates: number; skipped: number };

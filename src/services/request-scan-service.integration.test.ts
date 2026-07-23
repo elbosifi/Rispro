@@ -233,14 +233,17 @@ test("verifies scanner-safe patient QR filenames and skips document recognition"
   const jobId = await createJob("pending", filename);
   const recognitionCalls: string[] = [];
   const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  let verifiedToken: string | null = null;
+  const scannerDependencies = dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls, diagnostics, verifyToken: async (value) => { verifiedToken = value; return verifyPublicCancelToken(value); } });
   const job = await processRequestScanJob(
     jobId,
     settings,
-    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls, diagnostics })
+    scannerDependencies
   );
   assert.equal(job.status, "processed");
   assert.equal(Number(job.appointment_id), booking.id);
   assert.deepEqual(recognitionCalls, []);
+  assert.equal(verifiedToken, token);
   assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_SUCCESS_FILENAME_QR"));
   assert.equal(JSON.stringify(diagnostics).includes(token), false);
   assert.equal(job.error_message, null);

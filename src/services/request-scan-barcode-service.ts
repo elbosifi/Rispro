@@ -20,6 +20,7 @@ export type RequestScanQrOriginConfiguration = {
   risproPublicBaseUrl?: string;
   publicAppBaseUrl?: string;
   explicitAllowedOrigins?: string;
+  onProgress?: (stage: "rendering_300_dpi" | "scanning_original_300_dpi" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi", current?: number, total?: number) => void | Promise<void>;
 };
 
 const defaultImageProcessor = {
@@ -182,9 +183,10 @@ function orderedRenderedPages(pagePaths: string[]): RenderedPage[] {
   const first = pages[0]!;
   return [last, first, ...pages.slice(1, -1)];
 }
-async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 600, pass: PdfPass, deadline: number, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>): Promise<ResolutionResult> {
+async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 600, pass: PdfPass, deadline: number, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
   const accessions = new Set<string>(); const qrTokens = new Set<string>(); let ignoredQrCount = 0; let decoded = false; let attempts = 0; let pagesExamined = 0;
   for (const page of pages) {
+    await onProgress?.(pass === "original_sweep" ? (dpi === 300 ? "scanning_original_300_dpi" : "scanning_original_600_dpi") : (dpi === 300 ? "scanning_enhanced_300_dpi" : "scanning_enhanced_600_dpi"), pagesExamined, pages.length);
     if (Date.now() > deadline) {
       log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", dpi, currentPass: pass, pagesExamined, totalPageCount: pages.length, processingStoppedByTimeout: true });
       return { accessions, qrTokens, ignoredQrCount, decoded, attempts, failure: "barcode_processing_failed" };
@@ -215,12 +217,12 @@ async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 60
   }
   return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
 }
-async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir: string, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>): Promise<ResolutionResult> {
+async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir: string, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
   const stageDir = path.join(rootTempDir, `pdf-${dpi}`); await fs.mkdir(stageDir); const started = Date.now();
   const empty = (failure: RequestScanBarcodeFailure): ResolutionResult => ({ accessions: new Set(), qrTokens: new Set(), ignoredQrCount: 0, decoded: false, attempts: 0, failure });
   try {
     const prefix = path.join(stageDir, "page");
-    try { await dependencies.execFile("pdftoppm", ["-r", String(dpi), "-png", pdfPath, prefix], PDF_OPTIONS); } catch (error) {
+    await onProgress?.(dpi === 300 ? "rendering_300_dpi" : "rendering_600_dpi"); try { await dependencies.execFile("pdftoppm", ["-r", String(dpi), "-png", pdfPath, prefix], PDF_OPTIONS); } catch (error) {
       log(dependencies, "BARCODE_PDF_RENDER_FAILED", { fileType: "pdf", dpi, failureCategory: processTimedOut(error) ? "timeout" : "executable_failure", elapsedMs: Date.now() - started });
       return empty("pdf_render_failed");
     }
@@ -231,9 +233,9 @@ async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir:
     }
     log(dependencies, "BARCODE_PDF_SCAN_STARTED", { fileType: "pdf", dpi, totalPageCount: pages.length, pageScanOrder: pages.map((page) => page.pageNumber).join(","), currentPass: "original_sweep", processingStoppedByTimeout: false });
     const deadline = Date.now() + PDF_STAGE_TIMEOUT_MS;
-    const original = await scanPdfPass(pages, stageDir, dpi, "original_sweep", deadline, dependencies, allowedOrigins);
+    const original = await scanPdfPass(pages, stageDir, dpi, "original_sweep", deadline, dependencies, allowedOrigins, onProgress);
     if (original.failure || original.accessions.size || original.qrTokens.size) return original;
-    const enhanced = await scanPdfPass(pages, stageDir, dpi, "enhanced_sweep", deadline, dependencies, allowedOrigins);
+    const enhanced = await scanPdfPass(pages, stageDir, dpi, "enhanced_sweep", deadline, dependencies, allowedOrigins, onProgress);
     return { ...enhanced, ignoredQrCount: original.ignoredQrCount + enhanced.ignoredQrCount, decoded: original.decoded || enhanced.decoded, attempts: original.attempts + enhanced.attempts };
   } finally { await fs.rm(stageDir, { recursive: true, force: true }); }
 }
@@ -265,11 +267,11 @@ export async function extractRequestScanBarcode(filePath: string, dependencies: 
     let result: RequestScanBarcodeResult; let attempts = 0; let fallbackUsed = false; let successfulDpi: 300 | 600 | "none" = "none";
     if (fileType === "pdf") {
       const allowedOrigins = trustedRequestScanQrOrigins(qrOriginConfiguration);
-      const first = await scanPdfAtResolution(filePath, 300, tempDir, dependencies, allowedOrigins); attempts += first.attempts; result = summarize(first);
+      const first = await scanPdfAtResolution(filePath, 300, tempDir, dependencies, allowedOrigins, qrOriginConfiguration.onProgress); attempts += first.attempts; result = summarize(first);
       if (!first.failure && (first.accessions.size || first.qrTokens.size)) successfulDpi = 300;
       if (!first.failure && first.accessions.size === 0 && first.qrTokens.size === 0) {
         fallbackUsed = true;
-        const fallback = await scanPdfAtResolution(filePath, 600, tempDir, dependencies, allowedOrigins); attempts += fallback.attempts; result = summarize(fallback);
+        const fallback = await scanPdfAtResolution(filePath, 600, tempDir, dependencies, allowedOrigins, qrOriginConfiguration.onProgress); attempts += fallback.attempts; result = summarize(fallback);
         if (!fallback.failure) {
           if (fallback.accessions.size || fallback.qrTokens.size) successfulDpi = 600;
           result = summarize({
