@@ -173,6 +173,8 @@ test("attaches a matched request through the document service and marks the job 
   assert.equal(uploads[0].payload.appointmentRefType, "v2_booking");
   assert.equal(uploads[0].payload.documentType, "appointment_request");
   assert.equal(uploads[0].payload.source, "request_scan_automation");
+  assert.equal(uploads[0].payload.fileContentBuffer, undefined);
+  assert.equal(typeof uploads[0].payload.fileSourcePath, "string");
 });
 
 test("marks an existing automated request as a duplicate without attaching another document", async (t) => {

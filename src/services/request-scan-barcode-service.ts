@@ -15,12 +15,21 @@ export type RequestScanBarcodeDependencies = {
   execFile(command: string, args: string[], options: { timeout: number; maxBuffer: number }): Promise<{ stdout?: string; stderr?: string }>;
   imageProcessor?: { preprocess(sourcePath: string, destinationPath: string): Promise<void>; rotate(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string): Promise<void> };
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
+  metrics?: RequestScanRecognitionMetrics;
+};
+export type RequestScanRecognitionMetrics = {
+  elapsedMs: number; sourceBytes: number; pdfPageCount: number; pdftoppmProcesses: number; pdfimagesListProcesses: number; pdfimagesExtractionProcesses: number; zbarProcesses: number;
+  sharpMetadataReads: number; sharpPreprocessOperations: number; sharpResizeOperations: number; sharpCropOperations: number; sharpRotationOperations: number;
+  renderedBytes: number; nativeExtractedBytes: number; derivativeBytes: number; maximumTemporaryBytes: number;
+  originalPagesExamined: number; enhancedPagesExamined: number; nativeImagesExamined: number; nativeTilesExamined: number;
+  rssBeforeBytes: number; rssAfterBytes: number; peakObservedRssBytes?: number;
 };
 export type RequestScanQrOriginConfiguration = {
   risproPublicBaseUrl?: string;
   publicAppBaseUrl?: string;
   explicitAllowedOrigins?: string;
   onProgress?: (stage: "rendering_300_dpi" | "scanning_original_300_dpi" | "extracting_native_pdf_image" | "scanning_native_pdf_image" | "scanning_qr_crops" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi", current?: number, total?: number) => void | Promise<void>;
+  onPerformanceMetrics?: (metrics: Record<string, string | number | boolean>) => void;
 };
 
 const defaultImageProcessor = {
@@ -32,6 +41,20 @@ const ZBAR_OPTIONS = { timeout: 30_000, maxBuffer: 1024 * 1024 };
 const PDF_OPTIONS = { timeout: 120_000, maxBuffer: 1024 * 1024 };
 const IMAGE_PROCESSING_TIMEOUT_MS = 30_000;
 const PDF_STAGE_TIMEOUT_MS = 300_000;
+async function directoryBytes(directory: string): Promise<number> {
+  let total = 0;
+  for (const entry of await fs.readdir(directory, { withFileTypes: true }).catch(() => [])) {
+    const item = path.join(directory, entry.name);
+    if (entry.isDirectory()) total += await directoryBytes(item);
+    else if (entry.isFile()) total += await fs.stat(item).then((value) => value.size, () => 0);
+  }
+  return total;
+}
+async function observeTemporaryBytes(metrics: RequestScanRecognitionMetrics | undefined, root: string): Promise<number> {
+  const bytes = await directoryBytes(root);
+  if (metrics) metrics.maximumTemporaryBytes = Math.max(metrics.maximumTemporaryBytes, bytes);
+  return bytes;
+}
 type FileType = "image" | "pdf";
 type SuccessAttempt = "original" | "preprocessed" | "rotated";
 type DiagnosticCode = "BARCODE_SUCCESS_ORIGINAL" | "BARCODE_SUCCESS_PREPROCESSED" | "BARCODE_SUCCESS_ROTATED" | "BARCODE_SUCCESS_PDF_600_DPI" | "BARCODE_NOT_DETECTED" | "BARCODE_DETECTED_INVALID_ACCESSION" | "BARCODE_MULTIPLE_VALID_ACCESSIONS" | "BARCODE_PREPROCESSING_FAILED" | "BARCODE_DECODER_TIMEOUT" | "BARCODE_DECODER_FAILED" | "BARCODE_PDF_RENDER_FAILED" | "BARCODE_PROCESSING_FAILED" | "BARCODE_PDF_SCAN_STARTED";
@@ -195,6 +218,7 @@ async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 60
     if (pass === "original_sweep") {
       const decodedResult = await decodeBarcodeCandidates(page.pagePath, dependencies);
       attempts += 1; pagesExamined += 1;
+      if (dependencies.metrics) dependencies.metrics.originalPagesExamined += 1;
       if (decodedResult.kind === "timeout" || decodedResult.kind === "failure") {
         const failure: PageFailure = decodedResult.kind === "timeout" ? "barcode_decoder_timeout" : "barcode_decoder_failed";
         log(dependencies, pageFailureCode(failure), { fileType: "pdf", pageNumber: page.pageNumber, dpi, currentPass: pass, pagesExamined, totalPageCount: pages.length });
@@ -206,6 +230,7 @@ async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 60
     } else {
       decodedPage = await decodePageWithFallbacks(page.pagePath, tempDir, page.pageNumber, "pdf", dpi, dependencies, allowedOrigins, false);
       attempts += decodedPage.attempts; pagesExamined += 1; decoded ||= decodedPage.decoded; ignoredQrCount += decodedPage.ignoredQrCount;
+      if (dependencies.metrics) dependencies.metrics.enhancedPagesExamined += 1;
       if (decodedPage.failure) {
         log(dependencies, pageFailureCode(decodedPage.failure), { fileType: "pdf", pageNumber: page.pageNumber, dpi, currentPass: pass, pagesExamined, totalPageCount: pages.length });
         return { accessions, qrTokens, ignoredQrCount, decoded, attempts, failure: decodedPage.failure };
@@ -239,21 +264,80 @@ export function nativeTiles(width: number, height: number): NativeTile[] {
   // Keep all edge and corner coverage before any future bound can remove interiors.
   return prioritizeNativeTiles(unique, width, height).slice(0, MAX_NATIVE_TILES);
 }
+export type PdfNativeImageMetadata = { page: number; imageNumber: number; type: string; width: number; height: number; colorSpace?: string; components?: number; bitsPerComponent?: number; encoding?: string; objectId?: string };
+export function parsePdfImagesList(output: string): PdfNativeImageMetadata[] {
+  const rows: PdfNativeImageMetadata[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length < 9 || !/^\d+$/.test(columns[0]!) || !/^\d+$/.test(columns[1]!)) continue;
+    const [page, imageNumber, width, height, components, bitsPerComponent] = [columns[0], columns[1], columns[3], columns[4], columns[6], columns[7]].map(Number);
+    if (![page, imageNumber, width, height].every(Number.isInteger) || page < 1 || imageNumber < 0 || width < 1 || height < 1) continue;
+    rows.push({ page, imageNumber, type: columns[2]!.toLowerCase(), width, height, colorSpace: columns[5], components: Number.isInteger(components) ? components : undefined, bitsPerComponent: Number.isInteger(bitsPerComponent) ? bitsPerComponent : undefined, encoding: columns[8], objectId: columns.length > 11 ? `${columns[10]} ${columns[11]}` : undefined });
+  }
+  return rows;
+}
+function extractedImageNumber(name: string): number | null {
+  const match = name.match(/-(\d+)\.[^.]+$/);
+  return match ? Number(match[1]) : null;
+}
 async function scanNativePdfImages(pdfPath: string, pages: RenderedPage[], rootTempDir: string, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
   const accessions = new Set<string>(); const qrTokens = new Set<string>(); let ignoredQrCount = 0; let decoded = false; let attempts = 0; const deadline = Date.now() + NATIVE_FALLBACK_TIMEOUT_MS; const nativeDir = path.join(rootTempDir, "native-images"); await fs.mkdir(nativeDir);
   const collect = async (candidate: string) => { attempts += 1; const result = await decodeBarcodeCandidates(candidate, dependencies); if (result.kind !== "decoded") return; const values = decodedBarcodeValues(result.output, allowedOrigins); decoded ||= values.decoded; ignoredQrCount += values.ignoredQrCount; values.accessions.forEach((value) => accessions.add(value)); values.qrTokens.forEach((value) => qrTokens.add(value)); };
   try {
+    let listing: PdfNativeImageMetadata[];
+    try {
+      const listed = await dependencies.execFile("pdfimages", ["-list", pdfPath], PDF_OPTIONS);
+      listing = parsePdfImagesList(String(listed.stdout || ""));
+      if (!listing.length) return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
+      await dependencies.execFile("pdfimages", ["-j", pdfPath, path.join(nativeDir, "image")], PDF_OPTIONS);
+      if (dependencies.metrics) dependencies.metrics.nativeExtractedBytes = await observeTemporaryBytes(dependencies.metrics, nativeDir);
+    } catch {
+      log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", currentPass: "native_extraction_failed" });
+      return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
+    }
+    const extracted = new Map<number, string>();
+    for (const name of await fs.readdir(nativeDir)) {
+      const number = extractedImageNumber(name);
+      if (number != null && !extracted.has(number)) extracted.set(number, path.join(nativeDir, name));
+    }
     for (const [pageIndex, page] of pages.entries()) {
       if (Date.now() > deadline) { log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", currentPass: "native_fallback", pagesExamined: pageIndex, totalPageCount: pages.length, processingStoppedByTimeout: true }); break; }
       await onProgress?.("extracting_native_pdf_image", pageIndex, pages.length);
-      const pageDir = path.join(nativeDir, `page-${page.pageNumber}`); await fs.mkdir(pageDir); const prefix = path.join(pageDir, "image");
-      try { await dependencies.execFile("pdfimages", ["-f", String(page.pageNumber), "-l", String(page.pageNumber), "-j", pdfPath, prefix], PDF_OPTIONS); } catch { log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", currentPass: "native_extraction_failed", pageNumber: page.pageNumber }); continue; }
-      const candidates = (await fs.readdir(pageDir)).map((name) => path.join(pageDir, name)); const ranked = (await Promise.all(candidates.map(async (candidate) => { try { const metadata = await sharp(candidate).metadata(); return { candidate, width: metadata.width ?? 0, height: metadata.height ?? 0 }; } catch { return null; } }))).filter((value): value is { candidate: string; width: number; height: number } => value !== null && value.width >= NATIVE_MIN_DIMENSION && value.height >= NATIVE_MIN_DIMENSION).sort((a, b) => b.width * b.height - a.width * a.height).slice(0, MAX_NATIVE_IMAGES_PER_PAGE);
+      const pageDir = path.join(nativeDir, `page-${page.pageNumber}`); await fs.mkdir(pageDir);
+      const ranked = listing.filter((item) => item.page === page.pageNumber && item.type === "image" && item.width >= NATIVE_MIN_DIMENSION && item.height >= NATIVE_MIN_DIMENSION).map((item) => ({ candidate: extracted.get(item.imageNumber), width: item.width, height: item.height, imageNumber: item.imageNumber })).filter((item): item is { candidate: string; width: number; height: number; imageNumber: number } => Boolean(item.candidate)).sort((a, b) => b.width * b.height - a.width * a.height || a.imageNumber - b.imageNumber).slice(0, MAX_NATIVE_IMAGES_PER_PAGE);
       for (const [rank, image] of ranked.entries()) {
+        if (dependencies.metrics) dependencies.metrics.nativeImagesExamined += 1;
         await onProgress?.("scanning_native_pdf_image", rank + 1, ranked.length); await collect(image.candidate); if (accessions.size || qrTokens.size) continue;
-        const full = path.join(pageDir, `upscaled-${rank}.png`); const scale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(image.width, image.height)); await sharp(image.candidate).resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)), { kernel: sharp.kernel.lanczos3 }).png().toFile(full); await collect(full); if (accessions.size || qrTokens.size) continue;
-        const tiles = nativeTiles(image.width, image.height); for (const [tileIndex, tile] of tiles.entries()) { if (Date.now() > deadline) break; await onProgress?.("scanning_qr_crops", tileIndex + 1, tiles.length); const cropped = path.join(pageDir, `crop-${rank}-${tileIndex}.png`); const cropScale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(tile.width, tile.height)); await sharp(image.candidate).extract(tile).resize(Math.max(1, Math.round(tile.width * cropScale)), Math.max(1, Math.round(tile.height * cropScale)), { kernel: sharp.kernel.lanczos3 }).png().toFile(cropped); await collect(cropped); if (accessions.size || qrTokens.size) break; const normalized = path.join(pageDir, `crop-normalized-${rank}-${tileIndex}.png`); await sharp(cropped).grayscale().normalise().png().toFile(normalized); await collect(normalized); if (accessions.size || qrTokens.size) break; for (const angle of [90, 180, 270]) { const rotated = path.join(pageDir, `crop-rotated-${rank}-${tileIndex}-${angle}.png`); await sharp(normalized).rotate(angle).png().toFile(rotated); await collect(rotated); if (accessions.size || qrTokens.size) break; } if (accessions.size || qrTokens.size) break; }
+        let transformWidth = image.width; let transformHeight = image.height;
+        try { if (dependencies.metrics) dependencies.metrics.sharpMetadataReads += 1; const metadata = await sharp(image.candidate).metadata(); transformWidth = metadata.width ?? image.width; transformHeight = metadata.height ?? image.height; }
+        catch { continue; }
+        const full = path.join(pageDir, `upscaled-${rank}.png`); const scale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(transformWidth, transformHeight)); if (scale > 1.05) { if (dependencies.metrics) dependencies.metrics.sharpResizeOperations += 1; try { await sharp(image.candidate).resize(Math.round(transformWidth * scale), Math.round(transformHeight * scale), { kernel: sharp.kernel.lanczos3 }).png().toFile(full); if (dependencies.metrics) dependencies.metrics.derivativeBytes += await fs.stat(full).then((value) => value.size, () => 0); await observeTemporaryBytes(dependencies.metrics, rootTempDir); await collect(full); } finally { await fs.rm(full, { force: true }).catch(() => undefined); } } if (accessions.size || qrTokens.size) continue;
+        const tiles = nativeTiles(transformWidth, transformHeight);
+        for (const [tileIndex, tile] of tiles.entries()) {
+          if (Date.now() > deadline) break;
+          if (dependencies.metrics) dependencies.metrics.nativeTilesExamined += 1;
+          await onProgress?.("scanning_qr_crops", tileIndex + 1, tiles.length);
+          const cropped = path.join(pageDir, `crop-${rank}-${tileIndex}.png`);
+          const normalized = path.join(pageDir, `crop-normalized-${rank}-${tileIndex}.png`);
+          try {
+            const cropScale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(tile.width, tile.height));
+            if (dependencies.metrics) { dependencies.metrics.sharpCropOperations += 1; dependencies.metrics.sharpResizeOperations += 1; }
+            await sharp(image.candidate).extract(tile).resize(Math.round(tile.width * cropScale), Math.round(tile.height * cropScale), { kernel: sharp.kernel.lanczos3 }).png().toFile(cropped);
+            await collect(cropped); if (accessions.size || qrTokens.size) break;
+            if (dependencies.metrics) dependencies.metrics.sharpPreprocessOperations += 1;
+            await sharp(cropped).grayscale().normalise().png().toFile(normalized);
+            await collect(normalized); if (accessions.size || qrTokens.size) break;
+            for (const angle of [90, 180, 270]) {
+              const rotated = path.join(pageDir, `crop-rotated-${rank}-${tileIndex}-${angle}.png`);
+              try { if (dependencies.metrics) dependencies.metrics.sharpRotationOperations += 1; await sharp(normalized).rotate(angle).png().toFile(rotated); await collect(rotated); }
+              finally { await fs.rm(rotated, { force: true }).catch(() => undefined); }
+              if (accessions.size || qrTokens.size) break;
+            }
+          } finally { await Promise.all([fs.rm(cropped, { force: true }), fs.rm(normalized, { force: true })]).catch(() => undefined); }
+          if (accessions.size || qrTokens.size) break;
+        }
       }
+      await fs.rm(pageDir, { recursive: true, force: true }).catch(() => undefined);
     }
     return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
   } finally { await fs.rm(nativeDir, { recursive: true, force: true }); }
@@ -268,6 +352,8 @@ async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir:
       return empty("pdf_render_failed");
     }
     const pages = orderedRenderedPages((await fs.readdir(stageDir)).filter((name) => /^page-\d+\.png$/i.test(name)).map((name) => path.join(stageDir, name)));
+    if (dependencies.metrics) dependencies.metrics.pdfPageCount = Math.max(dependencies.metrics.pdfPageCount, pages.length);
+    if (dependencies.metrics) dependencies.metrics.renderedBytes += await observeTemporaryBytes(dependencies.metrics, stageDir);
     if (!pages.length) {
       log(dependencies, "BARCODE_PDF_RENDER_FAILED", { fileType: "pdf", dpi, failureCategory: "no_pages", elapsedMs: Date.now() - started });
       return empty("pdf_render_failed");
@@ -307,16 +393,34 @@ function terminalDiagnostic(result: RequestScanBarcodeResult): DiagnosticCode | 
 export async function extractRequestScanBarcode(filePath: string, dependencies: RequestScanBarcodeDependencies = defaultDependencies, qrOriginConfiguration: RequestScanQrOriginConfiguration = {}): Promise<RequestScanBarcodeResult> {
   const extension = path.extname(filePath).toLowerCase();
   if (![".pdf", ".jpg", ".jpeg"].includes(extension)) return { ok: false, reason: "unsupported_file" };
+  const counters: RequestScanRecognitionMetrics = { elapsedMs: 0, sourceBytes: 0, pdfPageCount: 0, pdftoppmProcesses: 0, pdfimagesListProcesses: 0, pdfimagesExtractionProcesses: 0, zbarProcesses: 0, sharpMetadataReads: 0, sharpPreprocessOperations: 0, sharpResizeOperations: 0, sharpCropOperations: 0, sharpRotationOperations: 0, renderedBytes: 0, nativeExtractedBytes: 0, derivativeBytes: 0, maximumTemporaryBytes: 0, originalPagesExamined: 0, enhancedPagesExamined: 0, nativeImagesExamined: 0, nativeTilesExamined: 0, rssBeforeBytes: 0, rssAfterBytes: 0 };
+  const measuredDependencies: RequestScanBarcodeDependencies = {
+    ...dependencies,
+    async execFile(command, args, options) {
+      if (command === "pdftoppm") counters.pdftoppmProcesses += 1;
+      else if (command === "pdfimages") args[0] === "-list" ? counters.pdfimagesListProcesses += 1 : counters.pdfimagesExtractionProcesses += 1;
+      else if (command === "zbarimg") counters.zbarProcesses += 1;
+      return dependencies.execFile(command, args, options);
+    },
+    imageProcessor: {
+      async preprocess(source, destination) { counters.sharpPreprocessOperations += 1; return (dependencies.imageProcessor ?? defaultImageProcessor).preprocess(source, destination); },
+      async rotate(source, angle, destination) { counters.sharpRotationOperations += 1; return (dependencies.imageProcessor ?? defaultImageProcessor).rotate(source, angle, destination); },
+    },
+    metrics: counters,
+  };
+  const sourceBytes = await fs.stat(filePath).then((value) => value.size, () => 0);
+  const rssBeforeBytes = process.memoryUsage().rss;
+  counters.sourceBytes = sourceBytes; counters.rssBeforeBytes = rssBeforeBytes;
   const fileType: FileType = extension === ".pdf" ? "pdf" : "image"; const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-")); const started = Date.now();
   try {
     let result: RequestScanBarcodeResult; let attempts = 0; let fallbackUsed = false; let successfulDpi: 300 | 600 | "none" = "none";
     if (fileType === "pdf") {
       const allowedOrigins = trustedRequestScanQrOrigins(qrOriginConfiguration);
-      const first = await scanPdfAtResolution(filePath, 300, tempDir, dependencies, allowedOrigins, qrOriginConfiguration.onProgress); attempts += first.attempts; result = summarize(first);
+      const first = await scanPdfAtResolution(filePath, 300, tempDir, measuredDependencies, allowedOrigins, qrOriginConfiguration.onProgress); attempts += first.attempts; result = summarize(first);
       if (!first.failure && (first.accessions.size || first.qrTokens.size)) successfulDpi = 300;
       if (!first.failure && first.accessions.size === 0 && first.qrTokens.size === 0) {
         fallbackUsed = true;
-        const fallback = await scanPdfAtResolution(filePath, 600, tempDir, dependencies, allowedOrigins, qrOriginConfiguration.onProgress); attempts += fallback.attempts; result = summarize(fallback);
+        const fallback = await scanPdfAtResolution(filePath, 600, tempDir, measuredDependencies, allowedOrigins, qrOriginConfiguration.onProgress); attempts += fallback.attempts; result = summarize(fallback);
         if (!fallback.failure) {
           if (fallback.accessions.size || fallback.qrTokens.size) successfulDpi = 600;
           result = summarize({
@@ -327,13 +431,16 @@ export async function extractRequestScanBarcode(filePath: string, dependencies: 
         }
       }
     } else {
-      const page = await decodePageWithFallbacks(filePath, tempDir, 1, "image", "source", dependencies, trustedRequestScanQrOrigins(qrOriginConfiguration)); attempts = page.attempts;
+      const page = await decodePageWithFallbacks(filePath, tempDir, 1, "image", "source", measuredDependencies, trustedRequestScanQrOrigins(qrOriginConfiguration)); attempts = page.attempts;
       result = page.failure ? { ok: false, reason: page.failure } : summarize({ accessions: new Set(page.accessions), qrTokens: new Set(page.qrTokens), ignoredQrCount: page.ignoredQrCount, decoded: page.decoded, attempts });
       if (page.successfulAttempt) log(dependencies, page.successfulAttempt === "original" ? "BARCODE_SUCCESS_ORIGINAL" : page.successfulAttempt === "preprocessed" ? "BARCODE_SUCCESS_PREPROCESSED" : "BARCODE_SUCCESS_ROTATED", { fileType, pageNumber: 1, dpi: "source", attempt: page.successfulAttempt, rotation: page.rotation!, attemptCount: attempts, fallbackUsed: false });
     }
     const terminal = terminalDiagnostic(result);
     if (terminal) log(dependencies, terminal, { fileType, attemptCount: attempts, elapsedMs: Date.now() - started, fallbackUsed, successfulDpi: "none" });
-    dependencies.logDiagnostic?.("recognition_complete", { fileType, outcome: result.ok ? "success" : result.reason, attemptCount: attempts, elapsedMs: Date.now() - started, fallbackUsed, successfulDpi: result.ok && fileType === "pdf" ? successfulDpi : "none" });
+    counters.elapsedMs = Date.now() - started; counters.rssAfterBytes = process.memoryUsage().rss; counters.peakObservedRssBytes = Math.max(counters.rssBeforeBytes, counters.rssAfterBytes);
+    const metrics = { fileType, outcome: result.ok ? "success" : result.reason, attemptCount: attempts, fallbackUsed, successfulDpi: result.ok && fileType === "pdf" ? successfulDpi : "none", ...counters };
+    dependencies.logDiagnostic?.("recognition_complete", metrics);
+    qrOriginConfiguration.onPerformanceMetrics?.(metrics);
     return result;
   } finally { await fs.rm(tempDir, { recursive: true, force: true }); }
 }

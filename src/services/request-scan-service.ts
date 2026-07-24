@@ -20,6 +20,7 @@ import { readRequestScanSettings, type RequestScanSettings } from "./request-sca
 import { logAuditEntry } from "./audit-service.js";
 import { env } from "../config/env.js";
 import { assertRequestScanLeaseOwned, claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, RequestScanLeaseLostError, updateRequestScanCheckpoint, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanLease } from "./request-scan-processing-service.js";
+import { createRequestScanProgressCoalescer } from "./request-scan-progress-coalescer.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
@@ -259,7 +260,8 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
   const jobId = job.id;
   let leaseLost = false; let heartbeat: NodeJS.Timeout | null = null; let renewing = false; let renewalPromise: Promise<void> | null = null; let tempDir: string | null = null;
   const ensureLease = async () => { if (leaseLost) throw new RequestScanLeaseLostError(); await assertRequestScanLeaseOwned(jobId, lease); };
-  const stage = async (value: Parameters<typeof updateRequestScanProgress>[2]) => { await ensureLease(); if (!(await updateRequestScanProgress(jobId, lease, value))) { leaseLost = true; throw new RequestScanLeaseLostError(); } };
+  const progress = createRequestScanProgressCoalescer(async (value) => { await ensureLease(); if (!(await updateRequestScanProgress(jobId, lease, value))) { leaseLost = true; throw new RequestScanLeaseLostError(); } });
+  const stage = (value: Parameters<typeof updateRequestScanProgress>[2]) => progress.update(value);
   const identifierStarted = Date.now();
   try {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-file-")); const localPath = path.join(tempDir, job.filename);
@@ -409,24 +411,26 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
 
     await stage({ stage: "checking_duplicate" });
     const idempotencyKey = `request-scan:v2-booking:${appointment.id}:appointment-request`;
-    if (await dependencies.automatedDocumentExists(appointment.id)) {
+    if (!dependencies.uploadDocumentIdempotently && await dependencies.automatedDocumentExists(appointment.id)) {
       const existing = dependencies.findDocumentByIdempotencyKey ? await dependencies.findDocumentByIdempotencyKey(idempotencyKey) : null;
-      if (!dependencies.uploadDocumentIdempotently) { await ensureLease(); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true); await ensureLease(); const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: existing?.id ?? null, source_relative_path: moved, error_message: null }); if (!completed) throw new RequestScanLeaseLostError(); return completed; }
+      await ensureLease(); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true); await ensureLease(); const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: existing?.id ?? null, source_relative_path: moved, error_message: null }); if (!completed) throw new RequestScanLeaseLostError(); return completed;
     }
-    await stage({ stage: "attaching_document" }); await ensureLease(); const buffer = await fs.readFile(localPath);
-    const payload = { patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: buffer, source: "request_scan_automation", requestScanJobId: job.id };
+    await stage({ stage: "attaching_document" }); await progress.flush(); await ensureLease();
+    const payload = { patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileSourcePath: localPath, source: "request_scan_automation", requestScanJobId: job.id };
     const attachment = dependencies.uploadDocumentIdempotently ? await dependencies.uploadDocumentIdempotently(payload, null, idempotencyKey) : { document: await dependencies.uploadDocument(payload, null), created: true };
     await ensureLease();
     const createdByThisJob = attachment.created || attachment.document.request_scan_job_id === job.id;
     job = await updateRequestScanCheckpoint(job.id, lease, { appointment_id: appointment.id, document_id: attachment.document.id, barcode_value: appointment.accession_number, attachment_completed_at: new Date().toISOString(), attachment_created: createdByThisJob });
     await stage({ stage: "moving_file" });
+    await progress.flush();
     return await archiveCheckpointedRequestScanJob(job, lease, settings, dependencies, createdByThisJob);
   } catch (error) {
-    if (error instanceof RequestScanLeaseLostError || leaseLost) return getRequestScanJob(job.id);
+    if (error instanceof RequestScanLeaseLostError || leaseLost) { progress.cancel(); return getRequestScanJob(job.id); }
+    await progress.flush().catch(() => undefined);
     const category = failureCategory(error); const message = error instanceof RequestScanProcessingError ? error.message : concise(error); let moved = job.source_relative_path;
     if (!job.attachment_completed_at) { try { await ensureLease(); moved = await moveOutcome(dependencies, settings, job, settings.failedSubfolder); } catch (moveError) { if (moveError instanceof RequestScanLeaseLostError) return getRequestScanJob(job.id); } }
     return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: message, failure_category: category, completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
-  } finally { if (heartbeat) clearInterval(heartbeat); if (renewalPromise) await renewalPromise; if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
+  } finally { progress.cancel(); if (heartbeat) clearInterval(heartbeat); if (renewalPromise) await renewalPromise; if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
 }
 
 export async function processRequestScanJob(jobId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId): Promise<RequestScanJob> {

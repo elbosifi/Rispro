@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpretRequestScanBarcodes, nativeTiles, trustedRequestScanQrOrigins, MAX_NATIVE_TILES, type RequestScanBarcodeDependencies } from "./request-scan-barcode-service.js";
+import { extractRequestScanBarcode, extractRisproPublicAppointmentToken, interpretRequestScanBarcodes, nativeTiles, parsePdfImagesList, trustedRequestScanQrOrigins, MAX_NATIVE_TILES, type RequestScanBarcodeDependencies } from "./request-scan-barcode-service.js";
 
 function noSymbol(): Error & { code: number } { return Object.assign(new Error("no symbols found"), { code: 4 }); }
 const QR_TOKEN = "pa_ab_CD-12_ef";
@@ -43,6 +43,19 @@ test("native QR tiles retain all corners and far-right coverage within the bound
   assert.ok(tiles.some((tile) => tile.left === 0 && tile.top + tile.height === height));
   assert.ok(tiles.some((tile) => tile.left + tile.width === width && tile.top + tile.height === height));
   assert.ok(tiles.some((tile) => tile.left === 240 && tile.top === 305 && tile.width === 160 && tile.height === 214));
+});
+test("parses Poppler native image listings conservatively across spacing, masks, and multi-digit values", () => {
+  const parsed = parsePdfImagesList(`page   num  type   width height color comp bpc enc interp object ID x-ppi y-ppi size ratio
+--------------------------------------------------------------------------------------------
+  1     0 image    1200  1600  rgb     3   8  jpeg no       12  0   300 300 10K 1%
+  1     1 smask    1200  1600  gray    1   8  image no      13  0   300 300 2K 1%
+ 12    34 image     900  1100  gray    1   1  ccitt no      44  0   200 200 4K 1%
+ malformed row`);
+  assert.deepEqual(parsed.map(({ page, imageNumber, type, width, height, encoding }) => ({ page, imageNumber, type, width, height, encoding })), [
+    { page: 1, imageNumber: 0, type: "image", width: 1200, height: 1600, encoding: "jpeg" },
+    { page: 1, imageNumber: 1, type: "smask", width: 1200, height: 1600, encoding: "image" },
+    { page: 12, imageNumber: 34, type: "image", width: 900, height: 1100, encoding: "ccitt" },
+  ]);
 });
 test("accepts only configured RISpro public appointment origins and preserves the token exactly", () => {
   assert.equal(extractRisproPublicAppointmentToken(QR_URL), QR_TOKEN);
@@ -140,11 +153,37 @@ test("uses enhanced PDF processing only after an empty original sweep and retrie
   assert.deepEqual(enhanced, { ok: true, accession: "V2-003628" });
   assert.deepEqual(renders, [300]);
   const firstDerivative = calls.findIndex((filePath) => filePath.includes("processed-"));
-  assert.equal(firstDerivative, 18);
+  assert.equal(firstDerivative, 10);
   assert.ok(derivatives.some((filePath) => filePath.includes("processed-9.png")));
   const fallbackRenders: number[] = [];
   await extractRequestScanBarcode("no-candidates.pdf", dependencies(() => noSymbol(), { renders: fallbackRenders }));
   assert.deepEqual(fallbackRenders, [300, 600]);
+});
+test("lists and extracts native PDF images once while retaining conflicts across pages", async () => {
+  const pdfimagesArgs: string[][] = [];
+  const result = await extractRequestScanBarcode("native-conflict.pdf", {
+    async execFile(command, args) {
+      if (command === "pdftoppm") {
+        await fs.writeFile(`${args.at(-1)}-1.png`, "page 1");
+        await fs.writeFile(`${args.at(-1)}-9.png`, "page 9");
+        return {};
+      }
+      if (command === "pdfimages") {
+        pdfimagesArgs.push(args);
+        if (args[0] === "-list") return { stdout: "1 0 image 800 1000 rgb 3 8 jpeg no 1 0 72 72 1K 1%\n9 1 image 900 1100 rgb 3 8 jpeg no 2 0 72 72 1K 1%" };
+        await fs.writeFile(`${args.at(-1)}-000.jpg`, "native 1");
+        await fs.writeFile(`${args.at(-1)}-001.jpg`, "native 9");
+        return {};
+      }
+      const candidate = args.at(-1)!;
+      if (candidate.endsWith("-000.jpg")) return { stdout: "CODE-128:V2-003628" };
+      if (candidate.endsWith("-001.jpg")) return { stdout: "CODE-128:V2-003629" };
+      throw noSymbol();
+    },
+  });
+  assert.deepEqual(result, { ok: false, reason: "multiple_accessions" });
+  assert.equal(pdfimagesArgs.filter((args) => args[0] === "-list").length, 1);
+  assert.equal(pdfimagesArgs.filter((args) => args[0] !== "-list").length, 1);
 });
 test("retries a PDF once at 600 DPI and records a 600-DPI success", async () => { const renders: number[] = []; const calls: string[] = []; const diagnostics: Record<string, string | number | boolean>[] = []; const result = await extractRequestScanBarcode("fallback.pdf", dependencies((filePath) => filePath.includes("pdf-600") && filePath.includes("rotated-270") ? "CODE-128:V2-003628" : noSymbol(), { renders, calls, diagnostics })); assert.deepEqual(result, { ok: true, accession: "V2-003628" }); assert.deepEqual(renders, [300, 600]); assert.ok(calls.some((filePath) => filePath.includes("pdf-600") && filePath.includes("rotated-270"))); assert.ok(diagnostics.some((entry) => entry.code === "BARCODE_SUCCESS_PDF_600_DPI")); assert.ok(diagnostics.some((entry) => entry.successfulDpi === 600 && entry.fallbackUsed === true)); });
 test("invalid values at 300 DPI permit the 600-DPI fallback, while 600 ambiguity remains manual review", async () => { const renders: number[] = []; const result = await extractRequestScanBarcode("invalid-then-ambiguous.pdf", dependencies((filePath) => filePath.includes("pdf-300") ? "CODE-128:OTHER-1" : filePath.endsWith("page-1.png") ? "CODE-128:V2-003628" : filePath.endsWith("page-2.png") ? "CODE-128:V2-003629" : noSymbol(), { renders })); assert.deepEqual(result, { ok: false, reason: "multiple_accessions" }); assert.deepEqual(renders, [300, 600]); });

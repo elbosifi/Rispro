@@ -26,6 +26,7 @@ export interface DocumentUploadPayload {
   mimeType?: string;
   fileContentBase64?: string;
   fileContentBuffer?: Buffer;
+  fileSourcePath?: string;
   source?: string;
   scanSessionId?: UserId;
   pageCount?: number | null;
@@ -257,14 +258,15 @@ function ensureNetworkAuthIfNeeded(config: StorageConfig): void {
 async function writeFileToStorageTarget(
   absoluteBasePath: string,
   originalFilename: string,
-  fileBuffer: Buffer
+  source: { buffer?: Buffer; path?: string },
 ): Promise<{ absolutePath: string; relativePath: string }> {
   const dateFolder = getTripoliToday();
   const targetDirectory = path.join(absoluteBasePath, dateFolder);
   await fs.mkdir(targetDirectory, { recursive: true });
   const storedFileName = `${Date.now()}-${crypto.randomUUID()}-${originalFilename}`;
   const absoluteStoredPath = path.join(targetDirectory, storedFileName);
-  await fs.writeFile(absoluteStoredPath, fileBuffer);
+  if (source.path) await fs.copyFile(source.path, absoluteStoredPath);
+  else await fs.writeFile(absoluteStoredPath, source.buffer!);
   return {
     absolutePath: absoluteStoredPath,
     relativePath: toStoredPath(absoluteStoredPath),
@@ -458,7 +460,13 @@ export async function uploadDocument(
   const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
   const mimeType = String(payload.mimeType || "application/octet-stream").trim().toLowerCase();
   const source = normalizeDocumentSource(payload.source);
-  const fileBuffer = resolveFileBuffer(payload);
+  const suppliedSources = [payload.fileContentBuffer != null, payload.fileContentBase64 != null, payload.fileSourcePath != null].filter(Boolean).length;
+  if (suppliedSources !== 1) throw new HttpError(400, "Exactly one document file source is required.");
+  const fileSourcePath = payload.fileSourcePath ? path.resolve(payload.fileSourcePath) : null;
+  const fileBuffer = fileSourcePath ? null : resolveFileBuffer(payload);
+  const fileStat = fileSourcePath ? await fs.stat(fileSourcePath).catch(() => null) : null;
+  if (fileSourcePath && !fileStat?.isFile()) throw new HttpError(400, "Document file source must be a regular file.");
+  const fileSize = fileStat?.size ?? fileBuffer!.length;
   const scanSessionId = normalizePositiveInteger(payload.scanSessionId, "scanSessionId", { required: false });
   const pageCount = payload.pageCount == null ? null : Number(payload.pageCount);
   const scannerName = String(payload.scannerName || "").trim() || null;
@@ -467,10 +475,10 @@ export async function uploadDocument(
   const idempotencyKey = String(payload.idempotencyKey || "").trim() || null;
   const requestScanJobId = normalizePositiveInteger(payload.requestScanJobId, "requestScanJobId", { required: false });
   if (idempotencyKey && !/^request-scan:v2-booking:\d+:appointment-request$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
-  if (fileBuffer.length === 0) {
+  if (fileSize === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
   }
-  if (fileBuffer.length > MAX_DOCUMENT_BYTES) {
+  if (fileSize > MAX_DOCUMENT_BYTES) {
     throw new HttpError(413, "Uploaded document exceeds the 50 MB limit.");
   }
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
@@ -490,7 +498,7 @@ export async function uploadDocument(
     try {
       ensureNetworkAuthIfNeeded(storageConfig);
       const preferredBasePath = resolveStorageBasePath(storageConfig.storagePath);
-      const written = await writeFileToStorageTarget(preferredBasePath, originalFilename, fileBuffer);
+      const written = await writeFileToStorageTarget(preferredBasePath, originalFilename, { buffer: fileBuffer ?? undefined, path: fileSourcePath ?? undefined });
       storedPath = written.relativePath;
       absoluteStoredPath = written.absolutePath;
       storageLocationType = "network";
@@ -504,7 +512,7 @@ export async function uploadDocument(
       throw new HttpError(503, fallbackReason || "Preferred storage is unavailable and fallback is disabled.");
     }
     const fallbackBasePath = resolveStorageBasePath(env.uploadsDir);
-    const written = await writeFileToStorageTarget(fallbackBasePath, originalFilename, fileBuffer);
+    const written = await writeFileToStorageTarget(fallbackBasePath, originalFilename, { buffer: fileBuffer ?? undefined, path: fileSourcePath ?? undefined });
     storedPath = written.relativePath;
     absoluteStoredPath = written.absolutePath;
     storageLocationType = "local_fallback";
@@ -565,7 +573,7 @@ export async function uploadDocument(
       originalFilename,
       storedPath,
       mimeType,
-      fileBuffer.length,
+      fileSize,
       storageLocationType,
       fallbackReason,
       currentUserId,
