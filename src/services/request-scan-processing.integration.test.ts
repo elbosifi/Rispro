@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { pool } from "../db/pool.js";
 import { claimNextRequestScanJob, claimRequestScanJob, recoverExpiredRequestScanJobs, renewRequestScanLease, updateRequestScanProgress } from "./request-scan-processing-service.js";
+import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
 
 const ids: number[] = [];
 async function ready(t: { skip(message: string): void }) { try { await pool.query("select 1"); return true; } catch { t.skip("PostgreSQL is not reachable at configured DATABASE_URL."); return false; } }
@@ -13,15 +14,18 @@ test("claim-next atomically gives concurrent slots different pending jobs in pri
   const first = await job(); const second = await job(); const priority = await job(); const ignored = await job();
   await pool.query("update request_scan_jobs set priority_requested_at=now() - interval '1 second' where id=$1", [priority]);
   await pool.query("update request_scan_jobs set status='processing' where id=$1", [ignored]);
-  const priorityClaim = await claimNextRequestScanJob("worker-priority");
-  assert.equal(priorityClaim?.job.id, priority);
-  const [claimA, claimB] = await Promise.all([claimNextRequestScanJob("worker-a"), claimNextRequestScanJob("worker-b")]);
+  assert.equal(await acquireRequestScanWorkerLeadership("claim-worker"), true);
+  assert.equal(await claimNextRequestScanJob("wrong-worker"), null);
+  const priorityClaim = await claimNextRequestScanJob("claim-worker");
+  assert.equal(Number(priorityClaim?.job.id), priority);
+  const [claimA, claimB] = await Promise.all([claimNextRequestScanJob("claim-worker"), claimNextRequestScanJob("claim-worker")]);
   assert.ok(claimA); assert.ok(claimB); assert.notEqual(claimA.job.id, claimB.job.id);
-  assert.equal([claimA.job.id, claimB.job.id].sort().join(","), [first, second].sort().join(","));
+  assert.equal([Number(claimA.job.id), Number(claimB.job.id)].sort().join(","), [first, second].sort().join(","));
   assert.equal(claimA.job.id === ignored || claimB.job.id === ignored, false);
   assert.notEqual(claimA.lease.token, claimB.lease.token);
-  assert.equal([claimA.job.worker_id, claimB.job.worker_id].sort().join(","), "worker-a,worker-b");
+  assert.equal([claimA.job.worker_id, claimB.job.worker_id].sort().join(","), "claim-worker,claim-worker");
   assert.equal(await claimNextRequestScanJob("worker-c"), null);
+  await releaseRequestScanWorkerLeadership("claim-worker");
 });
 test("expired leases recover conservatively while active leases remain processing", async (t) => { if (!(await ready(t))) return; const id = await job(); const claimed = await claimRequestScanJob(id, "worker-a"); assert.ok(claimed); await pool.query("update request_scan_jobs set lease_expires_at=now()-interval '1 second' where id=$1", [id]); assert.equal((await recoverExpiredRequestScanJobs()).requeued, 1); const row = await pool.query<{ status: string; recovery_count: number }>("select status,recovery_count from request_scan_jobs where id=$1", [id]); assert.deepEqual(row.rows[0], { status: "pending", recovery_count: 1 }); });
 after(async () => { if (ids.length) await pool.query("delete from request_scan_jobs where id=any($1::bigint[])", [ids]); await pool.end(); });

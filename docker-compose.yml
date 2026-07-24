@@ -28,7 +28,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
-      REQUEST_SCAN_WORKER_PROCESS_ENABLED: "false"
+      REQUEST_SCAN_WORKER_PROCESS_ENABLED: "${REQUEST_SCAN_APP_WORKER_ENABLED:-false}"
       REQUEST_SCAN_MAX_CONCURRENCY: "1"
     expose:
       - "3000"
@@ -59,8 +59,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RISPRO_SKIP_BOOTSTRAP: "1"
-      REQUEST_SCAN_WORKER_PROCESS_ENABLED: "true"
-      REQUEST_SCAN_MAX_CONCURRENCY: "2"
+      REQUEST_SCAN_WORKER_PROCESS_ENABLED: "${REQUEST_SCAN_DEDICATED_WORKER_ENABLED:-true}"
+      REQUEST_SCAN_MAX_CONCURRENCY: "${REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY:-1}"
     depends_on:
       app:
         condition: service_healthy
@@ -72,6 +72,7 @@ services:
     restart: unless-stopped
     cpus: 2
     mem_limit: 3g
+    stop_grace_period: 75s
     networks:
       - rispro-network
 

@@ -6,7 +6,7 @@ import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils
 import { verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
-import { uploadDocument } from "./document-service.js";
+import { findDocumentByIdempotencyKey, getDocumentById, uploadDocument, uploadDocumentIdempotently } from "./document-service.js";
 import { extractRequestScanBarcode, type RequestScanBarcodeFailure } from "./request-scan-barcode-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import {
@@ -15,15 +15,15 @@ import {
   requestScanSafeDisplayFilename,
   type RequestScanFilenameDecision,
 } from "./request-scan-filename-identifier.js";
-import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile } from "./request-scan-smb-service.js";
+import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile, reconcileRequestScanMove, requestScanArchivePath } from "./request-scan-smb-service.js";
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import { env } from "../config/env.js";
-import { claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanLease } from "./request-scan-processing-service.js";
+import { assertRequestScanLeaseOwned, claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, RequestScanLeaseLostError, updateRequestScanCheckpoint, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanLease } from "./request-scan-processing-service.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
-export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
+export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
 export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "dismissed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; accession_number: string };
 export type RequestScanServiceDependencies = {
@@ -31,7 +31,10 @@ export type RequestScanServiceDependencies = {
   downloadRequestScanFile: typeof downloadRequestScanFile;
   extractRequestScanBarcode: typeof extractRequestScanBarcode;
   moveRequestScanFile: typeof moveRequestScanFile;
+  reconcileRequestScanMove?: typeof reconcileRequestScanMove;
   uploadDocument: typeof uploadDocument;
+  uploadDocumentIdempotently?: typeof uploadDocumentIdempotently;
+  findDocumentByIdempotencyKey?: typeof findDocumentByIdempotencyKey;
   automatedDocumentExists: (appointmentId: number) => Promise<boolean>;
   findEligibleAppointment: (accession: string) => Promise<EligibleAppointment>;
   verifyPublicAppointmentToken: typeof verifyPublicCancelToken;
@@ -73,7 +76,10 @@ const defaultDependencies: RequestScanServiceDependencies = {
   downloadRequestScanFile,
   extractRequestScanBarcode,
   moveRequestScanFile,
+  reconcileRequestScanMove,
   uploadDocument,
+  uploadDocumentIdempotently,
+  findDocumentByIdempotencyKey,
   automatedDocumentExists,
   findEligibleAppointment: findEligibleRequestScanAppointment,
   verifyPublicAppointmentToken: verifyPublicCancelToken,
@@ -227,17 +233,41 @@ async function resolveFilenameEvidence(
 
 async function moveOutcome(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, folder: string, duplicate = false): Promise<string> { return dependencies.moveRequestScanFile(settings, job.source_relative_path, destination(folder, duplicate), job.filename); }
 
+async function archiveCheckpointedRequestScanJob(job: RequestScanJob, lease: RequestScanLease, settings: RequestScanSettings, dependencies: RequestScanServiceDependencies, created: boolean): Promise<RequestScanJob> {
+  const folder = destination(settings.processedSubfolder, !created);
+  const intended = job.intended_destination_path || requestScanArchivePath(folder, Number(job.id), job.filename);
+  if (!job.intended_destination_path) job = await updateRequestScanCheckpoint(job.id, lease, { intended_destination_path: intended });
+  await assertRequestScanLeaseOwned(job.id, lease);
+  if (!job.source_moved_at) {
+    const outcome = dependencies.reconcileRequestScanMove ? await dependencies.reconcileRequestScanMove(settings, job.source_relative_path, intended) : "moved";
+    if (!dependencies.reconcileRequestScanMove) await dependencies.moveRequestScanFile(settings, job.source_relative_path, folder, requestScanArchivePath("", Number(job.id), job.filename));
+    if (outcome === "conflict") throw new RequestScanProcessingError("Both the Request Scan source and archive destination exist. Manual reconciliation is required.", "smb_storage");
+    if (outcome === "missing") throw new RequestScanProcessingError("The Request Scan source and archive destination are both missing.", "source_missing");
+    await assertRequestScanLeaseOwned(job.id, lease);
+    job = await updateRequestScanCheckpoint(job.id, lease, { source_relative_path: intended, source_moved_at: new Date().toISOString() });
+  }
+  await assertRequestScanLeaseOwned(job.id, lease);
+  const completed = await finishRequestScanJob(job.id, lease, { status: created ? "processed" : "duplicate", source_relative_path: intended, error_message: null });
+  if (!completed) throw new RequestScanLeaseLostError();
+  return completed;
+}
+
 const requestScanWorkerId = createRequestScanWorkerId();
 export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJob, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> {
   const settings = suppliedSettings ?? await readRequestScanSettings();
   let job = claimed.job; const lease: RequestScanLease = claimed.lease;
   const jobId = job.id;
-  let leaseLost = false;
-  const heartbeat = setInterval(() => { void renewRequestScanLease(jobId, lease).then((owned) => { leaseLost ||= !owned; }); }, 12_000);
-  const stage = async (value: Parameters<typeof updateRequestScanProgress>[2]) => { if (leaseLost || !(await updateRequestScanProgress(jobId, lease, value))) { leaseLost = true; throw new HttpError(409, "Request Scan lease was lost."); } };
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-file-")); const localPath = path.join(tempDir, job.filename);
+  let leaseLost = false; let heartbeat: NodeJS.Timeout | null = null; let renewing = false; let renewalPromise: Promise<void> | null = null; let tempDir: string | null = null;
+  const ensureLease = async () => { if (leaseLost) throw new RequestScanLeaseLostError(); await assertRequestScanLeaseOwned(jobId, lease); };
+  const stage = async (value: Parameters<typeof updateRequestScanProgress>[2]) => { await ensureLease(); if (!(await updateRequestScanProgress(jobId, lease, value))) { leaseLost = true; throw new RequestScanLeaseLostError(); } };
   const identifierStarted = Date.now();
   try {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-file-")); const localPath = path.join(tempDir, job.filename);
+    heartbeat = setInterval(() => { if (renewing || leaseLost) return; renewing = true; renewalPromise = renewRequestScanLease(jobId, lease).then((owned) => { if (!owned) leaseLost = true; }).catch(() => { leaseLost = true; }).finally(() => { renewing = false; renewalPromise = null; }); }, 12_000);
+    if (job.attachment_completed_at && job.document_id) {
+      try { await getDocumentById(job.document_id); } catch { throw new RequestScanProcessingError("The checkpointed Request Scan document no longer exists. Manual review is required.", "internal_processing"); }
+      return await archiveCheckpointedRequestScanJob(job, lease, settings, dependencies, job.attachment_created !== false);
+    }
     await stage({ stage: "checking_filename" });
     const filenameEvidence = await resolveFilenameEvidence(job.filename, dependencies);
     const baseMetadata = () => identifierMetadata(job.filename, filenameEvidence, identifierStarted, false, false);
@@ -377,20 +407,26 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       }
     }
 
-    await stage({ stage: "checking_duplicate" }); if (await dependencies.automatedDocumentExists(appointment.id)) {
-      const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true);
-      const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); if (!completed) throw new HttpError(409, "Request Scan lease was lost."); return completed;
+    await stage({ stage: "checking_duplicate" });
+    const idempotencyKey = `request-scan:v2-booking:${appointment.id}:appointment-request`;
+    if (await dependencies.automatedDocumentExists(appointment.id)) {
+      const existing = dependencies.findDocumentByIdempotencyKey ? await dependencies.findDocumentByIdempotencyKey(idempotencyKey) : null;
+      if (!dependencies.uploadDocumentIdempotently) { await ensureLease(); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true); await ensureLease(); const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: existing?.id ?? null, source_relative_path: moved, error_message: null }); if (!completed) throw new RequestScanLeaseLostError(); return completed; }
     }
-    await stage({ stage: "attaching_document" }); const buffer = await fs.readFile(localPath);
-    const document = await dependencies.uploadDocument({ patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: buffer, source: "request_scan_automation" }, null);
-    await stage({ stage: "moving_file" }); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder);
-    const completed = await finishRequestScanJob(job.id, lease, { status: "processed", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); if (!completed) throw new HttpError(409, "Request Scan lease was lost."); return completed;
+    await stage({ stage: "attaching_document" }); await ensureLease(); const buffer = await fs.readFile(localPath);
+    const payload = { patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: buffer, source: "request_scan_automation", requestScanJobId: job.id };
+    const attachment = dependencies.uploadDocumentIdempotently ? await dependencies.uploadDocumentIdempotently(payload, null, idempotencyKey) : { document: await dependencies.uploadDocument(payload, null), created: true };
+    await ensureLease();
+    const createdByThisJob = attachment.created || attachment.document.request_scan_job_id === job.id;
+    job = await updateRequestScanCheckpoint(job.id, lease, { appointment_id: appointment.id, document_id: attachment.document.id, barcode_value: appointment.accession_number, attachment_completed_at: new Date().toISOString(), attachment_created: createdByThisJob });
+    await stage({ stage: "moving_file" });
+    return await archiveCheckpointedRequestScanJob(job, lease, settings, dependencies, createdByThisJob);
   } catch (error) {
+    if (error instanceof RequestScanLeaseLostError || leaseLost) return getRequestScanJob(job.id);
     const category = failureCategory(error); const message = error instanceof RequestScanProcessingError ? error.message : concise(error); let moved = job.source_relative_path;
-    try { moved = await moveOutcome(dependencies, settings, job, settings.failedSubfolder); } catch { /* keep the original path so recovery can retry it */ }
-    if (leaseLost) return getRequestScanJob(job.id);
+    if (!job.attachment_completed_at) { try { await ensureLease(); moved = await moveOutcome(dependencies, settings, job, settings.failedSubfolder); } catch (moveError) { if (moveError instanceof RequestScanLeaseLostError) return getRequestScanJob(job.id); } }
     return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: message, failure_category: category, completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
-  } finally { clearInterval(heartbeat); await fs.rm(tempDir, { recursive: true, force: true }); }
+  } finally { if (heartbeat) clearInterval(heartbeat); if (renewalPromise) await renewalPromise; if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
 }
 
 export async function processRequestScanJob(jobId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId): Promise<RequestScanJob> {
@@ -451,7 +487,7 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
 }
 
 const pendingRetryFields = { status: "pending" as const, error_message: null, failure_category: null, dismissed_at: null, dismissed_by: null, dismiss_reason: null, completed_at: null, processing_stage: "queued", processing_started_at: null, heartbeat_at: null, worker_id: null, lease_token: null, lease_expires_at: null, progress_current: null, progress_total: null };
-export async function retryRequestScanJob(id: number, overrides: Partial<RequestScanRetryDependencies> = {}): Promise<RequestScanJob> { const dependencies: RequestScanRetryDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, moveFile: moveRequestScanFile, updateJob, ...overrides }; const settings = await dependencies.readSettings(); const job = await dependencies.getJob(id); if (job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Only visible failed request scans can be retried."); const moved = await dependencies.moveFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return dependencies.updateJob(id, { ...pendingRetryFields, source_relative_path: moved, stage_started_at: new Date().toISOString() }); }
+export async function retryRequestScanJob(id: number, overrides: Partial<RequestScanRetryDependencies> = {}): Promise<RequestScanJob> { const dependencies: RequestScanRetryDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, moveFile: moveRequestScanFile, updateJob, ...overrides }; const settings = await dependencies.readSettings(); const job = await dependencies.getJob(id); if (job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Only visible failed request scans can be retried."); if (job.attachment_completed_at) return dependencies.updateJob(id, { ...pendingRetryFields, stage_started_at: new Date().toISOString() }); const moved = await dependencies.moveFile(settings, job.source_relative_path, settings.incomingSubfolder, job.filename); return dependencies.updateJob(id, { ...pendingRetryFields, source_relative_path: moved, stage_started_at: new Date().toISOString() }); }
 function cleanDismissReason(value: unknown): string | null { const reason = String(value ?? "").trim(); if (reason.length > 500) throw new HttpError(400, "Dismiss reason must be 500 characters or fewer."); return reason || null; }
 export async function dismissRequestScanJob(id: number, userId: number, reason?: unknown): Promise<RequestScanJob> { const { rows } = await pool.query("update request_scan_jobs set dismissed_at=now(),dismissed_by=$2,dismiss_reason=$3,updated_at=now() where id=$1 and status='failed' and dismissed_at is null returning *", [id, userId, cleanDismissReason(reason)]); if (!rows[0]) throw new HttpError(409, "Only visible failed request scans can be dismissed."); const job = rows[0] as RequestScanJob; await logAuditEntry({ entityType: "request_scan_job", entityId: id, actionType: "request_scan_dismissed", newValues: { failure_category: job.failure_category }, changedByUserId: userId }); return job; }
 export async function restoreDismissedRequestScanJob(id: number, userId: number): Promise<RequestScanJob> { const { rows } = await pool.query("update request_scan_jobs set dismissed_at=null,dismissed_by=null,dismiss_reason=null,updated_at=now() where id=$1 and status='failed' and dismissed_at is not null returning *", [id]); if (!rows[0]) throw new HttpError(409, "Only dismissed failed request scans can be restored."); const job = rows[0] as RequestScanJob; await logAuditEntry({ entityType: "request_scan_job", entityId: id, actionType: "request_scan_restored", newValues: { failure_category: job.failure_category }, changedByUserId: userId }); return job; }

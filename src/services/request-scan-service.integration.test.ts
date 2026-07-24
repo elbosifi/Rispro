@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { pool } from "../db/pool.js";
 import { issueLegacyPublicCancelToken, issuePublicCancelToken, verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
-import type { DocumentRow, DocumentUploadPayload } from "./document-service.js";
+import { uploadDocumentIdempotently, type DocumentRow, type DocumentUploadPayload } from "./document-service.js";
+import { resolveStoredPath } from "./document-storage-path.js";
 import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js";
 import {
   findEligibleRequestScanAppointment,
@@ -16,6 +18,7 @@ import {
   type RequestScanServiceDependencies,
 } from "./request-scan-service.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
+import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
 
 const created = { jobs: [] as number[], bookings: [] as number[], patients: [] as number[], policyVersions: [] as number[], policySets: [] as number[], modalities: [] as number[], users: [] as number[] };
 let sequence = 0;
@@ -572,7 +575,7 @@ test("manually assigns a failed request to an eligible V2 appointment through th
   assert.equal(uploads[0].payload.source, "request_scan_automation");
 });
 
-test("after attachment succeeds and SMB moves fail, the next worker cycle records a duplicate without attaching again", async (t) => {
+test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint without attaching again", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const jobId = await createJob();
@@ -582,15 +585,29 @@ test("after attachment succeeds and SMB moves fail, the next worker cycle record
   const failed = await processRequestScanJob(jobId, settings, first);
   assert.equal(failed.status, "failed");
   assert.equal(uploads.length, 1);
-
+  assert.ok(failed.attachment_completed_at); assert.ok(failed.document_id);
   assert.equal(failed.source_relative_path.includes("Incoming"), true);
+  await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async () => { throw new Error("checkpointed retry must not move back to Incoming"); } });
   const second = dependencies({ ok: true, accession: booking.accession }, { uploads });
-  second.listRequestScanFiles = async () => [{ filename: failed.filename, relativePath: failed.source_relative_path, modifiedAt: null }];
-  const cycle = await runRequestScanCycle(settings, second);
-  assert.equal(cycle.discovered, 1);
-  assert.equal(cycle.duplicates, 1);
-  assert.equal((await getRequestScanJob(jobId)).status, "duplicate");
+  assert.equal(await acquireRequestScanWorkerLeadership("resume-checkpoint-test"), true);
+  const cycle = await runRequestScanCycle(settings, second, "resume-checkpoint-test");
+  await releaseRequestScanWorkerLeadership("resume-checkpoint-test");
+  assert.equal(cycle.processed, 1);
+  assert.equal((await getRequestScanJob(jobId)).status, "processed");
   assert.equal(uploads.length, 1);
+});
+
+test("concurrent idempotent Request Scan uploads create one document and remove the losing file", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const jobA = await createJob(); const jobB = await createJob();
+  const key = `request-scan:v2-booking:${booking.id}:appointment-request`;
+  const payload = { patientId: booking.patientId, appointmentId: booking.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: "same-request.pdf", mimeType: "application/pdf", fileContentBuffer: Buffer.from("same-request"), source: "request_scan_automation" };
+  const results = await Promise.all([uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, key), uploadDocumentIdempotently({ ...payload, requestScanJobId: jobB }, null, key)]);
+  assert.equal(new Set(results.map((result) => result.document.id)).size, 1); assert.deepEqual(results.map((result) => result.created).sort(), [false, true]);
+  const rows = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [key]); assert.equal(rows.rowCount, 1);
+  const winningPath = resolveStoredPath(rows.rows[0].stored_path); const storedNames = await fs.readdir(path.dirname(winningPath));
+  assert.equal(storedNames.filter((name) => name.endsWith("-same-request.pdf")).length, 1);
+  await fs.rm(winningPath, { force: true }); await pool.query("delete from documents where id=$1", [rows.rows[0].id]);
 });
 
 after(async () => {

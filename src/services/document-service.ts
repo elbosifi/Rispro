@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "fs/promises";
 import path from "path";
 import { env } from "../config/env.js";
@@ -31,6 +32,8 @@ export interface DocumentUploadPayload {
   scannerName?: string | null;
   workstationName?: string | null;
   appVersion?: string | null;
+  idempotencyKey?: string | null;
+  requestScanJobId?: number | null;
 }
 
 export interface DocumentRow {
@@ -53,6 +56,7 @@ export interface DocumentRow {
   last_move_attempt_at: string | null;
   last_move_error: string | null;
   created_at: string;
+  request_scan_job_id?: number | null;
 }
 
 interface DocumentFilters {
@@ -258,7 +262,7 @@ async function writeFileToStorageTarget(
   const dateFolder = getTripoliToday();
   const targetDirectory = path.join(absoluteBasePath, dateFolder);
   await fs.mkdir(targetDirectory, { recursive: true });
-  const storedFileName = `${Date.now()}-${originalFilename}`;
+  const storedFileName = `${Date.now()}-${crypto.randomUUID()}-${originalFilename}`;
   const absoluteStoredPath = path.join(targetDirectory, storedFileName);
   await fs.writeFile(absoluteStoredPath, fileBuffer);
   return {
@@ -460,7 +464,9 @@ export async function uploadDocument(
   const scannerName = String(payload.scannerName || "").trim() || null;
   const workstationName = String(payload.workstationName || "").trim() || null;
   const appVersion = String(payload.appVersion || "").trim() || null;
-
+  const idempotencyKey = String(payload.idempotencyKey || "").trim() || null;
+  const requestScanJobId = normalizePositiveInteger(payload.requestScanJobId, "requestScanJobId", { required: false });
+  if (idempotencyKey && !/^request-scan:v2-booking:\d+:appointment-request$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
   if (fileBuffer.length === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
   }
@@ -476,7 +482,7 @@ export async function uploadDocument(
   await ensureAppointmentBelongsToPatient(appointmentReference, patientId);
 
   const storageConfig = await loadDocumentStorageConfig();
-  let storedPath = "";
+  let storedPath = ""; let absoluteStoredPath = "";
   let storageLocationType: "network" | "local_fallback" = "local_fallback";
   let fallbackReason: string | null = null;
 
@@ -486,6 +492,7 @@ export async function uploadDocument(
       const preferredBasePath = resolveStorageBasePath(storageConfig.storagePath);
       const written = await writeFileToStorageTarget(preferredBasePath, originalFilename, fileBuffer);
       storedPath = written.relativePath;
+      absoluteStoredPath = written.absolutePath;
       storageLocationType = "network";
     } catch (error) {
       fallbackReason = error instanceof Error ? error.message : "Network storage write failed.";
@@ -499,10 +506,13 @@ export async function uploadDocument(
     const fallbackBasePath = resolveStorageBasePath(env.uploadsDir);
     const written = await writeFileToStorageTarget(fallbackBasePath, originalFilename, fileBuffer);
     storedPath = written.relativePath;
+    absoluteStoredPath = written.absolutePath;
     storageLocationType = "local_fallback";
   }
 
-  const { rows } = (await pool.query(
+  let rows: DocumentRow[];
+  try {
+    const insertResult = (await pool.query(
     `
       insert into documents (
         patient_id,
@@ -521,9 +531,11 @@ export async function uploadDocument(
         page_count,
         scanner_name,
         workstation_name,
-        app_version
+        app_version,
+        idempotency_key,
+        request_scan_job_id
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       returning
         id,
         patient_id,
@@ -563,8 +575,16 @@ export async function uploadDocument(
       scannerName,
       workstationName,
       appVersion,
+      idempotencyKey,
+      requestScanJobId,
     ]
-  )) as DbQueryResult<DocumentRow>;
+    )) as DbQueryResult<DocumentRow>;
+    rows = insertResult.rows;
+  } catch (error) {
+    const cleanup = absoluteStoredPath ? await safeUnlink(absoluteStoredPath) : { ok: true };
+    if (!cleanup.ok) console.error("Document upload database write failed and orphan-file cleanup also failed.");
+    throw error;
+  }
   const savedDocument = rows[0];
 
   if (!savedDocument) {
@@ -586,6 +606,23 @@ export async function uploadDocument(
   });
 
   return savedDocument;
+}
+
+export async function findDocumentByIdempotencyKey(idempotencyKey: string): Promise<DocumentRow | null> {
+  const result = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1 limit 1", [idempotencyKey]);
+  return result.rows[0] ?? null;
+}
+
+export async function uploadDocumentIdempotently(payload: DocumentUploadPayload, currentUserId: OptionalUserId, idempotencyKey: string): Promise<{ document: DocumentRow; created: boolean }> {
+  const existing = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [idempotencyKey]);
+  if (existing.rows[0]) return { document: existing.rows[0], created: false };
+  try { return { document: await uploadDocument({ ...payload, idempotencyKey }, currentUserId), created: true }; }
+  catch (error) {
+    if ((error as { code?: string }).code !== "23505") throw error;
+    const winner = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [idempotencyKey]);
+    if (!winner.rows[0]) throw error;
+    return { document: winner.rows[0], created: false };
+  }
 }
 
 export async function deleteDocumentById(

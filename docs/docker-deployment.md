@@ -471,9 +471,9 @@ docker compose exec app wget -qO- http://127.0.0.1:3000/api/ready || echo "Not r
 
 Compose runs Request Scan document processing in `request-scan-worker`. The web `app` queues durable run requests and reports its PostgreSQL heartbeat; the worker owns processing and has no HTTP or DICOM ports.
 
-The initial production setting is `REQUEST_SCAN_MAX_CONCURRENCY=2`. It allows two independent files to process at once, while every page, image pass, QR tile, decoder attempt, SMB operation, attachment, and move within each document remains sequential. Set it to `1` and restart `request-scan-worker` to restore sequential file processing without rolling back the database migration. Values above `2` are intentionally unsupported in this phase; observe CPU, memory, scanner-share, and decoder usage before considering a later increase.
+The safe production default is `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. A controlled deployment may set it to `2` to process two independent files, while every page, image pass, QR tile, decoder attempt, SMB operation, attachment, and move within each document remains sequential. Values above `2` are unsupported.
 
-For rollback, stop `request-scan-worker`, set `REQUEST_SCAN_WORKER_PROCESS_ENABLED=true` for `app`, and restart `app`. Leave migration `139_request_scan_worker_runtime.sql` and its singleton runtime row in place. PostgreSQL worker leadership prevents accidental double processing while both processes are briefly enabled.
+Compose operators control the mode without editing YAML. The normal dedicated settings are `REQUEST_SCAN_APP_WORKER_ENABLED=false`, `REQUEST_SCAN_DEDICATED_WORKER_ENABLED=true`, and `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. For embedded sequential rollback, set the first value to `true`, the second to `false`, retain concurrency `1`, and restart the services. Scale `request-scan-worker` to zero while it is disabled so Docker does not restart an intentionally disabled entrypoint. Leave migrations 139 and 140 in place.
 
 ### MWL Not Responding
 

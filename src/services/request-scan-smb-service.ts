@@ -19,6 +19,28 @@ function config(settings: RequestScanSettings, subfolder = "") { return { server
 function credentials(settings: RequestScanSettings): BackupV3SmbCredentials { return { username: settings.username, password: settings.password }; }
 function joinRemote(...segments: string[]): string { return segments.filter(Boolean).map((value) => value.replace(/^[\\/]+|[\\/]+$/g, "").replace(/[\\/]+/g, "\\")).join("\\"); }
 function remoteFilename(value: string): string { if (!/^[A-Za-z0-9._ -]+$/.test(value) || value.includes("..")) throw new HttpError(400, "Network filename is unsafe."); return value; }
+export type RequestScanMoveReconciliation = "moved" | "already_moved" | "conflict" | "missing";
+export function requestScanArchiveFilename(jobId: number, filename: string): string { if (!Number.isSafeInteger(jobId) || jobId <= 0) throw new HttpError(400, "Request Scan job ID is invalid."); const safeName = path.basename(filename).replace(/[^A-Za-z0-9._ -]/g, "_").replace(/\.\.+/g, "_"); return `${jobId}-${remoteFilename(safeName || "request-scan")}`; }
+export function requestScanArchivePath(destinationFolder: string, jobId: number, filename: string): string { return joinRemote(destinationFolder, requestScanArchiveFilename(jobId, filename)); }
+
+async function remoteExists(run: (command: string, mode?: "transfer") => Promise<unknown>, remotePath: string): Promise<boolean> {
+  try { await run(`allinfo ${smbQuote(remotePath)}`); return true; }
+  catch (error) { if (classifyRequestScanSmbError(error) === "source_missing" || /not found/i.test(error instanceof Error ? error.message : String(error))) return false; throw error; }
+}
+
+export async function reconcileRequestScanMove(settings: RequestScanSettings, sourcePath: string, destinationPath: string, dependencies?: BackupV3SmbDependencies): Promise<RequestScanMoveReconciliation> {
+  return withBackupV3SmbSession(config(settings), credentials(settings), async (run) => {
+    const sourceExists = await remoteExists(run, sourcePath); const destinationExists = await remoteExists(run, destinationPath);
+    if (sourceExists && destinationExists) return "conflict";
+    if (!sourceExists && !destinationExists) return "missing";
+    if (!sourceExists) return "already_moved";
+    const destinationFolder = destinationPath.replace(/[\\/][^\\/]+$/, "");
+    const parts = destinationFolder.split(/[\\/]/).filter(Boolean); let current = "";
+    for (const part of parts) { current = joinRemote(current, part); await run(`mkdir ${smbQuote(current)}`).catch(async () => run(`cd ${smbQuote(current)}`)); }
+    await run(`rename ${smbQuote(sourcePath)} ${smbQuote(destinationPath)}`, "transfer");
+    return "moved";
+  }, dependencies);
+}
 
 function parseListing(output: string, folder: string): RequestScanRemoteFile[] {
   const found: RequestScanRemoteFile[] = [];

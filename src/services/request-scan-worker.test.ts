@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getRequestScanWorkerStatus, requestRequestScanWorkerRun, runRequestScanWorkerTick } from "./request-scan-worker.js";
+import { createRequestScanWorkerId } from "./request-scan-processing-service.js";
+
+test("Request Scan worker identities are globally unique even within one process", () => {
+  const first = createRequestScanWorkerId(); const second = createRequestScanWorkerId();
+  assert.notEqual(first, second); assert.match(first, new RegExp(`-${process.pid}-`));
+});
 
 test("Request Scan worker tick returns the completed cycle result", async () => {
   const expected = { discovered: 3, processed: 1, failed: 1, duplicates: 0, skipped: 1 };
