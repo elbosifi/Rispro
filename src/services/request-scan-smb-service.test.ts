@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile, reconcileRequestScanMove, requestScanArchivePath, validateRequestScanRemoteFilename } from "./request-scan-smb-service.js";
+import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile, reconcileRequestScanMove, requestScanArchivePath, testRequestScanSmb, validateRequestScanRemoteFilename } from "./request-scan-smb-service.js";
 import { classifySmbError } from "./backup-v3-smb-destination.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 
@@ -22,17 +22,20 @@ test("SMB metadata probes preserve machine-readable missing classification witho
 });
 
 const settings = { server: "test", share: "share", username: "user", password: "pass", domain: "" } as RequestScanSettings;
-function smbState(initial: Record<string, string>, options: { deleteFails?: boolean; hideDestinationAfterDelete?: boolean } = {}) {
-  const files = new Map(Object.entries(initial).map(([name, value]) => [name, Buffer.from(value)])); const commands: string[] = [];
+function smbState(initial: Record<string, string>, options: { deleteFails?: boolean; hideDestinationAfterDelete?: boolean; renameStatus?: string; renameLeavesDestination?: string; uploadedBody?: string; destinationDisappearsOnDownload?: boolean; destinationDisappearsBeforeDelete?: boolean; failReprobe?: boolean } = {}) {
+  const files = new Map(Object.entries(initial).map(([name, value]) => [name, Buffer.from(value)])); const commands: string[] = []; let destinationDownloaded = false;
   return { files, commands, dependencies: { async execFile(_command: string, args: string[]) {
     const command = args[args.indexOf("-c") + 1] || ""; commands.push(command);
     const paths = [...command.matchAll(/"([^"]+)"/g)].map((match) => match[1].replace(/\\\\/g, "\\"));
-    if (command.startsWith("allinfo")) { if (!files.has(paths[0])) throw Object.assign(new Error("NT_STATUS_OBJECT_NAME_NOT_FOUND"), { stderr: "NT_STATUS_OBJECT_NAME_NOT_FOUND" }); return { stdout: `size: ${files.get(paths[0])!.length}` }; }
-    if (command.startsWith("rename")) { const body = files.get(paths[0])!; files.delete(paths[0]); files.set(paths[1], body); return {}; }
+    if (command.startsWith("allinfo")) { if (options.failReprobe && commands.some((value) => value.startsWith("rename"))) throw Object.assign(new Error("connection failed"), { code: "EHOSTUNREACH" }); if (options.destinationDisappearsBeforeDelete && destinationDownloaded && paths[0]?.includes("Processed")) files.delete(paths[0]); if (!files.has(paths[0])) throw Object.assign(new Error("NT_STATUS_OBJECT_NAME_NOT_FOUND"), { stderr: "NT_STATUS_OBJECT_NAME_NOT_FOUND" }); return { stdout: `size: ${files.get(paths[0])!.length}` }; }
+    if (command.startsWith("rename")) { if (options.renameStatus) { if (options.renameLeavesDestination != null) files.set(paths[1]!, Buffer.from(options.renameLeavesDestination)); throw Object.assign(new Error(options.renameStatus), { stderr: options.renameStatus }); } const body = files.get(paths[0])!; files.delete(paths[0]); files.set(paths[1], body); return {}; }
+    if (command.startsWith("put")) { files.set(paths[1]!, options.uploadedBody == null ? await fs.readFile(paths[0]!) : Buffer.from(options.uploadedBody)); return {}; }
     if (command.startsWith("del")) { if (options.deleteFails) throw new Error("permission denied"); files.delete(paths[0]); if (options.hideDestinationAfterDelete) files.delete("Processed\\7-scan.pdf"); return {}; }
     return {};
   }, async downloadFile(_command: string, args: string[], _options: unknown, localPath: string) {
     const command = args[args.indexOf("-c") + 1] || ""; const remote = [...command.matchAll(/"([^"]+)"/g)][0]?.[1].replace(/\\\\/g, "\\");
+    if (options.destinationDisappearsOnDownload && remote?.includes("Processed")) { files.delete(remote); throw Object.assign(new Error("NT_STATUS_OBJECT_NAME_NOT_FOUND"), { stderr: "NT_STATUS_OBJECT_NAME_NOT_FOUND" }); }
+    if (remote?.includes("Processed")) destinationDownloaded = true;
     await fs.writeFile(localPath, files.get(remote!)!);
   } } };
 }
@@ -70,6 +73,79 @@ test("Request Scan SMB reconciliation covers all source and destination states",
   const missing = smbState({}); assert.equal(await reconcileRequestScanMove(settings, source, destination, missing.dependencies), "missing");
   const deleteFailure = smbState({ [source]: "same", [destination]: "same" }, { deleteFails: true }); await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, deleteFailure.dependencies));
   const verifyFailure = smbState({ [source]: "same", [destination]: "same" }, { hideDestinationAfterDelete: true }); await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, verifyFailure.dependencies), /verification failed/);
+});
+test("Request Scan SMB rename fallback is limited and verifies copy before deleting source", async () => {
+  const source = "Incoming\\scan.pdf"; const destination = "Processed\\7-scan.pdf";
+  for (const status of ["NT_STATUS_NOT_SUPPORTED", "NT_STATUS_INVALID_PARAMETER", "NT_STATUS_UNEXPECTED_IO_ERROR"]) {
+    const state = smbState({ [source]: "source" }, { renameStatus: status });
+    assert.equal(await reconcileRequestScanMove(settings, source, destination, state.dependencies), "moved");
+    assert.equal(state.files.has(source), false); assert.equal(state.files.get(destination)?.toString(), "source");
+    assert.equal(state.commands.some((command) => command.startsWith("put")), true);
+  }
+  for (const status of ["NT_STATUS_LOGON_FAILURE", "NT_STATUS_ACCESS_DENIED", "EHOSTUNREACH", "ETIMEDOUT", "NT_STATUS_DISK_FULL", "NT_STATUS_OBJECT_NAME_NOT_FOUND"]) {
+    const state = smbState({ [source]: "source" }, { renameStatus: status });
+    await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, state.dependencies));
+    assert.equal(state.commands.some((command) => command.startsWith("put")), false);
+    assert.equal(state.files.has(source), true);
+  }
+  const uncertain = smbState({ [source]: "source" }, { renameStatus: "NT_STATUS_NOT_SUPPORTED", failReprobe: true });
+  await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, uncertain.dependencies));
+  assert.equal(uncertain.commands.some((command) => command.startsWith("put")), false);
+  const unknownWithDestination = smbState({ [source]: "source" }, { renameStatus: "unclassified rename failure", renameLeavesDestination: "different" });
+  await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, unknownWithDestination.dependencies));
+  assert.equal(unknownWithDestination.commands.some((command) => command.startsWith("put")), false);
+  assert.equal(unknownWithDestination.files.has(source), true);
+});
+test("Request Scan SMB fallback failures preserve source and any uploaded destination", async () => {
+  const source = "Incoming\\scan.pdf"; const destination = "Processed\\7-scan.pdf";
+  const hashMismatch = smbState({ [source]: "source" }, { renameStatus: "NT_STATUS_NOT_SUPPORTED", uploadedBody: "different" });
+  await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, hashMismatch.dependencies), /verification failed/);
+  assert.equal(hashMismatch.files.has(source), true); assert.equal(hashMismatch.files.has(destination), true);
+  const disappeared = smbState({ [source]: "source" }, { renameStatus: "NT_STATUS_INVALID_PARAMETER", destinationDisappearsOnDownload: true });
+  await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, disappeared.dependencies));
+  assert.equal(disappeared.files.has(source), true);
+  const disappearedBeforeDelete = smbState({ [source]: "source" }, { renameStatus: "NT_STATUS_NOT_SUPPORTED", destinationDisappearsBeforeDelete: true });
+  await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, disappearedBeforeDelete.dependencies), /disappeared before source deletion/);
+  assert.equal(disappearedBeforeDelete.files.has(source), true);
+  const deletionFailure = smbState({ [source]: "source" }, { renameStatus: "NT_STATUS_NOT_SUPPORTED", deleteFails: true });
+  await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, deletionFailure.dependencies));
+  assert.equal(deletionFailure.files.has(source), true); assert.equal(deletionFailure.files.get(destination)?.toString(), "source");
+});
+test("Request Scan SMB diagnostics retain sanitized rename status without paths and record fallback result", async () => {
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const source = "Incoming\\patient-name.pdf"; const destination = "Processed\\7-patient-name.pdf";
+  const state = smbState({ [source]: "source" }, { renameStatus: "noise NT_STATUS_NOT_SUPPORTED /secret/patient-name.pdf" });
+  assert.equal(await reconcileRequestScanMove(settings, source, destination, state.dependencies, { jobId: 7, logDiagnostic(event, metadata) { diagnostics.push({ event, metadata }); } }), "moved");
+  const rename = diagnostics.find((value) => value.metadata.operation === "rename");
+  assert.equal(rename?.metadata.smbCode, "unknown"); assert.equal(rename?.metadata.nativeStatus, "NT_STATUS_NOT_SUPPORTED");
+  assert.equal(diagnostics.filter((value) => value.event === "request_scan_smb_failure").length, 1);
+  assert.deepEqual(diagnostics.at(-1)?.metadata.result, "moved"); assert.equal(diagnostics.at(-1)?.metadata.fallbackUsed, true);
+  const serialized = JSON.stringify(diagnostics);
+  assert.equal(serialized.includes("patient-name"), false); assert.equal(serialized.includes("/secret"), false);
+  assert.equal(serialized.includes("noise"), false);
+});
+test("Request Scan SMB native status extraction accepts only strict NT_STATUS tokens", () => {
+  assert.equal(classifySmbError(Object.assign(new Error("x"), { stderr: "prefix NT_STATUS_INVALID_PARAMETER suffix" }), "transfer").nativeStatus, "NT_STATUS_INVALID_PARAMETER");
+  assert.equal(classifySmbError(Object.assign(new Error("x"), { stderr: "NT_STATUS_ACCESS-DENIED" }), "transfer").nativeStatus, undefined);
+  assert.equal(classifySmbError(Object.assign(new Error("x"), { stderr: "status=INVALID_PARAMETER" }), "transfer").nativeStatus, undefined);
+});
+test("Request Scan full connection test archives and removes its synthetic artifact", async () => {
+  const state = smbState({});
+  await testRequestScanSmb({ ...settings, incomingSubfolder: "Requests\\Incoming", processedSubfolder: "Requests\\Processed", failedSubfolder: "Requests\\Failed" }, state.dependencies);
+  assert.equal([...state.files.keys()].some((name) => name.includes(".rispro-request-scan-workflow-")), false);
+  assert.equal(state.commands.some((command) => command.startsWith("rename") && command.includes("Requests\\\\Incoming") && command.includes("Requests\\\\Processed")), true);
+});
+test("Request Scan full connection test reports the failing archive stage and cleans partial artifacts", async () => {
+  const state = smbState({}, { renameStatus: "NT_STATUS_ACCESS_DENIED" });
+  await assert.rejects(() => testRequestScanSmb({ ...settings, incomingSubfolder: "Requests\\Incoming", processedSubfolder: "Requests\\Processed", failedSubfolder: "Requests\\Failed" }, state.dependencies), (error: Error) => {
+    assert.match(error.message, /archive reconciliation \(permission\)/);
+    assert.equal(error.message.includes("NT_STATUS_ACCESS_DENIED"), false);
+    assert.equal(error.message.includes("Requests\\"), false);
+    assert.equal(error.message.includes("user"), false);
+    assert.equal(error.message.includes("pass"), false);
+    return true;
+  });
+  assert.equal([...state.files.keys()].some((name) => name.includes(".rispro-request-scan-workflow-")), false);
 });
 test("Request Scan SMB failures emit classified path-free diagnostics", async () => {
   const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];

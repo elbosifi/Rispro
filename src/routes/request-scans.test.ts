@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { buildInlineContentDisposition, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
 import { parseRequestScanJobFilter, type RequestScanJob } from "../services/request-scan-service.js";
 
@@ -137,4 +138,14 @@ test("Retry queues the failed job and requests the controlled worker", async () 
   assert.deepEqual(events, ["queued", "triggered"]);
   assert.equal(result.job.status, "pending");
   assert.deepEqual(result.trigger, { status: "accepted" });
+});
+
+test("both Request Scan SMB test routes invoke the full archive workflow with existing role enforcement", async () => {
+  const [requestScans, settings] = await Promise.all([
+    readFile("src/routes/request-scans.ts", "utf8"),
+    readFile("src/routes/settings.ts", "utf8"),
+  ]);
+  assert.match(requestScans, /post\("\/archive-destination\/test", requireAnyRole\(\["supervisor", "super_admin"\]\).*await testRequestScanSmb\(settings\).*archiveWorkflowVerified: true/s);
+  assert.doesNotMatch(requestScans, /archive-destination\/test".*listRequestScanFiles/s);
+  assert.match(settings, /post\("\/request-scan-automation\/test".*request\.user\.role !== "super_admin".*await testRequestScanSmb\(await resolveRequestScanSettingsForTest.*archiveWorkflowVerified: true/s);
 });

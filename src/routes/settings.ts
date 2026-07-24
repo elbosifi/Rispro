@@ -244,7 +244,7 @@ settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
 
 settingsRouter.put("/request-scan-automation", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update Request Scan Automation settings."); res.json({ settings: await saveRequestScanSettings(asUnknownRecord(request.body ?? {}), request.user.sub as UserId) }); }));
-settingsRouter.post("/request-scan-automation/test", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can test Request Scan Automation settings."); await testRequestScanSmb(await resolveRequestScanSettingsForTest(asUnknownRecord(request.body ?? {}))); res.json({ ok: true }); }));
+settingsRouter.post("/request-scan-automation/test", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can test Request Scan Automation settings."); await testRequestScanSmb(await resolveRequestScanSettingsForTest(asUnknownRecord(request.body ?? {}))); res.json({ ok: true, archiveWorkflowVerified: true, checkedAt: new Date().toISOString() }); }));
 
 settingsRouter.put(
   "/passkeys/config",
