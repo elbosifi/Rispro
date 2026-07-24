@@ -6,6 +6,10 @@ import test from "node:test";
 import { sha256File } from "./backup-v3-checksums.js";
 import { backupV3SmbTransferProcessTimeoutMs, copyBackupV3ToSmbDestination, deleteBackupV3SmbDestinationCopy, retrieveBackupV3FromSmbDestination, testBackupV3SmbDestination, validateBackupV3SmbConfig, type BackupV3SmbDependencies } from "./backup-v3-smb-destination.js";
 
+function hasOperation(command: string, name: string): boolean {
+  return command.split(/;\s*/).some((operation) => operation.startsWith(`${name} `));
+}
+
 function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, Buffer>; commands: string[]; authFiles: string[]; timeouts: Array<{ command: string; timeout: number }> } {
   const files = new Map<string, Buffer>();
   const commands: string[] = [];
@@ -22,18 +26,25 @@ function fakeSmb(): { dependencies: BackupV3SmbDependencies; files: Map<string, 
       const smbCommand = String(args[args.indexOf("-c") + 1] || "");
       commands.push(smbCommand);
       timeouts.push({ command: smbCommand, timeout: options.timeout });
-      const parts = [...smbCommand.matchAll(/"((?:\\.|[^"\\])*)"/g)].map((match) => match[1]!.replace(/\\(.)/g, "$1"));
-      if (smbCommand.startsWith("put ")) {
-        files.set(parts[1]!, await fs.readFile(parts[0]!));
-      } else if (smbCommand.startsWith("get ")) {
-        await fs.writeFile(parts[1]!, files.get(parts[0]!) || Buffer.alloc(0));
-      } else if (smbCommand.startsWith("rename ")) {
-        const content = files.get(parts[0]!);
-        if (!content) throw new Error("missing remote file");
-        files.delete(parts[0]!);
-        files.set(parts[1]!, content);
-      } else if (smbCommand.startsWith("del ")) {
-        files.delete(parts[0]!);
+      let cwd = "";
+      for (const operation of smbCommand.split(/;\s*/)) {
+        const parts = [...operation.matchAll(/"((?:\\.|[^"\\])*)"/g)].map((match) => match[1]!.replace(/\\(.)/g, "$1"));
+        const remote = (value: string) => path.win32.normalize(path.win32.join("\\", cwd, value)).replace(/^\\+/, "");
+        if (operation.startsWith("cd ")) {
+          cwd = remote(parts[0]!);
+        } else if (operation.startsWith("put ")) {
+          files.set(remote(parts[1]!), await fs.readFile(parts[0]!));
+        } else if (operation.startsWith("get ")) {
+          await fs.writeFile(parts[1]!, files.get(remote(parts[0]!)) || Buffer.alloc(0));
+        } else if (operation.startsWith("rename ")) {
+          const source = remote(parts[0]!); const destination = remote(parts[1]!);
+          const content = files.get(source);
+          if (!content) throw new Error("missing remote file");
+          files.delete(source);
+          files.set(destination, content);
+        } else if (operation.startsWith("del ")) {
+          files.delete(remote(parts[0]!));
+        }
       }
     },
   };
@@ -55,11 +66,11 @@ test("SMB adapter restricts protocol to SMB2/3, uses an auth file, and verifies 
     assert.ok([...fake.files.keys()][0]?.endsWith("backup.rispro.zip"));
     assert.ok(fake.authFiles.every((content) => content.includes("password = super-secret")));
     assert.equal(fake.commands.some((command) => command.includes("super-secret")), false);
-    assert.ok(fake.commands.some((command) => command.startsWith("get ")));
-  assert.ok(fake.commands.some((command) => command.startsWith("rename ")));
+    assert.ok(fake.commands.some((command) => hasOperation(command, "get")));
+  assert.ok(fake.commands.some((command) => hasOperation(command, "rename")));
   const metadataTimeout = (config.timeoutSeconds + 5) * 1_000;
-  assert.ok(fake.timeouts.filter(({ command }) => command.startsWith("put ") || command.startsWith("get ")).every(({ timeout }) => timeout > metadataTimeout));
-  assert.ok(fake.timeouts.filter(({ command }) => command.startsWith("mkdir ") || command.startsWith("rename ")).every(({ timeout }) => timeout === metadataTimeout));
+  assert.ok(fake.timeouts.filter(({ command }) => hasOperation(command, "put") || hasOperation(command, "get")).every(({ timeout }) => timeout > metadataTimeout));
+  assert.ok(fake.timeouts.filter(({ command }) => hasOperation(command, "mkdir") || hasOperation(command, "rename")).every(({ timeout }) => timeout === metadataTimeout));
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -81,7 +92,7 @@ test("SMB transfer deadline scales safely and classifies child-process timeouts 
   const digest = await sha256File(source);
   try {
     await assert.rejects(
-      () => copyBackupV3ToSmbDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile(_command, args) { if (String(args.at(-1)).startsWith("put ")) { const error = new Error("Command timed out") as Error & { code: string; killed: boolean; signal: string }; error.code = "ETIMEDOUT"; error.killed = true; error.signal = "SIGTERM"; throw error; } } } }),
+      () => copyBackupV3ToSmbDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile(_command, args) { if (hasOperation(String(args.at(-1)), "put")) { const error = new Error("Command timed out") as Error & { code: string; killed: boolean; signal: string }; error.code = "ETIMEDOUT"; error.killed = true; error.signal = "SIGTERM"; throw error; } } } }),
       (error: Error) => error.message === "SMB archive transfer timed out." && !error.message.includes("super-secret")
     );
   } finally { await fs.rm(root, { recursive: true, force: true }); }
@@ -95,10 +106,10 @@ test("SMB cleanup is attempted after verification or rename failure and cannot r
   const commands: string[] = [];
   try {
     await assert.rejects(
-      () => copyBackupV3ToSmbDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile(_command, args) { const command = String(args.at(-1)); commands.push(command); if (command.startsWith("get ")) throw new Error("read-back failed"); if (command.startsWith("del ")) throw new Error("cleanup failed"); } } }),
+      () => copyBackupV3ToSmbDestination({ sourcePath: source, archiveName: "backup.rispro.zip", expectedSha256: digest.sha256, expectedByteSize: digest.byteSize, config, credentials: { username: "backup-user", password: "super-secret" }, dependencies: { async execFile(_command, args) { const command = String(args.at(-1)); commands.push(command); if (hasOperation(command, "get")) throw new Error("read-back failed"); if (hasOperation(command, "del")) throw new Error("cleanup failed"); } } }),
       /SMB destination operation failed\. Remote temporary-file cleanup also failed\./
     );
-    assert.ok(commands.some((command) => command.startsWith("del ")));
+    assert.ok(commands.some((command) => hasOperation(command, "del")));
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

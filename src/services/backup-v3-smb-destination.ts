@@ -32,10 +32,28 @@ const defaultDependencies: BackupV3SmbDependencies = {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] }); let settled = false;
       let timer: NodeJS.Timeout | undefined; let monitor: NodeJS.Timeout | undefined;
-      const finish = (error?: Error) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); if (monitor) clearInterval(monitor); if (error) { child.kill("SIGTERM"); reject(error); } else resolve(); };
+      let stdout = ""; let stderr = "";
+      const append = (current: string, chunk: string | Buffer) => `${current}${String(chunk)}`.slice(-options.maxBuffer);
+      child.stdout?.on("data", (chunk: string | Buffer) => { stdout = append(stdout, chunk); });
+      child.stderr?.on("data", (chunk: string | Buffer) => { stderr = append(stderr, chunk); });
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (monitor) clearInterval(monitor);
+        if (error) {
+          Object.assign(error, { stdout, stderr });
+          child.kill("SIGTERM");
+          reject(error);
+        } else resolve();
+      };
       timer = setTimeout(() => finish(Object.assign(new Error("SMB archive transfer timed out."), { code: "ETIMEDOUT" })), options.timeout);
       monitor = setInterval(() => { fs.stat(destination).then((stat) => { if (stat.size > maxBytes) finish(new HttpError(413, "Retrieved backup exceeds the configured maximum archive size.")); }).catch(() => undefined); }, 25);
-      child.once("error", (error) => finish(error)); child.once("close", (code) => { clearTimeout(timer); clearInterval(monitor); if (code === 0) finish(); else finish(new Error("SMB destination operation failed.")); });
+      child.once("error", (error) => finish(error));
+      child.once("close", (code) => {
+        if (code === 0 && !extractSmbFailureStatus(`${stdout}\n${stderr}`)) finish();
+        else finish(new Error("SMB destination operation failed."));
+      });
     });
   },
 };
@@ -56,6 +74,31 @@ function safeRemoteFilename(value: string): string {
 export function smbQuote(value: string): string {
   if (/[\r\n\0]/.test(value)) throw new HttpError(400, "SMB command contains unsafe text.");
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
+export function splitSmbRemotePath(value: string): { parent: string; basename: string } {
+  const normalized = String(value).normalize("NFC").replace(/\//g, "\\");
+  const segments = normalized.split("\\");
+  if (
+    !normalized
+    || normalized.startsWith("\\")
+    || normalized.endsWith("\\")
+    || segments.some((segment) => (
+      !segment
+      || segment === "."
+      || segment === ".."
+      || /[\u0000-\u001f\u007f<>:"|?*]/.test(segment)
+      || /[ .]$/.test(segment)
+      || Buffer.byteLength(segment, "utf8") > 240
+    ))
+  ) throw new HttpError(400, "SMB remote path is unsafe.");
+  return { parent: segments.slice(0, -1).join("\\"), basename: segments.at(-1)! };
+}
+
+function commandInSmbRemoteDirectory(remotePath: string, command: (quotedBasename: string) => string): string {
+  const { parent, basename } = splitSmbRemotePath(remotePath);
+  const operation = command(smbQuote(basename));
+  return parent ? `cd ${smbQuote(parent)}; ${operation}` : operation;
 }
 
 export function validateBackupV3SmbConfig(value: unknown): BackupV3SmbConfig {
@@ -108,9 +151,15 @@ function isChildProcessTimeout(error: unknown): boolean {
   return child.code === "ETIMEDOUT" || (child.killed === true && typeof child.signal === "string") || /(?:process|command|child).*tim(?:e|ed)[ -]?out|ETIMEDOUT/i.test(text);
 }
 
+function extractSmbFailureStatus(value: string): string | undefined {
+  return [...value.toUpperCase().matchAll(/(?:^|[^A-Z0-9_])(NT_STATUS_[A-Z0-9_]+)(?![A-Z0-9_-])/g)]
+    .map((match) => match[1]!)
+    .find((status) => status !== "NT_STATUS_OK");
+}
+
 export function classifySmbError(error: unknown, operation: SmbOperationKind): SmbCommandError {
-  const text = error instanceof Error ? `${error.message} ${String((error as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "")} ${String((error as NodeJS.ErrnoException).code || "")}`.toUpperCase() : String(error).toUpperCase();
-  const nativeStatus = text.match(/(?:^|[^A-Z0-9_])(NT_STATUS_[A-Z0-9_]+)(?![A-Z0-9_-])/)?.[1];
+  const text = error instanceof Error ? `${error.message} ${String((error as NodeJS.ErrnoException & { stdout?: unknown }).stdout || "")} ${String((error as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "")} ${String((error as NodeJS.ErrnoException).code || "")}`.toUpperCase() : String(error).toUpperCase();
+  const nativeStatus = extractSmbFailureStatus(text);
   if (operation === "transfer" && isChildProcessTimeout(error)) return new SmbCommandError(504, "SMB archive transfer timed out.", "timeout", nativeStatus, error);
   if (/LOGON_FAILURE|NT_STATUS_WRONG_PASSWORD|AUTHENTICATION/.test(text)) return new SmbCommandError(502, "SMB authentication failed.", "authentication", nativeStatus, error);
   if (/BAD_NETWORK_NAME|NO_SUCH_SHARE/.test(text)) return new SmbCommandError(502, "SMB share not found.", "share_not_found", nativeStatus, error);
@@ -139,15 +188,24 @@ export async function withBackupV3SmbSession<T>(configInput: unknown, credential
       ? backupV3SmbTransferProcessTimeoutMs(expectedByteSize || 0)
       : (config.timeoutSeconds + 5) * 1_000;
     try {
-      return await dependencies.execFile("smbclient", commandArgs(command), { timeout: processTimeout, maxBuffer: 1024 * 1024 });
+      const result = await dependencies.execFile("smbclient", commandArgs(command), { timeout: processTimeout, maxBuffer: 1024 * 1024 });
+      const output = result as { stdout?: unknown; stderr?: unknown } | undefined;
+      const nativeStatus = extractSmbFailureStatus(`${String(output?.stdout || "")}\n${String(output?.stderr || "")}`);
+      if (nativeStatus) throw Object.assign(new Error("SMB destination operation failed."), { stdout: output?.stdout, stderr: output?.stderr || nativeStatus });
+      return result;
     } catch (error) {
+      if (error instanceof SmbCommandError) throw error;
       throw classifySmbError(error, operation);
     }
   };
   const download = async (remote: string, local: string, maxBytes: number) => {
     const options = { timeout: backupV3SmbTransferProcessTimeoutMs(maxBytes), maxBuffer: 1024 * 1024 };
-    try { await (dependencies.downloadFile || defaultDependencies.downloadFile!)("smbclient", commandArgs(`get ${smbQuote(remote)} ${smbQuote(local)}`), options, local, maxBytes); }
-    catch (error) { throw error instanceof HttpError ? error : classifySmbError(error, "transfer"); }
+    const command = commandInSmbRemoteDirectory(remote, (quotedBasename) => `get ${quotedBasename} ${smbQuote(local)}`);
+    try { await (dependencies.downloadFile || defaultDependencies.downloadFile!)("smbclient", commandArgs(command), options, local, maxBytes); }
+    catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw classifySmbError(error, "transfer");
+    }
   };
   try { return await action(run, config, tempDir, download); }
   finally { await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
@@ -157,12 +215,12 @@ export async function ensureBackupV3SmbDirectory(run: (command: string, operatio
   const segments = config.subfolder ? config.subfolder.split("\\") : [];
   let current = "";
   for (const segment of segments) {
+    const parent = current;
     current = current ? `${current}\\${segment}` : segment;
-    try { await run(`mkdir ${smbQuote(current)}`); }
+    const mkdir = parent ? `cd ${smbQuote(parent)}; mkdir ${smbQuote(segment)}` : `mkdir ${smbQuote(segment)}`;
+    try { await run(mkdir); }
     catch (error) {
-      if (!(error instanceof HttpError) || !/operation failed/i.test(error.message)) throw error;
-      // smbclient reports an existing directory as a generic server failure;
-      // a subsequent cd proves it is a usable directory without masking access errors.
+      if (!(error instanceof SmbCommandError) || error.smbCode !== "already_exists") throw error;
       await run(`cd ${smbQuote(current)}`);
     }
   }
@@ -175,8 +233,8 @@ export async function testBackupV3SmbDestination(config: unknown, credentials: B
     const remoteName = `.rispro-write-test-${crypto.randomUUID()}`;
     const remotePath = parsed.subfolder ? `${parsed.subfolder}\\${remoteName}` : remoteName;
     await fs.writeFile(localPath, "RISpro backup destination test");
-    await run(`put ${smbQuote(localPath)} ${smbQuote(remotePath)}`);
-    await run(`del ${smbQuote(remotePath)}`);
+    await run(commandInSmbRemoteDirectory(remotePath, (quotedBasename) => `put ${smbQuote(localPath)} ${quotedBasename}`));
+    await run(commandInSmbRemoteDirectory(remotePath, (quotedBasename) => `del ${quotedBasename}`));
   }, dependencies);
 }
 
@@ -199,15 +257,15 @@ export async function copyBackupV3ToSmbDestination(input: {
     const remoteFinal = config.subfolder ? `${config.subfolder}\\${archiveName}` : archiveName;
     const readBackPath = path.join(tempDir, "read-back.bin");
     try {
-      await run(`put ${smbQuote(input.sourcePath)} ${smbQuote(remoteTemp)}`, "transfer", input.expectedByteSize);
-      await run(`get ${smbQuote(remoteTemp)} ${smbQuote(readBackPath)}`, "transfer", input.expectedByteSize);
+      await run(commandInSmbRemoteDirectory(remoteTemp, (quotedBasename) => `put ${smbQuote(input.sourcePath)} ${quotedBasename}`), "transfer", input.expectedByteSize);
+      await run(commandInSmbRemoteDirectory(remoteTemp, (quotedBasename) => `get ${quotedBasename} ${smbQuote(readBackPath)}`), "transfer", input.expectedByteSize);
       const readBack = await sha256File(readBackPath);
       if (readBack.byteSize !== input.expectedByteSize || readBack.sha256 !== input.expectedSha256) throw new HttpError(500, "SMB upload verification failed.");
-      await run(`rename ${smbQuote(remoteTemp)} ${smbQuote(remoteFinal)}`);
+      await run(commandInSmbRemoteDirectory(remoteTemp, (quotedTemporaryName) => `rename ${quotedTemporaryName} ${smbQuote(archiveName)}`));
       return { remotePath: remoteFinal, byteSize: readBack.byteSize, sha256: readBack.sha256 };
     } catch (error) {
       let cleanupFailed = false;
-      await run(`del ${smbQuote(remoteTemp)}`).catch(() => { cleanupFailed = true; });
+      await run(commandInSmbRemoteDirectory(remoteTemp, (quotedBasename) => `del ${quotedBasename}`)).catch(() => { cleanupFailed = true; });
       if (cleanupFailed && error instanceof HttpError) {
         throw new HttpError(error.statusCode, `${error.message} Remote temporary-file cleanup also failed.`);
       }
@@ -223,7 +281,7 @@ export async function deleteBackupV3SmbDestinationCopy(input: { remotePath: stri
   if (!archiveName.endsWith(".rispro.zip")) throw new HttpError(400, "Remote backup archive path is unsafe.");
   await withBackupV3SmbSession(input.config, input.credentials, async (run, config) => {
     const target = config.subfolder ? `${config.subfolder}\\${archiveName}` : archiveName;
-    await run(`del ${smbQuote(target)}`);
+    await run(commandInSmbRemoteDirectory(target, (quotedBasename) => `del ${quotedBasename}`));
   }, input.dependencies);
 }
 
@@ -236,7 +294,7 @@ export async function retrieveBackupV3FromSmbDestination(input: { remotePath: st
     const temporaryPath = path.join(input.stagingDir, `.${archiveName}.${crypto.randomUUID()}.partial`);
     const finalPath = path.join(input.stagingDir, archiveName);
     try {
-      const metadata = await run(`allinfo ${smbQuote(remotePath)}`);
+      const metadata = await run(commandInSmbRemoteDirectory(remotePath, (quotedBasename) => `allinfo ${quotedBasename}`));
       const declared = Number(String((metadata as { stdout?: string } | undefined)?.stdout || "").match(/\bsize:\s*(\d+)/i)?.[1]);
       if (Number.isFinite(declared) && declared > input.maximumByteSize) throw new HttpError(413, "Retrieved backup exceeds the configured maximum archive size.");
       await download(remotePath, temporaryPath, input.maximumByteSize);
