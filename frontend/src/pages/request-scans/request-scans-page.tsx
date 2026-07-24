@@ -39,7 +39,9 @@ type RequestScanStatus = {
   processedToday: number;
   duplicatesToday: number;
   failed: number;
+  devResetEnabled?: boolean;
 };
+type DevResetPreview = { enabled: boolean; jobs: number; pending: number; processing: number; failed: number; processed: number; duplicates: number; automatedDocuments: number; filesIncoming: number; filesProcessed: number; filesFailed: number; pathConflicts: number };
 type RequestScanTab = "active" | "processed" | "duplicate" | "failed" | "all";
 type WorkerTrigger = { status: "accepted" | "already_running" | "disabled" };
 
@@ -100,6 +102,7 @@ export default function RequestScansPage() {
   const [appointmentId, setAppointmentId] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [highlightedJobId, setHighlightedJobId] = useState<number | null>(null);
+  const [resetConfirmation, setResetConfirmation] = useState("");
   const objectUrl = useRef<string | null>(null);
   const previewRequest = useRef(0);
   const navigate = useNavigate();
@@ -135,6 +138,7 @@ export default function RequestScansPage() {
     queryFn: () => request<{ appointments: Appointment[] }>(`/eligible-appointments?q=${encodeURIComponent(query)}`),
     enabled: Boolean(assign),
   });
+  const resetPreview = useQuery({ queryKey: ["request-scans-dev-reset-preview"], queryFn: () => request<DevResetPreview>("/dev-reset/preview"), enabled: Boolean(statusData?.devResetEnabled) });
 
   const refreshRequestScans = () => {
     void client.invalidateQueries({ queryKey: ["request-scans"] });
@@ -179,6 +183,10 @@ export default function RequestScansPage() {
       void client.invalidateQueries({ queryKey: ["request-scans", "active"] });
       void client.invalidateQueries({ queryKey: ["request-scans-status"] });
     },
+  });
+  const devReset = useMutation({
+    mutationFn: () => request<{ completed: true }>("/dev-reset", { method: "POST", body: JSON.stringify({ confirmation: resetConfirmation }) }),
+    onSuccess: () => { setResetConfirmation(""); setNotice("Request Scan development data was reset. Incoming files will be discovered as new jobs."); refreshRequestScans(); void client.invalidateQueries({ queryKey: ["request-scans-dev-reset-preview"] }); },
   });
 
   const cards = status.isLoading
@@ -279,8 +287,8 @@ export default function RequestScansPage() {
                     {job.appointment_id && <button className="btn-secondary text-xs" onClick={() => navigate(`/registrations?appointmentId=${job.appointment_id}`)}>Open appointment</button>}
                     {job.document_id && <a className="btn-secondary text-xs" href={`/api/documents/${job.document_id}/view`} target="_blank" rel="noreferrer">Open document</a>}
                     {job.status === "failed" && <>
-                      <button className="btn-secondary text-xs" disabled={queuing} onClick={() => retry.mutate(job.id)}>{queuing ? "Queuing..." : "Retry"}</button>
-                      <button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/return-to-incoming` })}>Return</button>
+                      <button className="btn-secondary text-xs" disabled={queuing} onClick={() => retry.mutate(job.id)}>{queuing ? "Queuing..." : job.attachment_completed_at && job.document_id ? "Resume archive" : "Retry"}</button>
+                      {!job.attachment_completed_at && !job.document_id && <button className="btn-secondary text-xs" onClick={() => action.mutate({ url: `/${job.id}/return-to-incoming` })}>Return</button>}
                       <button className="btn-secondary text-xs" onClick={() => { setAssign(job); setAppointmentId(""); }}>Manually assign</button>
                     </>}
                   </td>
@@ -288,6 +296,7 @@ export default function RequestScansPage() {
               })}</tbody>
             </table>
           </div>}
+    {statusData?.devResetEnabled && <section className="rounded-lg border border-red-300 bg-red-50 p-4"><h2 className="font-semibold text-red-900">Development tools</h2><p className="mt-1 text-sm text-red-800">Reset Request Scan development data</p>{resetPreview.data && <div className="mt-2 grid gap-1 text-xs text-red-900 sm:grid-cols-3"><span>Jobs: {resetPreview.data.jobs}</span><span>Automated documents: {resetPreview.data.automatedDocuments}</span><span>Incoming files: {resetPreview.data.filesIncoming}</span><span>Processed files: {resetPreview.data.filesProcessed}</span><span>Failed files: {resetPreview.data.filesFailed}</span><span>Path conflicts: {resetPreview.data.pathConflicts}</span></div>}<label className="mt-3 block text-sm">Type RESET REQUEST SCANS<input className="input-premium mt-1 w-full" value={resetConfirmation} onChange={(event) => setResetConfirmation(event.target.value)} /></label><button className="mt-3 rounded bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={resetConfirmation !== "RESET REQUEST SCANS" || devReset.isPending} onClick={() => devReset.mutate()}>{devReset.isPending ? "Resetting..." : "Reset Request Scan development data"}</button>{devReset.isError && <p className="mt-2 text-sm text-red-700">{devReset.error.message}</p>}</section>}
     {preview && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={closePreview}><section className="mx-auto h-full max-w-5xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><div className="mb-3 flex justify-between"><h2 className="font-semibold">{preview.filename}</h2><button className="btn-secondary" onClick={closePreview}>Close</button></div>{previewLoading ? <p>Loading preview...</p> : previewError ? <p className="text-red-700">Preview could not be loaded: {previewError}</p> : previewUrl && (isPdf(preview) ? <iframe className="h-[85%] w-full" src={previewUrl} title="Request scan preview" /> : <img className="max-h-[85%] max-w-full object-contain" src={previewUrl} alt={preview.filename} />)}</section></div>}
     {assign && <div className="fixed inset-0 z-50 bg-black/40 p-6" onClick={() => setAssign(null)}><section className="mx-auto max-w-xl rounded-lg bg-background p-4" onClick={(event) => event.stopPropagation()}><h2 className="text-lg font-semibold">Manually assign request scan</h2><p className="mt-1 text-sm text-muted-foreground">{assign.filename}</p><input className="input-premium mt-3 w-full" placeholder="Search accession or patient" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input-premium mt-3 w-full" value={appointmentId} onChange={(event) => setAppointmentId(event.target.value)}><option value="">Select an eligible V2 appointment</option>{appointments.data?.appointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{appointment.accession_number} · {appointment.patient_name ?? "Patient"}</option>)}</select><div className="mt-4 flex gap-2"><button className="btn-primary" disabled={!appointmentId || action.isPending} onClick={() => action.mutate({ url: `/${assign.id}/manual-assign`, body: { appointmentId: Number(appointmentId) } }, { onSuccess: () => setAssign(null) })}>Attach and process</button><button className="btn-secondary" onClick={() => setAssign(null)}>Cancel</button></div></section></div>}
   </main>;

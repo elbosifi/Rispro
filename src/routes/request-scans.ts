@@ -10,6 +10,7 @@ import { isRequestScanWorkerHeartbeatFresh, readRequestScanWorkerRuntime, reques
 import type { RequestScanJob } from "../services/request-scan-service.js";
 import { getTripoliToday } from "../utils/date.js";
 import path from "node:path";
+import { isRequestScanDevResetEnabled, previewRequestScanDevReset, resetRequestScanDevelopmentData } from "../services/request-scan-dev-reset-service.js";
 
 const allowed = ["receptionist", "supervisor", "super_admin", "doctor"] as const;
 export const requestScansRouter = express.Router();
@@ -63,10 +64,12 @@ export async function queueRequestScanRetry(id: number, dependencies: RequestSca
 }
 
 requestScansRouter.get("/", asyncRoute(async (req: Request, res: Response) => { res.json({ jobs: (await listRequestScanJobs(req.query.status, req.query.category)).map(withSafeRequestScanFilename) }); }));
-requestScansRouter.get("/status", asyncRoute(async (_req: Request, res: Response) => { res.json(await getRequestScanStatus()); }));
+requestScansRouter.get("/status", asyncRoute(async (req: Request, res: Response) => { res.json({ ...(await getRequestScanStatus()), devResetEnabled: isRequestScanDevResetEnabled() && req.user!.role === "super_admin" }); }));
+requestScansRouter.get("/dev-reset/preview", requireAnyRole(["super_admin"]), asyncRoute(async (_req: Request, res: Response) => { res.json(await previewRequestScanDevReset()); }));
 requestScansRouter.get("/eligible-appointments", asyncRoute(async (req: Request, res: Response) => { const q = String(req.query.q || "").trim(); const { rows } = await pool.query(`select b.id, ('V2-' || lpad(b.id::text,6,'0')) as accession_number, coalesce(p.english_full_name,p.arabic_full_name) as patient_name from appointments_v2.bookings b join patients p on p.id=b.patient_id where b.status not in ('cancelled','discontinued','voided') and ($1='' or ('V2-' || lpad(b.id::text,6,'0')) ilike $2 or p.english_full_name ilike $2 or p.arabic_full_name ilike $2) order by b.booking_date desc,b.id desc limit 20`, [q, `%${q}%`]); res.json({ appointments: rows }); }));
 requestScansRouter.get("/:id/file", asyncRoute(async (req: Request, res: Response) => { const { job, buffer } = await downloadRequestScanJobFile(positive(req.params.id, "id")); sendRequestScanFileResponse(res, job, buffer); }));
 requestScansRouter.post("/run-now", asyncRoute(async (_req: Request, res: Response) => { res.status(202).json({ ok: true, trigger: await requestRequestScanRunNow() }); }));
+requestScansRouter.post("/dev-reset", requireAnyRole(["super_admin"]), asyncRoute(async (req: Request, res: Response) => { const body = asUnknownRecord(req.body); res.json(await resetRequestScanDevelopmentData(Number(req.user!.sub), body.confirmation)); }));
 requestScansRouter.post("/bulk-retry", asyncRoute(async (req: Request, res: Response) => { const result = await bulkRetryRequestScanJobs(jobIds(asUnknownRecord(req.body).jobIds)); const trigger = result.queued.length ? await requestRequestScanRunNow() : null; await auditBulkRequestScanRetry(result, Number(req.user!.sub), trigger?.status ?? "not_triggered"); res.status(202).json({ queued: result.queued.map(withSafeRequestScanFilename), failed: result.failed, trigger }); }));
 requestScansRouter.post("/bulk-dismiss", requireAnyRole(["supervisor", "super_admin"]), asyncRoute(async (req: Request, res: Response) => { const body = asUnknownRecord(req.body); res.json({ jobs: (await bulkDismissRequestScanJobs(jobIds(body.jobIds), Number(req.user!.sub), body.reason)).map(withSafeRequestScanFilename) }); }));
 requestScansRouter.post("/:id/start-now", asyncRoute(async (req: Request, res: Response) => { const job = await prioritizePendingRequestScanJob(positive(req.params.id, "id")); res.status(202).json({ job: withSafeRequestScanFilename(job), trigger: await requestRequestScanRunNow() }); }));

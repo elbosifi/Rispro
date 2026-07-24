@@ -9,12 +9,15 @@ import { resolveStoredPath } from "./document-storage-path.js";
 import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js";
 import {
   findEligibleRequestScanAppointment,
+  downloadRequestScanJobFile,
   getRequestScanJob,
   listRequestScanJobs,
   manuallyAssignRequestScan,
   processClaimedRequestScanJob,
   processRequestScanJob,
+  reconcileIncomingRequestScanFile,
   requestStopRequestScanJob,
+  returnRequestScanToIncoming,
   retryRequestScanJob,
   runRequestScanCycle,
   type RequestScanServiceDependencies,
@@ -562,6 +565,57 @@ test("retry moves a failed Request Scan back to the durable pending queue withou
     readSettings: async () => settings,
     moveFile: async () => { throw new Error("must not move"); },
   }), /Only visible failed request scans can be retried/);
+});
+
+test("Return rejects attached jobs and durable pre-attachment Return completes or repairs after interruption", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const attachedId = await createJob();
+  const attached = await processRequestScanJob(attachedId, settings, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true }));
+  assert.ok(attached.attachment_completed_at); await assert.rejects(() => returnRequestScanToIncoming(attachedId, { readSettings: async () => settings }), /already attached.*Resume archive/i);
+
+  const jobId = await createJob("failed"); let reconciliations = 0; let triggers = 0;
+  const returned = await returnRequestScanToIncoming(jobId, { readSettings: async () => settings, reconcileMove: async () => { reconciliations += 1; return "moved"; }, triggerWorker: async () => { triggers += 1; return {} as never; } });
+  assert.equal(returned.status, "pending"); assert.ok(returned.return_requested_at); assert.ok(returned.return_completed_at); assert.match(returned.source_relative_path, /Incoming/); assert.equal(reconciliations, 1); assert.equal(triggers, 1);
+
+  const interruptedId = await createJob("failed"); const interrupted = await getRequestScanJob(interruptedId);
+  const destinationPath = `${settings.incomingSubfolder}\\${interrupted.filename}`;
+  await pool.query("update request_scan_jobs set return_requested_at=now(),return_source_path=source_relative_path,return_destination_path=$2 where id=$1", [interruptedId, destinationPath]);
+  const repaired = await returnRequestScanToIncoming(interruptedId, { readSettings: async () => settings, reconcileMove: async () => "already_moved", triggerWorker: async () => ({} as never) });
+  assert.equal(repaired.status, "pending"); assert.equal(repaired.source_relative_path, destinationPath); assert.ok(repaired.return_completed_at);
+});
+
+test("Incoming ownership collisions are visible and completed Returns reactivate their terminal row", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const owner = await createJob("pending", "owned.pdf"); await pool.query("update request_scan_jobs set source_relative_path=$2 where id=$1", [owner, `${settings.incomingSubfolder}\\owned.pdf`]); const ownerRow = await getRequestScanJob(owner);
+  const failed = await createJob("failed", "owned.pdf");
+  await assert.rejects(() => returnRequestScanToIncoming(failed, { readSettings: async () => settings, reconcileMove: async () => "moved", triggerWorker: async () => ({} as never) }), /already owns/);
+  const conflict = await reconcileIncomingRequestScanFile(ownerRow.filename, ownerRow.source_relative_path);
+  assert.equal(conflict.outcome, "active"); assert.equal(Number(conflict.job.id), owner);
+
+  const terminal = await createJob("processed", "terminal.pdf"); const terminalRow = await getRequestScanJob(terminal);
+  const exposed = await reconcileIncomingRequestScanFile(terminalRow.filename, terminalRow.source_relative_path);
+  assert.equal(exposed.outcome, "orphan_conflict"); assert.equal(exposed.job.status, "failed"); assert.match(exposed.job.error_message || "", /terminal Request Scan row/);
+
+  const returnedId = await createJob("failed", "returned.pdf"); const returnedRow = await getRequestScanJob(returnedId);
+  await pool.query("update request_scan_jobs set return_requested_at=now(),return_destination_path=source_relative_path,return_completed_at=now() where id=$1", [returnedId]);
+  const reactivated = await reconcileIncomingRequestScanFile(returnedRow.filename, returnedRow.source_relative_path);
+  assert.equal(reactivated.outcome, "reactivated"); assert.equal(reactivated.job.status, "pending");
+});
+
+test("identifier checkpoint skips recognition and preview prefers document then archive fallbacks", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const jobId = await createJob(); const recognitionCalls: string[] = [];
+  await pool.query("update request_scan_jobs set appointment_id=$2,barcode_value=$3,identifier_verified_at=now(),identifier_strategy='document_accession' where id=$1", [jobId, booking.id, booking.accession]);
+  const processed = await processRequestScanJob(jobId, settings, dependencies({ ok: false, reason: "no_barcode" }, { recognitionCalls }));
+  assert.equal(processed.status, "processed"); assert.equal(recognitionCalls.length, 0);
+
+  const previewJob = { ...(await getRequestScanJob(jobId)), document_id: 999, intended_destination_path: "Processed\\archive.pdf", source_relative_path: "Incoming\\missing.pdf" };
+  const documentBytes = Buffer.from("attached document");
+  const attachedPreview = await downloadRequestScanJobFile(jobId, { readSettings: async () => settings, getJob: async () => previewJob, getDocument: async () => ({ id: 999, stored_path: "safe" } as never), readFile: async () => documentBytes, downloadFile: async () => { throw new Error("SMB must not be used"); } });
+  assert.deepEqual(attachedPreview.buffer, documentBytes);
+  const tried: string[] = [];
+  const archivePreview = await downloadRequestScanJobFile(jobId, { readSettings: async () => settings, getJob: async () => ({ ...previewJob, document_id: null }), downloadFile: async (_settings, remote, local) => { tried.push(remote); if (remote.includes("missing")) throw Object.assign(new Error("No such file"), { code: "ENOENT" }); await fs.writeFile(local, "archive"); } });
+  assert.deepEqual(tried, ["Incoming\\missing.pdf", "Processed\\archive.pdf"]); assert.equal(archivePreview.buffer.toString(), "archive");
 });
 
 test("Stop before attachment prevents upload, moves to Failed, audits the user, and retry clears cancellation", async (t) => {

@@ -21,9 +21,11 @@ export async function claimRequestScanJob(jobId: number, workerId: string): Prom
 }
 export async function claimNextRequestScanJob(workerId: string): Promise<ClaimedRequestScanJob | null> {
   const token = crypto.randomUUID();
-  const { rows } = await pool.query(`with active_owner as (
+  const { rows } = await pool.query(`with reset_gate as (
+    select pg_try_advisory_xact_lock(1421421) as allowed
+  ), active_owner as (
     select 1 from request_scan_worker_runtime
-    where singleton_key=1 and worker_id=$1 and worker_heartbeat_at >= now()-($4::int * interval '1 millisecond')
+    where singleton_key=1 and worker_id=$1 and worker_heartbeat_at >= now()-($4::int * interval '1 millisecond') and exists(select 1 from reset_gate where allowed)
   ), candidate as (
     select id from request_scan_jobs
     where status='pending' and exists (select 1 from active_owner)
@@ -50,7 +52,7 @@ export async function beginRequestScanAttachment(jobId: number, lease: RequestSc
   throw new RequestScanLeaseLostError();
 }
 export async function updateRequestScanCheckpoint(jobId: number, lease: RequestScanLease, values: Record<string, unknown>): Promise<RequestScanJob> {
-  const allowed = new Set(["appointment_id", "document_id", "barcode_value", "attachment_completed_at", "attachment_created", "intended_destination_path", "source_relative_path", "source_moved_at"]);
+  const allowed = new Set(["appointment_id", "document_id", "barcode_value", "identifier_verified_at", "identifier_strategy", "attachment_completed_at", "attachment_created", "intended_destination_path", "source_relative_path", "source_moved_at"]);
   const names = Object.keys(values);
   if (!names.length || names.some((name) => !allowed.has(name))) throw new Error("Invalid Request Scan checkpoint update.");
   const params = names.map((name) => values[name]);

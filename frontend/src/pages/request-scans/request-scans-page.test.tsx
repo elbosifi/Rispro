@@ -189,6 +189,15 @@ describe("RequestScansPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Attach and process" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/request-scans/9/manual-assign"), expect.objectContaining({ method: "POST" })));
   });
+  it("uses Resume archive and hides Return after attachment", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input); if (url.endsWith("/status")) return response(status);
+      if (url.includes("?status=failed")) return response({ jobs: [{ ...failedJob, attachment_completed_at: "2026-07-24T10:00:00Z", document_id: 55 }] });
+      return response({ jobs: [] });
+    });
+    renderPage(); fireEvent.click(await screen.findByRole("button", { name: "Failed (1)" })); await screen.findByText("failed.jpg");
+    expect(screen.getByRole("button", { name: "Resume archive" })).toBeTruthy(); expect(screen.queryByRole("button", { name: "Return" })).toBeNull();
+  });
 
   it("loads PDF previews through a private Blob URL", async () => {
     const createObjectURL = vi.fn().mockReturnValue("blob:pdf-preview");
@@ -241,5 +250,18 @@ describe("RequestScansPage", () => {
     expect(invalidations.every((key) => key.includes("request-scan"))).toBe(true);
     expect(source).not.toContain("window.location.reload");
     expect(source).not.toContain("navigate(0)");
+  });
+  it("shows development reset only when enabled and requires exact confirmation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/status")) return response({ ...status, devResetEnabled: true });
+      if (url.endsWith("/dev-reset/preview")) return response({ enabled: true, jobs: 2, pending: 0, processing: 0, failed: 2, processed: 0, duplicates: 0, automatedDocuments: 1, filesIncoming: 0, filesProcessed: 1, filesFailed: 1, pathConflicts: 0 });
+      if (url.endsWith("/dev-reset")) return response({ completed: true });
+      return response({ jobs: [] });
+    });
+    renderPage(); const button = await screen.findByRole("button", { name: "Reset Request Scan development data" }); expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Type RESET REQUEST SCANS/), { target: { value: "RESET REQUEST SCANS" } }); expect(button.hasAttribute("disabled")).toBe(false); fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/request-scans/dev-reset", expect.objectContaining({ method: "POST" })));
+    expect(await screen.findByText("Request Scan development data was reset. Incoming files will be discovered as new jobs.")).toBeTruthy();
   });
 });

@@ -473,7 +473,9 @@ Compose runs Request Scan document processing in `request-scan-worker`. The web 
 
 The safe production default is `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. A controlled deployment may set it to `2` to process two independent files, while every page, image pass, QR tile, decoder attempt, SMB operation, attachment, and move within each document remains sequential. Values above `2` are unsupported.
 
-Compose operators control the mode without editing YAML. The normal dedicated settings are `REQUEST_SCAN_APP_WORKER_ENABLED=false`, `REQUEST_SCAN_DEDICATED_WORKER_ENABLED=true`, and `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. For embedded sequential rollback, set the first value to `true`, the second to `false`, retain concurrency `1`, and restart the services. Scale `request-scan-worker` to zero while it is disabled so Docker does not restart an intentionally disabled entrypoint. Leave migrations 139 through 141 in place.
+Compose operators control the mode without editing YAML. The normal dedicated settings are `REQUEST_SCAN_APP_WORKER_ENABLED=false`, `REQUEST_SCAN_DEDICATED_WORKER_ENABLED=true`, and `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. For embedded sequential rollback, set the first value to `true`, the second to `false`, retain concurrency `1`, and restart the services. Scale `request-scan-worker` to zero while it is disabled so Docker does not restart an intentionally disabled entrypoint. Leave migrations 139 through 142 in place.
+
+The full Request Scan reset is a development-only recovery tool. It requires both a non-production `NODE_ENV` and the explicit `RISPRO_REQUEST_SCAN_DEV_RESET_ENABLED=true` opt-in, plus Super Administrator authorization, an idle worker, and the exact confirmation phrase shown in the UI. Production rejects the reset even if the flag is accidentally set.
 
 ### MWL Not Responding
 
