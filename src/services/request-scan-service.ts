@@ -152,7 +152,9 @@ async function hydrateMatchedAppointments(jobs: RequestScanJob[]): Promise<Reque
 
 export async function getRequestScanJob(id: number): Promise<RequestScanJob> { const { rows } = await pool.query("select * from request_scan_jobs where id=$1", [id]); if (!rows[0]) throw new HttpError(404, "Request scan not found."); return (await hydrateMatchedAppointments([rows[0] as RequestScanJob]))[0]!; }
 
-type IncomingReconciliation = { job: RequestScanJob; outcome: "active" | "created" | "reactivated" | "orphan_conflict" };
+const INCOMING_ORPHAN_CONFLICT_MESSAGE = "An Incoming file is owned by a terminal Request Scan row without a completed Return checkpoint. Manual reconciliation is required.";
+const ARCHIVE_PENDING_MESSAGE = "Document attached successfully. Archive movement is pending.";
+export type IncomingReconciliation = { job: RequestScanJob; outcome: "active" | "created" | "reactivated" | "archive_pending" | "orphan_conflict" };
 export async function reconcileIncomingRequestScanFile(filename: string, sourceRelativePath: string): Promise<IncomingReconciliation> {
   const client = await pool.connect();
   try {
@@ -160,13 +162,21 @@ export async function reconcileIncomingRequestScanFile(filename: string, sourceR
     const owned = await client.query<RequestScanJob>(`select * from request_scan_jobs where source_relative_path=$1 or (return_destination_path=$1 and return_requested_at is not null) order by case when source_relative_path=$1 then 0 else 1 end,id for update`, [sourceRelativePath]);
     const active = owned.rows.find((row) => row.status === "pending" || row.status === "processing");
     if (active) { await client.query("commit"); return { job: active, outcome: "active" }; }
+    const attached = owned.rows.find((row) => row.document_id != null && row.attachment_completed_at != null);
+    if (attached) {
+      if (attached.error_message === INCOMING_ORPHAN_CONFLICT_MESSAGE && attached.failure_category === "internal_processing") {
+        const { rows } = await client.query<RequestScanJob>("update request_scan_jobs set error_message=$2,failure_category='smb_storage',updated_at=now() where id=$1 returning *", [attached.id, ARCHIVE_PENDING_MESSAGE]);
+        await client.query("commit"); return { job: rows[0]!, outcome: "archive_pending" };
+      }
+      await client.query("commit"); return { job: attached, outcome: "archive_pending" };
+    }
     const returned = owned.rows.find((row) => row.return_requested_at && (row.return_completed_at || row.return_destination_path === sourceRelativePath));
     if (returned) {
       const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set filename=$2,source_relative_path=$3,status='pending',return_completed_at=coalesce(return_completed_at,now()),error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 returning *`, [returned.id, filename, sourceRelativePath]);
       await client.query("commit"); return { job: rows[0]!, outcome: "reactivated" };
     }
     if (owned.rows[0]) {
-      const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set status='failed',error_message='An Incoming file is owned by a terminal Request Scan row without a completed Return checkpoint. Manual reconciliation is required.',failure_category='internal_processing',dismissed_at=null,dismissed_by=null,dismiss_reason=null,updated_at=now() where id=$1 returning *`, [owned.rows[0].id]);
+      const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set status='failed',error_message=$2,failure_category='internal_processing',dismissed_at=null,dismissed_by=null,dismiss_reason=null,updated_at=now() where id=$1 returning *`, [owned.rows[0].id, INCOMING_ORPHAN_CONFLICT_MESSAGE]);
       await client.query("commit"); return { job: rows[0]!, outcome: "orphan_conflict" };
     }
     const { rows } = await client.query<RequestScanJob>(`insert into request_scan_jobs(filename,source_relative_path,mime_type,status) values($1,$2,$3,'pending') returning *`, [filename, sourceRelativePath, mime(filename)]);
@@ -175,7 +185,12 @@ export async function reconcileIncomingRequestScanFile(filename: string, sourceR
     await client.query("rollback");
     if ((error as { code?: string }).code === "23505") {
       const { rows } = await pool.query<RequestScanJob>("select * from request_scan_jobs where source_relative_path=$1", [sourceRelativePath]);
-      if (rows[0]) return { job: rows[0], outcome: rows[0].status === "pending" || rows[0].status === "processing" ? "active" : "orphan_conflict" };
+      if (rows[0]) {
+        const job = rows[0];
+        if (job.status === "pending" || job.status === "processing") return { job, outcome: "active" };
+        if (job.document_id != null && job.attachment_completed_at != null) return { job, outcome: "archive_pending" };
+        return { job, outcome: "orphan_conflict" };
+      }
     }
     throw error;
   } finally { client.release(); }
@@ -606,13 +621,14 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
   const result = emptyCycleResult(); const queuedAtStart = await drainPendingRequestScanJobs(settings, dependencies, REQUEST_SCAN_MAX_JOBS_PER_CYCLE, workerId, options); addCycleResult(result, queuedAtStart.result);
   if (options.shouldContinue && !options.shouldContinue()) return result;
   const files = await dependencies.listRequestScanFiles(settings); result.discovered = files.length;
-  const discovery = { incomingFiles: files.length, activeJobs: 0, createdJobs: 0, reactivatedJobs: 0, orphanConflicts: 0, skippedYoungFiles: 0 };
+  const discovery = { incomingFiles: files.length, activeJobs: 0, createdJobs: 0, reactivatedJobs: 0, archivePendingJobs: 0, orphanConflicts: 0, skippedYoungFiles: 0 };
   for (const file of files) {
     if (file.modifiedAt && Date.now() - file.modifiedAt.getTime() < settings.fileReadyDelaySeconds * 1000) { result.skipped += 1; discovery.skippedYoungFiles += 1; continue; }
     const reconciled = await reconcileIncomingRequestScanFile(file.filename, file.relativePath);
     if (reconciled.outcome === "active") discovery.activeJobs += 1;
     else if (reconciled.outcome === "created") discovery.createdJobs += 1;
     else if (reconciled.outcome === "reactivated") discovery.reactivatedJobs += 1;
+    else if (reconciled.outcome === "archive_pending") discovery.archivePendingJobs += 1;
     else { discovery.orphanConflicts += 1; result.skipped += 1; }
   }
   dependencies.logDiagnostic?.("request_scan_discovery", discovery);

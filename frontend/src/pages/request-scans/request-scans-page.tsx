@@ -11,6 +11,7 @@ type Job = {
   matchedAppointments?: Array<{ id: number; accessionNumber: string; patientId: number; modality?: string; examination?: string }>;
   document_id: number | null;
   attachment_completed_at?: string | null;
+  source_moved_at?: string | null;
   error_message: string | null;
   attempt_count: number;
   created_at: string;
@@ -91,6 +92,8 @@ function JobStatus({ status }: Pick<Job, "status">) {
 }
 const stageLabels: Record<string, string> = { queued: "Waiting for worker", downloading: "Downloading", checking_filename: "Checking filename", rendering_300_dpi: "Rendering at 300 DPI", scanning_original_300_dpi: "Scanning original pages at 300 DPI", extracting_native_pdf_image: "Extracting native PDF image", scanning_native_pdf_image: "Scanning native PDF image", scanning_qr_crops: "Scanning focused QR regions", scanning_enhanced_300_dpi: "Scanning enhanced pages at 300 DPI", rendering_600_dpi: "Rendering at 600 DPI", scanning_original_600_dpi: "Scanning original pages at 600 DPI", scanning_enhanced_600_dpi: "Scanning enhanced pages at 600 DPI", verifying_identifier: "Verifying appointment", resolving_appointment: "Resolving appointment", checking_duplicate: "Checking duplicate", attaching_document: "Attaching document", moving_file: "Moving file" };
 function ProcessingDetails({ job }: { job: Job }) { if (job.status !== "processing" || (!job.processing_stage && job.progress_current == null && !job.processing_started_at && !job.lease_expires_at)) return null; const expires = job.lease_expires_at ? new Date(job.lease_expires_at).getTime() : 0; const delayed = expires && expires < Date.now(); const elapsed = job.processing_started_at ? Math.max(0, Math.floor((Date.now() - new Date(job.processing_started_at).getTime()) / 1000)) : null; return <div className="mt-1 text-xs text-muted-foreground">{job.processing_stage && <p>{stageLabels[job.processing_stage] ?? "Processing"}</p>}{job.progress_current != null && job.progress_total != null && <p>{job.progress_current} of {job.progress_total} pages examined</p>}{elapsed != null && <p>Elapsed {elapsed} seconds</p>}{delayed && <p className="text-amber-700">Worker lease expired — recovery pending.</p>}</div>; }
+
+function ArchivePendingDetails({ job }: { job: Job }) { return job.status === "failed" && job.document_id != null && job.attachment_completed_at != null && !job.source_moved_at ? <p className="mt-1 text-xs text-amber-700">Document attached. Archive pending.</p> : null; }
 
 export default function RequestScansPage() {
   const [tab, setTab] = useState<RequestScanTab>("active");
@@ -279,7 +282,7 @@ export default function RequestScansPage() {
                   <td>{job.barcode_value ?? "-"}</td>
                   <td>{job.patient_name ?? "-"}</td>
                   <td>{[job.modality_name, job.exam_name].filter(Boolean).join(" · ") || "-"}</td>
-                  <td><JobStatus status={job.status} /><ProcessingDetails job={job} /></td>
+                  <td><JobStatus status={job.status} /><ProcessingDetails job={job} /><ArchivePendingDetails job={job} /></td>
                   <td>{job.attempt_count}</td>
                   <td className="max-w-52 text-red-700">{job.error_message ?? "-"}</td>
                   <td className="flex flex-wrap gap-1 p-2">

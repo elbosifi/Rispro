@@ -196,6 +196,7 @@ describe("RequestScansPage", () => {
       return response({ jobs: [] });
     });
     renderPage(); fireEvent.click(await screen.findByRole("button", { name: "Failed (1)" })); await screen.findByText("failed.jpg");
+    expect(screen.getByText("Document attached. Archive pending.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Resume archive" })).toBeTruthy(); expect(screen.queryByRole("button", { name: "Return" })).toBeNull();
   });
 
