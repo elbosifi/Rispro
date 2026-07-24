@@ -26,7 +26,7 @@ import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-t
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
 export type RequestScanMatchedAppointment = { id: number; accessionNumber: string; patientId: number; modality?: string; examination?: string };
-export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; matchedAppointments?: RequestScanMatchedAppointment[]; identifier_verified_at?: string | null; identifier_strategy?: string | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; archive_attempt_count?: number; last_archive_attempt_at?: string | null; archive_last_error?: string | null; archive_next_retry_at?: string | null; return_requested_at?: string | null; return_source_path?: string | null; return_destination_path?: string | null; return_completed_at?: string | null; cancel_requested_at?: string | null; cancel_requested_by?: number | null; cancel_reason?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; patient_mrn?: string | null; patient_date_of_birth?: string | null; modality_name?: string | null; exam_name?: string | null; appointment_date?: string | null; accession_number?: string | null };
+export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; manual_assignment_requested_at?: string | null; manual_assignment_requested_by?: number | null; manual_assignment_confirmed_at?: string | null; manual_assignment_appointment_id?: number | null; matchedAppointments?: RequestScanMatchedAppointment[]; identifier_verified_at?: string | null; identifier_strategy?: string | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; archive_attempt_count?: number; last_archive_attempt_at?: string | null; archive_last_error?: string | null; archive_next_retry_at?: string | null; return_requested_at?: string | null; return_source_path?: string | null; return_destination_path?: string | null; return_completed_at?: string | null; cancel_requested_at?: string | null; cancel_requested_by?: number | null; cancel_reason?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; patient_mrn?: string | null; patient_date_of_birth?: string | null; modality_name?: string | null; exam_name?: string | null; appointment_date?: string | null; accession_number?: string | null };
 export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "dismissed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; accession_number: string };
 export type RequestScanServiceDependencies = {
@@ -354,9 +354,15 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       return await archiveCheckpointedRequestScanJob(job, lease, settings, dependencies, job.attachment_created !== false);
     }
     let appointments: EligibleAppointment[] = [];
-    let appointmentSources = new Map<number, Set<"accession" | "qr" | "filename" | "checkpoint">>();
+    let appointmentSources = new Map<number, Set<"accession" | "qr" | "filename" | "checkpoint" | "manual">>();
     let identifierStrategy = job.identifier_strategy || "checkpoint";
-    if (job.identifier_verified_at && job.appointment_id && job.barcode_value) {
+    if (job.manual_assignment_appointment_id) {
+      const appointment = await dependencies.findEligibleAppointment(formatV2AccessionNumber(Number(job.manual_assignment_appointment_id)));
+      appointments = [appointment];
+      appointmentSources.set(Number(appointment.id), new Set(["manual"]));
+      identifierStrategy = "manual";
+      await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
+    } else if (job.identifier_verified_at && job.appointment_id && job.barcode_value) {
       const checkpointed = await loadRequestScanJobAppointments(job.id);
       const appointmentIds = checkpointed.length ? checkpointed.map((value) => value.appointment_id) : [Number(job.appointment_id)];
       appointments = await Promise.all(appointmentIds.map((id) => dependencies.findEligibleAppointment(formatV2AccessionNumber(id))));
@@ -373,19 +379,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         throw new HttpError(422, "The filename contains conflicting appointment information. Assign the document manually.");
       }
 
-      if (filenameEvidence.decision.kind === "success") {
-        const appointment = filenameEvidence.appointments.get(filenameEvidence.decision.appointmentId)!;
-        appointments = [appointment];
-        appointmentSources.set(Number(appointment.id), new Set(["filename"]));
-        identifierStrategy = filenameEvidence.decision.strategy;
-        const code = filenameEvidence.decision.strategy === "filename_accession"
-          ? "IDENTIFIER_SUCCESS_FILENAME_ACCESSION"
-          : filenameEvidence.decision.strategy === "filename_qr"
-            ? "IDENTIFIER_SUCCESS_FILENAME_QR"
-            : "IDENTIFIER_SUCCESS_FILENAME_CONSENSUS";
-        logIdentifier(dependencies, code, { ...baseMetadata(), sourcesAgreed: true });
-        await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
-      } else {
+      {
       const initialCode = filenameEvidence.accessionCandidateCount + filenameEvidence.qrCandidateCount === 0
         ? "IDENTIFIER_FILENAME_NOT_FOUND"
         : filenameEvidence.invalidCandidateCount > 0
@@ -416,7 +410,9 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
           throw new HttpError(422, "Multiple different appointment barcodes were detected. Assign the document manually.");
         }
         if (barcode.reason === "no_barcode" || barcode.reason === "no_valid_accession") {
-          throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
+          throw new HttpError(422, filenameEvidence.decision.kind === "success"
+            ? "The filename identifies an appointment, but no matching identifier could be confirmed inside the document. Review and assign the document manually."
+            : "No valid appointment identifier could be confirmed. Assign the document manually.");
         }
         throw new HttpError(422, requestScanBarcodeErrorMessage(barcode.reason));
       }
@@ -471,7 +467,9 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
 
       const documentAppointmentIds = [...documentAppointments.keys()];
       if (documentAppointmentIds.length === 0) {
-        throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
+        throw new HttpError(422, filenameEvidence.decision.kind === "success"
+          ? "The filename identifies an appointment, but no matching identifier could be confirmed inside the document. Review and assign the document manually."
+          : "No valid appointment identifier could be confirmed. Assign the document manually.");
       }
       if (unresolvedInternalCount) throw new HttpError(422, "The document contains an appointment identifier that could not be resolved. Review and assign the document manually.");
       const documentPatients = new Set([...documentAppointments.values()].map((value) => Number(value.patient_id)));
@@ -488,7 +486,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
         documentQrCandidateCount: barcode.qrTokens?.length ?? 0,
       });
 
-      const verifiedFilenameAppointmentId = filenameEvidence.decision.kind === "partial"
+      const verifiedFilenameAppointmentId = filenameEvidence.decision.kind === "success" || filenameEvidence.decision.kind === "partial"
         ? filenameEvidence.decision.appointmentId
         : null;
       if (verifiedFilenameAppointmentId != null && !documentAppointments.has(verifiedFilenameAppointmentId)) {
@@ -505,6 +503,10 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       }
       identifierStrategy = documentSourceKinds.size > 1 ? "document_consensus" : documentSourceKinds.has("qr") ? "document_qr" : "document_accession";
       if (verifiedFilenameAppointmentId != null) {
+        const sources = appointmentSources.get(verifiedFilenameAppointmentId) ?? new Set();
+        sources.add("filename");
+        appointmentSources.set(verifiedFilenameAppointmentId, sources);
+        identifierStrategy = "filename_document_consensus";
         logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_CONFIRMATION", {
           ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, true),
         });
@@ -704,7 +706,23 @@ export async function returnRequestScanToIncoming(id: number, overrides: Partial
   await dependencies.triggerWorker();
   return rows[0];
 }
-export async function manuallyAssignRequestScan(id: number, appointmentId: number, userId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> { const settings = suppliedSettings ?? await readRequestScanSettings(); const job = await getRequestScanJob(id); if (job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Restore this dismissed request scan before manual assignment."); if (job.attachment_completed_at || job.document_id) throw new HttpError(409, "This document is already attached and cannot be assigned again."); const appointment = await findEligibleRequestScanAppointment(`V2-${String(appointmentId).padStart(6, "0")}`); const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-manual-")); try { const localPath = path.join(tempDir, job.filename); await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath); const document = await dependencies.uploadDocument({ patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileContentBuffer: await fs.readFile(localPath), source: "request_scan_automation" }, userId); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder); const completed = await updateJob(id, { status: "processed", appointment_id: appointment.id, document_id: document.id, source_relative_path: moved, error_message: null, completed_at: new Date().toISOString() }); await logAuditEntry({ entityType: "request_scan_job", entityId: id, actionType: "request_scan_manually_assigned", newValues: { appointmentId: appointment.id, documentId: document.id }, changedByUserId: userId }); return completed; } finally { await fs.rm(tempDir, { recursive: true, force: true }); } }
+export async function manuallyAssignRequestScan(id: number, appointmentId: number, userId: number, _suppliedSettings?: RequestScanSettings, _dependencies?: RequestScanServiceDependencies): Promise<RequestScanJob> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const jobResult = await client.query<RequestScanJob>("select * from request_scan_jobs where id=$1 for update", [id]);
+    const job = jobResult.rows[0];
+    if (!job || job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Restore this dismissed request scan before manual assignment.");
+    if (job.attachment_completed_at || job.document_id) throw new HttpError(409, "This document is already attached and cannot be assigned again.");
+    const eligible = await client.query<EligibleAppointment>(`select b.id,b.patient_id,('V2-' || lpad(b.id::text,6,'0')) as accession_number from appointments_v2.bookings b where b.id=$1 and b.status not in ('cancelled','discontinued','voided')`, [appointmentId]);
+    if (!eligible.rows[0]) throw new HttpError(404, "No eligible appointment matches this selection.");
+    const appointment = eligible.rows[0];
+    const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set status='pending',processing_stage='queued',manual_assignment_requested_at=coalesce(manual_assignment_requested_at,now()),manual_assignment_requested_by=coalesce(manual_assignment_requested_by,$2),manual_assignment_confirmed_at=now(),manual_assignment_appointment_id=$3,appointment_id=$3,error_message=null,failure_category=null,completed_at=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,updated_at=now() where id=$1 returning *`, [id, userId, appointment.id]);
+    await client.query("commit");
+    await logAuditEntry({ entityType: "request_scan_job", entityId: id, actionType: "request_scan_manual_assignment_requested", newValues: { appointmentId: appointment.id, confirmed: true }, changedByUserId: userId });
+    return rows[0]!;
+  } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
+}
 type RequestScanPreviewDependencies = { readSettings: typeof readRequestScanSettings; getJob: typeof getRequestScanJob; getDocument: typeof getDocumentById; readFile: (filePath: string) => Promise<Buffer>; downloadFile: typeof downloadRequestScanFile };
 export async function downloadRequestScanJobFile(id: number, overrides: Partial<RequestScanPreviewDependencies> = {}): Promise<{ job: RequestScanJob; buffer: Buffer }> {
   const dependencies: RequestScanPreviewDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, getDocument: getDocumentById, readFile: fs.readFile, downloadFile: downloadRequestScanFile, ...overrides };

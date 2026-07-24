@@ -293,7 +293,7 @@ test("marks an existing automated request as a duplicate without attaching anoth
   assert.match(job.source_relative_path, /^Requests\/Processed\\Duplicates\\/);
 });
 
-test("uses an exact accession filename as a fast path while preserving eligibility and duplicate checks", async (t) => {
+test("requires matching document evidence for an accession filename", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const jobId = await createJob("pending", `${booking.accession}.pdf`);
@@ -302,12 +302,12 @@ test("uses an exact accession filename as a fast path while preserving eligibili
   const job = await processRequestScanJob(
     jobId,
     settings,
-    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls, uploads })
+    dependencies({ ok: true, accession: booking.accession }, { recognitionCalls, uploads })
   );
   assert.equal(job.status, "processed");
   assert.equal(Number(job.appointment_id), booking.id);
   assert.equal(job.barcode_value, booking.accession);
-  assert.deepEqual(recognitionCalls, []);
+  assert.equal(recognitionCalls.length, 1);
   assert.equal(uploads.length, 1);
 
   const duplicateJobId = await createJob("pending", `Scan_${booking.accession}_Page1.jpg`);
@@ -315,13 +315,13 @@ test("uses an exact accession filename as a fast path while preserving eligibili
   const duplicate = await processRequestScanJob(
     duplicateJobId,
     settings,
-    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls: duplicateRecognitionCalls })
+    dependencies({ ok: true, accession: booking.accession }, { recognitionCalls: duplicateRecognitionCalls })
   );
   assert.equal(duplicate.status, "duplicate");
-  assert.deepEqual(duplicateRecognitionCalls, []);
+  assert.equal(duplicateRecognitionCalls.length, 1);
 });
 
-test("verifies scanner-safe patient QR filenames and skips document recognition", async (t) => {
+test("requires matching document QR evidence for a QR filename", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const token = await issuePublicCancelToken(booking.id);
@@ -331,7 +331,7 @@ test("verifies scanner-safe patient QR filenames and skips document recognition"
   const recognitionCalls: string[] = [];
   const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
   let verifiedToken: string | null = null;
-  const scannerDependencies = dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls, diagnostics, verifyToken: async (value) => { verifiedToken = value; return verifyPublicCancelToken(value); } });
+  const scannerDependencies = dependencies({ ok: true, qrTokens: [token] }, { recognitionCalls, diagnostics, verifyToken: async (value) => { verifiedToken = value; return verifyPublicCancelToken(value); } });
   const job = await processRequestScanJob(
     jobId,
     settings,
@@ -339,23 +339,23 @@ test("verifies scanner-safe patient QR filenames and skips document recognition"
   );
   assert.equal(job.status, "processed");
   assert.equal(Number(job.appointment_id), booking.id);
-  assert.deepEqual(recognitionCalls, []);
+  assert.equal(recognitionCalls.length, 1);
   assert.equal(verifiedToken, token);
-  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_SUCCESS_FILENAME_QR"));
+  assert.ok(diagnostics.some(({ metadata }) => metadata.code === "IDENTIFIER_DOCUMENT_CONFIRMATION"));
   assert.equal(JSON.stringify(diagnostics).includes(token), false);
   assert.equal(job.error_message, null);
 
   const normalUrlJobId = await createJob("pending", `https://rispro.nccb.com.ly/public/appointment?t=${token}.pdf`);
   const normalUrlRecognitionCalls: string[] = [];
   const normalUrlDependencies = dependencies(
-    { ok: false, reason: "barcode_processing_failed" },
+    { ok: true, qrTokens: [token] },
     { existingDocument: () => true, recognitionCalls: normalUrlRecognitionCalls }
   );
   normalUrlDependencies.downloadRequestScanFile = async () => {};
   const normalUrlJob = await processRequestScanJob(normalUrlJobId, settings, normalUrlDependencies);
   assert.equal(normalUrlJob.status, "duplicate");
   assert.equal(Number(normalUrlJob.appointment_id), booking.id);
-  assert.deepEqual(normalUrlRecognitionCalls, []);
+  assert.equal(normalUrlRecognitionCalls.length, 1);
 });
 
 test("treats matching accession and QR evidence as consensus and conflicting evidence as manual review", async (t) => {
@@ -372,11 +372,11 @@ test("treats matching accession and QR evidence as consensus and conflicting evi
   const consensus = await processRequestScanJob(
     consensusId,
     settings,
-    dependencies({ ok: false, reason: "barcode_processing_failed" }, { recognitionCalls: consensusRecognitionCalls })
+    dependencies({ ok: true, accession: first.accession }, { recognitionCalls: consensusRecognitionCalls })
   );
   assert.equal(consensus.status, "processed");
   assert.equal(Number(consensus.appointment_id), first.id);
-  assert.deepEqual(consensusRecognitionCalls, []);
+  assert.equal(consensusRecognitionCalls.length, 1);
 
   const conflictId = await createJob("pending", `${first.accession}_https___rispro.nccb.com.ly_public_appointment_t=${secondToken}.pdf`);
   const conflictRecognitionCalls: string[] = [];
@@ -733,22 +733,19 @@ test("Stop rejects queued, completed, attachment-completed, and irreversible-sta
   await assert.rejects(() => requestStopRequestScanJob(attached, booking.userId), (error: Error & { statusCode?: number }) => error.statusCode === 409);
 });
 
-test("manually assigns a failed request to an eligible V2 appointment through the document service", async (t) => {
+test("manual assignment queues a checkpointed worker job without direct upload", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const jobId = await createJob("failed");
   const uploads: Array<{ payload: DocumentUploadPayload; userId: string | number | null }> = [];
 
   const job = await manuallyAssignRequestScan(jobId, booking.id, booking.userId, settings, dependencies({ ok: false, reason: "no_barcode" }, { uploads }));
-  assert.equal(job.status, "processed");
+  assert.equal(job.status, "pending");
   assert.equal(Number(job.appointment_id), booking.id);
-  assert.ok(Number(job.document_id) > 0);
-  assert.equal(uploads.length, 1);
-  assert.equal(uploads[0].userId, booking.userId);
-  assert.equal(Number(uploads[0].payload.appointmentId), booking.id);
-  assert.equal(uploads[0].payload.appointmentRefType, "v2_booking");
-  assert.equal(uploads[0].payload.documentType, "appointment_request");
-  assert.equal(uploads[0].payload.source, "request_scan_automation");
+  assert.equal(Number(job.manual_assignment_appointment_id), booking.id);
+  assert.ok(job.manual_assignment_requested_at);
+  assert.ok(job.manual_assignment_confirmed_at);
+  assert.equal(uploads.length, 0);
 });
 
 test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint without attaching again", async (t) => {

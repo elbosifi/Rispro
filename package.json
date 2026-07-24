@@ -11,6 +11,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "start": "tsx src/server.ts",
     "start:request-scan-worker": "tsx src/workers/request-scan-worker-main.ts",
+    "healthcheck:request-scan-worker": "tsx src/workers/request-scan-worker-health.ts",
     "bench:request-scan": "node --import tsx scripts/request-scan-performance-benchmark.ts",
     "migrate": "tsx src/db/migrate.ts",
     "seed:supervisor": "tsx src/db/seed-supervisor.ts",

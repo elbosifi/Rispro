@@ -19,6 +19,9 @@ test("Request Scan Compose worker has no published HTTP/DICOM ports and shares t
   assert.match(worker, /cpus: 2/);
   assert.match(worker, /mem_limit: 3g/);
   assert.match(worker, /stop_grace_period: 75s/);
+  assert.match(worker, /healthcheck:[\s\S]*healthcheck:request-scan-worker/);
+  assert.match(worker, /interval: 30s/);
+  assert.match(worker, /retries: 3/);
   assert.doesNotMatch(worker, /^\s+ports:/m);
   assert.doesNotMatch(worker, /^\s+expose:/m);
 });

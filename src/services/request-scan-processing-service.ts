@@ -70,7 +70,7 @@ export async function updateRequestScanCheckpoint(jobId: number, lease: RequestS
 export type RequestScanJobAppointmentCheckpoint = {
   appointment_id: number;
   patient_id: number;
-  identifier_source: "accession" | "qr" | "consensus" | "filename" | "checkpoint";
+  identifier_source: "accession" | "qr" | "consensus" | "filename" | "checkpoint" | "manual";
 };
 export async function loadRequestScanJobAppointments(jobId: number): Promise<RequestScanJobAppointmentCheckpoint[]> {
   const { rows } = await pool.query<RequestScanJobAppointmentCheckpoint>(

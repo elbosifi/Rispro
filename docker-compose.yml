@@ -68,7 +68,11 @@ services:
       - rispro-storage:/app/storage
       - ./storage/sante-hl7-outbox:/app/storage/sante-hl7-outbox
     healthcheck:
-      disable: true
+      test: ["CMD", "npm", "run", "healthcheck:request-scan-worker"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     restart: unless-stopped
     cpus: 2
     mem_limit: 3g
