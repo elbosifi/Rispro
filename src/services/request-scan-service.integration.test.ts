@@ -12,11 +12,14 @@ import {
   getRequestScanJob,
   listRequestScanJobs,
   manuallyAssignRequestScan,
+  processClaimedRequestScanJob,
   processRequestScanJob,
+  requestStopRequestScanJob,
   retryRequestScanJob,
   runRequestScanCycle,
   type RequestScanServiceDependencies,
 } from "./request-scan-service.js";
+import { claimRequestScanJob } from "./request-scan-processing-service.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
 
@@ -561,6 +564,37 @@ test("retry moves a failed Request Scan back to the durable pending queue withou
   }), /Only visible failed request scans can be retried/);
 });
 
+test("Stop before attachment prevents upload, moves to Failed, audits the user, and retry clears cancellation", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const jobId = await createJob(); const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const claimed = await claimRequestScanJob(jobId, "stop-test-worker"); assert.ok(claimed);
+  const requested = await requestStopRequestScanJob(jobId, booking.userId);
+  assert.ok(requested.cancel_requested_at); assert.equal(requested.cancel_reason, "manual_review_no_identifier");
+  assert.equal(Number((await requestStopRequestScanJob(jobId, booking.userId)).id), jobId);
+  const stopped = await processClaimedRequestScanJob(claimed, settings, dependencies({ ok: true, accession: booking.accession }, { uploads }));
+  assert.equal(stopped.status, "failed"); assert.equal(stopped.failure_category, "recognition"); assert.match(stopped.error_message || "", /Automatic scanning was stopped/);
+  assert.equal(uploads.length, 0); assert.match(stopped.source_relative_path, /Failed/);
+  const audit = await pool.query<{ changed_by_user_id: number; new_values: { reason?: string } }>("select changed_by_user_id,new_values from audit_log where entity_type='request_scan_job' and entity_id=$1 and action_type='request_scan_processing_stopped' order by id desc limit 1", [jobId]);
+  assert.equal(Number(audit.rows[0]?.changed_by_user_id), booking.userId); assert.equal(audit.rows[0]?.new_values.reason, "manual_review_no_identifier");
+  const retried = await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async (_settings, _source, folder, filename) => `${folder}\\${filename}` });
+  assert.equal(retried.status, "pending"); assert.equal(retried.cancel_requested_at, null); assert.equal(retried.cancel_requested_by, null); assert.equal(retried.cancel_reason, null);
+});
+
+test("Stop rejects queued, completed, attachment-completed, and irreversible-stage jobs", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const pending = await createJob("pending");
+  await assert.rejects(() => requestStopRequestScanJob(pending, booking.userId), (error: Error & { statusCode?: number }) => error.statusCode === 409);
+  const completed = await createJob("processed");
+  await assert.rejects(() => requestStopRequestScanJob(completed, booking.userId), (error: Error & { statusCode?: number }) => error.statusCode === 409);
+  for (const stage of ["attaching_document", "moving_file"]) {
+    const id = await createJob("processing"); await pool.query("update request_scan_jobs set processing_stage=$2 where id=$1", [id, stage]);
+    await assert.rejects(() => requestStopRequestScanJob(id, booking.userId), (error: Error & { statusCode?: number }) => error.statusCode === 409);
+  }
+  const attached = await createJob("processing"); await pool.query("update request_scan_jobs set attachment_completed_at=now() where id=$1", [attached]);
+  await assert.rejects(() => requestStopRequestScanJob(attached, booking.userId), (error: Error & { statusCode?: number }) => error.statusCode === 409);
+});
+
 test("manually assigns a failed request to an eligible V2 appointment through the document service", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
@@ -628,6 +662,7 @@ test("concurrent idempotent Request Scan uploads create one document and remove 
 });
 
 after(async () => {
+  if (created.jobs.length) await pool.query("delete from audit_log where entity_type='request_scan_job' and entity_id=any($1::bigint[])", [created.jobs]);
   if (created.jobs.length) await pool.query("delete from request_scan_jobs where id = any($1::bigint[])", [created.jobs]);
   if (created.bookings.length) {
     await pool.query("delete from external_mwl_outbox where booking_id = any($1::bigint[])", [created.bookings]);

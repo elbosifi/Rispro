@@ -12,10 +12,11 @@ export type RequestScanBarcodeResult =
   | { ok: true; accession?: string; qrTokens?: string[]; ignoredQrCount?: number }
   | { ok: false; reason: RequestScanBarcodeFailure; ignoredQrCount?: number };
 export type RequestScanBarcodeDependencies = {
-  execFile(command: string, args: string[], options: { timeout: number; maxBuffer: number }): Promise<{ stdout?: string; stderr?: string }>;
+  execFile(command: string, args: string[], options: { timeout: number; maxBuffer: number; signal?: AbortSignal }): Promise<{ stdout?: string; stderr?: string }>;
   imageProcessor?: { preprocess(sourcePath: string, destinationPath: string): Promise<void>; rotate(sourcePath: string, angle: 90 | 180 | 270, destinationPath: string): Promise<void> };
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
   metrics?: RequestScanRecognitionMetrics;
+  signal?: AbortSignal;
 };
 export type RequestScanRecognitionMetrics = {
   elapsedMs: number; sourceBytes: number; pdfPageCount: number; pdftoppmProcesses: number; pdfimagesListProcesses: number; pdfimagesExtractionProcesses: number; zbarProcesses: number;
@@ -30,6 +31,7 @@ export type RequestScanQrOriginConfiguration = {
   explicitAllowedOrigins?: string;
   onProgress?: (stage: "rendering_300_dpi" | "scanning_original_300_dpi" | "extracting_native_pdf_image" | "scanning_native_pdf_image" | "scanning_qr_crops" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi", current?: number, total?: number) => void | Promise<void>;
   onPerformanceMetrics?: (metrics: Record<string, string | number | boolean>) => void;
+  signal?: AbortSignal;
 };
 
 const defaultImageProcessor = {
@@ -136,10 +138,13 @@ type PageDecodeResult = { accessions: string[]; qrTokens: string[]; ignoredQrCou
 type ResolutionResult = { accessions: Set<string>; qrTokens: Set<string>; ignoredQrCount: number; decoded: boolean; attempts: number; failure?: RequestScanBarcodeFailure };
 function log(dependencies: RequestScanBarcodeDependencies, code: DiagnosticCode, metadata: Record<string, string | number | boolean>): void { dependencies.logDiagnostic?.("barcode_recognition", { code, ...metadata }); }
 function processTimedOut(error: unknown): boolean { return Boolean(error && typeof error === "object" && ((error as NodeJS.ErrnoException & { killed?: unknown; signal?: unknown; timedOut?: unknown }).killed || (error as NodeJS.ErrnoException & { signal?: unknown }).signal || (error as NodeJS.ErrnoException & { timedOut?: unknown }).timedOut || (error as NodeJS.ErrnoException).code === "ETIMEDOUT")); }
+function isAbortError(error: unknown): boolean { return Boolean(error && typeof error === "object" && ((error as { name?: unknown }).name === "AbortError" || (error as { code?: unknown }).code === "ABORT_ERR")); }
+function throwIfAborted(dependencies: RequestScanBarcodeDependencies): void { dependencies.signal?.throwIfAborted(); }
 function zbarNoSymbol(error: unknown): boolean { if (!error || typeof error !== "object" || processTimedOut(error)) return false; const value = error as NodeJS.ErrnoException & { stdout?: unknown; stderr?: unknown }; return Number(value.code) === 4 || /no symbols? found/i.test(`${String(value.stdout || "")} ${String(value.stderr || "")} ${value.message || ""}`); }
-async function decodeBarcodeCandidates(filePath: string, dependencies: RequestScanBarcodeDependencies): Promise<ZbarResult> { try { const result = await dependencies.execFile("zbarimg", ["--quiet", "--set", "*.enable=0", "--set", "code39.enable=1", "--set", "code128.enable=1", "--set", "qrcode.enable=1", filePath], ZBAR_OPTIONS); const output = String(result.stdout || ""); return output.trim() ? { kind: "decoded", output } : { kind: "no_symbol" }; } catch (error) { return zbarNoSymbol(error) ? { kind: "no_symbol" } : processTimedOut(error) ? { kind: "timeout" } : { kind: "failure" }; } }
+async function decodeBarcodeCandidates(filePath: string, dependencies: RequestScanBarcodeDependencies): Promise<ZbarResult> { try { throwIfAborted(dependencies); const result = await dependencies.execFile("zbarimg", ["--quiet", "--set", "*.enable=0", "--set", "code39.enable=1", "--set", "code128.enable=1", "--set", "qrcode.enable=1", filePath], { ...ZBAR_OPTIONS, signal: dependencies.signal }); const output = String(result.stdout || ""); return output.trim() ? { kind: "decoded", output } : { kind: "no_symbol" }; } catch (error) { if (isAbortError(error)) throw error; return zbarNoSymbol(error) ? { kind: "no_symbol" } : processTimedOut(error) ? { kind: "timeout" } : { kind: "failure" }; } }
 async function withImageProcessingTimeout(operation: Promise<void>): Promise<void> { let timeout: NodeJS.Timeout | undefined; try { await Promise.race([operation, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Barcode image processing timed out")), IMAGE_PROCESSING_TIMEOUT_MS); })]); } finally { if (timeout) clearTimeout(timeout); } }
 async function decodePageWithFallbacks(pagePath: string, tempDir: string, pageNumber: number, fileType: FileType, dpi: number | "source", dependencies: RequestScanBarcodeDependencies, allowedOrigins?: Set<string>, includeOriginal = true): Promise<PageDecodeResult> {
+  throwIfAborted(dependencies);
   let decoded = false; let attempts = 0; let preprocessingFailed = false; let ignoredQrCount = 0;
   const collectedAccessions = new Set<string>(); const collectedQrTokens = new Set<string>();
   let successfulAttempt: SuccessAttempt | null = null; let successfulRotation: 0 | 90 | 180 | 270 | null = null;
@@ -177,7 +182,7 @@ async function decodePageWithFallbacks(pagePath: string, tempDir: string, pageNu
     if (collectedAccessions.size) return current();
   }
   const processor = dependencies.imageProcessor ?? defaultImageProcessor; const processedPath = path.join(tempDir, `processed-${pageNumber}.png`);
-  try { await withImageProcessingTimeout(processor.preprocess(pagePath, processedPath)); } catch { preprocessingFailed = true; log(dependencies, "BARCODE_PREPROCESSING_FAILED", { fileType, pageNumber, dpi, attempt: "preprocessed", rotation: 0 }); }
+  try { throwIfAborted(dependencies); await withImageProcessingTimeout(processor.preprocess(pagePath, processedPath)); } catch (error) { if (isAbortError(error)) throw error; preprocessingFailed = true; log(dependencies, "BARCODE_PREPROCESSING_FAILED", { fileType, pageNumber, dpi, attempt: "preprocessed", rotation: 0 }); }
   if (!preprocessingFailed) {
     const processed = await attempt(processedPath);
     if ("failure" in processed) return collectedQrTokens.size ? current() : current(processed.failure);
@@ -185,8 +190,9 @@ async function decodePageWithFallbacks(pagePath: string, tempDir: string, pageNu
     if (collectedAccessions.size) return current();
   }
   if (!preprocessingFailed) for (const angle of [90, 180, 270] as const) {
+    throwIfAborted(dependencies);
     const rotatedPath = path.join(tempDir, `processed-${pageNumber}-rotated-${angle}.png`);
-    try { await withImageProcessingTimeout(processor.rotate(processedPath, angle, rotatedPath)); } catch { preprocessingFailed = true; log(dependencies, "BARCODE_PREPROCESSING_FAILED", { fileType, pageNumber, dpi, attempt: "rotated", rotation: angle }); continue; }
+    try { await withImageProcessingTimeout(processor.rotate(processedPath, angle, rotatedPath)); } catch (error) { if (isAbortError(error)) throw error; preprocessingFailed = true; log(dependencies, "BARCODE_PREPROCESSING_FAILED", { fileType, pageNumber, dpi, attempt: "rotated", rotation: angle }); continue; }
     const rotated = await attempt(rotatedPath);
     if ("failure" in rotated) return collectedQrTokens.size ? current() : current(rotated.failure);
     collect(rotated, "rotated", angle);
@@ -209,6 +215,7 @@ function orderedRenderedPages(pagePaths: string[]): RenderedPage[] {
 async function scanPdfPass(pages: RenderedPage[], tempDir: string, dpi: 300 | 600, pass: PdfPass, deadline: number, dependencies: RequestScanBarcodeDependencies, allowedOrigins: Set<string>, onProgress?: RequestScanQrOriginConfiguration["onProgress"]): Promise<ResolutionResult> {
   const accessions = new Set<string>(); const qrTokens = new Set<string>(); let ignoredQrCount = 0; let decoded = false; let attempts = 0; let pagesExamined = 0;
   for (const page of pages) {
+    throwIfAborted(dependencies);
     await onProgress?.(pass === "original_sweep" ? (dpi === 300 ? "scanning_original_300_dpi" : "scanning_original_600_dpi") : (dpi === 300 ? "scanning_enhanced_300_dpi" : "scanning_enhanced_600_dpi"), pagesExamined, pages.length);
     if (Date.now() > deadline) {
       log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", dpi, currentPass: pass, pagesExamined, totalPageCount: pages.length, processingStoppedByTimeout: true });
@@ -286,12 +293,14 @@ async function scanNativePdfImages(pdfPath: string, pages: RenderedPage[], rootT
   try {
     let listing: PdfNativeImageMetadata[];
     try {
-      const listed = await dependencies.execFile("pdfimages", ["-list", pdfPath], PDF_OPTIONS);
+      throwIfAborted(dependencies);
+      const listed = await dependencies.execFile("pdfimages", ["-list", pdfPath], { ...PDF_OPTIONS, signal: dependencies.signal });
       listing = parsePdfImagesList(String(listed.stdout || ""));
       if (!listing.length) return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
-      await dependencies.execFile("pdfimages", ["-j", pdfPath, path.join(nativeDir, "image")], PDF_OPTIONS);
+      await dependencies.execFile("pdfimages", ["-j", pdfPath, path.join(nativeDir, "image")], { ...PDF_OPTIONS, signal: dependencies.signal });
       if (dependencies.metrics) dependencies.metrics.nativeExtractedBytes = await observeTemporaryBytes(dependencies.metrics, nativeDir);
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) throw error;
       log(dependencies, "BARCODE_PROCESSING_FAILED", { fileType: "pdf", currentPass: "native_extraction_failed" });
       return { accessions, qrTokens, ignoredQrCount, decoded, attempts };
     }
@@ -306,14 +315,16 @@ async function scanNativePdfImages(pdfPath: string, pages: RenderedPage[], rootT
       const pageDir = path.join(nativeDir, `page-${page.pageNumber}`); await fs.mkdir(pageDir);
       const ranked = listing.filter((item) => item.page === page.pageNumber && item.type === "image" && item.width >= NATIVE_MIN_DIMENSION && item.height >= NATIVE_MIN_DIMENSION).map((item) => ({ candidate: extracted.get(item.imageNumber), width: item.width, height: item.height, imageNumber: item.imageNumber })).filter((item): item is { candidate: string; width: number; height: number; imageNumber: number } => Boolean(item.candidate)).sort((a, b) => b.width * b.height - a.width * a.height || a.imageNumber - b.imageNumber).slice(0, MAX_NATIVE_IMAGES_PER_PAGE);
       for (const [rank, image] of ranked.entries()) {
+        throwIfAborted(dependencies);
         if (dependencies.metrics) dependencies.metrics.nativeImagesExamined += 1;
         await onProgress?.("scanning_native_pdf_image", rank + 1, ranked.length); await collect(image.candidate); if (accessions.size || qrTokens.size) continue;
         let transformWidth = image.width; let transformHeight = image.height;
-        try { if (dependencies.metrics) dependencies.metrics.sharpMetadataReads += 1; const metadata = await sharp(image.candidate).metadata(); transformWidth = metadata.width ?? image.width; transformHeight = metadata.height ?? image.height; }
+        try { throwIfAborted(dependencies); if (dependencies.metrics) dependencies.metrics.sharpMetadataReads += 1; const metadata = await sharp(image.candidate).metadata(); transformWidth = metadata.width ?? image.width; transformHeight = metadata.height ?? image.height; }
         catch { continue; }
         const full = path.join(pageDir, `upscaled-${rank}.png`); const scale = Math.min(6, NATIVE_MAX_DIMENSION / Math.max(transformWidth, transformHeight)); if (scale > 1.05) { if (dependencies.metrics) dependencies.metrics.sharpResizeOperations += 1; try { await sharp(image.candidate).resize(Math.round(transformWidth * scale), Math.round(transformHeight * scale), { kernel: sharp.kernel.lanczos3 }).png().toFile(full); if (dependencies.metrics) dependencies.metrics.derivativeBytes += await fs.stat(full).then((value) => value.size, () => 0); await observeTemporaryBytes(dependencies.metrics, rootTempDir); await collect(full); } finally { await fs.rm(full, { force: true }).catch(() => undefined); } } if (accessions.size || qrTokens.size) continue;
         const tiles = nativeTiles(transformWidth, transformHeight);
         for (const [tileIndex, tile] of tiles.entries()) {
+          throwIfAborted(dependencies);
           if (Date.now() > deadline) break;
           if (dependencies.metrics) dependencies.metrics.nativeTilesExamined += 1;
           await onProgress?.("scanning_qr_crops", tileIndex + 1, tiles.length);
@@ -328,6 +339,7 @@ async function scanNativePdfImages(pdfPath: string, pages: RenderedPage[], rootT
             await sharp(cropped).grayscale().normalise().png().toFile(normalized);
             await collect(normalized); if (accessions.size || qrTokens.size) break;
             for (const angle of [90, 180, 270]) {
+              throwIfAborted(dependencies);
               const rotated = path.join(pageDir, `crop-rotated-${rank}-${tileIndex}-${angle}.png`);
               try { if (dependencies.metrics) dependencies.metrics.sharpRotationOperations += 1; await sharp(normalized).rotate(angle).png().toFile(rotated); await collect(rotated); }
               finally { await fs.rm(rotated, { force: true }).catch(() => undefined); }
@@ -347,7 +359,8 @@ async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir:
   const empty = (failure: RequestScanBarcodeFailure): ResolutionResult => ({ accessions: new Set(), qrTokens: new Set(), ignoredQrCount: 0, decoded: false, attempts: 0, failure });
   try {
     const prefix = path.join(stageDir, "page");
-    await onProgress?.(dpi === 300 ? "rendering_300_dpi" : "rendering_600_dpi"); try { await dependencies.execFile("pdftoppm", ["-r", String(dpi), "-png", pdfPath, prefix], PDF_OPTIONS); } catch (error) {
+    await onProgress?.(dpi === 300 ? "rendering_300_dpi" : "rendering_600_dpi"); try { throwIfAborted(dependencies); await dependencies.execFile("pdftoppm", ["-r", String(dpi), "-png", pdfPath, prefix], { ...PDF_OPTIONS, signal: dependencies.signal }); } catch (error) {
+      if (isAbortError(error)) throw error;
       log(dependencies, "BARCODE_PDF_RENDER_FAILED", { fileType: "pdf", dpi, failureCategory: processTimedOut(error) ? "timeout" : "executable_failure", elapsedMs: Date.now() - started });
       return empty("pdf_render_failed");
     }
@@ -396,6 +409,7 @@ export async function extractRequestScanBarcode(filePath: string, dependencies: 
   const counters: RequestScanRecognitionMetrics = { elapsedMs: 0, sourceBytes: 0, pdfPageCount: 0, pdftoppmProcesses: 0, pdfimagesListProcesses: 0, pdfimagesExtractionProcesses: 0, zbarProcesses: 0, sharpMetadataReads: 0, sharpPreprocessOperations: 0, sharpResizeOperations: 0, sharpCropOperations: 0, sharpRotationOperations: 0, renderedBytes: 0, nativeExtractedBytes: 0, derivativeBytes: 0, maximumTemporaryBytes: 0, originalPagesExamined: 0, enhancedPagesExamined: 0, nativeImagesExamined: 0, nativeTilesExamined: 0, rssBeforeBytes: 0, rssAfterBytes: 0 };
   const measuredDependencies: RequestScanBarcodeDependencies = {
     ...dependencies,
+    signal: qrOriginConfiguration.signal,
     async execFile(command, args, options) {
       if (command === "pdftoppm") counters.pdftoppmProcesses += 1;
       else if (command === "pdfimages") args[0] === "-list" ? counters.pdfimagesListProcesses += 1 : counters.pdfimagesExtractionProcesses += 1;

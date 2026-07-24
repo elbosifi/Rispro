@@ -86,6 +86,52 @@ test("enables QR in the existing zbar invocation and resolves a clear patient QR
     assert.ok(zbarArgs.includes("qrcode.enable=1"));
   });
 });
+test("Stop abort signals are passed to active zbarimg, pdftoppm, and pdfimages child processes", async () => {
+  await withImage(async (image) => {
+    const controller = new AbortController();
+    const pending = extractRequestScanBarcode(image, {
+      ...dependencies(() => ""),
+      async execFile(command, _args, options) {
+        assert.equal(command, "zbarimg");
+        return await new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true }));
+      },
+    }, { signal: controller.signal });
+    await new Promise((resolve) => setImmediate(resolve)); controller.abort();
+    await assert.rejects(pending, (error: Error) => error.name === "AbortError");
+  });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-barcode-abort-pdf-"));
+  const pdf = path.join(dir, "request.pdf"); await fs.writeFile(pdf, "%PDF");
+  try {
+    const controller = new AbortController();
+    const pending = extractRequestScanBarcode(pdf, {
+      async execFile(command, _args, options) {
+        assert.equal(command, "pdftoppm");
+        return await new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true }));
+      },
+    }, { signal: controller.signal });
+    await new Promise((resolve) => setImmediate(resolve)); controller.abort();
+    await assert.rejects(pending, (error: Error) => error.name === "AbortError");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+
+  const nativeDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-barcode-abort-native-"));
+  const nativePdf = path.join(nativeDir, "request.pdf"); await fs.writeFile(nativePdf, "%PDF");
+  try {
+    const controller = new AbortController(); let reachedPdfImages!: () => void;
+    const reached = new Promise<void>((resolve) => { reachedPdfImages = resolve; });
+    const pending = extractRequestScanBarcode(nativePdf, {
+      async execFile(command, args, options) {
+        if (command === "pdftoppm") { await fs.writeFile(`${args.at(-1)}-1.png`, "page"); return {}; }
+        if (command === "zbarimg") throw noSymbol();
+        assert.equal(command, "pdfimages"); reachedPdfImages();
+        return await new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true }));
+      },
+      imageProcessor: dependencies(() => "").imageProcessor,
+    }, { signal: controller.signal });
+    await reached; controller.abort();
+    await assert.rejects(pending, (error: Error) => error.name === "AbortError");
+  } finally { await fs.rm(nativeDir, { recursive: true, force: true }); }
+});
 test("resolves patient QR evidence through existing preprocessing and rotation fallbacks", async () => {
   await withImage(async (image) => {
     const preprocessed = await extractRequestScanBarcode(image, dependencies((filePath) => filePath.includes("processed-1.png") && !filePath.includes("rotated") ? `QR-Code:${QR_URL}` : noSymbol()));

@@ -127,6 +127,51 @@ describe("RequestScansPage", () => {
     expect(screen.getByRole("button", { name: "Scan folder now" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("stops only an eligible recognition job after confirmation and hides Stop at attachment", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/status")) return response(status);
+      if (url.includes("?status=active")) return response({ jobs: [{ ...processingJob, processing_stage: "scanning_original_300_dpi", attachment_completed_at: null }, { ...processingJob, id: 10, filename: "attaching.pdf", processing_stage: "attaching_document" }] });
+      if (url.endsWith("/8/stop")) return response({ job: { ...processingJob, cancel_requested_at: new Date().toISOString() } });
+      return response({ jobs: [] });
+    });
+    renderPage();
+    await screen.findByText("processing.jpg");
+    expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/request-scans/8/stop", expect.objectContaining({ method: "POST" })));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(await screen.findByText("Automatic scanning was stopped. The document is ready for manual assignment.")).toBeTruthy();
+  });
+
+  it("does not request Stop when confirmation is cancelled", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/status")) return response(status);
+      if (url.includes("?status=active")) return response({ jobs: [{ ...processingJob, processing_stage: "verifying_identifier" }] });
+      return response({ jobs: [] });
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/8/stop"))).toBe(false);
+  });
+
+  it("shows the server conflict when attachment wins the Stop race", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/status")) return response(status);
+      if (url.includes("?status=active")) return response({ jobs: [{ ...processingJob, processing_stage: "verifying_identifier" }] });
+      if (url.endsWith("/8/stop")) return { ok: false, status: 409, json: async () => ({ error: { message: "Automatic scanning can no longer be stopped because document attachment or completion has already begun." } }) } as Response;
+      return response({ jobs: [] });
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(await screen.findByText("Automatic scanning can no longer be stopped because document attachment or completion has already begun.")).toBeTruthy();
+  });
+
   it("retains failed recovery actions and manual assignment", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);

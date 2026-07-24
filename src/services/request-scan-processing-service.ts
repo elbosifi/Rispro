@@ -11,6 +11,7 @@ export type RequestScanProgressUpdate = { stage: RequestScanProcessingStage; cur
 export type RequestScanLease = { workerId: string; token: string };
 export type ClaimedRequestScanJob = { job: RequestScanJob; lease: RequestScanLease };
 export class RequestScanLeaseLostError extends Error { constructor() { super("Request Scan lease was lost."); this.name = "RequestScanLeaseLostError"; } }
+export class RequestScanCancellationRequestedError extends Error { constructor() { super("Request Scan cancellation was requested."); this.name = "RequestScanCancellationRequestedError"; } }
 
 export function createRequestScanWorkerId(): string { return `${process.env.COMPUTERNAME || process.env.HOSTNAME || "worker"}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`; }
 export async function claimRequestScanJob(jobId: number, workerId: string): Promise<ClaimedRequestScanJob | null> {
@@ -36,9 +37,17 @@ export async function claimNextRequestScanJob(workerId: string): Promise<Claimed
   returning job.*`, [workerId, token, REQUEST_SCAN_LEASE_MS, REQUEST_SCAN_WORKER_STALE_MS]);
   return rows[0] ? { job: rows[0] as RequestScanJob, lease: { workerId, token } } : null;
 }
-export async function assertRequestScanLeaseOwned(jobId: number, lease: RequestScanLease): Promise<void> {
-  const result = await pool.query(`select 1 from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at >= now()`, [jobId, lease.workerId, lease.token]);
+export async function assertRequestScanLeaseOwned(jobId: number, lease: RequestScanLease, allowCancellation = false): Promise<void> {
+  const result = await pool.query<{ cancel_requested_at: string | null }>(`select cancel_requested_at from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at >= now()`, [jobId, lease.workerId, lease.token]);
   if (!result.rowCount) throw new RequestScanLeaseLostError();
+  if (!allowCancellation && result.rows[0]?.cancel_requested_at) throw new RequestScanCancellationRequestedError();
+}
+export async function beginRequestScanAttachment(jobId: number, lease: RequestScanLease): Promise<RequestScanJob> {
+  const { rows } = await pool.query(`update request_scan_jobs set processing_stage='attaching_document',stage_started_at=now(),progress_current=null,progress_total=null,heartbeat_at=now(),lease_expires_at=now()+($4::int * interval '1 millisecond'),updated_at=now() where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at >= now() and cancel_requested_at is null returning *`, [jobId, lease.workerId, lease.token, REQUEST_SCAN_LEASE_MS]);
+  if (rows[0]) return rows[0] as RequestScanJob;
+  const state = await pool.query<{ cancel_requested_at: string | null }>(`select cancel_requested_at from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at >= now()`, [jobId, lease.workerId, lease.token]);
+  if (state.rows[0]?.cancel_requested_at) throw new RequestScanCancellationRequestedError();
+  throw new RequestScanLeaseLostError();
 }
 export async function updateRequestScanCheckpoint(jobId: number, lease: RequestScanLease, values: Record<string, unknown>): Promise<RequestScanJob> {
   const allowed = new Set(["appointment_id", "document_id", "barcode_value", "attachment_completed_at", "attachment_created", "intended_destination_path", "source_relative_path", "source_moved_at"]);
@@ -52,6 +61,11 @@ export async function updateRequestScanCheckpoint(jobId: number, lease: RequestS
 }
 export async function renewRequestScanLease(jobId: number, lease: RequestScanLease): Promise<boolean> {
   const result = await pool.query(`update request_scan_jobs set heartbeat_at=now(),lease_expires_at=now()+($3::int * interval '1 millisecond'),updated_at=now() where id=$1 and status='processing' and lease_token=$2::uuid`, [jobId, lease.token, REQUEST_SCAN_LEASE_MS]); return result.rowCount === 1;
+}
+export async function renewRequestScanLeaseExecutionState(jobId: number, lease: RequestScanLease): Promise<"owned" | "cancel_requested" | "lost"> {
+  const { rows } = await pool.query<{ cancel_requested_at: string | null }>(`update request_scan_jobs set heartbeat_at=now(),lease_expires_at=now()+($4::int * interval '1 millisecond'),updated_at=now() where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid returning cancel_requested_at`, [jobId, lease.workerId, lease.token, REQUEST_SCAN_LEASE_MS]);
+  if (!rows[0]) return "lost";
+  return rows[0].cancel_requested_at ? "cancel_requested" : "owned";
 }
 export async function updateRequestScanProgress(jobId: number, lease: RequestScanLease, update: RequestScanProgressUpdate): Promise<boolean> {
   if ((update.current != null && update.current < 0) || (update.total != null && update.total < 0) || (update.current != null && update.total != null && update.current > update.total)) throw new Error("Invalid Request Scan progress.");

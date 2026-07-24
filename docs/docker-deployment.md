@@ -473,7 +473,7 @@ Compose runs Request Scan document processing in `request-scan-worker`. The web 
 
 The safe production default is `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. A controlled deployment may set it to `2` to process two independent files, while every page, image pass, QR tile, decoder attempt, SMB operation, attachment, and move within each document remains sequential. Values above `2` are unsupported.
 
-Compose operators control the mode without editing YAML. The normal dedicated settings are `REQUEST_SCAN_APP_WORKER_ENABLED=false`, `REQUEST_SCAN_DEDICATED_WORKER_ENABLED=true`, and `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. For embedded sequential rollback, set the first value to `true`, the second to `false`, retain concurrency `1`, and restart the services. Scale `request-scan-worker` to zero while it is disabled so Docker does not restart an intentionally disabled entrypoint. Leave migrations 139 and 140 in place.
+Compose operators control the mode without editing YAML. The normal dedicated settings are `REQUEST_SCAN_APP_WORKER_ENABLED=false`, `REQUEST_SCAN_DEDICATED_WORKER_ENABLED=true`, and `REQUEST_SCAN_DEDICATED_MAX_CONCURRENCY=1`. For embedded sequential rollback, set the first value to `true`, the second to `false`, retain concurrency `1`, and restart the services. Scale `request-scan-worker` to zero while it is disabled so Docker does not restart an intentionally disabled entrypoint. Leave migrations 139 through 141 in place.
 
 ### MWL Not Responding
 

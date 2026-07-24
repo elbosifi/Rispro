@@ -9,6 +9,7 @@ type Job = {
   barcode_value: string | null;
   appointment_id: number | null;
   document_id: number | null;
+  attachment_completed_at?: string | null;
   error_message: string | null;
   attempt_count: number;
   created_at: string;
@@ -154,6 +155,19 @@ export default function RequestScansPage() {
     },
   });
   const startJob = useMutation({ mutationFn: (jobId: number) => request<{ job: Job; trigger: WorkerTrigger }>(`/${jobId}/start-now`, { method: "POST" }), onSuccess: ({ trigger }) => { setNotice(trigger.status === "accepted" ? "This request scan was prioritized and the worker was started." : trigger.status === "already_running" ? "This request scan was prioritized and will run next." : "This request scan was prioritized, but automation is disabled."); void client.invalidateQueries({ queryKey: ["request-scans", "active"] }); void client.invalidateQueries({ queryKey: ["request-scans-status"] }); } });
+  const stopJob = useMutation({
+    mutationFn: (jobId: number) => request<{ job: Job }>(`/${jobId}/stop`, { method: "POST" }),
+    onSuccess: () => {
+      setNotice("Automatic scanning was stopped. The document is ready for manual assignment.");
+      void client.invalidateQueries({ queryKey: ["request-scans", "active"] });
+      void client.invalidateQueries({ queryKey: ["request-scans", "failed"] });
+      void client.invalidateQueries({ queryKey: ["request-scans-status"] });
+    },
+    onError: (error: Error) => {
+      setNotice(error.message);
+      void client.invalidateQueries({ queryKey: ["request-scans", "active"] });
+    },
+  });
   const runNow = useMutation({
     mutationFn: () => request<{ ok: true; trigger: WorkerTrigger }>("/run-now", { method: "POST" }),
     onSuccess: ({ trigger }) => {
@@ -247,6 +261,8 @@ export default function RequestScansPage() {
               <tbody>{visibleJobs.map((job) => {
                 const queuing = retry.isPending && retry.variables === job.id;
                 const starting = startJob.isPending && startJob.variables === job.id;
+                const stopping = stopJob.isPending && stopJob.variables === job.id;
+                const canStop = job.status === "processing" && !job.attachment_completed_at && !["attaching_document", "moving_file"].includes(job.processing_stage || "");
                 return <tr key={job.id} className={`border-b ${highlightedJobId === job.id ? "bg-teal-50" : ""}`}>
                   <td className="p-2">{new Date(job.created_at).toLocaleString()}</td>
                   <td>{job.filename}</td>
@@ -258,6 +274,7 @@ export default function RequestScansPage() {
                   <td className="max-w-52 text-red-700">{job.error_message ?? "-"}</td>
                   <td className="flex flex-wrap gap-1 p-2">
                     <button className="btn-secondary text-xs" onClick={() => void openPreview(job)}>Preview</button>
+                    {canStop && <button className="btn-secondary text-xs" disabled={stopping} onClick={() => { if (window.confirm("Stop automatic scanning? Use this when you have reviewed the document and confirmed that it has no QR code or barcode. The file will be sent for manual assignment.")) stopJob.mutate(job.id); }}>{stopping ? "Stopping..." : "Stop"}</button>}
                     {job.status === "pending" && <button className="btn-secondary text-xs" disabled={starting} onClick={() => startJob.mutate(job.id)}>{starting ? "Starting..." : "Start now"}</button>}
                     {job.appointment_id && <button className="btn-secondary text-xs" onClick={() => navigate(`/registrations?appointmentId=${job.appointment_id}`)}>Open appointment</button>}
                     {job.document_id && <a className="btn-secondary text-xs" href={`/api/documents/${job.document_id}/view`} target="_blank" rel="noreferrer">Open document</a>}

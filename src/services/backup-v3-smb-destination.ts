@@ -73,7 +73,15 @@ export function validateBackupV3SmbConfig(value: unknown): BackupV3SmbConfig {
   return { server, share, subfolder, ...(domain ? { domain } : {}), timeoutSeconds };
 }
 
-export type SmbOperationKind = "metadata" | "transfer";
+export type SmbOperationKind = "metadata" | "metadata_probe" | "transfer";
+export type SmbFailureCode = "not_found" | "authentication" | "permission" | "share_not_found" | "network" | "timeout" | "storage_full" | "already_exists" | "unknown";
+export class SmbCommandError extends HttpError {
+  constructor(statusCode: number, message: string, readonly smbCode: SmbFailureCode, cause?: unknown) {
+    super(statusCode, message);
+    this.name = "SmbCommandError";
+    if (cause !== undefined) Object.defineProperty(this, "cause", { value: cause, configurable: true });
+  }
+}
 
 const SMB_TRANSFER_MIN_PROCESS_TIMEOUT_MS = 10 * 60 * 1_000;
 const SMB_TRANSFER_MAX_PROCESS_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
@@ -100,16 +108,20 @@ function isChildProcessTimeout(error: unknown): boolean {
   return child.code === "ETIMEDOUT" || (child.killed === true && typeof child.signal === "string") || /(?:process|command|child).*tim(?:e|ed)[ -]?out|ETIMEDOUT/i.test(text);
 }
 
-function classifySmbError(error: unknown, operation: SmbOperationKind): HttpError {
-  if (operation === "transfer" && isChildProcessTimeout(error)) return new HttpError(504, "SMB archive transfer timed out.");
-  const text = error instanceof Error ? `${error.message} ${String((error as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "")}`.toUpperCase() : String(error).toUpperCase();
-  if (/LOGON_FAILURE|NT_STATUS_WRONG_PASSWORD|AUTHENTICATION/.test(text)) return new HttpError(502, "SMB authentication failed.");
-  if (/BAD_NETWORK_NAME|NO_SUCH_SHARE/.test(text)) return new HttpError(502, "SMB share not found.");
-  if (/ACCESS_DENIED|PERMISSION_DENIED/.test(text)) return new HttpError(502, "SMB permission denied.");
-  if (/OBJECT_(?:NAME|PATH)_NOT_FOUND/.test(text)) return new HttpError(502, "Configured SMB folder was not found or could not be created.");
-  if (/DISK_FULL|NO_SPACE/.test(text)) return new HttpError(507, "SMB destination storage is full.");
-  if (/CONNECTION_REFUSED|ETIMEDOUT|TIMED_OUT|NO_ROUTE|HOST_UNREACH|NETWORK_UNREACH|EHOSTUNREACH|ENETUNREACH/.test(text)) return new HttpError(502, "SMB server unavailable.");
-  return new HttpError(502, "SMB destination operation failed.");
+export function classifySmbError(error: unknown, operation: SmbOperationKind): SmbCommandError {
+  if (operation === "transfer" && isChildProcessTimeout(error)) return new SmbCommandError(504, "SMB archive transfer timed out.", "timeout", error);
+  const text = error instanceof Error ? `${error.message} ${String((error as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "")} ${String((error as NodeJS.ErrnoException).code || "")}`.toUpperCase() : String(error).toUpperCase();
+  if (/LOGON_FAILURE|NT_STATUS_WRONG_PASSWORD|AUTHENTICATION/.test(text)) return new SmbCommandError(502, "SMB authentication failed.", "authentication", error);
+  if (/BAD_NETWORK_NAME|NO_SUCH_SHARE/.test(text)) return new SmbCommandError(502, "SMB share not found.", "share_not_found", error);
+  if (/ACCESS_DENIED|PERMISSION_DENIED/.test(text)) return new SmbCommandError(502, "SMB permission denied.", "permission", error);
+  if (/OBJECT_(?:NAME|PATH)_NOT_FOUND|NO_SUCH_FILE/.test(text)) {
+    const message = operation === "metadata_probe" ? "SMB file was not found." : "Configured SMB folder was not found or could not be created.";
+    return new SmbCommandError(502, message, "not_found", error);
+  }
+  if (/OBJECT_NAME_COLLISION|FILE_EXISTS|ALREADY_EXISTS/.test(text)) return new SmbCommandError(502, "SMB destination already exists.", "already_exists", error);
+  if (/DISK_FULL|NO_SPACE/.test(text)) return new SmbCommandError(507, "SMB destination storage is full.", "storage_full", error);
+  if (/CONNECTION_REFUSED|ETIMEDOUT|TIMED_OUT|NO_ROUTE|HOST_UNREACH|NETWORK_UNREACH|EHOSTUNREACH|ENETUNREACH/.test(text)) return new SmbCommandError(502, "SMB server unavailable.", isChildProcessTimeout(error) ? "timeout" : "network", error);
+  return new SmbCommandError(502, "SMB destination operation failed.", "unknown", error);
 }
 
 /** Shared SMB session for narrowly scoped internal integrations. Commands must use smbQuote for dynamic paths. */
