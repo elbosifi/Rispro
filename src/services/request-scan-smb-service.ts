@@ -62,8 +62,21 @@ async function observed<T>(operation: string, context: RequestScanSmbDiagnosticC
   try { return await action(); }
   catch (error) { if (!(error instanceof SmbCommandError && error.smbCode === "not_found")) context?.logDiagnostic?.("request_scan_smb_failure", { operation, smbCode: smbFailureCode(error), ...diagnosticMetadata(error), elapsedMs: Date.now() - started, ...(context.jobId ? { jobId: context.jobId } : {}) }); throw error; }
 }
+function parseRemoteListingInfo(stdout: string, expectedBasename: string): { exists: boolean; size: number | null } {
+  const expected = expectedBasename.normalize("NFC");
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.match(/^\s*(.*?)\s{2,}([A-Za-z]+)\s+(\d+)\s+(.+?)\s*$/);
+    if (!match || match[1]!.normalize("NFC") !== expected || match[2]!.toUpperCase().includes("D")) continue;
+    return { exists: true, size: Number(match[3]) };
+  }
+  return { exists: false, size: null };
+}
 async function remoteInfo(run: RequestScanSmbRun, remotePath: string, operation: "source_probe" | "destination_probe" | "destination_verification" | "source_verification" | "fallback_verification", context?: RequestScanSmbDiagnosticContext): Promise<{ exists: boolean; size: number | null }> {
-  try { const result = await observed(operation, context, () => run(commandInRemoteDirectory(remotePath, (quotedBasename) => `allinfo ${quotedBasename}`), "metadata_probe")) as { stdout?: string }; const match = String(result.stdout || "").match(/\bsize\s*:\s*(\d+)/i); return { exists: true, size: match ? Number(match[1]) : null }; }
+  try {
+    const { basename } = splitSmbRemotePath(remotePath);
+    const result = await observed(operation, context, () => run(commandInRemoteDirectory(remotePath, (quotedBasename) => `ls ${quotedBasename}`), "metadata_probe")) as { stdout?: string };
+    return parseRemoteListingInfo(String(result.stdout || ""), basename);
+  }
   catch (error) { if (error instanceof SmbCommandError && error.smbCode === "not_found") return { exists: false, size: null }; throw error; }
 }
 

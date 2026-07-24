@@ -50,6 +50,15 @@ function smbState(initial: Record<string, string>, options: { deleteFails?: bool
         result = { stdout: `size: ${files.get(remote)!.length}` };
         continue;
       }
+      if (operation.startsWith("ls ")) {
+        if (options.failReprobe && commands.some((value) => value.includes("rename "))) throw Object.assign(new Error("connection failed"), { code: "EHOSTUNREACH" });
+        const remote = resolve(cwd, paths[0]!);
+        if (options.destinationDisappearsBeforeDelete && destinationDownloaded && remote.includes("Processed")) files.delete(remote);
+        const body = files.get(remote);
+        if (!body) throw missing();
+        result = { stdout: `  ${path.win32.basename(remote)}  A  ${body.length}  Wed Jul 24 10:00:00 2026` };
+        continue;
+      }
       if (operation.startsWith("rename ")) {
         const source = resolve(cwd, paths[0]!); const destination = resolve(cwd, paths[1]!);
         if (options.renameStatus) {
@@ -123,6 +132,14 @@ test("Request Scan SMB reconciliation covers all source and destination states",
   const deleteFailure = smbState({ [source]: "same", [destination]: "same" }, { deleteFails: true }); await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, deleteFailure.dependencies));
   const verifyFailure = smbState({ [source]: "same", [destination]: "same" }, { hideDestinationAfterDelete: true }); await assert.rejects(() => reconcileRequestScanMove(settings, source, destination, verifyFailure.dependencies), /verification failed/);
 });
+test("Request Scan SMB nested file probes use exact same-command directory context", async () => {
+  const source = "Requests\\Incoming\\scan.pdf"; const destination = "Requests\\Processed\\7-scan.pdf";
+  const state = smbState({ [source]: "source" });
+  assert.equal(await reconcileRequestScanMove(settings, source, destination, state.dependencies), "moved");
+  assert.equal(state.commands.some((command) => command === 'cd "Requests\\\\Incoming"; ls "scan.pdf"'), true);
+  assert.equal(state.commands.some((command) => command.includes('ls "Requests\\\\Incoming\\\\scan.pdf"')), false);
+  assert.equal(state.commands.some((command) => command.includes("allinfo ")), false);
+});
 test("Request Scan SMB rename fallback is limited and verifies copy before deleting source", async () => {
   const source = "Incoming\\scan.pdf"; const destination = "Processed\\7-scan.pdf";
   for (const status of ["NT_STATUS_NOT_SUPPORTED", "NT_STATUS_INVALID_PARAMETER", "NT_STATUS_UNEXPECTED_IO_ERROR", "NT_STATUS_OBJECT_NAME_NOT_FOUND"]) {
@@ -187,7 +204,8 @@ test("Request Scan full connection test archives and removes its synthetic artif
   await testRequestScanSmb({ ...settings, incomingSubfolder: "Requests\\Incoming", processedSubfolder: "Requests\\Processed", failedSubfolder: "Requests\\Failed" }, state.dependencies);
   assert.equal([...state.files.keys()].some((name) => name.includes(".rispro-request-scan-workflow-")), false);
   assert.equal(state.commands.some((command) => command.startsWith('cd "Requests\\\\Incoming"; put "') && !command.includes('put "Requests\\\\Incoming')), true);
-  assert.equal(state.commands.some((command) => command.startsWith('cd "Requests\\\\Incoming"; allinfo "')), true);
+  assert.equal(state.commands.some((command) => command.startsWith('cd "Requests\\\\Incoming"; ls "')), true);
+  assert.equal(state.commands.some((command) => command.includes("allinfo ")), false);
   assert.equal(state.commands.some((command) => command.startsWith('cd "Requests\\\\Incoming"; rename "') && command.includes("..\\\\Processed")), true);
   assert.equal(state.commands.some((command) => command.startsWith('cd "Requests\\\\Processed') && hasOperation(command, "del")), true);
 });
