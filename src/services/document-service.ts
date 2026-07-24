@@ -282,18 +282,18 @@ export async function listDocuments(
 
   if (filters.patientId) {
     params.push(normalizePositiveInteger(filters.patientId, "patientId"));
-    conditions.push(`patient_id = $${params.length}`);
+    conditions.push(`d.patient_id = $${params.length}`);
   }
 
   if (filters.appointmentId) {
     params.push(normalizePositiveInteger(filters.appointmentId, "appointmentId"));
     const appointmentIdIndex = params.length;
     if (appointmentRefType === "legacy_appointment") {
-      conditions.push(`appointment_id = $${appointmentIdIndex}`);
+      conditions.push(`d.appointment_id = $${appointmentIdIndex}`);
     } else if (appointmentRefType === "v2_booking") {
-      conditions.push(`v2_booking_id = $${appointmentIdIndex}`);
+      conditions.push(`(d.v2_booking_id = $${appointmentIdIndex} or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=$${appointmentIdIndex}))`);
     } else {
-      conditions.push(`(appointment_id = $${appointmentIdIndex} or v2_booking_id = $${appointmentIdIndex})`);
+      conditions.push(`(d.appointment_id = $${appointmentIdIndex} or d.v2_booking_id = $${appointmentIdIndex} or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=$${appointmentIdIndex}))`);
     }
   }
 
@@ -301,28 +301,28 @@ export async function listDocuments(
   const { rows } = await pool.query(
     `
       select
-        id,
-        patient_id,
-        appointment_id,
-        v2_booking_id,
-        document_type,
-        original_filename,
-        stored_path,
-        mime_type,
-        file_size,
-        storage_location_type,
-        source,
-        scan_session_id,
-        page_count,
-        scanner_name,
-        workstation_name,
-        app_version,
-        last_move_attempt_at,
-        last_move_error,
-        created_at
-      from documents
+        d.id,
+        d.patient_id,
+        d.appointment_id,
+        d.v2_booking_id,
+        d.document_type,
+        d.original_filename,
+        d.stored_path,
+        d.mime_type,
+        d.file_size,
+        d.storage_location_type,
+        d.source,
+        d.scan_session_id,
+        d.page_count,
+        d.scanner_name,
+        d.workstation_name,
+        d.app_version,
+        d.last_move_attempt_at,
+        d.last_move_error,
+        d.created_at
+      from documents d
       ${whereClause}
-      order by created_at desc
+      order by d.created_at desc
       limit 50
     `,
     params
@@ -474,7 +474,7 @@ export async function uploadDocument(
   const appVersion = String(payload.appVersion || "").trim() || null;
   const idempotencyKey = String(payload.idempotencyKey || "").trim() || null;
   const requestScanJobId = normalizePositiveInteger(payload.requestScanJobId, "requestScanJobId", { required: false });
-  if (idempotencyKey && !/^request-scan:v2-booking:\d+:appointment-request$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
+  if (idempotencyKey && !/^request-scan:(?:v2-booking|job):\d+:appointment-request$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
   if (fileSize === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
   }
@@ -630,6 +630,27 @@ export async function uploadDocumentIdempotently(payload: DocumentUploadPayload,
     const winner = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [idempotencyKey]);
     if (!winner.rows[0]) throw error;
     return { document: winner.rows[0], created: false };
+  }
+}
+
+export async function upsertDocumentAppointmentLinks(documentId: number, appointmentIds: number[]): Promise<void> {
+  const ids = [...new Set(appointmentIds.map((value) => normalizePositiveInteger(value, "appointmentId")).filter((value): value is number => value != null))].sort((a, b) => a - b);
+  if (!ids.length) throw new HttpError(400, "At least one appointment link is required.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (const appointmentId of ids) {
+      await client.query(
+        "insert into document_appointment_links(document_id,appointment_id) values($1,$2) on conflict do nothing",
+        [documentId, appointmentId],
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

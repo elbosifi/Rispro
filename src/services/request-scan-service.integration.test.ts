@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import jwt from "jsonwebtoken";
 import { pool } from "../db/pool.js";
 import { issueLegacyPublicCancelToken, issuePublicCancelToken, verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
-import { uploadDocumentIdempotently, type DocumentRow, type DocumentUploadPayload } from "./document-service.js";
+import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
+import { listDocuments, uploadDocumentIdempotently, type DocumentRow, type DocumentUploadPayload } from "./document-service.js";
 import { resolveStoredPath } from "./document-storage-path.js";
 import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js";
 import {
@@ -101,6 +103,21 @@ async function createBooking(status = "scheduled") {
   return { id, patientId, userId, accession: `V2-${String(id).padStart(6, "0")}` };
 }
 
+async function createBookingForSamePatient(bookingId: number) {
+  const source = await pool.query<{ patient_id: number; modality_id: number; policy_version_id: number; created_by_user_id: number }>(
+    "select patient_id,modality_id,policy_version_id,created_by_user_id from appointments_v2.bookings where id=$1",
+    [bookingId],
+  );
+  const row = source.rows[0]!;
+  const inserted = await pool.query<{ id: number }>(
+    `insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,reporting_priority_id,booking_date,booking_time,case_category,status,notes,policy_version_id,created_by_user_id,updated_by_user_id)
+     values($1,$2,null,null,current_date+1,'10:00:00','non_oncology','scheduled','request scan multi test',$3,$4,$4) returning id`,
+    [row.patient_id, row.modality_id, row.policy_version_id, row.created_by_user_id],
+  );
+  const id = Number(inserted.rows[0]!.id); created.bookings.push(id);
+  return { id, patientId: Number(row.patient_id), accession: `V2-${String(id).padStart(6, "0")}` };
+}
+
 async function createJob(status = "pending", filename?: string) {
   const marker = suffix();
   const storedFilename = filename ?? `request-${marker}.jpg`;
@@ -162,6 +179,71 @@ test("finds exactly one eligible V2 accession and excludes cancelled, discontinu
   for (const booking of excluded) {
     await assert.rejects(() => findEligibleRequestScanAppointment(booking.accession), /No eligible appointment matches this accession/);
   }
+});
+
+test("Request Scan token resolver accepts genuine expired compact tokens while public verification remains unchanged", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const token = issueLegacyPublicCancelToken(booking.id, { expiresInSeconds: -60 });
+  assert.ok(token);
+  const resolved = await resolveRequestScanAppointmentToken(token);
+  assert.deepEqual(resolved, { bookingId: booking.id, tokenType: "compact" });
+  await assert.rejects(() => verifyPublicCancelToken(token), /expired/i);
+});
+
+test("Request Scan opaque token resolver rejects revocation without exposing the token", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const token = await issuePublicCancelToken(booking.id); assert.ok(token);
+  assert.deepEqual(await resolveRequestScanAppointmentToken(token), { bookingId: booking.id, tokenType: "opaque" });
+  await pool.query("update appointments_v2.public_appointment_tokens set revoked_at=now() where booking_id=$1", [booking.id]);
+  await assert.rejects(() => resolveRequestScanAppointmentToken(token), (error: unknown) => (error as { details?: { code?: string } }).details?.code === "qr_token_revoked");
+});
+
+test("Request Scan resolver accepts expired legacy JWT signatures and rejects tampering or missing bookings", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const secret = process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET || process.env.JWT_SECRET; assert.ok(secret);
+  const expiredJwt = jwt.sign({ bookingId: booking.id, action: "cancel" }, secret, { algorithm: "HS256", expiresIn: -60 });
+  assert.deepEqual(await resolveRequestScanAppointmentToken(expiredJwt), { bookingId: booking.id, tokenType: "jwt" });
+  await assert.rejects(() => verifyPublicCancelToken(expiredJwt), /expired/i);
+  await assert.rejects(() => resolveRequestScanAppointmentToken(`${expiredJwt.slice(0, -1)}x`), /Invalid Request Scan appointment token/);
+  const missing = issueLegacyPublicCancelToken(999_999_999, { expiresInSeconds: 3600 }); assert.ok(missing);
+  await assert.rejects(() => resolveRequestScanAppointmentToken(missing), (error: unknown) => (error as { details?: { code?: string } }).details?.code === "qr_booking_not_found");
+});
+
+test("same-patient multi-appointment identifiers create one document and link every appointment", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking(); const second = await createBookingForSamePatient(first.id); const jobId = await createJob();
+  const firstToken = await issuePublicCancelToken(first.id); const secondToken = await issuePublicCancelToken(second.id); assert.ok(firstToken); assert.ok(secondToken);
+  const multiDependencies = dependencies({ ok: true, accessions: [], qrTokens: [firstToken, secondToken] });
+  multiDependencies.uploadDocumentIdempotently = uploadDocumentIdempotently;
+  const completed = await processRequestScanJob(jobId, settings, multiDependencies);
+  assert.equal(completed.status, "processed"); assert.equal(Number(completed.appointment_id), Math.min(first.id, second.id));
+  const documents = await pool.query<{ id: number }>("select id from documents where request_scan_job_id=$1 or id=$2", [jobId, completed.document_id]);
+  assert.equal(documents.rowCount, 1);
+  const stored = await pool.query<DocumentRow>("select * from documents where id=$1", [completed.document_id]);
+  const storedPath = resolveStoredPath(stored.rows[0]!.stored_path); assert.equal(await fs.stat(storedPath).then((value) => value.isFile(), () => false), true);
+  const documentLinks = await pool.query<{ appointment_id: number }>("select appointment_id from document_appointment_links where document_id=$1 order by appointment_id", [completed.document_id]);
+  assert.deepEqual(documentLinks.rows.map((row) => Number(row.appointment_id)), [first.id, second.id].sort((a, b) => a - b));
+  const primaryDocuments = await listDocuments({ appointmentId: first.id, appointmentRefType: "v2_booking" });
+  const secondaryDocuments = await listDocuments({ appointmentId: second.id, appointmentRefType: "v2_booking" });
+  assert.equal(primaryDocuments.filter((document) => Number(document.id) === Number(completed.document_id)).length, 1);
+  assert.equal(secondaryDocuments.filter((document) => Number(document.id) === Number(completed.document_id)).length, 1);
+  const jobLinks = await pool.query<{ appointment_id: number; patient_id: number }>("select appointment_id,patient_id from request_scan_job_appointments where request_scan_job_id=$1 order by appointment_id", [jobId]);
+  assert.deepEqual(jobLinks.rows.map((row) => Number(row.appointment_id)), [first.id, second.id].sort((a, b) => a - b));
+  assert.equal(new Set(jobLinks.rows.map((row) => Number(row.patient_id))).size, 1);
+  assert.equal((await getRequestScanJob(jobId)).matchedAppointments?.length, 2);
+  await fs.rm(storedPath, { force: true });
+});
+
+test("different-patient and unresolved internal identifiers fail before attachment", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking(); const differentPatient = await createBooking();
+  const conflictJob = await createJob();
+  const conflict = await processRequestScanJob(conflictJob, settings, dependencies({ ok: true, accessions: [first.accession, differentPatient.accession], qrTokens: [] }));
+  assert.equal(conflict.status, "failed"); assert.match(conflict.error_message || "", /different patients/); assert.equal(conflict.document_id, null);
+  const unresolvedJob = await createJob();
+  const unresolved = await processRequestScanJob(unresolvedJob, settings, dependencies({ ok: true, accessions: [first.accession, "V2-999999999"], qrTokens: [] }));
+  assert.equal(unresolved.status, "failed"); assert.match(unresolved.error_message || "", /could not be resolved/); assert.equal(unresolved.document_id, null);
 });
 
 test("attaches a matched request through the document service and marks the job processed", async (t) => {
@@ -439,7 +521,7 @@ test("reconciles document accession and QR evidence as consensus or conflict", a
     dependencies({ ok: true, accession: first.accession, qrTokens: [secondToken] })
   );
   assert.equal(conflict.status, "failed");
-  assert.equal(conflict.error_message, "The scanned document contains conflicting appointment information. Assign the document manually.");
+  assert.equal(conflict.error_message, "The document contains appointment identifiers for different patients. Separate the document or assign it manually.");
   assert.equal(conflict.error_message.includes(secondToken), false);
 });
 
@@ -458,7 +540,7 @@ test("multiple document QR tokens resolving differently require manual review", 
     dependencies({ ok: true, qrTokens: [firstToken, secondToken] })
   );
   assert.equal(job.status, "failed");
-  assert.equal(job.error_message, "The scanned document contains conflicting appointment information. Assign the document manually.");
+  assert.equal(job.error_message, "The document contains appointment identifiers for different patients. Separate the document or assign it manually.");
 });
 
 test("invalid, expired, and wrong-action document QR tokens are rejected without disclosure", async (t) => {
@@ -487,8 +569,8 @@ test("invalid, expired, and wrong-action document QR tokens are rejected without
     settings,
     dependencies({ ok: true, accession: booking.accession, qrTokens: ["pa_invalid_but_ignored"] })
   );
-  assert.equal(accessionJob.status, "processed");
-  assert.equal(Number(accessionJob.appointment_id), booking.id);
+  assert.equal(accessionJob.status, "failed");
+  assert.equal(accessionJob.error_message, "The document contains an appointment identifier that could not be resolved. Review and assign the document manually.");
 });
 
 test("ignored unrelated document QR payloads remain manual and emit only safe diagnostics", async (t) => {
@@ -678,6 +760,7 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(failed.status, "failed");
   assert.equal(uploads.length, 1);
   assert.ok(failed.attachment_completed_at); assert.ok(failed.document_id);
+  await pool.query("delete from document_appointment_links where document_id=$1", [failed.document_id]);
   assert.equal(failed.source_relative_path.includes("Incoming"), true);
   await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async () => { throw new Error("checkpointed retry must not move back to Incoming"); } });
   const second = dependencies({ ok: true, accession: booking.accession }, { uploads });
@@ -687,6 +770,7 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(cycle.processed, 1);
   assert.equal((await getRequestScanJob(jobId)).status, "processed");
   assert.equal(uploads.length, 1);
+  assert.equal((await pool.query("select 1 from document_appointment_links where document_id=$1 and appointment_id=$2", [failed.document_id, booking.id])).rowCount, 1);
 });
 
 test("checkpointed identical source reconciliation completes without another upload", async (t) => {
@@ -704,10 +788,10 @@ test("checkpointed identical source reconciliation completes without another upl
 
 test("concurrent idempotent Request Scan uploads create one document and remove the losing file", async (t) => {
   if (!(await ensureDatabase(t))) return;
-  const booking = await createBooking(); const jobA = await createJob(); const jobB = await createJob();
-  const key = `request-scan:v2-booking:${booking.id}:appointment-request`;
+  const booking = await createBooking(); const jobA = await createJob();
+  const key = `request-scan:job:${jobA}:appointment-request`;
   const payload = { patientId: booking.patientId, appointmentId: booking.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: "same-request.pdf", mimeType: "application/pdf", fileContentBuffer: Buffer.from("same-request"), source: "request_scan_automation" };
-  const results = await Promise.all([uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, key), uploadDocumentIdempotently({ ...payload, requestScanJobId: jobB }, null, key)]);
+  const results = await Promise.all([uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, key), uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, key)]);
   assert.equal(new Set(results.map((result) => result.document.id)).size, 1); assert.deepEqual(results.map((result) => result.created).sort(), [false, true]);
   const rows = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [key]); assert.equal(rows.rowCount, 1);
   const winningPath = resolveStoredPath(rows.rows[0].stored_path); const storedNames = await fs.readdir(path.dirname(winningPath));
@@ -717,6 +801,7 @@ test("concurrent idempotent Request Scan uploads create one document and remove 
 
 after(async () => {
   if (created.jobs.length) await pool.query("delete from audit_log where entity_type='request_scan_job' and entity_id=any($1::bigint[])", [created.jobs]);
+  if (created.patients.length) await pool.query("delete from documents where patient_id=any($1::bigint[]) and source='request_scan_automation'", [created.patients]);
   if (created.jobs.length) await pool.query("delete from request_scan_jobs where id = any($1::bigint[])", [created.jobs]);
   if (created.bookings.length) {
     await pool.query("delete from external_mwl_outbox where booking_id = any($1::bigint[])", [created.bookings]);

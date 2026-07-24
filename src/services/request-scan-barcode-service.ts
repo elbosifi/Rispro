@@ -9,7 +9,7 @@ import { normalizeV2AccessionNumber } from "../modules/appointments-v2/shared/ut
 const execFile = promisify(execFileCallback);
 export type RequestScanBarcodeFailure = "no_barcode" | "no_valid_accession" | "multiple_accessions" | "unsupported_file" | "corrupt_file" | "barcode_decoder_timeout" | "barcode_decoder_failed" | "pdf_render_failed" | "image_preprocess_failed" | "barcode_processing_failed";
 export type RequestScanBarcodeResult =
-  | { ok: true; accession?: string; qrTokens?: string[]; ignoredQrCount?: number }
+  | { ok: true; accessions?: string[]; accession?: string; qrTokens?: string[]; ignoredQrCount?: number }
   | { ok: false; reason: RequestScanBarcodeFailure; ignoredQrCount?: number };
 export type RequestScanBarcodeDependencies = {
   execFile(command: string, args: string[], options: { timeout: number; maxBuffer: number; signal?: AbortSignal }): Promise<{ stdout?: string; stderr?: string }>;
@@ -385,14 +385,15 @@ async function scanPdfAtResolution(pdfPath: string, dpi: 300 | 600, rootTempDir:
 }
 function summarize(result: ResolutionResult): RequestScanBarcodeResult {
   if (result.failure) return { ok: false, reason: result.failure };
-  if (result.accessions.size > 1) return { ok: false, reason: "multiple_accessions" };
-  const accession = result.accessions.size === 1 ? [...result.accessions][0] : undefined;
-  const qrTokens = [...result.qrTokens];
-  if (accession || qrTokens.length) {
+  const accessions = [...result.accessions].sort();
+  const accession = accessions.length === 1 ? accessions[0] : undefined;
+  const qrTokens = [...result.qrTokens].sort();
+  if (accessions.length || qrTokens.length) {
     return {
       ok: true,
+      accessions,
       ...(accession ? { accession } : {}),
-      ...(qrTokens.length ? { qrTokens } : {}),
+      qrTokens,
       ...(result.ignoredQrCount ? { ignoredQrCount: result.ignoredQrCount } : {}),
     };
   }

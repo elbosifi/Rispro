@@ -3,10 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { pool } from "../db/pool.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
-import { verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
-import { findDocumentByIdempotencyKey, getDocumentAbsolutePath, getDocumentById, uploadDocument, uploadDocumentIdempotently } from "./document-service.js";
+import { findDocumentByIdempotencyKey, getDocumentAbsolutePath, getDocumentById, uploadDocument, uploadDocumentIdempotently, upsertDocumentAppointmentLinks } from "./document-service.js";
 import { extractRequestScanBarcode, type RequestScanBarcodeFailure } from "./request-scan-barcode-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import {
@@ -19,13 +18,15 @@ import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFi
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import { env } from "../config/env.js";
-import { assertRequestScanLeaseOwned, beginRequestScanAttachment, claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLeaseExecutionState, RequestScanCancellationRequestedError, RequestScanLeaseLostError, updateRequestScanCheckpoint, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanLease } from "./request-scan-processing-service.js";
+import { assertRequestScanLeaseOwned, beginRequestScanAttachment, checkpointRequestScanJobAppointments, claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, linkRequestScanDocumentAppointments, loadRequestScanJobAppointments, renewRequestScanLeaseExecutionState, RequestScanCancellationRequestedError, RequestScanLeaseLostError, updateRequestScanCheckpoint, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanJobAppointmentCheckpoint, type RequestScanLease } from "./request-scan-processing-service.js";
 import { createRequestScanProgressCoalescer } from "./request-scan-progress-coalescer.js";
 import { requestRequestScanWorkerRun } from "./request-scan-worker-control-service.js";
+import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
-export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; identifier_verified_at?: string | null; identifier_strategy?: string | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; return_requested_at?: string | null; return_source_path?: string | null; return_destination_path?: string | null; return_completed_at?: string | null; cancel_requested_at?: string | null; cancel_requested_by?: number | null; cancel_reason?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
+export type RequestScanMatchedAppointment = { id: number; accessionNumber: string; patientId: number; modality?: string; examination?: string };
+export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; barcode_value: string | null; appointment_id: number | null; document_id: number | null; matchedAppointments?: RequestScanMatchedAppointment[]; identifier_verified_at?: string | null; identifier_strategy?: string | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; return_requested_at?: string | null; return_source_path?: string | null; return_destination_path?: string | null; return_completed_at?: string | null; cancel_requested_at?: string | null; cancel_requested_by?: number | null; cancel_reason?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; modality_name?: string | null; exam_name?: string | null; accession_number?: string | null };
 export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "dismissed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; accession_number: string };
 export type RequestScanServiceDependencies = {
@@ -37,9 +38,10 @@ export type RequestScanServiceDependencies = {
   uploadDocument: typeof uploadDocument;
   uploadDocumentIdempotently?: typeof uploadDocumentIdempotently;
   findDocumentByIdempotencyKey?: typeof findDocumentByIdempotencyKey;
+  upsertDocumentAppointmentLinks?: typeof upsertDocumentAppointmentLinks;
   automatedDocumentExists: (appointmentId: number) => Promise<boolean>;
   findEligibleAppointment: (accession: string) => Promise<EligibleAppointment>;
-  verifyPublicAppointmentToken: typeof verifyPublicCancelToken;
+  verifyPublicAppointmentToken: (token: string) => Promise<{ bookingId: number }>;
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
 };
 export type RequestScanCycleOptions = { maxConcurrency?: 1 | 2; shouldContinue?: () => boolean };
@@ -87,9 +89,10 @@ const defaultDependencies: RequestScanServiceDependencies = {
   uploadDocument,
   uploadDocumentIdempotently,
   findDocumentByIdempotencyKey,
+  upsertDocumentAppointmentLinks,
   automatedDocumentExists,
-  findEligibleAppointment: findEligibleRequestScanAppointment,
-  verifyPublicAppointmentToken: verifyPublicCancelToken,
+  findEligibleAppointment: findRequestScanAppointment,
+  verifyPublicAppointmentToken: resolveRequestScanAppointmentToken,
   logDiagnostic(event, metadata) { console.info("[RequestScanIdentifier]", event, metadata); },
 };
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
@@ -123,10 +126,31 @@ export async function listRequestScanJobs(filterInput?: unknown, categoryInput?:
     ? "case when j.status = 'processing' then 0 else 1 end, j.created_at asc, j.id asc"
     : "j.created_at desc, j.id desc";
   const { rows } = await pool.query(`select j.*, u.full_name as dismissed_by_name, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, coalesce(p.english_full_name, p.arabic_full_name) as patient_name, m.name_en as modality_name, e.name_en as exam_name from request_scan_jobs j left join users u on u.id=j.dismissed_by left join appointments_v2.bookings b on b.id=j.appointment_id left join patients p on p.id=b.patient_id left join modalities m on m.id=b.modality_id left join exam_types e on e.id=b.exam_type_id ${finalWhere} order by ${order} limit 250`, values);
-  return rows as RequestScanJob[];
+  return hydrateMatchedAppointments(rows as RequestScanJob[]);
 }
 
-export async function getRequestScanJob(id: number): Promise<RequestScanJob> { const { rows } = await pool.query("select * from request_scan_jobs where id=$1", [id]); if (!rows[0]) throw new HttpError(404, "Request scan not found."); return rows[0] as RequestScanJob; }
+async function hydrateMatchedAppointments(jobs: RequestScanJob[]): Promise<RequestScanJob[]> {
+  if (!jobs.length) return jobs;
+  const { rows } = await pool.query<{ request_scan_job_id: number; id: number; patient_id: number; accession_number: string; modality: string | null; examination: string | null }>(
+    `select link.request_scan_job_id,b.id,b.patient_id,('V2-' || lpad(b.id::text,6,'0')) accession_number,m.name_en modality,e.name_en examination
+     from request_scan_job_appointments link
+     join appointments_v2.bookings b on b.id=link.appointment_id
+     left join modalities m on m.id=b.modality_id
+     left join exam_types e on e.id=b.exam_type_id
+     where link.request_scan_job_id=any($1::bigint[])
+     order by link.request_scan_job_id,b.id`,
+    [jobs.map(({ id }) => Number(id))],
+  );
+  const matches = new Map<number, RequestScanMatchedAppointment[]>();
+  for (const row of rows) {
+    const values = matches.get(Number(row.request_scan_job_id)) ?? [];
+    values.push({ id: Number(row.id), accessionNumber: row.accession_number, patientId: Number(row.patient_id), ...(row.modality ? { modality: row.modality } : {}), ...(row.examination ? { examination: row.examination } : {}) });
+    matches.set(Number(row.request_scan_job_id), values);
+  }
+  return jobs.map((job) => ({ ...job, matchedAppointments: matches.get(Number(job.id)) ?? [] }));
+}
+
+export async function getRequestScanJob(id: number): Promise<RequestScanJob> { const { rows } = await pool.query("select * from request_scan_jobs where id=$1", [id]); if (!rows[0]) throw new HttpError(404, "Request scan not found."); return (await hydrateMatchedAppointments([rows[0] as RequestScanJob]))[0]!; }
 
 type IncomingReconciliation = { job: RequestScanJob; outcome: "active" | "created" | "reactivated" | "orphan_conflict" };
 export async function reconcileIncomingRequestScanFile(filename: string, sourceRelativePath: string): Promise<IncomingReconciliation> {
@@ -164,6 +188,11 @@ async function updateJob(id: number, values: Partial<RequestScanJob>): Promise<R
 export async function findEligibleRequestScanAppointment(accession: string): Promise<EligibleAppointment> {
   const { rows } = await pool.query<EligibleAppointment>(`select b.id,b.patient_id,('V2-' || lpad(b.id::text,6,'0')) as accession_number from appointments_v2.bookings b where ('V2-' || lpad(b.id::text,6,'0'))=$1 and b.status not in ('cancelled','discontinued','voided')`, [accession]);
   if (!rows.length) throw new HttpError(404, "No eligible appointment matches this accession"); if (rows.length > 1) throw new HttpError(409, "More than one eligible appointment matches this accession"); return rows[0];
+}
+export async function findRequestScanAppointment(accession: string): Promise<EligibleAppointment> {
+  const { rows } = await pool.query<EligibleAppointment>(`select b.id,b.patient_id,('V2-' || lpad(b.id::text,6,'0')) as accession_number from appointments_v2.bookings b where ('V2-' || lpad(b.id::text,6,'0'))=$1`, [accession]);
+  if (!rows.length) throw new HttpError(404, "No appointment matches this accession");
+  return { ...rows[0]!, id: Number(rows[0]!.id), patient_id: Number(rows[0]!.patient_id) };
 }
 async function automatedDocumentExists(appointmentId: number): Promise<boolean> { const result = await pool.query("select 1 from documents where v2_booking_id=$1 and document_type='appointment_request' and source='request_scan_automation' limit 1", [appointmentId]); return Boolean(result.rowCount); }
 function concise(error: unknown): string { return error instanceof HttpError ? error.message : "Request scan processing failed"; }
@@ -299,13 +328,24 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
     heartbeat = setInterval(() => { if (renewing || leaseLost || cancellationRequested) return; renewing = true; renewalPromise = renewRequestScanLeaseExecutionState(jobId, lease).then((state) => { if (state === "lost") leaseLost = true; else if (state === "cancel_requested") { cancellationRequested = true; cancellationController.abort(); } }).catch(() => { leaseLost = true; }).finally(() => { renewing = false; renewalPromise = null; }); }, 12_000);
     if (job.attachment_completed_at && job.document_id) {
       try { await getDocumentById(job.document_id); } catch { throw new RequestScanProcessingError("The checkpointed Request Scan document no longer exists. Manual review is required.", "internal_processing"); }
+      const checkpointed = await loadRequestScanJobAppointments(job.id);
+      const appointmentIds = checkpointed.length ? checkpointed.map((value) => value.appointment_id) : job.appointment_id ? [Number(job.appointment_id)] : [];
+      if (!appointmentIds.length) throw new RequestScanProcessingError("The checkpointed Request Scan appointment links are missing. Manual review is required.", "internal_processing");
+      await ensureLease();
+      if (dependencies.upsertDocumentAppointmentLinks) await dependencies.upsertDocumentAppointmentLinks(job.document_id, appointmentIds);
+      else await linkRequestScanDocumentAppointments(job.id, lease, job.document_id, appointmentIds);
+      await ensureLease();
       return await archiveCheckpointedRequestScanJob(job, lease, settings, dependencies, job.attachment_created !== false);
     }
-    let appointment: EligibleAppointment;
+    let appointments: EligibleAppointment[] = [];
+    let appointmentSources = new Map<number, Set<"accession" | "qr" | "filename" | "checkpoint">>();
     let identifierStrategy = job.identifier_strategy || "checkpoint";
     if (job.identifier_verified_at && job.appointment_id && job.barcode_value) {
-      appointment = await dependencies.findEligibleAppointment(job.barcode_value);
-      if (Number(appointment.id) !== Number(job.appointment_id)) throw new RequestScanProcessingError("The checkpointed Request Scan identifier no longer resolves to the same appointment. Manual review is required.", "internal_processing");
+      const checkpointed = await loadRequestScanJobAppointments(job.id);
+      const appointmentIds = checkpointed.length ? checkpointed.map((value) => value.appointment_id) : [Number(job.appointment_id)];
+      appointments = await Promise.all(appointmentIds.map((id) => dependencies.findEligibleAppointment(formatV2AccessionNumber(id))));
+      if (!appointments.some((appointment) => Number(appointment.id) === Number(job.appointment_id))) throw new RequestScanProcessingError("The checkpointed Request Scan identifier no longer resolves to the same appointment. Manual review is required.", "internal_processing");
+      for (const appointment of appointments) appointmentSources.set(Number(appointment.id), new Set(["checkpoint"]));
       await stage({ stage: "downloading" }); await downloadRequestScanSource(dependencies, settings, job, localPath);
     } else {
       await stage({ stage: "checking_filename" });
@@ -318,7 +358,9 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       }
 
       if (filenameEvidence.decision.kind === "success") {
-        appointment = filenameEvidence.appointments.get(filenameEvidence.decision.appointmentId)!;
+        const appointment = filenameEvidence.appointments.get(filenameEvidence.decision.appointmentId)!;
+        appointments = [appointment];
+        appointmentSources.set(Number(appointment.id), new Set(["filename"]));
         identifierStrategy = filenameEvidence.decision.strategy;
         const code = filenameEvidence.decision.strategy === "filename_accession"
           ? "IDENTIFIER_SUCCESS_FILENAME_ACCESSION"
@@ -371,54 +413,53 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       }
       const documentAppointments = new Map<number, EligibleAppointment>();
       const documentSources: Array<{ appointmentId: number; source: "accession" | "qr" }> = [];
-      if (barcode.accession) {
+      let unresolvedInternalCount = 0;
+      const barcodeAccessions = barcode.accessions ?? (barcode.accession ? [barcode.accession] : []);
+      for (const accession of barcodeAccessions) {
         try {
-          const accessionAppointment = await dependencies.findEligibleAppointment(barcode.accession);
+          const accessionAppointment = await dependencies.findEligibleAppointment(accession);
           documentAppointments.set(Number(accessionAppointment.id), accessionAppointment);
           documentSources.push({ appointmentId: Number(accessionAppointment.id), source: "accession" });
         } catch {
-          // An unresolved accession is not authoritative evidence.
+          unresolvedInternalCount += 1;
         }
       }
-      let invalidQrCount = 0;
       for (const token of barcode.qrTokens ?? []) {
         let bookingId: number;
         try {
           const payload = await dependencies.verifyPublicAppointmentToken(token);
           bookingId = payload.bookingId;
-        } catch {
-          invalidQrCount += 1;
+        } catch (error) {
+          unresolvedInternalCount += 1;
+          const detailCode = error instanceof HttpError && error.details && typeof error.details === "object" ? String((error.details as { code?: unknown }).code || "") : "";
+          logIdentifier(dependencies, detailCode === "qr_token_revoked" || detailCode === "qr_booking_not_found" ? detailCode : "qr_token_invalid", { rawCandidateIndex: (barcode.qrTokens ?? []).indexOf(token) });
           continue;
         }
         try {
           const qrAppointment = await dependencies.findEligibleAppointment(formatV2AccessionNumber(bookingId));
           documentAppointments.set(Number(qrAppointment.id), qrAppointment);
           documentSources.push({ appointmentId: Number(qrAppointment.id), source: "qr" });
+          logIdentifier(dependencies, "qr_resolved", { rawCandidateIndex: (barcode.qrTokens ?? []).indexOf(token) });
         } catch {
-          invalidQrCount += 1;
+          unresolvedInternalCount += 1;
+          logIdentifier(dependencies, "qr_booking_not_found", { rawCandidateIndex: (barcode.qrTokens ?? []).indexOf(token) });
         }
       }
-      if (invalidQrCount) {
+      if (unresolvedInternalCount) {
         logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_QR_INVALID", {
           ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
           qrCandidateCount: barcode.qrTokens?.length ?? 0,
-          invalidQrCount,
+          invalidQrCount: unresolvedInternalCount,
         });
       }
 
       const documentAppointmentIds = [...documentAppointments.keys()];
-      if (documentAppointmentIds.length > 1) {
-        logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_CONFLICT", {
-          ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
-          documentAccessionCandidateCount: barcode.accession ? 1 : 0,
-          documentQrCandidateCount: barcode.qrTokens?.length ?? 0,
-        });
-        throw new HttpError(422, "The scanned document contains conflicting appointment information. Assign the document manually.");
-      }
       if (documentAppointmentIds.length === 0) {
         throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
       }
-      const documentAppointment = documentAppointments.get(documentAppointmentIds[0])!;
+      if (unresolvedInternalCount) throw new HttpError(422, "The document contains an appointment identifier that could not be resolved. Review and assign the document manually.");
+      const documentPatients = new Set([...documentAppointments.values()].map((value) => Number(value.patient_id)));
+      if (documentPatients.size > 1) throw new HttpError(422, "The document contains appointment identifiers for different patients. Separate the document or assign it manually.");
       const documentSourceKinds = new Set(documentSources.map((source) => source.source));
       const documentSuccessCode = documentSourceKinds.size > 1
         ? "IDENTIFIER_SUCCESS_DOCUMENT_CONSENSUS"
@@ -427,20 +468,25 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
           : "IDENTIFIER_SUCCESS_DOCUMENT_ACCESSION";
       logIdentifier(dependencies, documentSuccessCode, {
         ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, true),
-        documentAccessionCandidateCount: barcode.accession ? 1 : 0,
+        documentAccessionCandidateCount: barcodeAccessions.length,
         documentQrCandidateCount: barcode.qrTokens?.length ?? 0,
       });
 
       const verifiedFilenameAppointmentId = filenameEvidence.decision.kind === "partial"
         ? filenameEvidence.decision.appointmentId
         : null;
-      if (verifiedFilenameAppointmentId != null && verifiedFilenameAppointmentId !== Number(documentAppointment.id)) {
+      if (verifiedFilenameAppointmentId != null && !documentAppointments.has(verifiedFilenameAppointmentId)) {
         logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_CONFLICT", {
           ...identifierMetadata(job.filename, filenameEvidence, identifierStarted, true, false),
         });
         throw new HttpError(422, "The filename and scanned barcode identify different appointments. Assign the document manually.");
       }
-      appointment = documentAppointment;
+      appointments = [...documentAppointments.values()].sort((a, b) => Number(a.id) - Number(b.id));
+      for (const source of documentSources) {
+        const sources = appointmentSources.get(source.appointmentId) ?? new Set();
+        sources.add(source.source);
+        appointmentSources.set(source.appointmentId, sources);
+      }
       identifierStrategy = documentSourceKinds.size > 1 ? "document_consensus" : documentSourceKinds.has("qr") ? "document_qr" : "document_accession";
       if (verifiedFilenameAppointmentId != null) {
         logIdentifier(dependencies, "IDENTIFIER_DOCUMENT_CONFIRMATION", {
@@ -450,9 +496,18 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       }
     }
 
+    if (!appointments.length) throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
+    appointments.sort((a, b) => Number(a.id) - Number(b.id));
+    const appointment = appointments[0]!;
+    const appointmentCheckpoints: RequestScanJobAppointmentCheckpoint[] = appointments.map((value) => {
+      const sources = appointmentSources.get(Number(value.id)) ?? new Set(["checkpoint" as const]);
+      const identifier_source = sources.size > 1 ? "consensus" : [...sources][0]!;
+      return { appointment_id: Number(value.id), patient_id: Number(value.patient_id), identifier_source };
+    });
+    await checkpointRequestScanJobAppointments(job.id, lease, appointmentCheckpoints);
     if (!job.identifier_verified_at) job = await updateRequestScanCheckpoint(job.id, lease, { appointment_id: appointment.id, barcode_value: appointment.accession_number, identifier_verified_at: new Date().toISOString(), identifier_strategy: identifierStrategy });
     await stage({ stage: "checking_duplicate" });
-    const idempotencyKey = `request-scan:v2-booking:${appointment.id}:appointment-request`;
+    const idempotencyKey = `request-scan:job:${job.id}:appointment-request`;
     if (!dependencies.uploadDocumentIdempotently && await dependencies.automatedDocumentExists(appointment.id)) {
       const existing = dependencies.findDocumentByIdempotencyKey ? await dependencies.findDocumentByIdempotencyKey(idempotencyKey) : null;
       await ensureLease(); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true); await ensureLease(); const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: existing?.id ?? null, source_relative_path: moved, error_message: null }); if (!completed) throw new RequestScanLeaseLostError(); return completed;
@@ -460,6 +515,9 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
     await progress.flush(); job = await beginRequestScanAttachment(job.id, lease);
     const payload = { patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileSourcePath: localPath, source: "request_scan_automation", requestScanJobId: job.id };
     const attachment = dependencies.uploadDocumentIdempotently ? await dependencies.uploadDocumentIdempotently(payload, null, idempotencyKey) : { document: await dependencies.uploadDocument(payload, null), created: true };
+    await ensureLease();
+    if (dependencies.upsertDocumentAppointmentLinks) await dependencies.upsertDocumentAppointmentLinks(attachment.document.id, appointments.map((value) => Number(value.id)));
+    else await linkRequestScanDocumentAppointments(job.id, lease, attachment.document.id, appointments.map((value) => Number(value.id)));
     await ensureLease();
     const createdByThisJob = attachment.created || attachment.document.request_scan_job_id === job.id;
     job = await updateRequestScanCheckpoint(job.id, lease, { appointment_id: appointment.id, document_id: attachment.document.id, barcode_value: appointment.accession_number, attachment_completed_at: new Date().toISOString(), attachment_created: createdByThisJob });

@@ -61,6 +61,86 @@ export async function updateRequestScanCheckpoint(jobId: number, lease: RequestS
   if (!rows[0]) throw new RequestScanLeaseLostError();
   return rows[0] as RequestScanJob;
 }
+export type RequestScanJobAppointmentCheckpoint = {
+  appointment_id: number;
+  patient_id: number;
+  identifier_source: "accession" | "qr" | "consensus" | "filename" | "checkpoint";
+};
+export async function loadRequestScanJobAppointments(jobId: number): Promise<RequestScanJobAppointmentCheckpoint[]> {
+  const { rows } = await pool.query<RequestScanJobAppointmentCheckpoint>(
+    "select appointment_id,patient_id,identifier_source from request_scan_job_appointments where request_scan_job_id=$1 order by appointment_id",
+    [jobId],
+  );
+  return rows.map((row) => ({ ...row, appointment_id: Number(row.appointment_id), patient_id: Number(row.patient_id) }));
+}
+export async function checkpointRequestScanJobAppointments(jobId: number, lease: RequestScanLease, appointments: RequestScanJobAppointmentCheckpoint[]): Promise<void> {
+  if (!appointments.length) throw new Error("At least one Request Scan appointment checkpoint is required.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const owner = await client.query(
+      "select 1 from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at>=now() and cancel_requested_at is null for update",
+      [jobId, lease.workerId, lease.token],
+    );
+    if (!owner.rowCount) {
+      const state = await client.query<{ cancel_requested_at: string | null }>(
+        "select cancel_requested_at from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at>=now()",
+        [jobId, lease.workerId, lease.token],
+      );
+      if (state.rows[0]?.cancel_requested_at) throw new RequestScanCancellationRequestedError();
+      throw new RequestScanLeaseLostError();
+    }
+    for (const appointment of appointments) {
+      await client.query(
+        `insert into request_scan_job_appointments(request_scan_job_id,appointment_id,patient_id,identifier_source)
+         values($1,$2,$3,$4)
+         on conflict(request_scan_job_id,appointment_id) do update
+         set patient_id=excluded.patient_id,identifier_source=excluded.identifier_source`,
+        [jobId, appointment.appointment_id, appointment.patient_id, appointment.identifier_source],
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+export async function linkRequestScanDocumentAppointments(jobId: number, lease: RequestScanLease, documentId: number, appointmentIds: number[]): Promise<void> {
+  const uniqueAppointmentIds = [...new Set(appointmentIds)];
+  if (!uniqueAppointmentIds.length) throw new Error("At least one Request Scan document appointment link is required.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const owner = await client.query(
+      "select 1 from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at>=now() and cancel_requested_at is null for update",
+      [jobId, lease.workerId, lease.token],
+    );
+    if (!owner.rowCount) {
+      const state = await client.query<{ cancel_requested_at: string | null }>(
+        "select cancel_requested_at from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at>=now()",
+        [jobId, lease.workerId, lease.token],
+      );
+      if (state.rows[0]?.cancel_requested_at) throw new RequestScanCancellationRequestedError();
+      throw new RequestScanLeaseLostError();
+    }
+    for (const appointmentId of uniqueAppointmentIds) {
+      await client.query(
+        `insert into document_appointment_links(document_id,appointment_id)
+         values($1,$2)
+         on conflict(document_id,appointment_id) do nothing`,
+        [documentId, appointmentId],
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 export async function renewRequestScanLease(jobId: number, lease: RequestScanLease): Promise<boolean> {
   const result = await pool.query(`update request_scan_jobs set heartbeat_at=now(),lease_expires_at=now()+($3::int * interval '1 millisecond'),updated_at=now() where id=$1 and status='processing' and lease_token=$2::uuid`, [jobId, lease.token, REQUEST_SCAN_LEASE_MS]); return result.rowCount === 1;
 }

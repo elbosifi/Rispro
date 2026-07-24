@@ -199,6 +199,19 @@ describe("RequestScansPage", () => {
     expect(screen.getByRole("button", { name: "Resume archive" })).toBeTruthy(); expect(screen.queryByRole("button", { name: "Return" })).toBeNull();
   });
 
+  it("shows one document linked to several appointments without exposing token data", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input); if (url.endsWith("/status")) return response(status);
+      if (url.includes("?status=active")) return response({ jobs: [{ ...processingJob, appointment_id: 21, matchedAppointments: [{ id: 21, accessionNumber: "V2-000021", patientId: 5, examination: "CT head" }, { id: 22, accessionNumber: "V2-000022", patientId: 5, examination: "MRI brain" }] }] });
+      return response({ jobs: [] });
+    });
+    renderPage();
+    expect(await screen.findByText("Attached to 2 appointments")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Appointments (2)" }));
+    expect(screen.getByText("V2-000021")).toBeTruthy(); expect(screen.getByText("V2-000022")).toBeTruthy();
+    expect(screen.queryByText(/token|pa_/i)).toBeNull();
+  });
+
   it("loads PDF previews through a private Blob URL", async () => {
     const createObjectURL = vi.fn().mockReturnValue("blob:pdf-preview");
     const revokeObjectURL = vi.fn();
