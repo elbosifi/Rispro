@@ -6,7 +6,7 @@ import { asUnknownRecord } from "../utils/records.js";
 import { pool } from "../db/pool.js";
 import { auditBulkRequestScanRetry, bulkDismissRequestScanJobs, bulkRetryRequestScanJobs, dismissRequestScanJob, downloadRequestScanJobFile, getRequestScanJob, listRequestScanJobs, manuallyAssignRequestScan, prioritizePendingRequestScanJob, retryRequestScanJob, restoreDismissedRequestScanJob, returnRequestScanToIncoming, withSafeRequestScanFilename } from "../services/request-scan-service.js";
 import { readRequestScanSettings } from "../services/request-scan-settings-service.js";
-import { getRequestScanWorkerStatus, requestRequestScanWorkerRun } from "../services/request-scan-worker.js";
+import { isRequestScanWorkerHeartbeatFresh, readRequestScanWorkerRuntime, requestRequestScanWorkerRun as signalRequestScanWorkerRun } from "../services/request-scan-worker-control-service.js";
 import type { RequestScanJob } from "../services/request-scan-service.js";
 import { getTripoliToday } from "../utils/date.js";
 
@@ -17,27 +17,37 @@ function positive(value: unknown, name: string): number { const parsed = Number(
 function jobIds(value: unknown): number[] { if (!Array.isArray(value)) throw new HttpError(400, "jobIds must be an array."); const ids = [...new Set(value.map((id) => positive(id, "jobId")))]; if (!ids.length || ids.length > 50) throw new HttpError(400, "Select between 1 and 50 request scans."); return ids; }
 export function setRequestScanFileHeaders(res: Response, job: Pick<RequestScanJob, "mime_type" | "filename">): void { const safeJob = withSafeRequestScanFilename(job); res.setHeader("Content-Type", job.mime_type); res.setHeader("Content-Disposition", `inline; filename="${safeJob.filename.replace(/"/g, "")}"`); res.setHeader("Cache-Control", "private, no-store"); }
 type RequestScanStatusCounts = { pending: number; processing: number; processed_today: number; duplicates_today: number; failed: number; dismissed?: number };
-type RequestScanStatusDependencies = { readSettings: typeof readRequestScanSettings; workerStatus: typeof getRequestScanWorkerStatus; query: (text: string, values?: unknown[]) => Promise<{ rows: RequestScanStatusCounts[] }> };
-const requestScanStatusDependencies: RequestScanStatusDependencies = { readSettings: readRequestScanSettings, workerStatus: getRequestScanWorkerStatus, query: (text, values) => pool.query<RequestScanStatusCounts>(text, values) };
+type RequestScanStatusDependencies = { readSettings: typeof readRequestScanSettings; readRuntime?: typeof readRequestScanWorkerRuntime; query: (text: string, values?: unknown[]) => Promise<{ rows: RequestScanStatusCounts[] }> };
+const requestScanStatusDependencies: RequestScanStatusDependencies = { readSettings: readRequestScanSettings, readRuntime: readRequestScanWorkerRuntime, query: (text, values) => pool.query<RequestScanStatusCounts>(text, values) };
 export async function getRequestScanStatus(now = new Date(), dependencies: RequestScanStatusDependencies = requestScanStatusDependencies) {
-  const [settings, countResult] = await Promise.all([
+  const [settings, countResult, runtime] = await Promise.all([
     dependencies.readSettings(),
-    dependencies.query(`select count(*) filter (where status = 'pending')::int as pending, count(*) filter (where status = 'processing')::int as processing, count(*) filter (where status = 'processed' and completed_at >= ($1::date::timestamp at time zone 'Africa/Tripoli') and completed_at < (($1::date + 1)::timestamp at time zone 'Africa/Tripoli'))::int as processed_today, count(*) filter (where status = 'duplicate' and completed_at >= ($1::date::timestamp at time zone 'Africa/Tripoli') and completed_at < (($1::date + 1)::timestamp at time zone 'Africa/Tripoli'))::int as duplicates_today, count(*) filter (where status = 'failed' and dismissed_at is null)::int as failed, count(*) filter (where status = 'failed' and dismissed_at is not null)::int as dismissed from request_scan_jobs`, [getTripoliToday(now)])
+    dependencies.query(`select count(*) filter (where status = 'pending')::int as pending, count(*) filter (where status = 'processing')::int as processing, count(*) filter (where status = 'processed' and completed_at >= ($1::date::timestamp at time zone 'Africa/Tripoli') and completed_at < (($1::date + 1)::timestamp at time zone 'Africa/Tripoli'))::int as processed_today, count(*) filter (where status = 'duplicate' and completed_at >= ($1::date::timestamp at time zone 'Africa/Tripoli') and completed_at < (($1::date + 1)::timestamp at time zone 'Africa/Tripoli'))::int as duplicates_today, count(*) filter (where status = 'failed' and dismissed_at is null)::int as failed, count(*) filter (where status = 'failed' and dismissed_at is not null)::int as dismissed from request_scan_jobs`, [getTripoliToday(now)]),
+    dependencies.readRuntime ? dependencies.readRuntime() : Promise.resolve({ request_sequence: "0", acknowledged_sequence: "0", run_requested_at: null, worker_id: null, worker_started_at: null, worker_heartbeat_at: null, cycle_started_at: null, cycle_completed_at: null, last_success_at: null, last_error_at: null, last_error: null }),
   ]);
   const counts = countResult.rows[0] || { pending: 0, processing: 0, processed_today: 0, duplicates_today: 0, failed: 0, dismissed: 0 };
-  return { enabled: settings.enabled, ...dependencies.workerStatus(), pending: Number(counts.pending), processing: Number(counts.processing), processedToday: Number(counts.processed_today), duplicatesToday: Number(counts.duplicates_today), failed: Number(counts.failed), dismissed: Number(counts.dismissed ?? 0) };
+  const workerOnline = isRequestScanWorkerHeartbeatFresh(runtime, now);
+  const running = workerOnline && Boolean(runtime.cycle_started_at && (!runtime.cycle_completed_at || new Date(runtime.cycle_started_at) > new Date(runtime.cycle_completed_at)));
+  return { enabled: settings.enabled, running, lastRunAt: runtime.last_success_at, lastError: runtime.last_error, workerOnline, workerId: runtime.worker_id, workerStartedAt: runtime.worker_started_at, workerHeartbeatAt: runtime.worker_heartbeat_at, cycleStartedAt: runtime.cycle_started_at, cycleCompletedAt: runtime.cycle_completed_at, pending: Number(counts.pending), processing: Number(counts.processing), processedToday: Number(counts.processed_today), duplicatesToday: Number(counts.duplicates_today), failed: Number(counts.failed), dismissed: Number(counts.dismissed ?? 0) };
 }
 
 type RequestScanTriggerRouteDependencies = {
-  triggerWorker: typeof requestRequestScanWorkerRun;
+  triggerWorker: () => Promise<{ status: "accepted" | "already_running" | "disabled" }>;
 };
 type RequestScanRetryRouteDependencies = RequestScanTriggerRouteDependencies & {
   retryJob: typeof retryRequestScanJob;
 };
-export async function requestRequestScanRunNow(dependencies: RequestScanTriggerRouteDependencies = { triggerWorker: requestRequestScanWorkerRun }) {
+async function durableRequestScanTrigger(): Promise<{ status: "accepted" | "already_running" | "disabled" }> {
+  const settings = await readRequestScanSettings();
+  if (!settings.enabled) return { status: "disabled" };
+  const runtime = await signalRequestScanWorkerRun();
+  const running = isRequestScanWorkerHeartbeatFresh(runtime) && Boolean(runtime.cycle_started_at && (!runtime.cycle_completed_at || new Date(runtime.cycle_started_at) > new Date(runtime.cycle_completed_at)));
+  return { status: running ? "already_running" : "accepted" };
+}
+export async function requestRequestScanRunNow(dependencies: RequestScanTriggerRouteDependencies = { triggerWorker: durableRequestScanTrigger }) {
   return dependencies.triggerWorker();
 }
-export async function queueRequestScanRetry(id: number, dependencies: RequestScanRetryRouteDependencies = { retryJob: retryRequestScanJob, triggerWorker: requestRequestScanWorkerRun }) {
+export async function queueRequestScanRetry(id: number, dependencies: RequestScanRetryRouteDependencies = { retryJob: retryRequestScanJob, triggerWorker: durableRequestScanTrigger }) {
   const job = await dependencies.retryJob(id);
   const trigger = await dependencies.triggerWorker();
   return { job: withSafeRequestScanFilename(job), trigger };

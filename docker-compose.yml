@@ -21,12 +21,15 @@ services:
       context: .
       dockerfile: Dockerfile
       target: ${RISPRO_APP_IMAGE_TARGET:-production}
+    image: ${RISPRO_APP_IMAGE:-rispro-app:local}
     container_name: rispro-app
     env_file:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
+      REQUEST_SCAN_WORKER_PROCESS_ENABLED: "false"
+      REQUEST_SCAN_MAX_CONCURRENCY: "1"
     expose:
       - "3000"
     ports:
@@ -41,6 +44,34 @@ services:
       start_period: 30s
       retries: 3
     restart: unless-stopped
+    networks:
+      - rispro-network
+
+  request-scan-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${RISPRO_APP_IMAGE_TARGET:-production}
+    image: ${RISPRO_APP_IMAGE:-rispro-app:local}
+    env_file:
+      - .env
+    command: ["npm", "run", "start:request-scan-worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      RISPRO_SKIP_BOOTSTRAP: "1"
+      REQUEST_SCAN_WORKER_PROCESS_ENABLED: "true"
+      REQUEST_SCAN_MAX_CONCURRENCY: "2"
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - rispro-storage:/app/storage
+      - ./storage/sante-hl7-outbox:/app/storage/sante-hl7-outbox
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    cpus: 2
+    mem_limit: 3g
     networks:
       - rispro-network
 

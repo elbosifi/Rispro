@@ -17,6 +17,13 @@ services:
     # DATABASE_URL is read from .env only (set by setup-docker.sh).
     # Do not construct it here from raw DB_PASSWORD.
 
+  request-scan-worker:
+    depends_on:
+      app:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
   # -----------------------------------------------------------------------
   # PostgreSQL Database (internal)
   # -----------------------------------------------------------------------

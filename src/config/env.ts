@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { readRequestScanMaxConcurrency } from "./request-scan-concurrency.js";
 
 // E2E is deliberately isolated from a developer's .env so its guard can never
 // be redirected to a local or deployed database by dotenv's override behavior.
@@ -151,6 +152,8 @@ export interface EnvConfig {
   ohifLaunchTokenTtlSeconds: number;
   ohifRetrievalWorkerIntervalMs: number;
   ohifCacheCleanupEnabled: boolean;
+  requestScanWorkerProcessEnabled: boolean;
+  requestScanMaxConcurrency: 1 | 2;
 }
 
 function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
@@ -237,6 +240,9 @@ export const env: EnvConfig = {
   ohifLaunchTokenTtlSeconds: readPositiveInteger("OHIF_LAUNCH_TOKEN_TTL_SECONDS", 600),
   ohifRetrievalWorkerIntervalMs: readPositiveInteger("OHIF_RETRIEVAL_WORKER_INTERVAL_MS", 5000),
   ohifCacheCleanupEnabled: readBoolean("OHIF_CACHE_CLEANUP_ENABLED", false),
+  // Missing values preserve the original in-process Request Scan behavior.
+  requestScanWorkerProcessEnabled: readBoolean("REQUEST_SCAN_WORKER_PROCESS_ENABLED", true),
+  requestScanMaxConcurrency: readRequestScanMaxConcurrency(process.env.REQUEST_SCAN_MAX_CONCURRENCY),
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {

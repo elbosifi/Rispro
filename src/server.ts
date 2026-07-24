@@ -210,9 +210,11 @@ async function start(): Promise<void> {
   }
 
   try {
-    const { startRequestScanWorker } = await import("./services/request-scan-worker.js");
-    requestScanWorker = await startRequestScanWorker();
-    startupSummary.request_scan_worker = "started";
+    if (env.requestScanWorkerProcessEnabled) {
+      const { startRequestScanWorker } = await import("./services/request-scan-worker.js");
+      requestScanWorker = await startRequestScanWorker();
+      startupSummary.request_scan_worker = "started";
+    } else startupSummary.request_scan_worker = "disabled_by_env";
   } catch (error) {
     console.error("Request Scan worker initialization failed. Continuing without blocking startup.");
     logError(error);

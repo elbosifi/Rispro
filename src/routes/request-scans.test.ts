@@ -22,14 +22,14 @@ test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker 
   let values: unknown[] | undefined;
   const status = await getRequestScanStatus(new Date("2026-07-22T22:30:00.000Z"), {
     readSettings: async () => ({ enabled: true } as never),
-    workerStatus: () => ({ lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", running: true }),
+    readRuntime: async () => ({ request_sequence: "10", acknowledged_sequence: "9", run_requested_at: null, worker_id: "worker-a", worker_started_at: "2026-07-22T20:00:00.000Z", worker_heartbeat_at: "2026-07-22T22:29:59.000Z", cycle_started_at: "2026-07-22T22:29:00.000Z", cycle_completed_at: null, last_success_at: "2026-07-22T20:00:00.000Z", last_error_at: "2026-07-22T20:10:00.000Z", last_error: "SMB server unavailable." }),
     query: async (text, params) => {
       query = text;
       values = params;
       return { rows: [{ pending: 4, processing: 2, processed_today: 301, duplicates_today: 5, failed: 409, dismissed: 7 }] };
     },
   });
-  assert.deepEqual(status, { enabled: true, lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", running: true, pending: 4, processing: 2, processedToday: 301, duplicatesToday: 5, failed: 409, dismissed: 7 });
+  assert.deepEqual(status, { enabled: true, running: true, lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", workerOnline: true, workerId: "worker-a", workerStartedAt: "2026-07-22T20:00:00.000Z", workerHeartbeatAt: "2026-07-22T22:29:59.000Z", cycleStartedAt: "2026-07-22T22:29:00.000Z", cycleCompletedAt: null, pending: 4, processing: 2, processedToday: 301, duplicatesToday: 5, failed: 409, dismissed: 7 });
   assert.deepEqual(values, ["2026-07-23"]);
   assert.match(query, /count\(\*\) filter \(where status = 'pending'\)/);
   assert.match(query, /count\(\*\) filter \(where status = 'processing'\)/);
@@ -40,9 +40,30 @@ test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker 
 
 test("Request Scan status propagates aggregate query failures to the standard route error handler", async () => {
   await assert.rejects(
-    () => getRequestScanStatus(new Date(), { readSettings: async () => ({ enabled: true } as never), workerStatus: () => ({ lastRunAt: null, lastError: null, running: false }), query: async () => { throw new Error("database unavailable"); } }),
+    () => getRequestScanStatus(new Date(), { readSettings: async () => ({ enabled: true } as never), readRuntime: async () => ({}) as never, query: async () => { throw new Error("database unavailable"); } }),
     /database unavailable/
   );
+});
+
+test("Request Scan status reports a stale PostgreSQL worker heartbeat as offline", async () => {
+  const status = await getRequestScanStatus(new Date("2026-07-22T22:30:00.000Z"), {
+    readSettings: async () => ({ enabled: true } as never),
+    readRuntime: async () => ({ request_sequence: "1", acknowledged_sequence: "1", run_requested_at: null, worker_id: "old-worker", worker_started_at: null, worker_heartbeat_at: "2026-07-22T22:28:00.000Z", cycle_started_at: "2026-07-22T22:00:00.000Z", cycle_completed_at: null, last_success_at: null, last_error_at: null, last_error: null }),
+    query: async () => ({ rows: [{ pending: 1, processing: 0, processed_today: 0, duplicates_today: 0, failed: 0, dismissed: 0 }] }),
+  });
+  assert.equal(status.workerOnline, false);
+  assert.equal(status.running, false);
+});
+
+test("Request Scan status reports a fresh completed cycle as online and idle", async () => {
+  const status = await getRequestScanStatus(new Date("2026-07-22T22:30:00.000Z"), {
+    readSettings: async () => ({ enabled: true } as never),
+    readRuntime: async () => ({ request_sequence: "3", acknowledged_sequence: "3", run_requested_at: null, worker_id: "idle-worker", worker_started_at: "2026-07-22T22:00:00.000Z", worker_heartbeat_at: "2026-07-22T22:29:59.000Z", cycle_started_at: "2026-07-22T22:20:00.000Z", cycle_completed_at: "2026-07-22T22:20:03.000Z", last_success_at: "2026-07-22T22:20:03.000Z", last_error_at: null, last_error: null }),
+    query: async () => ({ rows: [{ pending: 0, processing: 0, processed_today: 0, duplicates_today: 0, failed: 0, dismissed: 0 }] }),
+  });
+  assert.equal(status.workerOnline, true);
+  assert.equal(status.running, false);
+  assert.equal(status.lastRunAt, "2026-07-22T22:20:03.000Z");
 });
 
 test("Request Scan status filter accepts only explicit API values", () => {

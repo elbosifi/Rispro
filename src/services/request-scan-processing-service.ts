@@ -8,11 +8,27 @@ export const REQUEST_SCAN_MAX_RECOVERIES = 3;
 export type RequestScanProcessingStage = "queued" | "downloading" | "checking_filename" | "rendering_300_dpi" | "scanning_original_300_dpi" | "extracting_native_pdf_image" | "scanning_native_pdf_image" | "scanning_qr_crops" | "scanning_enhanced_300_dpi" | "rendering_600_dpi" | "scanning_original_600_dpi" | "scanning_enhanced_600_dpi" | "verifying_identifier" | "resolving_appointment" | "checking_duplicate" | "attaching_document" | "moving_file" | "completed" | "failed";
 export type RequestScanProgressUpdate = { stage: RequestScanProcessingStage; current?: number | null; total?: number | null };
 export type RequestScanLease = { workerId: string; token: string };
+export type ClaimedRequestScanJob = { job: RequestScanJob; lease: RequestScanLease };
 
 export function createRequestScanWorkerId(): string { return `${process.env.COMPUTERNAME || process.env.HOSTNAME || "worker"}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`; }
-export async function claimRequestScanJob(jobId: number, workerId: string): Promise<{ job: RequestScanJob; lease: RequestScanLease } | null> {
+export async function claimRequestScanJob(jobId: number, workerId: string): Promise<ClaimedRequestScanJob | null> {
   const token = crypto.randomUUID();
   const { rows } = await pool.query(`update request_scan_jobs set status='processing',processing_stage='downloading',processing_started_at=coalesce(processing_started_at,now()),stage_started_at=now(),heartbeat_at=now(),worker_id=$2,lease_token=$3::uuid,lease_expires_at=now()+($4::int * interval '1 millisecond'),priority_requested_at=null,progress_current=null,progress_total=null,error_message=null,attempt_count=attempt_count+1,updated_at=now() where id=$1 and status='pending' returning *`, [jobId, workerId, token, REQUEST_SCAN_LEASE_MS]);
+  return rows[0] ? { job: rows[0] as RequestScanJob, lease: { workerId, token } } : null;
+}
+export async function claimNextRequestScanJob(workerId: string): Promise<ClaimedRequestScanJob | null> {
+  const token = crypto.randomUUID();
+  const { rows } = await pool.query(`with candidate as (
+    select id from request_scan_jobs
+    where status='pending'
+    order by priority_requested_at asc nulls last,created_at asc,id asc
+    for update skip locked
+    limit 1
+  )
+  update request_scan_jobs job set
+    status='processing',processing_stage='downloading',processing_started_at=coalesce(job.processing_started_at,now()),stage_started_at=now(),heartbeat_at=now(),worker_id=$1,lease_token=$2::uuid,lease_expires_at=now()+($3::int * interval '1 millisecond'),priority_requested_at=null,progress_current=null,progress_total=null,error_message=null,attempt_count=job.attempt_count+1,updated_at=now()
+  from candidate where job.id=candidate.id
+  returning job.*`, [workerId, token, REQUEST_SCAN_LEASE_MS]);
   return rows[0] ? { job: rows[0] as RequestScanJob, lease: { workerId, token } } : null;
 }
 export async function renewRequestScanLease(jobId: number, lease: RequestScanLease): Promise<boolean> {

@@ -122,8 +122,12 @@ log "  Build commit: ${RISPRO_BUILD_COMMIT_SHA:-unknown}"
 log "========================================"
 
 wait_for_postgres
-run_migrations
-seed_admin_accounts
+if [ "${RISPRO_SKIP_BOOTSTRAP:-0}" = "1" ]; then
+  log "Skipping migrations and account seeding (RISPRO_SKIP_BOOTSTRAP=1)."
+else
+  run_migrations
+  seed_admin_accounts
+fi
 
 log "Starting application..."
 log "========================================"

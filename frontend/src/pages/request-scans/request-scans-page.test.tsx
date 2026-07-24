@@ -13,6 +13,7 @@ const status = {
   lastRunAt: null,
   lastError: null,
   running: false,
+  workerOnline: true,
   pending: 1,
   processing: 1,
   processedToday: 2,

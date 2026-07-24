@@ -18,7 +18,8 @@ import {
 import { classifyRequestScanSmbError, downloadRequestScanFile, listRequestScanFiles, moveRequestScanFile } from "./request-scan-smb-service.js";
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
 import { logAuditEntry } from "./audit-service.js";
-import { claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, updateRequestScanProgress, type RequestScanLease } from "./request-scan-processing-service.js";
+import { env } from "../config/env.js";
+import { claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, renewRequestScanLease, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanLease } from "./request-scan-processing-service.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
@@ -36,6 +37,7 @@ export type RequestScanServiceDependencies = {
   verifyPublicAppointmentToken: typeof verifyPublicCancelToken;
   logDiagnostic?: (event: string, metadata: Record<string, string | number | boolean>) => void;
 };
+export type RequestScanCycleOptions = { maxConcurrency?: 1 | 2; shouldContinue?: () => boolean };
 type RequestScanRetryDependencies = {
   readSettings: typeof readRequestScanSettings;
   getJob: typeof getRequestScanJob;
@@ -226,11 +228,10 @@ async function resolveFilenameEvidence(
 async function moveOutcome(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, folder: string, duplicate = false): Promise<string> { return dependencies.moveRequestScanFile(settings, job.source_relative_path, destination(folder, duplicate), job.filename); }
 
 const requestScanWorkerId = createRequestScanWorkerId();
-export async function processRequestScanJob(jobId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId): Promise<RequestScanJob> {
+export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJob, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanJob> {
   const settings = suppliedSettings ?? await readRequestScanSettings();
-  const claimed = await claimRequestScanJob(jobId, workerId);
-  if (!claimed) return getRequestScanJob(jobId);
   let job = claimed.job; const lease: RequestScanLease = claimed.lease;
+  const jobId = job.id;
   let leaseLost = false;
   const heartbeat = setInterval(() => { void renewRequestScanLease(jobId, lease).then((owned) => { leaseLost ||= !owned; }); }, 12_000);
   const stage = async (value: Parameters<typeof updateRequestScanProgress>[2]) => { if (leaseLost || !(await updateRequestScanProgress(jobId, lease, value))) { leaseLost = true; throw new HttpError(409, "Request Scan lease was lost."); } };
@@ -392,21 +393,60 @@ export async function processRequestScanJob(jobId: number, suppliedSettings?: Re
   } finally { clearInterval(heartbeat); await fs.rm(tempDir, { recursive: true, force: true }); }
 }
 
+export async function processRequestScanJob(jobId: number, suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId): Promise<RequestScanJob> {
+  const settings = suppliedSettings ?? await readRequestScanSettings();
+  const claimed = await claimRequestScanJob(jobId, workerId);
+  if (!claimed) return getRequestScanJob(jobId);
+  return processClaimedRequestScanJob(claimed, settings, dependencies);
+}
+
 export type RequestScanCycleResult = { discovered: number; processed: number; failed: number; duplicates: number; skipped: number };
 const REQUEST_SCAN_MAX_JOBS_PER_CYCLE = 100;
-async function nextPendingRequestScanJob(): Promise<RequestScanJob | null> { const { rows } = await pool.query("select * from request_scan_jobs where status='pending' order by priority_requested_at asc nulls last,created_at asc,id asc limit 1"); return rows[0] as RequestScanJob | undefined ?? null; }
 export async function prioritizePendingRequestScanJob(id: number): Promise<RequestScanJob> { const { rows } = await pool.query("update request_scan_jobs set priority_requested_at=coalesce(priority_requested_at,now()),updated_at=now() where id=$1 and status='pending' returning *", [id]); if (rows[0]) return rows[0] as RequestScanJob; const job = await getRequestScanJob(id); if (job.status !== "pending") throw new HttpError(409, "Only queued request scans can be started."); throw new HttpError(404, "Request scan not found."); }
-async function drainPendingRequestScanJobs(settings: RequestScanSettings, dependencies: RequestScanServiceDependencies, result: RequestScanCycleResult, limit: number): Promise<number> { let count = 0; for (; count < limit; count += 1) { const job = await nextPendingRequestScanJob(); if (!job) break; const completed = await processRequestScanJob(job.id, settings, dependencies); if (completed.status === "processed") result.processed += 1; else if (completed.status === "duplicate") result.duplicates += 1; else if (completed.status === "failed") result.failed += 1; else result.skipped += 1; } return count; }
+function emptyCycleResult(): RequestScanCycleResult { return { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 }; }
+function addJobOutcome(result: RequestScanCycleResult, completed: RequestScanJob): void { if (completed.status === "processed") result.processed += 1; else if (completed.status === "duplicate") result.duplicates += 1; else if (completed.status === "failed") result.failed += 1; else result.skipped += 1; }
+function addCycleResult(target: RequestScanCycleResult, source: RequestScanCycleResult): void { target.discovered += source.discovered; target.processed += source.processed; target.failed += source.failed; target.duplicates += source.duplicates; target.skipped += source.skipped; }
+export async function runRequestScanJobPool(options: { limit: number; maxConcurrency: 1 | 2; shouldContinue?: () => boolean; claimNext: () => Promise<ClaimedRequestScanJob | null>; processClaimed: (claim: ClaimedRequestScanJob) => Promise<RequestScanJob> }): Promise<{ claimed: number; result: RequestScanCycleResult }> {
+  if (!Number.isInteger(options.limit) || options.limit < 0) throw new Error("Request Scan cycle limit must be a non-negative integer.");
+  if (options.maxConcurrency !== 1 && options.maxConcurrency !== 2) throw new Error("Request Scan concurrency must be either 1 or 2.");
+  let reservations = 0;
+  const reserveClaim = (): boolean => {
+    if (options.shouldContinue && !options.shouldContinue()) return false;
+    if (reservations >= options.limit) return false;
+    reservations += 1;
+    return true;
+  };
+  const slot = async (): Promise<{ claimed: number; result: RequestScanCycleResult; errors: unknown[] }> => {
+    const result = emptyCycleResult(); let claimed = 0; const errors: unknown[] = [];
+    while (reserveClaim()) {
+      let claim: ClaimedRequestScanJob | null;
+      try { claim = await options.claimNext(); } catch (error) { errors.push(error); break; }
+      if (!claim) { reservations -= 1; break; }
+      claimed += 1;
+      try { addJobOutcome(result, await options.processClaimed(claim)); } catch (error) { errors.push(error); }
+    }
+    return { claimed, result, errors };
+  };
+  const slots = await Promise.all(Array.from({ length: options.maxConcurrency }, slot));
+  const result = emptyCycleResult(); const errors = slots.flatMap((slotResult) => slotResult.errors);
+  for (const slotResult of slots) addCycleResult(result, slotResult.result);
+  if (errors.length) throw new AggregateError(errors, "Request Scan worker slot failed.");
+  return { claimed: slots.reduce((total, slotResult) => total + slotResult.claimed, 0), result };
+}
+async function drainPendingRequestScanJobs(settings: RequestScanSettings, dependencies: RequestScanServiceDependencies, limit: number, workerId: string, options: RequestScanCycleOptions): Promise<{ claimed: number; result: RequestScanCycleResult }> {
+  return runRequestScanJobPool({ limit, maxConcurrency: options.maxConcurrency ?? env.requestScanMaxConcurrency, shouldContinue: options.shouldContinue, claimNext: () => claimNextRequestScanJob(workerId), processClaimed: (claim) => processClaimedRequestScanJob(claim, settings, dependencies) });
+}
 
-export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies): Promise<RequestScanCycleResult> {
+export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings, dependencies: RequestScanServiceDependencies = defaultDependencies, workerId = requestScanWorkerId, options: RequestScanCycleOptions = {}): Promise<RequestScanCycleResult> {
   const settings = suppliedSettings ?? await readRequestScanSettings(); if (!settings.enabled) return { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 };
-  const result: RequestScanCycleResult = { discovered: 0, processed: 0, failed: 0, duplicates: 0, skipped: 0 }; const queuedAtStart = await drainPendingRequestScanJobs(settings, dependencies, result, REQUEST_SCAN_MAX_JOBS_PER_CYCLE);
+  const result = emptyCycleResult(); const queuedAtStart = await drainPendingRequestScanJobs(settings, dependencies, REQUEST_SCAN_MAX_JOBS_PER_CYCLE, workerId, options); addCycleResult(result, queuedAtStart.result);
+  if (options.shouldContinue && !options.shouldContinue()) return result;
   const files = await dependencies.listRequestScanFiles(settings); result.discovered = files.length;
   for (const file of files) {
     if (file.modifiedAt && Date.now() - file.modifiedAt.getTime() < settings.fileReadyDelaySeconds * 1000) { result.skipped += 1; continue; }
     const job = await createOrGetJob(file.filename, file.relativePath); if (job.status !== "pending") result.skipped += 1;
   }
-  await drainPendingRequestScanJobs(settings, dependencies, result, REQUEST_SCAN_MAX_JOBS_PER_CYCLE - queuedAtStart);
+  const queuedAfterDiscovery = await drainPendingRequestScanJobs(settings, dependencies, REQUEST_SCAN_MAX_JOBS_PER_CYCLE - queuedAtStart.claimed, workerId, options); addCycleResult(result, queuedAfterDiscovery.result);
   return result;
 }
 

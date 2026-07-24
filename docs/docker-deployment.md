@@ -467,6 +467,14 @@ For external DB:
 docker compose exec app wget -qO- http://127.0.0.1:3000/api/ready || echo "Not ready"
 ```
 
+### Request Scan Worker
+
+Compose runs Request Scan document processing in `request-scan-worker`. The web `app` queues durable run requests and reports its PostgreSQL heartbeat; the worker owns processing and has no HTTP or DICOM ports.
+
+The initial production setting is `REQUEST_SCAN_MAX_CONCURRENCY=2`. It allows two independent files to process at once, while every page, image pass, QR tile, decoder attempt, SMB operation, attachment, and move within each document remains sequential. Set it to `1` and restart `request-scan-worker` to restore sequential file processing without rolling back the database migration. Values above `2` are intentionally unsupported in this phase; observe CPU, memory, scanner-share, and decoder usage before considering a later increase.
+
+For rollback, stop `request-scan-worker`, set `REQUEST_SCAN_WORKER_PROCESS_ENABLED=true` for `app`, and restart `app`. Leave migration `139_request_scan_worker_runtime.sql` and its singleton runtime row in place. PostgreSQL worker leadership prevents accidental double processing while both processes are briefly enabled.
+
 ### MWL Not Responding
 
 ```bash

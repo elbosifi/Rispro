@@ -28,6 +28,11 @@ type RequestScanStatus = {
   lastRunAt: string | null;
   lastError: string | null;
   running: boolean;
+  workerOnline: boolean;
+  workerId?: string | null;
+  workerHeartbeatAt?: string | null;
+  cycleStartedAt?: string | null;
+  cycleCompletedAt?: string | null;
   pending: number;
   processing: number;
   processedToday: number;
@@ -166,7 +171,7 @@ export default function RequestScansPage() {
     ? [["Worker", "Loading..."], ["Processing", "—"], ["Queued", "—"], ["Processed today", "—"], ["Failed", "—"], ["Last worker run", "Loading..."]]
     : status.isError || !statusData
       ? [["Worker", "Unavailable"], ["Processing", "—"], ["Queued", "—"], ["Processed today", "—"], ["Failed", "—"], ["Last worker run", "Unavailable"]]
-      : [["Worker", !statusData.enabled ? "Disabled" : statusData.running ? "Processing" : "Idle"], ["Processing", String(statusData.processing)], ["Queued", String(statusData.pending)], ["Processed today", String(statusData.processedToday)], ["Failed", String(statusData.failed)], ["Last worker run", statusData.lastRunAt ? new Date(statusData.lastRunAt).toLocaleString() : "Not run"]];
+      : [["Worker", !statusData.enabled ? "Disabled" : !statusData.workerOnline ? "Offline" : statusData.running ? "Processing" : "Idle"], ["Processing", String(statusData.processing)], ["Queued", String(statusData.pending)], ["Processed today", String(statusData.processedToday)], ["Failed", String(statusData.failed)], ["Last worker run", statusData.lastRunAt ? new Date(statusData.lastRunAt).toLocaleString() : "Not run"]];
   const tabs: Array<{ value: RequestScanTab; label: string }> = [
     { value: "active", label: `Active${statusData ? ` (${statusData.pending + statusData.processing})` : ""}` },
     { value: "processed", label: "Processed" },
