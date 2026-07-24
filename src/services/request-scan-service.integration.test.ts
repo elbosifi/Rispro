@@ -18,6 +18,8 @@ import {
   processClaimedRequestScanJob,
   processRequestScanJob,
   reconcileIncomingRequestScanFile,
+  retryRequestScanArchive,
+  bulkRetryRequestScanArchives,
   requestStopRequestScanJob,
   returnRequestScanToIncoming,
   retryRequestScanJob,
@@ -790,7 +792,7 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(resumed.status, "processed");
   assert.equal(uploads.length, 1);
   assert.equal(recognitionCalls.length, 0);
-  assert.equal((await pool.query("select count(*)::int as count from documents where request_scan_job_id=$1", [jobId])).rows[0].count, 1);
+  assert.equal((await pool.query("select count(*)::int as count from documents where id=$1", [failed.document_id])).rows[0].count, 1);
   assert.equal((await pool.query("select 1 from document_appointment_links where document_id=$1 and appointment_id=$2", [failed.document_id, booking.id])).rowCount, 1);
 });
 
@@ -821,7 +823,22 @@ test("concurrent idempotent Request Scan uploads create one document and remove 
   await fs.rm(winningPath, { force: true }); await pool.query("delete from documents where id=$1", [rows.rows[0].id]);
 });
 
+test("archive-only retry queues the attached checkpoint once and reports per-item outcomes", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const jobId = await createJob();
+  const failed = await processRequestScanJob(jobId, settings, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true }));
+  assert.ok(failed.document_id); assert.ok(failed.attachment_completed_at);
+  await pool.query("update request_scan_jobs set archive_attempt_count=3,archive_last_error='SMB unavailable',archive_next_retry_at=now()+interval '10 minutes' where id=$1", [jobId]);
+  const queued = await retryRequestScanArchive(jobId, booking.userId);
+  assert.equal(queued.status, "pending"); assert.equal(queued.document_id, failed.document_id); assert.ok(queued.attachment_completed_at); assert.equal(queued.archive_next_retry_at, null);
+  const again = await bulkRetryRequestScanArchives([jobId, 999999], booking.userId);
+  assert.equal(again.queued.length, 0); assert.equal(again.failed.length, 2);
+  const audit = await pool.query("select action_type from audit_log where entity_type='request_scan_job' and entity_id=$1 and action_type='request_scan_archive_retry_queued'", [jobId]);
+  assert.equal(audit.rowCount, 1);
+});
+
 after(async () => {
+  if (created.users.length) await pool.query("delete from audit_log where changed_by_user_id=any($1::bigint[])", [created.users]);
   if (created.jobs.length) await pool.query("delete from audit_log where entity_type='request_scan_job' and entity_id=any($1::bigint[])", [created.jobs]);
   if (created.patients.length) await pool.query("delete from documents where patient_id=any($1::bigint[]) and source='request_scan_automation'", [created.patients]);
   if (created.jobs.length) await pool.query("delete from request_scan_jobs where id = any($1::bigint[])", [created.jobs]);

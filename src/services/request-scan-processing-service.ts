@@ -28,7 +28,8 @@ export async function claimNextRequestScanJob(workerId: string): Promise<Claimed
     where singleton_key=1 and worker_id=$1 and worker_heartbeat_at >= now()-($4::int * interval '1 millisecond') and exists(select 1 from reset_gate where allowed)
   ), candidate as (
     select id from request_scan_jobs
-    where status='pending' and exists (select 1 from active_owner)
+    where (status='pending' or (status='failed' and attachment_completed_at is not null and document_id is not null and source_moved_at is null and archive_next_retry_at <= now() and archive_attempt_count < 7))
+      and exists (select 1 from active_owner)
     order by priority_requested_at asc nulls last,created_at asc,id asc
     for update skip locked
     limit 1
@@ -50,6 +51,11 @@ export async function beginRequestScanAttachment(jobId: number, lease: RequestSc
   const state = await pool.query<{ cancel_requested_at: string | null }>(`select cancel_requested_at from request_scan_jobs where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at >= now()`, [jobId, lease.workerId, lease.token]);
   if (state.rows[0]?.cancel_requested_at) throw new RequestScanCancellationRequestedError();
   throw new RequestScanLeaseLostError();
+}
+export async function beginRequestScanArchive(jobId: number, lease: RequestScanLease): Promise<RequestScanJob> {
+  const { rows } = await pool.query(`update request_scan_jobs set processing_stage='moving_file',stage_started_at=now(),heartbeat_at=now(),lease_expires_at=now()+($4::int * interval '1 millisecond'),archive_attempt_count=archive_attempt_count+1,last_archive_attempt_at=now(),archive_last_error=null,archive_next_retry_at=null,updated_at=now() where id=$1 and status='processing' and worker_id=$2 and lease_token=$3::uuid and lease_expires_at >= now() returning *`, [jobId, lease.workerId, lease.token, REQUEST_SCAN_LEASE_MS]);
+  if (!rows[0]) throw new RequestScanLeaseLostError();
+  return rows[0] as RequestScanJob;
 }
 export async function updateRequestScanCheckpoint(jobId: number, lease: RequestScanLease, values: Record<string, unknown>): Promise<RequestScanJob> {
   const allowed = new Set(["appointment_id", "document_id", "barcode_value", "identifier_verified_at", "identifier_strategy", "attachment_completed_at", "attachment_created", "intended_destination_path", "source_relative_path", "source_moved_at"]);

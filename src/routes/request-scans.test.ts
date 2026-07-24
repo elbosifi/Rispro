@@ -43,12 +43,13 @@ test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker 
       return { rows: [{ pending: 4, processing: 2, processed_today: 301, duplicates_today: 5, failed: 409, dismissed: 7 }] };
     },
   });
-  assert.deepEqual(status, { enabled: true, running: true, lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", workerOnline: true, workerId: "worker-a", workerStartedAt: "2026-07-22T20:00:00.000Z", workerHeartbeatAt: "2026-07-22T22:29:59.000Z", cycleStartedAt: "2026-07-22T22:29:00.000Z", cycleCompletedAt: null, pending: 4, processing: 2, processedToday: 301, duplicatesToday: 5, failed: 409, dismissed: 7 });
+  assert.deepEqual(status, { enabled: true, running: true, lastRunAt: "2026-07-22T20:00:00.000Z", lastError: "SMB server unavailable.", workerOnline: true, workerId: "worker-a", workerStartedAt: "2026-07-22T20:00:00.000Z", workerHeartbeatAt: "2026-07-22T22:29:59.000Z", cycleStartedAt: "2026-07-22T22:29:00.000Z", cycleCompletedAt: null, pending: 4, processing: 2, processedToday: 301, duplicatesToday: 5, failed: 409, dismissed: 7, archiveDestination: { name: null, state: "unknown", affectedCount: 0, lastConnectionCheck: null, lastSuccessfulArchive: null, nextRetryAt: null, lastError: null } });
   assert.deepEqual(values, ["2026-07-23"]);
   assert.match(query, /count\(\*\) filter \(where status = 'pending'\)/);
   assert.match(query, /count\(\*\) filter \(where status = 'processing'\)/);
   assert.match(query, /status = 'processed'.*Africa\/Tripoli/s);
   assert.match(query, /status = 'duplicate'.*Africa\/Tripoli/s);
+  assert.match(query, /archive_pending/);
   assert.doesNotMatch(query, /limit 250/i);
 });
 
