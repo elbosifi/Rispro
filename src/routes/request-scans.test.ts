@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, setRequestScanFileHeaders } from "./request-scans.js";
+import { buildInlineContentDisposition, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
 import { parseRequestScanJobFilter, type RequestScanJob } from "../services/request-scan-service.js";
 
 test("Request Scan file response is private and inline for PDF and JPEG previews", () => {
@@ -8,13 +8,27 @@ test("Request Scan file response is private and inline for PDF and JPEG previews
   const response = { setHeader(name: string, value: string) { headers.set(name, value); } };
   setRequestScanFileHeaders(response as never, { filename: 'request".pdf', mime_type: "application/pdf" });
   assert.equal(headers.get("Content-Type"), "application/pdf");
-  assert.equal(headers.get("Content-Disposition"), 'inline; filename="request.pdf"');
+  assert.equal(headers.get("Content-Disposition"), `inline; filename="request-scan.pdf"; filename*=UTF-8''request.pdf`);
   assert.equal(headers.get("Cache-Control"), "private, no-store");
   setRequestScanFileHeaders(response as never, { filename: "request.jpg", mime_type: "image/jpeg" });
   assert.equal(headers.get("Content-Type"), "image/jpeg");
   setRequestScanFileHeaders(response as never, { filename: "https___rispro.nccb.com.ly_public_appointment_t=pa_private_token.pdf", mime_type: "application/pdf" });
-  assert.equal(headers.get("Content-Disposition"), 'inline; filename="Patient appointment QR.pdf"');
+  assert.equal(headers.get("Content-Disposition"), `inline; filename="request-scan.pdf"; filename*=UTF-8''Patient%20appointment%20QR.pdf`);
   assert.equal([...headers.values()].some((value) => value.includes("pa_private_token")), false);
+});
+
+test("Request Scan inline filenames use an ASCII fallback and RFC 5987 Unicode encoding", () => {
+  assert.equal(buildInlineContentDisposition("إبراهيم محمد رمضان.pdf", "application/pdf"), `inline; filename="request-scan.pdf"; filename*=UTF-8''%D8%A5%D8%A8%D8%B1%D8%A7%D9%87%D9%8A%D9%85%20%D9%85%D8%AD%D9%85%D8%AF%20%D8%B1%D9%85%D8%B6%D8%A7%D9%86.pdf`);
+  assert.equal(buildInlineContentDisposition("تقرير أشعة.jpg", "image/jpeg"), `inline; filename="request-scan.jpg"; filename*=UTF-8''%D8%AA%D9%82%D8%B1%D9%8A%D8%B1%20%D8%A3%D8%B4%D8%B9%D8%A9.jpg`);
+  assert.match(buildInlineContentDisposition("quote' (100%).pdf", "application/pdf"), /quote%27%20%28100%25%29\.pdf$/);
+  const injected = buildInlineContentDisposition("safe.pdf\r\nX-Evil: yes", "application/pdf");
+  assert.doesNotMatch(injected, /[\r\n]/);
+});
+test("Arabic Request Scan preview sends HTTP 200 and exact PDF bytes", () => {
+  const headers = new Map<string, string>(); let status = 0; let sent: Buffer | null = null; const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0, 0xff]);
+  const response = { setHeader(name: string, value: string) { headers.set(name, value); }, status(value: number) { status = value; return this; }, send(value: Buffer) { sent = value; return this; } };
+  sendRequestScanFileResponse(response as never, { filename: "إبراهيم محمد رمضان.pdf", mime_type: "application/pdf" }, bytes);
+  assert.equal(status, 200); assert.deepEqual(sent, bytes); assert.equal(headers.get("Content-Type"), "application/pdf"); assert.match(headers.get("Content-Disposition")!, /filename="request-scan\.pdf"; filename\*=UTF-8''%D8/);
 });
 
 test("Request Scan status uses aggregate counts, Tripoli boundaries, and worker runtime state", async () => {

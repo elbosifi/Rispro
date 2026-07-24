@@ -242,7 +242,7 @@ async function archiveCheckpointedRequestScanJob(job: RequestScanJob, lease: Req
   if (!job.source_moved_at) {
     const outcome = dependencies.reconcileRequestScanMove ? await dependencies.reconcileRequestScanMove(settings, job.source_relative_path, intended) : "moved";
     if (!dependencies.reconcileRequestScanMove) await dependencies.moveRequestScanFile(settings, job.source_relative_path, folder, requestScanArchivePath("", Number(job.id), job.filename));
-    if (outcome === "conflict") throw new RequestScanProcessingError("Both the Request Scan source and archive destination exist. Manual reconciliation is required.", "smb_storage");
+    if (outcome === "conflict") throw new RequestScanProcessingError("The Incoming file and archived file have the same job destination but different contents. Both files were preserved for manual review.", "smb_storage");
     if (outcome === "missing") throw new RequestScanProcessingError("The Request Scan source and archive destination are both missing.", "source_missing");
     await assertRequestScanLeaseOwned(job.id, lease);
     job = await updateRequestScanCheckpoint(job.id, lease, { source_relative_path: intended, source_moved_at: new Date().toISOString() });

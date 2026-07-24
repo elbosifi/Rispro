@@ -115,6 +115,7 @@ function dependencies(result: RequestScanBarcodeResult, options: {
   recognitionCalls?: string[];
   diagnostics?: Array<{ event: string; metadata: Record<string, string | number | boolean> }>;
   verifyToken?: typeof verifyPublicCancelToken;
+  reconciliation?: "moved" | "already_moved" | "identical_source_removed" | "conflict" | "missing";
 } = {}): RequestScanServiceDependencies {
   return {
     listRequestScanFiles: async () => [],
@@ -124,6 +125,7 @@ function dependencies(result: RequestScanBarcodeResult, options: {
       if (options.failAllMoves || (options.failProcessedMove && destinationFolder.includes("Processed") && !destinationFolder.includes("Duplicates"))) throw new Error("SMB move failed");
       return `${destinationFolder}\\${filename}`;
     },
+    ...(options.reconciliation ? { reconcileRequestScanMove: async () => options.reconciliation! } : {}),
     uploadDocument: async (payload, userId) => {
       options.uploads?.push({ payload, userId: userId ?? null });
       const inserted = await pool.query<{ id: string }>(
@@ -597,6 +599,19 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(cycle.processed, 1);
   assert.equal((await getRequestScanJob(jobId)).status, "processed");
   assert.equal(uploads.length, 1);
+});
+
+test("checkpointed identical source reconciliation completes without another upload", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const jobId = await createJob(); const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const failed = await processRequestScanJob(jobId, settings, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true, uploads }));
+  assert.equal(failed.status, "failed"); assert.ok(failed.attachment_completed_at);
+  await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async () => { throw new Error("must not move checkpointed source"); } });
+  const resumed = await processRequestScanJob(jobId, settings, dependencies({ ok: false, reason: "no_barcode" }, { reconciliation: "identical_source_removed", uploads }));
+  assert.equal(resumed.status, "processed");
+  assert.equal(uploads.length, 1);
+  assert.equal(Number(resumed.document_id), Number(failed.document_id));
+  assert.ok(resumed.source_moved_at);
 });
 
 test("concurrent idempotent Request Scan uploads create one document and remove the losing file", async (t) => {
