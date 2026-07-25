@@ -138,8 +138,10 @@ const DialogHeader = forwardRef<HTMLDivElement, DialogHeaderProps>(
         <div style={{ flex: 1 }}>{children}</div>
         {showClose && (
           <button
+            type="button"
             onClick={onClose}
             className="btn-ghost"
+            aria-label="Close dialog"
             style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             <X size={16} />
