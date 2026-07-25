@@ -122,10 +122,11 @@ DialogContent.displayName = "DialogContent";
 interface DialogHeaderProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   showClose?: boolean;
+  closeLabel?: string;
 }
 
 const DialogHeader = forwardRef<HTMLDivElement, DialogHeaderProps>(
-  ({ children, showClose = true, className = "", ...props }, ref) => {
+  ({ children, showClose = true, closeLabel = "Close dialog", className = "", ...props }, ref) => {
     const { onClose } = useDialog();
 
     return (
@@ -141,7 +142,7 @@ const DialogHeader = forwardRef<HTMLDivElement, DialogHeaderProps>(
             type="button"
             onClick={onClose}
             className="btn-ghost"
-            aria-label="Close dialog"
+            aria-label={closeLabel}
             style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             <X size={16} />

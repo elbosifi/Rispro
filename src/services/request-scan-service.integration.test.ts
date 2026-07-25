@@ -30,7 +30,7 @@ import { claimRequestScanJob } from "./request-scan-processing-service.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
 
-const created = { jobs: [] as number[], bookings: [] as number[], patients: [] as number[], policyVersions: [] as number[], policySets: [] as number[], modalities: [] as number[], users: [] as number[] };
+const created = { jobs: [] as number[], bookings: [] as number[], patients: [] as number[], policyVersions: [] as number[], policySets: [] as number[], modalities: [] as number[], examTypes: [] as number[], users: [] as number[] };
 let sequence = 0;
 
 const settings: RequestScanSettings = {
@@ -83,6 +83,12 @@ async function createBooking(status = "scheduled") {
   );
   const modalityId = Number(modality.rows[0].id);
   created.modalities.push(modalityId);
+  const exam = await pool.query<{ id: number }>(
+    "insert into exam_types(modality_id,code,name_ar,name_en,is_active) values($1,$2,$3,$4,true) returning id",
+    [modalityId, `request_scan_exam_${marker}`, `ÙØ­Øµ ${marker}`, `Request scan exam ${marker}`]
+  );
+  const examTypeId = Number(exam.rows[0].id);
+  created.examTypes.push(examTypeId);
   const policySet = await pool.query<{ id: number }>(
     "insert into appointments_v2.policy_sets(key,name,created_by_user_id) values($1,$2,$3) returning id",
     [`request_scan_policy_${marker}`, `Request scan policy ${marker}`, userId]
@@ -97,8 +103,8 @@ async function createBooking(status = "scheduled") {
   created.policyVersions.push(policyVersionId);
   const booking = await pool.query<{ id: number }>(
     `insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,reporting_priority_id,booking_date,booking_time,case_category,status,notes,policy_version_id,created_by_user_id,updated_by_user_id)
-     values($1,$2,null,null,current_date,'09:00:00','non_oncology',$3,'request scan test',$4,$5,$5) returning id`,
-    [patientId, modalityId, status, policyVersionId, userId]
+     values($1,$2,$3,null,current_date,'09:00:00','non_oncology',$4,'request scan test',$5,$6,$6) returning id`,
+    [patientId, modalityId, examTypeId, status, policyVersionId, userId]
   );
   const id = Number(booking.rows[0].id);
   created.bookings.push(id);
@@ -611,11 +617,21 @@ test("active Request Scan filtering returns processing first and pending oldest-
   await pool.query("update request_scan_jobs set created_at=$2 where id=$1", [olderPendingId, "2026-07-23T08:00:00.000Z"]);
   await pool.query("update request_scan_jobs set created_at=$2 where id=$1", [processingId, "2026-07-23T10:00:00.000Z"]);
   await pool.query("update request_scan_jobs set created_at=$2 where id=$1", [newerPendingId, "2026-07-23T09:00:00.000Z"]);
+  const bilingualBooking = await createBooking();
+  await pool.query("update request_scan_jobs set appointment_id=$2 where id=$1", [processingId, bilingualBooking.id]);
 
   const active = await listRequestScanJobs("active");
   const relevant = active.filter(({ id }) => [olderPendingId, processingId, newerPendingId, failedId].includes(Number(id)));
   assert.deepEqual(relevant.map(({ id }) => Number(id)), [processingId, olderPendingId, newerPendingId]);
   assert.deepEqual(relevant.map(({ status }) => status), ["processing", "pending", "pending"]);
+
+  const bilingual = relevant.find(({ id }) => Number(id) === processingId)!;
+  const source = await pool.query<{ patient_name_ar: string; patient_name_en: string; modality_name_ar: string; modality_name_en: string; exam_name_ar: string; exam_name_en: string }>(
+    `select p.arabic_full_name as patient_name_ar,p.english_full_name as patient_name_en,m.name_ar as modality_name_ar,m.name_en as modality_name_en,e.name_ar as exam_name_ar,e.name_en as exam_name_en
+     from appointments_v2.bookings b join patients p on p.id=b.patient_id join modalities m on m.id=b.modality_id join exam_types e on e.id=b.exam_type_id where b.id=$1`,
+    [bilingualBooking.id],
+  );
+  assert.deepEqual({ patient_name_ar: bilingual.patient_name_ar, patient_name_en: bilingual.patient_name_en, modality_name_ar: bilingual.modality_name_ar, modality_name_en: bilingual.modality_name_en, exam_name_ar: bilingual.exam_name_ar, exam_name_en: bilingual.exam_name_en }, source.rows[0]);
 
   assert.ok((await listRequestScanJobs("failed")).some(({ id }) => Number(id) === failedId));
   assert.ok((await listRequestScanJobs("processed")).some(({ id }) => Number(id) === processedId));
@@ -847,6 +863,7 @@ after(async () => {
   if (created.patients.length) await pool.query("delete from patients where id = any($1::bigint[])", [created.patients]);
   if (created.policyVersions.length) await pool.query("delete from appointments_v2.policy_versions where id = any($1::bigint[])", [created.policyVersions]);
   if (created.policySets.length) await pool.query("delete from appointments_v2.policy_sets where id = any($1::bigint[])", [created.policySets]);
+  if (created.examTypes.length) await pool.query("delete from exam_types where id = any($1::bigint[])", [created.examTypes]);
   if (created.modalities.length) await pool.query("delete from modalities where id = any($1::bigint[])", [created.modalities]);
   if (created.users.length) await pool.query("delete from users where id = any($1::bigint[])", [created.users]);
   await pool.end();
