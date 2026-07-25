@@ -163,6 +163,16 @@ describe("RequestScansPage", () => {
     expect(screen.getByRole("tab", { name: "Processed" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("loads the appointment when Request Scans returns the ID as a numeric string", async () => {
+    mock([{ ...completed, appointment_id: "9" as unknown as number }]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open appointment" }));
+
+    expect(await screen.findByText("Patient One")).toBeTruthy();
+    expect(screen.getAllByText("V2-000009").length).toBeGreaterThan(0);
+  });
+
   it("opens processing details with diagnostic content", async () => {
     mock();
     renderPage();

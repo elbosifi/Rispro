@@ -194,7 +194,8 @@ export function AppointmentManageModal({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isRtl = language === "ar";
-  const normalizedAppointmentId = Number.isInteger(appointmentId) && (appointmentId ?? 0) > 0 ? appointmentId : null;
+  const parsedAppointmentId = appointmentId == null ? null : Number(appointmentId);
+  const normalizedAppointmentId = Number.isSafeInteger(parsedAppointmentId) && parsedAppointmentId > 0 ? parsedAppointmentId : null;
   const [activeTab, setActiveTab] = useState<AppointmentManageTab>(initialTab);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);

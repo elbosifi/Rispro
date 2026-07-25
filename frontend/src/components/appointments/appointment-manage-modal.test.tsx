@@ -203,4 +203,11 @@ describe("AppointmentManageModal", () => {
     expect((await screen.findAllByText("ACC-99")).length).toBeGreaterThan(0);
     expect((screen.getAllByText("Second Patient")).length).toBeGreaterThan(0);
   });
+
+  it("loads when the appointment ID arrives as a numeric string", async () => {
+    renderModal({ appointmentId: "42" as unknown as number });
+
+    expect((await screen.findAllByText("ACC-42")).length).toBeGreaterThan(0);
+    expect(mocks.getAppointmentById).toHaveBeenCalledWith(42);
+  });
 });
