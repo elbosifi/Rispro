@@ -40,10 +40,11 @@ function Dialog({ open, onClose, children }: DialogProps) {
 interface DialogContentProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   maxWidth?: string;
+  scrollable?: boolean;
 }
 
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ children, maxWidth = "400px", className = "", ...props }, ref) => {
+  ({ children, maxWidth = "400px", scrollable = true, className = "", ...props }, ref) => {
     const { onClose } = useDialog();
 
   useEffect(() => {
@@ -74,6 +75,8 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
         inset: 0,
@@ -86,11 +89,14 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
       {...props}
     >
       {/* Backdrop */}
-      <div style={{
-        position: "absolute",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)"
-      }} />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundColor: "rgba(0,0,0,0.5)"
+        }}
+        onClick={onClose}
+      />
 
       {/* Dialog */}
       <div
@@ -107,7 +113,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           border: "1px solid var(--border)",
           boxShadow: "var(--shadow-floating)",
           maxHeight: "calc(100vh - 32px)",
-          overflow: "auto",
+          overflow: scrollable ? "auto" : "hidden",
         }}
         className={className}
       >

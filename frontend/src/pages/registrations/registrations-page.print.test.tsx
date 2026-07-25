@@ -538,6 +538,34 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("updates the deep-linked tab and closes without removing unrelated query parameters", async () => {
+    renderRegistrationsPage(["/registrations?appointmentId=7&tab=status&status[]=scheduled&customFilter=keep"]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
+      expect(screen.getByRole("tab", { name: "Status" }).getAttribute("aria-selected")).toBe("true");
+    });
+
+    await userEvent.click(screen.getByRole("tab", { name: "Report" }));
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
+      expect(params.get("appointmentId")).toBe("7");
+      expect(params.get("tab")).toBe("report");
+      expect(params.get("customFilter")).toBe("keep");
+      expect(params.getAll("status[]")).toEqual(["scheduled"]);
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
+      expect(screen.queryByRole("dialog", { name: "Manage" })).toBeNull();
+      expect(params.has("appointmentId")).toBe(false);
+      expect(params.has("tab")).toBe(false);
+      expect(params.get("customFilter")).toBe("keep");
+      expect(params.getAll("status[]")).toEqual(["scheduled"]);
+    });
+  });
+
   it("shows selected appointment workflow timestamps in the manage drawer", async () => {
     fetchAppointmentsMock.mockResolvedValueOnce([
       {
@@ -937,7 +965,7 @@ describe("RegistrationsPage print actions", () => {
     const row = getAppointmentRow("ACC-7");
     expect(within(row).queryByRole("button", { name: "Reschedule" })).toBeNull();
     await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
-    await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getAllByRole("tab", { name: "Reschedule" }).at(-1)!);
 
     await waitFor(() => {
       expect(useV2AvailabilityMock).toHaveBeenCalledWith(
@@ -1012,7 +1040,7 @@ describe("RegistrationsPage print actions", () => {
     });
 
     await userEvent.click(within(getAppointmentRow("ACC-7")).getByRole("button", { name: "Manage" }));
-    await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getAllByRole("tab", { name: "Reschedule" }).at(-1)!);
     await waitFor(() => expect(fetchPublicSchedulingCapacitySettingsMock).toHaveBeenCalled());
     await userEvent.click(await screen.findByRole("button", { name: "Show full days" }));
     const restrictedDate = await screen.findByRole("button", { name: /2027-01-05 available/i });
@@ -1088,7 +1116,7 @@ describe("RegistrationsPage print actions", () => {
 
     const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
-    await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getAllByRole("tab", { name: "Reschedule" }).at(-1)!);
 
     await waitFor(() => {
       expect(screen.getByText("Choose a new date for this appointment. Other appointment details stay unchanged.")).toBeTruthy();

@@ -374,10 +374,11 @@ export function useV2ExamTypeCatalog() {
   });
 }
 
-export function useV2SpecialReasonCodes() {
+export function useV2SpecialReasonCodes(enabled = true) {
   return useQuery({
     queryKey: ["v2-special-reason-codes"] as const,
     queryFn: fetchV2SpecialReasonCodes,
+    enabled,
     staleTime: 5 * 60_000,
   });
 }

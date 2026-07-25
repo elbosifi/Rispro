@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
-vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar" }) }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar", t: (key: string) => key }) }));
+vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { id: 1, role: "super_admin" } }) }));
 
 import RequestScansPage from "./request-scans-page";
 
@@ -24,6 +25,27 @@ function mock(jobs = [archiveFailure]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const value = String(input);
     if (value.endsWith("/status")) return response(status);
+    if (value.includes("/v2/lookups/special-reason-codes")) return response({ items: [] });
+    if (value.includes("/api/v2/read/appointments/")) return response({ appointment: {
+      id: 9,
+      patient_id: 1,
+      accession_number: "V2-000009",
+      patient_name: "Patient One",
+      patient_name_ar: "المريض الأول",
+      patient_name_en: "Patient One",
+      patient_mrn: "MRN-9",
+      modality_name_ar: "التصوير المقطعي",
+      modality_name_en: "CT",
+      modality_code: "CT",
+      exam_name_ar: "الرأس",
+      exam_name_en: "Head",
+      modality_id: 1,
+      exam_type_id: 3,
+      appointment_date: "2026-07-25",
+      status: "scheduled",
+      created_at: "2026-07-24T09:00:00Z",
+      public_appointment_url: "https://rispro.test/public/appointment?t=scan-token",
+    } });
     if (value.includes("/api/request-scans/") && value.endsWith("/file")) return { ok: true, blob: async () => new Blob(["%PDF-1.4"], { type: "application/pdf" }) } as Response;
     if (value.includes("eligible-appointments")) return response({ appointments: [{ id: 12, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_ar: "المريض المحدد", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_ar: "الرنين", modality_name_en: "MRI", exam_name: "Brain", exam_name_ar: "الدماغ", exam_name_en: "Brain", appointment_date: "2026-07-25" }] });
     if (value.includes("?status=")) return response({ jobs });
@@ -116,13 +138,29 @@ describe("RequestScansPage", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("navigates to the appointment from the action menu", async () => {
+  it("opens the appointment modal from the action menu without navigating", async () => {
     mock([completed]);
     renderPage();
     fireEvent.click(await screen.findByRole("tab", { name: "Processed" }));
     const menu = await openMenu("completed.pdf");
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Open appointment" }));
-    expect(await screen.findByText("Registration destination")).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "registrations.manage" })).toBeTruthy();
+    expect(screen.queryByText("Registration destination")).toBeNull();
+    expect(screen.getByTestId("request-scans-page")).toBeTruthy();
+    expect(screen.getByText("completed.pdf")).toBeTruthy();
+    expect(screen.getByText("Patient One")).toBeTruthy();
+  });
+
+  it("opens the same appointment modal from the primary row action and preserves the selected tab", async () => {
+    mock([completed]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Processed" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open appointment" }));
+    expect(await screen.findByRole("dialog", { name: "registrations.manage" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Processed" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "toast.close" }));
+    expect(screen.queryByRole("dialog", { name: "registrations.manage" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Processed" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("opens processing details with diagnostic content", async () => {

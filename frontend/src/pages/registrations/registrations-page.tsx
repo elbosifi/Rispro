@@ -1,30 +1,21 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { Bell, ExternalLink, Eye, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
+import { Bell, ExternalLink, Eye, FileText, MoreHorizontal, Printer } from "lucide-react";
 import {
-  cancelAppointment,
   fetchAppointments,
   fetchAppointmentLookups,
   fetchAppointmentSlipSettings,
-  fetchPublicAppointmentReportStatus,
-  getAppointmentById,
   fetchPatientQrSettings,
-  fetchPublicSchedulingCapacitySettings,
   sendPatientWebPushNotification,
-  updateAppointmentStatus,
-  type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { formatDateLy, formatDateTimeLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
-import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
-import { AppointmentEditor } from "@/components/appointments/appointment-editor";
-import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
+import { AppointmentManageModal, type AppointmentManageTab } from "@/components/appointments/appointment-manage-modal";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
-import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -36,26 +27,7 @@ import {
 } from "@/lib/print-utils";
 import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
-import {
-  useCreateSchedulingOverrideRequest,
-  rescheduleV2Booking,
-  useV2SpecialReasonCodes,
-} from "@/v2/appointments/api";
 import type { WhatsappTemplate } from "@/lib/whatsapp";
-import {
-  RESCHEDULABLE_STATUSES,
-  type BookingStatus,
-  type CapacityResolutionMode,
-  type RescheduleBookingRequest,
-  type SchedulingOverrideType,
-} from "@/v2/appointments/types";
-import { AvailabilityPanel } from "@/v2/appointments/components/AvailabilityPanel";
-import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSection";
-import { SupervisorOverrideModal } from "@/v2/appointments/components/SupervisorOverrideModal";
-import { SchedulingOverrideRequestModal } from "@/v2/appointments/components/SchedulingOverrideRequestModal";
-import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
-import { inferSupportedOverrideType } from "@/v2/appointments/utils/scheduling-override-requests";
-import { useAuth } from "@/providers/auth-provider";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
   dateMode: "single",
@@ -68,12 +40,6 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
 };
 
 const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15";
-const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
-const DAY_MS = 24 * 60 * 60 * 1000;
-const MANAGE_TABS = ["details", "documents", "report", "reschedule", "status", "cancel"] as const;
-type ManageTab = (typeof MANAGE_TABS)[number];
-const MANUAL_STATUS_OPTIONS = ["scheduled", "arrived", "waiting", "completed", "no-show", "discontinued"] as const;
-const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "discontinued"]);
 const DRILLDOWN_FILTER_PARAM_KEYS = ["source", "dateMode", "date", "dateFrom", "dateTo", "modalityId", "status", "status[]", "q"];
 
 function RegistrationStat({
@@ -104,29 +70,6 @@ function RegistrationStat({
   );
 }
 
-function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function clampAvailabilityOffset(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.floor(value);
-}
-
-function startDateFromOffset(offset: number): string {
-  const start = new Date(`${todayIsoDate()}T00:00:00Z`);
-  start.setUTCDate(start.getUTCDate() + clampAvailabilityOffset(offset));
-  return start.toISOString().slice(0, 10);
-}
-
-function offsetFromStartDate(isoDate: string): number {
-  if (!isoDate) return 0;
-  const start = new Date(`${todayIsoDate()}T00:00:00Z`).getTime();
-  const selected = new Date(`${isoDate}T00:00:00Z`).getTime();
-  if (!Number.isFinite(selected)) return 0;
-  return clampAvailabilityOffset(Math.floor((selected - start) / DAY_MS));
-}
-
 function publicAppointmentToken(appointment: AppointmentWithDetails): string {
   const directToken = String(appointment.publicCancelToken || "").trim();
   if (directToken) return directToken;
@@ -141,17 +84,6 @@ function publicAppointmentToken(appointment: AppointmentWithDetails): string {
   }
 }
 
-function formatElapsedSince(language: string, value: string | null | undefined): string {
-  if (!value) return "—";
-  const startedAt = new Date(value).getTime();
-  if (!Number.isFinite(startedAt)) return "—";
-  const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return language === "ar" ? `${hours}س ${remainingMinutes}د` : `${hours}h ${remainingMinutes}m`;
-}
-
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -163,26 +95,26 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
-  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isRtl = language === "ar";
   const queryClient = useQueryClient();
   const appointmentIdParam = searchParams.get("appointmentId");
   const patientIdParam = searchParams.get("patientId");
   const tabParam = searchParams.get("tab");
   const isStatisticsDrilldown = searchParams.get("source") === "statistics";
   const hasUrlAppointmentFilters = DRILLDOWN_FILTER_PARAM_KEYS.some((key) => key !== "source" && searchParams.has(key));
-  const initialManageTab = MANAGE_TABS.includes(tabParam as ManageTab) ? (tabParam as ManageTab) : "details";
+  const appointmentManageTabs: AppointmentManageTab[] = ["details", "documents", "report", "reschedule", "status", "cancel"];
+  const initialManageTab = appointmentManageTabs.includes(tabParam as AppointmentManageTab) ? (tabParam as AppointmentManageTab) : "details";
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
+  const [reportCheckOnOpen, setReportCheckOnOpen] = useState(false);
+  const parsedAppointmentId = appointmentIdParam ? Number(appointmentIdParam) : null;
+  const deepLinkedAppointmentId = Number.isInteger(parsedAppointmentId) && (parsedAppointmentId ?? 0) > 0 ? parsedAppointmentId : null;
+  const manageAppointmentId = selectedAppointment?.id ?? deepLinkedAppointmentId;
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [slipPreviewAppointment, setSlipPreviewAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [manageTab, setManageTab] = useState<ManageTab>(initialManageTab);
-  const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
-  const [reportError, setReportError] = useState("");
   const [notificationAppointment, setNotificationAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [notificationMode, setNotificationMode] = useState<"template" | "custom">("template");
@@ -194,26 +126,6 @@ export default function RegistrationsPage() {
   const [whatsappMode, setWhatsappMode] = useState<"template" | "custom">("template");
   const [whatsappTemplate, setWhatsappTemplate] = useState<WhatsappTemplate>("qr_link");
   const [whatsappMessage, setWhatsappMessage] = useState("");
-  const [rescheduleDate, setRescheduleDate] = useState("");
-  const [rescheduleReason, setRescheduleReason] = useState("");
-  const [rescheduleSelectedRow, setRescheduleSelectedRow] = useState<AvailabilityRowViewModel | null>(null);
-  const [rescheduleOffset, setRescheduleOffset] = useState(0);
-  const [rescheduleShowFullDays, setRescheduleShowFullDays] = useState(false);
-  const [rescheduleShowWeekendDays, setRescheduleShowWeekendDays] = useState(false);
-  const [rescheduleOverrideOpen, setRescheduleOverrideOpen] = useState(false);
-  const [rescheduleOverrideError, setRescheduleOverrideError] = useState<string | null>(null);
-  const [rescheduleOverrideLoading, setRescheduleOverrideLoading] = useState(false);
-  const [pendingReschedulePayload, setPendingReschedulePayload] = useState<RescheduleBookingRequest | null>(null);
-  const [rescheduleRequestOpen, setRescheduleRequestOpen] = useState(false);
-  const [rescheduleRequestError, setRescheduleRequestError] = useState<string | null>(null);
-  const [rescheduleRequestOverrideType, setRescheduleRequestOverrideType] = useState<SchedulingOverrideType | null>(null);
-  const [rescheduleCapacityResolutionMode, setRescheduleCapacityResolutionMode] =
-    useState<CapacityResolutionMode>("standard");
-  const [rescheduleSpecialReasonCode, setRescheduleSpecialReasonCode] = useState("");
-  const [rescheduleSpecialReasonConfirmed, setRescheduleSpecialReasonConfirmed] = useState(false);
-  const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
-  const [manualStatus, setManualStatus] = useState<(typeof MANUAL_STATUS_OPTIONS)[number]>("scheduled");
-  const [manualStatusReason, setManualStatusReason] = useState("");
   const patientScopedDefaultFilters: RegistrationsFilters = patientIdParam
     ? {
         ...DEFAULT_FILTERS,
@@ -256,14 +168,6 @@ export default function RegistrationsPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
-  const { data: schedulingCapacitySettings } = useQuery({
-    queryKey: ["settings", "scheduling_and_capacity", "public"],
-    queryFn: fetchPublicSchedulingCapacitySettings,
-    staleTime: 60_000,
-  });
-  const allowReceptionOverrideRequestsFromAvailability =
-    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled" &&
-    String(schedulingCapacitySettings?.can_request_scheduling_override ?? "disabled") === "enabled";
   useEffect(() => {
     if (!patientIdParam) return;
 
@@ -279,150 +183,6 @@ export default function RegistrationsPage() {
           },
     );
   }, [patientIdParam]);
-  const { data: specialReasonOptions = [] } = useV2SpecialReasonCodes();
-  const selectedCanReschedule = Boolean(
-    selectedAppointment && RESCHEDULABLE_STATUSES.includes(selectedAppointment.status as BookingStatus)
-  );
-  const canUseNonStandardCapacityModes = user?.role === "supervisor" || user?.role === "super_admin";
-  const isSuperAdmin = user?.role === "super_admin";
-  const rescheduleAvailability = useAppointmentAvailability({
-    patientId: manageTab === "reschedule" && selectedCanReschedule ? selectedAppointment?.patientId ?? null : null,
-    modalityId: selectedAppointment?.modalityId ?? null,
-    examTypeId: selectedAppointment?.examTypeId ?? null,
-    caseCategory: selectedAppointment?.caseCategory ?? "non_oncology",
-    capacityResolutionMode:
-      rescheduleCapacityResolutionMode === "special_quota_extra"
-        ? rescheduleCapacityResolutionMode
-        : canUseNonStandardCapacityModes
-        ? rescheduleCapacityResolutionMode
-        : "standard",
-    specialReasonCode:
-      rescheduleCapacityResolutionMode === "special_quota_extra"
-        ? rescheduleSpecialReasonCode || null
-        : null,
-    days: 14,
-    offset: rescheduleOffset,
-  });
-  const selectedRescheduleAvailabilityItem = rescheduleAvailability.rawItems.find(
-    (item) => item.date === rescheduleDate
-  );
-  const rescheduleSpecialQuotaAvailable =
-    (selectedRescheduleAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
-  const rescheduleAnySpecialQuotaAvailable = rescheduleAvailability.rawItems.some(
-    (item) => (item.specialQuotaSummary?.remaining ?? 0) > 0
-  );
-  const canUseRescheduleSpecialQuota =
-    isSuperAdmin ||
-    rescheduleSpecialQuotaAvailable ||
-    rescheduleAnySpecialQuotaAvailable ||
-    rescheduleCapacityResolutionMode === "special_quota_extra";
-  const canUseSelectedRescheduleCapacityMode =
-    rescheduleCapacityResolutionMode === "special_quota_extra"
-      ? canUseRescheduleSpecialQuota
-      : canUseNonStandardCapacityModes;
-  const rescheduleCapacityModeNeedsOverrideAuth =
-    canUseNonStandardCapacityModes &&
-    (rescheduleCapacityResolutionMode === "category_override" ||
-      rescheduleCapacityResolutionMode === "total_capacity_override");
-  const rescheduleSpecialQuotaNeedsDetails =
-    canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra";
-  const createRescheduleOverrideRequestMutation = useCreateSchedulingOverrideRequest();
-
-  const cancelMutation = useMutation({
-    mutationFn: (id: number) => cancelAppointment(id, "Cancelled from registrations"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-      queryClient.invalidateQueries({ queryKey: ["calendar"] });
-      pushToast({
-        type: "success",
-        title: t("registrations.cancelledTitle"),
-        message: t("registrations.cancelledMessage"),
-      });
-      setSelectedAppointment(null);
-    },
-    onError: (err: unknown) => {
-      pushToast({
-        type: "error",
-        title: t("registrations.cancelFailedTitle"),
-        message: getErrorMessage(err, t("registrations.cancelFailedMessage")),
-      });
-    },
-  });
-
-  const statusMutation = useMutation({
-    mutationFn: async (payload: { appointmentId: number; status: string; reason: string | null }) => {
-      await updateAppointmentStatus(payload.appointmentId, payload.status, payload.reason);
-      return getAppointmentById(payload.appointmentId);
-    },
-    meta: {
-      suppressGlobalToast: true,
-    },
-    onSuccess: (updated) => {
-      queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-      queryClient.invalidateQueries({ queryKey: ["calendar"] });
-      setSelectedAppointment(updated);
-      setManualStatus(updated.status as (typeof MANUAL_STATUS_OPTIONS)[number]);
-      setManualStatusReason("");
-      pushToast({
-        type: "success",
-        title: chooseLocalized(language, "تم تحديث الحالة", "Status updated"),
-        message: statusLabel(language, updated.status),
-      });
-    },
-    onError: (err: unknown) => {
-      pushToast({
-        type: "error",
-        title: chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed"),
-        message: getErrorMessage(err, chooseLocalized(language, "حاول مرة أخرى.", "Please try again.")),
-      });
-    },
-  });
-
-  const rescheduleMutation = useMutation({
-    mutationFn: async (input: {
-      appointment: AppointmentWithDetails;
-      newDate: string;
-      payload: RescheduleBookingRequest;
-    }) => {
-      await rescheduleV2Booking(input.appointment.id, input.payload);
-      return getAppointmentById(input.appointment.id);
-    },
-    meta: {
-      suppressGlobalToast: true,
-    },
-    onSuccess: (updated, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-      queryClient.invalidateQueries({ queryKey: ["calendar"] });
-      queryClient.invalidateQueries({ queryKey: ["registration-reschedule-availability"] });
-      setSelectedAppointment(updated);
-      setRescheduleDate("");
-      setRescheduleReason("");
-      setRescheduleSelectedRow(null);
-      setRescheduleOverrideOpen(false);
-      setPendingReschedulePayload(null);
-      setRescheduleOverrideError(null);
-      setRescheduleCapacityResolutionMode("standard");
-      setRescheduleSpecialReasonCode("");
-      setRescheduleSpecialReasonConfirmed(false);
-      setRescheduleSpecialReasonNote("");
-      pushToast({
-        type: "success",
-        title: t("registrations.rescheduleSuccessTitle"),
-        message: `${formatDateLy(variables.appointment.appointmentDate)} → ${formatDateLy(variables.newDate)}`,
-      });
-    },
-    onError: (err: unknown) => {
-      pushToast({
-        type: "error",
-        title: t("registrations.rescheduleFailedTitle"),
-        message: getPatientRequirementStaffMessage(err, t) || getErrorMessage(err, t("registrations.rescheduleFailedMessage")),
-      });
-    },
-  });
-
   const sendNotificationMutation = useMutation({
     mutationFn: async () => {
       if (!notificationAppointment) throw new Error("No appointment selected.");
@@ -679,24 +439,6 @@ export default function RegistrationsPage() {
   }
   if (filters.modalityId) backToStatisticsParams.set("modalityId", filters.modalityId);
   const backToStatisticsHref = `/statistics${backToStatisticsParams.toString() ? `?${backToStatisticsParams.toString()}` : ""}`;
-  const selectedAppointmentCreatedBy = selectedAppointment
-    ? selectedAppointment.createdByName ||
-      selectedAppointment.createdByUsername ||
-      (selectedAppointment.createdByUserId ? `#${selectedAppointment.createdByUserId}` : "—")
-    : "—";
-
-  const reportStatusMutation = useMutation({
-    mutationFn: (token: string) => fetchPublicAppointmentReportStatus(token),
-    onSuccess: (status) => {
-      setReportStatus(status);
-      setReportError("");
-    },
-    onError: (error) => {
-      setReportStatus(null);
-      setReportError(error instanceof Error ? error.message : t("registrations.reportStatusFailed"));
-    },
-  });
-
   const handleViewAppointmentLink = async (appointment: AppointmentWithDetails) => {
     const url = String(appointment.publicAppointmentUrl || "").trim();
     if (!url) {
@@ -729,10 +471,10 @@ export default function RegistrationsPage() {
     setSlipPreviewAppointment(appointment);
   };
 
-  const setManageTabAndUrl = (tab: ManageTab) => {
-    setManageTab(tab);
-    if (!appointmentIdParam) return;
+  const setManageTabAndUrl = (tab: AppointmentManageTab) => {
+    if (!selectedAppointment && !appointmentIdParam) return;
     const nextSearchParams = new URLSearchParams(searchParams);
+    if (selectedAppointment) nextSearchParams.set("appointmentId", String(selectedAppointment.id));
     if (tab === "details") {
       nextSearchParams.delete("tab");
     } else {
@@ -743,42 +485,20 @@ export default function RegistrationsPage() {
 
   const manageAppointment = (appointment: AppointmentWithDetails) => {
     setSelectedAppointment(appointment);
-    setManageTabAndUrl("details");
+    setReportCheckOnOpen(false);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("appointmentId", String(appointment.id));
+    nextSearchParams.delete("tab");
+    setSearchParams(nextSearchParams, { replace: true });
   };
 
   const openReportPanel = (appointment: AppointmentWithDetails, checkNow = false) => {
-    const token = publicAppointmentToken(appointment);
     setSelectedAppointment(appointment);
-    setManageTabAndUrl("report");
-    setReportStatus(null);
-    setReportError("");
-
-    if (!token) {
-      setReportError(t("registrations.reportUnavailable"));
-      return;
-    }
-
-    if (checkNow) {
-      reportStatusMutation.mutate(token);
-    }
-  };
-
-  const checkSelectedReportStatus = () => {
-    if (!selectedAppointment) return;
-    const token = publicAppointmentToken(selectedAppointment);
-    if (!token) {
-      setReportStatus(null);
-      setReportError(t("registrations.reportUnavailable"));
-      return;
-    }
-    reportStatusMutation.mutate(token);
-  };
-
-  const openSelectedReport = () => {
-    if (!selectedAppointment) return;
-    const token = publicAppointmentToken(selectedAppointment);
-    if (!token) return;
-    window.location.href = `/api/public/appointments/report-open?t=${encodeURIComponent(token)}`;
+    setReportCheckOnOpen(checkNow);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("appointmentId", String(appointment.id));
+    nextSearchParams.set("tab", "report");
+    setSearchParams(nextSearchParams, { replace: true });
   };
 
   const openPatientNotificationDialog = (appointment: AppointmentWithDetails) => {
@@ -837,87 +557,16 @@ export default function RegistrationsPage() {
     setWhatsappAppointment(null);
   };
 
-  const closeManageDrawer = useCallback(() => {
+  const closeManageModal = () => {
     setSelectedAppointment(null);
-    setManageTab("details");
-    setReportStatus(null);
-    setReportError("");
+    setReportCheckOnOpen(false);
     if (appointmentIdParam) {
       const nextSearchParams = new URLSearchParams(searchParams);
       nextSearchParams.delete("appointmentId");
       nextSearchParams.delete("tab");
       setSearchParams(nextSearchParams, { replace: true });
     }
-  }, [appointmentIdParam, searchParams, setSearchParams]);
-
-  useEffect(() => {
-    const rawAppointmentId = appointmentIdParam?.trim();
-    if (!rawAppointmentId) {
-      return;
-    }
-
-    const appointmentId = Number(rawAppointmentId);
-    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
-      return;
-    }
-
-    let cancelled = false;
-
-    void getAppointmentById(appointmentId)
-      .then((appointment) => {
-        if (cancelled) return;
-        setSelectedAppointment(appointment);
-        setManageTab(initialManageTab);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        pushToast({
-          type: "error",
-          title: t("registrations.appointmentLinkTitle"),
-          message: error instanceof Error ? error.message : t("registrations.appointmentLinkUnavailable"),
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [appointmentIdParam, initialManageTab, t]);
-
-  useEffect(() => {
-    if (!selectedAppointment) return;
-    if (!MANAGE_TABS.includes(tabParam as ManageTab)) return;
-    setManageTab(tabParam as ManageTab);
-  }, [selectedAppointment, tabParam]);
-
-  useEffect(() => {
-    setRescheduleDate("");
-    setRescheduleReason("");
-    setRescheduleSelectedRow(null);
-    setRescheduleOverrideOpen(false);
-    setPendingReschedulePayload(null);
-    setRescheduleOverrideError(null);
-    setRescheduleCapacityResolutionMode("standard");
-    setRescheduleSpecialReasonCode("");
-    setRescheduleSpecialReasonConfirmed(false);
-    setRescheduleSpecialReasonNote("");
-    if (selectedAppointment?.status && MANUAL_STATUS_OPTIONS.includes(selectedAppointment.status as (typeof MANUAL_STATUS_OPTIONS)[number])) {
-      setManualStatus(selectedAppointment.status as (typeof MANUAL_STATUS_OPTIONS)[number]);
-    }
-    setManualStatusReason("");
-  }, [manageTab, selectedAppointment?.id, selectedAppointment?.status]);
-
-  useEffect(() => {
-    if (
-      rescheduleCapacityResolutionMode === "special_quota_extra" &&
-      !rescheduleAvailability.isLoading &&
-      !rescheduleSpecialQuotaAvailable
-    ) {
-      setRescheduleCapacityResolutionMode("standard");
-      setRescheduleSpecialReasonCode("");
-      setRescheduleSpecialReasonConfirmed(false);
-      setRescheduleSpecialReasonNote("");
-    }
-  }, [rescheduleAvailability.isLoading, rescheduleCapacityResolutionMode, rescheduleSpecialQuotaAvailable]);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -974,37 +623,6 @@ export default function RegistrationsPage() {
     void printAppointmentSlipById(slipPreviewAppointment.id, language);
   };
 
-  useEffect(() => {
-    if (!selectedAppointment) return;
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeManageDrawer();
-      }
-      if (e.key.toLowerCase() === "p") {
-        const target = e.target as HTMLElement | null;
-        const tagName = target?.tagName.toLowerCase();
-        if (tagName === "input" || tagName === "textarea" || tagName === "select" || target?.isContentEditable) {
-          return;
-        }
-        e.preventDefault();
-        void printAppointmentSlipById(selectedAppointment.id, language);
-      }
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [closeManageDrawer, language, selectedAppointment]);
-
-  function Field({ label, value }: { label: string; value: ReactNode }) {
-    return (
-      <div className="rounded-lg border border-border bg-muted/30 p-2">
-        <p className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
-          {label}
-        </p>
-        <p className="text-[13px] font-medium leading-snug">{value == null ? "—" : value}</p>
-      </div>
-    );
-  }
-
   function protocolVersionText(appointment: AppointmentWithDetails): string | null {
     const summary = appointment.protocolAssignmentSummary;
     if (!summary) return null;
@@ -1041,164 +659,6 @@ export default function RegistrationsPage() {
       </div>
     );
   }
-
-  function ProtocolDetailSummary({ appointment }: { appointment: AppointmentWithDetails }) {
-    if (!usesProtocolWorkflow(appointment)) return null;
-    const summary = appointment.protocolAssignmentSummary;
-
-    return (
-      <div className="mt-3 rounded-xl border border-border bg-muted/20 p-3">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-              summary
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-slate-200 bg-white/70 text-slate-600"
-            }`}
-          >
-            {summary ? "Protocol assigned" : "Not protocolled"}
-          </span>
-          <span className="text-xs font-semibold text-foreground">
-            {summary ? protocolVersionText(appointment) : "Protocol: Not protocolled"}
-          </span>
-        </div>
-        {summary ? (
-          <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <Field label="Protocol" value={protocolVersionText(appointment)} />
-            <Field label="Scanner" value={summary.scannerName || "Not selected"} />
-            <Field label="Assigned by" value={summary.assignedBy || "Not recorded"} />
-            <Field label="Assigned at" value={summary.assignedAt ? formatDateTimeLy(summary.assignedAt) : "Not recorded"} />
-            <Field label="Protocol notes" value={summary.protocolNotes || "None recorded"} />
-            <Field label="Contrast notes" value={summary.contrastNotes || "None recorded"} />
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No protocol assignment is recorded for this CT/MRI appointment.</p>
-        )}
-      </div>
-    );
-  }
-
-  const canSubmitReschedule =
-    Boolean(selectedAppointment && rescheduleDate && rescheduleSelectedRow) &&
-    (!rescheduleSpecialQuotaNeedsDetails ||
-      (Boolean(rescheduleSpecialReasonCode) && rescheduleSpecialReasonConfirmed)) &&
-    !rescheduleMutation.isPending;
-
-  const buildReschedulePayload = (): RescheduleBookingRequest | null => {
-    if (!selectedAppointment || !rescheduleDate || !rescheduleSelectedRow) return null;
-    return {
-      bookingDate: rescheduleDate,
-      bookingTime: null,
-      capacityResolutionMode: canUseSelectedRescheduleCapacityMode ? rescheduleCapacityResolutionMode : "standard",
-      useSpecialQuota:
-        canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra",
-      specialReasonCode:
-        canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra"
-          ? rescheduleSpecialReasonCode || null
-          : null,
-      specialReasonNote:
-        canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra"
-          ? rescheduleSpecialReasonNote.trim() || null
-          : null,
-      rescheduleReason: rescheduleReason.trim() || null,
-    };
-  };
-
-  const submitReschedulePayload = async (
-    appointment: AppointmentWithDetails,
-    payload: RescheduleBookingRequest,
-  ) => {
-    await rescheduleMutation.mutateAsync({
-      appointment,
-      newDate: payload.bookingDate,
-      payload,
-    });
-  };
-
-  const submitReschedule = () => {
-    if (!selectedAppointment || !canSubmitReschedule) return;
-    const payload = buildReschedulePayload();
-    if (!payload) return;
-    const supportedOverrideType = allowReceptionOverrideRequestsFromAvailability
-      ? inferSupportedOverrideType(rescheduleSelectedRow?.reasonCodes)
-      : null;
-    if (
-      rescheduleSelectedRow?.requiresSupervisorOverride ||
-      rescheduleSelectedRow?.status === "restricted" ||
-      rescheduleSelectedRow?.status === "full" ||
-      (rescheduleSelectedRow?.status === "blocked" && supportedOverrideType) ||
-      rescheduleCapacityModeNeedsOverrideAuth
-    ) {
-      if (user?.role === "receptionist" && supportedOverrideType) {
-        setPendingReschedulePayload(payload);
-        setRescheduleRequestOverrideType(supportedOverrideType);
-        setRescheduleRequestError(null);
-        setRescheduleRequestOpen(true);
-        return;
-      }
-      setPendingReschedulePayload(payload);
-      setRescheduleOverrideError(null);
-      setRescheduleOverrideOpen(true);
-      return;
-    }
-    void submitReschedulePayload(selectedAppointment, payload);
-  };
-
-  const handleRescheduleOverrideConfirm = async (overridePayload: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    overrideReason: string;
-  }) => {
-    if (!selectedAppointment || !pendingReschedulePayload) return;
-    if (!overridePayload.overrideReason.trim()) {
-      setRescheduleOverrideError(t("appointments.create.overrideReasonRequired"));
-      return;
-    }
-    setRescheduleOverrideLoading(true);
-    setRescheduleOverrideError(null);
-    const reschedulePayload: RescheduleBookingRequest = {
-      ...pendingReschedulePayload,
-      override: {
-        supervisorUsername: overridePayload.supervisorUsername,
-        supervisorPassword: overridePayload.supervisorPassword,
-        reason: overridePayload.overrideReason.trim(),
-      },
-    };
-    try {
-      await submitReschedulePayload(selectedAppointment, reschedulePayload);
-      setRescheduleOverrideOpen(false);
-      setPendingReschedulePayload(null);
-    } finally {
-      setRescheduleOverrideLoading(false);
-    }
-  };
-
-  const submitRescheduleOverrideRequest = async (requesterReason: string) => {
-    if (!selectedAppointment || !pendingReschedulePayload) return;
-    setRescheduleRequestError(null);
-    try {
-      await createRescheduleOverrideRequestMutation.mutateAsync({
-        requestType: "reschedule_booking",
-        bookingId: selectedAppointment.id,
-        requesterReason,
-        createdFromContext: "registrations_reschedule",
-        requestPayload: {
-          ...pendingReschedulePayload,
-          capacityResolutionMode: "standard",
-        },
-      });
-      setRescheduleRequestOpen(false);
-      setPendingReschedulePayload(null);
-      pushToast({
-        type: "success",
-        title: t("overrideRequests.submittedTitle"),
-        message: t("overrideRequests.rescheduleSubmittedMessage"),
-      });
-      queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
-    } catch (error) {
-      setRescheduleRequestError(error instanceof Error ? error.message : t("overrideRequests.submitFailed"));
-    }
-  };
 
   return (
     <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-3 sm:space-y-4">
@@ -1819,547 +1279,17 @@ export default function RegistrationsPage() {
         </div>
       </Card>
 
-      {selectedAppointment ? (
-        <div
-          className="fixed inset-0 z-50 bg-black/45"
-          onClick={closeManageDrawer}
-          role="presentation"
-          data-testid="registrations-manage-backdrop"
-        >
-          <div
-            className={`absolute top-0 h-full w-full overflow-y-auto bg-background shadow-2xl sm:w-[600px] ${
-              isRtl ? "left-0" : "right-0"
-            }`}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t("registrations.manage")}
-          >
-            <div className="border-b border-border p-3 sm:p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-semibold sm:text-base">
-                      {chooseLocalized(
-                        language,
-                        selectedAppointment.arabicFullName,
-                        selectedAppointment.englishFullName,
-                      )}
-                    </h3>
-                    <PatientCategoryBadge
-                      category={selectedAppointment.caseCategory}
-                      showWhenUnset={false}
-                      size="sm"
-                    />
-                  </div>
-                  <p className="text-[11px] sm:text-xs text-muted-foreground">
-                    {selectedAppointment.accessionNumber} •{" "}
-                    {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-8 px-2.5 text-[10px]"
-                    onClick={() => openPatientDrawer(selectedAppointment)}
-                  >
-                    {t("registrations.openPatientProfile")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-8 px-2.5 text-[10px]"
-                    onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
-                  >
-                    {t("registrations.print")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2.5 text-[10px]"
-                    onClick={closeManageDrawer}
-                  >
-                    {t("toast.close")}
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-                <Field
-                  label={t("registrations.patient")}
-                  value={chooseLocalized(
-                    language,
-                    selectedAppointment.arabicFullName,
-                    selectedAppointment.englishFullName,
-                  )}
-                />
-                <Field
-                  label={t("registrations.accession")}
-                  value={selectedAppointment.accessionNumber}
-                />
-                <Field
-                  label={t("registrations.modality")}
-                  value={[
-                    chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn),
-                    chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn),
-                  ]
-                    .filter(Boolean)
-                    .join(" • ") || "—"}
-                />
-                <Field
-                  label={t("registrations.date")}
-                  value={formatDateLy(selectedAppointment.appointmentDate)}
-                />
-                <Field
-                  label={t("registrations.createdAt")}
-                  value={formatDateTimeLy(selectedAppointment.createdAt)}
-                />
-                <Field
-                  label={t("registrations.createdBy")}
-                  value={selectedAppointmentCreatedBy}
-                />
-                {selectedAppointment.arrivedAt ? (
-                  <Field
-                    label={chooseLocalized(language, "وقت الوصول", "Arrival time")}
-                    value={formatDateTimeLy(selectedAppointment.arrivedAt)}
-                  />
-                ) : null}
-                {(selectedAppointment.status === "arrived" || selectedAppointment.status === "waiting") && selectedAppointment.arrivedAt ? (
-                  <Field
-                    label={chooseLocalized(language, "مدة الانتظار", "Waiting duration")}
-                    value={formatElapsedSince(language, selectedAppointment.arrivedAt)}
-                  />
-                ) : null}
-                {selectedAppointment.completedAt ? (
-                  <Field
-                    label={chooseLocalized(language, "وقت الإكمال", "Completed at")}
-                    value={formatDateTimeLy(selectedAppointment.completedAt)}
-                  />
-                ) : null}
-              </div>
-              <div className="mt-2">
-                <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                  {statusLabel(language, selectedAppointment.status)}
-                </span>
-              </div>
-              <ProtocolDetailSummary appointment={selectedAppointment} />
-            </div>
-
-            <div className="border-b border-border px-3 py-2 sm:px-4">
-              <div className="flex flex-wrap gap-1.5">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={manageTab === "details" ? "secondary" : "ghost"}
-                  className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTabAndUrl("details")}
-                >
-                  {t("registrations.detailsEdit")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={manageTab === "documents" ? "secondary" : "ghost"}
-                  className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTabAndUrl("documents")}
-                >
-                  {t("registrations.requestDocuments")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={manageTab === "report" ? "secondary" : "ghost"}
-                  className="h-8 px-2.5 text-[10px]"
-                  onClick={() => {
-                    setManageTabAndUrl("report");
-                    setReportStatus(null);
-                    setReportError("");
-                  }}
-                >
-                  {t("registrations.report")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={manageTab === "reschedule" ? "secondary" : "ghost"}
-                  className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTabAndUrl("reschedule")}
-                >
-                  {t("registrations.reschedule")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={manageTab === "status" ? "secondary" : "ghost"}
-                  className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTabAndUrl("status")}
-                >
-                  {chooseLocalized(language, "الحالة", "Status")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={manageTab === "cancel" ? "secondary" : "ghost"}
-                  className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTabAndUrl("cancel")}
-                >
-                  {t("registrations.cancelAppointment")}
-                </Button>
-              </div>
-            </div>
-
-            <div className="p-3 sm:p-4">
-              {manageTab === "details" ? (
-                <AppointmentEditor
-                  appointment={selectedAppointment}
-                  lookups={lookups}
-                  onUpdated={(updated) => setSelectedAppointment(updated)}
-                  onDeleted={closeManageDrawer}
-                />
-              ) : null}
-
-              {manageTab === "documents" ? (
-                <RequestDocumentsPanel
-                  appointmentId={selectedAppointment.id}
-                  patientId={selectedAppointment.patientId}
-                  appointmentRefType="v2_booking"
-                  title={t("registrations.requestDocuments")}
-                  enableLocalScan
-                />
-              ) : null}
-
-              {manageTab === "report" ? (
-                <div className="rounded-2xl border border-border bg-muted/20 p-3">
-                  <div className="mb-3">
-                    <div>
-                      <h4 className="text-sm font-semibold">{t("registrations.report")}</h4>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {selectedAppointment.accessionNumber} •{" "}
-                        {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
-                      </p>
-                    </div>
-                  </div>
-                  {selectedAppointment.sonicDicomStudyNote?.trim() ? (
-                    <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-sm" title={`PACS note: ${selectedAppointment.sonicDicomStudyNote.trim()}`}>
-                      <p className="text-xs font-semibold uppercase text-amber-700">PACS note</p>
-                      <p
-                        className="mt-1 text-amber-900"
-                        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-                      >
-                        {selectedAppointment.sonicDicomStudyNote.trim()}
-                      </p>
-                    </div>
-                  ) : null}
-                  <div className="rounded-xl border border-border bg-background p-3 text-sm">
-                    {reportError ? (
-                      <p className="text-red-700">{reportError}</p>
-                    ) : reportStatus ? (
-                      <p className="text-muted-foreground">{reportStatus.message}</p>
-                    ) : (
-                      <p className="text-muted-foreground">{t("registrations.reportHint")}</p>
-                    )}
-                  </div>
-                  <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={!publicAppointmentToken(selectedAppointment) || reportStatusMutation.isPending}
-                      onClick={checkSelectedReportStatus}
-                    >
-                      {reportStatusMutation.isPending ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 size={14} className="animate-spin" />
-                          {t("registrations.reportChecking")}
-                        </span>
-                      ) : (
-                        t("registrations.reportCheck")
-                      )}
-                    </Button>
-                  </div>
-                  {reportStatus?.canViewReport ? (
-                    <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
-                      <Button type="button" size="sm" variant="secondary" onClick={openSelectedReport}>
-                        <ExternalLink size={14} className={isRtl ? "ml-2" : "mr-2"} />
-                        {reportStatus.viewButtonLabel || t("registrations.reportOpen")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {manageTab === "reschedule" ? (
-                selectedCanReschedule ? (
-                  <div className="rounded-2xl border border-border bg-muted/20 p-3">
-                    <div className="mb-3">
-                      <h4 className="text-sm font-semibold">{t("registrations.reschedule")}</h4>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t("registrations.rescheduleHint")}
-                      </p>
-                    </div>
-
-                    {rescheduleAvailability.isError ? (
-                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-                        {(rescheduleAvailability.error as Error | undefined)?.message ||
-                          t("registrations.rescheduleAvailabilityFailed")}
-                      </div>
-                    ) : (
-                      <form
-                        className="space-y-3"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          submitReschedule();
-                        }}
-                      >
-                        <div className="rounded-xl border border-border bg-background p-3">
-                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="text-xs font-semibold text-foreground">
-                                {t("appointments.create.evaluatedAvailability")}
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {t("registrations.rescheduleAvailabilitySameAsCreate")}
-                              </p>
-                            </div>
-                            {rescheduleDate ? (
-                              <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
-                                {formatDateLy(rescheduleDate)}
-                              </span>
-                            ) : null}
-                          </div>
-                          <AvailabilityPanel
-                            rows={rescheduleAvailability.rows.filter(
-                              (row) =>
-                                row.date !== selectedAppointment.appointmentDate &&
-                                (row.status !== "blocked" ||
-                                  ((allowReceptionOverrideRequestsFromAvailability || user?.role !== "receptionist") &&
-                                    Boolean(inferSupportedOverrideType(row.reasonCodes))))
-                            )}
-                            selectedDate={rescheduleDate}
-                            onSelectDate={(row) => {
-                              setRescheduleSelectedRow(row);
-                              setRescheduleDate(row.date);
-                              setRescheduleOverrideError(null);
-                            }}
-                            loading={rescheduleAvailability.isLoading}
-                            emptyMessage={t("registrations.rescheduleNoDates")}
-                            showFullDays={rescheduleShowFullDays}
-                            onToggleShowFullDays={() => setRescheduleShowFullDays((current) => !current)}
-                            showPolicyHiddenDays={rescheduleShowWeekendDays}
-                            onToggleShowPolicyHiddenDays={() => setRescheduleShowWeekendDays((current) => !current)}
-                            startDate={startDateFromOffset(rescheduleOffset)}
-                            onChangeStartDate={(nextDate) => {
-                              setRescheduleOffset(offsetFromStartDate(nextDate));
-                              setRescheduleDate("");
-                              setRescheduleSelectedRow(null);
-                            }}
-                            onPreviousPage={() => {
-                              setRescheduleOffset((current) =>
-                                Math.max(0, current - RESCHEDULE_AVAILABILITY_WINDOW_DAYS)
-                              );
-                              setRescheduleDate("");
-                              setRescheduleSelectedRow(null);
-                            }}
-                            onNextPage={() => {
-                              setRescheduleOffset((current) => current + RESCHEDULE_AVAILABILITY_WINDOW_DAYS);
-                              setRescheduleDate("");
-                              setRescheduleSelectedRow(null);
-                            }}
-                            canGoPrevious={rescheduleOffset > 0}
-                            allowOverrideRequests={allowReceptionOverrideRequestsFromAvailability || user?.role !== "receptionist"}
-                          />
-                        </div>
-
-                        {canUseNonStandardCapacityModes || canUseRescheduleSpecialQuota ? (
-                          <SpecialQuotaSection
-                            capacityResolutionMode={rescheduleCapacityResolutionMode}
-                            onChangeCapacityResolutionMode={(mode) => {
-                              if (mode === "special_quota_extra" && !rescheduleSpecialQuotaAvailable) return;
-                              setRescheduleCapacityResolutionMode(mode);
-                              setRescheduleOverrideError(null);
-                              setRescheduleOverrideOpen(false);
-                              setPendingReschedulePayload(null);
-                            }}
-                            specialQuotaAvailable={rescheduleSpecialQuotaAvailable}
-                            supervisorMode={canUseNonStandardCapacityModes || canUseRescheduleSpecialQuota}
-                            superAdminMode={isSuperAdmin}
-                            allowCategoryOverride={canUseNonStandardCapacityModes}
-                            specialReasonCode={rescheduleSpecialReasonCode}
-                            onChangeSpecialReasonCode={setRescheduleSpecialReasonCode}
-                            specialReasonConfirmed={rescheduleSpecialReasonConfirmed}
-                            onChangeSpecialReasonConfirmed={setRescheduleSpecialReasonConfirmed}
-                            specialReasonNote={rescheduleSpecialReasonNote}
-                            onChangeSpecialReasonNote={setRescheduleSpecialReasonNote}
-                            options={specialReasonOptions}
-                          />
-                        ) : null}
-
-                        <div>
-                          <label htmlFor="registration-reschedule-reason" className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
-                            {t("registrations.rescheduleReason")}
-                          </label>
-                          <textarea
-                            id="registration-reschedule-reason"
-                            value={rescheduleReason}
-                            onChange={(e) => setRescheduleReason(e.target.value)}
-                            rows={2}
-                            className="input-premium w-full resize-none"
-                            placeholder={t("registrations.rescheduleReasonPlaceholder")}
-                          />
-                        </div>
-
-                        {rescheduleSelectedRow?.requiresSupervisorOverride ||
-                        rescheduleSelectedRow?.status === "restricted" ||
-                        rescheduleSelectedRow?.status === "full" ||
-                        rescheduleCapacityModeNeedsOverrideAuth ? (
-                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                            {t("registrations.rescheduleSupervisorRequired")}
-                          </div>
-                        ) : null}
-
-                        <div className={`flex flex-wrap gap-2 ${isRtl ? "justify-start" : "justify-end"}`}>
-                          {user?.role === "receptionist" && allowReceptionOverrideRequestsFromAvailability && rescheduleSelectedRow && inferSupportedOverrideType(rescheduleSelectedRow.reasonCodes) ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              disabled={!canSubmitReschedule || createRescheduleOverrideRequestMutation.isPending}
-                              onClick={() => {
-                                const payload = buildReschedulePayload();
-                                if (!payload) return;
-                                setPendingReschedulePayload(payload);
-                                setRescheduleRequestOverrideType(inferSupportedOverrideType(rescheduleSelectedRow.reasonCodes));
-                                setRescheduleRequestError(null);
-                                setRescheduleRequestOpen(true);
-                              }}
-                            >
-                              {t("overrideRequests.requestApproval")}
-                            </Button>
-                          ) : null}
-                          <Button
-                            type="submit"
-                            size="sm"
-                            disabled={!canSubmitReschedule}
-                          >
-                            {rescheduleMutation.isPending
-                              ? t("appointments.v2.rescheduling")
-                              : t("registrations.reschedule")}
-                          </Button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    {t("registrations.rescheduleNotAllowed")}
-                  </div>
-                )
-              ) : null}
-
-              {manageTab === "status" ? (
-                <div className="rounded-2xl border border-border bg-muted/20 p-3">
-                  <div className="mb-3">
-                    <h4 className="text-sm font-semibold">{chooseLocalized(language, "تغيير حالة الموعد", "Change appointment status")}</h4>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {chooseLocalized(language, "استخدمها لتصحيح حالة الموعد يدوياً عند الحاجة.", "Use this to correct the appointment status manually when needed.")}
-                    </p>
-                  </div>
-                  <div className="mb-3 rounded-xl border border-border bg-background p-3 text-sm">
-                    <span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span>
-                    <span className="font-semibold">{statusLabel(language, selectedAppointment.status)}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {MANUAL_STATUS_OPTIONS.map((status) => (
-                      <button
-                        key={status}
-                        type="button"
-                        className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${
-                          manualStatus === status
-                            ? "border-accent/40 bg-accent/10 text-accent"
-                            : "border-border bg-background text-foreground hover:border-accent/30"
-                        }`}
-                        onClick={() => setManualStatus(status)}
-                      >
-                        {statusLabel(language, status)}
-                      </button>
-                    ))}
-                  </div>
-                  {STATUS_REASON_REQUIRED.has(manualStatus) ? (
-                    <div className="mt-3">
-                      <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
-                        {chooseLocalized(language, "السبب", "Reason")}
-                      </label>
-                      <textarea
-                        value={manualStatusReason}
-                        onChange={(event) => setManualStatusReason(event.target.value)}
-                        rows={3}
-                        className="input-premium w-full resize-none"
-                        placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")}
-                      />
-                    </div>
-                  ) : null}
-                  <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={
-                        statusMutation.isPending ||
-                        manualStatus === selectedAppointment.status ||
-                        (STATUS_REASON_REQUIRED.has(manualStatus) && !manualStatusReason.trim())
-                      }
-                      onClick={() =>
-                        statusMutation.mutate({
-                          appointmentId: selectedAppointment.id,
-                          status: manualStatus,
-                          reason: manualStatusReason.trim() || null,
-                        })
-                      }
-                    >
-                      {statusMutation.isPending ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 size={14} className="animate-spin" />
-                          {chooseLocalized(language, "جار الحفظ", "Saving")}
-                        </span>
-                      ) : (
-                        chooseLocalized(language, "حفظ الحالة", "Save status")
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-
-              {manageTab === "cancel" ? (
-                ["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) ? (
-                  <div className="rounded-2xl border border-border bg-muted/20 p-3">
-                    <div className="mb-2 text-xs text-muted-foreground">
-                      {t("registrations.cancelAppointment")}
-                    </div>
-                    <div className={isRtl ? "flex justify-start" : "flex justify-end"}>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        style={{ color: "#ef4444" }}
-                        onClick={() => {
-                          if (!window.confirm(t("common.confirmCancelAppointment"))) return;
-                          cancelMutation.mutate(selectedAppointment.id);
-                        }}
-                      >
-                        {t("registrations.cancelAppointment")}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    {t("registrations.cancelNotAllowed")}
-                  </div>
-                )
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AppointmentManageModal
+        appointmentId={manageAppointmentId}
+        open={manageAppointmentId !== null}
+        initialAppointment={selectedAppointment}
+        initialTab={initialManageTab}
+        checkReportOnOpen={reportCheckOnOpen}
+        onClose={closeManageModal}
+        onTabChange={setManageTabAndUrl}
+        onAppointmentUpdated={setSelectedAppointment}
+        onAppointmentDeleted={closeManageModal}
+      />
 
       {selectedPatientId ? (
         <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
@@ -2598,37 +1528,6 @@ export default function RegistrationsPage() {
           </form>
         </div>
       ) : null}
-
-      <SupervisorOverrideModal
-        open={rescheduleOverrideOpen}
-        onClose={() => {
-          setRescheduleOverrideOpen(false);
-          setRescheduleOverrideError(null);
-          setPendingReschedulePayload(null);
-        }}
-        onConfirm={handleRescheduleOverrideConfirm}
-        loading={rescheduleOverrideLoading || rescheduleMutation.isPending}
-        authError={rescheduleOverrideError}
-      />
-
-      <SchedulingOverrideRequestModal
-        open={rescheduleRequestOpen}
-        requestType="reschedule_booking"
-        overrideType={rescheduleRequestOverrideType}
-        patientLabel={selectedAppointment?.englishFullName || selectedAppointment?.arabicFullName || `Patient #${selectedAppointment?.patientId ?? ""}`}
-        modalityLabel={selectedAppointment?.modalityNameEn || selectedAppointment?.modalityNameAr || `Modality #${selectedAppointment?.modalityId ?? ""}`}
-        examTypeLabel={selectedAppointment?.examNameEn || selectedAppointment?.examNameAr || `Exam #${selectedAppointment?.examTypeId ?? ""}`}
-        requestedDate={rescheduleDate}
-        requestedTime={null}
-        decision={selectedRescheduleAvailabilityItem?.decision ?? null}
-        loading={createRescheduleOverrideRequestMutation.isPending}
-        error={rescheduleRequestError}
-        onClose={() => {
-          setRescheduleRequestOpen(false);
-          setRescheduleRequestError(null);
-        }}
-        onSubmit={submitRescheduleOverrideRequest}
-      />
 
       {slipPreviewAppointment ? (
         <div
