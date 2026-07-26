@@ -11,6 +11,15 @@ interface PdfDocumentPreviewProps {
   includeOpenAction: boolean;
 }
 
+function safePdfDiagnostic(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error ?? "Unknown PDF preview error");
+  return rawMessage
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/[A-Za-z]:\\\S+/g, "[path]")
+    .replace(/\/(?:[^/\s]+\/)+[^/\s)]+/g, "[path]")
+    .slice(0, 240);
+}
+
 function PdfFailure({ message, document, labels, includeOpenAction }: PdfDocumentPreviewProps & { message: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50 p-6 text-center text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200" role="alert">
@@ -128,6 +137,12 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
   }, []);
 
   const page = pageCount ? Math.min(selectedPage, pageCount) : 1;
+  const handlePreviewError = (error: unknown) => {
+    if (import.meta.env.DEV) {
+      console.warn("[RISpro] React-PDF preview failed:", safePdfDiagnostic(error));
+    }
+    setPreviewError(labels.pdfFailed);
+  };
 
   return (
     <Document
@@ -139,8 +154,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
         if (!hadPageCount || pageCount !== numPages) setSelectedPage(1);
         setPreviewError(null);
       }}
-      onLoadError={() => setPreviewError(labels.pdfFailed)}
-      onSourceError={() => setPreviewError(labels.pdfFailed)}
+      onLoadError={handlePreviewError}
+      onSourceError={handlePreviewError}
       error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} />}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-2">

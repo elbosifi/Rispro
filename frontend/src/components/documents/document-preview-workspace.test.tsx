@@ -6,11 +6,11 @@ import type { RequestDocument } from "@/lib/api-hooks";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 
-function MockDocument({ children, file, onLoadSuccess, onLoadError }: { children: ReactNode; file: { url: string }; onLoadSuccess?: (pdf: { numPages: number }) => void; onLoadError?: () => void }) {
+function MockDocument({ children, file, onLoadSuccess, onLoadError }: { children: ReactNode; file: { url: string }; onLoadSuccess?: (pdf: { numPages: number }) => void; onLoadError?: (error: Error) => void }) {
   const isMalformed = file.url.includes("/999/");
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (isMalformed) onLoadError?.();
+      if (isMalformed) onLoadError?.(new Error("Failed to load PDF from https://internal.example/documents/999/view"));
       else onLoadSuccess?.({ numPages: file.url.includes("/43/") ? 2 : 3 });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -135,9 +135,11 @@ describe("DocumentPreviewWorkspace", () => {
   });
 
   it("contains malformed-PDF failures and keeps the open action available", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     renderWorkspace(pdfDocument(999));
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("could not be previewed"));
     expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/documents/999/view");
+    expect(warn).toHaveBeenCalledWith("[RISpro] React-PDF preview failed:", expect.stringContaining("[url]"));
   });
 });
