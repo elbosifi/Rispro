@@ -163,6 +163,58 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/32");
   });
 
+  it("restores queued-job context and safely cancels it before starting again", async () => {
+    const uploadedJob = {
+      id: 52,
+      status: "uploaded",
+      processing_stage: "queued",
+      staged_manifest_version: 2,
+      staged_file_count: 4,
+      rispro_patient_id: 10,
+      destination_pacs_key: "1",
+      replacement_patient_name: "Target^Patient",
+      provisional_source_identity: {
+        studyInstanceUid: "1.2.52",
+        patientId: "SOURCE-52",
+        patientName: "Source^FiftyTwo",
+        patientBirthDate: "19850102",
+        patientSex: "F",
+        modality: "MR",
+        studyDate: "20260720",
+      },
+    };
+    let activeJob: typeof uploadedJob | null = uploadedJob;
+    apiMock.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: activeJob, comparison: null });
+      if (path === "/pacs/remap/jobs/52") return Promise.resolve({ job: uploadedJob, comparison: null });
+      if (path === "/pacs/remap/jobs/52/cancel" && options?.method === "POST") {
+        activeJob = null;
+        return Promise.resolve({ job: { ...uploadedJob, status: "cancelled", processing_stage: "cancelled" } });
+      }
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [] });
+      if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
+      return Promise.resolve({ items: [] });
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    expect(screen.getByText(/Source\^FiftyTwo/)).toBeTruthy();
+    const selectionSummary = screen.getByLabelText("Selection summary");
+    expect(selectionSummary.textContent).toContain("Target^Patient");
+    expect(selectionSummary.textContent).toContain("Main PACS");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel queued upload and start again" }));
+
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith(
+      "/pacs/remap/jobs/52/cancel",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+  });
+
   it("keeps quick preview and complete scan inside Source and gates Continue", async () => {
     renderPage();
     const continueButton = screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement;

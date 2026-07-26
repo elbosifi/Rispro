@@ -843,8 +843,12 @@ export default function PacsRemapPage() {
   });
 
   const currentJob = (currentJobQuery.data?.job || startupActiveJob || null) as RemapJob;
-  const stagedProvisionalIdentity = isAwaitingStagedJob(currentJob) ? currentJob.provisional_source_identity || null : null;
-  const stagedProvisionalStudyUid = stagedProvisionalIdentity?.studyInstanceUid || "";
+  const stagedProvisionalIdentity = Number(currentJob?.staged_manifest_version) === 2
+    ? currentJob.provisional_source_identity || null
+    : null;
+  const stagedAwaitingStudyUid = isAwaitingStagedJob(currentJob)
+    ? stagedProvisionalIdentity?.studyInstanceUid || ""
+    : "";
   const selectedStudy = selectedScannedStudy || (stagedProvisionalIdentity
     ? {
       studyInstanceUid: stagedProvisionalIdentity.studyInstanceUid,
@@ -886,6 +890,10 @@ export default function PacsRemapPage() {
       : selectedDirectoryPatient
         ? formatDirectoryPatientName(language, selectedDirectoryPatient)
         : null;
+  const effectiveSelectedPatientLabel = selectedPatientLabel
+    || currentJob?.replacement_patient_name
+    || (currentJob?.rispro_patient_id ? formatFallbackPatientLabel(language, currentJob.rispro_patient_id) : null);
+  const displayedDestinationKey = currentJob?.destination_pacs_key || effectiveSelectedDestinationKey;
   const stagingCompleted = secureStagingStatus === "awaiting_confirmation" || isAwaitingStagedJob(currentJob);
   const canContinueStudy = fastStagedWorkflow
     ? Boolean(selectedStudy)
@@ -934,11 +942,11 @@ export default function PacsRemapPage() {
   };
 
   useEffect(() => {
-    if (!stagedProvisionalStudyUid) return;
-    setSelectedStudyInstanceUid(stagedProvisionalStudyUid);
+    if (!stagedAwaitingStudyUid) return;
+    setSelectedStudyInstanceUid(stagedAwaitingStudyUid);
     setSecureStagingStatus("awaiting_confirmation");
     if (uiStep === "source" || uiStep === "processing") setUiStep("patient");
-  }, [stagedProvisionalStudyUid, uiStep]);
+  }, [stagedAwaitingStudyUid, uiStep]);
 
   useEffect(() => {
     if (!jobId || !currentJobQuery.isError) return;
@@ -990,14 +998,21 @@ export default function PacsRemapPage() {
   const resetWorkflow = (): void => {
     cancelActiveFullScan();
     cancelActiveStagingUpload();
-    const awaitingJobId = isAwaitingStagedJob(currentJob) || secureStagingStatus === "awaiting_confirmation"
+    const cancellableJobId = currentJob?.status === "uploaded"
+      || isAwaitingStagedJob(currentJob)
+      || secureStagingStatus === "awaiting_confirmation"
       ? effectiveJobId
       : null;
-    if (awaitingJobId) {
-      void api(`/pacs/remap/jobs/${awaitingJobId}/cancel`, {
+    if (cancellableJobId) {
+      void api(`/pacs/remap/jobs/${cancellableJobId}/cancel`, {
         method: "POST",
-        body: JSON.stringify({ reason: "Operator reset before final confirmation." }),
+        body: JSON.stringify({
+          reason: currentJob?.status === "uploaded"
+            ? "Operator cancelled queued upload before processing started."
+            : "Operator reset before final confirmation.",
+        }),
       }).then(() => {
+        queryClient.setQueryData(["pacs", "remap", "active-job"], { job: null, comparison: null });
         void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
         void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
       }).catch((error: unknown) => {
@@ -1088,8 +1103,8 @@ export default function PacsRemapPage() {
         <section className="card-shell flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-xs" aria-label={language === "ar" ? "ملخص الاختيارات" : "Selection summary"}>
           <strong className="w-full text-sm sm:w-auto">{language === "ar" ? "ملخص الاختيارات" : "Selected context"}</strong>
           <span className={!selectedStudy ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.studyLabel")}:</b> {selectedStudy?.studyDescription || (selectedStudy ? selectedStudy.modality : "—") || (language === "ar" ? "غير مكتملة" : "Not selected")}{selectedStudy ? ` • ${selectedStudy.fileCount} ${language === "ar" ? "ملف" : "files"}` : ""}</span>
-          <span className={!selectedPatientLabel ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.selectedRISProPatient")}:</b> {selectedPatientLabel || (language === "ar" ? "غير مكتمل" : "Not selected")}</span>
-          <span className={!effectiveSelectedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === effectiveSelectedDestinationKey)?.name || effectiveSelectedDestinationKey || (language === "ar" ? "غير مكتملة" : "Not selected")}</span>
+          <span className={!effectiveSelectedPatientLabel ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.selectedRISProPatient")}:</b> {effectiveSelectedPatientLabel || (language === "ar" ? "غير مكتمل" : "Not selected")}</span>
+          <span className={!displayedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || (language === "ar" ? "غير مكتملة" : "Not selected")}</span>
           {skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
         </section>
 
@@ -1745,6 +1760,12 @@ export default function PacsRemapPage() {
                 {effectiveProcessingStage !== "uploading" && effectiveProcessingStage !== "enqueueing_send" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
                 {effectiveProcessingStage === "enqueueing_send" && t(language, "pacs.remap.sendingToPacs")}
               </p>
+              {stagedProvisionalIdentity && (
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {language === "ar" ? "المصدر" : "Source"}: <strong>{stagedProvisionalIdentity.patientName || stagedProvisionalIdentity.patientId || "—"}</strong>
+                  {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
+                </p>
+              )}
               {currentJob && (
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                   {language === "ar" ? "حالة المهمة" : "Job status"}: {statusLabel(language, currentJob.status)} •{" "}
@@ -1752,6 +1773,22 @@ export default function PacsRemapPage() {
                   {currentJob.processing_skipped_file_count ? ` • ${language === "ar" ? "تم تجاوز" : "Skipped"}: ${currentJob.processing_skipped_file_count}` : ""}
                   {currentJob.processing_attempt_count ? ` • ${language === "ar" ? "المحاولة" : "Attempt"}: ${currentJob.processing_attempt_count}` : ""}
                 </p>
+              )}
+              {currentJob?.status === "uploaded" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const confirmed = window.confirm(
+                      language === "ar"
+                        ? "هل تريد إلغاء هذا الرفع المنتظر وحذف الملفات المرحلية والبدء من جديد؟"
+                        : "Cancel this queued upload, remove its securely staged files, and start again?",
+                    );
+                    if (confirmed) resetWorkflow();
+                  }}
+                  className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm"
+                >
+                  {language === "ar" ? "إلغاء الرفع المنتظر والبدء من جديد" : "Cancel queued upload and start again"}
+                </button>
               )}
               {effectiveProcessingStage === "enqueueing_send" && currentJob?.send_error_code && (
                 <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
