@@ -90,7 +90,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel() {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline" } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -102,18 +102,20 @@ function renderPanel() {
     },
   });
 
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
         <RequestDocumentsPanel
           appointmentId={42}
           patientId={9}
           appointmentRefType="v2_booking"
+          previewMode={options.previewMode}
           enableLocalScan
         />
       </LanguageProvider>
     </QueryClientProvider>
   );
+  return { ...rendered, queryClient };
 }
 
 function renderPanelWithoutLocalScan() {
@@ -139,6 +141,25 @@ function renderPanelWithoutLocalScan() {
       </LanguageProvider>
     </QueryClientProvider>
   );
+}
+
+function documentFixture(id: number, filename: string, mimeType: string) {
+  return {
+    id,
+    patientId: 9,
+    appointmentId: null,
+    v2BookingId: 42,
+    documentType: "appointment_request",
+    originalFilename: filename,
+    storedPath: "",
+    mimeType,
+    fileSize: 128,
+    storageLocationType: "local_fallback",
+    source: "manual_upload",
+    lastMoveAttemptAt: null,
+    lastMoveError: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
 }
 
 describe("RequestDocumentsPanel local scan flow", () => {
@@ -434,5 +455,47 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Retry failed uploads" })).toBeNull();
     });
+  });
+
+  it("selects the first document once and preserves selection after refetch", async () => {
+    const documents = [documentFixture(1, "first.png", "image/png"), documentFixture(2, "second.png", "image/png")];
+    mockListAppointmentDocuments.mockResolvedValue(documents);
+    const rendered = renderPanel({ previewMode: "inline" });
+
+    expect((await screen.findByRole("button", { name: "first.png" })).getAttribute("aria-pressed")).toBe("true");
+    await userEvent.click(screen.getByRole("button", { name: "second.png" }));
+    expect(screen.getByRole("button", { name: "second.png" }).getAttribute("aria-pressed")).toBe("true");
+
+    mockListAppointmentDocuments.mockResolvedValue([...documents]);
+    await rendered.queryClient.invalidateQueries({ queryKey: ["appointment-documents", "v2_booking", 42] });
+    await waitFor(() => expect(screen.getByRole("button", { name: "second.png" }).getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  it("selects a safely identified uploaded document after the list refetches", async () => {
+    const firstDocument = documentFixture(1, "first.png", "image/png");
+    const uploadedDocument = documentFixture(2, "uploaded.png", "image/png");
+    mockListAppointmentDocuments.mockResolvedValue([firstDocument]);
+    mockUploadAppointmentDocument.mockResolvedValue(uploadedDocument);
+    const rendered = renderPanel({ previewMode: "inline" });
+    await screen.findByRole("button", { name: "first.png" });
+
+    mockListAppointmentDocuments.mockResolvedValue([firstDocument, uploadedDocument]);
+    const file = new File(["image"], "uploaded.png", { type: "image/png" });
+    await userEvent.upload(screen.getByTestId("document-file-input") as HTMLInputElement, file);
+    await userEvent.click(screen.getByRole("button", { name: "Attach Request" }));
+    await rendered.queryClient.invalidateQueries({ queryKey: ["appointment-documents", "v2_booking", 42] });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "uploaded.png" }).getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  it("keeps upload, delete, and open actions available when inline preview is unsupported", async () => {
+    mockFetchCurrentSession.mockResolvedValue({ id: 1, role: "super_admin", username: "admin", fullName: "Admin" });
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(3, "scan.tiff", "image/tiff")]);
+    renderPanel({ previewMode: "inline" });
+
+    expect((await screen.findByRole("alert")).textContent).toContain("not supported");
+    expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/documents/3/view");
   });
 });

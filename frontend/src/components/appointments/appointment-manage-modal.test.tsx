@@ -44,8 +44,8 @@ vi.mock("@/components/appointments/appointment-editor", () => ({
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
-  RequestDocumentsPanel: ({ appointmentId, patientId }: { appointmentId: number; patientId: number }) => (
-    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId}>Request documents content</div>
+  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode }: { appointmentId: number; patientId: number; previewMode?: string }) => (
+    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode}>Request documents content</div>
   ),
 }));
 
@@ -161,6 +161,7 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByText("Scheduled")).toBeTruthy();
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-appointment-id")).toBe("42");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-patient-id")).toBe("7");
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-preview-mode")).toBe("inline");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 

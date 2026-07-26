@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLanguage } from "@/providers/language-provider";
 import {
@@ -14,6 +14,9 @@ import {
 } from "@/lib/api-hooks";
 import { scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
+import { DocumentPreviewWorkspace } from "./document-preview-workspace";
+
+export type DocumentPreviewMode = "link" | "modal" | "inline";
 
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
@@ -30,7 +33,7 @@ interface RequestDocumentsPanelProps {
   patientId: number | null;
   appointmentRefType?: AppointmentRefType;
   title?: string;
-  enablePreviewModal?: boolean;
+  previewMode?: DocumentPreviewMode;
   enableLocalScan?: boolean;
 }
 
@@ -39,12 +42,13 @@ export function RequestDocumentsPanel({
   patientId,
   appointmentRefType = "auto",
   title,
-  enablePreviewModal = false,
+  previewMode = "link",
   enableLocalScan = false,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
   const [scanUploading, setScanUploading] = useState(false);
   const [scannerAppLaunching, setScannerAppLaunching] = useState(false);
@@ -64,6 +68,19 @@ export function RequestDocumentsPanel({
     queryFn: () => listAppointmentDocuments(appointmentId, appointmentRefType),
     enabled: Number.isFinite(appointmentId) && appointmentId > 0,
   });
+  const selectedDocument = useMemo(
+    () => documents.find((document) => document.id === selectedDocumentId) ?? null,
+    [documents, selectedDocumentId]
+  );
+
+  useEffect(() => {
+    if (documents.length === 0) {
+      if (selectedDocumentId !== null) setSelectedDocumentId(null);
+      return;
+    }
+    if (selectedDocumentId !== null && documents.some((document) => document.id === selectedDocumentId)) return;
+    setSelectedDocumentId(documents[0].id);
+  }, [documents, selectedDocumentId]);
   const { data: currentUser } = useQuery({
     queryKey: ["current-session"],
     queryFn: fetchCurrentSession,
@@ -111,8 +128,11 @@ export function RequestDocumentsPanel({
       if (!file) throw new Error(t("documents.chooseFileFirst"));
       return uploadFileAsDocument(file, documentType, "manual_upload");
     },
-    onSuccess: () => {
+    onSuccess: (uploadedDocument) => {
       setFile(null);
+      if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
+        setSelectedDocumentId(uploadedDocument.id);
+      }
       queryClient.invalidateQueries({ queryKey });
       pushToast({
         type: "success",
@@ -131,7 +151,9 @@ export function RequestDocumentsPanel({
 
   const deleteMutation = useMutation({
     mutationFn: async (documentId: number) => deleteAppointmentDocument(documentId),
-    onSuccess: () => {
+    onSuccess: (_result, documentId) => {
+      if (selectedDocumentId === documentId) setSelectedDocumentId(null);
+      if (selectedPreview?.id === documentId) setSelectedPreview(null);
       queryClient.invalidateQueries({ queryKey });
       pushToast({
         type: "success",
@@ -255,7 +277,10 @@ export function RequestDocumentsPanel({
         fileName: suggestedFileName || `appointment-${appointmentId}-request.pdf`,
       });
       try {
-        await uploadFileAsDocument(scanResult.file, preparedDocumentType, scanResult.source);
+        const uploadedDocument = await uploadFileAsDocument(scanResult.file, preparedDocumentType, scanResult.source);
+        if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
+          setSelectedDocumentId(uploadedDocument.id);
+        }
       } catch (err) {
         failures.push({
           file: scanResult.file,
@@ -301,7 +326,10 @@ export function RequestDocumentsPanel({
     try {
       for (const failedUpload of failedScanUploads) {
         try {
-          await uploadFileAsDocument(failedUpload.file, failedUpload.documentType, "naps2_webscan");
+          const uploadedDocument = await uploadFileAsDocument(failedUpload.file, failedUpload.documentType, "naps2_webscan");
+          if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
+            setSelectedDocumentId(uploadedDocument.id);
+          }
           retriedSuccessCount += 1;
         } catch (err) {
           remainingFailures.push({
@@ -335,13 +363,14 @@ export function RequestDocumentsPanel({
   }
 
   return (
-    <div className="rounded-xl border border-stone-200 dark:border-stone-700 p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2">
+    <div className={previewMode === "inline" ? "flex h-full min-h-0 flex-col rounded-xl border border-stone-200 p-3 dark:border-stone-700" : "rounded-xl border border-stone-200 p-4 dark:border-stone-700"}>
+      <div className="flex shrink-0 items-center justify-between gap-2">
         <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{resolvedTitle}</h4>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+      <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
         <input
+          data-testid="document-file-input"
           type="file"
           accept="application/pdf,image/jpeg,image/png"
           onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -379,11 +408,11 @@ export function RequestDocumentsPanel({
         </div>
       </div>
       {enableLocalScan && canScanOrUpload && !naps2ScannerEnabled && (
-        <p className="text-xs text-stone-500">{t("documents.scanNotSupportedMessage")}</p>
+        <p className="mt-2 shrink-0 text-xs text-stone-500">{t("documents.scanNotSupportedMessage")}</p>
       )}
 
       {enableLocalScan && canScanOrUpload && (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-stone-500">
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 text-xs text-stone-500">
           {scannerAppEnabled ? (
             <>
               <a href={scannerAppDownloadUrl} className="underline" download>
@@ -428,7 +457,7 @@ export function RequestDocumentsPanel({
       )}
 
       {failedScanUploads.length > 0 && (
-        <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 space-y-2">
+        <div className="mt-2 shrink-0 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/20">
           <div className="text-xs text-amber-800 dark:text-amber-200">
             {t("documents.failedUploadsRemaining")}: {failedScanUploads.length}
           </div>
@@ -444,28 +473,63 @@ export function RequestDocumentsPanel({
       )}
 
       {isLoading ? (
-        <p className="text-sm text-stone-500">{t("documents.loading")}</p>
+        <p className="mt-3 text-sm text-stone-500" role="status">{t("documents.loading")}</p>
       ) : error ? (
-        <p className="text-sm text-red-600">{error instanceof Error ? error.message : t("documents.failedLoad")}</p>
+        <p className="mt-3 text-sm text-red-600" role="alert">{error instanceof Error ? error.message : t("documents.failedLoad")}</p>
       ) : documents.length === 0 ? (
-        <p className="text-sm text-stone-500">{t("documents.noDocuments")}</p>
+        <p className="mt-3 text-sm text-stone-500">{t("documents.noDocuments")}</p>
+      ) : previewMode === "inline" ? (
+        <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex shrink-0 gap-2 overflow-x-auto pb-1" role="list" aria-label={t("documents.documentSelector")}>
+            {documents.map((doc) => (
+              <div key={doc.id} className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-muted/20 p-1" role="listitem">
+                <button
+                  type="button"
+                  className={`max-w-48 truncate rounded-md px-2 py-1.5 text-start text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${selectedDocumentId === doc.id ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  onClick={() => setSelectedDocumentId(doc.id)}
+                  aria-pressed={selectedDocumentId === doc.id}
+                  title={doc.originalFilename}
+                >
+                  {doc.originalFilename}
+                </button>
+                {canDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm(t("documents.deleteConfirm"))) return;
+                      deleteMutation.mutate(doc.id);
+                    }}
+                    className="rounded-md bg-red-100 px-2 py-1.5 text-xs text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:bg-red-900/30 dark:text-red-400"
+                    disabled={deleteMutation.isPending}
+                  >
+                    {t("documents.delete")}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} /> : null}
+        </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="mt-3 space-y-2">
           {documents.map((doc) => (
-            <li key={doc.id} className="rounded-lg border border-stone-200 dark:border-stone-700 p-2">
+            <li key={doc.id} className="rounded-lg border border-stone-200 p-2 dark:border-stone-700">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-stone-900 dark:text-white truncate">{doc.originalFilename}</div>
+                  <div className="truncate text-sm font-medium text-stone-900 dark:text-white">{doc.originalFilename}</div>
                   <div className="text-xs text-stone-500">
                     {doc.documentType} - {doc.mimeType || "file"} - {doc.storageLocationType}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {enablePreviewModal ? (
+                  {previewMode === "modal" ? (
                     <button
                       type="button"
-                      onClick={() => setSelectedPreview(doc)}
-                      className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"
+                      onClick={() => {
+                        setSelectedDocumentId(doc.id);
+                        setSelectedPreview(doc);
+                      }}
+                      className="rounded bg-stone-100 px-2 py-1 text-xs dark:bg-stone-700"
                     >
                       {t("documents.view")}
                     </button>
@@ -474,7 +538,7 @@ export function RequestDocumentsPanel({
                       href={`/api/documents/${doc.id}/view`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"
+                      className="rounded bg-stone-100 px-2 py-1 text-xs dark:bg-stone-700"
                     >
                       {t("documents.open")}
                     </a>
@@ -486,7 +550,7 @@ export function RequestDocumentsPanel({
                         if (!window.confirm(t("documents.deleteConfirm"))) return;
                         deleteMutation.mutate(doc.id);
                       }}
-                      className="px-2 py-1 text-xs rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                      className="rounded bg-red-100 px-2 py-1 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-400"
                       disabled={deleteMutation.isPending}
                     >
                       {t("documents.delete")}
@@ -499,7 +563,7 @@ export function RequestDocumentsPanel({
         </ul>
       )}
 
-      {enablePreviewModal && selectedPreview && (
+      {previewMode === "modal" && selectedPreview && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={(e) => {
@@ -527,11 +591,9 @@ export function RequestDocumentsPanel({
                 </button>
               </div>
             </div>
-            <iframe
-              title={`doc-${selectedPreview.id}`}
-              src={`/api/documents/${selectedPreview.id}/view`}
-              className="w-full h-full"
-            />
+            <div className="min-h-0 flex-1 overflow-hidden p-3">
+              <DocumentPreviewWorkspace document={selectedPreview} showOpenAction={false} />
+            </div>
           </div>
         </div>
       )}

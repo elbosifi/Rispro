@@ -620,14 +620,14 @@ export function AppointmentManageModal({
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto pe-1 pt-3" aria-busy={appointmentQuery.isLoading}>
+        <div className={`min-h-0 flex-1 pe-1 pt-3 ${activeTab === "documents" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`} aria-busy={appointmentQuery.isLoading}>
           {normalizedAppointmentId === null ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert"><p className="font-semibold">{t("registrations.appointmentInvalidReference")}</p></div> : null}
           {appointmentQuery.isLoading && !appointment ? <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground" role="status">{t("registrations.appointmentLoading")}</div> : null}
           {appointmentQuery.isError && !appointment ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><p className="font-semibold">{t("registrations.appointmentLoadFailed")}</p><p className="mt-1">{getErrorMessage(appointmentQuery.error, t("registrations.appointmentLoadFailed"))}</p></div> : null}
 
           {appointment && activeTab === "details" ? <AppointmentEditor appointment={appointment} lookups={lookups} onUpdated={updateDisplayedAppointment} onDeleted={() => { onAppointmentDeleted?.(appointment.id); closeModal(); }} /> : null}
 
-          {appointment && activeTab === "documents" ? <RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} enableLocalScan /> : null}
+          {appointment && activeTab === "documents" ? <RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan /> : null}
 
           {appointment && activeTab === "report" ? (
             <div className="rounded-2xl border border-border bg-muted/20 p-3">

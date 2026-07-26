@@ -1284,7 +1284,7 @@ function ProtocolAssignmentModal({
             </div>
             {detail?.assignmentDetail && <ProtocolAssignmentSummary detail={detail} />}
             <div className="mt-4">
-              <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" enablePreviewModal />
+              <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" previewMode="modal" />
             </div>
           </>
         )}
