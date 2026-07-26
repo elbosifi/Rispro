@@ -44,8 +44,11 @@ vi.mock("@/components/appointments/appointment-editor", () => ({
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
-  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode }: { appointmentId: number; patientId: number; previewMode?: string }) => (
-    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode}>Request documents content</div>
+  RequestDocumentsPanel: ({ appointmentId, patientId, previewMode, expanded, onExpandedChange }: { appointmentId: number; patientId: number; previewMode?: string; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void }) => (
+    <div data-testid="request-documents-panel" data-appointment-id={appointmentId} data-patient-id={patientId} data-preview-mode={previewMode} data-expanded={expanded ? "true" : "false"}>
+      Request documents content
+      <button type="button" onClick={() => onExpandedChange?.(!expanded)}>{expanded ? "Exit expanded review" : "Expand review"}</button>
+    </div>
   ),
 }));
 
@@ -158,11 +161,44 @@ describe("AppointmentManageModal", () => {
     expect((screen.getAllByText("Test Patient")).length).toBeGreaterThan(0);
     expect((screen.getAllByText("ACC-42")).length).toBeGreaterThan(0);
     expect((screen.getAllByText(/CT/)).length).toBeGreaterThan(0);
+    expect(screen.getByText("Head")).toBeTruthy();
+    expect(screen.getByText("26/07/2026")).toBeTruthy();
     expect(screen.getByText("Scheduled")).toBeTruthy();
+    expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Patient profile" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Print" })).toBeTruthy();
+    expect(screen.queryByText("Protocol: Not protocolled")).toBeNull();
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-appointment-id")).toBe("42");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-patient-id")).toBe("7");
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-preview-mode")).toBe("inline");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
+  });
+
+  it("retains the full appointment header and protocol summary outside Documents", async () => {
+    renderModal({ initialTab: "details" });
+
+    expect(await screen.findByText("Protocol: Not protocolled")).toBeTruthy();
+    expect(screen.queryByTestId("compact-document-appointment-header")).toBeNull();
+    expect((screen.getAllByText("Test Patient")).length).toBeGreaterThan(1);
+  });
+
+  it("enters and exits expanded document review with compact identity and close controls intact", async () => {
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand review" }));
+
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-expanded")).toBe("true");
+    expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
+    expect((screen.getAllByText("Test Patient")).length).toBeGreaterThan(0);
+    expect((screen.getAllByText("ACC-42")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.queryByRole("tab")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit expanded review" }));
+
+    expect(screen.getByTestId("request-documents-panel").getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByRole("tab", { name: "Request Documents" })).toBeTruthy();
   });
 
   it("switches tabs and refreshes displayed appointment data after an update", async () => {

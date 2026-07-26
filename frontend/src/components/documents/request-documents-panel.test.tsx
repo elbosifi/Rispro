@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -90,7 +91,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline" } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -111,11 +112,43 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline" } = {}
           appointmentRefType="v2_booking"
           previewMode={options.previewMode}
           enableLocalScan
+          expanded={options.expanded}
+          onExpandedChange={options.onExpandedChange}
         />
       </LanguageProvider>
     </QueryClientProvider>
   );
   return { ...rendered, queryClient };
+}
+
+function renderControlledExpandedPanel() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  function Harness() {
+    const [expanded, setExpanded] = useState(false);
+    return (
+      <RequestDocumentsPanel
+        appointmentId={42}
+        patientId={9}
+        appointmentRefType="v2_booking"
+        previewMode="inline"
+        enableLocalScan
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+      />
+    );
+  }
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LanguageProvider>
+        <Harness />
+      </LanguageProvider>
+    </QueryClientProvider>
+  );
 }
 
 function renderPanelWithoutLocalScan() {
@@ -497,5 +530,25 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/documents/3/view");
+  });
+
+  it("collapses controls in expanded review and restores them without changing selection", async () => {
+    const documents = [documentFixture(1, "first.png", "image/png"), documentFixture(2, "second.png", "image/png")];
+    mockListAppointmentDocuments.mockResolvedValue(documents);
+    renderControlledExpandedPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: "second.png" }));
+    await userEvent.click(screen.getByRole("button", { name: "Expand review" }));
+
+    expect(screen.queryByTestId("document-file-input")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Attached documents" }) as HTMLSelectElement).value).toBe("2");
+    expect(screen.getByRole("button", { name: "Exit expanded review" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Exit expanded review" }));
+
+    expect(screen.getByTestId("document-file-input")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "second.png" }).getAttribute("aria-pressed")).toBe("true");
   });
 });

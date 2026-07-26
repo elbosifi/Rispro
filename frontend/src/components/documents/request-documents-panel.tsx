@@ -35,6 +35,8 @@ interface RequestDocumentsPanelProps {
   title?: string;
   previewMode?: DocumentPreviewMode;
   enableLocalScan?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 export function RequestDocumentsPanel({
@@ -44,6 +46,8 @@ export function RequestDocumentsPanel({
   title,
   previewMode = "link",
   enableLocalScan = false,
+  expanded = false,
+  onExpandedChange,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -363,12 +367,17 @@ export function RequestDocumentsPanel({
   }
 
   return (
-    <div className={previewMode === "inline" ? "flex h-full min-h-0 flex-col rounded-xl border border-stone-200 p-3 dark:border-stone-700" : "rounded-xl border border-stone-200 p-4 dark:border-stone-700"}>
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{resolvedTitle}</h4>
-      </div>
+    <div
+      data-expanded={expanded ? "true" : "false"}
+      className={previewMode === "inline" ? `flex h-full min-h-0 flex-col rounded-xl border border-stone-200 dark:border-stone-700 ${expanded ? "p-2" : "p-3"}` : "rounded-xl border border-stone-200 p-4 dark:border-stone-700"}
+    >
+      {!expanded ? (
+        <div className="flex shrink-0 items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{resolvedTitle}</h4>
+        </div>
+      ) : null}
 
-      <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
+      {!expanded ? <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
         <input
           data-testid="document-file-input"
           type="file"
@@ -406,12 +415,12 @@ export function RequestDocumentsPanel({
             {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
           </button>
         </div>
-      </div>
-      {enableLocalScan && canScanOrUpload && !naps2ScannerEnabled && (
+      </div> : null}
+      {!expanded && enableLocalScan && canScanOrUpload && !naps2ScannerEnabled && (
         <p className="mt-2 shrink-0 text-xs text-stone-500">{t("documents.scanNotSupportedMessage")}</p>
       )}
 
-      {enableLocalScan && canScanOrUpload && (
+      {!expanded && enableLocalScan && canScanOrUpload && (
         <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 text-xs text-stone-500">
           {scannerAppEnabled ? (
             <>
@@ -456,7 +465,7 @@ export function RequestDocumentsPanel({
         </div>
       )}
 
-      {failedScanUploads.length > 0 && (
+      {!expanded && failedScanUploads.length > 0 && (
         <div className="mt-2 shrink-0 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/20">
           <div className="text-xs text-amber-800 dark:text-amber-200">
             {t("documents.failedUploadsRemaining")}: {failedScanUploads.length}
@@ -479,7 +488,32 @@ export function RequestDocumentsPanel({
       ) : documents.length === 0 ? (
         <p className="mt-3 text-sm text-stone-500">{t("documents.noDocuments")}</p>
       ) : previewMode === "inline" ? (
-        <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2">
+        <div className={`${expanded ? "mt-1" : "mt-3"} flex min-h-0 flex-1 flex-col gap-2`}>
+          {expanded ? (
+            <div className="flex shrink-0 items-center gap-2">
+              <select
+                className="input-premium h-8 min-w-0 flex-1 py-1 text-xs"
+                aria-label={t("documents.documentSelector")}
+                value={selectedDocumentId ?? ""}
+                onChange={(event) => setSelectedDocumentId(Number(event.target.value))}
+              >
+                {documents.map((doc) => <option key={doc.id} value={doc.id}>{doc.originalFilename}</option>)}
+              </select>
+              {canDelete && selectedDocument ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!window.confirm(t("documents.deleteConfirm"))) return;
+                    deleteMutation.mutate(selectedDocument.id);
+                  }}
+                  className="shrink-0 rounded-md bg-red-100 px-2 py-1.5 text-xs text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:bg-red-900/30 dark:text-red-400"
+                  disabled={deleteMutation.isPending}
+                >
+                  {t("documents.delete")}
+                </button>
+              ) : null}
+            </div>
+          ) : (
           <div className="flex shrink-0 gap-2 overflow-x-auto pb-1" role="list" aria-label={t("documents.documentSelector")}>
             {documents.map((doc) => (
               <div key={doc.id} className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-muted/20 p-1" role="listitem">
@@ -508,7 +542,14 @@ export function RequestDocumentsPanel({
               </div>
             ))}
           </div>
-          {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} /> : null}
+          )}
+          {selectedDocument ? (
+            <DocumentPreviewWorkspace
+              document={selectedDocument}
+              expanded={expanded}
+              onExpandedChange={onExpandedChange}
+            />
+          ) : null}
         </div>
       ) : (
         <ul className="mt-3 space-y-2">

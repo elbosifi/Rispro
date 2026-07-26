@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RequestDocument } from "@/lib/api-hooks";
 import type { DocumentPreviewLabels } from "./document-preview-workspace";
 
@@ -11,10 +12,12 @@ interface PdfDocumentPreviewProps {
   labels: DocumentPreviewLabels;
   includeOpenAction: boolean;
   isRtl: boolean;
+  expanded: boolean;
 }
 
 type PdfViewMode = "overview" | "single";
 type PdfPageCardVariant = "overview" | "thumbnail";
+type PdfPageSize = { width: number; height: number };
 
 function safePdfDiagnostic(error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : String(error ?? "Unknown PDF preview error");
@@ -25,7 +28,7 @@ function safePdfDiagnostic(error: unknown): string {
     .slice(0, 240);
 }
 
-function PdfFailure({ message, document, labels, includeOpenAction }: PdfDocumentPreviewProps & { message: string }) {
+function PdfFailure({ message, document, labels, includeOpenAction }: Pick<PdfDocumentPreviewProps, "document" | "labels" | "includeOpenAction"> & { message: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50 p-6 text-center text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200" role="alert">
       <p>{message}</p>
@@ -47,12 +50,16 @@ function LazyPdfPageCard({
   pageNumber,
   selectedPage,
   variant,
+  pdfDocument,
+  overviewCardSize,
   labels,
   onSelect,
 }: {
   pageNumber: number;
   selectedPage: number;
   variant: PdfPageCardVariant;
+  pdfDocument: PDFDocumentProxy | null;
+  overviewCardSize: PdfPageSize;
   labels: DocumentPreviewLabels;
   onSelect: (pageNumber: number) => void;
 }) {
@@ -60,7 +67,15 @@ function LazyPdfPageCard({
   const isOverview = variant === "overview";
   const [isVisible, setIsVisible] = useState(isPriority);
   const [renderError, setRenderError] = useState(false);
+  const [pageSize, setPageSize] = useState<PdfPageSize | null>(null);
   const pageCardRef = useRef<HTMLButtonElement>(null);
+  const cardWidth = isOverview ? overviewCardSize.width : 92;
+  const cardHeight = isOverview ? overviewCardSize.height : 96;
+  const pageViewportWidth = Math.max(24, cardWidth - (isOverview ? 20 : 16));
+  const pageViewportHeight = Math.max(24, cardHeight - (isOverview ? 42 : 22));
+  const renderScale = pageSize
+    ? Math.min(pageViewportWidth / pageSize.width, pageViewportHeight / pageSize.height)
+    : null;
 
   useEffect(() => {
     if (isPriority) {
@@ -87,13 +102,36 @@ function LazyPdfPageCard({
     return () => observer.disconnect();
   }, [isPriority]);
 
+  useEffect(() => {
+    if (!isVisible || !pdfDocument) return;
+    let cancelled = false;
+    setPageSize(null);
+    setRenderError(false);
+    void pdfDocument
+      .getPage(pageNumber)
+      .then((pdfPage) => {
+        if (cancelled) return;
+        const viewport = pdfPage.getViewport({ scale: 1 });
+        setPageSize({ width: viewport.width, height: viewport.height });
+      })
+      .catch(() => {
+        if (!cancelled) setRenderError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isVisible, pageNumber, pdfDocument]);
+
   return (
     <button
       ref={pageCardRef}
       type="button"
       data-pdf-page={pageNumber}
+      data-page-viewport-width={pageViewportWidth}
+      data-page-viewport-height={pageViewportHeight}
+      style={{ width: cardWidth, height: cardHeight }}
       className={`flex shrink-0 snap-start flex-col items-center justify-between rounded-lg border-2 bg-background text-xs transition hover:border-accent/60 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
-        isOverview ? "h-[244px] w-[184px] p-2" : "h-[96px] w-[92px] p-1.5"
+        isOverview ? "p-2" : "p-1.5"
       } ${
         selectedPage === pageNumber
           ? "border-accent bg-accent/10 font-semibold text-foreground ring-1 ring-accent/30"
@@ -108,14 +146,13 @@ function LazyPdfPageCard({
       aria-current={selectedPage === pageNumber ? "page" : undefined}
     >
       <div
-        className={`flex w-full items-center justify-center overflow-hidden rounded border border-border bg-muted/20 ${
-          isOverview ? "h-[210px]" : "h-[74px]"
-        }`}
+        className="flex w-full items-center justify-center overflow-hidden rounded border border-border bg-muted/20"
+        style={{ height: pageViewportHeight }}
       >
-        {isVisible && !renderError ? (
+        {isVisible && !renderError && renderScale ? (
           <Page
             pageNumber={pageNumber}
-            width={isOverview ? 166 : 76}
+            scale={renderScale}
             renderTextLayer={false}
             renderAnnotationLayer={false}
             loading={<span className="text-[10px] text-muted-foreground">{labels.thumbnailLoading}</span>}
@@ -130,18 +167,21 @@ function LazyPdfPageCard({
   );
 }
 
-export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl }: PdfDocumentPreviewProps) {
+export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded }: PdfDocumentPreviewProps) {
   const [pageCount, setPageCount] = useState<number | null>(null);
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
   const [viewMode, setViewMode] = useState<PdfViewMode>("overview");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mainWidth, setMainWidth] = useState(760);
+  const [overviewCardSize, setOverviewCardSize] = useState<PdfPageSize>({ width: 184, height: 244 });
   const mainPreviewRef = useRef<HTMLDivElement>(null);
   const overviewRef = useRef<HTMLDivElement>(null);
   const file = useMemo(() => ({ url: `/api/documents/${document.id}/view`, withCredentials: true }), [document.id]);
 
   useEffect(() => {
     setPageCount(null);
+    setPdfDocument(null);
     setSelectedPage(1);
     setViewMode("overview");
     setPreviewError(null);
@@ -158,6 +198,24 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     observer.observe(element);
     return () => observer.disconnect();
   }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== "overview") return;
+    const element = overviewRef.current;
+    if (!element) return;
+    const updateCardSize = () => {
+      const availableHeight = element.clientHeight - 24;
+      if (availableHeight <= 0) return;
+      const height = Math.min(expanded ? 320 : 252, availableHeight);
+      const width = Math.min(expanded ? 230 : 190, Math.max(112, Math.round(height * 0.75)));
+      setOverviewCardSize({ width, height });
+    };
+    updateCardSize();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateCardSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded, pageCount, viewMode]);
 
   useEffect(() => {
     if (viewMode !== "overview") return;
@@ -192,19 +250,20 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     <Document
       file={file}
       loading={<div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-border bg-muted/20 p-6 text-sm text-muted-foreground" role="status">{labels.loading}</div>}
-      onLoadSuccess={({ numPages }) => {
+      onLoadSuccess={(loadedPdf) => {
         const hadPageCount = pageCount !== null;
-        setPageCount(numPages);
-        if (!hadPageCount || pageCount !== numPages) setSelectedPage(1);
+        setPdfDocument(loadedPdf);
+        setPageCount(loadedPdf.numPages);
+        if (!hadPageCount || pageCount !== loadedPdf.numPages) setSelectedPage(1);
         setPreviewError(null);
       }}
       onLoadError={handlePreviewError}
       onSourceError={handlePreviewError}
-      error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} isRtl={isRtl} />}
+      error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} />}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         {previewError ? (
-          <PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={previewError} isRtl={isRtl} />
+          <PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={previewError} />
         ) : viewMode === "overview" ? (
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-muted/10" aria-label={labels.pageOverview}>
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
@@ -246,6 +305,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                   pageNumber={pageNumber}
                   selectedPage={page}
                   variant="overview"
+                  pdfDocument={pdfDocument}
+                  overviewCardSize={overviewCardSize}
                   labels={labels}
                   onSelect={(nextPage) => {
                     setSelectedPage(nextPage);
@@ -310,6 +371,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                     pageNumber={pageNumber}
                     selectedPage={page}
                     variant="thumbnail"
+                    pdfDocument={pdfDocument}
+                    overviewCardSize={overviewCardSize}
                     labels={labels}
                     onSelect={setSelectedPage}
                   />

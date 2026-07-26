@@ -197,6 +197,7 @@ export function AppointmentManageModal({
   const isRtl = language === "ar";
   const normalizedAppointmentId = normalizeAppointmentId(appointmentId);
   const [activeTab, setActiveTab] = useState<AppointmentManageTab>(initialTab);
+  const [documentReviewExpanded, setDocumentReviewExpanded] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
   const [reportError, setReportError] = useState("");
@@ -294,10 +295,12 @@ export function AppointmentManageModal({
     setReportError("");
     setRescheduleOverrideOpen(false);
     setRescheduleRequestOpen(false);
+    setDocumentReviewExpanded(false);
     onClose();
   }, [onClose]);
 
   const selectTab = (tab: AppointmentManageTab) => {
+    if (tab !== "documents") setDocumentReviewExpanded(false);
     setActiveTab(tab);
     onTabChange?.(tab);
   };
@@ -504,6 +507,7 @@ export function AppointmentManageModal({
     setReportStatus(null);
     setReportError("");
     setSelectedPatientId(null);
+    setDocumentReviewExpanded(false);
   }, [initialTab, normalizedAppointmentId]);
 
   useEffect(() => {
@@ -564,7 +568,7 @@ export function AppointmentManageModal({
         dir={isRtl ? "rtl" : "ltr"}
         className="flex h-[92vh] min-h-0 flex-col overflow-hidden"
       >
-        <DialogHeader closeLabel={t("toast.close")} className="shrink-0 border-b border-border pb-3">
+        <DialogHeader closeLabel={t("toast.close")} className={`shrink-0 border-b border-border ${documentReviewExpanded ? "pb-1" : activeTab === "documents" ? "pb-2" : "pb-3"}`}>
           <div className="min-w-0">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -589,7 +593,19 @@ export function AppointmentManageModal({
                 </div>
               ) : null}
             </div>
-            {appointment ? (
+            {appointment && activeTab === "documents" ? (
+              <div
+                data-testid="compact-document-appointment-header"
+                className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+                aria-label={t("registrations.requestDocuments")}
+              >
+                <span>{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn)}</span>
+                <span>{formatDateLy(appointment.appointmentDate)}</span>
+                <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
+                  {statusLabel(language, appointment.status)}
+                </span>
+              </div>
+            ) : appointment ? (
               <>
                 <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                   <Field label={t("registrations.patient")} value={chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)} />
@@ -609,7 +625,7 @@ export function AppointmentManageModal({
           </div>
         </DialogHeader>
 
-        {appointment ? (
+        {appointment && !documentReviewExpanded ? (
           <div className="shrink-0 border-b border-border px-0 py-2">
             <div role="tablist" aria-label={t("registrations.manage")} className="flex max-w-full flex-wrap gap-1.5">
               {MANAGE_TABS.map((tab) => {
@@ -620,14 +636,14 @@ export function AppointmentManageModal({
           </div>
         ) : null}
 
-        <div className={`min-h-0 flex-1 pe-1 pt-3 ${activeTab === "documents" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`} aria-busy={appointmentQuery.isLoading}>
+        <div className={`min-h-0 flex-1 pe-1 ${documentReviewExpanded ? "pt-1" : "pt-3"} ${activeTab === "documents" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`} aria-busy={appointmentQuery.isLoading}>
           {normalizedAppointmentId === null ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert"><p className="font-semibold">{t("registrations.appointmentInvalidReference")}</p></div> : null}
           {appointmentQuery.isLoading && !appointment ? <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground" role="status">{t("registrations.appointmentLoading")}</div> : null}
           {appointmentQuery.isError && !appointment ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><p className="font-semibold">{t("registrations.appointmentLoadFailed")}</p><p className="mt-1">{getErrorMessage(appointmentQuery.error, t("registrations.appointmentLoadFailed"))}</p></div> : null}
 
           {appointment && activeTab === "details" ? <AppointmentEditor appointment={appointment} lookups={lookups} onUpdated={updateDisplayedAppointment} onDeleted={() => { onAppointmentDeleted?.(appointment.id); closeModal(); }} /> : null}
 
-          {appointment && activeTab === "documents" ? <RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan /> : null}
+          {appointment && activeTab === "documents" ? <RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} /> : null}
 
           {appointment && activeTab === "report" ? (
             <div className="rounded-2xl border border-border bg-muted/20 p-3">

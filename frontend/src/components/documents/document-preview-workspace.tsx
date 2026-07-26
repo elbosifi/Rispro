@@ -23,6 +23,8 @@ export interface DocumentPreviewLabels {
   openPage: string;
   scrollPagesLeft: string;
   scrollPagesRight: string;
+  expandReview: string;
+  exitExpandedReview: string;
 }
 
 const LazyPdfDocumentPreview = lazy(() => import("./pdf-document-preview"));
@@ -150,23 +152,60 @@ function labelsFor(t: (key: TranslationKey) => string): DocumentPreviewLabels {
     openPage: t("documents.openPage"),
     scrollPagesLeft: t("documents.scrollPagesLeft"),
     scrollPagesRight: t("documents.scrollPagesRight"),
+    expandReview: t("documents.expandReview"),
+    exitExpandedReview: t("documents.exitExpandedReview"),
   };
 }
 
-export function DocumentPreviewWorkspace({ document, showOpenAction = true }: { document: RequestDocument; showOpenAction?: boolean }) {
+interface DocumentPreviewWorkspaceProps {
+  document: RequestDocument;
+  showOpenAction?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+export function DocumentPreviewWorkspace({
+  document,
+  showOpenAction = true,
+  expanded = false,
+  onExpandedChange,
+}: DocumentPreviewWorkspaceProps) {
   const { t, isArabic } = useLanguage();
   const labels = labelsFor(t);
   const kind = previewKind(document);
   const src = viewUrl(document);
+  const toolbar = showOpenAction || onExpandedChange ? (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {onExpandedChange ? (
+        <button
+          type="button"
+          className="inline-flex items-center rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          onClick={() => onExpandedChange(!expanded)}
+          aria-pressed={expanded}
+        >
+          {expanded ? labels.exitExpandedReview : labels.expandReview}
+        </button>
+      ) : null}
+      {showOpenAction ? <OpenDocumentAction href={src} label={labels.openInNewTab} /> : null}
+      <span className="sr-only" aria-live="polite">
+        {expanded ? labels.exitExpandedReview : labels.expandReview}
+      </span>
+    </div>
+  ) : null;
 
   if (kind === "unsupported") {
-    return <PreviewFailure message={labels.unsupported} href={src} label={labels.openInNewTab} />;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-2">
+        {toolbar}
+        <PreviewFailure message={labels.unsupported} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />
+      </div>
+    );
   }
 
   if (kind === "image") {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-2">
-        {showOpenAction ? <div className="flex shrink-0 justify-end"><OpenDocumentAction href={src} label={labels.openInNewTab} /></div> : null}
+        {toolbar}
         <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} />
       </div>
     );
@@ -174,7 +213,7 @@ export function DocumentPreviewWorkspace({ document, showOpenAction = true }: { 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {showOpenAction ? <div className="flex shrink-0 justify-end"><OpenDocumentAction href={src} label={labels.openInNewTab} /></div> : null}
+      {toolbar}
       <PreviewErrorBoundary
         key={document.id}
         fallback={<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />}
@@ -186,7 +225,7 @@ export function DocumentPreviewWorkspace({ document, showOpenAction = true }: { 
           </div>
         }
       >
-        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} />
+        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} expanded={expanded} />
       </Suspense>
       </PreviewErrorBoundary>
     </div>
