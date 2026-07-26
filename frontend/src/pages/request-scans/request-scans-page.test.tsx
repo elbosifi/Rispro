@@ -164,13 +164,26 @@ describe("RequestScansPage", () => {
   });
 
   it("loads the appointment when Request Scans returns the ID as a numeric string", async () => {
-    mock([{ ...completed, appointment_id: "9" as unknown as number }]);
+    const fetchMock = mock([{ ...completed, appointment_id: "9" as unknown as number }]);
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Open appointment" }));
 
     expect(await screen.findByText("Patient One")).toBeTruthy();
     expect(screen.getAllByText("V2-000009").length).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/v2/read/appointments/9")).toBe(true);
+  });
+
+  it("shows a localized notice and does not open the modal for an invalid appointment reference", async () => {
+    const fetchMock = mock([{ ...completed, appointment_id: "V2-000009" as unknown as number }]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open appointment" }));
+
+    expect(await screen.findByText("The appointment could not be opened because its reference is invalid.")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "registrations.manage" })).toBeNull();
+    expect(screen.getByTestId("request-scans-page")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v2/read/appointments/"))).toBe(false);
   });
 
   it("opens processing details with diagnostic content", async () => {

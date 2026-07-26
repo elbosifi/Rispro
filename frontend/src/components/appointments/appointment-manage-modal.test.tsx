@@ -142,6 +142,14 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByText("Appointment unavailable")).toBeTruthy();
   });
 
+  it("shows an invalid-reference state without requesting an appointment", async () => {
+    renderModal({ appointmentId: "V2-000009" as unknown as number });
+
+    expect((await screen.findByRole("alert")).textContent).toContain("The appointment reference is invalid or unavailable.");
+    expect(mocks.getAppointmentById).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+  });
+
   it("renders appointment details, opens the initial tab, and passes document IDs", async () => {
     renderModal({ initialTab: "documents" });
     const dialog = await screen.findByRole("dialog", { name: "Manage" });

@@ -14,6 +14,7 @@ import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
+import { normalizeAppointmentId } from "@/lib/appointment-id";
 import { getPatientRequirementStaffMessage } from "@/lib/patient-requirement-messages";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
@@ -194,8 +195,7 @@ export function AppointmentManageModal({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isRtl = language === "ar";
-  const parsedAppointmentId = appointmentId == null ? null : Number(appointmentId);
-  const normalizedAppointmentId = Number.isSafeInteger(parsedAppointmentId) && parsedAppointmentId > 0 ? parsedAppointmentId : null;
+  const normalizedAppointmentId = normalizeAppointmentId(appointmentId);
   const [activeTab, setActiveTab] = useState<AppointmentManageTab>(initialTab);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
@@ -222,7 +222,12 @@ export function AppointmentManageModal({
 
   const appointmentQuery = useQuery({
     queryKey: ["appointment-manage-modal", normalizedAppointmentId],
-    queryFn: () => getAppointmentById(normalizedAppointmentId as number),
+    queryFn: () => {
+      if (normalizedAppointmentId === null) {
+        throw new Error(t("registrations.appointmentInvalidReference"));
+      }
+      return getAppointmentById(normalizedAppointmentId);
+    },
     enabled: open && normalizedAppointmentId !== null,
     initialData: initialAppointment?.id === normalizedAppointmentId ? initialAppointment : undefined,
     staleTime: 30_000,
@@ -237,13 +242,13 @@ export function AppointmentManageModal({
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
     queryFn: fetchAppointmentLookups,
-    enabled: open,
+    enabled: open && normalizedAppointmentId !== null,
     staleTime: 1000 * 60 * 5,
   });
   const { data: schedulingCapacitySettings } = useQuery({
     queryKey: ["settings", "scheduling_and_capacity", "public"],
     queryFn: fetchPublicSchedulingCapacitySettings,
-    enabled: open,
+    enabled: open && normalizedAppointmentId !== null,
     staleTime: 60_000,
   });
   const { data: specialReasonOptions = [] } = useV2SpecialReasonCodes(open && normalizedAppointmentId !== null);
@@ -616,6 +621,7 @@ export function AppointmentManageModal({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto pe-1 pt-3" aria-busy={appointmentQuery.isLoading}>
+          {normalizedAppointmentId === null ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert"><p className="font-semibold">{t("registrations.appointmentInvalidReference")}</p></div> : null}
           {appointmentQuery.isLoading && !appointment ? <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground" role="status">{t("registrations.appointmentLoading")}</div> : null}
           {appointmentQuery.isError && !appointment ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><p className="font-semibold">{t("registrations.appointmentLoadFailed")}</p><p className="mt-1">{getErrorMessage(appointmentQuery.error, t("registrations.appointmentLoadFailed"))}</p></div> : null}
 

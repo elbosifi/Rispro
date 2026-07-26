@@ -14,6 +14,7 @@ import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-for
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
+import { normalizeAppointmentId } from "@/lib/appointment-id";
 import { AppointmentManageModal, type AppointmentManageTab } from "@/components/appointments/appointment-manage-modal";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
@@ -107,8 +108,7 @@ export default function RegistrationsPage() {
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [reportCheckOnOpen, setReportCheckOnOpen] = useState(false);
-  const parsedAppointmentId = appointmentIdParam ? Number(appointmentIdParam) : null;
-  const deepLinkedAppointmentId = Number.isInteger(parsedAppointmentId) && (parsedAppointmentId ?? 0) > 0 ? parsedAppointmentId : null;
+  const deepLinkedAppointmentId = normalizeAppointmentId(appointmentIdParam);
   const manageAppointmentId = selectedAppointment?.id ?? deepLinkedAppointmentId;
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [slipPreviewAppointment, setSlipPreviewAppointment] =

@@ -38,6 +38,7 @@ import {
 } from "@/components/shared";
 import { AppointmentManageModal } from "@/components/appointments/appointment-manage-modal";
 import { chooseLocalized, t, type Language, type TranslationKey } from "@/lib/i18n";
+import { normalizeAppointmentId } from "@/lib/appointment-id";
 import { useLanguage } from "@/providers/language-provider";
 
 type Job = {
@@ -423,7 +424,12 @@ export default function RequestScansPage() {
   const setAssignTarget = (job: Job) => { setAssign(job); setAppointmentId(""); setAssignmentConfirmed(false); setAssignmentError(null); };
   const openAppointment = (job: Job) => {
     setOpenMenuJobId(null);
-    setManageAppointmentId(job.appointment_id);
+    const normalizedAppointmentId = normalizeAppointmentId(job.appointment_id);
+    if (normalizedAppointmentId === null) {
+      setNotice(t(language, "requestScans.appointmentInvalidReference"));
+      return;
+    }
+    setManageAppointmentId(normalizedAppointmentId);
   };
 
   return <main data-testid="request-scans-page" dir={isArabic ? "rtl" : "ltr"} className="min-h-full bg-[linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]">
