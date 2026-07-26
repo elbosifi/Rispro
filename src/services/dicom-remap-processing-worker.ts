@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   claimNextDicomRemapProcessingJob,
-  cleanupExpiredFailedDicomRemapStaging,
+  cleanupExpiredDicomRemapStaging,
   processClaimedDicomRemapJob,
 } from "./dicom-remap-service.js";
 import type { DicomRemapJobRow } from "./dicom-remap-service.js";
@@ -17,7 +17,7 @@ const workerId = `dicom-remap-processing-${process.pid}-${randomUUID()}`;
 type ClaimJob = { job: DicomRemapJobRow; recovered: boolean } | null;
 let claimJob = claimNextDicomRemapProcessingJob;
 let processJob = processClaimedDicomRemapJob;
-let cleanupFailedStaging = cleanupExpiredFailedDicomRemapStaging;
+let cleanupStaging = cleanupExpiredDicomRemapStaging;
 
 export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: number; leaseSeconds?: number; owner?: string } = {}): Promise<{ claimed: number; completed: number; failed: number }> {
   if (tickRunning || stopped) return { claimed: 0, completed: 0, failed: 0 };
@@ -29,7 +29,10 @@ export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: n
   let completed = 0;
   let failed = 0;
   try {
-    await cleanupFailedStaging(Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72))).catch(() => 0);
+    await cleanupStaging(
+      Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72)),
+      Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24))
+    ).catch(() => 0);
     for (let index = 0; index < batchSize && !stopped; index += 1) {
       const claim = await claimJob(owner, leaseSeconds);
       if (!claim) break;
@@ -56,16 +59,16 @@ export const __dicomRemapProcessingWorkerTestables = {
   setDependencies(dependencies: {
     claim?: (owner: string, leaseSeconds: number) => Promise<ClaimJob>;
     process?: typeof processClaimedDicomRemapJob;
-    cleanup?: (retentionHours: number) => Promise<number>;
+    cleanup?: (failedRetentionHours: number, awaitingConfirmationRetentionHours: number) => Promise<number>;
   }): void {
     claimJob = dependencies.claim || claimNextDicomRemapProcessingJob;
     processJob = dependencies.process || processClaimedDicomRemapJob;
-    cleanupFailedStaging = dependencies.cleanup || cleanupExpiredFailedDicomRemapStaging;
+    cleanupStaging = dependencies.cleanup || cleanupExpiredDicomRemapStaging;
   },
   resetDependencies(): void {
     claimJob = claimNextDicomRemapProcessingJob;
     processJob = processClaimedDicomRemapJob;
-    cleanupFailedStaging = cleanupExpiredFailedDicomRemapStaging;
+    cleanupStaging = cleanupExpiredDicomRemapStaging;
     stopped = false;
   },
 };

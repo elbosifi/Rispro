@@ -106,9 +106,9 @@ wait_for "PostgreSQL health" "${COMPOSE[@]}" exec -T postgres pg_isready -U risp
 "${COMPOSE[@]}" up -d app
 wait_for "RISpro health endpoint" curl -fsS "http://127.0.0.1:${HOST_PORT}/api/health"
 
-MIGRATION="$("${COMPOSE[@]}" exec -T postgres psql -U rispro -d rispro -Atqc "select 1 from schema_migrations where filename = '119_dicom_remap_durable_processing.sql'")"
-[ "$MIGRATION" = "1" ] || { echo "FAIL: migration 119 is not present in the running database" >&2; exit 1; }
-echo "OK: migration 119 is present"
+MIGRATIONS="$("${COMPOSE[@]}" exec -T postgres psql -U rispro -d rispro -Atqc "select count(*) from schema_migrations where filename in ('119_dicom_remap_durable_processing.sql', '146_dicom_remap_staged_confirmation.sql')")"
+[ "$MIGRATIONS" = "2" ] || { echo "FAIL: DICOM remap durable-staging migrations 119 and 146 are not present in the running database" >&2; exit 1; }
+echo "OK: DICOM remap durable-staging migrations 119 and 146 are present"
 
 "${COMPOSE[@]}" logs --no-color app | grep -q 'dicom_remap_processing_worker_started'
 echo "OK: DICOM-remap processing worker startup logged"

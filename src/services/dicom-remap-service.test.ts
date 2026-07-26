@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -10,11 +11,14 @@ import {
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
   claimNextDicomRemapProcessingJob,
+  cleanupExpiredAwaitingDicomRemapStaging,
   cleanupDicomRemapStagingStorage,
+  confirmStagedDicomRemapJob,
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
   failStaleDicomRemapSendEnqueues,
+  finalizeDicomRemapAwaitingConfirmationStagingJob,
   getMyActiveDicomRemapJob,
   monitorDicomRemapSendJob,
   previewDicomRemapMultipartUpload,
@@ -170,6 +174,38 @@ async function makeStagedFiles(files: Array<{ fileName: string; content?: string
   return { tempDir, staged };
 }
 
+function selectedStudyManifest(
+  selectedStudyInstanceUID: string,
+  files: Array<{ id: string; relativePath: string; displayName: string; mimeType: string; byteSize: number; sha256: string }>,
+  identityOverrides: Partial<{
+    patientId: string;
+    patientName: string;
+    patientBirthDate: string;
+    patientSex: string;
+    modality: string;
+    studyDate: string;
+  }> = {}
+) {
+  return {
+    version: 2,
+    provisionalSelectedStudyInstanceUID: selectedStudyInstanceUID,
+    provisionalSourceIdentity: {
+      studyInstanceUid: selectedStudyInstanceUID,
+      patientId: "OLDID",
+      patientName: "OLD^PATIENT",
+      patientBirthDate: "19900101",
+      patientSex: "M",
+      modality: "CT",
+      studyDate: "20260726",
+      ...identityOverrides,
+    },
+    uploadMode: "staged_folder_selected_study" as const,
+    fileCount: files.length,
+    totalBytes: files.reduce((total, file) => total + file.byteSize, 0),
+    files,
+  };
+}
+
 test.afterEach(() => {
   __dicomRemapTestables.resetTestOverrides();
 });
@@ -218,6 +254,151 @@ test("durable staging writes a hashed private file by generated path", async () 
   }
 });
 
+test("fast durable staging completes without a patient or destination and confirmation queues the same job idempotently", async () => {
+  const storageKey = `jobs/1-${randomUUID()}`;
+  const directory = path.resolve("storage/dicom/remap-staging", storageKey);
+  await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+  const selectedStudyInstanceUID = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const body = makeSyntheticDicomBuffer({ StudyInstanceUID: selectedStudyInstanceUID });
+  const relativePath = "files/000000-fast-stage.dcm";
+  await writeFile(path.join(directory, relativePath), body);
+  const files = [{
+    id: "000000-fast-stage",
+    relativePath,
+    displayName: "source.dcm",
+    mimeType: "application/dicom",
+    byteSize: body.length,
+    sha256: createHash("sha256").update(body).digest("hex"),
+  }];
+  const provisionalSourceIdentity = {
+    studyInstanceUid: selectedStudyInstanceUID,
+    patientId: "OLDID",
+    patientName: "OLD^PATIENT",
+    patientBirthDate: "19900101",
+    patientSex: "M",
+    modality: "CT",
+    studyDate: "20260726",
+  };
+  const stagingJob = remapJob({
+    status: "uploaded",
+    processing_stage: "staging",
+    staged_storage_key: storageKey,
+    created_by_user_id: 42,
+  });
+  const awaitingJob = remapJob({
+    ...stagingJob,
+    status: "awaiting_confirmation",
+    processing_stage: "awaiting_confirmation",
+    staged_manifest_version: 2,
+    staged_file_count: files.length,
+    staged_total_bytes: body.length,
+    provisional_source_identity: provisionalSourceIdentity,
+  });
+
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  queueQueryResults([{ rows: [awaitingJob] }]);
+  try {
+    const staged = await finalizeDicomRemapAwaitingConfirmationStagingJob({
+      context: { job: stagingJob, storageKey, directory },
+      files,
+      selectedStudyInstanceUID,
+      provisionalSourceIdentity,
+      confirmSource: "true",
+    });
+    assert.equal(staged.job.id, stagingJob.id);
+    assert.equal(staged.job.status, "awaiting_confirmation");
+    assert.equal(staged.job.rispro_patient_id, null);
+    assert.equal(staged.job.destination_pacs_key, null);
+    const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(manifest.version, 2);
+    assert.equal(manifest.uploadMode, "staged_folder_selected_study");
+    assert.equal(manifest.provisionalSelectedStudyInstanceUID, selectedStudyInstanceUID);
+    assert.equal("selectedStudyInstanceUID" in manifest, false);
+
+    __dicomRemapTestables.setPatientLoaderForTests(async () => ({
+      id: 77,
+      mrn: "RIS-77",
+      national_id: null,
+      identifier_type: "other",
+      identifier_value: "RIS-77",
+      category: null,
+      arabic_full_name: "Replacement Patient",
+      english_full_name: "Replacement Patient",
+      age_years: 35,
+      demographics_estimated: false,
+      sex: "F",
+      phone_1: null,
+      phone_2: null,
+      address: null,
+      estimated_date_of_birth: "1991-01-02",
+    }));
+    __dicomRemapTestables.setModalityListerForTests(async () => ({
+      modalities: [{ key: "MAIN", aet: "MAIN", host: "127.0.0.1", port: 104, isDefault: true }],
+    }));
+    const queuedJob = remapJob({
+      ...awaitingJob,
+      status: "uploaded",
+      processing_stage: "queued",
+      selected_study_instance_uid: selectedStudyInstanceUID,
+      rispro_patient_id: 77,
+      destination_pacs_key: "MAIN",
+      replacement_patient_id: "RIS-77",
+      replacement_patient_name: "Replacement^Patient",
+    });
+    const confirmationCalls = queueQueryResults([{ rows: [awaitingJob] }, { rows: [queuedJob] }]);
+    const confirmed = await confirmStagedDicomRemapJob({
+      jobId: stagingJob.id,
+      selectedStudyInstanceUID,
+      risproPatientId: 77,
+      destinationPacsKey: "MAIN",
+      confirm: true,
+      currentUserId: 42,
+    });
+    assert.equal(confirmed.job.id, stagingJob.id);
+    assert.equal(confirmed.job.status, "uploaded");
+    assert.equal(confirmed.job.processing_stage, "queued");
+    assert.match(confirmationCalls[1]!.sql, /status = 'awaiting_confirmation'/i);
+    assert.match(confirmationCalls[1]!.sql, /processing_stage = 'awaiting_confirmation'/i);
+
+    const duplicateCalls = queueQueryResults([{ rows: [queuedJob] }]);
+    const duplicate = await confirmStagedDicomRemapJob({
+      jobId: stagingJob.id,
+      selectedStudyInstanceUID,
+      risproPatientId: 77,
+      destinationPacsKey: "MAIN",
+      confirm: true,
+      currentUserId: 42,
+    });
+    assert.equal(duplicate.job.id, stagingJob.id);
+    assert.equal(duplicateCalls.length, 1);
+
+    const cancelledAfterConfirmation = remapJob({
+      ...queuedJob,
+      status: "cancelled",
+      processing_stage: "cancelled",
+      cancellation_reason: "Operator reset before final confirmation.",
+    });
+    queueQueryResults([{ rows: [cancelledAfterConfirmation] }]);
+    await assert.rejects(
+      () => confirmStagedDicomRemapJob({
+        jobId: stagingJob.id,
+        selectedStudyInstanceUID,
+        risproPatientId: 77,
+        destinationPacsKey: "MAIN",
+        confirm: true,
+        currentUserId: 42,
+      }),
+      (error) => {
+        assert.equal(error instanceof HttpError ? error.statusCode : null, 409);
+        assert.equal(error instanceof HttpError ? (error.details as { status?: string } | null)?.status : null, "cancelled");
+        return true;
+      },
+    );
+  } finally {
+    await cleanupDicomRemapStagingStorage(storageKey);
+  }
+});
+
 test("processing claim uses a skip-locked lease claim", async () => {
   const claimed = remapJob({ status: "processing", processing_attempt_count: 1, processing_lease_owner: "worker-a" });
   __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
@@ -227,6 +408,67 @@ test("processing claim uses a skip-locked lease claim", async () => {
   assert.equal(result?.recovered, false);
   assert.match(calls[0]!.sql, /for update skip locked/i);
   assert.match(calls[0]!.sql, /processing_lease_owner/i);
+  assert.doesNotMatch(calls[0]!.sql, /status\s*=\s*'awaiting_confirmation'/i);
+});
+
+test("expired awaiting-confirmation staging is cancelled before staged PHI is removed", async () => {
+  const storageKey = `jobs/902-${randomUUID()}`;
+  const directory = path.resolve("storage/dicom/remap-staging", storageKey);
+  await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(directory, "files", "staged.dcm"), Buffer.from("private-phi"));
+  const awaiting = remapJob({
+    id: 902,
+    status: "awaiting_confirmation",
+    processing_stage: "awaiting_confirmation",
+    staged_storage_key: storageKey,
+    staging_cleanup_completed_at: null,
+  });
+  const cancelled = remapJob({
+    ...awaiting,
+    status: "cancelled",
+    processing_stage: "cancelled",
+    cancellation_reason: "AWAITING_CONFIRMATION_EXPIRED",
+  });
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const calls = queueQueryResults([
+    { rows: [awaiting] },
+    { rows: [cancelled] },
+    { rows: [{ ...cancelled, staging_cleanup_completed_at: "2026-07-26T00:00:00.000Z" }] },
+  ]);
+
+  const cleaned = await cleanupExpiredAwaitingDicomRemapStaging(24);
+  assert.equal(cleaned, 1);
+  assert.match(calls[0]!.sql, /status = 'awaiting_confirmation'/i);
+  assert.match(calls[1]!.sql, /cancellation_reason = 'AWAITING_CONFIRMATION_EXPIRED'/i);
+  assert.match(calls[2]!.sql, /staging_cleanup_completed_at = now\(\)/i);
+  await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
+});
+
+test("retention cleanup retries staged PHI removal after an operator-cancel cleanup failure", async () => {
+  const storageKey = `jobs/903-${randomUUID()}`;
+  const directory = path.resolve("storage/dicom/remap-staging", storageKey);
+  await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(directory, "files", "staged.dcm"), Buffer.from("private-phi"));
+  const cancelled = remapJob({
+    id: 903,
+    status: "cancelled",
+    processing_stage: "cancelled",
+    staged_storage_key: storageKey,
+    staging_cleanup_completed_at: null,
+    cancellation_reason: "Operator reset before final confirmation.",
+  });
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const calls = queueQueryResults([
+    { rows: [cancelled] },
+    { rows: [{ ...cancelled, staging_cleanup_completed_at: "2026-07-26T00:00:00.000Z" }] },
+  ]);
+
+  const cleaned = await cleanupExpiredAwaitingDicomRemapStaging(24);
+  assert.equal(cleaned, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0]!.sql, /or status = 'cancelled'/i);
+  assert.match(calls[1]!.sql, /status = 'cancelled'/i);
+  await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
 });
 
 test("persisted remap upload rejects a conflicting duplicate instance safely", async () => {
@@ -638,6 +880,112 @@ test("unverified single-study folder validation accepts one matching staged stud
   assert.equal(result.originalSummary.studyInstanceUid, uid);
 });
 
+test("fast staged-folder validation isolates the selected study and ignores identity differences in excluded studies", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-selected-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const selectedUid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const otherUid = "2.25.200";
+  const files = [
+    { id: "selected-file-one", relativePath: "files/selected.dcm", displayName: "selected.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+    { id: "excluded-file-one", relativePath: "files/excluded-one.dcm", displayName: "excluded-one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "b".repeat(64) },
+    { id: "excluded-file-two", relativePath: "files/excluded-two.dcm", displayName: "excluded-two.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "c".repeat(64) },
+    { id: "unparsed-file-one", relativePath: "files/unparsed.dcm", displayName: "unparsed.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "d".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid }));
+  await writeFile(path.join(directory, files[1]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: otherUid, PatientID: "OTHER-A", PatientName: "Other^One" }));
+  await writeFile(path.join(directory, files[2]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: otherUid, PatientID: "OTHER-B", PatientName: "Other^Two" }));
+  await writeFile(path.join(directory, files[3]!.relativePath), Buffer.from("not-a-dicom"));
+
+  const result = await __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+    directory,
+    manifest: selectedStudyManifest(selectedUid, files),
+    selectedStudyInstanceUID: selectedUid,
+  });
+  assert.deepEqual(result.validFiles.map((file) => file.id), ["selected-file-one"]);
+  assert.deepEqual(Object.keys(result.plan.sopInstanceUidByFileId), ["selected-file-one"]);
+  assert.deepEqual(result.selectionCounts, {
+    totalStagedFiles: 4,
+    validDicomFiles: 3,
+    selectedStudyFiles: 1,
+    excludedOtherStudyFiles: 2,
+    excludedStudyCount: 1,
+    skippedOrUnparsedFiles: 1,
+  });
+});
+
+test("fast staged-folder validation fails safely when the confirmed study is absent", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-selected-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const selectedUid = "2.25.999";
+  const files = [
+    { id: "other-study-file", relativePath: "files/other.dcm", displayName: "other.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer());
+
+  await assert.rejects(
+    () => __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+      directory,
+      manifest: selectedStudyManifest(selectedUid, files),
+      selectedStudyInstanceUID: selectedUid,
+    }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? (error.details as { code?: string } | null)?.code : null, "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND");
+      return true;
+    },
+  );
+  assert.equal((await readdir(directory)).includes("uid-plan.json"), false);
+});
+
+test("fast staged-folder validation checks identity consistency only within the selected study", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-selected-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const selectedUid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const files = [
+    { id: "selected-identity-one", relativePath: "files/one.dcm", displayName: "one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+    { id: "selected-identity-two", relativePath: "files/two.dcm", displayName: "two.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "b".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid, PatientID: "SOURCE-A" }));
+  await writeFile(path.join(directory, files[1]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid, PatientID: "SOURCE-B" }));
+
+  await assert.rejects(
+    () => __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+      directory,
+      manifest: selectedStudyManifest(selectedUid, files),
+      selectedStudyInstanceUID: selectedUid,
+    }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? (error.details as { code?: string } | null)?.code : null, "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT");
+      assert.equal(error instanceof HttpError ? (error.details as { selectedStudyFiles?: number } | null)?.selectedStudyFiles : null, 2);
+      return true;
+    },
+  );
+  assert.equal((await readdir(directory)).includes("uid-plan.json"), false);
+});
+
+test("fast staged-folder validation stops when authoritative selected-study identity differs from the preliminary card", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-selected-plan-"));
+  await mkdir(path.join(directory, "files"));
+  const selectedUid = "1.2.840.113619.2.55.3.604688433.1234.1456789012.1";
+  const files = [
+    { id: "selected-mismatch-one", relativePath: "files/one.dcm", displayName: "one.dcm", mimeType: "application/dicom", byteSize: 1, sha256: "a".repeat(64) },
+  ];
+  await writeFile(path.join(directory, files[0]!.relativePath), makeSyntheticDicomBuffer({ StudyInstanceUID: selectedUid, PatientID: "AUTHORITATIVE" }));
+
+  await assert.rejects(
+    () => __dicomRemapTestables.readOrBuildDicomRemapUidPlan({
+      directory,
+      manifest: selectedStudyManifest(selectedUid, files, { patientId: "PROVISIONAL" }),
+      selectedStudyInstanceUID: selectedUid,
+    }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? (error.details as { code?: string } | null)?.code : null, "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH");
+      assert.equal(error instanceof HttpError ? (error.details as { mismatchFieldCount?: number } | null)?.mismatchFieldCount : null, 1);
+      return true;
+    },
+  );
+  assert.equal((await readdir(directory)).includes("uid-plan.json"), false);
+});
+
 test("staged DICOM validation rejects conflicting source identity with sanitized counts before UID planning", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-plan-"));
   await mkdir(path.join(directory, "files"));
@@ -663,6 +1011,12 @@ test("staged DICOM validation rejects conflicting source identity with sanitized
         uniquePatientNameCount: 1,
         uniqueBirthDateCount: 1,
         uniqueSexCount: 1,
+        totalStagedFiles: 2,
+        validDicomFiles: 2,
+        selectedStudyFiles: 2,
+        excludedOtherStudyFiles: 0,
+        excludedStudyCount: 0,
+        skippedOrUnparsedFiles: 0,
       });
       return true;
     },

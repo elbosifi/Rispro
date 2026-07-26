@@ -51,7 +51,7 @@ function uniqueSuffix(): string {
   return `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 }
 
-function syntheticDicom(sopInstanceUid: string): Buffer {
+function syntheticDicom(sopInstanceUid: string, overrides: Record<string, unknown> = {}): Buffer {
   return Buffer.from(datasetToBuffer({
     _meta: {
       FileMetaInformationVersion: new Uint8Array([0, 1]),
@@ -77,6 +77,7 @@ function syntheticDicom(sopInstanceUid: string): Buffer {
     HighBit: 15,
     PixelRepresentation: 0,
     PixelData: new Uint16Array([1]),
+    ...overrides,
   }));
 }
 
@@ -226,7 +227,7 @@ async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<
   }
 }
 
-test("migration 119 exposes durable processing columns, accepted status, and indexes", async (t) => {
+test("durable processing migrations expose staging, selected-study confirmation, accepted status, and indexes", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const { pool } = await import("../db/pool.js");
   const expectedColumns = [
@@ -234,6 +235,7 @@ test("migration 119 exposes durable processing columns, accepted status, and ind
     "processed_file_count", "processing_skipped_file_count", "processing_attempt_count", "processing_started_at",
     "processing_completed_at", "processing_last_checked_at", "processing_last_heartbeat_at", "processing_lease_owner",
     "processing_lease_expires_at", "processing_error_code", "processing_error_details", "staging_cleanup_completed_at",
+    "selected_study_instance_uid", "provisional_source_identity", "processing_selection_counts",
   ];
   const columns = await pool.query<{ column_name: string }>(`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'dicom_remap_jobs' and column_name = any($1::text[])`, [expectedColumns]);
   assert.deepEqual(new Set(columns.rows.map((row) => row.column_name)), new Set(expectedColumns));
@@ -265,6 +267,7 @@ test("durable remap processing stages, claims concurrently, recovers partial Ort
   const patientId = Number(patient.rows[0]!.id);
   let appServer: http.Server | null = null;
   let jobId = 0;
+  let fastJobId = 0;
   try {
     const fakeRequest = async (requestPath: string, options: { method?: string; body?: unknown } = {}) => {
       let body: BodyInit | undefined;
@@ -360,6 +363,102 @@ test("durable remap processing stages, claims concurrently, recovers partial Ort
     assert.equal(fake.state.uploaded.size, 2);
 
     await pool.query(`update dicom_remap_jobs set status = 'sent' where id = $1`, [jobId]);
+    resetFakeOrthancState(fake.state);
+    const selectedFastStudyUid = "1.2.840.10008.1.2.3.4.5";
+    const otherFastStudyUid = "2.25.777.1";
+    const fastSelected = syntheticDicom("1.2.840.10008.1.2.3.4.5.21", { StudyInstanceUID: selectedFastStudyUid });
+    const fastExcluded = syntheticDicom("2.25.777.1.1", {
+      StudyInstanceUID: otherFastStudyUid,
+      SeriesInstanceUID: "2.25.777.1.2",
+      PatientID: "EXCLUDED-ID",
+      PatientName: "Excluded^Patient",
+      PatientBirthDate: "19700101",
+      PatientSex: "F",
+    });
+    const fastForm = new FormData();
+    fastForm.append("files", new Blob([new Uint8Array(fastSelected)], { type: "application/dicom" }), "selected.dcm");
+    fastForm.append("files", new Blob([new Uint8Array(fastExcluded)], { type: "application/dicom" }), "excluded.dcm");
+    fastForm.append("files", new Blob([new Uint8Array(Buffer.from("not-a-dicom"))], { type: "application/dicom" }), "unparsed.dcm");
+    fastForm.append("selectedStudyInstanceUID", selectedFastStudyUid);
+    fastForm.append("provisionalSourceIdentity", JSON.stringify({
+      studyInstanceUid: selectedFastStudyUid,
+      patientId: "SOURCE-ID",
+      patientName: "Source^Patient",
+      patientBirthDate: "19900101",
+      patientSex: "M",
+      modality: "CT",
+      studyDate: "20260726",
+    }));
+    fastForm.append("confirmSource", "true");
+    const fastStageResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/stage-multipart`, {
+      method: "POST",
+      headers: { Cookie: `${env.cookieName}=${token}` },
+      body: fastForm,
+    });
+    const fastStagePayload = await fastStageResponse.json() as { job?: { id: number; status: string; processing_stage: string; rispro_patient_id: number | null; destination_pacs_key: string | null } };
+    assert.equal(fastStageResponse.status, 202);
+    assert.equal(fastStagePayload.job?.status, "awaiting_confirmation");
+    assert.equal(fastStagePayload.job?.processing_stage, "awaiting_confirmation");
+    assert.equal(fastStagePayload.job?.rispro_patient_id, null);
+    assert.equal(fastStagePayload.job?.destination_pacs_key, null);
+    fastJobId = Number(fastStagePayload.job?.id);
+    assert.ok(fastJobId > 0);
+
+    const beforeConfirmationTick = await runDicomRemapProcessingWorkerTick({ owner: "awaiting-worker", batchSize: 1, leaseSeconds: 120 });
+    assert.deepEqual(beforeConfirmationTick, { claimed: 0, completed: 0, failed: 0 });
+    assert.equal(fake.state.uploadRecords.length, 0);
+
+    const confirmationBody = JSON.stringify({
+      selectedStudyInstanceUID: selectedFastStudyUid,
+      risproPatientId: patientId,
+      destinationPacsKey: "PACS_TEST",
+      confirm: true,
+    });
+    const confirmFast = () => fetch(`${risproUrl}/api/pacs/remap/jobs/${fastJobId}/confirm-staged`, {
+      method: "POST",
+      headers: { Cookie: `${env.cookieName}=${token}`, "Content-Type": "application/json" },
+      body: confirmationBody,
+    });
+    const fastConfirmResponse = await confirmFast();
+    const fastConfirmPayload = await fastConfirmResponse.json() as { job?: { id: number; status: string; processing_stage: string } };
+    assert.equal(fastConfirmResponse.status, 202);
+    assert.equal(Number(fastConfirmPayload.job?.id), fastJobId);
+    assert.equal(fastConfirmPayload.job?.status, "uploaded");
+    assert.equal(fastConfirmPayload.job?.processing_stage, "queued");
+    const duplicateFastConfirm = await confirmFast();
+    assert.equal(duplicateFastConfirm.status, 202);
+    assert.equal(Number(((await duplicateFastConfirm.json()) as { job?: { id: number } }).job?.id), fastJobId);
+
+    const fastRun = await runDicomRemapProcessingWorkerTick({ owner: "fast-selected-worker", batchSize: 1, leaseSeconds: 120 });
+    assert.deepEqual(fastRun, { claimed: 1, completed: 1, failed: 0 });
+    const fastProcessed = await pool.query<{
+      status: string;
+      processing_stage: string;
+      processed_file_count: number;
+      processing_selection_counts: {
+        totalStagedFiles: number;
+        validDicomFiles: number;
+        selectedStudyFiles: number;
+        excludedOtherStudyFiles: number;
+        excludedStudyCount: number;
+        skippedOrUnparsedFiles: number;
+      };
+    }>(`select status, processing_stage, processed_file_count, processing_selection_counts from dicom_remap_jobs where id = $1`, [fastJobId]);
+    assert.equal(fastProcessed.rows[0]?.status, "sending");
+    assert.equal(Number(fastProcessed.rows[0]?.processed_file_count), 1);
+    assert.deepEqual(fastProcessed.rows[0]?.processing_selection_counts, {
+      totalStagedFiles: 3,
+      validDicomFiles: 2,
+      selectedStudyFiles: 1,
+      excludedOtherStudyFiles: 1,
+      excludedStudyCount: 1,
+      skippedOrUnparsedFiles: 1,
+    });
+    assert.equal(fake.state.uploadRecords.length, 1);
+    assert.equal(fake.state.uploaded.size, 1);
+    assert.equal(fake.state.sendCount, 1);
+    await pool.query(`update dicom_remap_jobs set status = 'sent' where id = $1`, [fastJobId]);
+
     const handoffJob = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage, modified_orthanc_study_id, destination_pacs_key, replacement_patient_id, replacement_patient_name, replacement_patient_sex, replacement_patient_birth_date) values ($1, 'remapped', 'enqueueing_send', $2, 'PACS_TEST', $3, $4, 'M', null) returning id`, [userId, fake.state.studyId, nationalId, `Durable^Patient^${suffix}`]);
     const handoffId = Number(handoffJob.rows[0].id);
     const beforeHandoffUploadCount = fake.state.uploadRecords.length;
@@ -379,14 +478,18 @@ test("durable remap processing stages, claims concurrently, recovers partial Ort
     assert.equal(fake.state.sendCount, 3);
     fake.state.scenario.sendMode = "success";
 
-    await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id in ($1, $2, $3, $4)`, [jobId, handoffId, ambiguousId, claimId]);
-    await pool.query(`delete from dicom_remap_jobs where id in ($1, $2, $3)`, [jobId, handoffId, ambiguousId]);
+    await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id in ($1, $2, $3, $4, $5)`, [jobId, handoffId, ambiguousId, claimId, fastJobId]);
+    await pool.query(`delete from dicom_remap_jobs where id in ($1, $2, $3, $4)`, [jobId, handoffId, ambiguousId, fastJobId]);
   } finally {
     __dicomRemapTestables.resetTestOverrides();
     __resetOrthancPacsFetchForTests();
     __resetOrthancPacsSettingsForTests();
     if (appServer) await new Promise<void>((resolve) => appServer!.close(() => resolve()));
     await fake.close();
+    if (fastJobId > 0) {
+      await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id = $1`, [fastJobId]).catch(() => undefined);
+      await pool.query(`delete from dicom_remap_jobs where id = $1`, [fastJobId]).catch(() => undefined);
+    }
     await pool.query(`delete from audit_log where changed_by_user_id = $1`, [userId]).catch(() => undefined);
     await pool.query(`delete from patients where id = $1`, [patientId]).catch(() => undefined);
     await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);

@@ -52,8 +52,8 @@ export interface DicomScanFileEntry {
   modality: string;
   patientId: string;
   patientName: string;
-  patientBirthDate?: string;
-  patientSex?: string;
+  patientBirthDate: string;
+  patientSex: string;
 }
 
 export interface DicomScanStudySummary {
@@ -63,6 +63,8 @@ export interface DicomScanStudySummary {
   modality: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
   seriesCount: number;
   fileCount: number;
   totalBytes: number;
@@ -313,6 +315,8 @@ function summarizeStudies(entries: DicomScanFileEntry[]): DicomScanStudySummary[
         modality: entry.modality,
         patientId: entry.patientId,
         patientName: entry.patientName,
+        patientBirthDate: entry.patientBirthDate || "",
+        patientSex: entry.patientSex || "",
         seriesCount: 0,
         fileCount: 1,
         totalBytes: entry.fileSize,
@@ -327,6 +331,8 @@ function summarizeStudies(entries: DicomScanFileEntry[]): DicomScanStudySummary[
     existing.modality = pickStudyDisplayValue(existing.modality, entry.modality);
     existing.patientId = pickStudyDisplayValue(existing.patientId, entry.patientId);
     existing.patientName = pickStudyDisplayValue(existing.patientName, entry.patientName);
+    existing.patientBirthDate = pickStudyDisplayValue(existing.patientBirthDate, entry.patientBirthDate || "");
+    existing.patientSex = pickStudyDisplayValue(existing.patientSex, entry.patientSex || "");
     existing.fileCount += 1;
     existing.totalBytes += entry.fileSize;
     existing.files.push(entry);
@@ -340,6 +346,8 @@ function summarizeStudies(entries: DicomScanFileEntry[]): DicomScanStudySummary[
     modality: value.modality,
     patientId: value.patientId,
     patientName: value.patientName,
+    patientBirthDate: value.patientBirthDate,
+    patientSex: value.patientSex,
     seriesCount: value.seriesSet.size || 1,
     fileCount: value.fileCount,
     totalBytes: value.totalBytes,

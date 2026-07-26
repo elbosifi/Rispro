@@ -90,6 +90,7 @@ export function createApp(): Application {
   const PACS_REMAP_UPLOAD_PATH = "/api/pacs/remap/jobs/upload";
   const PACS_REMAP_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/upload-multipart";
   const PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/process-multipart";
+  const PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/stage-multipart";
   const SCAN_SESSION_UPLOAD_PATH = "/api/scan-sessions/upload";
   const ADMIN_RESTORE_PREFIX = "/api/admin/restore";
   app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -99,6 +100,7 @@ export function createApp(): Application {
       req.path === PACS_REMAP_UPLOAD_PATH ||
       req.path === PACS_REMAP_MULTIPART_UPLOAD_PATH ||
       req.path === PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH ||
+      req.path === PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH ||
       req.path === SCAN_SESSION_UPLOAD_PATH ||
       req.path.startsWith(ADMIN_RESTORE_PREFIX)
     ) {

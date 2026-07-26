@@ -1,18 +1,31 @@
 # DICOM Remap Upload and PACS Send Transport
 
-RISpro uses `POST /api/pacs/remap/jobs/process-multipart` for the active DICOM remap workflow. The browser sends `multipart/form-data` to RISpro; RISpro streams those bytes to private durable job staging, writes a versioned manifest with byte counts and SHA-256 values, and returns `202 Accepted` once staging and the queued job commit are complete.
+RISpro offers two operator workflows. Both upload through RISpro into private durable staging; neither uploads from the browser directly to Orthanc.
 
-## Folder study detection
+## Operator workflows
 
-Folder selection first sends a bounded, distributed header-only preview so the study chooser can appear quickly. RISpro then scans every DICOM-like browser file locally in batches, reading header bytes only and replacing the preliminary result when the complete scan finishes. A completed scan uploads only the files belonging to the explicitly selected Study Instance UID.
+Folder or file selection first runs the existing bounded, distributed header preview so a preliminary study card appears quickly. The card shows source name, patient ID, date of birth and sex when available, modality, study date, and Study Instance UID. It is explicitly preliminary until the server verifies the durable source.
 
-If the complete scan is taking too long, it can be skipped only after a one-study preliminary result and a separate acknowledgement. That mode uploads every DICOM-like candidate with `uploadMode=single_study_folder_unverified` and the provisional selected Study Instance UID. The durable worker parses every valid staged DICOM before it creates a UID plan, rewrites data, uploads to Orthanc, verifies Orthanc, or enqueues PACS send. Any mixed-study folder fails safely with `DICOM_REMAP_MULTIPLE_STUDIES_DETECTED`; diagnostics contain only the stable error code and sanitized counts.
+1. **Complete browser scan.** RISpro scans every DICOM-like browser file locally and replaces the preliminary result when the scan completes. The operator selects a study and `POST /api/pacs/remap/jobs/process-multipart` uploads only that study's files. Existing `single_study_folder_unverified` validation remains strict and rejects mixed studies.
+2. **Fast server verification.** After selecting an identifiable preliminary study and explicitly acknowledging it, the browser cancels the complete scan and immediately sends all DICOM-like candidates once to `POST /api/pacs/remap/jobs/stage-multipart`. Patient and destination selection remain usable during that upload. The server writes manifest version 2 and finishes with both `status` and `processing_stage` set to `awaiting_confirmation`; the worker cannot claim that state.
 
-The request does not parse, rewrite, upload, validate, or transmit DICOM after the upload bytes have completed. The restart-safe processing worker claims the queued job under a database lease, validates staged files, persists a UID replacement plan, rewrites and uploads to Orthanc, verifies one study and replacement identity, then invokes the existing asynchronous C-STORE flow. The frontend polls RISpro job status through `uploaded`, `processing`, `sending`, `sent`, or `failed`.
+When patient, destination, replacement preview, and final identity confirmation are ready, the fast workflow sends only JSON to `POST /api/pacs/remap/jobs/:jobId/confirm-staged`. The endpoint atomically attaches the selected Study Instance UID and processing inputs and moves the same job to `uploaded` / `queued`. Duplicate identical confirmation returns the same job and cannot create a second processing attempt. The source files are not placed in a second `FormData`, so the CD is not read or uploaded again after secure staging begins.
+
+The recommended operator wording is: **“Confirm this source study and begin secure staging. RISpro will verify every staged DICOM file on the server and will remap only the selected Study Instance UID. Other studies on the CD will not be sent.”**
+
+## Server verification and selected-study isolation
+
+Manifest version 1 retains the existing final-at-upload selected UID behavior. Manifest version 2 records immutable file metadata, byte sizes, SHA-256 values, the provisional selected UID, and the provisional identity snapshot while the job cannot be claimed. Final confirmation stores the authoritative processing selection in the database; it does not silently mutate the staging manifest.
+
+After confirmation, the restart-safe worker validates every manifest hash and size, parses every valid staged DICOM candidate, groups candidates by Study Instance UID, and requires the confirmed UID to exist. It builds the persisted deterministic UID plan, rewrites, and uploads only files in that exact group. Files from other studies are never rewritten, uploaded to Orthanc, or sent. Sanitized processing counts record total staged files, valid DICOM files, selected-study files, excluded other-study files, excluded study count, and skipped/unparsed files; filenames, paths, and patient identifiers are excluded.
+
+Patient ID and patient name must be internally consistent within the selected study. Birth date and sex must also be consistent when present. Identity differences in excluded studies do not block the selected study. Non-empty provisional identity fields are compared with the authoritative selected-study identity. A material difference fails safely with `DICOM_REMAP_SOURCE_IDENTITY_MISMATCH`; an absent confirmed UID fails with `DICOM_REMAP_SELECTED_STUDY_NOT_FOUND`. Neither condition rewrites or uploads an instance.
+
+Once queued, the existing worker lease, retry, deterministic UID plan, Orthanc identity/instance-count verification, and asynchronous PACS send behavior are unchanged.
 
 ## Gateway transport for large CT/MR studies
 
-Ordinary RISpro API requests remain limited to **75 MiB** at the bundled Nginx gateway. The active remap endpoint, `POST /api/pacs/remap/jobs/process-multipart`, has an exact dedicated route with a **21 GiB** gateway allowance, 900-second upload/proxy timeouts, and both `proxy_request_buffering off` and `proxy_buffering off`. Nginx therefore streams the browser request to RISpro instead of buffering a full study.
+Ordinary RISpro API requests remain limited to **75 MiB** at the bundled Nginx gateway. Both full-size remap endpoints, `POST /api/pacs/remap/jobs/process-multipart` and `POST /api/pacs/remap/jobs/stage-multipart`, have exact dedicated routes with a **21 GiB** gateway allowance, 900-second upload/proxy timeouts, and both `proxy_request_buffering off` and `proxy_buffering off`. Nginx therefore streams the browser request to RISpro instead of buffering a full study.
 
 The extra 1 GiB is transport headroom for multipart boundaries and request metadata. It does not expand the accepted DICOM content limit: RISpro remains authoritative and enforces `DICOM_REMAP_STAGING_MAX_FILES=5000` and `DICOM_REMAP_STAGING_MAX_TOTAL_BYTES=21474836480` (20 GiB) by default. Ensure the private persistent staging volume has adequate free space for the configured application limit.
 
@@ -26,7 +39,7 @@ docker compose exec gateway nginx -T
 docker compose restart gateway
 ```
 
-Confirm the rendered output includes `location = /api/pacs/remap/jobs/process-multipart`, `client_max_body_size 21g`, `proxy_request_buffering off`, and `proxy_buffering off`.
+Confirm the rendered output includes exact locations for both `/api/pacs/remap/jobs/process-multipart` and `/api/pacs/remap/jobs/stage-multipart`, each with `client_max_body_size 21g`, `proxy_request_buffering off`, and `proxy_buffering off`.
 
 ## Durable staging and processing deployment
 
@@ -35,10 +48,12 @@ Confirm the rendered output includes `location = /api/pacs/remap/jobs/process-mu
 - Set `DICOM_REMAP_PROCESSING_WORKER_INTERVAL_MS` (default `5000`), `DICOM_REMAP_PROCESSING_LEASE_SECONDS` (default `120`), and `DICOM_REMAP_PROCESSING_BATCH_SIZE` (default `5`) to size the worker conservatively.
 - Multiple backend instances must share this staging volume. Alternatively run exactly one dedicated processing worker with access to the same volume and database. A lease prevents concurrent processing of one job; a lease expiry allows restart recovery.
 - A UID plan is atomically written before the first Orthanc instance upload. Retries reuse identical Study, Series, and SOP Instance UIDs, making a partial Orthanc upload restart-safe. Conflicting existing instances fail safely.
-- Successful jobs remove staged DICOM only after verified Orthanc ingestion and durable send enqueue. Cancelled queued and interrupted uploads are cleaned promptly. Failed-processing staging is retained for the configured retention window (`DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS`, default `72`) for controlled diagnosis.
+- Successful jobs remove staged DICOM only after verified Orthanc ingestion and durable send enqueue. Operator reset aborts an active browser upload where possible; cancelling an `awaiting_confirmation` job marks it cancelled and removes staged PHI. Abandoned `awaiting_confirmation` jobs expire and are cleaned after `DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS` (default `24`). Failed-processing staging is retained for `DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS` (default `72`) for controlled diagnosis.
 - DICOM staging contains PHI. Do not expose the directory through a web server, backup it to unapproved locations, or log file names, paths, metadata, file contents, or credentials.
 
-To inspect work, use Recent Jobs or the authenticated job endpoint. `uploaded` means durable staging is queued; `processing` exposes the persisted stage/counters/heartbeat; `sending` has an Orthanc C-STORE job; `sent` is terminal success; and `failed` exposes only sanitized error code/details. Ordinary resend is unavailable for a processing failure unless a verified remapped Orthanc study exists.
+To inspect work, use Recent Jobs or the authenticated job endpoint. `awaiting_confirmation` means durable staging is complete but no validation, rewrite, Orthanc upload, or PACS send may begin. `uploaded` means queued; `processing` exposes the persisted stage/counters/heartbeat; `sending` has an Orthanc C-STORE job; `sent` is terminal success; and `failed` exposes only sanitized error code/details. Refresh or re-entry resumes the active `awaiting_confirmation` job at patient selection. Ordinary resend is unavailable for a processing failure unless a verified remapped Orthanc study exists.
+
+Migration `146_dicom_remap_staged_confirmation.sql` adds the confirmed selected UID, provisional source snapshot, and sanitized selection-count columns. Deploy the migration before or with application instances and reload the two Nginx exact routes. Rollback is application-first: return all instances to the prior code and gateway configuration; the added nullable columns may remain safely in place. Jobs already confirmed and queued continue under the existing worker. Before rollback, cancel or complete any `awaiting_confirmation` jobs so old code does not leave staged PHI indefinitely.
 
 Worker recovery and failed sends:
 
@@ -57,4 +72,4 @@ For host-side validation of the durable remap deployment mount and worker startu
 scripts/test-dicom-remap-compose-smoke.sh
 ```
 
-The script creates a unique disposable Compose project with an internal PostgreSQL container, synthetic secrets, nonproduction ports, and the lightweight restore-validation image target. It waits for PostgreSQL and `/api/health`, verifies migration 119 and processing-worker startup, checks `/app/storage/dicom/remap-staging` is on the project `rispro-storage` volume, and confirms a non-PHI sentinel survives application restart and recreation. It also checks graceful shutdown and removes the temporary `.env`, containers, network, and volumes with a shell trap. It never connects to Orthanc, PACS, or production services.
+The script creates a unique disposable Compose project with an internal PostgreSQL container, synthetic secrets, nonproduction ports, and the lightweight restore-validation image target. It waits for PostgreSQL and `/api/health`, verifies DICOM remap migrations 119 and 146 plus processing-worker startup, checks `/app/storage/dicom/remap-staging` is on the project `rispro-storage` volume, and confirms a non-PHI sentinel survives application restart and recreation. It also checks graceful shutdown and removes the temporary `.env`, containers, network, and volumes with a shell trap. It never connects to Orthanc, PACS, or production services.

@@ -23,6 +23,17 @@ type RemapProcessingStage =
   | "failed";
 
 type PatientLookupMode = "filtered_appointments" | "all_appointments" | "all_patients";
+type SecureStagingStatus = "idle" | "uploading" | "awaiting_confirmation" | "failed";
+
+interface ProvisionalSourceIdentity {
+  studyInstanceUid: string;
+  patientId: string;
+  patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
+  modality: string;
+  studyDate: string;
+}
 
 function readActiveRemapJobId(details: unknown): number | null {
   if (!details || typeof details !== "object") return null;
@@ -62,6 +73,19 @@ interface RemapJob {
   processing_last_heartbeat_at?: string | null;
   processing_error_code?: string | null;
   processing_error_details?: unknown;
+  staged_manifest_version?: number | null;
+  staged_total_bytes?: number | null;
+  selected_study_instance_uid?: string | null;
+  provisional_source_identity?: ProvisionalSourceIdentity | null;
+}
+
+function isAwaitingStagedJob(job: RemapJob | null | undefined): boolean {
+  return Boolean(
+    job
+    && job.status === "awaiting_confirmation"
+    && Number(job.staged_manifest_version) === 2
+    && job.provisional_source_identity
+  );
 }
 
 interface RemapComparison {
@@ -199,11 +223,22 @@ async function uploadMultipartWithProgress(
   timeoutMs: number,
   onProgress: (loaded: number, total: number) => void,
   onUploadComplete?: () => void,
+  signal?: AbortSignal,
 ): Promise<UploadMultipartResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const timer = window.setTimeout(() => xhr.abort(), timeoutMs);
+    let timedOut = false;
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      xhr.abort();
+    }, timeoutMs);
     let uploadComplete = false;
+    const abortFromSignal = () => xhr.abort();
+    signal?.addEventListener("abort", abortFromSignal, { once: true });
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromSignal);
+    };
     const markUploadComplete = () => {
       if (uploadComplete) return;
       uploadComplete = true;
@@ -227,7 +262,7 @@ async function uploadMultipartWithProgress(
     xhr.withCredentials = true;
     xhr.onreadystatechange = () => {
       if (xhr.readyState !== XMLHttpRequest.DONE) return;
-      window.clearTimeout(timer);
+      cleanup();
       const raw = xhr.responseText || "{}";
       const body = (() => {
         try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
@@ -245,12 +280,15 @@ async function uploadMultipartWithProgress(
       reject(new ApiError(message, xhr.status, (body?.error as { details?: unknown } | undefined)?.details ?? body?.details));
     };
     xhr.onerror = () => {
-      window.clearTimeout(timer);
+      cleanup();
       reject(new ApiError("Network error during upload.", 0));
     };
     xhr.onabort = () => {
-      window.clearTimeout(timer);
-      reject(new ApiError(`Request timed out after ${Math.round(timeoutMs / 1000)}s.`, 408));
+      cleanup();
+      reject(new ApiError(
+        timedOut ? `Request timed out after ${Math.round(timeoutMs / 1000)}s.` : "Secure source staging was cancelled.",
+        timedOut ? 408 : 499
+      ));
     };
     xhr.send(formData);
   });
@@ -283,6 +321,7 @@ export default function PacsRemapPage() {
   const [destinationCheckedForResend, setDestinationCheckedForResend] = useState(false);
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
+  const [secureStagingStatus, setSecureStagingStatus] = useState<SecureStagingStatus>("idle");
   const [uiStep, setUiStep] = useState<RemapWizardUiStep>("source");
   const [processingStage, setProcessingStage] = useState<RemapProcessingStage>("idle");
   const [fileInputVersion, setFileInputVersion] = useState(0);
@@ -291,12 +330,13 @@ export default function PacsRemapPage() {
   const mainHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const focusHeadingAfterNavigationRef = useRef(false);
   const fullScanControllerRef = useRef<AbortController | null>(null);
+  const stagingUploadControllerRef = useRef<AbortController | null>(null);
   const scanRunIdRef = useRef(0);
   const completedFullScanRunIdRef = useRef<number | null>(null);
 
-  const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
+  const selectedScannedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
   const provisionalIdentityIsConsistent = useMemo(() => {
-    const entries = scanResult?.studies[0]?.files || [];
+    const entries = selectedScannedStudy?.files || [];
     const values = (key: "patientId" | "patientName" | "patientBirthDate" | "patientSex") => new Set(entries
       .map((entry) => String(entry[key] || "").trim().replace(/\s+/g, " "))
       .filter(Boolean)
@@ -305,7 +345,7 @@ export default function PacsRemapPage() {
         : key === "patientSex" ? value.toUpperCase() : value));
     return ["patientId", "patientName", "patientBirthDate", "patientSex"]
       .every((key) => values(key as "patientId" | "patientName" | "patientBirthDate" | "patientSex").size <= 1);
-  }, [scanResult]);
+  }, [selectedScannedStudy]);
 
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
@@ -387,7 +427,11 @@ export default function PacsRemapPage() {
   const refetchActiveJob = activeJobQuery.refetch;
   const startupActiveJob = jobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
   const effectiveJobId = jobId ?? startupActiveJob?.id ?? null;
-  const effectiveUiStep: RemapWizardUiStep = startupActiveJob ? "processing" : uiStep;
+  const effectiveUiStep: RemapWizardUiStep = startupActiveJob
+    ? isAwaitingStagedJob(startupActiveJob)
+      ? (uiStep === "source" || uiStep === "processing" ? "patient" : uiStep)
+      : "processing"
+    : uiStep;
   const effectiveResumedJobMessage = startupActiveJob
     ? t(language, "pacs.remap.existingJobResumed", { jobId: startupActiveJob.id })
     : resumedJobMessage;
@@ -422,8 +466,14 @@ export default function PacsRemapPage() {
     fullScanControllerRef.current = null;
   };
 
+  const cancelActiveStagingUpload = (): void => {
+    stagingUploadControllerRef.current?.abort();
+    stagingUploadControllerRef.current = null;
+  };
+
   const clearAbandonedDraft = useCallback((): void => {
     cancelActiveFullScan();
+    cancelActiveStagingUpload();
     setFiles([]);
     setScanResult(null);
     setSelectedStudyInstanceUid("");
@@ -437,6 +487,7 @@ export default function PacsRemapPage() {
     setConfirmChecked(false);
     setUploadLoaded(0);
     setUploadTotal(0);
+    setSecureStagingStatus("idle");
     setFileInputVersion((value) => value + 1);
   }, []);
 
@@ -444,6 +495,7 @@ export default function PacsRemapPage() {
     if (!Number.isSafeInteger(activeJobId) || activeJobId <= 0) return;
     if (reason === "conflict") clearAbandonedDraft();
     cancelActiveFullScan();
+    cancelActiveStagingUpload();
     focusHeadingAfterNavigationRef.current = true;
     setJobId(activeJobId);
     setUiStep("processing");
@@ -509,6 +561,7 @@ export default function PacsRemapPage() {
     onSuccess: (result, _sourceFiles, context) => {
       if (context?.runId !== scanRunIdRef.current || completedFullScanRunIdRef.current === context.runId) return;
       setScanResult(result);
+      if (result.studies.length === 1) setSelectedStudyInstanceUid(result.studies[0]!.studyInstanceUid);
       setPreviewWarning("");
     },
     onError: (_error: unknown, _sourceFiles, context) => {
@@ -517,21 +570,89 @@ export default function PacsRemapPage() {
     },
   });
 
-  const canSkipCompleteScan = completeScanStatus === "running"
+  const canStartFastStaging = completeScanStatus === "running"
     && scanResult?.previewOnly === true
-    && scanResult.studies.length === 1
     && scanResult.parsedDicomFileCount > 0
-    && scanResult.unparsedCount === 0
-    && Boolean(scanResult.studies[0]?.studyInstanceUid.trim())
+    && Boolean(selectedScannedStudy?.studyInstanceUid.trim())
     && provisionalIdentityIsConsistent;
 
-  const skipCompleteScan = (): void => {
-    if (!canSkipCompleteScan || !skipAcknowledged) return;
-    cancelActiveFullScan();
-    setCompleteScanStatus("skipped");
-    setSelectedStudyInstanceUid(scanResult?.studies[0]?.studyInstanceUid || "");
-    setUiStep("source");
-  };
+  const stageSourceMutation = useMutation({
+    onMutate: () => {
+      cancelActiveFullScan();
+      focusHeadingAfterNavigationRef.current = true;
+      setCompleteScanStatus("skipped");
+      setSecureStagingStatus("uploading");
+      setUploadLoaded(0);
+      setUploadTotal(files.filter(isLikelyDicomCandidate).reduce((sum, file) => sum + file.size, 0));
+      setErrorMessage("");
+      setErrorDetails("");
+      setUiStep("patient");
+    },
+    mutationFn: async ({
+      study,
+      uploadFiles,
+      acknowledged,
+    }: {
+      study: DicomStudyScanResult["studies"][number];
+      uploadFiles: File[];
+      acknowledged: boolean;
+    }) => {
+      if (!acknowledged || !study.studyInstanceUid.trim()) {
+        throw new Error("Confirm a valid preliminary source study before secure staging.");
+      }
+      if (!uploadFiles.length) throw new Error("No uploadable DICOM-like files were selected.");
+      const provisionalSourceIdentity: ProvisionalSourceIdentity = {
+        studyInstanceUid: study.studyInstanceUid,
+        patientId: study.patientId || "",
+        patientName: study.patientName || "",
+        patientBirthDate: study.patientBirthDate || "",
+        patientSex: study.patientSex || "",
+        modality: study.modality || "",
+        studyDate: study.studyDate || "",
+      };
+      const formData = new FormData();
+      uploadFiles.forEach((file) => formData.append("files", file, file.name));
+      formData.append("selectedStudyInstanceUID", study.studyInstanceUid);
+      formData.append("provisionalSourceIdentity", JSON.stringify(provisionalSourceIdentity));
+      formData.append("confirmSource", "true");
+      const controller = new AbortController();
+      stagingUploadControllerRef.current = controller;
+      try {
+        return await uploadMultipartWithProgress(
+          "/pacs/remap/jobs/stage-multipart",
+          formData,
+          900_000,
+          (loaded, total) => {
+            setUploadLoaded(loaded);
+            setUploadTotal(total || uploadFiles.reduce((sum, file) => sum + file.size, 0));
+          },
+          undefined,
+          controller.signal
+        );
+      } finally {
+        if (stagingUploadControllerRef.current === controller) stagingUploadControllerRef.current = null;
+      }
+    },
+    onSuccess: (uploadResult) => {
+      setJobId(uploadResult.job.id);
+      setSecureStagingStatus("awaiting_confirmation");
+      setProcessingStage("idle");
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", uploadResult.job.id] });
+    },
+    onError: (error: unknown) => {
+      if (error instanceof ApiError && error.status === 499) return;
+      const activeJobId = error instanceof ApiError && error.status === 409 ? readActiveRemapJobId(error.details) : null;
+      if (activeJobId) {
+        attachToExistingRemapJob(activeJobId, "conflict");
+        return;
+      }
+      setSecureStagingStatus("failed");
+      setErrorMessage(error instanceof Error ? error.message : "Secure source staging failed.");
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
+    },
+  });
 
   const processMutation = useMutation({
     onMutate: () => {
@@ -604,6 +725,44 @@ export default function PacsRemapPage() {
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+  });
+
+  const confirmStagedMutation = useMutation({
+    mutationFn: async () => {
+      if (!effectiveJobId) throw new Error("Secure staging job is not available.");
+      if (!selectedPatientId || !effectiveSelectedDestinationKey) throw new Error("Patient and destination are required.");
+      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${effectiveJobId}/confirm-staged`, {
+        method: "POST",
+        body: JSON.stringify({
+          selectedStudyInstanceUID: selectedStudyInstanceUid,
+          risproPatientId: selectedPatientId,
+          destinationPacsKey: effectiveSelectedDestinationKey,
+          confirm: true,
+        }),
+      });
+    },
+    onMutate: () => {
+      focusHeadingAfterNavigationRef.current = true;
+      setUiStep("processing");
+      setProcessingStage("queued");
+      setErrorMessage("");
+      setErrorDetails("");
+      setSuccessMessage("");
+    },
+    onSuccess: (result) => {
+      setJobId(result.job.id);
+      setSecureStagingStatus("awaiting_confirmation");
+      setProcessingStage("queued");
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", result.job.id] });
+    },
+    onError: (error: unknown) => {
+      setUiStep("review");
+      setProcessingStage("idle");
+      setErrorMessage(error instanceof Error ? error.message : "Staged confirmation failed.");
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
     },
   });
 
@@ -684,6 +843,27 @@ export default function PacsRemapPage() {
   });
 
   const currentJob = (currentJobQuery.data?.job || startupActiveJob || null) as RemapJob;
+  const stagedProvisionalIdentity = isAwaitingStagedJob(currentJob) ? currentJob.provisional_source_identity || null : null;
+  const stagedProvisionalStudyUid = stagedProvisionalIdentity?.studyInstanceUid || "";
+  const selectedStudy = selectedScannedStudy || (stagedProvisionalIdentity
+    ? {
+      studyInstanceUid: stagedProvisionalIdentity.studyInstanceUid,
+      studyDescription: "",
+      studyDate: stagedProvisionalIdentity.studyDate,
+      modality: stagedProvisionalIdentity.modality,
+      patientId: stagedProvisionalIdentity.patientId,
+      patientName: stagedProvisionalIdentity.patientName,
+      patientBirthDate: stagedProvisionalIdentity.patientBirthDate,
+      patientSex: stagedProvisionalIdentity.patientSex,
+      seriesCount: 0,
+      fileCount: Number(currentJob?.staged_file_count || 0),
+      totalBytes: Number(currentJob?.staged_total_bytes || 0),
+      files: [],
+    }
+    : null);
+  const fastStagedWorkflow = secureStagingStatus !== "idle"
+    || isAwaitingStagedJob(currentJob)
+    || Number(currentJob?.staged_manifest_version) === 2;
   const directoryPatients = patientQuery.data?.patients || [];
   const appointmentPatientOptions = useMemo(() => {
     const combinedAppointments = [
@@ -706,16 +886,23 @@ export default function PacsRemapPage() {
       : selectedDirectoryPatient
         ? formatDirectoryPatientName(language, selectedDirectoryPatient)
         : null;
-  const canContinueStudy = completeScanStatus === "skipped"
-    ? Boolean(selectedStudy && skipAcknowledged)
+  const stagingCompleted = secureStagingStatus === "awaiting_confirmation" || isAwaitingStagedJob(currentJob);
+  const canContinueStudy = fastStagedWorkflow
+    ? Boolean(selectedStudy)
     : completeScanStatus === "complete" && Boolean(selectedStudy);
   const canContinuePatient = !!selectedPatientId
     && !replacementPreviewQuery.isLoading
     && !replacementPreviewQuery.isError
     && !!replacementPreviewQuery.data;
   const canContinueDestination = !!effectiveSelectedDestinationKey;
-  const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
-  const skippedScanMode = completeScanStatus === "skipped";
+  const canSubmit = canContinueStudy
+    && canContinuePatient
+    && canContinueDestination
+    && confirmChecked
+    && (!fastStagedWorkflow || stagingCompleted)
+    && !processMutation.isPending
+    && !confirmStagedMutation.isPending;
+  const skippedScanMode = fastStagedWorkflow;
   const checkingForActiveJob = activeJobQuery.isPending && effectiveJobId == null;
   const reviewFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : selectedStudy?.files || [];
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
@@ -747,6 +934,13 @@ export default function PacsRemapPage() {
   };
 
   useEffect(() => {
+    if (!stagedProvisionalStudyUid) return;
+    setSelectedStudyInstanceUid(stagedProvisionalStudyUid);
+    setSecureStagingStatus("awaiting_confirmation");
+    if (uiStep === "source" || uiStep === "processing") setUiStep("patient");
+  }, [stagedProvisionalStudyUid, uiStep]);
+
+  useEffect(() => {
     if (!jobId || !currentJobQuery.isError) return;
     let active = true;
     void refetchActiveJob().then((result) => {
@@ -772,12 +966,19 @@ export default function PacsRemapPage() {
     scanRunIdRef.current += 1;
     fullScanControllerRef.current?.abort();
     fullScanControllerRef.current = null;
+    stagingUploadControllerRef.current?.abort();
+    stagingUploadControllerRef.current = null;
   }, []);
 
   const visibleErrorMessage =
     isTerminalSuccess
       ? ""
-      : currentJob?.processing_error_code === "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED" || currentJob?.processing_error_code === "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT"
+      : [
+        "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED",
+        "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT",
+        "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH",
+        "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND",
+      ].includes(currentJob?.processing_error_code || "")
         ? t(language, "pacs.remap.serverVerificationFailed")
         : errorMessage || currentJob?.error_message || "";
   const visibleErrorDetails = errorDetails || (currentJob?.processing_error_details ? formatTechnicalDetails(currentJob.processing_error_details) : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
@@ -788,6 +989,21 @@ export default function PacsRemapPage() {
 
   const resetWorkflow = (): void => {
     cancelActiveFullScan();
+    cancelActiveStagingUpload();
+    const awaitingJobId = isAwaitingStagedJob(currentJob) || secureStagingStatus === "awaiting_confirmation"
+      ? effectiveJobId
+      : null;
+    if (awaitingJobId) {
+      void api(`/pacs/remap/jobs/${awaitingJobId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Operator reset before final confirmation." }),
+      }).then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
+        void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+      }).catch((error: unknown) => {
+        setErrorMessage(error instanceof Error ? error.message : "Pending secure staging could not be cancelled.");
+      });
+    }
     setFiles([]);
     setScanResult(null);
     setSelectedStudyInstanceUid("");
@@ -801,6 +1017,7 @@ export default function PacsRemapPage() {
     setConfirmChecked(false);
     setUploadLoaded(0);
     setUploadTotal(0);
+    setSecureStagingStatus("idle");
     setJobId(null);
     setErrorMessage("");
     setErrorDetails("");
@@ -813,7 +1030,9 @@ export default function PacsRemapPage() {
     focusHeadingAfterNavigationRef.current = false;
     setFileInputVersion((v) => v + 1);
     scanMutation.reset();
+    stageSourceMutation.reset();
     processMutation.reset();
+    confirmStagedMutation.reset();
   };
 
   const stepLabels = language === "ar"
@@ -874,6 +1093,36 @@ export default function PacsRemapPage() {
           {skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
         </section>
 
+        {fastStagedWorkflow && effectiveUiStep !== "processing" && (
+          <section className="rounded-2xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-950" aria-live="polite">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong>{language === "ar" ? "رفع المصدر الآمن" : "Secure source staging"}</strong>
+              <span>
+                {stagingCompleted
+                  ? (language === "ar" ? "اكتمل — في انتظار التأكيد النهائي" : "Complete — awaiting final confirmation")
+                  : secureStagingStatus === "failed"
+                    ? (language === "ar" ? "فشل" : "Failed")
+                    : `${uploadPercent}%`}
+              </span>
+            </div>
+            <p className="mt-1">
+              {stagingCompleted
+                ? (language === "ar" ? "لن تبدأ المعالجة أو الإرسال قبل التأكيد النهائي." : "Backend validation, rewriting and PACS sending will not start before final confirmation.")
+                : (language === "ar" ? "يمكنك متابعة اختيار المريض والوجهة أثناء الرفع." : "Patient and destination selection remain available while the source uploads.")}
+            </p>
+            {effectiveResumedJobMessage && <p className="mt-1 font-semibold text-teal-800">{effectiveResumedJobMessage}</p>}
+            {stagedProvisionalIdentity && (
+              <p className="mt-1">
+                {language === "ar" ? "المصدر" : "Source"}: <strong>{stagedProvisionalIdentity.patientName || stagedProvisionalIdentity.patientId || "—"}</strong>
+                {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
+              </p>
+            )}
+            <button type="button" onClick={resetWorkflow} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
+              {language === "ar" ? "إلغاء الرفع الآمن وإعادة البدء" : "Cancel secure staging and reset"}
+            </button>
+          </section>
+        )}
+
         <div {...activeCardProps}>
           {effectiveUiStep === "source" && <>
             {checkingForActiveJob && (
@@ -912,6 +1161,7 @@ export default function PacsRemapPage() {
                     if (checkingForActiveJob) return;
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
+                    cancelActiveStagingUpload();
                     setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
@@ -921,6 +1171,7 @@ export default function PacsRemapPage() {
                     setScanProgress(null);
                     setSkipAcknowledged(false);
                     setConfirmChecked(false);
+                    setSecureStagingStatus("idle");
                     setUiStep("source");
                     if (selectedFiles.length > 0) scanMutation.mutate(selectedFiles);
                   }}
@@ -943,6 +1194,7 @@ export default function PacsRemapPage() {
                     if (checkingForActiveJob) return;
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
+                    cancelActiveStagingUpload();
                     setFiles(selectedFiles);
                     setScanResult(null);
                     setSelectedStudyInstanceUid("");
@@ -952,6 +1204,7 @@ export default function PacsRemapPage() {
                     setScanProgress(null);
                     setSkipAcknowledged(false);
                     setConfirmChecked(false);
+                    setSecureStagingStatus("idle");
                     setUiStep("source");
                     if (selectedFiles.length > 0) scanMutation.mutate(selectedFiles);
                   }}
@@ -1010,15 +1263,43 @@ export default function PacsRemapPage() {
               )}
               {scanResult.previewOnly && completeScanStatus === "running" && (
                 <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <p className="text-sm font-semibold">{language === "ar" ? "تحقق سريع على الخادم" : "Fast server verification"}</p>
                   <p>{t(language, "pacs.remap.preliminaryScanNotice")}</p>
-                  {canSkipCompleteScan && (
-                    <>
+                  {canStartFastStaging && selectedScannedStudy && (
+                     <>
+                      <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-white/80 p-3 sm:grid-cols-4">
+                        <div><span className="block text-slate-500">{t(language, "pacs.remap.studyPatientName")}</span><strong>{selectedScannedStudy.patientName || "—"}</strong></div>
+                        <div><span className="block text-slate-500">{t(language, "pacs.remap.studyPatientId")}</span><strong>{selectedScannedStudy.patientId || "—"}</strong></div>
+                        <div><span className="block text-slate-500">{language === "ar" ? "تاريخ الميلاد" : "Date of birth"}</span><strong>{selectedScannedStudy.patientBirthDate || "—"}</strong></div>
+                        <div><span className="block text-slate-500">{language === "ar" ? "الجنس" : "Sex"}</span><strong>{selectedScannedStudy.patientSex || "—"}</strong></div>
+                        <div><span className="block text-slate-500">{t(language, "pacs.remap.studyModality")}</span><strong>{selectedScannedStudy.modality || "—"}</strong></div>
+                        <div><span className="block text-slate-500">{t(language, "pacs.remap.studyDate")}</span><strong>{selectedScannedStudy.studyDate || "—"}</strong></div>
+                        <div className="col-span-2"><span className="block text-slate-500">Study Instance UID</span><strong className="break-all font-mono text-[11px]">{selectedScannedStudy.studyInstanceUid}</strong></div>
+                      </div>
+                      <p className="font-semibold">
+                        {language === "ar"
+                          ? "سيتم إعادة ربط وإرسال الملفات التابعة لمعرّف Study Instance UID هذا فقط. لن يتم إرسال الدراسات الأخرى الموجودة على القرص."
+                          : "Only this Study Instance UID will be remapped and sent. Other studies on the CD will not be sent."}
+                      </p>
                       <label className="flex items-start gap-2">
                         <input type="checkbox" checked={skipAcknowledged} onChange={(event) => setSkipAcknowledged(event.target.checked)} />
-                        <span>{t(language, "pacs.remap.skipCompleteScanAcknowledgement")}</span>
+                        <span>
+                          {language === "ar"
+                            ? "أؤكد أن بطاقة الدراسة الأولية هذه هي المصدر المقصود وأريد بدء الرفع الآمن الآن."
+                            : "I confirm this preliminary source study and want to begin secure staging now."}
+                        </span>
                       </label>
-                      <button type="button" onClick={skipCompleteScan} disabled={!skipAcknowledged} className="btn-secondary px-3 py-2 rounded-lg disabled:opacity-50">
-                        {t(language, "pacs.remap.skipCompleteScan")}
+                      <button
+                        type="button"
+                        onClick={() => stageSourceMutation.mutate({
+                          study: selectedScannedStudy,
+                          uploadFiles: files.filter(isLikelyDicomCandidate),
+                          acknowledged: skipAcknowledged,
+                        })}
+                        disabled={!skipAcknowledged || stageSourceMutation.isPending}
+                        className="btn-primary px-3 py-2 rounded-lg disabled:opacity-50"
+                      >
+                        {language === "ar" ? "تأكيد هذه الدراسة وبدء الرفع الآمن" : "Confirm this source study and begin secure staging"}
                       </button>
                     </>
                   )}
@@ -1027,7 +1308,11 @@ export default function PacsRemapPage() {
               {completeScanStatus === "skipped" && (
                 <div className="space-y-1 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900" role="status">
                   <p className="font-semibold">{t(language, "pacs.remap.folderNotFullyScanned")}</p>
-                  <p>{t(language, "pacs.remap.skipCompleteScanUploadWarning")}</p>
+                  <p>
+                    {secureStagingStatus === "uploading"
+                      ? (language === "ar" ? "يجري رفع المصدر الآمن. يمكنك اختيار المريض والوجهة أثناء الرفع." : "Secure source staging is in progress. You can select the patient and destination while it uploads.")
+                      : (language === "ar" ? "اكتمل الرفع الآمن وتنتظر المهمة التأكيد النهائي." : "Secure staging is complete and the job is awaiting final confirmation.")}
+                  </p>
                 </div>
               )}
               {scanResult.studies.length === 0 && (
@@ -1084,7 +1369,7 @@ export default function PacsRemapPage() {
             </div>
           </>}
 
-          {effectiveUiStep === "patient" && scanResult && (
+          {effectiveUiStep === "patient" && selectedStudy && (
             <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[1]}</h3>
@@ -1252,7 +1537,7 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {effectiveUiStep === "destination" && scanResult && (
+          {effectiveUiStep === "destination" && selectedStudy && (
             <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[2]}</h3>
@@ -1279,7 +1564,7 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {effectiveUiStep === "review" && scanResult && (
+          {effectiveUiStep === "review" && selectedStudy && (
             <div className="space-y-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[3]}</h3>
@@ -1299,28 +1584,28 @@ export default function PacsRemapPage() {
                   <tbody>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "المريض" : "Patient"}</th>
-                      <td className="px-3 py-2 font-mono">{skippedScanMode ? t(language, "pacs.remap.folderNotFullyScanned") : selectedStudy?.patientName || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{selectedStudy?.patientName || "—"}</td>
                       <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientName || selectedPatientLabel || "—"}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">PatientID</th>
-                      <td className="px-3 py-2 font-mono">{skippedScanMode ? t(language, "pacs.remap.folderNotFullyScanned") : selectedStudy?.patientId || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{selectedStudy?.patientId || "—"}</td>
                       <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientId || "—"}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "الجنس" : "Sex"}</th>
-                      <td className="px-3 py-2 font-mono">—</td>
+                      <td className="px-3 py-2 font-mono">{selectedStudy?.patientSex || "—"}</td>
                       <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientSex || "—"}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "تاريخ الميلاد" : "Birth date"}</th>
-                      <td className="px-3 py-2 font-mono">—</td>
+                      <td className="px-3 py-2 font-mono">{selectedStudy?.patientBirthDate || "—"}</td>
                       <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientBirthDate || "—"}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.studyLabel")}</th>
                       <td className="px-3 py-2">{skippedScanMode ? selectedStudyInstanceUid : `${selectedStudy?.studyDescription || "—"} • ${selectedStudy?.studyDate || "—"} • ${selectedStudy?.modality || "—"}`}</td>
-                      <td className="px-3 py-2">{skippedScanMode ? t(language, "pacs.remap.backendValidatedOneStudy") : (language === "ar" ? "نفس الدراسة المختارة" : "Selected study only")}</td>
+                      <td className="px-3 py-2">{skippedScanMode ? (language === "ar" ? "سيتحقق الخادم من هذا المعرّف فقط ويستبعد الدراسات الأخرى." : "The server will verify this exact UID and exclude other studies.") : (language === "ar" ? "نفس الدراسة المختارة" : "Selected study only")}</td>
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.destinationLabel")}</th>
@@ -1331,7 +1616,11 @@ export default function PacsRemapPage() {
                 </table>
               </div>
               <p className="text-xs text-amber-700">
-                {skippedScanMode ? t(language, "pacs.remap.skipCompleteScanUploadWarning") : t(language, "pacs.remap.selectedStudyOnly")}
+                {skippedScanMode
+                  ? (stagingCompleted
+                    ? (language === "ar" ? "اكتمل الرفع الآمن. سيعزل الخادم الدراسة المختارة ويتحقق منها بعد التأكيد النهائي." : "Secure staging is complete. The server will isolate and validate the selected study after final confirmation.")
+                    : (language === "ar" ? "انتظر اكتمال الرفع الآمن قبل التأكيد النهائي." : "Wait for secure source staging to complete before final confirmation."))
+                  : t(language, "pacs.remap.selectedStudyOnly")}
               </p>
               <details className="rounded-2xl border border-slate-200 bg-white text-xs">
                 <summary className="flex cursor-pointer list-none flex-col gap-1 border-b border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1339,7 +1628,7 @@ export default function PacsRemapPage() {
                     <h4 className="font-semibold">{language === "ar" ? "محتويات الدراسة من القرص" : "CD study contents"}</h4>
                     <p className="text-slate-500">
                       {skippedScanMode
-                        ? t(language, "pacs.remap.skipCompleteScanFilesNote")
+                        ? (language === "ar" ? "تمت قراءة هذه الملفات من المصدر مرة واحدة للرفع الآمن. لن يعيد التأكيد النهائي رفعها." : "These source files are read once for secure staging. Final confirmation will not upload them again.")
                         : language === "ar"
                         ? "هذه هي ملفات الدراسة التي سيتم رفعها بعد التأكيد."
                         : "These are the selected study files that will be uploaded after confirmation."}
@@ -1399,8 +1688,15 @@ export default function PacsRemapPage() {
                 </label>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <button type="button" onClick={() => navigateTo("destination")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
-                  <button type="button" onClick={() => processMutation.mutate()} disabled={!canSubmit} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">
-                    {t(language, "pacs.remap.uploadSelectedStudy")}
+                  <button
+                    type="button"
+                    onClick={() => fastStagedWorkflow ? confirmStagedMutation.mutate() : processMutation.mutate()}
+                    disabled={!canSubmit}
+                    className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto"
+                  >
+                    {fastStagedWorkflow
+                      ? (language === "ar" ? "تأكيد المريض والوجهة وبدء إعادة الربط" : "Confirm patient and destination; begin remap")
+                      : t(language, "pacs.remap.uploadSelectedStudy")}
                   </button>
                 </div>
               </div>

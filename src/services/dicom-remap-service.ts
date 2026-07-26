@@ -20,6 +20,8 @@ type DicomRemapQuery = typeof pool.query;
 type DicomRemapAuditLogger = typeof logAuditEntry;
 type OrthancFetch = typeof orthancFetch;
 type RemapSleep = (ms: number) => Promise<void>;
+type DicomRemapPatientLoader = typeof getPatientById;
+type DicomRemapModalityLister = typeof listOrthancRemoteModalities;
 const { DicomMessage, DicomMetaDictionary, datasetToBuffer } = dcmjs.data;
 
 export type DicomRemapJobStatus =
@@ -116,10 +118,32 @@ export interface DicomRemapJobRow {
   processing_error_code?: string | null;
   processing_error_details?: unknown;
   staging_cleanup_completed_at?: string | null;
+  selected_study_instance_uid?: string | null;
+  provisional_source_identity?: DicomRemapProvisionalSourceIdentity | null;
+  processing_selection_counts?: DicomRemapSelectionCounts | null;
   error_message: string | null;
   cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DicomRemapProvisionalSourceIdentity {
+  studyInstanceUid: string;
+  patientId: string;
+  patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
+  modality: string;
+  studyDate: string;
+}
+
+export interface DicomRemapSelectionCounts {
+  totalStagedFiles: number;
+  validDicomFiles: number;
+  selectedStudyFiles: number;
+  excludedOtherStudyFiles: number;
+  excludedStudyCount: number;
+  skippedOrUnparsedFiles: number;
 }
 
 interface OrthancFetchResult {
@@ -182,6 +206,8 @@ interface DicomRemapPreviewStudySummary {
   modality: string;
   patientId: string;
   patientName: string;
+  patientBirthDate: string;
+  patientSex: string;
   seriesCount: number;
   fileCount: number;
   totalBytes: number;
@@ -217,7 +243,8 @@ const DICOM_REMAP_UPLOAD_CONCURRENCY = 2;
 const DICOM_REMAP_TEMP_PREFIX = "rispro-dicom-remap-";
 export const DICOM_REMAP_PREVIEW_HEADER_BYTES = 512 * 1024;
 const DICOM_REMAP_STAGING_MANIFEST_VERSION = 1;
-const DICOM_REMAP_UID_PLAN_VERSION = 1;
+const DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION = 2;
+const DICOM_REMAP_UID_PLAN_VERSION = 2;
 function readDicomRemapPositiveLimit(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -232,6 +259,8 @@ let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
 let sleepForDicomRemap: RemapSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let getPatientForDicomRemap: DicomRemapPatientLoader = getPatientById;
+let listModalitiesForDicomRemap: DicomRemapModalityLister = listOrthancRemoteModalities;
 let orthancBulkModifyAvailableForTests: boolean | null = null;
 let afterRemappedInstanceUploadForTests: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null = null;
 
@@ -378,11 +407,48 @@ function normalizeDicomUid(value: string): string {
   return String(value || "").replace(/\0/g, "").trim();
 }
 
+function normalizeSelectedStudyInstanceUid(value: unknown): string {
+  const clean = normalizeDicomUid(String(value || ""));
+  if (!clean || clean.length > 64 || !/^[0-9]+(?:\.[0-9]+)+$/.test(clean)) {
+    throw new HttpError(400, "A valid selected Study Instance UID is required.");
+  }
+  return clean;
+}
+
 function normalizeDicomPatientName(value: string): string {
   const clean = String(value || "").trim();
   if (!clean) return "";
   if (clean.includes("^")) return clean;
   return clean.replace(/\s+/g, "^");
+}
+
+function normalizeProvisionalSourceIdentity(
+  value: unknown,
+  selectedStudyInstanceUid: string
+): DicomRemapProvisionalSourceIdentity {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const read = (key: keyof DicomRemapProvisionalSourceIdentity, maxLength = 256): string => {
+    const clean = String(record[key] || "").replace(/\0/g, "").trim();
+    if (clean.length > maxLength || DICOM_CONTROL_CHAR_PATTERN.test(clean)) {
+      throw new HttpError(400, "Provisional source identity is invalid.");
+    }
+    return clean;
+  };
+  const snapshotUid = normalizeSelectedStudyInstanceUid(record.studyInstanceUid);
+  if (snapshotUid !== selectedStudyInstanceUid) {
+    throw new HttpError(400, "Provisional source identity does not match the selected study.");
+  }
+  return {
+    studyInstanceUid: snapshotUid,
+    patientId: read("patientId"),
+    patientName: read("patientName"),
+    patientBirthDate: read("patientBirthDate", 32),
+    patientSex: read("patientSex", 16),
+    modality: read("modality", 64),
+    studyDate: read("studyDate", 32),
+  };
 }
 
 function readDicomStringValue(value: unknown): string {
@@ -2416,8 +2482,10 @@ export interface DicomRemapStagedManifestFile {
 
 interface DicomRemapStagingManifest {
   version: number;
-  selectedStudyInstanceUID: string | null;
-  uploadMode: "single_study_folder_unverified" | null;
+  selectedStudyInstanceUID?: string | null;
+  provisionalSelectedStudyInstanceUID?: string | null;
+  provisionalSourceIdentity?: DicomRemapProvisionalSourceIdentity | null;
+  uploadMode: "single_study_folder_unverified" | "staged_folder_selected_study" | null;
   fileCount: number;
   totalBytes: number;
   files: DicomRemapStagedManifestFile[];
@@ -2428,6 +2496,7 @@ interface PersistedDicomUidPlan {
   studyInstanceUid: string;
   seriesInstanceUidByOriginal: Record<string, string>;
   sopInstanceUidByFileId: Record<string, string>;
+  selectionCounts?: DicomRemapSelectionCounts;
 }
 
 function dicomRemapStagingRoot(): string {
@@ -2558,10 +2627,10 @@ export async function finalizeDicomRemapStagingJob({
   const totalBytes = files.reduce((total, file) => total + file.byteSize, 0);
   if (totalBytes <= 0 || totalBytes > DICOM_REMAP_STAGING_MAX_TOTAL_BYTES) throw new HttpError(413, "DICOM upload exceeds the configured size limit.");
 
-  const patient = await getPatientById(patientId);
+  const patient = await getPatientForDicomRemap(patientId);
   const replacement = formatReplacementFromPatient(patient);
   if (!replacement.patientId || !replacement.patientName) throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
-  const modalities = await listOrthancRemoteModalities();
+  const modalities = await listModalitiesForDicomRemap();
   if (!modalities.modalities.some((item) => item.key === destination)) throw new HttpError(400, "Selected PACS destination is not available.");
 
   const manifest: DicomRemapStagingManifest = {
@@ -2586,6 +2655,93 @@ export async function finalizeDicomRemapStagingJob({
   const job = result.rows[0];
   if (!job) throw new HttpError(409, "DICOM remap upload changed before staging completed.");
   await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_completed", oldValues: { status: "uploaded", processingStage: "staging" }, newValues: { status: "uploaded", processingStage: "queued", fileCount: manifest.fileCount, totalBytes: manifest.totalBytes }, changedByUserId: job.created_by_user_id });
+  return { job };
+}
+
+export async function finalizeDicomRemapAwaitingConfirmationStagingJob({
+  context,
+  files,
+  selectedStudyInstanceUID,
+  provisionalSourceIdentity,
+  confirmSource,
+}: {
+  context: DicomRemapStagingContext;
+  files: DicomRemapStagedManifestFile[];
+  selectedStudyInstanceUID: string | null;
+  provisionalSourceIdentity: unknown;
+  confirmSource: string | null;
+}): Promise<{ job: DicomRemapJobRow }> {
+  if (!validateExplicitConfirm(confirmSource)) {
+    throw new HttpError(400, "Explicit source-study confirmation is required.");
+  }
+  const selectedUid = normalizeSelectedStudyInstanceUid(selectedStudyInstanceUID);
+  const provisionalIdentity = normalizeProvisionalSourceIdentity(provisionalSourceIdentity, selectedUid);
+  if (!files.length) throw new HttpError(400, "At least one DICOM file is required.");
+  if (files.length > DICOM_REMAP_STAGING_MAX_FILES) {
+    throw new HttpError(413, "Too many files in DICOM upload.", { code: "DICOM_REMAP_STAGING_FILE_LIMIT" });
+  }
+  const totalBytes = files.reduce((total, file) => total + file.byteSize, 0);
+  if (totalBytes <= 0 || totalBytes > DICOM_REMAP_STAGING_MAX_TOTAL_BYTES) {
+    throw new HttpError(413, "DICOM upload exceeds the configured size limit.", { code: "DICOM_REMAP_STAGING_SIZE_LIMIT" });
+  }
+
+  const manifest: DicomRemapStagingManifest = {
+    version: DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION,
+    provisionalSelectedStudyInstanceUID: selectedUid,
+    provisionalSourceIdentity: provisionalIdentity,
+    uploadMode: "staged_folder_selected_study",
+    fileCount: files.length,
+    totalBytes,
+    files,
+  };
+  try {
+    await writePrivateJson(path.join(context.directory, "manifest.json"), manifest);
+  } catch (error) {
+    await failDicomRemapStagingJob(context.job.id, "DICOM_REMAP_STAGING_MANIFEST_FAILED");
+    throw error;
+  }
+
+  const result = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs
+        set status = 'awaiting_confirmation',
+            processing_stage = 'awaiting_confirmation',
+            staged_manifest_version = $2,
+            staged_file_count = $3,
+            staged_total_bytes = $4,
+            provisional_source_identity = $5::jsonb,
+            processing_error_code = null,
+            processing_error_details = null,
+            error_message = null,
+            updated_at = now()
+      where id = $1
+        and status = 'uploaded'
+        and processing_stage = 'staging'
+        and staged_storage_key = $6
+      returning *`,
+    [
+      context.job.id,
+      manifest.version,
+      manifest.fileCount,
+      manifest.totalBytes,
+      JSON.stringify(provisionalIdentity),
+      context.storageKey,
+    ]
+  );
+  const job = result.rows[0];
+  if (!job) throw new HttpError(409, "DICOM remap upload changed before staging completed.");
+  await logDicomRemapAuditEntry({
+    entityType: "dicom_remap_job",
+    entityId: job.id,
+    actionType: "dicom_remap_staging_awaiting_confirmation",
+    oldValues: { status: "uploaded", processingStage: "staging" },
+    newValues: {
+      status: "awaiting_confirmation",
+      processingStage: "awaiting_confirmation",
+      fileCount: manifest.fileCount,
+      totalBytes: manifest.totalBytes,
+    },
+    changedByUserId: job.created_by_user_id,
+  });
   return { job };
 }
 
@@ -2635,6 +2791,82 @@ export async function cleanupExpiredFailedDicomRemapStaging(retentionHours: numb
   return cleaned;
 }
 
+export async function cleanupExpiredAwaitingDicomRemapStaging(retentionHours: number, limit = 25): Promise<number> {
+  const safeHours = Math.max(1, Math.min(Math.floor(retentionHours), 24 * 365));
+  const safeLimit = Math.max(1, Math.min(limit, 100));
+  const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
+    `select *
+       from dicom_remap_jobs
+      where staged_storage_key is not null
+        and staging_cleanup_completed_at is null
+        and (
+          (status = 'awaiting_confirmation' and updated_at < now() - ($1::text || ' hours')::interval)
+          or status = 'cancelled'
+        )
+      order by updated_at asc
+      limit $2`,
+    [safeHours, safeLimit]
+  );
+  let cleaned = 0;
+  for (const candidate of rows) {
+    let job = candidate;
+    if (candidate.status === "awaiting_confirmation") {
+      const cancelled = await queryDicomRemapDb<DicomRemapJobRow>(
+        `update dicom_remap_jobs
+            set status = 'cancelled',
+                cancellation_reason = 'AWAITING_CONFIRMATION_EXPIRED',
+                processing_stage = 'cancelled',
+                updated_at = now()
+          where id = $1
+            and status = 'awaiting_confirmation'
+            and updated_at < now() - ($2::text || ' hours')::interval
+          returning *`,
+        [candidate.id, safeHours]
+      );
+      if (!cancelled.rows[0]) continue;
+      job = cancelled.rows[0];
+    }
+    try {
+      await cleanupDicomRemapStagingStorage(String(job.staged_storage_key));
+      const result = await queryDicomRemapDb<DicomRemapJobRow>(
+        `update dicom_remap_jobs
+            set staging_cleanup_completed_at = now(), updated_at = now()
+          where id = $1
+            and status = 'cancelled'
+            and staging_cleanup_completed_at is null
+          returning *`,
+        [job.id]
+      );
+      if (!result.rows[0]) continue;
+      cleaned += 1;
+      await logDicomRemapAuditEntry({
+        entityType: "dicom_remap_job",
+        entityId: job.id,
+        actionType: job.cancellation_reason === "AWAITING_CONFIRMATION_EXPIRED"
+          ? "dicom_remap_staging_expired"
+          : "dicom_remap_staging_cleaned",
+        oldValues: job.cancellation_reason === "AWAITING_CONFIRMATION_EXPIRED"
+          ? { status: "awaiting_confirmation" }
+          : { status: "cancelled" },
+        newValues: { status: "cancelled", retentionHours: safeHours },
+        changedByUserId: null,
+      });
+    } catch {
+      // A later worker tick retries cancelled rows whose private staging remains.
+    }
+  }
+  return cleaned;
+}
+
+export async function cleanupExpiredDicomRemapStaging(
+  failedRetentionHours: number,
+  awaitingConfirmationRetentionHours: number
+): Promise<number> {
+  const failed = await cleanupExpiredFailedDicomRemapStaging(failedRetentionHours);
+  const awaiting = await cleanupExpiredAwaitingDicomRemapStaging(awaitingConfirmationRetentionHours);
+  return failed + awaiting;
+}
+
 function processingErrorCode(error: unknown): string {
   if (error instanceof HttpError) {
     const code = String((error.details as { code?: unknown } | null)?.code || "");
@@ -2653,6 +2885,8 @@ function processingErrorMessage(code: string): string {
     DICOM_REMAP_MULTIPLE_STUDIES: "Uploaded files must belong to exactly one selected study.",
     DICOM_REMAP_MULTIPLE_STUDIES_DETECTED: "More than one DICOM study was found in the selected folder. Start again, allow the complete folder scan to finish, and select the required study.",
     DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT: "The selected folder contains conflicting source-patient identity information. No DICOM files were remapped or sent. Run the complete folder scan and select the required study.",
+    DICOM_REMAP_SELECTED_STUDY_NOT_FOUND: "The confirmed source study was not found in the securely staged files. No DICOM files were remapped or sent.",
+    DICOM_REMAP_SOURCE_IDENTITY_MISMATCH: "Server verification found that the source identity differs from the preliminary confirmation. No DICOM files were remapped or sent.",
     DICOM_REMAP_ORTHANC_UPLOAD_FAILED: "Orthanc could not ingest the remapped study.",
     DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT: "Orthanc reported a conflicting remapped instance.",
     DICOM_REMAP_ORTHANC_VERIFICATION_FAILED: "Orthanc could not verify the remapped study.",
@@ -2662,7 +2896,7 @@ function processingErrorMessage(code: string): string {
   return messages[code] || "DICOM remap processing failed.";
 }
 
-async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ manifest: DicomRemapStagingManifest; directory: string }> {
+async function readDicomRemapStagingManifestMetadata(job: DicomRemapJobRow): Promise<{ manifest: DicomRemapStagingManifest; directory: string }> {
   const storageKey = String(job.staged_storage_key || "").trim();
   if (!storageKey) throw new HttpError(409, "DICOM remap manifest is missing.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
   const directory = resolveDicomRemapStagingPath(storageKey);
@@ -2672,9 +2906,34 @@ async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ m
   } catch {
     throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
   }
-  if (manifest.version !== DICOM_REMAP_STAGING_MANIFEST_VERSION || !Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length !== Number(manifest.fileCount)) {
+  if (
+    ![DICOM_REMAP_STAGING_MANIFEST_VERSION, DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION].includes(Number(manifest.version))
+    || !Array.isArray(manifest.files)
+    || manifest.files.length === 0
+    || manifest.files.length !== Number(manifest.fileCount)
+    || Number(manifest.fileCount) !== Number(job.staged_file_count)
+    || Number(manifest.totalBytes) !== Number(job.staged_total_bytes)
+  ) {
     throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
   }
+  if (manifest.version === DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION) {
+    let selectedUid = "";
+    let identityUid = "";
+    try {
+      selectedUid = normalizeSelectedStudyInstanceUid(manifest.provisionalSelectedStudyInstanceUID);
+      identityUid = normalizeSelectedStudyInstanceUid(manifest.provisionalSourceIdentity?.studyInstanceUid);
+    } catch {
+      throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+    }
+    if (manifest.uploadMode !== "staged_folder_selected_study" || selectedUid !== identityUid) {
+      throw new HttpError(409, "DICOM remap manifest is invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+    }
+  }
+  return { manifest, directory };
+}
+
+async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ manifest: DicomRemapStagingManifest; directory: string }> {
+  const { manifest, directory } = await readDicomRemapStagingManifestMetadata(job);
   const seen = new Set<string>();
   let totalBytes = 0;
   for (const file of manifest.files) {
@@ -2691,7 +2950,7 @@ async function loadDicomRemapStagingManifest(job: DicomRemapJobRow): Promise<{ m
     if (digest !== file.sha256) throw new HttpError(409, "A staged DICOM file failed integrity validation.", { code: "DICOM_REMAP_STAGED_FILE_HASH_MISMATCH" });
     totalBytes += info.size;
   }
-  if (totalBytes !== Number(manifest.totalBytes) || totalBytes !== Number(job.staged_total_bytes)) throw new HttpError(409, "DICOM remap manifest totals are invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+  if (totalBytes !== Number(manifest.totalBytes)) throw new HttpError(409, "DICOM remap manifest totals are invalid.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
   return { manifest, directory };
 }
 
@@ -2718,17 +2977,46 @@ function normalizeSourceIdentityValue(value: string, field: "patientId" | "patie
   return collapsed;
 }
 
-async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest: DicomRemapStagingManifest; directory: string }): Promise<{ plan: PersistedDicomUidPlan; originalSummary: OrthancStudySummary; validFiles: DicomRemapStagedManifestFile[]; skippedFiles: number }> {
+async function readOrBuildDicomRemapUidPlan({
+  manifest,
+  directory,
+  selectedStudyInstanceUID,
+}: {
+  manifest: DicomRemapStagingManifest;
+  directory: string;
+  selectedStudyInstanceUID?: string | null;
+}): Promise<{
+  plan: PersistedDicomUidPlan;
+  originalSummary: OrthancStudySummary;
+  validFiles: DicomRemapStagedManifestFile[];
+  skippedFiles: number;
+  selectionCounts: DicomRemapSelectionCounts;
+}> {
   const planPath = path.join(directory, "uid-plan.json");
   const existing = await readFile(planPath, "utf8").catch(() => null);
   if (existing) {
     try {
       const plan = JSON.parse(existing) as PersistedDicomUidPlan;
-      if (plan.version !== DICOM_REMAP_UID_PLAN_VERSION || !plan.studyInstanceUid || !plan.seriesInstanceUidByOriginal || !plan.sopInstanceUidByFileId) throw new Error("invalid");
+      if (![1, DICOM_REMAP_UID_PLAN_VERSION].includes(plan.version) || !plan.studyInstanceUid || !plan.seriesInstanceUidByOriginal || !plan.sopInstanceUidByFileId) throw new Error("invalid");
       const validFiles = manifest.files.filter((file) => Boolean(plan.sopInstanceUidByFileId[file.id]));
       if (!validFiles.length) throw new Error("empty");
+      const selectionCounts = plan.selectionCounts || {
+        totalStagedFiles: manifest.files.length,
+        validDicomFiles: validFiles.length,
+        selectedStudyFiles: validFiles.length,
+        excludedOtherStudyFiles: 0,
+        excludedStudyCount: 0,
+        skippedOrUnparsedFiles: manifest.files.length - validFiles.length,
+      };
+      if (manifest.uploadMode === "staged_folder_selected_study" && !plan.selectionCounts) throw new Error("missing_selection_counts");
       const first = parseStagedDicomSummary(await readFile(path.join(directory, validFiles[0]!.relativePath)));
-      return { plan, originalSummary: first.summary, validFiles, skippedFiles: manifest.files.length - validFiles.length };
+      return {
+        plan,
+        originalSummary: first.summary,
+        validFiles,
+        skippedFiles: manifest.files.length - validFiles.length,
+        selectionCounts,
+      };
     } catch {
       throw new HttpError(409, "DICOM remap UID plan is invalid.", { code: "DICOM_REMAP_UID_PLAN_INVALID" });
     }
@@ -2736,19 +3024,13 @@ async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest:
 
   const seriesInstanceUidByOriginal: Record<string, string> = {};
   const sopInstanceUidByFileId: Record<string, string> = {};
-  const validFiles: DicomRemapStagedManifestFile[] = [];
+  const parsedFiles: Array<{
+    file: DicomRemapStagedManifestFile;
+    parsed: ReturnType<typeof parseStagedDicomSummary>;
+  }> = [];
   const studyUids = new Set<string>();
-  const sourceIdentity = {
-    patientId: new Set<string>(),
-    patientName: new Set<string>(),
-    patientBirthDate: new Set<string>(),
-    patientSex: new Set<string>(),
-  };
-  let originalSummary: OrthancStudySummary | null = null;
-  let skippedFiles = 0;
   for (const file of manifest.files) {
     if (isSkippableDicomRemapFolderEntry(file.displayName) || !isLikelyDicomFile(file.displayName, file.mimeType)) {
-      skippedFiles += 1;
       continue;
     }
     let parsed: ReturnType<typeof parseStagedDicomSummary>;
@@ -2756,37 +3038,80 @@ async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest:
       parsed = parseStagedDicomSummary(await readFile(path.join(directory, file.relativePath)));
     } catch (error) {
       if (error instanceof HttpError && error.statusCode === 400) {
-        skippedFiles += 1;
         continue;
       }
       throw error;
     }
     studyUids.add(parsed.summary.studyInstanceUid);
-    for (const field of Object.keys(sourceIdentity) as Array<keyof typeof sourceIdentity>) {
-      const value = normalizeSourceIdentityValue(parsed.summary[field], field);
-      if (value) sourceIdentity[field].add(value);
-    }
-    if (!originalSummary) originalSummary = parsed.summary;
-    validFiles.push(file);
+    parsedFiles.push({ file, parsed });
   }
-  if (!originalSummary || !validFiles.length) throw new HttpError(400, "No valid DICOM instances were staged.", { code: "DICOM_REMAP_DICOM_PARSE_FAILED" });
-  const expectedStudyUid = String(manifest.selectedStudyInstanceUID || "").trim();
-  if (studyUids.size !== 1 || !expectedStudyUid || !studyUids.has(expectedStudyUid)) {
+  if (!parsedFiles.length) throw new HttpError(400, "No valid DICOM instances were staged.", { code: "DICOM_REMAP_DICOM_PARSE_FAILED" });
+
+  const selectedStudyMode = manifest.uploadMode === "staged_folder_selected_study";
+  const expectedStudyUid = selectedStudyMode
+    ? String(selectedStudyInstanceUID || "").trim()
+    : String(manifest.selectedStudyInstanceUID || "").trim();
+  let selectedFiles = parsedFiles;
+  if (selectedStudyMode) {
+    const provisionalUid = String(manifest.provisionalSelectedStudyInstanceUID || "").trim();
+    if (!expectedStudyUid || expectedStudyUid !== provisionalUid || !studyUids.has(expectedStudyUid)) {
+      throw new HttpError(400, "The selected study was not found in durable staging.", {
+        code: "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND",
+        totalStagedFiles: manifest.files.length,
+        validDicomFiles: parsedFiles.length,
+        selectedStudyFiles: 0,
+        excludedOtherStudyFiles: parsedFiles.length,
+        excludedStudyCount: studyUids.size,
+        skippedOrUnparsedFiles: manifest.files.length - parsedFiles.length,
+        uniqueStudyCount: studyUids.size,
+      });
+    }
+    selectedFiles = parsedFiles.filter(({ parsed }) => parsed.summary.studyInstanceUid === expectedStudyUid);
+  } else if (studyUids.size !== 1 || !expectedStudyUid || !studyUids.has(expectedStudyUid)) {
     const code = manifest.uploadMode === "single_study_folder_unverified"
       ? "DICOM_REMAP_MULTIPLE_STUDIES_DETECTED"
       : "DICOM_REMAP_MULTIPLE_STUDIES";
     throw new HttpError(400, "Uploaded files do not match the selected study.", {
       code,
-      parsedDicomFileCount: validFiles.length,
+      parsedDicomFileCount: parsedFiles.length,
       uniqueStudyCount: studyUids.size,
     });
   }
+
+  const selectionCounts: DicomRemapSelectionCounts = {
+    totalStagedFiles: manifest.files.length,
+    validDicomFiles: parsedFiles.length,
+    selectedStudyFiles: selectedFiles.length,
+    excludedOtherStudyFiles: parsedFiles.length - selectedFiles.length,
+    excludedStudyCount: selectedStudyMode ? Math.max(0, studyUids.size - 1) : 0,
+    skippedOrUnparsedFiles: manifest.files.length - parsedFiles.length,
+  };
+  if (!selectedFiles.length) {
+    throw new HttpError(400, "The selected study was not found in durable staging.", {
+      code: "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND",
+      ...selectionCounts,
+    });
+  }
+
+  const sourceIdentity = {
+    patientId: new Set<string>(),
+    patientName: new Set<string>(),
+    patientBirthDate: new Set<string>(),
+    patientSex: new Set<string>(),
+  };
+  for (const { parsed } of selectedFiles) {
+    for (const field of Object.keys(sourceIdentity) as Array<keyof typeof sourceIdentity>) {
+      const value = normalizeSourceIdentityValue(parsed.summary[field], field);
+      if (value) sourceIdentity[field].add(value);
+    }
+  }
   const identityDiagnostics = {
-    parsedDicomFileCount: validFiles.length,
+    parsedDicomFileCount: selectedFiles.length,
     uniquePatientIdCount: sourceIdentity.patientId.size,
     uniquePatientNameCount: sourceIdentity.patientName.size,
     uniqueBirthDateCount: sourceIdentity.patientBirthDate.size,
     uniqueSexCount: sourceIdentity.patientSex.size,
+    ...selectionCounts,
   };
   if (Object.values(sourceIdentity).some((values) => values.size > 1)) {
     throw new HttpError(400, "Uploaded files contain conflicting source-patient identity information.", {
@@ -2794,14 +3119,59 @@ async function readOrBuildDicomRemapUidPlan({ manifest, directory }: { manifest:
       ...identityDiagnostics,
     });
   }
-  for (const file of validFiles) {
-    const parsed = parseStagedDicomSummary(await readFile(path.join(directory, file.relativePath)));
+
+  if (selectedStudyMode) {
+    const provisional = manifest.provisionalSourceIdentity;
+    if (!provisional) {
+      throw new HttpError(409, "Provisional source identity is missing.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+    }
+    const mismatchedFields = ([
+      ["patientId", "patientId"],
+      ["patientName", "patientName"],
+      ["patientBirthDate", "patientBirthDate"],
+      ["patientSex", "patientSex"],
+    ] as const).filter(([provisionalField, authoritativeField]) => {
+      const provisionalValue = normalizeSourceIdentityValue(provisional[provisionalField], authoritativeField);
+      if (!provisionalValue) return false;
+      const authoritativeValues = sourceIdentity[authoritativeField];
+      return authoritativeValues.size !== 1 || !authoritativeValues.has(provisionalValue);
+    });
+    if (mismatchedFields.length > 0) {
+      throw new HttpError(400, "The verified source identity differs from the preliminary source identity.", {
+        code: "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH",
+        mismatchFieldCount: mismatchedFields.length,
+        ...identityDiagnostics,
+      });
+    }
+  }
+
+  const firstSummary = selectedFiles[0]!.parsed.summary;
+  const originalSummary: OrthancStudySummary = {
+    studyInstanceUid: firstSummary.studyInstanceUid,
+    patientId: Array.from(sourceIdentity.patientId)[0] || "",
+    patientName: Array.from(sourceIdentity.patientName)[0] || "",
+    patientBirthDate: Array.from(sourceIdentity.patientBirthDate)[0] || "",
+    patientSex: Array.from(sourceIdentity.patientSex)[0] || "",
+  };
+  for (const { file, parsed } of selectedFiles) {
     seriesInstanceUidByOriginal[parsed.seriesInstanceUid] ||= createDicomUid();
     sopInstanceUidByFileId[file.id] = createDicomUid();
   }
-  const plan: PersistedDicomUidPlan = { version: DICOM_REMAP_UID_PLAN_VERSION, studyInstanceUid: createDicomUid(), seriesInstanceUidByOriginal, sopInstanceUidByFileId };
+  const plan: PersistedDicomUidPlan = {
+    version: DICOM_REMAP_UID_PLAN_VERSION,
+    studyInstanceUid: createDicomUid(),
+    seriesInstanceUidByOriginal,
+    sopInstanceUidByFileId,
+    selectionCounts,
+  };
   await writePrivateJson(planPath, plan);
-  return { plan, originalSummary, validFiles, skippedFiles };
+  return {
+    plan,
+    originalSummary,
+    validFiles: selectedFiles.map(({ file }) => file),
+    skippedFiles: manifest.files.length - selectedFiles.length,
+    selectionCounts,
+  };
 }
 
 async function rewriteStagedDicomForPersistedPlan(file: DicomRemapStagedManifestFile, directory: string, replacement: OrthancPatientSummary, plan: PersistedDicomUidPlan): Promise<Buffer> {
@@ -2864,10 +3234,33 @@ async function requireDicomRemapProcessingLease(jobId: number, leaseOwner: strin
   throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
 }
 
-async function updateDicomRemapProcessingProgress(jobId: number, leaseOwner: string, processedFileCount: number, skippedFileCount: number, leaseSeconds: number): Promise<void> {
+async function updateDicomRemapProcessingProgress(
+  jobId: number,
+  leaseOwner: string,
+  processedFileCount: number,
+  skippedFileCount: number,
+  leaseSeconds: number,
+  selectionCounts?: DicomRemapSelectionCounts
+): Promise<void> {
   const result = await queryDicomRemapDb<DicomRemapJobRow>(
-    `update dicom_remap_jobs set processed_file_count = greatest(coalesce(processed_file_count, 0), $3), processing_skipped_file_count = $4, processing_last_heartbeat_at = now(), processing_last_checked_at = now(), processing_lease_expires_at = now() + ($5::text || ' seconds')::interval, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
-    [jobId, leaseOwner, processedFileCount, skippedFileCount, Math.max(30, Math.min(Math.floor(leaseSeconds), 3600))]
+    `update dicom_remap_jobs
+        set processed_file_count = greatest(coalesce(processed_file_count, 0), $3),
+            processing_skipped_file_count = $4,
+            processing_selection_counts = coalesce($6::jsonb, processing_selection_counts),
+            processing_last_heartbeat_at = now(),
+            processing_last_checked_at = now(),
+            processing_lease_expires_at = now() + ($5::text || ' seconds')::interval,
+            updated_at = now()
+      where id = $1 and status = 'processing' and processing_lease_owner = $2
+      returning *`,
+    [
+      jobId,
+      leaseOwner,
+      processedFileCount,
+      skippedFileCount,
+      Math.max(30, Math.min(Math.floor(leaseSeconds), 3600)),
+      selectionCounts ? JSON.stringify(selectionCounts) : null,
+    ]
   );
   if (!result.rows[0]) throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
 }
@@ -2902,15 +3295,18 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
     const patientId = job.rispro_patient_id;
     const destination = String(job.destination_pacs_key || "").trim();
     if (!patientId || !destination) throw new HttpError(409, "DICOM remap processing inputs are missing.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
-    const patient = await getPatientById(patientId);
+    const patient = await getPatientForDicomRemap(patientId);
     const replacement = formatReplacementFromPatient(patient);
     if (!replacement.patientId || !replacement.patientName) throw new HttpError(409, "Replacement identity is unavailable.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
-    const modalities = await listOrthancRemoteModalities();
+    const modalities = await listModalitiesForDicomRemap();
     if (!modalities.modalities.some((item) => item.key === destination)) throw new HttpError(409, "PACS destination is unavailable.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
 
     await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "building_uid_plan");
-    const planned = await readOrBuildDicomRemapUidPlan(staged);
-    await updateDicomRemapProcessingProgress(job.id, leaseOwner, 0, planned.skippedFiles, leaseSeconds);
+    const planned = await readOrBuildDicomRemapUidPlan({
+      ...staged,
+      selectedStudyInstanceUID: job.selected_study_instance_uid,
+    });
+    await updateDicomRemapProcessingProgress(job.id, leaseOwner, 0, planned.skippedFiles, leaseSeconds, planned.selectionCounts);
 
     const studyIds = new Set<string>();
     for (const [index, file] of planned.validFiles.entries()) {
@@ -2934,12 +3330,12 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
     if (instanceCount == null || instanceCount !== planned.validFiles.length) throw new HttpError(502, "Orthanc did not verify the expected remapped instance count.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
 
     const remapped = await queryDicomRemapDb<DicomRemapJobRow>(
-      `update dicom_remap_jobs set status = 'remapped', processing_stage = 'enqueueing_send', source_orthanc_study_id = $3, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, replacement_patient_id = $8, replacement_patient_name = $9, replacement_patient_sex = $10, replacement_patient_birth_date = $11, processing_completed_at = now(), processing_last_heartbeat_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = null, processing_error_details = null, error_message = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
-      [job.id, leaseOwner, modifiedStudyId, planned.originalSummary.patientId, planned.originalSummary.patientName, planned.originalSummary.patientSex, planned.originalSummary.patientBirthDate, replacement.patientId, replacement.patientName, replacement.patientSex, replacement.patientBirthDate]
+      `update dicom_remap_jobs set status = 'remapped', processing_stage = 'enqueueing_send', source_orthanc_study_id = $3, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, replacement_patient_id = $8, replacement_patient_name = $9, replacement_patient_sex = $10, replacement_patient_birth_date = $11, processing_selection_counts = $12::jsonb, processing_completed_at = now(), processing_last_heartbeat_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = null, processing_error_details = null, error_message = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+      [job.id, leaseOwner, modifiedStudyId, planned.originalSummary.patientId, planned.originalSummary.patientName, planned.originalSummary.patientSex, planned.originalSummary.patientBirthDate, replacement.patientId, replacement.patientName, replacement.patientSex, replacement.patientBirthDate, JSON.stringify(planned.selectionCounts)]
     );
     const remappedJob = remapped.rows[0];
     if (!remappedJob) throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
-    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: remappedJob.id, actionType: "dicom_remap_processing_completed", oldValues: { status: "processing" }, newValues: { status: "remapped", processingStage: "enqueueing_send", processedFileCount: planned.validFiles.length, skippedFileCount: planned.skippedFiles, modifiedOrthancStudyId: modifiedStudyId }, changedByUserId: null });
+    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: remappedJob.id, actionType: "dicom_remap_processing_completed", oldValues: { status: "processing" }, newValues: { status: "remapped", processingStage: "enqueueing_send", processedFileCount: planned.validFiles.length, skippedFileCount: planned.skippedFiles, selectionCounts: planned.selectionCounts, modifiedOrthancStudyId: modifiedStudyId }, changedByUserId: null });
     const sending = await sendExistingDicomRemapJobToDestination({ job: remappedJob, currentUserId: remappedJob.created_by_user_id, auditActionType: "pacs_send_enqueued" });
     await cleanupDicomRemapStagingStorage(String(job.staged_storage_key || "")).then(async () => {
       await queryDicomRemapDb(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1`, [job.id]);
@@ -2949,7 +3345,21 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
   } catch (error) {
     const code = processingErrorCode(error);
     const details = error instanceof HttpError && error.details && typeof error.details === "object"
-      ? error.details as { parsedDicomFileCount?: unknown; uniqueStudyCount?: unknown; uniquePatientIdCount?: unknown; uniquePatientNameCount?: unknown; uniqueBirthDateCount?: unknown; uniqueSexCount?: unknown }
+      ? error.details as {
+        parsedDicomFileCount?: unknown;
+        uniqueStudyCount?: unknown;
+        uniquePatientIdCount?: unknown;
+        uniquePatientNameCount?: unknown;
+        uniqueBirthDateCount?: unknown;
+        uniqueSexCount?: unknown;
+        mismatchFieldCount?: unknown;
+        totalStagedFiles?: unknown;
+        validDicomFiles?: unknown;
+        selectedStudyFiles?: unknown;
+        excludedOtherStudyFiles?: unknown;
+        excludedStudyCount?: unknown;
+        skippedOrUnparsedFiles?: unknown;
+      }
       : null;
     const numericDiagnostic = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
     const processingDiagnostics = {
@@ -2960,6 +3370,13 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       ...(numericDiagnostic(details?.uniquePatientNameCount) !== undefined ? { uniquePatientNameCount: numericDiagnostic(details?.uniquePatientNameCount) } : {}),
       ...(numericDiagnostic(details?.uniqueBirthDateCount) !== undefined ? { uniqueBirthDateCount: numericDiagnostic(details?.uniqueBirthDateCount) } : {}),
       ...(numericDiagnostic(details?.uniqueSexCount) !== undefined ? { uniqueSexCount: numericDiagnostic(details?.uniqueSexCount) } : {}),
+      ...(numericDiagnostic(details?.mismatchFieldCount) !== undefined ? { mismatchFieldCount: numericDiagnostic(details?.mismatchFieldCount) } : {}),
+      ...(numericDiagnostic(details?.totalStagedFiles) !== undefined ? { totalStagedFiles: numericDiagnostic(details?.totalStagedFiles) } : {}),
+      ...(numericDiagnostic(details?.validDicomFiles) !== undefined ? { validDicomFiles: numericDiagnostic(details?.validDicomFiles) } : {}),
+      ...(numericDiagnostic(details?.selectedStudyFiles) !== undefined ? { selectedStudyFiles: numericDiagnostic(details?.selectedStudyFiles) } : {}),
+      ...(numericDiagnostic(details?.excludedOtherStudyFiles) !== undefined ? { excludedOtherStudyFiles: numericDiagnostic(details?.excludedOtherStudyFiles) } : {}),
+      ...(numericDiagnostic(details?.excludedStudyCount) !== undefined ? { excludedStudyCount: numericDiagnostic(details?.excludedStudyCount) } : {}),
+      ...(numericDiagnostic(details?.skippedOrUnparsedFiles) !== undefined ? { skippedOrUnparsedFiles: numericDiagnostic(details?.skippedOrUnparsedFiles) } : {}),
     };
     const updated = await queryDicomRemapDb<DicomRemapJobRow>(
       `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3::text, processing_error_details = $4::jsonb, error_message = $5::text, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
@@ -2989,6 +3406,8 @@ function summarizeDicomRemapPreview(entries: DicomRemapPreviewEntry[]): DicomRem
         modality: entry.modality,
         patientId: entry.patientId,
         patientName: entry.patientName,
+        patientBirthDate: entry.patientBirthDate,
+        patientSex: entry.patientSex,
         seriesCount: 0,
         fileCount: 1,
         totalBytes: entry.fileSize,
@@ -3003,6 +3422,8 @@ function summarizeDicomRemapPreview(entries: DicomRemapPreviewEntry[]): DicomRem
     existing.modality = pickPreviewDisplayValue(existing.modality, entry.modality);
     existing.patientId = pickPreviewDisplayValue(existing.patientId, entry.patientId);
     existing.patientName = pickPreviewDisplayValue(existing.patientName, entry.patientName);
+    existing.patientBirthDate = pickPreviewDisplayValue(existing.patientBirthDate, entry.patientBirthDate);
+    existing.patientSex = pickPreviewDisplayValue(existing.patientSex, entry.patientSex);
     existing.fileCount += 1;
     existing.totalBytes += entry.fileSize;
     existing.files.push(entry);
@@ -3017,6 +3438,8 @@ function summarizeDicomRemapPreview(entries: DicomRemapPreviewEntry[]): DicomRem
       modality: value.modality,
       patientId: value.patientId,
       patientName: value.patientName,
+      patientBirthDate: value.patientBirthDate,
+      patientSex: value.patientSex,
       seriesCount: value.seriesSet.size || 1,
       fileCount: value.fileCount,
       totalBytes: value.totalBytes,
@@ -3302,7 +3725,7 @@ export async function processDicomRemapMultipartJob({
   let job: DicomRemapJobRow | null = null;
 
   try {
-    const patient = await getPatientById(patientId);
+    const patient = await getPatientForDicomRemap(patientId);
     const replacement = formatReplacementFromPatient(patient);
     job = await createEmptyDicomRemapUploadJob(currentUserId);
 
@@ -3559,7 +3982,7 @@ export async function listMyDicomRemapJobs({
 }
 
 export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: string; name: string; isDefault: boolean }>> {
-  const { modalities } = await listOrthancRemoteModalities();
+  const { modalities } = await listModalitiesForDicomRemap();
   return modalities.map((modality) => ({
     key: modality.key,
     id: modality.key,
@@ -3588,6 +4011,9 @@ export async function cancelDicomRemapJob({
       update dicom_remap_jobs
       set status = 'cancelled',
           cancellation_reason = nullif($3, ''),
+          processing_stage = 'cancelled',
+          processing_lease_owner = null,
+          processing_lease_expires_at = null,
           updated_at = now()
       where id = $1
         and created_by_user_id = $2
@@ -3816,7 +4242,7 @@ export async function prepareDicomRemapConfirmation({
     throw new HttpError(400, "risproPatientId is required.");
   }
 
-  const patient = await getPatientById(patientId);
+  const patient = await getPatientForDicomRemap(patientId);
   const replacement = formatReplacementFromPatient(patient);
   if (!replacement.patientId || !replacement.patientName) {
     throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
@@ -3890,12 +4316,135 @@ export async function getDicomRemapReplacementPreview({
   if (!patientId) {
     throw new HttpError(400, "risproPatientId is required.");
   }
-  const patient = await getPatientById(patientId);
+  const patient = await getPatientForDicomRemap(patientId);
   const replacement = formatReplacementFromPatient(patient);
   if (!replacement.patientId || !replacement.patientName) {
     throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
   }
   return replacement;
+}
+
+function isMatchingStagedConfirmation(
+  job: DicomRemapJobRow,
+  selectedStudyInstanceUid: string,
+  patientId: number,
+  destinationPacsKey: string
+): boolean {
+  return String(job.selected_study_instance_uid || "") === selectedStudyInstanceUid
+    && Number(job.rispro_patient_id) === patientId
+    && String(job.destination_pacs_key || "") === destinationPacsKey;
+}
+
+export async function confirmStagedDicomRemapJob({
+  jobId,
+  selectedStudyInstanceUID,
+  risproPatientId,
+  destinationPacsKey,
+  confirm,
+  currentUserId,
+}: {
+  jobId: number | string;
+  selectedStudyInstanceUID: unknown;
+  risproPatientId: number | string;
+  destinationPacsKey: unknown;
+  confirm: boolean;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow }> {
+  if (!confirm) throw new HttpError(400, "Explicit confirmation is required.");
+  const cleanJobId = normalizePositiveInteger(jobId, "jobId");
+  const patientId = normalizePositiveInteger(risproPatientId, "risproPatientId");
+  if (!cleanJobId || !patientId) throw new HttpError(400, "Job and patient are required.");
+  const selectedUid = normalizeSelectedStudyInstanceUid(selectedStudyInstanceUID);
+  const destination = normalizeOrthancModalityKey(destinationPacsKey, "destinationPacsKey");
+
+  const initialJob = await loadOwnedJob(cleanJobId, currentUserId);
+  if (initialJob.status !== "awaiting_confirmation") {
+    if (initialJob.status !== "cancelled" && isMatchingStagedConfirmation(initialJob, selectedUid, patientId, destination)) {
+      return { job: initialJob };
+    }
+    throw new HttpError(409, "Job is not awaiting staged confirmation.", { status: initialJob.status });
+  }
+  if (
+    initialJob.processing_stage !== "awaiting_confirmation"
+    || Number(initialJob.staged_manifest_version) !== DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION
+    || !initialJob.staged_storage_key
+  ) {
+    throw new HttpError(409, "Durable DICOM staging is not complete.", { code: "DICOM_REMAP_MANIFEST_INVALID" });
+  }
+  const { manifest } = await readDicomRemapStagingManifestMetadata(initialJob);
+  if (
+    manifest.uploadMode !== "staged_folder_selected_study"
+    || String(manifest.provisionalSelectedStudyInstanceUID || "") !== selectedUid
+  ) {
+    throw new HttpError(409, "The confirmed study does not match the securely staged source selection.", {
+      code: "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND",
+    });
+  }
+
+  const patient = await getPatientForDicomRemap(patientId);
+  const replacement = formatReplacementFromPatient(patient);
+  if (!replacement.patientId || !replacement.patientName) {
+    throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
+  }
+  const modalities = await listModalitiesForDicomRemap();
+  if (!modalities.modalities.some((item) => item.key === destination)) {
+    throw new HttpError(400, "Selected PACS destination is not available.");
+  }
+
+  const result = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs
+        set selected_study_instance_uid = $3,
+            rispro_patient_id = $4,
+            destination_pacs_key = $5,
+            replacement_patient_id = $6,
+            replacement_patient_name = $7,
+            replacement_patient_sex = $8,
+            replacement_patient_birth_date = $9,
+            status = 'uploaded',
+            processing_stage = 'queued',
+            processing_error_code = null,
+            processing_error_details = null,
+            error_message = null,
+            updated_at = now()
+      where id = $1
+        and created_by_user_id = $2
+        and status = 'awaiting_confirmation'
+        and processing_stage = 'awaiting_confirmation'
+        and staged_manifest_version = $10
+      returning *`,
+    [
+      cleanJobId,
+      currentUserId,
+      selectedUid,
+      patientId,
+      destination,
+      replacement.patientId,
+      replacement.patientName,
+      replacement.patientSex,
+      replacement.patientBirthDate,
+      DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION,
+    ]
+  );
+  const job = result.rows[0];
+  if (!job) {
+    const current = await loadOwnedJob(cleanJobId, currentUserId);
+    if (isMatchingStagedConfirmation(current, selectedUid, patientId, destination)) return { job: current };
+    throw new HttpError(409, "Job changed before staged confirmation completed.", { status: current.status });
+  }
+  await logDicomRemapAuditEntry({
+    entityType: "dicom_remap_job",
+    entityId: job.id,
+    actionType: "dicom_remap_staged_confirmed",
+    oldValues: { status: "awaiting_confirmation", processingStage: "awaiting_confirmation" },
+    newValues: {
+      status: "uploaded",
+      processingStage: "queued",
+      risproPatientId: patientId,
+      destinationPacsKey: destination,
+    },
+    changedByUserId: currentUserId,
+  });
+  return { job };
 }
 
 export async function resendDicomRemapJobToPacs({
@@ -4128,6 +4677,12 @@ export const __dicomRemapTestables = {
   setSleepForTests(sleep: RemapSleep): void {
     sleepForDicomRemap = sleep;
   },
+  setPatientLoaderForTests(loader: DicomRemapPatientLoader): void {
+    getPatientForDicomRemap = loader;
+  },
+  setModalityListerForTests(lister: DicomRemapModalityLister): void {
+    listModalitiesForDicomRemap = lister;
+  },
   setBulkModifyRouteAvailableForTests(value: boolean | null): void {
     orthancBulkModifyAvailableForTests = value;
   },
@@ -4139,6 +4694,8 @@ export const __dicomRemapTestables = {
     logDicomRemapAuditEntry = logAuditEntry;
     fetchOrthancForRemap = orthancFetch;
     sleepForDicomRemap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    getPatientForDicomRemap = getPatientById;
+    listModalitiesForDicomRemap = listOrthancRemoteModalities;
     orthancBulkModifyAvailableForTests = null;
     afterRemappedInstanceUploadForTests = null;
   },

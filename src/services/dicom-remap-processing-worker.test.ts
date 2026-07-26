@@ -19,6 +19,23 @@ test("processing worker uses the durable claim path and is idle when no job is q
   assert.ok(calls.some((sql) => /for update skip locked/i.test(sql)));
 });
 
+test("processing worker runs failed and abandoned-awaiting staging retention before claiming", async () => {
+  let cleanupArgs: [number, number] | null = null;
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    cleanup: async (failedHours, awaitingHours) => {
+      cleanupArgs = [failedHours, awaitingHours];
+      return 0;
+    },
+    claim: async () => null,
+  });
+  const result = await runDicomRemapProcessingWorkerTick({ owner: "cleanup-worker", batchSize: 1, leaseSeconds: 120 });
+  assert.deepEqual(result, { claimed: 0, completed: 0, failed: 0 });
+  assert.deepEqual(cleanupArgs, [
+    Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72)),
+    Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24)),
+  ]);
+});
+
 test("processing worker continues after one claimed job fails", async () => {
   const jobs = [
     { job: { id: 11 } as never, recovered: false },

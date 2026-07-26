@@ -38,11 +38,13 @@ import {
   cleanupDicomRemapUploadTempDir,
   cleanupDicomRemapStagingStorage,
   confirmDicomRemapAndSend,
+  confirmStagedDicomRemapJob,
   createDicomRemapMultipartUploadJob,
   createDicomRemapStagingContext,
   createDicomRemapUploadJob,
   DICOM_REMAP_PREVIEW_HEADER_BYTES,
   failDicomRemapStagingJob,
+  finalizeDicomRemapAwaitingConfirmationStagingJob,
   finalizeDicomRemapStagingJob,
   previewDicomRemapMultipartUpload,
   type DicomRemapStagedUploadFile,
@@ -193,7 +195,12 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
 
 function dicomRemapStagingFailureCode(error: unknown): string {
   const code = String((error as { details?: { code?: unknown } } | null)?.details?.code || "");
-  if (["DICOM_REMAP_STAGING_FILE_LIMIT", "DICOM_REMAP_STAGING_SIZE_LIMIT"].includes(code)) return code;
+  if ([
+    "DICOM_REMAP_STAGING_INTERRUPTED",
+    "DICOM_REMAP_STAGING_FILE_LIMIT",
+    "DICOM_REMAP_STAGING_SIZE_LIMIT",
+    "DICOM_REMAP_STAGING_MANIFEST_FAILED",
+  ].includes(code)) return code;
   return "DICOM_REMAP_STAGING_WRITE_FAILED";
 }
 
@@ -204,6 +211,8 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
   risproPatientId: string | null;
   destinationPacsKey: string | null;
   confirm: string | null;
+  provisionalSourceIdentity: unknown;
+  confirmSource: string | null;
 }> {
   const files: Awaited<ReturnType<typeof writeDicomRemapStagedFile>>[] = [];
   let selectedStudyInstanceUID: string | null = null;
@@ -211,6 +220,8 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
   let risproPatientId: string | null = null;
   let destinationPacsKey: string | null = null;
   let confirm: string | null = null;
+  let provisionalSourceIdentity: unknown = null;
+  let confirmSource: string | null = null;
   const writes: Promise<void>[] = [];
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -249,6 +260,14 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
       if (fieldName === "risproPatientId") risproPatientId = clean;
       if (fieldName === "destinationPacsKey") destinationPacsKey = clean;
       if (fieldName === "confirm") confirm = clean;
+      if (fieldName === "confirmSource") confirmSource = clean;
+      if (fieldName === "provisionalSourceIdentity") {
+        try {
+          provisionalSourceIdentity = JSON.parse(String(value || "null")) as unknown;
+        } catch {
+          provisionalSourceIdentity = null;
+        }
+      }
     });
     busboy.on("error", fail);
     busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM upload.", { code: "DICOM_REMAP_STAGING_FILE_LIMIT" })));
@@ -257,7 +276,16 @@ async function stageDicomRemapMultipartDurably(req: Request, context: Awaited<Re
       Promise.all(writes).then(() => {
         if (settled) return;
         settled = true;
-        resolve({ files: files.sort((a, b) => a.id.localeCompare(b.id)), selectedStudyInstanceUID, uploadMode, risproPatientId, destinationPacsKey, confirm });
+        resolve({
+          files: files.sort((a, b) => a.id.localeCompare(b.id)),
+          selectedStudyInstanceUID,
+          uploadMode,
+          risproPatientId,
+          destinationPacsKey,
+          confirm,
+          provisionalSourceIdentity,
+          confirmSource,
+        });
       }).catch(fail);
     });
     req.pipe(busboy);
@@ -678,6 +706,31 @@ pacsRouter.post(
 );
 
 pacsRouter.post(
+  "/remap/jobs/stage-multipart",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const context = await createDicomRemapStagingContext(currentUserId);
+    try {
+      const staged = await stageDicomRemapMultipartDurably(req, context);
+      const result = await finalizeDicomRemapAwaitingConfirmationStagingJob({
+        context,
+        files: staged.files,
+        selectedStudyInstanceUID: staged.selectedStudyInstanceUID,
+        provisionalSourceIdentity: staged.provisionalSourceIdentity,
+        confirmSource: staged.confirmSource,
+      });
+      res.status(202).json(result);
+    } catch (error) {
+      await failDicomRemapStagingJob(context.job.id, dicomRemapStagingFailureCode(error)).catch(() => undefined);
+      await cleanupDicomRemapStagingStorage(context.storageKey).catch(() => undefined);
+      throw error;
+    }
+  })
+);
+
+pacsRouter.post(
   "/remap/jobs/process-multipart",
   ...authMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
@@ -693,6 +746,27 @@ pacsRouter.post(
       await cleanupDicomRemapStagingStorage(context.storageKey).catch(() => undefined);
       throw error;
     }
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/confirm-staged",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) throw new HttpError(400, "jobId is required.");
+    const body = asUnknownRecord(request.body ?? {});
+    const result = await confirmStagedDicomRemapJob({
+      jobId,
+      selectedStudyInstanceUID: body.selectedStudyInstanceUID,
+      risproPatientId: asOptionalString(body.risproPatientId) || "",
+      destinationPacsKey: body.destinationPacsKey,
+      confirm: validateExplicitConfirm(body.confirm),
+      currentUserId,
+    });
+    res.status(202).json(result);
   })
 );
 
