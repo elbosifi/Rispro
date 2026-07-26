@@ -15,11 +15,23 @@ function MockDocument({ children, file, onLoadSuccess, onLoadError }: { children
     }, 0);
     return () => window.clearTimeout(timer);
   }, [file.url, isMalformed]);
+  if (file.url.includes("/998/")) {
+    throw new Error("PDF preview component failed");
+  }
   return <>{children}</>;
 }
 
-function MockPage({ pageNumber, loading }: { pageNumber: number; loading?: ReactNode }) {
-  return <div data-testid={`mock-pdf-page-${pageNumber}`}>{loading || `Rendered page ${pageNumber}`}</div>;
+function MockPage({ pageNumber, width, loading }: { pageNumber: number; width: number; loading?: ReactNode }) {
+  const isLargePage = width > 200;
+  return (
+    <div
+      data-testid={isLargePage ? "mock-pdf-large-page" : `mock-pdf-page-${pageNumber}`}
+      data-page-number={pageNumber}
+      data-width={width}
+    >
+      {loading || `Rendered page ${pageNumber}`}
+    </div>
+  );
 }
 
 vi.mock("react-pdf", () => ({
@@ -63,31 +75,33 @@ afterEach(() => {
 });
 
 describe("DocumentPreviewWorkspace", () => {
-  it("renders the PDF page count and one control per page", async () => {
+  it("opens PDFs in overview mode with the page count and one button per page", async () => {
     renderWorkspace(pdfDocument());
 
-    expect(await screen.findByText("Page 1 of 3")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Page 1" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Page 2" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Page 3" })).toBeTruthy();
+    expect(await screen.findByText("3 pages")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open page 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open page 2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open page 3" })).toBeTruthy();
+    expect(screen.queryByTestId("mock-pdf-large-page")).toBeNull();
   });
 
-  it("changes the selected page from a thumbnail and identifies it accessibly", async () => {
+  it("opens a selected overview page in single-page mode", async () => {
     const user = userEvent.setup();
     renderWorkspace(pdfDocument());
-    await screen.findByText("Page 1 of 3");
+    await screen.findByText("3 pages");
 
-    await user.click(screen.getByRole("button", { name: "Page 2" }));
+    await user.click(screen.getByRole("button", { name: "Open page 2" }));
 
     expect(screen.getByText("Page 2 of 3")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Page 2" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("button", { name: "Page 1" }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to all pages" })).toBeTruthy();
+    expect(screen.getByTestId("mock-pdf-large-page").getAttribute("data-page-number")).toBe("2");
   });
 
-  it("supports previous and next controls at their boundaries", async () => {
+  it("supports previous and next controls at their single-page boundaries", async () => {
     const user = userEvent.setup();
     renderWorkspace(pdfDocument());
-    await screen.findByText("Page 1 of 3");
+    await screen.findByText("3 pages");
+    await user.click(screen.getByRole("button", { name: "Open page 1" }));
 
     const previous = screen.getByRole("button", { name: "Previous page" });
     const next = screen.getByRole("button", { name: "Next page" });
@@ -103,10 +117,24 @@ describe("DocumentPreviewWorkspace", () => {
     expect(screen.getByText("Page 2 of 3")).toBeTruthy();
   });
 
-  it("resets to page one when the selected document changes", async () => {
+  it("returns to overview while preserving the selected page", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(pdfDocument());
+    await screen.findByText("3 pages");
+    await user.click(screen.getByRole("button", { name: "Open page 2" }));
+    await user.click(screen.getByRole("button", { name: "Back to all pages" }));
+
+    expect(screen.getByText("3 pages")).toBeTruthy();
+    expect(screen.queryByTestId("mock-pdf-large-page")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open page 2" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "Open page 1" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("resets to overview mode and page one when the selected PDF changes", async () => {
+    const user = userEvent.setup();
     const { rerender } = renderWorkspace(pdfDocument());
-    await screen.findByText("Page 1 of 3");
-    await userEvent.click(screen.getByRole("button", { name: "Page 3" }));
+    await screen.findByText("3 pages");
+    await user.click(screen.getByRole("button", { name: "Open page 3" }));
     expect(screen.getByText("Page 3 of 3")).toBeTruthy();
 
     rerender(
@@ -115,7 +143,9 @@ describe("DocumentPreviewWorkspace", () => {
       </LanguageProvider>
     );
 
-    await waitFor(() => expect(screen.getByText("Page 1 of 2")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("2 pages")).toBeTruthy());
+    expect(screen.queryByTestId("mock-pdf-large-page")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open page 1" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("renders an image preview with one selected thumbnail", () => {
@@ -141,5 +171,22 @@ describe("DocumentPreviewWorkspace", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("could not be previewed"));
     expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/documents/999/view");
     expect(warn).toHaveBeenCalledWith("[RISpro] React-PDF preview failed:", expect.stringContaining("[url]"));
+  });
+
+  it("resets a component-level PDF failure when another document is selected", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { rerender } = renderWorkspace(pdfDocument(998));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/documents/998/view");
+
+    rerender(
+      <LanguageProvider>
+        <div className="h-[600px]"><DocumentPreviewWorkspace document={pdfDocument()} /></div>
+      </LanguageProvider>
+    );
+
+    expect(await screen.findByText("3 pages")).toBeTruthy();
+    expect(error).toHaveBeenCalled();
   });
 });

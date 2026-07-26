@@ -16,6 +16,13 @@ export interface DocumentPreviewLabels {
   page: string;
   pageOf: string;
   thumbnailLoading: string;
+  allPages: string;
+  backToAllPages: string;
+  pageOverview: string;
+  pagesCount: string;
+  openPage: string;
+  scrollPagesLeft: string;
+  scrollPagesRight: string;
 }
 
 const LazyPdfDocumentPreview = lazy(() => import("./pdf-document-preview"));
@@ -136,11 +143,18 @@ function labelsFor(t: (key: TranslationKey) => string): DocumentPreviewLabels {
     page: t("documents.page"),
     pageOf: t("documents.pageOf"),
     thumbnailLoading: t("documents.thumbnailLoading"),
+    allPages: t("documents.allPages"),
+    backToAllPages: t("documents.backToAllPages"),
+    pageOverview: t("documents.pageOverview"),
+    pagesCount: t("documents.pagesCount"),
+    openPage: t("documents.openPage"),
+    scrollPagesLeft: t("documents.scrollPagesLeft"),
+    scrollPagesRight: t("documents.scrollPagesRight"),
   };
 }
 
 export function DocumentPreviewWorkspace({ document, showOpenAction = true }: { document: RequestDocument; showOpenAction?: boolean }) {
-  const { t } = useLanguage();
+  const { t, isArabic } = useLanguage();
   const labels = labelsFor(t);
   const kind = previewKind(document);
   const src = viewUrl(document);
@@ -159,9 +173,12 @@ export function DocumentPreviewWorkspace({ document, showOpenAction = true }: { 
   }
 
   return (
-    <PreviewErrorBoundary
-      fallback={<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />}
-    >
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {showOpenAction ? <div className="flex shrink-0 justify-end"><OpenDocumentAction href={src} label={labels.openInNewTab} /></div> : null}
+      <PreviewErrorBoundary
+        key={document.id}
+        fallback={<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />}
+      >
       <Suspense
         fallback={
           <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-border bg-muted/20 p-6 text-sm text-muted-foreground" role="status">
@@ -169,11 +186,9 @@ export function DocumentPreviewWorkspace({ document, showOpenAction = true }: { 
           </div>
         }
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
-          {showOpenAction ? <div className="flex shrink-0 justify-end"><OpenDocumentAction href={src} label={labels.openInNewTab} /></div> : null}
-          <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} />
-        </div>
+        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} />
       </Suspense>
-    </PreviewErrorBoundary>
+      </PreviewErrorBoundary>
+    </div>
   );
 }
