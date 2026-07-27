@@ -783,16 +783,16 @@ test("Return rejects attached jobs and durable pre-attachment Return completes o
 
   const jobId = await createJob("failed"); let reconciliations = 0; let triggers = 0;
   const returned = await returnRequestScanToIncoming(jobId, { readSettings: async () => settings, reconcileMove: async () => { reconciliations += 1; return "moved"; }, triggerWorker: async () => { triggers += 1; return {} as never; } });
-  assert.equal(returned.status, "pending"); assert.ok(returned.return_requested_at); assert.ok(returned.return_completed_at); assert.match(returned.source_relative_path, /Incoming/); assert.equal(reconciliations, 1); assert.equal(triggers, 1);
+  assert.equal(returned.status, "pending"); assert.equal(returned.return_requested_at, null); assert.equal(returned.return_source_path, null); assert.equal(returned.return_destination_path, null); assert.equal(returned.return_completed_at, null); assert.match(returned.source_relative_path, /Incoming/); assert.equal(reconciliations, 1); assert.equal(triggers, 1);
 
   const interruptedId = await createJob("failed"); const interrupted = await getRequestScanJob(interruptedId);
   const destinationPath = `${settings.incomingSubfolder}\\${interrupted.filename}`;
   await pool.query("update request_scan_jobs set return_requested_at=now(),return_source_path=source_relative_path,return_destination_path=$2 where id=$1", [interruptedId, destinationPath]);
   const repaired = await returnRequestScanToIncoming(interruptedId, { readSettings: async () => settings, reconcileMove: async () => "already_moved", triggerWorker: async () => ({} as never) });
-  assert.equal(repaired.status, "pending"); assert.equal(repaired.source_relative_path, destinationPath); assert.ok(repaired.return_completed_at);
+  assert.equal(repaired.status, "pending"); assert.equal(repaired.source_relative_path, destinationPath); assert.equal(repaired.return_requested_at, null); assert.equal(repaired.return_source_path, null); assert.equal(repaired.return_destination_path, null); assert.equal(repaired.return_completed_at, null);
 });
 
-test("Incoming ownership collisions are visible and completed Returns reactivate their terminal row", async (t) => {
+test("Incoming ownership collisions are visible and only in-progress Returns reactivate their terminal row", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const owner = await createJob("pending", "owned.pdf"); await pool.query("update request_scan_jobs set source_relative_path=$2 where id=$1", [owner, `${settings.incomingSubfolder}\\owned.pdf`]); const ownerRow = await getRequestScanJob(owner);
   const failed = await createJob("failed", "owned.pdf");
@@ -806,8 +806,34 @@ test("Incoming ownership collisions are visible and completed Returns reactivate
 
   const returnedId = await createJob("failed", "returned.pdf"); const returnedRow = await getRequestScanJob(returnedId);
   await pool.query("update request_scan_jobs set return_requested_at=now(),return_destination_path=source_relative_path,return_completed_at=now() where id=$1", [returnedId]);
-  const reactivated = await reconcileIncomingRequestScanFile(returnedRow.filename, returnedRow.source_relative_path);
+  const stale = await reconcileIncomingRequestScanFile(returnedRow.filename, returnedRow.source_relative_path);
+  assert.equal(stale.outcome, "orphan_conflict");
+
+  const inProgressId = await createJob("failed", "in-progress-returned.pdf"); const inProgressRow = await getRequestScanJob(inProgressId);
+  const inProgressDestination = `${settings.incomingSubfolder}\\${inProgressRow.filename}`;
+  await pool.query("update request_scan_jobs set return_requested_at=now(),return_source_path=$2,return_destination_path=$3,return_completed_at=null where id=$1", [inProgressId, inProgressRow.source_relative_path, inProgressDestination]);
+  const reactivated = await reconcileIncomingRequestScanFile(inProgressRow.filename, inProgressDestination);
   assert.equal(reactivated.outcome, "reactivated"); assert.equal(reactivated.job.status, "pending");
+  assert.equal(reactivated.job.return_requested_at, null); assert.equal(reactivated.job.return_source_path, null); assert.equal(reactivated.job.return_destination_path, null); assert.equal(reactivated.job.return_completed_at, null);
+});
+
+test("retry across calendar dates uses the current Failed source instead of an old Return checkpoint", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const jobId = await createJob("failed", "dated-retry.pdf");
+  const currentFailedPath = `${settings.failedSubfolder}\\2026-07-28\\dated-retry.pdf`;
+  const oldReturnPath = `${settings.failedSubfolder}\\2026-07-27\\dated-retry.pdf`;
+  await pool.query("update request_scan_jobs set source_relative_path=$2,return_requested_at=$3,return_source_path=$4,return_destination_path=$5,return_completed_at=$6 where id=$1", [jobId, currentFailedPath, "2026-07-27T10:00:00Z", oldReturnPath, `${settings.incomingSubfolder}\\dated-retry.pdf`, "2026-07-27T10:01:00Z"]);
+  let movedFrom = "";
+  const retried = await retryRequestScanJob(jobId, {
+    readSettings: async () => settings,
+    moveFile: async (_settings, sourcePath, destinationFolder, filename) => { movedFrom = sourcePath; return `${destinationFolder}\\${filename}`; },
+  });
+  assert.equal(movedFrom, currentFailedPath);
+  assert.equal(retried.source_relative_path, `${settings.incomingSubfolder}\\dated-retry.pdf`);
+  assert.equal(retried.return_requested_at, null);
+  assert.equal(retried.return_source_path, null);
+  assert.equal(retried.return_destination_path, null);
+  assert.equal(retried.return_completed_at, null);
 });
 
 test("identifier checkpoint skips recognition and preview prefers document then archive fallbacks", async (t) => {
@@ -870,6 +896,66 @@ test("manual assignment queues a checkpointed worker job without direct upload",
   assert.ok(job.manual_assignment_requested_at);
   assert.ok(job.manual_assignment_confirmed_at);
   assert.equal(uploads.length, 0);
+});
+
+test("manual assignment processes through the real checkpoint constraint and queues completed Orthanc export", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking("completed");
+  await pool.query("update appointments_v2.bookings set completed_at=now() where id=$1", [booking.id]);
+  const code = `CT${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const jobId = await createModalityJob(booking.modalityId, code, `manual-${suffix()}.jpg`);
+  await pool.query("update request_scan_jobs set status='failed',failure_category='recognition',error_message='No barcode',completed_at=now() where id=$1", [jobId]);
+
+  await manuallyAssignRequestScan(jobId, booking.id, booking.userId, settings);
+  const dependenciesWithRealUpload = dependencies({ ok: false, reason: "no_barcode" }, { reconciliation: "moved" });
+  dependenciesWithRealUpload.uploadDocumentIdempotently = uploadDocumentIdempotently;
+  const processed = await processRequestScanJob(jobId, { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, dependenciesWithRealUpload);
+
+  assert.equal(processed.status, "processed");
+  assert.equal(processed.identifier_strategy, "manual");
+  assert.ok(processed.identifier_verified_at);
+  assert.ok(processed.document_id);
+  assert.ok(processed.attachment_completed_at);
+  assert.match(processed.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${code}[\\\\/]Processed`));
+  assert.ok(processed.source_moved_at);
+
+  const checkpoint = await pool.query<{ identifier_source: string }>("select identifier_source from request_scan_job_appointments where request_scan_job_id=$1 and appointment_id=$2", [jobId, booking.id]);
+  assert.deepEqual(checkpoint.rows, [{ identifier_source: "manual" }]);
+  const document = await pool.query<{ id: number; document_type: string; source: string; stored_path: string }>("select id,document_type,source,stored_path from documents where id=$1", [processed.document_id]);
+  assert.deepEqual(document.rows[0] && { document_type: document.rows[0].document_type, source: document.rows[0].source }, { document_type: "clinical_document", source: "modality_scan_automation" });
+  assert.ok(await fs.stat(resolveStoredPath(document.rows[0]!.stored_path)).then((value) => value.isFile(), () => false));
+  const exportRow = await pool.query<{ status: string; destination_key: string }>("select status,destination_key from clinical_document_exports where document_id=$1 and appointment_id=$2", [processed.document_id, booking.id]);
+  assert.deepEqual(exportRow.rows, [{ status: "pending", destination_key: "authoritative_orthanc" }]);
+  await fs.rm(resolveStoredPath(document.rows[0]!.stored_path), { force: true });
+});
+
+test("unexpected Request Scan failures retain safe database diagnostics", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob("pending");
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const failingDependencies = dependencies({ ok: true, accession: booking.accession }, { diagnostics });
+  failingDependencies.uploadDocumentIdempotently = async () => {
+    throw Object.assign(new Error("check failed for patient John Doe at C:\\sensitive\\source.pdf"), { code: "23514", constraint: "request_scan_job_appointments_identifier_source_check" });
+  };
+  const failed = await processRequestScanJob(jobId, settings, failingDependencies);
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error_message, "The document could not be attached because the Request Scan database configuration is incompatible. Contact an administrator.");
+  const failureDiagnostics = diagnostics.filter(({ event }) => event === "request_scan_processing_failed");
+  assert.equal(failureDiagnostics.length, 1);
+  assert.deepEqual(failureDiagnostics[0]!.metadata, {
+    eventType: "request_scan_processing_failed",
+    jobId,
+    processingStage: "attaching_document",
+    workflowSource: "reception",
+    modalityId: 0,
+    errorName: "Error",
+    safeErrorMessage: "The document could not be attached because the Request Scan database configuration is incompatible. Contact an administrator.",
+    postgresErrorCode: "23514",
+    postgresConstraint: "request_scan_job_appointments_identifier_source_check",
+  });
+  assert.doesNotMatch(JSON.stringify(failureDiagnostics), /John Doe|sensitive|source\.pdf/i);
 });
 
 test("manual assignment rejects a different-modality appointment without mutating the modality job", async (t) => {

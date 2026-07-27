@@ -197,7 +197,7 @@ export async function reconcileIncomingRequestScanFile(filename: string, sourceR
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const owned = await client.query<RequestScanJob>(`select * from request_scan_jobs where source_relative_path=$1 or (return_destination_path=$1 and return_requested_at is not null) order by case when source_relative_path=$1 then 0 else 1 end,id for update`, [sourceRelativePath]);
+    const owned = await client.query<RequestScanJob>(`select * from request_scan_jobs where source_relative_path=$1 or (return_destination_path=$1 and return_requested_at is not null and return_completed_at is null) order by case when source_relative_path=$1 then 0 else 1 end,id for update`, [sourceRelativePath]);
     const active = owned.rows.find((row) => row.status === "pending" || row.status === "processing");
     if (active) { await client.query("commit"); return { job: active, outcome: "active" }; }
     const attached = owned.rows.find((row) => row.document_id != null && row.attachment_completed_at != null);
@@ -208,9 +208,9 @@ export async function reconcileIncomingRequestScanFile(filename: string, sourceR
       }
       await client.query("commit"); return { job: attached, outcome: "archive_pending" };
     }
-    const returned = owned.rows.find((row) => row.return_requested_at && (row.return_completed_at || row.return_destination_path === sourceRelativePath));
+    const returned = owned.rows.find((row) => row.return_requested_at && !row.return_completed_at && row.return_destination_path === sourceRelativePath);
     if (returned) {
-      const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set filename=$2,source_relative_path=$3,status='pending',return_completed_at=coalesce(return_completed_at,now()),error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 returning *`, [returned.id, filename, sourceRelativePath]);
+      const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set filename=$2,source_relative_path=$3,status='pending',return_requested_at=null,return_source_path=null,return_destination_path=null,return_completed_at=null,error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 returning *`, [returned.id, filename, sourceRelativePath]);
       await client.query("commit"); return { job: rows[0]!, outcome: "reactivated" };
     }
     if (owned.rows[0]) {
@@ -248,7 +248,39 @@ export async function findRequestScanAppointment(accession: string): Promise<Eli
   return { ...rows[0]!, id: Number(rows[0]!.id), patient_id: Number(rows[0]!.patient_id) };
 }
 async function automatedDocumentExists(appointmentId: number): Promise<boolean> { const result = await pool.query("select 1 from documents where v2_booking_id=$1 and document_type='appointment_request' and source='request_scan_automation' limit 1", [appointmentId]); return Boolean(result.rowCount); }
-function concise(error: unknown): string { return error instanceof HttpError ? error.message : "Request scan processing failed"; }
+const REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT = "request_scan_job_appointments_identifier_source_check";
+const REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT_MESSAGE = "The document could not be attached because the Request Scan database configuration is incompatible. Contact an administrator.";
+type RequestScanDatabaseError = { code?: unknown; constraint?: unknown };
+function requestScanDatabaseError(error: unknown): RequestScanDatabaseError { return error && typeof error === "object" ? error as RequestScanDatabaseError : {}; }
+function isRequestScanIdentifierSourceConstraintError(error: unknown): boolean {
+  const record = requestScanDatabaseError(error);
+  if (record.constraint === REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT) return true;
+  return record.code === "23514" && error instanceof Error && error.message.includes(REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT);
+}
+export function requestScanProcessingErrorMessage(error: unknown): string {
+  if (isRequestScanIdentifierSourceConstraintError(error)) return REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT_MESSAGE;
+  return error instanceof HttpError ? error.message : "Request scan processing failed";
+}
+function safeRequestScanDiagnosticMessage(error: unknown): string {
+  if (isRequestScanIdentifierSourceConstraintError(error)) return REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT_MESSAGE;
+  if (error instanceof RequestScanProcessingError || error instanceof HttpError) return error.message.replace(/\s+/g, " ").trim().slice(0, 300) || "Request scan processing failed";
+  return "Unexpected Request Scan processing failure.";
+}
+function logUnexpectedRequestScanFailure(dependencies: RequestScanServiceDependencies, job: RequestScanJob, error: unknown): void {
+  if (error instanceof RequestScanProcessingError || error instanceof HttpError) return;
+  const record = requestScanDatabaseError(error);
+  dependencies.logDiagnostic?.("request_scan_processing_failed", {
+    eventType: "request_scan_processing_failed",
+    jobId: Number(job.id),
+    processingStage: job.processing_stage || "unknown",
+    workflowSource: job.workflow_source || "reception",
+    modalityId: job.modality_id == null ? 0 : Number(job.modality_id),
+    errorName: error instanceof Error ? error.name : "UnknownError",
+    safeErrorMessage: safeRequestScanDiagnosticMessage(error),
+    postgresErrorCode: typeof record.code === "string" ? record.code : "",
+    postgresConstraint: typeof record.constraint === "string" ? record.constraint : "",
+  });
+}
 function failureCategory(error: unknown): RequestScanFailureCategory { return error instanceof RequestScanProcessingError ? error.category : error instanceof HttpError ? requestScanFailureCategory(error.message) : "internal_processing"; }
 async function downloadRequestScanSource(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, localPath: string): Promise<void> { try { await dependencies.downloadRequestScanFile(settings, job.source_relative_path, localPath); } catch (error) { const category = classifyRequestScanSmbError(error); throw new RequestScanProcessingError(category === "source_missing" ? "The source scan file could not be found." : "SMB destination operation failed.", category, { cause: error }); } }
 
@@ -602,7 +634,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: stoppedMessage, failure_category: "recognition" })) ?? getRequestScanJob(job.id);
     }
     await progress.flush().catch(() => undefined);
-    const category = failureCategory(error); const message = error instanceof RequestScanProcessingError ? error.message : concise(error); let moved = job.source_relative_path;
+    const category = failureCategory(error); const message = requestScanProcessingErrorMessage(error); logUnexpectedRequestScanFailure(dependencies, job, error); let moved = job.source_relative_path;
     if (!job.attachment_completed_at) { try { await ensureLease(); moved = await moveOutcome(dependencies, settings, job, inbox.failedSubfolder); } catch (moveError) { if (moveError instanceof RequestScanLeaseLostError) return getRequestScanJob(job.id); } }
     const archiveFailure = Boolean(job.attachment_completed_at && job.document_id && !job.source_moved_at);
     const retryDelayMinutes = Math.min(60, 2 ** Math.min(6, Math.max(0, Number(job.archive_attempt_count ?? 1) - 1)));
@@ -724,7 +756,7 @@ export async function runRequestScanCycle(suppliedSettings?: RequestScanSettings
   return result;
 }
 
-const pendingRetryFields = { status: "pending" as const, error_message: null, failure_category: null, dismissed_at: null, dismissed_by: null, dismiss_reason: null, cancel_requested_at: null, cancel_requested_by: null, cancel_reason: null, completed_at: null, processing_stage: "queued", processing_started_at: null, heartbeat_at: null, worker_id: null, lease_token: null, lease_expires_at: null, progress_current: null, progress_total: null };
+const pendingRetryFields = { status: "pending" as const, error_message: null, failure_category: null, dismissed_at: null, dismissed_by: null, dismiss_reason: null, cancel_requested_at: null, cancel_requested_by: null, cancel_reason: null, return_requested_at: null, return_source_path: null, return_destination_path: null, return_completed_at: null, completed_at: null, processing_stage: "queued", processing_started_at: null, heartbeat_at: null, worker_id: null, lease_token: null, lease_expires_at: null, progress_current: null, progress_total: null };
 export async function retryRequestScanJob(id: number, overrides: Partial<RequestScanRetryDependencies> = {}): Promise<RequestScanJob> {
   const dependencies: RequestScanRetryDependencies = { readSettings: readRequestScanSettings, getJob: getRequestScanJob, moveFile: moveRequestScanFile, updateJob, ...overrides };
   const job = await dependencies.getJob(id);
@@ -764,6 +796,7 @@ export async function returnRequestScanToIncoming(id: number, overrides: Partial
   const settings = await dependencies.readSettings();
   const client = await pool.connect();
   let job: RequestScanJob;
+  let destinationPath = "";
   try {
     await client.query("begin");
     const locked = await client.query<RequestScanJob>("select * from request_scan_jobs where id=$1 for update", [id]);
@@ -775,8 +808,9 @@ export async function returnRequestScanToIncoming(id: number, overrides: Partial
     const incoming = `${inboxForJob(settings, job).incomingSubfolder.replace(/[\\/]+$/g, "")}\\${filename}`;
     const owner = await client.query("select id from request_scan_jobs where source_relative_path=$1 and id<>$2 limit 1", [incoming, id]);
     if (owner.rowCount) throw new HttpError(409, "Another Request Scan job already owns the Incoming destination.");
-    const source = job.return_source_path || job.source_relative_path;
-    const destinationPath = job.return_destination_path || incoming;
+    const returnInProgress = Boolean(job.return_requested_at && !job.return_completed_at && job.return_source_path && job.return_destination_path);
+    const source = returnInProgress ? job.return_source_path! : job.source_relative_path;
+    destinationPath = returnInProgress ? job.return_destination_path! : incoming;
     const persisted = await client.query<RequestScanJob>(`update request_scan_jobs set return_requested_at=coalesce(return_requested_at,now()),return_source_path=$2,return_destination_path=$3,updated_at=now() where id=$1 returning *`, [id, source, destinationPath]);
     job = persisted.rows[0]!;
     await client.query("commit");
@@ -784,7 +818,7 @@ export async function returnRequestScanToIncoming(id: number, overrides: Partial
   const outcome = await dependencies.reconcileMove(settings, job.return_source_path!, job.return_destination_path!, undefined, { jobId: Number(job.id) });
   if (outcome === "conflict") throw new HttpError(409, "The previous source and Incoming file have different contents. Both files were preserved for manual reconciliation.");
   if (outcome === "missing") throw new HttpError(404, "The Request Scan source and Incoming destination are both missing.");
-  const { rows } = await pool.query<RequestScanJob>(`update request_scan_jobs set source_relative_path=return_destination_path,status='pending',return_completed_at=now(),error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 and status='failed' and attachment_completed_at is null and document_id is null and return_destination_path is not null returning *`, [id]);
+  const { rows } = await pool.query<RequestScanJob>(`update request_scan_jobs set source_relative_path=$2,status='pending',return_requested_at=null,return_source_path=null,return_destination_path=null,return_completed_at=null,error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 and status='failed' and attachment_completed_at is null and document_id is null and return_destination_path is not null returning *`, [id, destinationPath]);
   if (!rows[0]) throw new HttpError(409, "The Request Scan Return checkpoint could not be completed.");
   await dependencies.triggerWorker();
   return rows[0];
@@ -817,7 +851,8 @@ export async function downloadRequestScanJobFile(id: number, overrides: Partial<
   }
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-preview-"));
   try {
-    const candidates = [...new Set([job.source_relative_path, job.intended_destination_path, job.return_destination_path].filter((value): value is string => Boolean(value)))];
+    const activeReturnDestination = job.return_requested_at && !job.return_completed_at ? job.return_destination_path : null;
+    const candidates = [...new Set([job.source_relative_path, job.intended_destination_path, activeReturnDestination].filter((value): value is string => Boolean(value)))];
     for (const [index, remotePath] of candidates.entries()) {
       const localPath = path.join(tempDir, `preview-${index}${path.extname(job.filename)}`);
       try { await dependencies.downloadFile(settings, remotePath, localPath); return { job, buffer: await dependencies.readFile(localPath) }; }
