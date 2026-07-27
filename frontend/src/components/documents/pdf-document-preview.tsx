@@ -16,6 +16,7 @@ interface PdfDocumentPreviewProps {
 }
 
 type PdfViewMode = "overview" | "single";
+type PdfSizingMode = "fit-page" | "fit-width";
 type PdfPageCardVariant = "overview" | "thumbnail";
 type PdfPageSize = { width: number; height: number };
 
@@ -172,18 +173,21 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
   const [viewMode, setViewMode] = useState<PdfViewMode>("overview");
+  const [sizingMode, setSizingMode] = useState<PdfSizingMode>(expanded ? "fit-page" : "fit-width");
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [mainWidth, setMainWidth] = useState(760);
+  const [mainSize, setMainSize] = useState({ width: 760, height: 640 });
   const [overviewCardSize, setOverviewCardSize] = useState<PdfPageSize>({ width: 184, height: 244 });
   const mainPreviewRef = useRef<HTMLDivElement>(null);
   const overviewRef = useRef<HTMLDivElement>(null);
   const file = useMemo(() => ({ url: `/api/documents/${document.id}/view`, withCredentials: true }), [document.id]);
+  const page = pageCount ? Math.min(selectedPage, pageCount) : 1;
 
   useEffect(() => {
     setPageCount(null);
     setPdfDocument(null);
     setSelectedPage(1);
     setViewMode("overview");
+    setSizingMode(expanded ? "fit-page" : "fit-width");
     setPreviewError(null);
   }, [document.id]);
 
@@ -191,13 +195,37 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     if (viewMode !== "single") return;
     const element = mainPreviewRef.current;
     if (!element) return;
-    const updateWidth = () => setMainWidth(Math.max(240, Math.min(980, element.clientWidth - 32)));
-    updateWidth();
+    const updateSize = () => setMainSize({ width: Math.max(240, element.clientWidth - 32), height: Math.max(240, element.clientHeight - 32) });
+    updateSize();
     if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(updateWidth);
+    const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [viewMode]);
+  }, [viewMode, expanded]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    setSizingMode("fit-page");
+    setViewMode("single");
+  }, [expanded]);
+
+  const [selectedPageSize, setSelectedPageSize] = useState<PdfPageSize | null>(null);
+  useEffect(() => {
+    if (viewMode !== "single" || !pdfDocument) return;
+    let cancelled = false;
+    void pdfDocument.getPage(page).then((pdfPage) => {
+      if (!cancelled) setSelectedPageSize(pdfPage.getViewport({ scale: 1 }));
+    }).catch(() => {
+      if (!cancelled) setSelectedPageSize(null);
+    });
+    return () => { cancelled = true; };
+  }, [page, pdfDocument, viewMode]);
+
+  const pageScale = selectedPageSize
+    ? sizingMode === "fit-page"
+      ? Math.min(mainSize.width / selectedPageSize.width, mainSize.height / selectedPageSize.height)
+      : mainSize.width / selectedPageSize.width
+    : null;
 
   useEffect(() => {
     if (viewMode !== "overview") return;
@@ -231,7 +259,6 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     return () => cancelAnimationFrame(frame);
   }, [selectedPage, viewMode]);
 
-  const page = pageCount ? Math.min(selectedPage, pageCount) : 1;
   const pages = pageCount ? Array.from({ length: pageCount }, (_, index) => index + 1) : [];
   const handlePreviewError = (error: unknown) => {
     if (import.meta.env.DEV) {
@@ -349,13 +376,18 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 >
                   {isRtl ? <ChevronLeft size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
                 </button>
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="group" aria-label="PDF sizing">
+                  <button type="button" className={`rounded-md px-2 py-1 text-[11px] ${sizingMode === "fit-page" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-page")} aria-pressed={sizingMode === "fit-page"}>{labels.fitPage}</button>
+                  <button type="button" className={`rounded-md px-2 py-1 text-[11px] ${sizingMode === "fit-width" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-width")} aria-pressed={sizingMode === "fit-width"}>{labels.fitWidth}</button>
+                </div>
               </div>
             </div>
-            <div ref={mainPreviewRef} className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex min-h-full min-w-full items-start justify-center">
+            <div ref={mainPreviewRef} className="min-h-0 min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
+              <div className={`flex min-h-full min-w-full justify-center ${sizingMode === "fit-page" ? "items-center" : "items-start"}`}>
                 <Page
                   pageNumber={page}
-                  width={mainWidth}
+                  width={sizingMode === "fit-width" ? mainSize.width : undefined}
+                  scale={sizingMode === "fit-page" ? pageScale ?? 1 : undefined}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
                   loading={<span className="text-sm text-muted-foreground">{labels.loading}</span>}

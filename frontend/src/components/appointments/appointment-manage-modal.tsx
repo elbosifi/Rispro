@@ -560,13 +560,13 @@ export function AppointmentManageModal({
   return (
     <Dialog open={open} onClose={closeModal}>
       <DialogContent
-        maxWidth="min(94vw, 1200px)"
+        maxWidth={documentReviewExpanded ? "calc(100vw - 16px)" : "min(94vw, 1200px)"}
         scrollable={false}
         role="dialog"
         aria-modal="true"
         aria-label={t("registrations.manage")}
         dir={isRtl ? "rtl" : "ltr"}
-        className="flex h-[92vh] min-h-0 flex-col overflow-hidden"
+        className={`flex min-h-0 flex-col overflow-hidden ${documentReviewExpanded ? "!m-2 !h-[calc(100dvh-16px)] !max-h-[calc(100dvh-16px)] !p-2 !rounded-lg" : "h-[92vh]"}`}
       >
         <DialogHeader closeLabel={t("toast.close")} className={`shrink-0 border-b border-border ${documentReviewExpanded ? "pb-1" : activeTab === "documents" ? "pb-2" : "pb-3"}`}>
           <div className="min-w-0">
@@ -582,7 +582,7 @@ export function AppointmentManageModal({
                   </p>
                 ) : null}
               </div>
-              {appointment ? (
+              {appointment && !documentReviewExpanded ? (
                 <div className="flex flex-wrap gap-1">
                   <Button type="button" variant="secondary" size="sm" className="h-8 px-2.5 text-[10px]" onClick={() => setSelectedPatientId(appointment.patientId)}>
                     {t("registrations.openPatientProfile")}
@@ -605,7 +605,7 @@ export function AppointmentManageModal({
                   {statusLabel(language, appointment.status)}
                 </span>
               </div>
-            ) : appointment ? (
+            ) : appointment && !documentReviewExpanded ? (
               <>
                 <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                   <Field label={t("registrations.patient")} value={chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)} />
