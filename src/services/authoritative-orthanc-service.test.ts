@@ -85,19 +85,21 @@ test("uploads one DICOM instance and verifies the returned study, series, and SO
       assert.ok(Buffer.isBuffer(init?.body));
       return json({ ID: "instance-1", ParentSeries: "series-1", ParentStudy: "study-1" });
     }
-    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1", MainDicomTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" } });
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" });
     throw new Error(`Unexpected ${init?.method || "GET"} ${path}`);
   });
   const instance = await new service.AuthoritativeOrthancClient(enabled).uploadDicomInstance(Buffer.from("DICOM"), "1.2.3");
   assert.deepEqual(instance, { orthancInstanceId: "instance-1", orthancSeriesId: "series-1", orthancStudyId: "study-1", studyInstanceUid: "1.2.3", seriesInstanceUid: "2.25.3", sopInstanceUid: "2.25.4", patientId: "PATIENT-1", accessionNumber: "V2-000042" });
-  assert.deepEqual(calls.map((call) => `${call.method} ${call.path}`), ["POST /instances", "GET /instances/instance-1"]);
+  assert.deepEqual(calls.map((call) => `${call.method} ${call.path}`), ["POST /instances", "GET /instances/instance-1", "GET /instances/instance-1/simplified-tags"]);
 });
 
 test("finds an existing SOPInstanceUID for retry idempotency without mutating Orthanc", async () => {
   service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
     const path = new URL(String(url)).pathname;
     if (path === "/tools/find") { assert.match(String(init?.body), /SOPInstanceUID/); return json(["instance-1"]); }
-    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1", MainDicomTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" } });
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" });
     throw new Error(`Unexpected ${path}`);
   });
   const instance = await new service.AuthoritativeOrthancClient(enabled).findInstanceBySopInstanceUid("2.25.4");
@@ -108,8 +110,56 @@ test("rejects a returned instance whose study does not match the intended study"
   service.__setAuthoritativeOrthancFetchForTests(async (url) => {
     const path = new URL(String(url)).pathname;
     if (path === "/instances") return json({ ID: "instance-1" });
-    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1", MainDicomTags: { StudyInstanceUID: "9.9.9", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4" } });
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "9.9.9", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4" });
     throw new Error(`Unexpected ${path}`);
   });
   await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).uploadDicomInstance(Buffer.from("DICOM"), "1.2.3"), /different study/i);
+});
+
+test("reads ParentStudy from the series only when the instance resource omits it", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1" });
+    if (path === "/series/series-1") return json({ ParentStudy: "study-1" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4" });
+    throw new Error(`Unexpected ${path}`);
+  });
+  const instance = await new service.AuthoritativeOrthancClient(enabled).getInstance("instance-1");
+  assert.equal(instance.orthancStudyId, "study-1");
+});
+
+test("falls back to detailed Orthanc tags and parses detailed values", async () => {
+  const calls: string[] = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const path = new URL(String(url)).pathname;
+    calls.push(path);
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ PatientID: "PATIENT-1" });
+    if (path === "/instances/instance-1/tags") return json({ "00080018": { Value: "2.25.4" }, "00080050": { Value: "V2-000042" }, "00100020": { Value: "PATIENT-1" }, "0020000D": { Value: "1.2.3" }, "0020000E": { Value: "2.25.3" } });
+    throw new Error(`Unexpected ${path}`);
+  });
+  const instance = await new service.AuthoritativeOrthancClient(enabled).getInstance("instance-1");
+  assert.deepEqual(instance, { orthancInstanceId: "instance-1", orthancSeriesId: "series-1", orthancStudyId: "study-1", studyInstanceUid: "1.2.3", seriesInstanceUid: "2.25.3", sopInstanceUid: "2.25.4", patientId: "PATIENT-1", accessionNumber: "V2-000042" });
+  assert.deepEqual(calls, ["/instances/instance-1", "/instances/instance-1/simplified-tags", "/instances/instance-1/tags"]);
+});
+
+test("fails safely when required instance UIDs remain incomplete", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3" });
+    if (path === "/instances/instance-1/tags") return json({ SOPInstanceUID: null });
+    throw new Error(`Unexpected ${path}`);
+  });
+  await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).getInstance("instance-1"), /incomplete instance metadata/i);
+});
+
+test("preserves Orthanc availability errors while trying tag fallbacks", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
+    throw new Error("fetch failed");
+  });
+  await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).getInstance("instance-1"), /unavailable/i);
 });

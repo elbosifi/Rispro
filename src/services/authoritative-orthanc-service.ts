@@ -81,7 +81,40 @@ export class AuthoritativeOrthancClient {
   }
   async getSystem(): Promise<OrthancSystemInfo> { const row = record(await this.request("/system")); const version = first(row.Version, row.version); if (!version && !first(row.Name, row.name)) throw new HttpError(502, "Authoritative Orthanc returned an invalid system response."); return { name: first(row.Name, row.name, this.settings.displayName), version, apiVersion: first(row.ApiVersion, row.API_VERSION, row.apiVersion) }; }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); const row = { ...record(detail), ...record(statistics) }; const dicom = tags(row); return { orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]), patientSex: first(dicom.PatientSex, dicom["00100040"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean), seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"]), instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"]) }; }
-  async getInstance(orthancInstanceId: string): Promise<OrthancInstanceDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID."); const detail = record(await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}`)); const dicom = tags(detail); const orthancSeriesId = first(detail.ParentSeries, detail.parentSeries); let orthancStudyId = first(detail.ParentStudy, detail.parentStudy); if (!orthancStudyId && orthancSeriesId) { const series = record(await this.request(`/series/${encodeURIComponent(orthancSeriesId)}`)); orthancStudyId = first(series.ParentStudy, series.parentStudy); } const result = { orthancInstanceId, orthancSeriesId, orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), seriesInstanceUid: first(dicom.SeriesInstanceUID, dicom["0020000E"]), sopInstanceUid: first(dicom.SOPInstanceUID, dicom["00080018"]), patientId: first(dicom.PatientID, dicom["00100020"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]) }; if (!result.studyInstanceUid || !result.seriesInstanceUid || !result.sopInstanceUid) throw new HttpError(502, "Authoritative Orthanc returned incomplete instance metadata.", { code: "orthanc_invalid_response" }); return result; }
+  async getInstance(orthancInstanceId: string): Promise<OrthancInstanceDetails> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");
+    const detail = record(await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}`));
+    const orthancSeriesId = first(detail.ParentSeries, detail.parentSeries);
+    let orthancStudyId = first(detail.ParentStudy, detail.parentStudy);
+    if (!orthancStudyId && orthancSeriesId) {
+      const series = record(await this.request(`/series/${encodeURIComponent(orthancSeriesId)}`));
+      orthancStudyId = first(series.ParentStudy, series.parentStudy);
+    }
+
+    let simplifiedTags: unknown = null;
+    let simplifiedError: unknown = null;
+    try { simplifiedTags = await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}/simplified-tags`); } catch (error) { simplifiedError = error; }
+    let dicom = tags(simplifiedTags);
+    const readInstanceValues = () => ({
+      studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]),
+      seriesInstanceUid: first(dicom.SeriesInstanceUID, dicom["0020000E"]),
+      sopInstanceUid: first(dicom.SOPInstanceUID, dicom["00080018"]),
+      patientId: first(dicom.PatientID, dicom["00100020"]),
+      accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]),
+    });
+    let values = readInstanceValues();
+    if (!values.studyInstanceUid || !values.seriesInstanceUid || !values.sopInstanceUid) {
+      let detailed: unknown = null;
+      let detailedError: unknown = null;
+      try { detailed = await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}/tags`); } catch (error) { detailedError = error; }
+      if (simplifiedError && detailedError) throw detailedError;
+      dicom = { ...dicom, ...tags(detailed) };
+      values = readInstanceValues();
+    }
+    const result = { orthancInstanceId, orthancSeriesId, orthancStudyId, ...values };
+    if (!result.studyInstanceUid || !result.seriesInstanceUid || !result.sopInstanceUid) throw new HttpError(502, "Authoritative Orthanc returned incomplete instance metadata.", { code: "orthanc_invalid_response" });
+    return result;
+  }
   async findInstanceBySopInstanceUid(sopInstanceUid: string): Promise<OrthancInstanceDetails | null> { const uid = text(sopInstanceUid); if (!uid) throw new HttpError(400, "A SOPInstanceUID is required."); const ids = await this.request("/tools/find", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Level: "Instance", Query: { SOPInstanceUID: uid } }) }); if (!Array.isArray(ids)) throw new HttpError(502, "Authoritative Orthanc returned an invalid instance search response.", { code: "orthanc_invalid_response" }); const matches = await Promise.all(ids.filter((id): id is string => typeof id === "string").map((id) => this.getInstance(id))); const exact = matches.filter((instance) => instance.sopInstanceUid === uid); if (exact.length > 1) throw new HttpError(502, "Authoritative Orthanc returned multiple instances for one SOPInstanceUID.", { code: "orthanc_invalid_response" }); return exact[0] || null; }
   async uploadDicomInstance(bytes: Buffer, intendedStudyInstanceUid: string): Promise<OrthancUploadedInstance> { if (!bytes.length) throw new HttpError(400, "Generated DICOM instance is empty.", { code: "orthanc_invalid_dicom" }); const response = record(await this.request("/instances", { method: "POST", headers: { "Content-Type": "application/dicom", Accept: "application/json" }, body: bytes as unknown as BodyInit })); const orthancInstanceId = first(response.ID, response.Id, response.id); if (!orthancInstanceId) throw new HttpError(502, "Authoritative Orthanc returned an invalid upload response.", { code: "orthanc_invalid_response" }); const verified = await this.getInstance(orthancInstanceId); if (verified.studyInstanceUid !== text(intendedStudyInstanceUid)) throw new HttpError(502, "Authoritative Orthanc accepted the instance in a different study.", { code: "orthanc_study_mismatch" }); return verified; }
   async findStudy(query: OrthancStudyQuery): Promise<OrthancStudyMatchResult> { const uid = text(query.studyInstanceUid); const accession = text(query.accessionNumber); const matchKey = uid ? "study_instance_uid" : "accession_number" as const; const matchValue = uid || accession; if (!matchValue) throw new HttpError(400, "A StudyInstanceUID or accession number is required."); const ids = await this.request("/tools/find", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Level: "Study", Query: uid ? { StudyInstanceUID: uid } : { AccessionNumber: accession } }) }); if (!Array.isArray(ids)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study search response."); const studies = await Promise.all(ids.filter((id): id is string => typeof id === "string").map((id) => this.getStudy(id)));
