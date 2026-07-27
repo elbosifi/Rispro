@@ -12,6 +12,7 @@ import { queueRouter } from "./routes/queue.js";
 import { documentsRouter } from "./routes/documents.js";
 import { scanSessionsRouter } from "./routes/scan-sessions.js";
 import { integrationsRouter } from "./routes/integrations.js";
+import { authoritativeOrthancRouter } from "./routes/authoritative-orthanc.js";
 import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
@@ -139,6 +140,7 @@ export function createApp(): Application {
   app.use("/api/queue", queueRouter);
   app.use("/api/documents", documentsRouter);
   app.use("/api/scan-sessions", scanSessionsRouter);
+  app.use("/api/integrations/authoritative-orthanc", authoritativeOrthancRouter);
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/backup-control", backupControlRouter);

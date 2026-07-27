@@ -378,7 +378,7 @@ function RequestScanRow({ language, job, showSelection, selected, canRetryArchiv
   </TableRow>;
 }
 
-export default function RequestScansPage({ modality }: { modality?: { id: number; code: string; name: string; onBack: () => void } }) {
+export default function RequestScansPage({ modality }: { modality?: { id: number; code: string; name: string; onBack: () => void; orthancState?: "connected" | "disabled" | "unavailable" } }) {
   const { language, isArabic } = useLanguage();
   const scopeQuery = modality ? `workflowSource=modality&modalityId=${modality.id}` : "";
   const scopeKey = modality ? `modality:${modality.id}` : "reception";
@@ -439,7 +439,7 @@ export default function RequestScansPage({ modality }: { modality?: { id: number
 
   return <main data-testid="request-scans-page" dir={isArabic ? "rtl" : "ltr"} className="min-h-full bg-[linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]">
     <div className="mx-auto flex min-h-full w-full max-w-[1680px] flex-col gap-3 p-3 sm:p-4 lg:p-5">
-      {modality ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><div><h1 className="text-xl font-semibold">{chooseLocalized(language, `${modality.code} إدخال المستندات`, `${modality.code} Document Ingestion`)}</h1><p className="text-sm text-muted-foreground">{modality.name}</p></div><Button type="button" variant="secondary" onClick={modality.onBack}>{chooseLocalized(language, "العودة إلى قائمة عمل الأجهزة", "Back to Modality Worklist")}</Button></div> : null}
+      {modality ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><div><h1 className="text-xl font-semibold">{chooseLocalized(language, `${modality.code} إدخال المستندات`, `${modality.code} Document Ingestion`)}</h1><p className="text-sm text-muted-foreground">{modality.name}</p>{modality.orthancState ? <p className="mt-1 text-xs text-muted-foreground" data-testid="authoritative-orthanc-status">{chooseLocalized(language, "Orthanc: " + (modality.orthancState === "connected" ? "متصل" : modality.orthancState === "disabled" ? "معطل" : "غير متاح"), `Orthanc: ${modality.orthancState === "connected" ? "Connected" : modality.orthancState === "disabled" ? "Disabled" : "Unavailable"}`)}</p> : null}</div><Button type="button" variant="secondary" onClick={modality.onBack}>{chooseLocalized(language, "العودة إلى قائمة عمل الأجهزة", "Back to Modality Worklist")}</Button></div> : null}
       <RequestScansOperationalHeader language={language} status={status.data} refreshedAt={Math.max(status.dataUpdatedAt, jobs.dataUpdatedAt)} onFilter={setFilter} onScanNow={() => scanNow.mutate()} scanning={scanNow.isPending} />
       {notice ? <Alert className="border-slate-200 bg-white"><AlertDescription>{notice}</AlertDescription></Alert> : null}
       {health?.affectedCount ? <ArchiveIncidentBanner language={language} health={health} canRetry={Boolean(status.data?.canRetryArchives)} onTest={() => testConnection.mutate()} onRetry={() => { const candidates = archiveCandidates.length ? archiveCandidates : visible.filter(archivePending); if (candidates.length) { setSelected(candidates.map((job) => job.id)); setBulkConfirm(true); } else { setTab("failed"); setCategory("smb_storage"); setSelected([]); } }} onDetails={() => setArchiveDetailsOpen(true)} testing={testConnection.isPending} /> : null}

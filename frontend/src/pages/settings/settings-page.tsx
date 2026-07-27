@@ -66,6 +66,7 @@ import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
 import RequestScanAutomationSection from "./request-scan-automation-section";
+import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import ExamTypesSection from "./exam-types-section";
 import { isReAuthRequiredError } from "./settings-page.helpers";
 import type {
@@ -186,7 +187,8 @@ type SettingsSection =
   | "documents_and_uploads"
   | "backup_restore"
   | "system_diagnostics"
-  | "request_scan_automation";
+  | "request_scan_automation"
+  | "authoritative_orthanc";
 
 const SECTION_KEYS: SettingsSection[] = [
   "patient_registration",
@@ -216,7 +218,8 @@ const SECTION_KEYS: SettingsSection[] = [
   "documents_and_uploads",
   "backup_restore",
   "system_diagnostics",
-  "request_scan_automation"
+  "request_scan_automation",
+  "authoritative_orthanc"
 ];
 
 type SettingsMenuSection = Exclude<SettingsSection, "menu">;
@@ -252,6 +255,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   backup_restore: "system",
   system_diagnostics: "system",
   request_scan_automation: "integrations",
+  authoritative_orthanc: "integrations",
 };
 
 const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
@@ -290,6 +294,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "request_scan_automation") {
     return "Request Scan Automation";
+  }
+  if (section === "authoritative_orthanc") {
+    return "Authoritative Orthanc";
   }
   return _t(`settings.section.${section}` as TranslationKey);
 }
@@ -475,6 +482,7 @@ export default function SettingsPage() {
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
             {section === "system_diagnostics" && user?.role === "super_admin" && <SystemDiagnosticsSection onReAuthRequired={requestReAuth} />}
             {section === "request_scan_automation" && user?.role === "super_admin" && <RequestScanAutomationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
+            {section === "authoritative_orthanc" && (user?.role === "supervisor" || user?.role === "super_admin") && <AuthoritativeOrthancSection onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
           </Card>

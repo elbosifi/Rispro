@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   language: "en" as "en" | "ar",
-  modalityProps: null as null | { id: number; code: string; name: string; onBack: () => void },
+  modalityProps: null as null | { id: number; code: string; name: string; orthancState?: string; onBack: () => void },
 }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: state.language, isArabic: state.language === "ar" }) }));
 vi.mock("@/lib/api-hooks", () => ({ fetchAppointmentLookups: vi.fn(async () => ({
@@ -14,8 +14,9 @@ vi.mock("@/lib/api-hooks", () => ({ fetchAppointmentLookups: vi.fn(async () => (
     { id: 8, code: "MRI", nameAr: "الرنين", nameEn: "MRI", isActive: false },
   ],
 })) }));
+vi.mock("@/lib/api-client", () => ({ api: vi.fn(async () => ({ state: "unavailable" })) }));
 vi.mock("@/pages/request-scans/request-scans-page", () => ({
-  default: (props: { modality: { id: number; code: string; name: string; onBack: () => void } }) => {
+  default: (props: { modality: { id: number; code: string; name: string; orthancState?: string; onBack: () => void } }) => {
     state.modalityProps = props.modality;
     return <div><h1>{props.modality.code} Document Ingestion</h1><button onClick={props.modality.onBack}>Back to Modality Worklist</button></div>;
   },
@@ -52,6 +53,7 @@ describe("DocumentIngestionPage", () => {
     expect(await screen.findByRole("heading", { name: "CT Document Ingestion" })).toBeTruthy();
     expect(state.modalityProps?.id).toBe(7);
     expect(state.modalityProps?.code).toBe("CT");
+    expect(state.modalityProps?.orthancState).toBe("unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Back to Modality Worklist" }));
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality?modalityId=7"));
   });
