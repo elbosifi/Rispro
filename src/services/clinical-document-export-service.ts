@@ -338,10 +338,22 @@ export async function assertClinicalDocumentExportAppointmentAccess(appointmentI
 
 export async function retryClinicalDocumentExport(exportId: UserId, changedByUserId: UserId): Promise<ClinicalDocumentExportRow> {
   const id = normalizePositiveInteger(exportId, "exportId");
-  const { rows } = await pool.query<ClinicalDocumentExportRow>(`update clinical_document_exports set status='pending', attempt_count=0, next_retry_at=now(), last_error=null, export_lease_owner=null, export_lease_expires_at=null, updated_at=now() where id=$1 and status='failed' returning *`, [id]);
+  const { rows } = await pool.query<ClinicalDocumentExportRow & { previous_status: "failed" | "blocked" }>(`
+    with target as (
+      select id, status as previous_status
+      from clinical_document_exports
+      where id=$1 and status in ('failed','blocked')
+      for update
+    )
+    update clinical_document_exports e
+    set status='pending', attempt_count=0, next_retry_at=null, last_error=null, export_lease_owner=null, export_lease_expires_at=null, updated_at=now()
+    from target
+    where e.id=target.id
+    returning e.*, target.previous_status
+  `, [id]);
   const row = rows[0];
-  if (!row) throw new HttpError(409, "Only failed clinical document exports can be retried.");
-  await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_manual_retry_requested", oldValues: { status: "failed" }, newValues: { status: "pending" }, changedByUserId });
+  if (!row) throw new HttpError(409, "Only failed or blocked clinical document exports can be retried.");
+  await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_manual_retry_requested", oldValues: { status: row.previous_status }, newValues: { status: "pending" }, changedByUserId });
   return row;
 }
 

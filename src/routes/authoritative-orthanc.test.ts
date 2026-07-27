@@ -11,6 +11,8 @@ test("authoritative Orthanc routes keep settings restricted and modality status 
   assert.match(source, /get\("\/appointments\/:appointmentId\/study", requireAnyRole\(\["modality_staff", "supervisor", "super_admin"\]\)/);
   assert.match(source, /get\("\/appointments\/:appointmentId\/document-exports", requireAnyRole\(\["modality_staff", "supervisor", "super_admin"\]\)/);
   assert.match(source, /post\("\/document-exports\/reconcile", requireAnyRole\(\["super_admin"\]\)/);
-  assert.match(source, /post\("\/document-exports\/:exportId\/retry", requireAnyRole\(\["supervisor", "super_admin"\]\)/);
+  const retryRoute = source.match(/post\("\/document-exports\/:exportId\/retry"[^\n]*/)?.[0] || "";
+  assert.match(retryRoute, /requireAnyRole\(\["supervisor", "super_admin"\]\)/);
+  assert.doesNotMatch(retryRoute, /modality_staff/);
   assert.doesNotMatch(source, /delete\(|\/instances["'`]|\/series["'`]|\/studies["'`]/i);
 });

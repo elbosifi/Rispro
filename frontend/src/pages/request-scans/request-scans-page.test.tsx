@@ -4,15 +4,16 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
+const authState = vi.hoisted(() => ({ role: "super_admin" as string }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar", t: (key: string) => key }) }));
-vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { id: 1, role: "super_admin" } }) }));
+vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { id: 1, role: authState.role } }) }));
 
 import RequestScansPage from "./request-scans-page";
 
 const response = (value: unknown) => ({ ok: true, json: async () => value }) as Response;
 const health = { name: "archive-share", state: "unavailable", affectedCount: 31, lastConnectionCheck: "2026-07-24T10:00:00Z", lastSuccessfulArchive: "2026-07-24T09:00:00Z", nextRetryAt: "2026-07-24T10:02:00Z", lastError: "Connection unavailable" };
 const status = { enabled: true, lastRunAt: "2026-07-24T10:00:00Z", lastError: null, running: false, workerOnline: true, pending: 2, processing: 1, processedToday: 2, failed: 1, canRetryArchives: true, archiveDestination: health };
-type JobFixture = { id: number; filename: string; status: string; barcode_value: string | null; appointment_id: number | null; document_id: number | null; attachment_completed_at: string | null; source_moved_at: string | null; archive_attempt_count: number; last_archive_attempt_at: string | null; archive_last_error: string | null; error_message: string | null; attempt_count: number; created_at: string; patient_name: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn: string | null; patient_date_of_birth: string | null; modality_name: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; failure_category?: string | null; processing_stage?: string | null; appointment_date?: string | null };
+type JobFixture = { id: number; filename: string; status: string; barcode_value: string | null; appointment_id: number | null; document_id: number | null; attachment_completed_at: string | null; source_moved_at: string | null; archive_attempt_count: number; last_archive_attempt_at: string | null; archive_last_error: string | null; error_message: string | null; attempt_count: number; created_at: string; patient_name: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn: string | null; patient_date_of_birth: string | null; modality_name: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; failure_category?: string | null; processing_stage?: string | null; appointment_date?: string | null; appointment_status?: string | null; clinical_document_export_status?: "pending" | "exporting" | "exported" | "failed" | "blocked" | null; clinical_document_export_id?: number | null; clinical_document_export_last_attempt_at?: string | null; clinical_document_export_next_retry_at?: string | null; clinical_document_exported_at?: string | null; clinical_document_export_last_error?: string | null };
 const archiveFailure: JobFixture = { id: 9, filename: "request.pdf", status: "failed", barcode_value: "V2-000009", appointment_id: 9, document_id: 55, attachment_completed_at: "2026-07-24T09:30:00Z", source_moved_at: null, archive_attempt_count: 7, last_archive_attempt_at: "2026-07-24T10:00:00Z", archive_last_error: "Connection unavailable", error_message: "Connection unavailable", attempt_count: 7, created_at: "2026-07-24T09:00:00Z", patient_name: "Patient One", patient_name_ar: "المريض الأول", patient_name_en: "Patient One", patient_mrn: "MRN-9", patient_date_of_birth: "1980-01-01", modality_name: "CT", modality_name_ar: "التصوير المقطعي", modality_name_en: "CT", exam_name: "Head", exam_name_ar: "الرأس", exam_name_en: "Head", failure_category: "smb_storage", processing_stage: "archive", appointment_date: "2026-07-25" };
 const completed = { ...archiveFailure, id: 10, filename: "completed.pdf", status: "processed", source_moved_at: "2026-07-24T10:01:00Z", archive_last_error: null };
 
@@ -58,9 +59,39 @@ async function openMenu(filename = "request.pdf") {
   return screen.getByRole("menu", { name: `Actions for ${filename}` });
 }
 
-afterEach(() => { languageState.language = "en"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { languageState.language = "en"; authState.role = "super_admin"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("RequestScansPage", () => {
+  it("shows supervisor Retry matching for blocked clinical exports and queues the retry", async () => {
+    const fetchMock = mock([{ ...archiveFailure, status: "processed", source_moved_at: "2026-07-24T10:01:00Z", clinical_document_export_status: "blocked", clinical_document_export_id: 101, appointment_status: "completed", clinical_document_export_last_error: "Patient identity conflict" }]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Retry matching" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/integrations/authoritative-orthanc/document-exports/101/retry"))).toBe(true));
+  });
+
+  it("uses the Arabic blocked-export retry-matching label", async () => {
+    languageState.language = "ar";
+    mock([{ ...archiveFailure, status: "processed", source_moved_at: "2026-07-24T10:01:00Z", clinical_document_export_status: "blocked", clinical_document_export_id: 101, appointment_status: "completed" }]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByRole("button", { name: "إعادة المطابقة" })).toBeTruthy();
+  });
+
+  it("does not show blocked-export retry matching to modality staff", async () => {
+    authState.role = "modality_staff";
+    mock([{ ...archiveFailure, status: "processed", source_moved_at: "2026-07-24T10:01:00Z", clinical_document_export_status: "blocked", clinical_document_export_id: 101, appointment_status: "completed" }]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    await screen.findByText("request.pdf");
+    expect(screen.queryByRole("button", { name: "Retry matching" })).toBeNull();
+  });
+
+  it("keeps ordinary failed clinical exports on the Retry wording and hides retry for exported exports", async () => {
+    mock([{ ...archiveFailure, status: "processed", source_moved_at: "2026-07-24T10:01:00Z", clinical_document_export_status: "failed", clinical_document_export_id: 101, appointment_status: "completed" }, { ...completed, id: 11, filename: "exported.pdf", clinical_document_export_status: "exported", clinical_document_export_id: 102, appointment_status: "completed" }]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry matching" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+  });
+
   it("scopes modality jobs, status, preview, and browser links to the selected modality", async () => {
     const fetchMock = mock();
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });

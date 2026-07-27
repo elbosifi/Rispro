@@ -344,7 +344,9 @@ function ClinicalDocumentExportStatus({ language, job, canRetry, onRetry }: { la
   const tone = !status || status === "pending" ? "border-slate-200 bg-slate-50 text-slate-600" : status === "exporting" ? "border-blue-200 bg-blue-50 text-blue-800" : status === "exported" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : status === "failed" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-red-200 bg-red-50 text-red-800";
   const timestamp = job.clinical_document_exported_at || job.clinical_document_export_last_attempt_at;
   const detail = job.clinical_document_export_last_error || (timestamp ? formatDateTime(language, timestamp) : undefined);
-  return <div className="mt-1 flex max-w-full flex-wrap items-center gap-1"><div className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold ${tone}`} title={detail}><FileText size={11} aria-hidden="true" /><span className="truncate">{t(language, key)}</span></div>{canRetry && status === "failed" && job.clinical_document_export_id ? <button type="button" className="rounded border border-amber-300 px-1.5 py-1 text-[10px] font-semibold text-amber-900 hover:bg-amber-100" onClick={onRetry}>{language === "ar" ? "إعادة المحاولة" : "Retry"}</button> : null}</div>;
+  const canRetryExport = canRetry && Boolean(job.clinical_document_export_id) && (status === "failed" || status === "blocked");
+  const retryLabel: TranslationKey = status === "blocked" ? "requestScans.export.retryMatching" : "requestScans.actions.retry";
+  return <div className="mt-1 flex max-w-full flex-wrap items-center gap-1"><div className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold ${tone}`} title={detail}><FileText size={11} aria-hidden="true" /><span className="truncate">{t(language, key)}</span></div>{canRetryExport ? <button type="button" className="rounded border border-amber-300 px-1.5 py-1 text-[10px] font-semibold text-amber-900 hover:bg-amber-100" onClick={onRetry}>{t(language, retryLabel)}</button> : null}</div>;
 }
 
 function attentionKey(job: Job): TranslationKey | null {
