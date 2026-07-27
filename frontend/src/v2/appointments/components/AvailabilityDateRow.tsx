@@ -16,7 +16,7 @@ interface Props {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
-  specialQuotaPath: boolean;
+  specialQuotaPath?: boolean;
   examMixQuotaSummaries?: Array<{
     ruleId: number;
     title: string | null;
@@ -157,7 +157,7 @@ export function AvailabilityDateRow({
   nonOncologyFilled,
   nonOncologyRemaining,
   specialQuotaRemaining,
-  specialQuotaPath,
+  specialQuotaPath = false,
   examMixQuotaSummaries,
   primaryExamMixBlocking,
   matchedExamRuleSummary,
