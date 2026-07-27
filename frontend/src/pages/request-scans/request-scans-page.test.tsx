@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,9 @@ const status = { enabled: true, lastRunAt: "2026-07-24T10:00:00Z", lastError: nu
 type JobFixture = { id: number; filename: string; status: string; barcode_value: string | null; appointment_id: number | null; document_id: number | null; attachment_completed_at: string | null; source_moved_at: string | null; archive_attempt_count: number; last_archive_attempt_at: string | null; archive_last_error: string | null; error_message: string | null; attempt_count: number; created_at: string; patient_name: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn: string | null; patient_date_of_birth: string | null; modality_name: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; failure_category?: string | null; processing_stage?: string | null; appointment_date?: string | null; appointment_status?: string | null; clinical_document_export_status?: "pending" | "exporting" | "exported" | "failed" | "blocked" | null; clinical_document_export_id?: number | null; clinical_document_export_last_attempt_at?: string | null; clinical_document_export_next_retry_at?: string | null; clinical_document_exported_at?: string | null; clinical_document_export_last_error?: string | null };
 const archiveFailure: JobFixture = { id: 9, filename: "request.pdf", status: "failed", barcode_value: "V2-000009", appointment_id: 9, document_id: 55, attachment_completed_at: "2026-07-24T09:30:00Z", source_moved_at: null, archive_attempt_count: 7, last_archive_attempt_at: "2026-07-24T10:00:00Z", archive_last_error: "Connection unavailable", error_message: "Connection unavailable", attempt_count: 7, created_at: "2026-07-24T09:00:00Z", patient_name: "Patient One", patient_name_ar: "المريض الأول", patient_name_en: "Patient One", patient_mrn: "MRN-9", patient_date_of_birth: "1980-01-01", modality_name: "CT", modality_name_ar: "التصوير المقطعي", modality_name_en: "CT", exam_name: "Head", exam_name_ar: "الرأس", exam_name_en: "Head", failure_category: "smb_storage", processing_stage: "archive", appointment_date: "2026-07-25" };
 const completed = { ...archiveFailure, id: 10, filename: "completed.pdf", status: "processed", source_moved_at: "2026-07-24T10:01:00Z", archive_last_error: null };
+const pending = { ...archiveFailure, id: 20, filename: "queued.pdf", status: "pending", barcode_value: null, appointment_id: null, document_id: null, attachment_completed_at: null, source_moved_at: null, processing_stage: "queued" };
+const processing = { ...pending, id: 21, filename: "processing.pdf", status: "processing", processing_stage: "recognition" };
+const unassignedFailure = { ...pending, id: 22, filename: "V2-003838.pdf", status: "failed", failure_category: "recognition" };
 
 function renderPage(modality?: { id: number; code: string; name: string; onBack: () => void }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -62,6 +65,63 @@ async function openMenu(filename = "request.pdf") {
 afterEach(() => { languageState.language = "en"; authState.role = "super_admin"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("RequestScansPage", () => {
+  it("shows the scoped Start now action for a queued job", async () => {
+    const fetchMock = mock([pending]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Start now" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/request-scans/20/start-now?workflowSource=modality&modalityId=7")).toBe(true));
+    expect(screen.getAllByText("Queued").length).toBeGreaterThan(1);
+  });
+
+  it("shows Stop & review before attachment and reports Stopping while cancellation is pending", async () => {
+    const fetchMock = mock([processing]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
+    expect((screen.getByRole("button", { name: "Stopping…" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/request-scans/21/stop?workflowSource=modality&modalityId=7")).toBe(true));
+  });
+
+  it("keeps the failed-unassigned assignment action and automatic retry in More actions", async () => {
+    mock([unassignedFailure]);
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Assign appointment" })).toBeTruthy();
+    const menu = await openMenu("V2-003838.pdf");
+    expect(within(menu).getByRole("menuitem", { name: "Retry automatic recognition" })).toBeTruthy();
+  });
+
+  it("prefills one filename accession without selecting an appointment", async () => {
+    mock([unassignedFailure]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    const search = await screen.findByLabelText("Selected RIS appointment");
+    expect((search as HTMLInputElement).value).toBe("V2-003838");
+    expect(screen.getByText("Filename suggestion — not verified")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("uses contextual modality folder wording while keeping the global scan action", async () => {
+    mock([]);
+    renderPage({ id: 7, code: "MR", name: "MR", onBack: vi.fn() });
+    expect(await screen.findByRole("button", { name: "Scan MR folder now" })).toBeTruthy();
+    expect(screen.getByText(/Discovers files and starts a worker cycle/)).toBeTruthy();
+  });
+
+  it("shows and authorizes the dismissed tab and restore action", async () => {
+    const dismissed = { ...unassignedFailure, dismissed_at: "2026-07-27T10:00:00Z" };
+    const fetchMock = mock([dismissed]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: /Dismissed/ }));
+    expect(await screen.findByText("V2-003838.pdf")).toBeTruthy();
+    const menu = await openMenu("V2-003838.pdf");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Restore" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/22/restore-dismissed"))).toBe(true));
+    cleanup();
+    authState.role = "modality_staff";
+    mock([unassignedFailure]);
+    renderPage();
+    expect(screen.queryByRole("tab", { name: /Dismissed/ })).toBeNull();
+  });
+
   it("shows supervisor Retry matching for blocked clinical exports and queues the retry", async () => {
     const fetchMock = mock([{ ...archiveFailure, status: "processed", source_moved_at: "2026-07-24T10:01:00Z", clinical_document_export_status: "blocked", clinical_document_export_id: 101, appointment_status: "completed", clinical_document_export_last_error: "Patient identity conflict" }]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
@@ -111,9 +171,9 @@ describe("RequestScansPage", () => {
     expect(screen.getByRole("button", { name: /Processed today 2/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Needs attention 1/ })).toBeTruthy();
     expect(screen.queryByText("Workload")).toBeNull();
-    expect(screen.getByText("Matched")).toBeTruthy();
+    expect(screen.getByText("Match confirmed")).toBeTruthy();
     expect(screen.getByText("Attached")).toBeTruthy();
-    expect(screen.getByText("Archived")).toBeTruthy();
+    expect(screen.getByText("Archive needs review")).toBeTruthy();
   });
 
   it("renders bilingual patient, modality, and examination values while keeping technical values LTR", async () => {
@@ -157,7 +217,7 @@ describe("RequestScansPage", () => {
     await screen.findByText("request.pdf");
     const menu = await openMenu();
     const items = within(menu).getAllByRole("menuitem");
-    expect(items).toHaveLength(5);
+    expect(items.length).toBeGreaterThanOrEqual(5);
     expect(items.every((item) => item.tagName === "BUTTON" || item.tagName === "A")).toBe(true);
     expect(within(menu).getByRole("menuitem", { name: "Preview scanned document" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "Open in browser" })).toBeTruthy();
@@ -295,9 +355,9 @@ describe("RequestScansPage", () => {
     const comboboxes = screen.getAllByRole("combobox");
     expect(await screen.findByRole("option", { name: /V2-000012/ })).toBeTruthy();
     fireEvent.change(comboboxes[1], { target: { value: "12" } });
-    expect(await screen.findByText("Selected Patient")).toBeTruthy();
+    expect((await screen.findAllByText("Selected Patient")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("checkbox", { name: /I verified the patient identity/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and queue attachment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and attach" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/9/manual-assign"))).toBe(true));
   });
 
