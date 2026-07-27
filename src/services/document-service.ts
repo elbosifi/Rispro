@@ -654,6 +654,14 @@ export async function upsertDocumentAppointmentLinks(documentId: number, appoint
       );
     }
     await client.query("commit");
+    const { rows } = await pool.query<{ source: string; document_type: string }>("select source, document_type from documents where id=$1", [documentId]);
+    if (rows[0]?.source === "modality_scan_automation" && rows[0].document_type === "clinical_document") {
+      for (const appointmentId of ids) {
+        await enqueueClinicalDocumentExportsForAppointment(appointmentId).catch((error) => {
+          console.warn(JSON.stringify({ type: "clinical_document_export_link_queue_failed", documentId, appointmentId, error: error instanceof Error ? error.message : String(error) }));
+        });
+      }
+    }
   } catch (error) {
     await client.query("rollback");
     throw error;

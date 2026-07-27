@@ -238,7 +238,7 @@ async function processClaimedExport(row: ExportWorkRow): Promise<void> {
       verifyInstance(instance, row, study, identifiers);
     } else {
       const source = await readFile(getDocumentAbsolutePath({ stored_path: row.document_stored_path }));
-      const dicom = await createClinicalDocumentDicom(source, row.document_mime_type, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: identifiers.seriesInstanceUid, sopInstanceUid: identifiers.sopInstanceUid, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, accessionNumber: row.appointment_accession_number, documentTitle: row.document_type || row.document_original_filename, originalFilename: row.document_original_filename });
+      const dicom = await createClinicalDocumentDicom(source, row.document_mime_type, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: identifiers.seriesInstanceUid, sopInstanceUid: identifiers.sopInstanceUid, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number, documentTitle: row.document_type || row.document_original_filename, originalFilename: row.document_original_filename, instanceNumber: String(row.id) });
       try {
         instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!);
       } catch (error) {
@@ -284,7 +284,7 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
   return row ? await loadExportWork(row.id) : null;
 }
 
-export async function runClinicalDocumentExportTick(options: { batchSize?: number } = {}): Promise<{ reconciled: number; processed: number; exported: number; failed: number }> {
+export async function runClinicalDocumentExportTick(options: { batchSize?: number; shouldStop?: () => boolean } = {}): Promise<{ reconciled: number; processed: number; exported: number; failed: number }> {
   const reconciled = await reconcileClinicalDocumentExports();
   const settings = await readAuthoritativeOrthancSettings();
   if (!settings.enabled) return { reconciled, processed: 0, exported: 0, failed: 0 };
@@ -293,6 +293,7 @@ export async function runClinicalDocumentExportTick(options: { batchSize?: numbe
   let exported = 0;
   let failed = 0;
   for (let index = 0; index < Math.max(1, options.batchSize ?? DEFAULT_BATCH_SIZE); index += 1) {
+    if (options.shouldStop?.()) break;
     const row = await claimNextClinicalDocumentExport(workerId);
     if (!row) break;
     processed += 1;
@@ -310,13 +311,15 @@ let workerRunning = false;
 let workerStopped = false;
 
 export async function startClinicalDocumentExportWorker(options: { intervalMs?: number; batchSize?: number } = {}): Promise<ClinicalDocumentExportWorker> {
+  if (workerInterval) return { stop: async () => { workerStopped = true; if (workerInterval) { clearInterval(workerInterval); workerInterval = null; } while (workerRunning) await new Promise((resolve) => setTimeout(resolve, 100)); } };
   const intervalMs = Math.max(5_000, options.intervalMs ?? 15_000);
   workerStopped = false;
-  await runClinicalDocumentExportTick({ batchSize: options.batchSize }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_startup_tick_failed", error: safeErrorMessage(error) })));
+  workerRunning = true;
+  void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_startup_tick_failed", error: safeErrorMessage(error) }))).finally(() => { workerRunning = false; });
   workerInterval = setInterval(() => {
     if (workerRunning || workerStopped) return;
     workerRunning = true;
-    void runClinicalDocumentExportTick({ batchSize: options.batchSize }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_tick_failed", error: safeErrorMessage(error) }))).finally(() => { workerRunning = false; });
+    void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_tick_failed", error: safeErrorMessage(error) }))).finally(() => { workerRunning = false; });
   }, intervalMs);
   workerInterval.unref();
   return { async stop() { workerStopped = true; if (workerInterval) { clearInterval(workerInterval); workerInterval = null; } while (workerRunning) await new Promise((resolve) => setTimeout(resolve, 100)); } };

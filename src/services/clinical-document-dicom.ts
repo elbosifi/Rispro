@@ -18,6 +18,9 @@ export type ClinicalDocumentDicomMetadata = {
   accessionNumber: string;
   documentTitle: string;
   originalFilename: string;
+  studyDate?: string | null;
+  studyTime?: string | null;
+  instanceNumber?: string | null;
   contentDate?: string;
   contentTime?: string;
 };
@@ -116,18 +119,26 @@ export async function createClinicalDocumentDicom(bytes: Buffer, mimeType: strin
     Modality: "DOC",
     ConversionType: "WSD",
     SeriesDescription: "RISpro Clinical Documents",
-    InstanceNumber: "1",
     PatientID: cleanText(metadata.patientId, "UNKNOWN"),
     PatientName: cleanText(metadata.patientName, "UNKNOWN"),
-    PatientBirthDate: dicomDate(metadata.patientBirthDate),
-    PatientSex: cleanText(metadata.patientSex, "").slice(0, 1).toUpperCase() || undefined,
+    PatientBirthDate: dicomDate(metadata.patientBirthDate) || "",
+    PatientSex: cleanText(metadata.patientSex, "").slice(0, 1).toUpperCase(),
+    StudyDate: dicomDate(metadata.studyDate) || "",
+    StudyTime: cleanText(metadata.studyTime, ""),
+    ReferringPhysicianName: "",
+    StudyID: "",
     AccessionNumber: cleanText(metadata.accessionNumber, "UNKNOWN"),
+    SeriesNumber: "1",
     DocumentTitle: cleanText(metadata.documentTitle || metadata.originalFilename, "Clinical Document").slice(0, 64),
+    ConceptNameCodeSequence: [],
     MIMETypeOfEncapsulatedDocument: "application/pdf",
     EncapsulatedDocument: new Uint8Array(pdf),
     BurnedInAnnotation: "YES",
+    AcquisitionDateTime: "",
     ContentDate: contentDate,
     ContentTime: contentTime,
+    Manufacturer: "RISpro",
+    InstanceNumber: cleanText(metadata.instanceNumber, "1"),
     InstanceCreationDate: contentDate,
     InstanceCreationTime: contentTime,
   };

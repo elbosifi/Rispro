@@ -14,6 +14,8 @@ const metadata = {
   accessionNumber: "V2-000001",
   documentTitle: "clinical_document",
   originalFilename: "report.pdf",
+  studyDate: "20260727",
+  instanceNumber: "17",
 };
 
 function parse(buffer: Buffer): Record<string, unknown> {
@@ -37,6 +39,10 @@ test("creates a valid Encapsulated PDF DICOM instance with stable supplied UIDs"
   assert.equal(dataset.SeriesInstanceUID, metadata.seriesInstanceUid);
   assert.equal(dataset.SOPInstanceUID, metadata.sopInstanceUid);
   assert.equal(dataset.PatientID, metadata.patientId);
+  assert.equal(dataset.SeriesNumber, 1);
+  assert.equal(dataset.InstanceNumber, Number(metadata.instanceNumber));
+  assert.equal(dataset.StudyDate, metadata.studyDate);
+  assert.equal(dataset.Manufacturer, "RISpro");
   assert.equal(dataset.MIMETypeOfEncapsulatedDocument, "application/pdf");
   assert.match(encapsulatedBytes(dataset.EncapsulatedDocument).toString("ascii"), /^%PDF-/);
 });

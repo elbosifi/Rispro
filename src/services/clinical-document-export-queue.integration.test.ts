@@ -74,6 +74,11 @@ test("clinical document export queue is idempotent, excludes Reception documents
     assert.equal(claimed?.document_id, clinicalDocumentId);
     assert.equal(claimed?.appointment_id, bookingId);
     assert.equal(claimed?.status, "exporting");
+    assert.equal((await claimNextClinicalDocumentExport(`queue-test-second-${suffix}`))?.id, undefined);
+    await client.query("update clinical_document_exports set export_lease_expires_at=now()-interval '1 second' where id=$1", [claimed?.id]);
+    const recovered = await claimNextClinicalDocumentExport(`queue-test-recovered-${suffix}`);
+    assert.equal(recovered?.id, claimed?.id);
+    assert.equal(recovered?.status, "exporting");
 
     const receptionRows = await client.query("select 1 from clinical_document_exports where document_id=$1", [receptionDocumentId]);
     assert.equal(receptionRows.rowCount, 0);
