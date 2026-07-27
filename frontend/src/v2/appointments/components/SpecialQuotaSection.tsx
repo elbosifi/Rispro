@@ -7,9 +7,10 @@ interface Props {
   capacityResolutionMode: CapacityResolutionMode;
   onChangeCapacityResolutionMode: (mode: CapacityResolutionMode) => void;
   specialQuotaAvailable: boolean;
-  supervisorMode?: boolean;
-  superAdminMode?: boolean;
-  allowCategoryOverride?: boolean;
+  showCapacityActions: boolean;
+  canUseSpecialQuota: boolean;
+  canUseCategoryOverride: boolean;
+  canUseTotalCapacityOverride: boolean;
   specialReasonCode: string;
   onChangeSpecialReasonCode: (value: string) => void;
   specialReasonConfirmed: boolean;
@@ -23,8 +24,10 @@ export function SpecialQuotaSection({
   capacityResolutionMode,
   onChangeCapacityResolutionMode,
   specialQuotaAvailable,
-  supervisorMode = true,
-  allowCategoryOverride = supervisorMode,
+  showCapacityActions,
+  canUseSpecialQuota,
+  canUseCategoryOverride,
+  canUseTotalCapacityOverride,
   specialReasonCode,
   onChangeSpecialReasonCode,
   specialReasonConfirmed,
@@ -32,13 +35,12 @@ export function SpecialQuotaSection({
   specialReasonNote,
   onChangeSpecialReasonNote,
   options,
-  superAdminMode = false,
 }: Props) {
   const { language } = useLanguage();
   const specialQuotaEnabled = capacityResolutionMode === "special_quota_extra";
   const categoryOverrideEnabled = capacityResolutionMode === "category_override";
 
-  if (!supervisorMode) return null;
+  if (!showCapacityActions) return null;
 
   return (
     <div className="card-shell p-3 sm:p-4">
@@ -52,19 +54,21 @@ export function SpecialQuotaSection({
         className="input-premium"
       >
         <option value="standard">{t(language, "appointments.create.standardBooking")}</option>
-        {allowCategoryOverride && (
+        {canUseCategoryOverride && (
           <option value="category_override">{t(language, "appointments.create.categoryOverride")}</option>
         )}
-        {superAdminMode && (
+        {canUseTotalCapacityOverride && (
           <option value="total_capacity_override">
             {language === "ar" ? "تجاوز السعة الإجمالية (مدير أعلى فقط)" : "Total capacity override (super admin only)"}
           </option>
         )}
-        <option value="special_quota_extra" disabled={!specialQuotaAvailable}>
-          {t(language, "appointments.create.specialQuotaExtra")}
-        </option>
+        {canUseSpecialQuota && (
+          <option value="special_quota_extra" disabled={!specialQuotaAvailable}>
+            {t(language, "appointments.create.specialQuotaExtra")}
+          </option>
+        )}
       </select>
-      {!specialQuotaAvailable && (
+      {canUseSpecialQuota && !specialQuotaAvailable && (
         <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
           {t(language, "appointments.create.specialQuotaUnavailable")}
         </div>
@@ -74,9 +78,11 @@ export function SpecialQuotaSection({
           {t(language, "appointments.create.categoryReserveNote")}
         </div>
       )}
-      <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
-        {t(language, "appointments.create.specialReasonAudit")}
-      </div>
+      {canUseSpecialQuota && (
+        <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
+          {t(language, "appointments.create.specialReasonAudit")}
+        </div>
+      )}
 
       {specialQuotaEnabled && (
         <div className="space-y-3 mt-4">

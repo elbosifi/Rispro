@@ -1,0 +1,20 @@
+{
+  "appointmentId": "55",
+  "accessionNumber": "V2-000055",
+  "modalityId": "51",
+  "modalityCode": "SQMODE_c155991fCT",
+  "patientId": "57",
+  "patientMrn": "000057",
+  "patientNationalId": "978952cc615e",
+  "patientNameEnglish": "SQMODE_b8a61b77 Patient",
+  "patientNameArabic": "SQMODE_b8a61b77مريض",
+  "appointmentDate": "2042-01-07",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

@@ -313,10 +313,10 @@ export function CreateAppointmentTab({
     isSuperAdmin ||
     hasSpecialQuotaAvailable ||
     hasAnySpecialQuotaAvailable ||
-    form.capacityResolutionMode === "special_quota_extra";
+    (form.capacityResolutionMode === "special_quota_extra" && availability.isLoading);
   const canUseSelectedCapacityMode =
     form.capacityResolutionMode === "special_quota_extra"
-      ? canUseSpecialQuotaMode
+      ? hasSpecialQuotaAvailable
       : canUseNonStandardCapacityModes;
   const filteredPriorityOptions = useMemo(
     () => priorityOptions.filter((p) => !isRoutinePriority(p)),
@@ -324,16 +324,20 @@ export function CreateAppointmentTab({
   );
 
   useEffect(() => {
+    const specialQuotaIsDefinitivelyUnavailable =
+      form.capacityResolutionMode === "special_quota_extra" &&
+      availability.enabled &&
+      !availability.isLoading &&
+      (form.appointmentDate ? !hasSpecialQuotaAvailable : !hasAnySpecialQuotaAvailable);
     if (
-      form.capacityResolutionMode !== "standard" &&
-      (!canUseSelectedCapacityMode ||
-        (form.capacityResolutionMode === "special_quota_extra" &&
-          !availability.isLoading &&
-          !hasSpecialQuotaAvailable))
+      (form.capacityResolutionMode !== "standard" &&
+        form.capacityResolutionMode !== "special_quota_extra" &&
+        !canUseSelectedCapacityMode) ||
+      specialQuotaIsDefinitivelyUnavailable
     ) {
       actions.setCapacityResolutionMode("standard");
     }
-  }, [actions, availability.isLoading, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseSelectedCapacityMode]);
+  }, [actions, availability.enabled, availability.isLoading, form.appointmentDate, form.capacityResolutionMode, hasAnySpecialQuotaAvailable, hasSpecialQuotaAvailable, canUseSelectedCapacityMode]);
 
   useEffect(() => {
     if (!form.patientId) {
@@ -410,20 +414,21 @@ export function CreateAppointmentTab({
   }, [canRequestDeferredOverride, showFullDays, showPolicyHiddenDays]);
 
   const canSelectAvailabilityRow = useCallback((row: AvailabilityRowViewModel): boolean => {
-    const hasRowSpecialQuota = (row.specialQuotaRemaining ?? 0) > 0;
     const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
-    if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota) && !canRequestDeferredOverride(supportedOverrideType, row)) {
+    if (isReceptionist && row.status !== "available" && !row.hasSpecialQuotaPath && !canRequestDeferredOverride(supportedOverrideType, row)) {
       return false;
     }
     if (row.status === "blocked" && !supportedOverrideType) return false;
-    if (row.status === "full" && !row.requiresSupervisorOverride && !hasRowSpecialQuota && !supportedOverrideType) return false;
+    if (row.status === "full" && !row.requiresSupervisorOverride && !supportedOverrideType) return false;
     return true;
   }, [canRequestDeferredOverride, isReceptionist]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (!canSelectAvailabilityRow(row)) return;
     const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
-    const requiresOverride = row.status === "restricted" || (row.status !== "available" && Boolean(supportedOverrideType)) || (row.status === "full" && row.requiresSupervisorOverride);
+    const quotaOnlyPath = row.hasSpecialQuotaPath;
+    const requiresOverride = !quotaOnlyPath && (row.status === "restricted" || (row.status !== "available" && Boolean(supportedOverrideType)) || (row.status === "full" && row.requiresSupervisorOverride));
+    if (quotaOnlyPath) actions.setCapacityResolutionMode("special_quota_extra");
     actions.setAppointmentDate(row.date, requiresOverride);
     setAvailabilitySelectedRow(row);
     setPageError(null);
@@ -444,9 +449,14 @@ export function CreateAppointmentTab({
     availabilitySelectedRow == null
       ? !isReceptionist
       : availabilitySelectedRow.status === "available" ||
-        ((availabilitySelectedRow.specialQuotaRemaining ?? 0) > 0 && !selectedRowRequiresOverride) ||
+        (availabilitySelectedRow.hasSpecialQuotaPath && form.capacityResolutionMode === "special_quota_extra") ||
         selectedRowCanUseImmediateOverride;
-  const canSubmitCreate = Boolean(schedulingEngineEnabled && !submitLoading && selectedRowCanBookNormally);
+  const canSubmitCreate = Boolean(
+    schedulingEngineEnabled &&
+    !submitLoading &&
+    selectedRowCanBookNormally &&
+    !(form.capacityResolutionMode === "special_quota_extra" && availability.isLoading)
+  );
   const canRequestOverrideApproval = canRequestDeferredOverride(selectedRowSupportedOverrideType);
 
   useEffect(() => {
@@ -1070,9 +1080,10 @@ export function CreateAppointmentTab({
                     setOverrideError(null);
                   }}
                   specialQuotaAvailable={hasSpecialQuotaAvailable}
-                  supervisorMode={!isReceptionist && (canUseNonStandardCapacityModes || canUseSpecialQuotaMode)}
-                  superAdminMode={isSuperAdmin}
-                  allowCategoryOverride={canUseNonStandardCapacityModes}
+                  showCapacityActions={canUseNonStandardCapacityModes || canUseSpecialQuotaMode}
+                  canUseSpecialQuota={canUseSpecialQuotaMode}
+                  canUseCategoryOverride={canUseNonStandardCapacityModes}
+                  canUseTotalCapacityOverride={isSuperAdmin}
                   specialReasonCode={form.specialReasonCode}
                   onChangeSpecialReasonCode={actions.setSpecialReasonCode}
                   specialReasonConfirmed={form.specialReasonConfirmed}

@@ -16,6 +16,7 @@ interface Props {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
+  specialQuotaPath: boolean;
   examMixQuotaSummaries?: Array<{
     ruleId: number;
     title: string | null;
@@ -156,6 +157,7 @@ export function AvailabilityDateRow({
   nonOncologyFilled,
   nonOncologyRemaining,
   specialQuotaRemaining,
+  specialQuotaPath,
   examMixQuotaSummaries,
   primaryExamMixBlocking,
   matchedExamRuleSummary,
@@ -169,6 +171,7 @@ export function AvailabilityDateRow({
   const { language } = useLanguage();
   const isClickable =
     status === "available" ||
+    specialQuotaPath ||
     (status === "restricted" && allowNonAvailableSelection) ||
     requestableOverride ||
     (status === "full" && allowNonAvailableSelection && (requiresSupervisorOverride || (specialQuotaRemaining ?? 0) > 0));
@@ -219,7 +222,9 @@ export function AvailabilityDateRow({
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{date}</div>
         </div>
         <div style={{ fontSize: 12, fontWeight: 700, color: statusColor, textTransform: "capitalize" }}>
-          {status === "blocked" && requestableOverride
+          {specialQuotaPath
+            ? (language === "ar" ? "الحصة الخاصة متاحة" : "Special quota available")
+            : status === "blocked" && requestableOverride
             ? t(language, "appointments.create.needsApproval")
             : status === "blocked"
             ? t(language, "appointments.create.notAvailable")

@@ -1,0 +1,14 @@
+# RISpro generated Modality Worklist source file
+(0008,0005) CS [ISO_IR 192]
+(0010,0010) PN [SQMODE_1807320d Patient]
+(0010,0020) LO [9f74eb033605]
+(0010,0030) DA []
+(0010,0040) CS [M]
+(0040,0100) SQ (Sequence with undefined length)
+(fffe,e000) na (Item with undefined length)
+  (0008,0050) SH [V2-000051]
+  (0008,0060) CS [SQMODE_C155991FCT]
+  (0040,0002) DA [20420103]
+  (0040,0007) LO [SQMODE_c155991f CT Head]
+(fffe,e00d) na (ItemDelimitationItem)
+(fffe,e0dd) na (SequenceDelimitationItem)

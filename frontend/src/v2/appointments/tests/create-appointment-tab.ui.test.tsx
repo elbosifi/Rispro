@@ -274,6 +274,8 @@ const availabilityRows: AvailabilityRowViewModel[] = [
 ];
 
 const mockRowsRef = { current: availabilityRows };
+const mockAvailabilityLoading = { current: false };
+const mockRawItemsByExamType: { current: Record<number, MockRawAvailabilityItem[]> | null } = { current: null };
 type MockRawAvailabilityItem = {
   date: string;
   specialQuotaSummary: {
@@ -307,11 +309,13 @@ const mockRawItemsRef: { current: MockRawAvailabilityItem[] } = {
 };
 
 vi.mock("../hooks/useAppointmentAvailability", () => ({
-  useAppointmentAvailability: () => ({
+  useAppointmentAvailability: (args: { examTypeId?: number | null }) => ({
     enabled: true,
     rows: mockRowsRef.current,
-    rawItems: mockRawItemsRef.current,
-    isLoading: false,
+    rawItems: args.examTypeId != null && mockRawItemsByExamType.current
+      ? (mockRawItemsByExamType.current[args.examTypeId] ?? [])
+      : mockRawItemsRef.current,
+    isLoading: mockAvailabilityLoading.current,
     isError: false,
     error: null,
     refetch: vi.fn(),
@@ -393,6 +397,29 @@ const supervisorTotalCapacityRows: AvailabilityRowViewModel[] = [
   },
 ];
 
+const allowedSpecialQuotaDecision: SchedulingDecisionDto = {
+  isAllowed: true,
+  requiresSupervisorOverride: false,
+  displayStatus: "available",
+  suggestedBookingMode: "special",
+  consumedCapacityMode: "special",
+  remainingStandardCapacity: 0,
+  remainingSpecialQuota: 2,
+  matchedRuleIds: [],
+  reasons: [],
+  policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+  decisionTrace: { evaluatedAt: "", input: {} },
+};
+
+const assignedReceptionistQuotaRows: AvailabilityRowViewModel[] = [
+  {
+    ...availabilityRows[1],
+    specialQuotaRemaining: 2,
+    hasSpecialQuotaPath: true,
+    requiresSupervisorOverride: false,
+  },
+];
+
 function setup(
   canUseNonStandardCapacityModes: boolean = true,
   priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }> = [],
@@ -401,7 +428,8 @@ function setup(
     { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
   ],
   currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor",
-  doctorModuleCapabilities: DoctorModuleCapability[] = []
+  doctorModuleCapabilities: DoctorModuleCapability[] = [],
+  evaluateDecision?: SchedulingDecisionDto
 ) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
@@ -425,7 +453,7 @@ function setup(
     wasOverride: Boolean(payload.override),
   }));
 
-  const onEvaluateAvailability = vi.fn(async (): Promise<SchedulingDecisionDto> => ({
+  const onEvaluateAvailability = vi.fn(async (): Promise<SchedulingDecisionDto> => evaluateDecision ?? ({
     isAllowed: false,
     requiresSupervisorOverride: true,
     displayStatus: "restricted" as const,
@@ -507,6 +535,8 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockCreateSchedulingOverrideRequest.mockReset();
     mockCreateSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
     mockReceptionOverrideRequestsEnabled.current = true;
+    mockAvailabilityLoading.current = false;
+    mockRawItemsByExamType.current = null;
     mockIntendedReportingDoctors.current = [
       { id: 42, displayName: "Dr Target", canFinalizeReports: true },
     ];
@@ -1104,18 +1134,17 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(callArg.specialReasonNote).toBe("High-risk escalation");
   });
 
-  it("disables special_quota_extra mode when no special quota exists", async () => {
+  it("does not offer special_quota_extra mode when no special quota exists", async () => {
     mockRawItemsRef.current = [];
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     const select = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
-    const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");
-    expect(option?.disabled).toBe(true);
+    expect(Array.from(select.options).some((option) => option.value === "special_quota_extra")).toBe(false);
   });
 
-  it("disables special_quota_extra when configured quota exists but remaining is 0 for selected date", async () => {
+  it("does not offer special_quota_extra when configured quota is exhausted", async () => {
     mockRawItemsRef.current = [
       {
         date: "2027-01-02",
@@ -1134,16 +1163,112 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
     const select = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
-    const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");
-    expect(option?.disabled).toBe(true);
+    expect(Array.from(select.options).some((option) => option.value === "special_quota_extra")).toBe(false);
   });
 
   it("non-supervisor UI does not show capacity resolution selector", async () => {
+    mockRawItemsRef.current = [];
     setup(false, [], undefined, "receptionist");
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
+  });
+
+  it("shows assigned receptionist special quota without category or total overrides", async () => {
+    mockRowsRef.current = assignedReceptionistQuotaRows;
+    const { onCreateAppointment } = setup(false, [], undefined, "receptionist", [], allowedSpecialQuotaDecision);
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    const quotaDate = screen.getByRole("button", { name: /2027-01-02 restricted/i });
+    expect(quotaDate).toBeTruthy();
+    expect(screen.getByText("Special quota available")).toBeTruthy();
+    await userEvent.click(quotaDate);
+
+    const capacityAction = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
+    expect(capacityAction.value).toBe("special_quota_extra");
+    expect(Array.from(capacityAction.options).map((option) => option.value)).toEqual([
+      "standard",
+      "special_quota_extra",
+    ]);
+    fireEvent.change(screen.getByLabelText("Special Reason"), { target: { value: "urgent" } });
+    await userEvent.click(screen.getByLabelText("I confirm the selected special reason is correct"));
+    await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+    await waitFor(() => expect(onCreateAppointment).toHaveBeenCalled());
+    expect(onCreateAppointment.mock.calls[0][0]).toMatchObject({
+      capacityResolutionMode: "special_quota_extra",
+      useSpecialQuota: true,
+      specialReasonCode: "urgent",
+    });
+  });
+
+  it("does not show special quota for an unassigned receptionist", async () => {
+    mockRawItemsRef.current = [];
+    mockRowsRef.current = [availabilityRowsWithAvailable[0]];
+    setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
+  });
+
+  it("keeps an assigned receptionist quota selection during availability loading", async () => {
+    mockRowsRef.current = assignedReceptionistQuotaRows;
+    setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+
+    mockRawItemsRef.current = [];
+    mockAvailabilityLoading.current = true;
+    fireEvent.change(screen.getByLabelText("Case Category"), { target: { value: "non_oncology" } });
+
+    expect((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).value).toBe("special_quota_extra");
+  });
+
+  it("resets special quota mode after changing to an exam type without an authorized quota", async () => {
+    mockRowsRef.current = assignedReceptionistQuotaRows;
+    mockRawItemsByExamType.current = { 101: mockRawItemsRef.current, 102: [] };
+    setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+    expect((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).value).toBe("special_quota_extra");
+
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "102" } });
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
+    });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).value).toBe("standard");
+    });
+  });
+
+  it("retains supervisor capacity control boundaries", async () => {
+    setup(true, [], undefined, "supervisor");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    const supervisorOptions = Array.from((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).options).map((option) => option.value);
+    expect(supervisorOptions).toEqual(["standard", "category_override", "special_quota_extra"]);
+
+  });
+
+  it("retains super-admin total-capacity control", async () => {
+    setup(true, [], undefined, "super_admin");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    const options = Array.from((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).options).map((option) => option.value);
+    expect(options).toEqual(["standard", "category_override", "total_capacity_override", "special_quota_extra"]);
   });
 
   describe("success state actions", () => {

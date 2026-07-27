@@ -111,13 +111,14 @@ export function AvailabilityPanel({
             nonOncologyFilled={row.nonOncologyFilled}
             nonOncologyRemaining={row.nonOncologyRemaining}
             specialQuotaRemaining={row.specialQuotaRemaining}
+            specialQuotaPath={Boolean(row.hasSpecialQuotaPath)}
             examMixQuotaSummaries={row.examMixQuotaSummaries}
             primaryExamMixBlocking={row.primaryExamMixBlocking}
             matchedExamRuleSummary={row.matchedExamRuleSummary}
             reasonText={row.reasonText}
             requiresSupervisorOverride={row.requiresSupervisorOverride}
             requestableOverride={requestableOverride}
-            allowNonAvailableSelection={allowOverrideRequests}
+            allowNonAvailableSelection={allowOverrideRequests || row.hasSpecialQuotaPath}
             selected={selectedDate === row.date}
             onClick={() => onSelectDate(row)}
           />

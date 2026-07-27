@@ -17,6 +17,7 @@ export interface AvailabilityRowViewModel {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
+  hasSpecialQuotaPath?: boolean;
   examMixQuotaSummaries?: Array<{
     ruleId: number;
     title: string | null;
@@ -99,6 +100,10 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
       : matchedExamRuleSummary?.effectMode ?? "";
   const reasonText = matchedExamRuleSummary ? "" : day.decision.reasons[0]?.message ?? "";
   const reasonCodes = day.decision.reasons.map((reason) => reason.code);
+  const hasSpecialQuotaPath =
+    status === "restricted" &&
+    reasonCodes.includes("category_capacity_exhausted") &&
+    (day.specialQuotaSummary?.remaining ?? 0) > 0;
   const isWeekend = isWeekendDate(day.date);
   const hideAlways = reasonCodes.includes("weekday_appointments_disabled");
 
@@ -118,6 +123,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
     nonOncologyFilled: day.nonOncology?.filled ?? 0,
     nonOncologyRemaining: day.nonOncology?.remaining ?? null,
     specialQuotaRemaining: day.specialQuotaSummary?.remaining ?? null,
+    hasSpecialQuotaPath,
     examMixQuotaSummaries: day.examMixQuotaSummaries ?? [],
     primaryExamMixBlocking:
       (day.examMixQuotaSummaries ?? [])
@@ -149,6 +155,7 @@ export function isAvailabilityRowVisible(
   row: AvailabilityRowViewModel,
   options: AvailabilityRowVisibilityOptions
 ): boolean {
+  if (row.hasSpecialQuotaPath) return true;
   if (row.status === "full" || row.status === "restricted" || options.requestableOverride) {
     return options.showFullDays;
   }
