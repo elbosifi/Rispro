@@ -16,6 +16,7 @@ import {
 } from "./document-storage-path.js";
 import type { UserId, OptionalUserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
+import { enqueueClinicalDocumentExportsForAppointment } from "./clinical-document-export-queue-service.js";
 
 export interface DocumentUploadPayload {
   patientId?: UserId;
@@ -613,6 +614,12 @@ export async function uploadDocument(
     },
     changedByUserId: currentUserId
   });
+
+  if (savedDocument.source === "modality_scan_automation" && savedDocument.document_type === "clinical_document" && savedDocument.v2_booking_id) {
+    await enqueueClinicalDocumentExportsForAppointment(Number(savedDocument.v2_booking_id), currentUserId).catch((error) => {
+      console.warn(JSON.stringify({ type: "clinical_document_export_queue_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) }));
+    });
+  }
 
   return savedDocument;
 }

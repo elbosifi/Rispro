@@ -13,6 +13,7 @@ import {
   type ReportingAssignmentActivationNotification,
 } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import { createAssignedToMeNotifications } from "../../../doctor-portal/reporting-board-repository.js";
+import { queueClinicalDocumentExportForCompletedAppointment } from "../../../../services/clinical-document-export-service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -526,6 +527,11 @@ export async function updateBookingStatusManual(
 
     await client.query("commit");
     await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
+    if (targetStatus === "completed") {
+      await queueClinicalDocumentExportForCompletedAppointment(bookingId, userId).catch((error) => {
+        console.warn(JSON.stringify({ type: "clinical_document_export_completion_queue_failed", appointmentId: bookingId, error: error instanceof Error ? error.message : String(error) }));
+      });
+    }
     scheduleBookingWorklistSync(bookingId);
     return {
       id: bookingId,

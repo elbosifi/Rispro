@@ -5,6 +5,7 @@ import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normal
 import { requireRow } from "../utils/records.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleBookingWorklistSync } from "./dicom-service.js";
+import { queueClinicalDocumentExportForCompletedAppointment } from "./clinical-document-export-service.js";
 import {
   listOrthancVerificationTargets,
   verifyBookingStudyWithOrthanc,
@@ -746,6 +747,9 @@ async function completeBookingIfStillEligible({
 
     await client.query("commit");
     await createAssignedToMeNotificationsForReportingIntent(reportingIntentNotification);
+    await queueClinicalDocumentExportForCompletedAppointment(bookingId).catch((error) => {
+      console.warn(JSON.stringify({ type: "clinical_document_export_completion_queue_failed", appointmentId: bookingId, error: error instanceof Error ? error.message : String(error) }));
+    });
     scheduleBookingWorklistSync(bookingId);
     return true;
   } catch (error) {

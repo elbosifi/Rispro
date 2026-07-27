@@ -73,3 +73,43 @@ test("rejects conflicting StudyInstanceUID search results and never calls mutati
   assert.equal(result.status, "ambiguous");
   assert.ok(calls.every((call) => call.method === "GET" || (call.method === "POST" && call.path === "/tools/find")));
 });
+
+test("uploads one DICOM instance and verifies the returned study, series, and SOP identifiers", async () => {
+  const calls: Array<{ path: string; method: string }> = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    calls.push({ path, method: init?.method || "GET" });
+    if (path === "/instances") {
+      assert.equal(init?.method, "POST");
+      assert.equal(new Headers(init?.headers).get("content-type"), "application/dicom");
+      assert.ok(Buffer.isBuffer(init?.body));
+      return json({ ID: "instance-1", ParentSeries: "series-1", ParentStudy: "study-1" });
+    }
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1", MainDicomTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" } });
+    throw new Error(`Unexpected ${init?.method || "GET"} ${path}`);
+  });
+  const instance = await new service.AuthoritativeOrthancClient(enabled).uploadDicomInstance(Buffer.from("DICOM"), "1.2.3");
+  assert.deepEqual(instance, { orthancInstanceId: "instance-1", orthancSeriesId: "series-1", orthancStudyId: "study-1", studyInstanceUid: "1.2.3", seriesInstanceUid: "2.25.3", sopInstanceUid: "2.25.4", patientId: "PATIENT-1", accessionNumber: "V2-000042" });
+  assert.deepEqual(calls.map((call) => `${call.method} ${call.path}`), ["POST /instances", "GET /instances/instance-1"]);
+});
+
+test("finds an existing SOPInstanceUID for retry idempotency without mutating Orthanc", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/tools/find") { assert.match(String(init?.body), /SOPInstanceUID/); return json(["instance-1"]); }
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1", MainDicomTags: { StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" } });
+    throw new Error(`Unexpected ${path}`);
+  });
+  const instance = await new service.AuthoritativeOrthancClient(enabled).findInstanceBySopInstanceUid("2.25.4");
+  assert.equal(instance?.orthancInstanceId, "instance-1");
+});
+
+test("rejects a returned instance whose study does not match the intended study", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/instances") return json({ ID: "instance-1" });
+    if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1", MainDicomTags: { StudyInstanceUID: "9.9.9", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4" } });
+    throw new Error(`Unexpected ${path}`);
+  });
+  await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).uploadDicomInstance(Buffer.from("DICOM"), "1.2.3"), /different study/i);
+});

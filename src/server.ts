@@ -15,6 +15,7 @@ import type { DicomRemapProcessingWorker } from "./services/dicom-remap-processi
 import type { OhifRetrievalWorker } from "./modules/ohif-viewer/worker.js";
 import type { BackupV3Worker } from "./services/backup-v3-worker.js";
 import type { RequestScanWorker } from "./services/request-scan-worker.js";
+import type { ClinicalDocumentExportWorker } from "./services/clinical-document-export-service.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -32,6 +33,7 @@ let dicomRemapProcessingWorker: DicomRemapProcessingWorker | null = null;
 let ohifRetrievalWorker: OhifRetrievalWorker | null = null;
 let backupV3Worker: BackupV3Worker | null = null;
 let requestScanWorker: RequestScanWorker | null = null;
+let clinicalDocumentExportWorker: ClinicalDocumentExportWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -117,6 +119,7 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
     try { await backupV3Worker.stop(); } catch (error) { console.error("Failed to stop Backup V3 worker.", error); }
   }
   if (requestScanWorker) { try { await requestScanWorker.stop(); } catch (error) { console.error("Failed to stop Request Scan worker.", error); } }
+  if (clinicalDocumentExportWorker) { try { await clinicalDocumentExportWorker.stop(); } catch (error) { console.error("Failed to stop Clinical Document Export worker.", error); } }
 
   server.close(async (serverError?: Error) => {
     try {
@@ -219,6 +222,16 @@ async function start(): Promise<void> {
     console.error("Request Scan worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.request_scan_worker = "initialization_failed";
+  }
+
+  try {
+    const { startClinicalDocumentExportWorker } = await import("./services/clinical-document-export-service.js");
+    clinicalDocumentExportWorker = await startClinicalDocumentExportWorker();
+    startupSummary.clinical_document_export = "started";
+  } catch (error) {
+    console.error("Clinical Document Export worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.clinical_document_export = "initialization_failed";
   }
 
   try {
@@ -397,6 +410,10 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  PACS Auto-Completion:");
     console.log(`    Worker:         ${startupSummary.pacs_auto_completion || "disabled"}`);
+
+    console.log("");
+    console.log("  Clinical Document Export:");
+    console.log(`    Worker:         ${startupSummary.clinical_document_export || "disabled"}`);
 
     console.log("");
     console.log("  Reporting Board SonicDICOM Cache:");
