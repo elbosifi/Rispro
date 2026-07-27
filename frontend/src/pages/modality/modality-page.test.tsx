@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModalityPage from "./modality-page";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -18,6 +19,7 @@ const printAppointmentSlipByIdMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
+function LocationProbe() { const location = useLocation(); return <span data-testid="location">{location.pathname}{location.search}</span>; }
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
@@ -183,7 +185,7 @@ function mriAssignment(overrides: Partial<ModalityProtocolAssignment> = {}): Mod
   };
 }
 
-function renderPage(rows: AppointmentWithDetails[]) {
+function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -211,9 +213,12 @@ function renderPage(rows: AppointmentWithDetails[]) {
   updateAppointmentStatusMock.mockResolvedValue({ ok: true });
 
   return render(
-    <QueryClientProvider client={queryClient}>
-      <ModalityPage />
-    </QueryClientProvider>
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <QueryClientProvider client={queryClient}>
+        <ModalityPage />
+        <LocationProbe />
+      </QueryClientProvider>
+    </MemoryRouter>
   );
 }
 
@@ -236,6 +241,32 @@ describe("ModalityPage modality board", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     languageState.language = "en";
+  });
+
+  it("disables document ingestion until a modality is selected", async () => {
+    renderPage([]);
+    expect((await screen.findByRole("button", { name: "Scan Documents" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens CT document ingestion with the selected modality ID", async () => {
+    const user = userEvent.setup();
+    renderPage([]);
+    await screen.findByRole("option", { name: "CT" });
+    await user.selectOptions(screen.getByRole("combobox"), "1");
+    const button = screen.getByRole("button", { name: "Scan Documents" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    await user.click(button);
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality/document-ingestion?modalityId=1"));
+  });
+
+  it("restores a selected active modality from the worklist URL and rejects an unknown one", async () => {
+    const active = renderPage([], "/modality?modalityId=1");
+    await screen.findByRole("option", { name: "CT" });
+    await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("1"));
+    expect((screen.getByRole("button", { name: "Scan Documents" }) as HTMLButtonElement).disabled).toBe(false);
+    active.unmount();
+    renderPage([], "/modality?modalityId=999");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Scan Documents" }) as HTMLButtonElement).disabled).toBe(true));
   });
 
   it("sorts arrived rows by arrivedAt ascending after in-progress rows", async () => {

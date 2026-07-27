@@ -15,6 +15,7 @@ export type RequestScanSettings = {
   incomingSubfolder: string;
   processedSubfolder: string;
   failedSubfolder: string;
+  modalityDocumentsRootSubfolder?: string;
   pollingIntervalSeconds: number;
   fileReadyDelaySeconds: number;
 };
@@ -30,10 +31,11 @@ function settingsFrom(values: Record<string, string>): RequestScanSettings {
   const incomingSubfolder = String(values.incoming_subfolder || "Requests/Incoming").trim();
   const processedSubfolder = String(values.processed_subfolder || "Requests/Processed").trim();
   const failedSubfolder = String(values.failed_subfolder || "Requests/Failed").trim();
+  const modalityDocumentsRootSubfolder = String(values.modality_documents_root_subfolder || "ModalityDocuments").trim();
   return {
     enabled: enabled(values.enabled), server: String(values.server || "").trim(), share: String(values.share || "").trim(),
     domain: String(values.domain || "").trim(), username: String(values.username || "").trim(),
-    password: String(values.password || ""), incomingSubfolder, processedSubfolder, failedSubfolder,
+    password: String(values.password || ""), incomingSubfolder, processedSubfolder, failedSubfolder, modalityDocumentsRootSubfolder,
     pollingIntervalSeconds: positive(values.polling_interval_seconds, 15, "Polling interval"), fileReadyDelaySeconds: positive(values.file_ready_delay_seconds, 15, "File-ready delay"),
   };
 }
@@ -51,10 +53,11 @@ function resolveRequestScanSettings(input: Record<string, unknown>, current: Rec
     incomingSubfolder: String(input.incomingSubfolder ?? input.incoming_subfolder ?? current.incoming_subfolder ?? "Requests/Incoming").trim(),
     processedSubfolder: String(input.processedSubfolder ?? input.processed_subfolder ?? current.processed_subfolder ?? "Requests/Processed").trim(),
     failedSubfolder: String(input.failedSubfolder ?? input.failed_subfolder ?? current.failed_subfolder ?? "Requests/Failed").trim(),
+    modalityDocumentsRootSubfolder: String(input.modalityDocumentsRootSubfolder ?? input.modality_documents_root_subfolder ?? current.modality_documents_root_subfolder ?? "ModalityDocuments").trim(),
     pollingIntervalSeconds: positive(input.pollingIntervalSeconds ?? input.polling_interval_seconds ?? current.polling_interval_seconds, 15, "Polling interval"),
     fileReadyDelaySeconds: positive(input.fileReadyDelaySeconds ?? input.file_ready_delay_seconds ?? current.file_ready_delay_seconds, 15, "File-ready delay"),
   };
-  for (const folder of [candidate.incomingSubfolder, candidate.processedSubfolder, candidate.failedSubfolder]) {
+  for (const folder of [candidate.incomingSubfolder, candidate.processedSubfolder, candidate.failedSubfolder, candidate.modalityDocumentsRootSubfolder]) {
     validateBackupV3SmbConfig({ server: candidate.server || "placeholder", share: candidate.share || "placeholder", subfolder: folder, domain: candidate.domain, timeoutSeconds: 15 });
   }
   if (candidate.enabled && (!candidate.server || !candidate.share || !candidate.username || !candidate.password)) {
@@ -88,7 +91,7 @@ export async function saveRequestScanSettings(input: Record<string, unknown>, us
   const password = typeof input.password === "string" && input.password.trim() ? input.password : "";
   await upsertSettings(REQUEST_SCAN_SETTINGS_CATEGORY, [
     { key: "enabled", value: candidate.enabled ? "enabled" : "disabled" }, { key: "server", value: candidate.server }, { key: "share", value: candidate.share }, { key: "domain", value: candidate.domain }, { key: "username", value: candidate.username },
-    { key: "incoming_subfolder", value: candidate.incomingSubfolder }, { key: "processed_subfolder", value: candidate.processedSubfolder }, { key: "failed_subfolder", value: candidate.failedSubfolder },
+    { key: "incoming_subfolder", value: candidate.incomingSubfolder }, { key: "processed_subfolder", value: candidate.processedSubfolder }, { key: "failed_subfolder", value: candidate.failedSubfolder }, { key: "modality_documents_root_subfolder", value: candidate.modalityDocumentsRootSubfolder },
     { key: "polling_interval_seconds", value: String(candidate.pollingIntervalSeconds) }, { key: "file_ready_delay_seconds", value: String(candidate.fileReadyDelaySeconds) },
     ...(password ? [{ key: "password", value: password }] : []),
   ], userId);

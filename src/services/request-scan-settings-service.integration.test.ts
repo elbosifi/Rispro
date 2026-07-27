@@ -30,6 +30,7 @@ test("resolves submitted request-scan test settings without saving them", async 
     incomingSubfolder: "Draft/Incoming",
     processedSubfolder: "Draft/Processed",
     failedSubfolder: "Draft/Failed",
+    modalityDocumentsRootSubfolder: "ModalityDocuments",
     pollingIntervalSeconds: 30,
     fileReadyDelaySeconds: 20,
   });
@@ -44,6 +45,7 @@ test("resolves submitted request-scan test settings without saving them", async 
     incomingSubfolder: "Draft/Incoming",
     processedSubfolder: "Draft/Processed",
     failedSubfolder: "Draft/Failed",
+    modalityDocumentsRootSubfolder: "ModalityDocuments",
     pollingIntervalSeconds: 30,
     fileReadyDelaySeconds: 20,
   });

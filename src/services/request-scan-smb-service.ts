@@ -192,11 +192,18 @@ function parseListing(output: string, folder: string): RequestScanRemoteFile[] {
   return found;
 }
 
-export async function listRequestScanFiles(settings: RequestScanSettings, dependencies?: BackupV3SmbDependencies): Promise<RequestScanRemoteFile[]> {
-  const folder = settings.incomingSubfolder;
+export async function listRequestScanFiles(settings: RequestScanSettings, dependencies?: BackupV3SmbDependencies, incomingSubfolder = settings.incomingSubfolder): Promise<RequestScanRemoteFile[]> {
+  const folder = incomingSubfolder;
   return withBackupV3SmbSession(config(settings), credentials(settings), async (run) => {
     const result = await run(`cd ${smbQuote(folder)}; ls`) as { stdout?: string };
     return parseListing(String(result.stdout || ""), folder);
+  }, dependencies);
+}
+export async function ensureRequestScanFolders(settings: RequestScanSettings, subfolders: string[], dependencies?: BackupV3SmbDependencies): Promise<void> {
+  await withBackupV3SmbSession(config(settings), credentials(settings), async (run) => {
+    for (const subfolder of [...new Set(subfolders)]) {
+      await ensureBackupV3SmbDirectory(run, validateBackupV3SmbConfig(config(settings, subfolder)));
+    }
   }, dependencies);
 }
 

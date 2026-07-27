@@ -23,6 +23,7 @@ import QueuePage from "@/pages/queue/queue-page";
 import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
 import NoShowReviewPage from "@/pages/queue/no-show-review-page";
 import ModalityPage from "@/pages/modality/modality-page";
+import DocumentIngestionPage from "@/pages/modality/document-ingestion-page";
 import ComparisonsPage from "@/pages/comparisons/comparisons-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
 import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-page";
@@ -171,6 +172,9 @@ function AppContent() {
     if (pathname.startsWith("/name-dictionary")) {
       return "name.dictionary";
     }
+    if (pathname.startsWith("/modality/document-ingestion")) {
+      return "modality";
+    }
     return APP_PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
@@ -297,6 +301,7 @@ function AppContent() {
             <Route path="/queue" element={guardedPage("queue", <QueuePage />)} />
             <Route path="/queue/no-shows" element={guardedPage("queue", <NoShowReviewPage />)} />
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
+            <Route path="/modality/document-ingestion" element={guardedPage("modality", <DocumentIngestionPage />)} />
             <Route path="/comparisons" element={guardedPage("comparisons", <ComparisonsPage />)} />
             <Route path="/comparisons/:id" element={guardedPage("comparisons", <ComparisonsPage />)} />
             <Route path="/print" element={guardedPage("print", <PrintPage />)} />

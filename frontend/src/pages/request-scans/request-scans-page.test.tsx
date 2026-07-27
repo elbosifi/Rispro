@@ -16,15 +16,15 @@ type JobFixture = { id: number; filename: string; status: string; barcode_value:
 const archiveFailure: JobFixture = { id: 9, filename: "request.pdf", status: "failed", barcode_value: "V2-000009", appointment_id: 9, document_id: 55, attachment_completed_at: "2026-07-24T09:30:00Z", source_moved_at: null, archive_attempt_count: 7, last_archive_attempt_at: "2026-07-24T10:00:00Z", archive_last_error: "Connection unavailable", error_message: "Connection unavailable", attempt_count: 7, created_at: "2026-07-24T09:00:00Z", patient_name: "Patient One", patient_name_ar: "المريض الأول", patient_name_en: "Patient One", patient_mrn: "MRN-9", patient_date_of_birth: "1980-01-01", modality_name: "CT", modality_name_ar: "التصوير المقطعي", modality_name_en: "CT", exam_name: "Head", exam_name_ar: "الرأس", exam_name_en: "Head", failure_category: "smb_storage", processing_stage: "archive", appointment_date: "2026-07-25" };
 const completed = { ...archiveFailure, id: 10, filename: "completed.pdf", status: "processed", source_moved_at: "2026-07-24T10:01:00Z", archive_last_error: null };
 
-function renderPage() {
+function renderPage(modality?: { id: number; code: string; name: string; onBack: () => void }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/request-scans"]}><Routes><Route path="/request-scans" element={<RequestScansPage />} /><Route path="/registrations" element={<div>Registration destination</div>} /></Routes></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/request-scans"]}><Routes><Route path="/request-scans" element={<RequestScansPage modality={modality} />} /><Route path="/registrations" element={<div>Registration destination</div>} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 
 function mock(jobs = [archiveFailure]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const value = String(input);
-    if (value.endsWith("/status")) return response(status);
+    if (value.includes("/api/request-scans/status")) return response(status);
     if (value.includes("/v2/lookups/special-reason-codes")) return response({ items: [] });
     if (value.includes("/api/v2/read/appointments/")) return response({ appointment: {
       id: 9,
@@ -46,7 +46,7 @@ function mock(jobs = [archiveFailure]) {
       created_at: "2026-07-24T09:00:00Z",
       public_appointment_url: "https://rispro.test/public/appointment?t=scan-token",
     } });
-    if (value.includes("/api/request-scans/") && value.endsWith("/file")) return { ok: true, blob: async () => new Blob(["%PDF-1.4"], { type: "application/pdf" }) } as Response;
+    if (/\/api\/request-scans\/\d+\/file(?:\?|$)/.test(value)) return { ok: true, blob: async () => new Blob(["%PDF-1.4"], { type: "application/pdf" }) } as Response;
     if (value.includes("eligible-appointments")) return response({ appointments: [{ id: 12, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_ar: "المريض المحدد", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_ar: "الرنين", modality_name_en: "MRI", exam_name: "Brain", exam_name_ar: "الدماغ", exam_name_en: "Brain", appointment_date: "2026-07-25" }] });
     if (value.includes("?status=")) return response({ jobs });
     return response({ jobs: [] });
@@ -61,6 +61,16 @@ async function openMenu(filename = "request.pdf") {
 afterEach(() => { languageState.language = "en"; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("RequestScansPage", () => {
+  it("scopes modality jobs, status, preview, and browser links to the selected modality", async () => {
+    const fetchMock = mock();
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    await screen.findByText("request.pdf");
+    const calls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(calls.some((value) => value.includes("/status?workflowSource=modality&modalityId=7"))).toBe(true);
+    expect(calls.some((value) => value.includes("?status=active&workflowSource=modality&modalityId=7"))).toBe(true);
+    const menu = await openMenu();
+    expect(within(menu).getByRole("menuitem", { name: "Open in browser" }).getAttribute("href")).toBe("/api/request-scans/9/file?workflowSource=modality&modalityId=7");
+  });
   it("renders a compact operational header and localized English table", async () => {
     mock();
     renderPage();

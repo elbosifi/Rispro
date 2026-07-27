@@ -10,6 +10,7 @@ import { listDocuments, uploadDocumentIdempotently, type DocumentRow, type Docum
 import { resolveStoredPath } from "./document-storage-path.js";
 import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js";
 import {
+  buildRequestScanInbox,
   findEligibleRequestScanAppointment,
   downloadRequestScanJobFile,
   getRequestScanJob,
@@ -24,6 +25,7 @@ import {
   returnRequestScanToIncoming,
   retryRequestScanJob,
   runRequestScanCycle,
+  sanitizeRequestScanModalityCode,
   type RequestScanServiceDependencies,
 } from "./request-scan-service.js";
 import { claimRequestScanJob } from "./request-scan-processing-service.js";
@@ -108,7 +110,7 @@ async function createBooking(status = "scheduled") {
   );
   const id = Number(booking.rows[0].id);
   created.bookings.push(id);
-  return { id, patientId, userId, accession: `V2-${String(id).padStart(6, "0")}` };
+  return { id, patientId, userId, modalityId, accession: `V2-${String(id).padStart(6, "0")}` };
 }
 
 async function createBookingForSamePatient(bookingId: number) {
@@ -137,6 +139,13 @@ async function createJob(status = "pending", filename?: string) {
   created.jobs.push(id);
   return id;
 }
+async function createModalityJob(modalityId: number, modalityCode: string, filename = `clinical-${suffix()}.jpg`) {
+  const result = await pool.query<{ id: number }>(
+    "insert into request_scan_jobs(filename,source_relative_path,mime_type,status,workflow_source,modality_id) values($1,$2,'image/jpeg','pending','modality',$3) returning id",
+    [filename, `ModalityDocuments\\${modalityCode}\\Incoming\\${filename}`, modalityId],
+  );
+  const id = Number(result.rows[0].id); created.jobs.push(id); return id;
+}
 
 function dependencies(result: RequestScanBarcodeResult, options: {
   existingDocument?: () => boolean;
@@ -161,8 +170,8 @@ function dependencies(result: RequestScanBarcodeResult, options: {
       options.uploads?.push({ payload, userId: userId ?? null });
       const inserted = await pool.query<{ id: string }>(
         `insert into documents(patient_id,v2_booking_id,document_type,original_filename,stored_path,mime_type,file_size,uploaded_by_user_id,storage_location_type,source)
-         values($1,$2,$3,$4,$5,$6,$7,$8,'local_fallback','request_scan_automation') returning id::text`,
-        [payload.patientId, payload.appointmentId, payload.documentType, payload.originalFilename, `tests/${payload.originalFilename}`, payload.mimeType, payload.fileContentBuffer?.length ?? 0, userId ?? null]
+         values($1,$2,$3,$4,$5,$6,$7,$8,'local_fallback',$9) returning id::text`,
+        [payload.patientId, payload.appointmentId, payload.documentType, payload.originalFilename, `tests/${payload.originalFilename}`, payload.mimeType, payload.fileContentBuffer?.length ?? 0, userId ?? null, payload.source]
       );
       return { id: Number(inserted.rows[0].id) } as DocumentRow;
     },
@@ -187,6 +196,105 @@ test("finds exactly one eligible V2 accession and excludes cancelled, discontinu
   for (const booking of excluded) {
     await assert.rejects(() => findEligibleRequestScanAppointment(booking.accession), /No eligible appointment matches this accession/);
   }
+});
+
+test("modality ingestion attaches clinical documents, rejects modality mismatches, and permits multiple files per appointment", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const ct = await createBooking("scheduled");
+  const mri = await createBooking("scheduled");
+  const ctCode = `CT${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [ct.modalityId, ctCode]);
+  const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const firstId = await createModalityJob(ct.modalityId, ctCode, "ct-first.jpg");
+  const secondId = await createModalityJob(ct.modalityId, ctCode, "ct-second.jpg");
+  const mismatchId = await createModalityJob(ct.modalityId, ctCode, "ct-mismatch.jpg");
+  const documentsBeforeMismatch = await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1", [mri.id]);
+  const linksBeforeMismatch = await pool.query<{ count: number }>("select count(*)::int count from document_appointment_links where appointment_id=$1", [mri.id]);
+
+  const first = await processRequestScanJob(firstId, settings, dependencies({ ok: true, accession: ct.accession }, { uploads }));
+  const second = await processRequestScanJob(secondId, settings, dependencies({ ok: true, accession: ct.accession }, { uploads }));
+  const mismatch = await processRequestScanJob(mismatchId, settings, dependencies({ ok: true, accession: mri.accession }, { uploads }));
+
+  assert.equal(first.status, "processed");
+  assert.equal(second.status, "processed");
+  assert.equal(uploads.length, 2);
+  assert.equal((uploads[0]!.payload as DocumentUploadPayload).documentType, "clinical_document");
+  assert.equal((uploads[0]!.payload as DocumentUploadPayload).source, "modality_scan_automation");
+  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [ct.id])).rows[0]!.count, 2);
+  assert.equal(mismatch.status, "failed");
+  assert.equal(mismatch.failure_category, "modality_mismatch");
+  assert.match(mismatch.source_relative_path, /Failed/);
+  assert.match(mismatch.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${ctCode}[\\\\/]Failed`));
+  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1", [mri.id])).rows[0]!.count, documentsBeforeMismatch.rows[0]!.count);
+  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from document_appointment_links where appointment_id=$1", [mri.id])).rows[0]!.count, linksBeforeMismatch.rows[0]!.count);
+  assert.equal((await pool.query("select 1 from request_scan_job_appointments where request_scan_job_id=$1", [mismatchId])).rowCount, 0);
+  const ctJobs = await listRequestScanJobs("all", undefined, "modality", ct.modalityId);
+  assert.ok([firstId, secondId, mismatchId].every((id) => ctJobs.some((job) => Number(job.id) === id)));
+  assert.ok(ctJobs.every((job) => job.workflow_source === "modality" && Number(job.modality_id) === ct.modalityId));
+  assert.ok(!(await listRequestScanJobs("all", undefined, "reception")).some((job) => [firstId, secondId, mismatchId].includes(Number(job.id))));
+});
+
+test("modality inbox paths are exact and unsafe modality codes are rejected", () => {
+  const inbox = buildRequestScanInbox({ ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, { id: 7, code: "CT" });
+  assert.deepEqual(inbox, {
+    workflowSource: "modality",
+    modalityId: 7,
+    modalityCode: "CT",
+    incomingSubfolder: "ModalityDocuments\\CT\\Incoming",
+    processedSubfolder: "ModalityDocuments\\CT\\Processed",
+    failedSubfolder: "ModalityDocuments\\CT\\Failed",
+  });
+  for (const unsafe of ["", "   ", ".", "..", "CT/MRI", "CT\\MRI", "CT∕MRI", "CT／MRI"]) {
+    assert.throws(() => sanitizeRequestScanModalityCode(unsafe), /unsafe/i);
+  }
+});
+
+test("one cycle processes Reception and CT while isolating an unavailable MRI inbox and unsafe modality code", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const code = `CT${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const receptionFilename = `mixed-reception-${suffix()}.jpg`;
+  const modalityFilename = `mixed-ct-${suffix()}.jpg`;
+  const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const diagnostics: Array<{ event: string; metadata: Record<string, string | number | boolean> }> = [];
+  const base = dependencies({ ok: true, accession: booking.accession }, { uploads, diagnostics });
+  const workerId = `mixed-cycle-${suffix()}`;
+  assert.equal(await acquireRequestScanWorkerLeadership(workerId), true);
+  let cycle: Awaited<ReturnType<typeof runRequestScanCycle>>;
+  try {
+    cycle = await runRequestScanCycle(
+      { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" },
+      {
+        ...base,
+        listActiveModalities: async () => [
+          { id: booking.modalityId, code },
+          { id: booking.modalityId + 100_000, code: "MRI" },
+          { id: booking.modalityId + 200_000, code: "../unsafe" },
+        ],
+        ensureRequestScanFolders: async (_settings, folders) => {
+          if (folders.some((folder) => folder.includes("\\MRI\\"))) throw Object.assign(new Error("MRI share unavailable"), { code: "ENOENT" });
+        },
+        listRequestScanFiles: async (_settings, _limit, incomingSubfolder) => {
+          if (incomingSubfolder === settings.incomingSubfolder) return [{ filename: receptionFilename, relativePath: `Requests\\Incoming\\${receptionFilename}`, modifiedAt: null }];
+          if (incomingSubfolder === `ModalityDocuments\\${code}\\Incoming`) return [{ filename: modalityFilename, relativePath: `ModalityDocuments\\${code}\\Incoming\\${modalityFilename}`, modifiedAt: null }];
+          return [];
+        },
+      },
+      workerId,
+    );
+  } finally {
+    await releaseRequestScanWorkerLeadership(workerId);
+  }
+  const jobs = await pool.query<{ id: number }>("select id from request_scan_jobs where filename=any($1::text[])", [[receptionFilename, modalityFilename]]);
+  created.jobs.push(...jobs.rows.map((row) => Number(row.id)));
+
+  assert.equal(cycle.discovered, 2);
+  const outcomes = await pool.query("select filename,status,error_message,failure_category from request_scan_jobs where filename=any($1::text[]) order by filename", [[receptionFilename, modalityFilename]]);
+  assert.equal(cycle.processed, 2, JSON.stringify({ cycle, outcomes: outcomes.rows, diagnostics }));
+  assert.deepEqual(uploads.map(({ payload }) => (payload as DocumentUploadPayload).documentType).sort(), ["appointment_request", "clinical_document"]);
+  assert.ok(diagnostics.some(({ event, metadata }) => event === "request_scan_inbox_failed" && metadata.modalityCode === "MRI"));
+  assert.ok(diagnostics.some(({ event, metadata }) => event === "request_scan_inbox_failed" && metadata.stage === "configuration"));
 });
 
 test("Request Scan token resolver accepts genuine expired compact tokens while public verification remains unchanged", async (t) => {
@@ -764,6 +872,30 @@ test("manual assignment queues a checkpointed worker job without direct upload",
   assert.equal(uploads.length, 0);
 });
 
+test("manual assignment rejects a different-modality appointment without mutating the modality job", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const ct = await createBooking();
+  const mri = await createBooking();
+  const ctCode = `CT${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [ct.modalityId, ctCode]);
+  const jobId = await createModalityJob(ct.modalityId, ctCode, "ct-manual-mismatch.jpg");
+  await pool.query("update request_scan_jobs set status='failed',failure_category='recognition',error_message='Manual review required',completed_at=now() where id=$1", [jobId]);
+  const before = await getRequestScanJob(jobId);
+
+  await assert.rejects(
+    () => manuallyAssignRequestScan(jobId, mri.id, ct.userId, settings, dependencies({ ok: false, reason: "no_barcode" })),
+    /No eligible appointment matches this selection/,
+  );
+
+  const after = await getRequestScanJob(jobId);
+  assert.equal(after.status, before.status);
+  assert.equal(after.failure_category, before.failure_category);
+  assert.equal(after.error_message, before.error_message);
+  assert.equal(after.appointment_id, null);
+  assert.equal(after.manual_assignment_appointment_id, null);
+  assert.equal(after.manual_assignment_requested_at, null);
+});
+
 test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint without attaching again", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
@@ -807,6 +939,29 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(recognitionCalls.length, 0);
   assert.equal((await pool.query("select count(*)::int as count from documents where id=$1", [failed.document_id])).rows[0].count, 1);
   assert.equal((await pool.query("select 1 from document_appointment_links where document_id=$1 and appointment_id=$2", [failed.document_id, booking.id])).rowCount, 1);
+});
+
+test("a disabled-modality job retry resumes its original checkpoint and cannot create a second clinical document", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const code = `CT${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const jobId = await createModalityJob(booking.modalityId, code, "disabled-modality-retry.jpg");
+  const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const failed = await processRequestScanJob(jobId, { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true, uploads }));
+  assert.equal(failed.status, "failed");
+  assert.equal(uploads.length, 1);
+  assert.ok(failed.attachment_completed_at);
+  await pool.query("update modalities set is_active=false where id=$1", [booking.modalityId]);
+  assert.ok((await listRequestScanJobs("failed", undefined, "modality", booking.modalityId)).some((job) => Number(job.id) === jobId));
+  await retryRequestScanJob(jobId, {
+    readSettings: async () => ({ ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }),
+    moveFile: async () => { throw new Error("checkpointed retry must not move or consult active modalities"); },
+  });
+  const resumed = await processRequestScanJob(jobId, { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, dependencies({ ok: false, reason: "no_barcode" }, { uploads }));
+  assert.equal(resumed.status, "processed");
+  assert.equal(uploads.length, 1);
+  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from documents where id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [failed.document_id])).rows[0]!.count, 1);
 });
 
 test("checkpointed identical source reconciliation completes without another upload", async (t) => {
@@ -853,7 +1008,7 @@ test("archive-only retry queues the attached checkpoint once and reports per-ite
 after(async () => {
   if (created.users.length) await pool.query("delete from audit_log where changed_by_user_id=any($1::bigint[])", [created.users]);
   if (created.jobs.length) await pool.query("delete from audit_log where entity_type='request_scan_job' and entity_id=any($1::bigint[])", [created.jobs]);
-  if (created.patients.length) await pool.query("delete from documents where patient_id=any($1::bigint[]) and source='request_scan_automation'", [created.patients]);
+  if (created.patients.length) await pool.query("delete from documents where patient_id=any($1::bigint[]) and source in ('request_scan_automation','modality_scan_automation')", [created.patients]);
   if (created.jobs.length) await pool.query("delete from request_scan_jobs where id = any($1::bigint[])", [created.jobs]);
   if (created.bookings.length) {
     await pool.query("delete from external_mwl_outbox where booking_id = any($1::bigint[])", [created.bookings]);

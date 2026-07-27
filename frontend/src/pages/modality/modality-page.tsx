@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BadgeCheck,
   Ban,
@@ -446,9 +447,11 @@ export default function ModalityPage() {
   const { language: rawLanguage, isArabic } = useLanguage();
   const language = rawLanguage as Language;
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedRef = useRef<HTMLTableRowElement | null>(null);
 
-  const [modalityId, setModalityId] = useState("");
+  const [modalityId, setModalityId] = useState(() => searchParams.get("modalityId") || "");
   const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
   const [boardFilter, setBoardFilter] = useState<BoardFilter>("operational");
@@ -581,6 +584,15 @@ export default function ModalityPage() {
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
     void queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
+  };
+  const handleModalityChange = (value: string) => {
+    setModalityId(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("modalityId", value); else next.delete("modalityId");
+    setSearchParams(next, { replace: true });
+    setSelectedAppointmentId(null);
+    setConfirmTargetId(null);
+    setConfirmVerified(false);
   };
 
   const handleClearStatusFilter = () => {
@@ -729,6 +741,10 @@ export default function ModalityPage() {
                 <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
                 <span>{isFetching ? chooseLocalized(language, "جار التحديث", "Refreshing") : t(language, "modality.refresh")}</span>
               </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={!currentModality?.isActive} onClick={() => currentModality && navigate(`/modality/document-ingestion?modalityId=${currentModality.id}`)} className="rounded-xl px-3">
+                <ScanLine size={16} />
+                <span>{chooseLocalized(language, "مسح المستندات", "Scan Documents")}</span>
+              </Button>
             </div>
           </div>
         </header>
@@ -740,12 +756,7 @@ export default function ModalityPage() {
                 <Select
                   label={t(language, "modality.selectModality")}
                   value={modalityId}
-                  onChange={(value) => {
-                    setModalityId(value);
-                    setSelectedAppointmentId(null);
-                    setConfirmTargetId(null);
-                    setConfirmVerified(false);
-                  }}
+                  onChange={handleModalityChange}
                   options={[
                     { value: "", label: t(language, "modality.selectModality") },
                     ...modalities

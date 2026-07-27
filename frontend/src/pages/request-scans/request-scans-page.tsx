@@ -43,6 +43,7 @@ import { useLanguage } from "@/providers/language-provider";
 
 type Job = {
   id: number;
+  scoped_file_url?: string;
   filename: string;
   status: "pending" | "processing" | "processed" | "duplicate" | "failed";
   barcode_value: string | null;
@@ -150,7 +151,7 @@ async function message(response: Response, fallback: string): Promise<string> {
       : body?.message || fallback;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+async function requestBase<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/request-scans${url}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -346,7 +347,7 @@ function RequestScanActionsMenu({ language, job, open, onToggle, onClose, onPrev
     <button type="button" aria-label={t(language, "requestScans.actions.forFile", { filename: job.filename })} aria-expanded={open} aria-haspopup="menu" aria-controls={`request-scan-actions-${job.id}`} onClick={onToggle} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-foreground transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-slate-100"><span>{t(language, "requestScans.actions.more")}</span><ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
     {open ? <div id={`request-scan-actions-${job.id}`} role="menu" aria-label={t(language, "requestScans.actions.menuForFile", { filename: job.filename })} className="absolute end-0 top-full z-30 mt-1 min-w-64 rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
       <button type="button" role="menuitem" className={actionItemClass} onClick={() => { onClose(); onPreview(); }}><FileText className="h-4 w-4 shrink-0" aria-hidden="true" />{t(language, "requestScans.actions.preview")}</button>
-      <a role="menuitem" href={requestScanFileUrl(job.id)} target="_blank" rel="noreferrer" className={actionItemClass} onClick={onClose}><ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />{t(language, "requestScans.actions.openBrowser")}</a>
+      <a role="menuitem" href={job.scoped_file_url || requestScanFileUrl(job.id)} target="_blank" rel="noreferrer" className={actionItemClass} onClick={onClose}><ExternalLink className="h-4 w-4 shrink-0" aria-hidden="true" />{t(language, "requestScans.actions.openBrowser")}</a>
       {job.document_id ? <a role="menuitem" href={attachedDocumentUrl(job.document_id)} target="_blank" rel="noreferrer" className={actionItemClass} onClick={onClose}><FileText className="h-4 w-4 shrink-0" aria-hidden="true" />{t(language, "requestScans.actions.viewAttached")}</a> : null}
       {job.appointment_id ? <button type="button" role="menuitem" className={actionItemClass} onClick={() => { onClose(); onAppointment(); }}><CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />{t(language, "requestScans.actions.openAppointment")}</button> : null}
       <button type="button" role="menuitem" className={actionItemClass} onClick={() => { onClose(); onDetails(); }}><Activity className="h-4 w-4 shrink-0" aria-hidden="true" />{t(language, "requestScans.actions.processingDetails")}</button>
@@ -377,8 +378,12 @@ function RequestScanRow({ language, job, showSelection, selected, canRetryArchiv
   </TableRow>;
 }
 
-export default function RequestScansPage() {
+export default function RequestScansPage({ modality }: { modality?: { id: number; code: string; name: string; onBack: () => void } }) {
   const { language, isArabic } = useLanguage();
+  const scopeQuery = modality ? `workflowSource=modality&modalityId=${modality.id}` : "";
+  const scopeKey = modality ? `modality:${modality.id}` : "reception";
+  const scopedUrl = (value: string) => scopeQuery ? `${value}${value.includes("?") ? "&" : "?"}${scopeQuery}` : value;
+  const request = <T,>(value: string, options?: RequestInit) => requestBase<T>(scopedUrl(value), options);
   const [tab, setTab] = useState<RequestScanTab>("active");
   const [category, setCategory] = useState("");
   const [selected, setSelected] = useState<number[]>([]);
@@ -402,10 +407,10 @@ export default function RequestScansPage() {
   const closePreview = () => { previewRequest.current += 1; revokePreviewUrl(); setPreviewUrl(null); setPreview(null); };
   useEffect(() => () => { previewRequest.current += 1; revokePreviewUrl(); }, []);
 
-  const status = useQuery({ queryKey: ["request-scans-status"], queryFn: () => request<RequestScanStatus>("/status"), refetchInterval: (q) => requestScanStatusPollInterval(q.state.data), refetchIntervalInBackground: false });
-  const jobs = useQuery({ queryKey: ["request-scans", tab, category], queryFn: () => request<{ jobs: Job[] }>(`?status=${tab}${category ? `&category=${category}` : ""}`), refetchInterval: () => requestScanJobsPollInterval(tab, status.data), refetchIntervalInBackground: false });
-  const archiveJobs = useQuery({ queryKey: ["request-scans", "archive-pending"], queryFn: () => request<{ jobs: Job[] }>("?status=failed&category=smb_storage"), enabled: Boolean(status.data?.archiveDestination.affectedCount && status.data?.canRetryArchives), refetchInterval: false });
-  const appointments = useQuery({ queryKey: ["request-scan-appointments", query], queryFn: () => request<{ appointments: Appointment[] }>(`/eligible-appointments?q=${encodeURIComponent(query)}`), enabled: Boolean(assign) });
+  const status = useQuery({ queryKey: ["request-scans-status", scopeKey], queryFn: () => request<RequestScanStatus>("/status"), refetchInterval: (q) => requestScanStatusPollInterval(q.state.data), refetchIntervalInBackground: false });
+  const jobs = useQuery({ queryKey: ["request-scans", scopeKey, tab, category], queryFn: () => request<{ jobs: Job[] }>(`?status=${tab}${category ? `&category=${category}` : ""}`), refetchInterval: () => requestScanJobsPollInterval(tab, status.data), refetchIntervalInBackground: false });
+  const archiveJobs = useQuery({ queryKey: ["request-scans", scopeKey, "archive-pending"], queryFn: () => request<{ jobs: Job[] }>("?status=failed&category=smb_storage"), enabled: Boolean(status.data?.archiveDestination.affectedCount && status.data?.canRetryArchives), refetchInterval: false });
+  const appointments = useQuery({ queryKey: ["request-scan-appointments", scopeKey, query], queryFn: () => request<{ appointments: Appointment[] }>(`/eligible-appointments?q=${encodeURIComponent(query)}`), enabled: Boolean(assign) });
   const refresh = () => { void client.invalidateQueries({ queryKey: ["request-scans"] }); void client.invalidateQueries({ queryKey: ["request-scans-status"] }); };
   const scanNow = useMutation({ mutationFn: () => request("/run-now", { method: "POST" }), onSuccess: refresh, onError: (error: Error) => setNotice(localizeError(language, error)) });
   const archiveRetry = useMutation({ mutationFn: (id: number) => request<{ job: Job; trigger: WorkerTrigger }>(`/${id}/retry-archive`, { method: "POST" }), onSuccess: () => { setNotice(t(language, "requestScans.archive.retryQueued")); refresh(); }, onError: (error: Error) => setNotice(localizeError(language, error)) });
@@ -413,8 +418,8 @@ export default function RequestScansPage() {
   const bulkRetry = useMutation({ mutationFn: (ids: number[]) => request<{ queued: Job[]; failed: Array<{ id: number; message: string }> }>("/bulk-retry-archives", { method: "POST", body: JSON.stringify({ jobIds: ids }) }), onSuccess: (result) => { setBulkConfirm(false); setSelected([]); setNotice(t(language, "requestScans.archive.bulkQueued", { count: result.queued.length })); refresh(); }, onError: (error: Error) => setNotice(localizeError(language, error)) });
   const testConnection = useMutation({ mutationFn: () => request<{ state: string }>("/archive-destination/test", { method: "POST" }), onSuccess: () => { setNotice(t(language, "requestScans.archive.connectionSucceeded")); refresh(); }, onError: (error: Error) => setNotice(localizeError(language, error)) });
   const assignMutation = useMutation({ mutationFn: () => request(`/${assign!.id}/manual-assign`, { method: "POST", body: JSON.stringify({ appointmentId: Number(appointmentId), patientIdentityConfirmed: assignmentConfirmed }) }), onSuccess: () => { setAssign(null); setNotice(t(language, "requestScans.assignment.queued")); refresh(); }, onError: (error: Error) => setAssignmentError(localizeError(language, error)) });
-  const openPreview = async (job: Job) => { const requestId = ++previewRequest.current; revokePreviewUrl(); setPreviewUrl(null); setPreview(job); const response = await fetch(requestScanFileUrl(job.id), { credentials: "include" }); if (!response.ok) { if (requestId === previewRequest.current) setNotice(await message(response, t(language, "requestScans.preview.failed"))); return; } const nextUrl = URL.createObjectURL(await response.blob()); if (requestId !== previewRequest.current) { URL.revokeObjectURL(nextUrl); return; } url.current = nextUrl; setPreviewUrl(nextUrl); };
-  const visible = jobs.data?.jobs ?? [];
+  const openPreview = async (job: Job) => { const requestId = ++previewRequest.current; revokePreviewUrl(); setPreviewUrl(null); setPreview(job); const response = await fetch(scopeQuery ? `${requestScanFileUrl(job.id)}?${scopeQuery}` : requestScanFileUrl(job.id), { credentials: "include" }); if (!response.ok) { if (requestId === previewRequest.current) setNotice(await message(response, t(language, "requestScans.preview.failed"))); return; } const nextUrl = URL.createObjectURL(await response.blob()); if (requestId !== previewRequest.current) { URL.revokeObjectURL(nextUrl); return; } url.current = nextUrl; setPreviewUrl(nextUrl); };
+  const visible = (jobs.data?.jobs ?? []).map((job) => ({ ...job, scoped_file_url: scopeQuery ? `${requestScanFileUrl(job.id)}?${scopeQuery}` : requestScanFileUrl(job.id) }));
   const archiveCandidates = [...visible, ...(archiveJobs.data?.jobs ?? [])].filter(archivePending).filter((job, index, jobsForFilter) => jobsForFilter.findIndex((candidate) => candidate.id === job.id) === index);
   const selectedArchive = archiveCandidates.filter((job) => selected.includes(job.id));
   const selectableArchive = visible.filter(archivePending);
@@ -434,6 +439,7 @@ export default function RequestScansPage() {
 
   return <main data-testid="request-scans-page" dir={isArabic ? "rtl" : "ltr"} className="min-h-full bg-[linear-gradient(180deg,rgba(248,250,252,1),rgba(241,245,249,1))]">
     <div className="mx-auto flex min-h-full w-full max-w-[1680px] flex-col gap-3 p-3 sm:p-4 lg:p-5">
+      {modality ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><div><h1 className="text-xl font-semibold">{chooseLocalized(language, `${modality.code} إدخال المستندات`, `${modality.code} Document Ingestion`)}</h1><p className="text-sm text-muted-foreground">{modality.name}</p></div><Button type="button" variant="secondary" onClick={modality.onBack}>{chooseLocalized(language, "العودة إلى قائمة عمل الأجهزة", "Back to Modality Worklist")}</Button></div> : null}
       <RequestScansOperationalHeader language={language} status={status.data} refreshedAt={Math.max(status.dataUpdatedAt, jobs.dataUpdatedAt)} onFilter={setFilter} onScanNow={() => scanNow.mutate()} scanning={scanNow.isPending} />
       {notice ? <Alert className="border-slate-200 bg-white"><AlertDescription>{notice}</AlertDescription></Alert> : null}
       {health?.affectedCount ? <ArchiveIncidentBanner language={language} health={health} canRetry={Boolean(status.data?.canRetryArchives)} onTest={() => testConnection.mutate()} onRetry={() => { const candidates = archiveCandidates.length ? archiveCandidates : visible.filter(archivePending); if (candidates.length) { setSelected(candidates.map((job) => job.id)); setBulkConfirm(true); } else { setTab("failed"); setCategory("smb_storage"); setSelected([]); } }} onDetails={() => setArchiveDetailsOpen(true)} testing={testConnection.isPending} /> : null}

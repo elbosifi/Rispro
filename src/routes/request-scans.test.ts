@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { buildInlineContentDisposition, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
+import { assertRequestScanJobScope, buildInlineContentDisposition, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, requestScanScope, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
 import { parseRequestScanJobFilter, type RequestScanJob } from "../services/request-scan-service.js";
 
 test("Request Scan file response is private and inline for PDF and JPEG previews", () => {
@@ -24,6 +24,34 @@ test("Request Scan inline filenames use an ASCII fallback and RFC 5987 Unicode e
   assert.match(buildInlineContentDisposition("quote' (100%).pdf", "application/pdf"), /quote%27%20%28100%25%29\.pdf$/);
   const injected = buildInlineContentDisposition("safe.pdf\r\nX-Evil: yes", "application/pdf");
   assert.doesNotMatch(injected, /[\r\n]/);
+});
+
+test("modality staff cannot request Reception ingestion scope", () => {
+  const request = { user: { role: "modality_staff" }, query: { workflowSource: "reception" } };
+  assert.throws(() => requestScanScope(request as never), /cannot access Reception ingestion jobs/);
+  assert.deepEqual(requestScanScope({ user: { role: "modality_staff" }, query: { workflowSource: "modality", modalityId: "7" } } as never), { workflowSource: "modality", modalityId: 7 });
+});
+
+test("direct Request Scan job access enforces workflow and modality scope", () => {
+  const modalityScope = { workflowSource: "modality" as const, modalityId: 7 };
+  const receptionJob = { workflow_source: "reception", modality_id: null } as unknown as RequestScanJob;
+  const ownJob = { workflow_source: "modality", modality_id: 7 } as unknown as RequestScanJob;
+  const otherModalityJob = { workflow_source: "modality", modality_id: 8 } as unknown as RequestScanJob;
+  assert.throws(() => assertRequestScanJobScope("modality_staff", modalityScope, receptionJob), /outside the requested workflow scope/);
+  assert.throws(() => assertRequestScanJobScope("modality_staff", modalityScope, otherModalityJob), /another modality/);
+  assert.doesNotThrow(() => assertRequestScanJobScope("modality_staff", modalityScope, ownJob));
+  assert.doesNotThrow(() => assertRequestScanJobScope("supervisor", { workflowSource: "reception", modalityId: null }, ownJob));
+  assert.doesNotThrow(() => assertRequestScanJobScope("super_admin", modalityScope, receptionJob));
+});
+
+test("every direct Request Scan job route is protected by the shared id scope guard", async () => {
+  const source = await readFile("src/routes/request-scans.ts", "utf8");
+  assert.match(source, /requestScansRouter\.param\("id",[\s\S]*requireRequestScanJobAccess/);
+  for (const route of ["/:id/file", "/:id/start-now", "/:id/retry", "/:id/retry-archive", "/:id/stop", "/:id/dismiss", "/:id/restore", "/:id/return-to-incoming", "/:id/manual-assign"]) {
+    assert.match(source, new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(source, /post\("\/bulk-retry"[\s\S]*requireRequestScanJobsAccess/);
+  assert.match(source, /post\("\/bulk-retry-archives", requireAnyRole\(\["supervisor", "super_admin"\]\)/);
 });
 test("Arabic Request Scan preview sends HTTP 200 and exact PDF bytes", () => {
   const headers = new Map<string, string>(); let status = 0; let sent: Buffer | null = null; const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0, 0xff]);
