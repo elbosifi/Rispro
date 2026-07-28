@@ -173,7 +173,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
   const [viewMode, setViewMode] = useState<PdfViewMode>("overview");
-  const [sizingMode, setSizingMode] = useState<PdfSizingMode>(expanded ? "fit-page" : "fit-width");
+  const [sizingMode, setSizingMode] = useState<PdfSizingMode>("fit-page");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mainSize, setMainSize] = useState({ width: 760, height: 640 });
   const [overviewCardSize, setOverviewCardSize] = useState<PdfPageSize>({ width: 184, height: 244 });
@@ -187,7 +187,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     setPdfDocument(null);
     setSelectedPage(1);
     setViewMode("overview");
-    setSizingMode(expanded ? "fit-page" : "fit-width");
+    setSizingMode("fit-page");
+    setSelectedPageSize(null);
     setPreviewError(null);
   }, [document.id]);
 
@@ -196,11 +197,14 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     const element = mainPreviewRef.current;
     if (!element) return;
     const updateSize = () => setMainSize({ width: Math.max(240, element.clientWidth - 32), height: Math.max(240, element.clientHeight - 32) });
-    updateSize();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
-    return () => observer.disconnect();
+    const frame = typeof requestAnimationFrame === "undefined" ? null : requestAnimationFrame(updateSize);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [viewMode, expanded]);
 
   useEffect(() => {
@@ -275,6 +279,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
 
   return (
     <Document
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       file={file}
       loading={<div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-border bg-muted/20 p-6 text-sm text-muted-foreground" role="status">{labels.loading}</div>}
       onLoadSuccess={(loadedPdf) => {
@@ -288,7 +293,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
       onSourceError={handlePreviewError}
       error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} />}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
         {previewError ? (
           <PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={previewError} />
         ) : viewMode === "overview" ? (
@@ -344,8 +349,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
             </div>
           </section>
         ) : (
-          <>
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/10 px-3 py-2">
+          <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_112px] gap-2">
+            <div className="flex min-h-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/10 px-3 py-2">
               <button
                 type="button"
                 className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -382,7 +387,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 </div>
               </div>
             </div>
-            <div ref={mainPreviewRef} className="min-h-0 min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
+            <div ref={mainPreviewRef} className="min-h-0 min-w-0 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
               <div className={`flex min-h-full min-w-full justify-center ${sizingMode === "fit-page" ? "items-center" : "items-start"}`}>
                 <Page
                   pageNumber={page}
@@ -395,7 +400,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 />
               </div>
             </div>
-            <div className="h-[112px] shrink-0 rounded-xl border border-border bg-muted/10 p-2">
+            <div className="min-h-0 rounded-xl border border-border bg-muted/10 p-2">
               <div className="flex h-full min-w-0 snap-x items-center gap-2 overflow-x-auto overflow-y-hidden scroll-smooth py-1" aria-label={labels.allPages}>
                 {pages.map((pageNumber) => (
                   <LazyPdfPageCard
@@ -411,7 +416,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 ))}
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </Document>

@@ -299,6 +299,18 @@ export function AppointmentManageModal({
     onClose();
   }, [onClose]);
 
+  useEffect(() => {
+    if (!open || !documentReviewExpanded) return;
+    const handleExpandedEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDocumentReviewExpanded(false);
+    };
+    document.addEventListener("keydown", handleExpandedEscape, true);
+    return () => document.removeEventListener("keydown", handleExpandedEscape, true);
+  }, [documentReviewExpanded, open]);
+
   const selectTab = (tab: AppointmentManageTab) => {
     if (tab !== "documents") setDocumentReviewExpanded(false);
     setActiveTab(tab);

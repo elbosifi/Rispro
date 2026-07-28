@@ -179,11 +179,7 @@ export function DocumentPreviewWorkspace({
   const kind = previewKind(document);
   const src = viewUrl(document);
   const toolbar = showOpenAction || onExpandedChange ? (
-    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-      <span className="min-w-0 truncate text-xs font-semibold text-foreground" title={document.originalFilename}>
-        {document.originalFilename}
-      </span>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
       {onExpandedChange ? (
         <button
           type="button"
@@ -195,7 +191,6 @@ export function DocumentPreviewWorkspace({
         </button>
       ) : null}
       {showOpenAction ? <OpenDocumentAction href={src} label={labels.openInNewTab} /> : null}
-      </div>
       <span className="sr-only" aria-live="polite">
         {expanded ? labels.exitExpandedReview : labels.expandReview}
       </span>

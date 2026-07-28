@@ -33,7 +33,7 @@ function MockDocument({ children, file, onLoadSuccess, onLoadError }: { children
 }
 
 function MockPage({ pageNumber, width, scale, loading }: { pageNumber: number; width?: number; scale?: number; loading?: ReactNode }) {
-  const isLargePage = Boolean(width && width > 200);
+  const isLargePage = Boolean((width && width > 200) || (scale && scale > 0.5));
   return (
     <div
       data-testid={isLargePage ? "mock-pdf-large-page" : `mock-pdf-page-${pageNumber}`}
