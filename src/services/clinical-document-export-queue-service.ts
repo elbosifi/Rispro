@@ -10,8 +10,8 @@ export async function enqueueClinicalDocumentExportsForAppointment(
 ): Promise<number[]> {
   const result = await pool.query<{ id: number; appointment_id: number }>(
     `
-      insert into clinical_document_exports (document_id, appointment_id, destination_key, next_retry_at)
-      select distinct d.id, b.id, $2, now()
+      insert into clinical_document_exports (document_id, appointment_id, destination_key, representation_type, next_retry_at)
+      select distinct d.id, b.id, $2, 'secondary_capture', now()
       from appointments_v2.bookings b
       join documents d
         on d.document_type = 'clinical_document'
@@ -49,8 +49,8 @@ export async function enqueueClinicalDocumentExportsForAppointment(
 export async function reconcileClinicalDocumentExports(changedByUserId: OptionalUserId = null): Promise<number> {
   const result = await pool.query<{ id: number; appointment_id: number }>(
     `
-      insert into clinical_document_exports (document_id, appointment_id, destination_key, next_retry_at)
-      select distinct d.id, b.id, $1, now()
+      insert into clinical_document_exports (document_id, appointment_id, destination_key, representation_type, next_retry_at)
+      select distinct d.id, b.id, $1, 'secondary_capture', now()
       from documents d
       join appointments_v2.bookings b
         on d.v2_booking_id = b.id

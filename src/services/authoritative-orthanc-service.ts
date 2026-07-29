@@ -12,7 +12,7 @@ export type OrthancSystemInfo = { name: string | null; version: string | null; a
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
 export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; study: OrthancStudyDetails | null; reason?: string };
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
-export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null };
+export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null; modality: string | null };
 export type OrthancUploadedInstance = OrthancInstanceDetails;
 
 type FetchLike = typeof fetch;
@@ -101,6 +101,7 @@ export class AuthoritativeOrthancClient {
       sopInstanceUid: first(dicom.SOPInstanceUID, dicom["00080018"]),
       patientId: first(dicom.PatientID, dicom["00100020"]),
       accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]),
+      modality: first(dicom.Modality, dicom["00080060"]),
     });
     let values = readInstanceValues();
     if (!values.studyInstanceUid || !values.seriesInstanceUid || !values.sopInstanceUid) {

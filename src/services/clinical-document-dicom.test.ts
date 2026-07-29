@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import dcmjs from "dcmjs";
 import sharp from "sharp";
-import { createClinicalDocumentDicom, normalizeClinicalDocumentToPdf, ENCAPSULATED_PDF_STORAGE_SOP_CLASS_UID } from "./clinical-document-dicom.js";
+import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, normalizeClinicalDocumentToPdf, normalizeRisproModalityCode, ENCAPSULATED_PDF_STORAGE_SOP_CLASS_UID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID } from "./clinical-document-dicom.js";
 
 const { DicomMessage, DicomMetaDictionary } = dcmjs.data;
 const metadata = {
@@ -57,6 +57,25 @@ test("converts JPEG and PNG input to PDF before encapsulation", async () => {
     const dicom = await createClinicalDocumentDicom(source, mime, { ...metadata, sopInstanceUid: `2.25.${mime === "image/jpeg" ? "457" : "458"}` });
     assert.match(encapsulatedBytes(parse(dicom).EncapsulatedDocument).toString("ascii"), /^%PDF-/);
   }
+});
+
+test("creates parseable RGB Secondary Capture pages with the appointment modality", async () => {
+  const dicom = await createClinicalDocumentSecondaryCapture(Buffer.from([255, 0, 0, 0, 255, 0]), 1, 2, { ...metadata, modality: "MR", seriesNumber: 9000, instanceNumber: 4 });
+  const dataset = parse(dicom);
+  assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
+  assert.equal(dataset.Modality, "MR");
+  assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
+  assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]);
+  assert.equal(dataset.ConversionType, "SD");
+  assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3);
+  assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.HighBit, 7);
+  assert.equal(dataset.InstanceNumber, 4); assert.equal(dataset.BurnedInAnnotation, "YES");
+});
+
+test("maps only supported RISpro modality aliases", () => {
+  for (const [input, expected] of [["MRI", "MR"], ["MR", "MR"], ["CT", "CT"], ["ultrasound", "US"], ["Mammography", "MG"], ["X-ray", "DX"], ["CR", "CR"], ["PET", "PT"], ["nuclear_medicine", "NM"]]) assert.equal(normalizeRisproModalityCode(input), expected);
+  assert.equal(normalizeRisproModalityCode("DOC"), null);
+  assert.equal(normalizeRisproModalityCode("unknown"), null);
 });
 
 test("rejects unsupported or malformed source files safely", async () => {

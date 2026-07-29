@@ -14,4 +14,3 @@ test("migration 149 creates durable export fields, statuses, and idempotency key
   assert.equal(unique.rowCount, 1);
   await assert.rejects(() => pool.query("insert into clinical_document_exports(document_id,appointment_id,status) values(-1,-1,'not-a-status')"));
 });
-

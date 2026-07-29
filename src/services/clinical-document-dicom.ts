@@ -5,6 +5,7 @@ import dcmjs from "dcmjs";
 const { datasetToBuffer } = dcmjs.data;
 
 export const ENCAPSULATED_PDF_STORAGE_SOP_CLASS_UID = "1.2.840.10008.5.1.4.1.1.104.1";
+export const SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID = "1.2.840.10008.5.1.4.1.1.7";
 const IMPLEMENTATION_CLASS_UID = "2.25.329038087439464931464405735134857";
 
 export type ClinicalDocumentDicomMetadata = {
@@ -24,6 +25,24 @@ export type ClinicalDocumentDicomMetadata = {
   contentDate?: string;
   contentTime?: string;
 };
+
+export type SecondaryCaptureMetadata = Omit<ClinicalDocumentDicomMetadata, "documentTitle" | "originalFilename" | "instanceNumber"> & {
+  modality: string;
+  seriesNumber: number;
+  instanceNumber: number;
+};
+
+const MODALITY_ALIASES: Record<string, string> = {
+  MRI: "MR", MR: "MR", CT: "CT", US: "US", ULTRASOUND: "US",
+  MAMMO: "MG", MAMMOGRAPHY: "MG", MG: "MG", XR: "DX", XRAY: "DX", X_RAY: "DX", DX: "DX",
+  CR: "CR", PET: "PT", PT: "PT", NM: "NM", NUCLEAR_MEDICINE: "NM",
+};
+
+/** Maps RISpro modality codes to valid DICOM modality values.  There is deliberately no SC/OT/DOC fallback. */
+export function normalizeRisproModalityCode(value: unknown): string | null {
+  const code = String(value ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return MODALITY_ALIASES[code] || null;
+}
 
 export function createClinicalDocumentUid(): string {
   return `2.25.${BigInt(`0x${randomUUID().replaceAll("-", "")}`).toString(10)}`;
@@ -141,6 +160,28 @@ export async function createClinicalDocumentDicom(bytes: Buffer, mimeType: strin
     InstanceNumber: cleanText(metadata.instanceNumber, "1"),
     InstanceCreationDate: contentDate,
     InstanceCreationTime: contentTime,
+  };
+  return Buffer.from(datasetToBuffer(dataset));
+}
+
+/** Creates an uncompressed 8-bit RGB Secondary Capture image. */
+export async function createClinicalDocumentSecondaryCapture(rgbPixels: Buffer, rows: number, columns: number, metadata: SecondaryCaptureMetadata): Promise<Buffer> {
+  if (!metadata.studyInstanceUid || !metadata.seriesInstanceUid || !metadata.sopInstanceUid) throw new Error("Clinical document DICOM identifiers are incomplete.");
+  if (!Number.isInteger(rows) || !Number.isInteger(columns) || rows < 1 || columns < 1 || rgbPixels.length !== rows * columns * 3) throw new Error("Secondary Capture pixel data is invalid.");
+  if (!normalizeRisproModalityCode(metadata.modality)) throw new Error("The RISpro modality code cannot be mapped to a DICOM modality.");
+  const generated = nowDicomParts();
+  const contentDate = dicomDate(metadata.contentDate) || generated.date;
+  const contentTime = cleanText(metadata.contentTime, generated.time);
+  const dataset = {
+    _meta: { FileMetaInformationVersion: new Uint8Array([0, 1]), MediaStorageSOPClassUID: SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID, MediaStorageSOPInstanceUID: metadata.sopInstanceUid, TransferSyntaxUID: "1.2.840.10008.1.2.1", ImplementationClassUID: IMPLEMENTATION_CLASS_UID, ImplementationVersionName: "RISPRO_CLIN_DOC_2" },
+    SpecificCharacterSet: "ISO_IR 192", SOPClassUID: SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID, SOPInstanceUID: metadata.sopInstanceUid,
+    StudyInstanceUID: metadata.studyInstanceUid, SeriesInstanceUID: metadata.seriesInstanceUid, Modality: metadata.modality,
+    ImageType: ["DERIVED", "SECONDARY"], ConversionType: "SD", SeriesDescription: "RISpro Scanned Documents",
+    PatientID: cleanText(metadata.patientId, "UNKNOWN"), PatientName: cleanText(metadata.patientName, "UNKNOWN"), PatientBirthDate: dicomDate(metadata.patientBirthDate) || "", PatientSex: cleanText(metadata.patientSex, "").slice(0, 1).toUpperCase(),
+    AccessionNumber: cleanText(metadata.accessionNumber, "UNKNOWN"), StudyDate: dicomDate(metadata.studyDate) || "", StudyTime: cleanText(metadata.studyTime, ""),
+    SeriesNumber: String(metadata.seriesNumber), InstanceNumber: String(metadata.instanceNumber), BurnedInAnnotation: "YES", Manufacturer: "RISpro",
+    Rows: rows, Columns: columns, SamplesPerPixel: 3, PhotometricInterpretation: "RGB", PlanarConfiguration: 0, BitsAllocated: 8, BitsStored: 8, HighBit: 7, PixelRepresentation: 0, PixelData: new Uint8Array(rgbPixels),
+    ContentDate: contentDate, ContentTime: contentTime, InstanceCreationDate: contentDate, InstanceCreationTime: contentTime,
   };
   return Buffer.from(datasetToBuffer(dataset));
 }
