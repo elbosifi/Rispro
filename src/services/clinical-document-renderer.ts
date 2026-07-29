@@ -23,7 +23,14 @@ export async function renderClinicalDocument(source: Buffer, mimeType: string): 
       const info = await execFileAsync("pdfinfo", [input], { timeout: 30_000, maxBuffer: 1024 * 1024 });
       const pageCount = Number((`${info.stdout}\n${info.stderr}`).match(/^Pages:\s*(\d+)\s*$/mi)?.[1]);
       if (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > MAX_PAGES) throw new Error("Clinical document page count is outside the supported export limit.");
-      await execFileAsync("pdftoppm", ["-r", "180", "-scale-to-x", String(MAX_RENDER_DIMENSION), "-scale-to-y", String(MAX_RENDER_DIMENSION), "-f", "1", "-l", String(Math.min(pageCount, MAX_PAGES + 1)), "-png", input, join(directory, "page")], { timeout: 120_000, maxBuffer: 1024 * 1024 });
+      for (let pageNumber = 1; pageNumber <= Math.min(pageCount, MAX_PAGES + 1); pageNumber += 1) {
+        const pageInfo = await execFileAsync("pdfinfo", ["-box", "-f", String(pageNumber), "-l", String(pageNumber), input], { timeout: 30_000, maxBuffer: 1024 * 1024 });
+        const size = (`${pageInfo.stdout}\n${pageInfo.stderr}`).match(/^Page\s+size:\s*([\d.]+)\s+x\s+([\d.]+)\s+pts/im);
+        const width = Number(size?.[1]) * 2.5; const height = Number(size?.[2]) * 2.5;
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) throw new Error("Clinical document page dimensions could not be determined.");
+        const oversized = Math.max(width, height) > MAX_RENDER_DIMENSION || width * height > MAX_PAGE_PIXELS;
+        await execFileAsync("pdftoppm", ["-r", "180", ...(oversized ? ["-scale-to", String(MAX_RENDER_DIMENSION)] : []), "-f", String(pageNumber), "-l", String(pageNumber), "-png", input, join(directory, "page")], { timeout: 120_000, maxBuffer: 1024 * 1024 });
+      }
     } else if (mime === "image/jpeg" || mime === "image/png") {
       await writeFile(join(directory, "page-1.png"), await sharp(source, { failOn: "error", limitInputPixels: MAX_PAGE_PIXELS }).flatten({ background: "#ffffff" }).toColourspace("srgb").removeAlpha().png().toBuffer());
     } else throw new Error("Unsupported clinical document source type.");

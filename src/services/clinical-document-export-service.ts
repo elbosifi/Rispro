@@ -162,6 +162,7 @@ async function resolveTargetStudy(context: AppointmentExportContext): Promise<Or
   if (result.status === "ambiguous") throw new ClinicalDocumentExportBlockedError(result.reason || "ambiguous_study_match", "Orthanc study matching is ambiguous and needs review.");
   if (result.status === "not_found" || !result.study) throw new Error("Orthanc study was not found yet.");
   if (!result.study.studyInstanceUid) throw new ClinicalDocumentExportBlockedError("missing_study_instance_uid", "The matched Orthanc study has no StudyInstanceUID.");
+  if (result.study.modalitiesInStudy.length && !result.study.modalitiesInStudy.map((value) => value.toUpperCase()).includes(modality)) throw new ClinicalDocumentExportBlockedError("modality_conflict", "The matched Orthanc study modality does not match the appointment.");
   const expectedAccession = context.appointment_accession_number.trim();
   if (result.study.accessionNumber && result.study.accessionNumber !== expectedAccession) throw new ClinicalDocumentExportBlockedError("accession_conflict", "The matched Orthanc study accession does not match the appointment.");
   if (result.study.patientId && expectedPatientIds.length && !expectedPatientIds.some((value) => value.toUpperCase() === result.study!.patientId!.toUpperCase())) throw new ClinicalDocumentExportBlockedError("patient_identity_conflict", "The matched Orthanc study patient identity does not match the appointment.");
@@ -229,6 +230,9 @@ async function prepareSecondaryCapturePages(row: ExportWorkRow, studyUid: string
     const seriesUid = row.series_instance_uid || series[0] || createClinicalDocumentUid(); const seriesNumber = row.series_number || existing.rows.find((value) => value.series_number)?.series_number || 9000;
     const max = await client.query<{ max: number | null }>("select max(i.instance_number) from clinical_document_export_instances i join clinical_document_exports e on e.id=i.export_id where e.appointment_id=$1 and i.series_instance_uid=$2", [row.appointment_id, seriesUid]);
     const start = Number(max.rows[0]?.max || 0) + 1;
+    const expected = await client.query<{ expected_page_count: number | null }>("select expected_page_count from clinical_document_exports where id=$1 and status='exporting' and export_lease_owner=$2 for update", [row.id, row.export_lease_owner]);
+    if (!expected.rows[0]) throw new Error("Clinical document export lease was lost before page preparation.");
+    if (expected.rows[0].expected_page_count != null && Number(expected.rows[0].expected_page_count) !== rendered.pages.length) throw new ClinicalDocumentExportBlockedError("page_set_conflict", "The persisted clinical document page set does not match the rendered document.");
     const updated = await client.query("update clinical_document_exports set study_instance_uid=coalesce(study_instance_uid,$2),series_instance_uid=coalesce(series_instance_uid,$3),series_number=coalesce(series_number,$4),expected_page_count=coalesce(expected_page_count,$5),updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$6", [row.id, studyUid, seriesUid, seriesNumber, rendered.pages.length, row.export_lease_owner]);
     if (updated.rowCount !== 1) throw new Error("Clinical document export lease was lost before page preparation.");
     const persisted = await client.query<ClinicalDocumentExportInstanceRow>("select * from clinical_document_export_instances where export_id=$1 order by page_number", [row.id]);
@@ -296,10 +300,11 @@ async function markFailure(row: ExportWorkRow, error: unknown): Promise<void> {
   const exhausted = retryable && row.attempt_count >= MAX_AUTOMATIC_ATTEMPTS;
   const nextRetryAt = !retryable || exhausted ? null : new Date(Date.now() + retryDelayMs(row.attempt_count)).toISOString();
   const status: ClinicalDocumentExportStatus = retryable ? "failed" : "blocked";
-  await pool.query(
+  const updated = await pool.query(
     `update clinical_document_exports set status=$2, next_retry_at=$3, last_error=$4, export_lease_owner=null, export_lease_expires_at=null, updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$5`,
     [row.id, status, nextRetryAt, exhausted ? "Automatic retry limit reached. Manual retry is required." : message, row.export_lease_owner],
   );
+  if (updated.rowCount !== 1) return;
   await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: status === "blocked" ? "clinical_document_export_blocked" : "clinical_document_export_failed", oldValues: { status: "exporting" }, newValues: { status, retryable, nextRetryAt, error: exhausted ? "automatic_retry_limit_reached" : message, code: error instanceof ClinicalDocumentExportBlockedError ? error.code : errorCode(error) }, changedByUserId: null });
   if (error instanceof ClinicalDocumentExportBlockedError && ["patient_identity_conflict", "study_instance_uid_conflict", "accession_conflict"].includes(error.code)) await logAuditEntry({ entityType: "clinical_document_export", entityId: row.id, actionType: "clinical_document_export_identity_conflict", oldValues: null, newValues: { code: error.code }, changedByUserId: null });
 }

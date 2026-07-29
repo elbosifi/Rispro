@@ -73,12 +73,12 @@ test("converts JPEG and PNG input to PDF before encapsulation", async () => {
 
 test("creates parseable RGB Secondary Capture MR and CT pages with native PixelData", async () => {
   const pixels = Buffer.from([255, 0, 0, 0, 255, 0]);
-  for (const [modality, sopInstanceUid, instanceNumber] of [["MR", "2.25.457", 4], ["CT", "2.25.458", 5]] as const) {
+  for (const [modality, expectedModality, sopInstanceUid, instanceNumber] of [["MRI", "MR", "2.25.457", 4], ["CT", "CT", "2.25.458", 5]] as const) {
     const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 2, { ...metadata, sopInstanceUid, modality, seriesNumber: 9000, instanceNumber });
     const dataset = parse(dicom);
     assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
     assert.equal(dataset.StudyInstanceUID, metadata.studyInstanceUid); assert.equal(dataset.SeriesInstanceUID, metadata.seriesInstanceUid);
-    assert.equal(dataset.Modality, modality); assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
+    assert.equal(dataset.Modality, expectedModality); assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
     assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]); assert.equal(dataset.ConversionType, "SD");
     assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3); assert.equal(dataset.PlanarConfiguration, 0);
     assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.BitsStored, 8); assert.equal(dataset.HighBit, 7); assert.equal(dataset.PixelRepresentation, 0);
