@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { boundedText, decideAutoDeployment, failedJobs, recoverIssue, redactSecrets, upsertIssue } from "./github-automation-issues.mjs";
+import { boundedText, decideAutoDeployment, failedJobs, recoverIssue, redactSecrets, selectDeploymentRun, upsertIssue } from "./github-automation-issues.mjs";
 
 const shaPattern = /^[0-9a-f]{40}$/i;
 const short = (sha) => sha.slice(0, 12);
@@ -51,7 +51,7 @@ async function controller() {
   const [ci, selfHosted] = await Promise.all([newestRun(client, "ci.yml", sha), newestRun(client, "self-hosted-ci.yml", sha)]);
   const deployments = await client.request(`/repos/${client.owner}/${client.repo}/actions/workflows/deploy.yml/runs?per_page=100`);
   const expectedName = `Deploy RISpro development ${sha}`;
-  const deployment = (deployments.workflow_runs ?? []).filter((run) => run.name === expectedName).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] ?? null;
+  const deployment = selectDeploymentRun(deployments.workflow_runs, expectedName);
   const decision = decideAutoDeployment({ targetSha: sha, mainSha: mainTip, ci, selfHosted, deployment });
   console.log(`Auto-deploy decision for ${sha}: ${decision.action}.`);
   if (decision.action === "report-ci-failure") { await ciIssue(sha, ci, selfHosted, mainTip); return; }

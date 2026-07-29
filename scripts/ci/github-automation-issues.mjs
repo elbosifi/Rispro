@@ -33,6 +33,12 @@ export function decideAutoDeployment({ targetSha, mainSha, ci, selfHosted, deplo
   return deployment.conclusion === "success" ? { action: "deployment-exists" } : { action: "deployment-failed" };
 }
 
+export function selectDeploymentRun(runs, expectedName) {
+  return (runs ?? [])
+    .filter((run) => run.display_title === expectedName && run.event === "workflow_dispatch")
+    .sort((left, right) => new Date(right.created_at) - new Date(left.created_at))[0] ?? null;
+}
+
 function client({ token = process.env.GITHUB_TOKEN, repository = process.env.GITHUB_REPOSITORY } = {}) {
   if (!token || !repository?.includes("/")) throw new Error("GITHUB_TOKEN and GITHUB_REPOSITORY are required.");
   const [owner, repo] = repository.split("/");
