@@ -404,6 +404,10 @@ test("concurrent identical modality jobs create one document and an archive retr
   ]);
   assert.deepEqual([first.status, second.status].sort(), ["duplicate", "processed"]);
   assert.equal((await pool.query("select id from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId])).rowCount, 1);
+  const stored = await pool.query<DocumentRow>("select * from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId]);
+  const storedPath = resolveStoredPath(stored.rows[0].stored_path);
+  assert.equal((await fs.stat(storedPath)).isFile(), true);
+  assert.equal((await fs.readdir(path.dirname(storedPath))).filter((name) => name.endsWith("-concurrent.pdf")).length, 1);
   assert.equal((await pool.query("select id from clinical_document_exports where appointment_id=$1", [booking.id])).rowCount, 1);
 
   const failedId = await createModalityJob(booking.modalityId, code, "concurrent.pdf");
@@ -1427,16 +1431,18 @@ test("checkpointed identical source reconciliation completes without another upl
   assert.ok(resumed.source_moved_at);
 });
 
-test("concurrent idempotent Request Scan uploads create one document and remove the losing file", async (t) => {
+test("concurrent reception Request Scan uploads create one document and remove the losing staged file", async (t) => {
   if (!(await ensureDatabase(t))) return;
-  const booking = await createBooking(); const jobA = await createJob();
-  const key = `request-scan:job:${jobA}:appointment-request`;
+  const booking = await createBooking(); const jobA = await createJob(); const jobB = await createJob();
+  const keyA = `request-scan:job:${jobA}:appointment-request`; const keyB = `request-scan:job:${jobB}:appointment-request`;
   const payload = { patientId: booking.patientId, appointmentId: booking.id, appointmentRefType: "v2_booking", documentType: "appointment_request", originalFilename: "same-request.pdf", mimeType: "application/pdf", fileContentBuffer: Buffer.from("same-request"), source: "request_scan_automation" };
-  const results = await Promise.all([uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, key), uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, key)]);
+  const results = await Promise.all([uploadDocumentIdempotently({ ...payload, requestScanJobId: jobA }, null, keyA), uploadDocumentIdempotently({ ...payload, requestScanJobId: jobB }, null, keyB)]);
   assert.equal(new Set(results.map((result) => result.document.id)).size, 1); assert.deepEqual(results.map((result) => result.created).sort(), [false, true]);
-  const rows = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [key]); assert.equal(rows.rowCount, 1);
+  const rows = await pool.query<DocumentRow>("select * from documents where request_scan_job_id=any($1::bigint[])", [[jobA, jobB]]); assert.equal(rows.rowCount, 1);
   const winningPath = resolveStoredPath(rows.rows[0].stored_path); const storedNames = await fs.readdir(path.dirname(winningPath));
   assert.equal(storedNames.filter((name) => name.endsWith("-same-request.pdf")).length, 1);
+  const stagingNames = await fs.readdir(path.join(path.dirname(path.dirname(winningPath)), ".rispro-document-staging")).catch(() => [] as string[]);
+  assert.equal(stagingNames.filter((name) => name.endsWith("-same-request.pdf")).length, 0);
   await fs.rm(winningPath, { force: true }); await pool.query("delete from documents where id=$1", [rows.rows[0].id]);
 });
 

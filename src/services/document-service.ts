@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "fs/promises";
 import path from "path";
+import type { PoolClient } from "pg";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
@@ -125,24 +126,24 @@ function resolveFileBuffer(payload: DocumentUploadPayload): Buffer {
   return decodeBase64File(payload.fileContentBase64);
 }
 
-async function ensureRelatedRecords(patientId: number | null, appointmentId: number | null): Promise<void> {
+async function ensureRelatedRecords(patientId: number | null, appointmentId: number | null, executor: DocumentDatabaseExecutor = pool): Promise<void> {
   if (!patientId && !appointmentId) {
     throw new HttpError(400, "patientId or appointmentId is required.");
   }
 
   if (patientId) {
-    const { rowCount } = await pool.query("select 1 from patients where id = $1 limit 1", [patientId]);
+    const { rowCount } = await executor.query("select 1 from patients where id = $1 limit 1", [patientId]);
     if (Number(rowCount || 0) === 0) {
       throw new HttpError(404, "Patient not found.");
     }
   }
 }
 
-async function ensureAppointmentBelongsToPatient(reference: AppointmentReference, patientId: number | null): Promise<void> {
+async function ensureAppointmentBelongsToPatient(reference: AppointmentReference, patientId: number | null, executor: DocumentDatabaseExecutor = pool): Promise<void> {
   if (!patientId) return;
 
   if (reference.legacyAppointmentId) {
-    const { rowCount } = await pool.query(
+    const { rowCount } = await executor.query(
       "select 1 from appointments where id = $1 and patient_id = $2 limit 1",
       [reference.legacyAppointmentId, patientId]
     );
@@ -152,7 +153,7 @@ async function ensureAppointmentBelongsToPatient(reference: AppointmentReference
   }
 
   if (reference.v2BookingId) {
-    const { rowCount } = await pool.query(
+    const { rowCount } = await executor.query(
       "select 1 from appointments_v2.bookings where id = $1 and patient_id = $2 limit 1",
       [reference.v2BookingId, patientId]
     );
@@ -178,42 +179,43 @@ function normalizeAppointmentRefType(
   return "auto";
 }
 
-async function findLegacyAppointmentId(appointmentId: number): Promise<number | null> {
-  const { rowCount } = await pool.query("select 1 from appointments where id = $1 limit 1", [appointmentId]);
+async function findLegacyAppointmentId(appointmentId: number, executor: DocumentDatabaseExecutor = pool): Promise<number | null> {
+  const { rowCount } = await executor.query("select 1 from appointments where id = $1 limit 1", [appointmentId]);
   return Number(rowCount || 0) > 0 ? appointmentId : null;
 }
 
-async function findV2BookingId(appointmentId: number): Promise<number | null> {
-  const { rowCount } = await pool.query("select 1 from appointments_v2.bookings where id = $1 limit 1", [appointmentId]);
+async function findV2BookingId(appointmentId: number, executor: DocumentDatabaseExecutor = pool): Promise<number | null> {
+  const { rowCount } = await executor.query("select 1 from appointments_v2.bookings where id = $1 limit 1", [appointmentId]);
   return Number(rowCount || 0) > 0 ? appointmentId : null;
 }
 
 async function resolveAppointmentReference(
   appointmentId: number | null,
-  refType: AppointmentRefType
+  refType: AppointmentRefType,
+  executor: DocumentDatabaseExecutor = pool,
 ): Promise<AppointmentReference> {
   if (!appointmentId) {
     return { legacyAppointmentId: null, v2BookingId: null };
   }
 
   if (refType === "legacy_appointment") {
-    const legacyAppointmentId = await findLegacyAppointmentId(appointmentId);
+    const legacyAppointmentId = await findLegacyAppointmentId(appointmentId, executor);
     if (!legacyAppointmentId) throw new HttpError(404, "Appointment not found.");
     return { legacyAppointmentId, v2BookingId: null };
   }
 
   if (refType === "v2_booking") {
-    const v2BookingId = await findV2BookingId(appointmentId);
+    const v2BookingId = await findV2BookingId(appointmentId, executor);
     if (!v2BookingId) throw new HttpError(404, "Appointment not found.");
     return { legacyAppointmentId: null, v2BookingId };
   }
 
   // Auto mode: prefer V2 for modern UI flows.
-  const v2BookingId = await findV2BookingId(appointmentId);
+  const v2BookingId = await findV2BookingId(appointmentId, executor);
   if (v2BookingId) {
     return { legacyAppointmentId: null, v2BookingId };
   }
-  const legacyAppointmentId = await findLegacyAppointmentId(appointmentId);
+  const legacyAppointmentId = await findLegacyAppointmentId(appointmentId, executor);
   if (legacyAppointmentId) {
     return { legacyAppointmentId, v2BookingId: null };
   }
@@ -379,6 +381,8 @@ export function getDocumentAbsolutePath(document: { stored_path?: string }): str
   return resolveStoredPath(document.stored_path);
 }
 
+type DocumentDatabaseExecutor = { query: typeof pool.query };
+
 type RequestScanFingerprintProfile = {
   documentType: "clinical_document" | "appointment_request";
   source: "modality_scan_automation" | "request_scan_automation";
@@ -398,7 +402,7 @@ function requestScanFingerprintProfile(payload: DocumentUploadPayload): RequestS
 }
 
 async function findRequestScanDocumentDuplicate(
-  queryable: { query: typeof pool.query },
+  queryable: DocumentDatabaseExecutor,
   profile: RequestScanFingerprintProfile,
   patientId: number,
   appointmentId: number | null,
@@ -521,9 +525,70 @@ async function safeUnlink(absolutePath: string): Promise<{ ok: boolean; reason?:
   }
 }
 
+type StoredDocumentFile = {
+  absolutePath: string;
+  storedPath: string;
+  storageLocationType: "network" | "local_fallback";
+  fallbackReason: string | null;
+  storageConfig: StorageConfig;
+};
+
+type DocumentPersistenceOptions = {
+  storedFile?: StoredDocumentFile;
+  deferPostCommit?: boolean;
+};
+
+async function stageDocumentFile(storageConfig: StorageConfig, originalFilename: string, source: { buffer?: Buffer; path?: string }): Promise<StoredDocumentFile & { stagedPath: string }> {
+  const stage = async (basePath: string, storageLocationType: "network" | "local_fallback", fallbackReason: string | null) => {
+    const stagingDirectory = path.join(basePath, ".rispro-document-staging");
+    await fs.mkdir(stagingDirectory, { recursive: true });
+    const stagedPath = path.join(stagingDirectory, `${crypto.randomUUID()}-${originalFilename}`);
+    try {
+      if (source.path) await fs.copyFile(source.path, stagedPath); else await fs.writeFile(stagedPath, source.buffer!);
+    } catch (error) {
+      await safeUnlink(stagedPath);
+      throw error;
+    }
+    return { stagedPath, absolutePath: "", storedPath: "", storageLocationType, fallbackReason, storageConfig };
+  };
+  if (storageConfig.storagePath) {
+    try {
+      ensureNetworkAuthIfNeeded(storageConfig);
+      return await stage(resolveStorageBasePath(storageConfig.storagePath), "network", null);
+    } catch (error) {
+      if (!storageConfig.fallbackEnabled) throw new HttpError(503, error instanceof Error ? error.message : "Preferred storage is unavailable and fallback is disabled.");
+      const fallbackReason = error instanceof Error ? error.message : "Network storage write failed.";
+      return stage(resolveStorageBasePath(env.uploadsDir), "local_fallback", fallbackReason);
+    }
+  }
+  if (!storageConfig.fallbackEnabled) throw new HttpError(503, "Preferred storage is unavailable and fallback is disabled.");
+  return stage(resolveStorageBasePath(env.uploadsDir), "local_fallback", null);
+}
+
+async function promoteStagedDocumentFile(staged: StoredDocumentFile & { stagedPath: string }, originalFilename: string): Promise<StoredDocumentFile> {
+  const targetDirectory = path.join(path.dirname(path.dirname(staged.stagedPath)), getTripoliToday());
+  await fs.mkdir(targetDirectory, { recursive: true });
+  const absolutePath = path.join(targetDirectory, `${Date.now()}-${crypto.randomUUID()}-${originalFilename}`);
+  await fs.rename(staged.stagedPath, absolutePath);
+  return { ...staged, absolutePath, storedPath: toStoredPath(absolutePath) };
+}
+
+async function finalizeDocumentUpload(savedDocument: DocumentRow, storedFile: StoredDocumentFile, currentUserId: OptionalUserId): Promise<void> {
+  try {
+    await logAuditEntry({ entityType: "document", entityId: savedDocument.id, actionType: "upload", oldValues: null, newValues: { ...savedDocument, storageAuthUsername: storedFile.storageLocationType === "network" ? buildNetworkAuthUsername(storedFile.storageConfig) : "", fallbackReason: storedFile.fallbackReason }, changedByUserId: currentUserId });
+  } catch (error) {
+    console.warn(JSON.stringify({ type: "document_upload_audit_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) }));
+  }
+  if (savedDocument.source === "modality_scan_automation" && savedDocument.document_type === "clinical_document" && savedDocument.v2_booking_id) {
+    await enqueueClinicalDocumentExportsForAppointment(Number(savedDocument.v2_booking_id), currentUserId).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_queue_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) })));
+  }
+}
+
 export async function uploadDocument(
   payload: DocumentUploadPayload,
-  currentUserId: OptionalUserId
+  currentUserId: OptionalUserId,
+  executor: DocumentDatabaseExecutor = pool,
+  options: DocumentPersistenceOptions = {},
 ): Promise<DocumentRow> {
   const patientId = normalizePositiveInteger(payload.patientId, "patientId", { required: false });
   const appointmentId = normalizePositiveInteger(payload.appointmentId, "appointmentId", { required: false });
@@ -564,16 +629,16 @@ export async function uploadDocument(
     throw new HttpError(400, "Document file size changed while calculating its fingerprint.");
   }
 
-  await ensureRelatedRecords(patientId, appointmentId);
-  const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType);
-  await ensureAppointmentBelongsToPatient(appointmentReference, patientId);
+  await ensureRelatedRecords(patientId, appointmentId, executor);
+  const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType, executor);
+  await ensureAppointmentBelongsToPatient(appointmentReference, patientId, executor);
 
-  const storageConfig = await loadDocumentStorageConfig();
-  let storedPath = ""; let absoluteStoredPath = "";
-  let storageLocationType: "network" | "local_fallback" = "local_fallback";
-  let fallbackReason: string | null = null;
+  const storageConfig = options.storedFile?.storageConfig ?? await loadDocumentStorageConfig();
+  let storedPath = options.storedFile?.storedPath ?? ""; let absoluteStoredPath = options.storedFile?.absolutePath ?? "";
+  let storageLocationType: "network" | "local_fallback" = options.storedFile?.storageLocationType ?? "local_fallback";
+  let fallbackReason: string | null = options.storedFile?.fallbackReason ?? null;
 
-  if (storageConfig.storagePath) {
+  if (!options.storedFile && storageConfig.storagePath) {
     try {
       ensureNetworkAuthIfNeeded(storageConfig);
       const preferredBasePath = resolveStorageBasePath(storageConfig.storagePath);
@@ -586,7 +651,7 @@ export async function uploadDocument(
     }
   }
 
-  if (!storedPath) {
+  if (!options.storedFile && !storedPath) {
     if (!storageConfig.fallbackEnabled) {
       throw new HttpError(503, fallbackReason || "Preferred storage is unavailable and fallback is disabled.");
     }
@@ -599,7 +664,7 @@ export async function uploadDocument(
 
   let rows: DocumentRow[];
   try {
-    const insertResult = (await pool.query(
+    const insertResult = (await executor.query(
     `
       insert into documents (
         patient_id,
@@ -681,25 +746,7 @@ export async function uploadDocument(
     throw new HttpError(500, "Failed to save document.");
   }
 
-  await logAuditEntry({
-    entityType: "document",
-    entityId: savedDocument.id,
-    actionType: "upload",
-    oldValues: null,
-    newValues: {
-      ...savedDocument,
-      storageAuthUsername:
-        storageLocationType === "network" ? buildNetworkAuthUsername(storageConfig) : "",
-      fallbackReason,
-    },
-    changedByUserId: currentUserId
-  });
-
-  if (savedDocument.source === "modality_scan_automation" && savedDocument.document_type === "clinical_document" && savedDocument.v2_booking_id) {
-    await enqueueClinicalDocumentExportsForAppointment(Number(savedDocument.v2_booking_id), currentUserId).catch((error) => {
-      console.warn(JSON.stringify({ type: "clinical_document_export_queue_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) }));
-    });
-  }
+  if (!options.deferPostCommit) await finalizeDocumentUpload(savedDocument, { absolutePath: absoluteStoredPath, storedPath, storageLocationType, fallbackReason, storageConfig }, currentUserId);
 
   return savedDocument;
 }
@@ -719,8 +766,6 @@ export async function findDocumentByIdempotencyKey(idempotencyKey: string): Prom
 }
 
 export async function uploadDocumentIdempotently(payload: DocumentUploadPayload, currentUserId: OptionalUserId, idempotencyKey: string): Promise<{ document: DocumentRow; created: boolean }> {
-  const existing = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [idempotencyKey]);
-  if (existing.rows[0]) return { document: existing.rows[0], created: false };
   const fingerprintProfile = requestScanFingerprintProfile(payload);
   if (fingerprintProfile) {
     const patientId = normalizePositiveInteger(payload.patientId, "patientId");
@@ -728,25 +773,67 @@ export async function uploadDocumentIdempotently(payload: DocumentUploadPayload,
     const fileSourcePath = payload.fileSourcePath ? path.resolve(payload.fileSourcePath) : null;
     const fileBuffer = fileSourcePath ? null : resolveFileBuffer(payload);
     const fingerprint = await requestScanContentFingerprint(fileSourcePath, fileBuffer);
-    const client = await pool.connect();
+    const fileSource = { buffer: fileBuffer ?? undefined, path: fileSourcePath ?? undefined };
+    const findByIdempotencyKey = (executor: DocumentDatabaseExecutor) => executor.query<DocumentRow>("select * from documents where idempotency_key=$1 limit 1", [idempotencyKey]);
+    const inspect = async (): Promise<DocumentRow | null> => {
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const existing = await findByIdempotencyKey(client);
+        if (existing.rows[0]) { await client.query("commit"); return existing.rows[0]; }
+        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`request-scan-document:${fingerprintProfile.source}:${patientId}:${fingerprint.byteSize}:${fingerprint.sha256}`]);
+        const duplicate = await findRequestScanDocumentDuplicate(client, fingerprintProfile, patientId!, appointmentId, fingerprint);
+        await client.query("commit");
+        return duplicate;
+      } catch (error) {
+        await client.query("rollback").catch(() => undefined);
+        throw error;
+      } finally { client.release(); }
+    };
+    const winner = await inspect();
+    if (winner) return { document: winner, created: false };
+    const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
+    const staged = await stageDocumentFile(await loadDocumentStorageConfig(), originalFilename, fileSource);
+    let storedFile: StoredDocumentFile | null = null;
+    let client: PoolClient | null = null;
+    let clientReleased = false;
+    let committed = false;
     try {
+      client = await pool.connect();
       await client.query("begin");
+      const existing = await findByIdempotencyKey(client);
+      if (existing.rows[0]) {
+        await client.query("commit");
+        await safeUnlink(staged.stagedPath);
+        return { document: existing.rows[0], created: false };
+      }
       await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`request-scan-document:${fingerprintProfile.source}:${patientId}:${fingerprint.byteSize}:${fingerprint.sha256}`]);
       const duplicate = await findRequestScanDocumentDuplicate(client, fingerprintProfile, patientId!, appointmentId, fingerprint);
       if (duplicate) {
         await client.query("commit");
+        await safeUnlink(staged.stagedPath);
         return { document: duplicate, created: false };
       }
-      const created = await uploadDocument({ ...payload, idempotencyKey }, currentUserId);
+      storedFile = await promoteStagedDocumentFile(staged, originalFilename);
+      const created = await uploadDocument({ ...payload, idempotencyKey }, currentUserId, client, { storedFile, deferPostCommit: true });
       await client.query("commit");
+      committed = true;
+      client.release();
+      clientReleased = true;
+      await finalizeDocumentUpload(created, storedFile, currentUserId);
       return { document: created, created: true };
     } catch (error) {
-      await client.query("rollback");
+      if (!committed) {
+        await client?.query("rollback").catch(() => undefined);
+        await safeUnlink(storedFile?.absolutePath || staged.stagedPath);
+      }
       throw error;
     } finally {
-      client.release();
+      if (client && !clientReleased) client.release();
     }
   }
+  const existing = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [idempotencyKey]);
+  if (existing.rows[0]) return { document: existing.rows[0], created: false };
   try { return { document: await uploadDocument({ ...payload, idempotencyKey }, currentUserId), created: true }; }
   catch (error) {
     if ((error as { code?: string }).code !== "23505") throw error;
