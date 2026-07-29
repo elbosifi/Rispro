@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
-import { cleanupRenderedClinicalDocument, parsePdfInfoPageSizes, readRenderedRgbPage, renderClinicalDocument } from "./clinical-document-renderer.js";
+import { cleanupRenderedClinicalDocument, parsePdfInfoPageSizes, projectedRenderedDimensions, readRenderedRgbPage, renderClinicalDocument } from "./clinical-document-renderer.js";
 
 test("parses locale-stable pdfinfo Page N size lines", () => {
-  assert.deepEqual(parsePdfInfoPageSizes("Page    1 size:  612 x 792 pts\nPage 2 size: 612.5 x 792.25 pts", 2), [{ widthPoints: 612, heightPoints: 792 }, { widthPoints: 612.5, heightPoints: 792.25 }]);
+  assert.deepEqual(parsePdfInfoPageSizes("Page    1 size:  612 x 792 pts (letter)\nPage 2 size: 612.5 x 792.25 pts (A4)", 2), [{ widthPoints: 612, heightPoints: 792 }, { widthPoints: 612.5, heightPoints: 792.25 }]);
   assert.throws(() => parsePdfInfoPageSizes("Page 1 size: 612 x 792 pts", 2), /dimensions/);
+});
+
+test("projects aspect-preserving bounded PDF dimensions before Poppler runs", () => {
+  assert.deepEqual(projectedRenderedDimensions(612, 792), { width: 1530, height: 1980, pixels: 3029400, scaled: false });
+  const oversized = projectedRenderedDimensions(10000, 5000);
+  assert.equal(oversized.width, 6000); assert.equal(oversized.height, 3000); assert.equal(oversized.pixels, 18_000_000); assert.equal(oversized.scaled, true);
 });
 
 test("normalizes supported source images to three sRGB bytes per pixel", async () => {
