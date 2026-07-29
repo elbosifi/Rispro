@@ -57,8 +57,48 @@ export async function beginRequestScanArchive(jobId: number, lease: RequestScanL
   if (!rows[0]) throw new RequestScanLeaseLostError();
   return rows[0] as RequestScanJob;
 }
+export async function prepareRequestScanFailureMove(jobId: number, lease: RequestScanLease, proposedDestinationPath: string): Promise<{ job: RequestScanJob; shouldMove: boolean }> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<RequestScanJob & { lease_owned: boolean }>(
+      `select job.*,
+              (job.status='processing' and job.worker_id=$2 and job.lease_token=$3::uuid and job.lease_expires_at>=now()) lease_owned
+       from request_scan_jobs job
+       where job.id=$1
+       for update`,
+      [jobId, lease.workerId, lease.token],
+    );
+    const current = rows[0];
+    if (!current?.lease_owned) throw new RequestScanLeaseLostError();
+    if (current.attachment_completed_at || current.document_id) {
+      await client.query("commit");
+      return { job: current, shouldMove: false };
+    }
+    const destinationPath = current.failure_destination_path || proposedDestinationPath;
+    const alreadyAtDestination = current.source_relative_path.replace(/\//g, "\\").toLowerCase() === destinationPath.replace(/\//g, "\\").toLowerCase();
+    const persisted = await client.query<RequestScanJob>(
+      `update request_scan_jobs
+       set failure_destination_path=$2,
+           failure_moved_at=case when $3::boolean then coalesce(failure_moved_at,now()) else failure_moved_at end,
+           heartbeat_at=now(),
+           lease_expires_at=now()+($4::int * interval '1 millisecond'),
+           updated_at=now()
+       where id=$1
+       returning *`,
+      [jobId, destinationPath, alreadyAtDestination, REQUEST_SCAN_LEASE_MS],
+    );
+    await client.query("commit");
+    return { job: persisted.rows[0]!, shouldMove: !alreadyAtDestination };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 export async function updateRequestScanCheckpoint(jobId: number, lease: RequestScanLease, values: Record<string, unknown>): Promise<RequestScanJob> {
-  const allowed = new Set(["appointment_id", "document_id", "barcode_value", "identifier_verified_at", "identifier_strategy", "attachment_completed_at", "attachment_created", "intended_destination_path", "source_relative_path", "source_moved_at"]);
+  const allowed = new Set(["appointment_id", "document_id", "barcode_value", "identifier_verified_at", "identifier_strategy", "attachment_completed_at", "attachment_created", "intended_destination_path", "source_relative_path", "source_moved_at", "failure_destination_path", "failure_moved_at", "archive_recovered_from_path", "archive_recovered_at"]);
   const names = Object.keys(values);
   if (!names.length || names.some((name) => !allowed.has(name))) throw new Error("Invalid Request Scan checkpoint update.");
   const params = names.map((name) => values[name]);
@@ -171,7 +211,44 @@ export async function finishRequestScanJob(jobId: number, lease: RequestScanLeas
   return rows[0] as RequestScanJob | undefined ?? null;
 }
 export async function recoverExpiredRequestScanJobs(): Promise<{ requeued: number; failed: number }> {
-  const failed = await pool.query(`update request_scan_jobs set status='failed',processing_stage='failed',error_message='Processing was interrupted repeatedly. Retry or assign the document manually.',failure_category='processing_interrupted',completed_at=now(),worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where status='processing' and lease_expires_at < now() and recovery_count >= $1`, [REQUEST_SCAN_MAX_RECOVERIES - 1]);
+  const attached = await pool.query(
+    `update request_scan_jobs
+     set status='failed',
+         processing_stage='failed',
+         error_message=case
+           when attachment_completed_at is not null and document_id is not null
+             then 'Document attached successfully. Archive movement was interrupted and can be retried.'
+           else 'Request Scan attachment state was interrupted and requires manual review.'
+         end,
+         failure_category=case when attachment_completed_at is not null and document_id is not null then 'smb_storage' else 'internal_processing' end,
+         archive_last_error=case
+           when attachment_completed_at is not null and document_id is not null
+             then 'Document attached successfully. Archive movement was interrupted and can be retried.'
+           else archive_last_error
+         end,
+         archive_next_retry_at=case
+           when attachment_completed_at is not null and document_id is not null then coalesce(archive_next_retry_at,now())
+           else archive_next_retry_at
+         end,
+         completed_at=now(),
+         worker_id=null,
+         lease_token=null,
+         lease_expires_at=null,
+         progress_current=null,
+         progress_total=null,
+         updated_at=now()
+     where status='processing'
+       and lease_expires_at < now()
+       and recovery_count >= $1
+       and (attachment_completed_at is not null or document_id is not null)`,
+    [REQUEST_SCAN_MAX_RECOVERIES - 1],
+  );
+  const failed = await pool.query(
+    `update request_scan_jobs
+     set status='failed',processing_stage='failed',error_message='Processing was interrupted repeatedly. Retry or assign the document manually.',failure_category='processing_interrupted',completed_at=now(),worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now()
+     where status='processing' and lease_expires_at < now() and recovery_count >= $1 and attachment_completed_at is null and document_id is null`,
+    [REQUEST_SCAN_MAX_RECOVERIES - 1],
+  );
   const requeued = await pool.query(`update request_scan_jobs set status='pending',processing_stage='queued',stage_started_at=now(),worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,recovery_count=recovery_count+1,completed_at=null,updated_at=now() where status='processing' and lease_expires_at < now() and recovery_count < $1`, [REQUEST_SCAN_MAX_RECOVERIES - 1]);
-  return { requeued: requeued.rowCount ?? 0, failed: failed.rowCount ?? 0 };
+  return { requeued: requeued.rowCount ?? 0, failed: (attached.rowCount ?? 0) + (failed.rowCount ?? 0) };
 }

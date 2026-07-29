@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import jwt from "jsonwebtoken";
 import { pool } from "../db/pool.js";
@@ -26,9 +27,10 @@ import {
   retryRequestScanJob,
   runRequestScanCycle,
   sanitizeRequestScanModalityCode,
+  verifyFailedRequestScanFileIdentity,
   type RequestScanServiceDependencies,
 } from "./request-scan-service.js";
-import { claimRequestScanJob } from "./request-scan-processing-service.js";
+import { claimRequestScanJob, recoverExpiredRequestScanJobs, updateRequestScanCheckpoint } from "./request-scan-processing-service.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
 
@@ -195,6 +197,21 @@ test("finds exactly one eligible V2 accession and excludes cancelled, discontinu
   assert.equal(Number(found.id), eligible.id);
   for (const booking of excluded) {
     await assert.rejects(() => findEligibleRequestScanAppointment(booking.accession), /No eligible appointment matches this accession/);
+  }
+});
+
+test("Failed-file identity verification requires both exact size and SHA-256", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "request-scan-identity-test-"));
+  try {
+    const storedPath = path.join(tempDir, "stored.pdf");
+    await fs.writeFile(storedPath, "same-size-a");
+    const document = { stored_path: storedPath, file_size: 11 } as DocumentRow;
+    const download = (content: string) => async (_settings: RequestScanSettings, _remotePath: string, localPath: string) => { await fs.writeFile(localPath, content); };
+    assert.equal(await verifyFailedRequestScanFileIdentity(settings, "Failed\\same.pdf", document, download("same-size-a")), "match");
+    assert.equal(await verifyFailedRequestScanFileIdentity(settings, "Failed\\different.pdf", document, download("same-size-b")), "mismatch");
+    assert.equal(await verifyFailedRequestScanFileIdentity(settings, "Failed\\missing.pdf", document, async () => { throw Object.assign(new Error("No such file"), { code: "ENOENT" }); }), "missing");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
 
@@ -783,7 +800,7 @@ test("Return rejects attached jobs and durable pre-attachment Return completes o
 
   const jobId = await createJob("failed"); let reconciliations = 0; let triggers = 0;
   const returned = await returnRequestScanToIncoming(jobId, { readSettings: async () => settings, reconcileMove: async () => { reconciliations += 1; return "moved"; }, triggerWorker: async () => { triggers += 1; return {} as never; } });
-  assert.equal(returned.status, "pending"); assert.equal(returned.return_requested_at, null); assert.equal(returned.return_source_path, null); assert.equal(returned.return_destination_path, null); assert.equal(returned.return_completed_at, null); assert.match(returned.source_relative_path, /Incoming/); assert.equal(reconciliations, 1); assert.equal(triggers, 1);
+  assert.equal(returned.status, "pending"); assert.equal(returned.return_requested_at, null); assert.equal(returned.return_source_path, null); assert.equal(returned.return_destination_path, null); assert.equal(returned.return_completed_at, null); assert.match(returned.source_relative_path, /Incoming/); assert.equal(reconciliations, 0); assert.equal(triggers, 1);
 
   const interruptedId = await createJob("failed"); const interrupted = await getRequestScanJob(interruptedId);
   const destinationPath = `${settings.incomingSubfolder}\\${interrupted.filename}`;
@@ -1025,6 +1042,190 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(recognitionCalls.length, 0);
   assert.equal((await pool.query("select count(*)::int as count from documents where id=$1", [failed.document_id])).rows[0].count, 1);
   assert.equal((await pool.query("select 1 from document_appointment_links where document_id=$1 and appointment_id=$2", [failed.document_id, booking.id])).rowCount, 1);
+});
+
+test("a committed attachment checkpoint with a lost acknowledgement is never moved to Failed", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob();
+  const failedMoves: string[] = [];
+  const injected = dependencies({ ok: true, accession: booking.accession });
+  injected.updateCheckpoint = async (id, lease, values) => {
+    const checkpointed = await updateRequestScanCheckpoint(id, lease, values);
+    if (values.attachment_completed_at) throw new Error("Simulated lost attachment-checkpoint acknowledgement.");
+    return checkpointed;
+  };
+  injected.moveRequestScanFile = async (_settings, sourcePath, destinationFolder, filename) => {
+    if (destinationFolder.includes("Failed")) failedMoves.push(sourcePath);
+    return `${destinationFolder}\\${filename}`;
+  };
+
+  const result = await processRequestScanJob(jobId, settings, injected);
+  const authoritative = await getRequestScanJob(jobId);
+
+  assert.ok(authoritative.document_id);
+  assert.ok(authoritative.attachment_completed_at);
+  assert.equal(authoritative.source_relative_path.includes("Incoming"), true);
+  assert.equal(result.source_relative_path.includes("Incoming"), true);
+  assert.deepEqual(failedMoves, []);
+});
+
+test("a successful Failed move with a lost path checkpoint is reconciled on the next lease cycle", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const jobId = await createJob();
+  const original = await getRequestScanJob(jobId);
+  const remoteFiles = new Set([original.source_relative_path]);
+  let expireAfterMove = true;
+  const injected = dependencies({ ok: false, reason: "no_barcode" });
+  injected.downloadRequestScanFile = async (_settings, remotePath, localPath) => {
+    if (!remoteFiles.has(remotePath)) throw Object.assign(new Error("No such file"), { code: "ENOENT" });
+    await fs.writeFile(localPath, "request scan");
+  };
+  injected.reconcileRequestScanMove = async (_settings, sourcePath, destinationPath) => {
+    if (remoteFiles.has(sourcePath) && !remoteFiles.has(destinationPath)) {
+      remoteFiles.delete(sourcePath);
+      remoteFiles.add(destinationPath);
+      if (expireAfterMove && destinationPath.includes("Failed")) {
+        expireAfterMove = false;
+        await pool.query("update request_scan_jobs set lease_expires_at=now()-interval '1 second' where id=$1", [jobId]);
+      }
+      return "moved";
+    }
+    if (!remoteFiles.has(sourcePath) && remoteFiles.has(destinationPath)) return "already_moved";
+    if (remoteFiles.has(sourcePath) && remoteFiles.has(destinationPath)) return "conflict";
+    return "missing";
+  };
+
+  const ambiguous = await processRequestScanJob(jobId, settings, injected);
+  assert.equal(ambiguous.status, "processing");
+  assert.equal(ambiguous.source_relative_path, original.source_relative_path);
+  assert.ok(ambiguous.failure_destination_path);
+  assert.equal(remoteFiles.has(ambiguous.failure_destination_path!), true);
+
+  assert.equal((await recoverExpiredRequestScanJobs()).requeued, 1);
+  const reconciled = await processRequestScanJob(jobId, settings, injected);
+  assert.equal(reconciled.status, "failed");
+  assert.equal(reconciled.source_relative_path, ambiguous.failure_destination_path);
+  assert.ok(reconciled.failure_moved_at);
+  assert.equal(remoteFiles.has(reconciled.source_relative_path), true);
+});
+
+test("an archive move with a lost source-moved checkpoint completes idempotently on retry", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob();
+  const original = await getRequestScanJob(jobId);
+  const remoteFiles = new Set([original.source_relative_path]);
+  const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const recognitionCalls: string[] = [];
+  let expireAfterArchiveMove = true;
+  const injected = dependencies({ ok: true, accession: booking.accession }, { uploads, recognitionCalls });
+  injected.downloadRequestScanFile = async (_settings, remotePath, localPath) => {
+    if (!remoteFiles.has(remotePath)) throw Object.assign(new Error("No such file"), { code: "ENOENT" });
+    await fs.writeFile(localPath, "request scan");
+  };
+  injected.reconcileRequestScanMove = async (_settings, sourcePath, destinationPath) => {
+    if (remoteFiles.has(sourcePath) && !remoteFiles.has(destinationPath)) {
+      remoteFiles.delete(sourcePath);
+      remoteFiles.add(destinationPath);
+      if (expireAfterArchiveMove && destinationPath.includes("Processed")) {
+        expireAfterArchiveMove = false;
+        await pool.query("update request_scan_jobs set lease_expires_at=now()-interval '1 second' where id=$1", [jobId]);
+      }
+      return "moved";
+    }
+    if (!remoteFiles.has(sourcePath) && remoteFiles.has(destinationPath)) return "already_moved";
+    if (remoteFiles.has(sourcePath) && remoteFiles.has(destinationPath)) return "conflict";
+    return "missing";
+  };
+
+  const ambiguous = await processRequestScanJob(jobId, settings, injected);
+  assert.equal(ambiguous.status, "processing");
+  assert.ok(ambiguous.document_id);
+  assert.ok(ambiguous.attachment_completed_at);
+  assert.ok(ambiguous.intended_destination_path);
+  assert.equal(ambiguous.source_moved_at, null);
+  assert.equal(remoteFiles.has(ambiguous.intended_destination_path!), true);
+
+  assert.equal((await recoverExpiredRequestScanJobs()).requeued, 1);
+  const completed = await processRequestScanJob(jobId, settings, injected);
+  assert.equal(completed.status, "processed");
+  assert.equal(completed.source_relative_path, ambiguous.intended_destination_path);
+  assert.ok(completed.source_moved_at);
+  assert.equal(uploads.length, 1);
+  assert.equal(recognitionCalls.length, 1);
+});
+
+test("an attached document stranded in its deterministic Failed path is hash-verified and archived without reprocessing", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob();
+  const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
+  const failed = await processRequestScanJob(jobId, settings, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true, uploads }));
+  assert.equal(failed.status, "failed");
+  await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async () => { throw new Error("attached retry must not move to Incoming"); } });
+
+  const recognitionCalls: string[] = [];
+  const reconciliations: Array<{ source: string; destination: string }> = [];
+  let verifiedPath = "";
+  const recovery = dependencies({ ok: false, reason: "no_barcode" }, { uploads, recognitionCalls });
+  recovery.reconcileRequestScanMove = async (_settings, source, destination) => {
+    reconciliations.push({ source, destination });
+    return source.includes("Failed") ? "moved" : "missing";
+  };
+  recovery.verifyFailedFileIdentity = async (_settings, remotePath) => {
+    verifiedPath = remotePath;
+    return "match";
+  };
+
+  const completed = await processRequestScanJob(jobId, settings, recovery);
+  assert.equal(completed.status, "processed");
+  assert.ok(completed.source_moved_at);
+  assert.equal(completed.archive_recovered_from_path, verifiedPath);
+  assert.ok(completed.archive_recovered_at);
+  assert.match(verifiedPath, /Requests[\\/]Failed[\\/]\d{4}-\d{2}-\d{2}[\\/]/);
+  assert.equal(reconciliations.some(({ source }) => source === verifiedPath), true);
+  assert.equal(uploads.length, 1);
+  assert.equal(recognitionCalls.length, 0);
+});
+
+test("a different same-named Failed file is preserved for manual review", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob();
+  const failed = await processRequestScanJob(jobId, settings, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true }));
+  await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async () => { throw new Error("attached retry must not move to Incoming"); } });
+  let recoveryMoveCalls = 0;
+  const recovery = dependencies({ ok: false, reason: "no_barcode" });
+  recovery.reconcileRequestScanMove = async (_settings, source) => {
+    if (source.includes("Failed")) recoveryMoveCalls += 1;
+    return "missing";
+  };
+  recovery.verifyFailedFileIdentity = async () => "mismatch";
+
+  const reviewed = await processRequestScanJob(jobId, settings, recovery);
+  assert.equal(reviewed.status, "failed");
+  assert.equal(reviewed.source_relative_path, failed.source_relative_path);
+  assert.equal(reviewed.source_moved_at, null);
+  assert.equal(recoveryMoveCalls, 0);
+  assert.equal(reviewed.error_message, "A same-named file exists in the Request Scan Failed folder, but its size or SHA-256 does not match the stored document. The file was preserved for manual review.");
+});
+
+test("RequestScanProcessingError retains its specific safe archive message", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const jobId = await createJob();
+  await processRequestScanJob(jobId, settings, dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true }));
+  await retryRequestScanJob(jobId, { readSettings: async () => settings, moveFile: async () => { throw new Error("attached retry must not move to Incoming"); } });
+  const missing = dependencies({ ok: false, reason: "no_barcode" });
+  missing.reconcileRequestScanMove = async () => "missing";
+  missing.verifyFailedFileIdentity = async () => "missing";
+
+  const result = await processRequestScanJob(jobId, settings, missing);
+  assert.equal(result.status, "failed");
+  assert.equal(result.error_message, "The Request Scan source and archive destination are both missing.");
+  assert.equal(result.archive_last_error, result.error_message);
+  assert.equal(result.failure_category, "source_missing");
 });
 
 test("a disabled-modality job retry resumes its original checkpoint and cannot create a second clinical document", async (t) => {

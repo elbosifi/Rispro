@@ -75,7 +75,7 @@ export async function resetRequestScanDevelopmentData(userId: number, confirmati
       const incoming = `${settings.incomingSubfolder.replace(/[\\/]+$/g, "")}\\${filename}`;
       if (destinations.has(incoming)) throw new HttpError(409, "Request Scan reset found conflicting Incoming destinations. Conflicting files were preserved.");
       destinations.add(incoming);
-      const candidates = [...new Set([job.source_relative_path, job.return_destination_path, job.return_source_path, job.intended_destination_path].filter((value): value is string => Boolean(value)))];
+      const candidates = [...new Set([job.source_relative_path, job.return_destination_path, job.return_source_path, job.intended_destination_path, job.failure_destination_path].filter((value): value is string => Boolean(value)))];
       let recovered = false;
       for (const source of candidates) {
         if (source === incoming) { if (incomingPaths.has(incoming)) recovered = true; if (recovered) break; continue; }

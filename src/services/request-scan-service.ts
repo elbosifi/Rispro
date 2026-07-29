@@ -5,7 +5,7 @@ import { pool } from "../db/pool.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
-import { findDocumentByIdempotencyKey, getDocumentAbsolutePath, getDocumentById, uploadDocument, uploadDocumentIdempotently, upsertDocumentAppointmentLinks } from "./document-service.js";
+import { findDocumentByIdempotencyKey, getDocumentAbsolutePath, getDocumentById, uploadDocument, uploadDocumentIdempotently, upsertDocumentAppointmentLinks, type DocumentRow } from "./document-service.js";
 import { extractRequestScanBarcode, type RequestScanBarcodeFailure } from "./request-scan-barcode-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import {
@@ -18,15 +18,16 @@ import { classifyRequestScanSmbError, downloadRequestScanFile, ensureRequestScan
 import { readRequestScanSettings, type RequestScanSettings } from "./request-scan-settings-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import { env } from "../config/env.js";
-import { assertRequestScanLeaseOwned, beginRequestScanArchive, beginRequestScanAttachment, checkpointRequestScanJobAppointments, claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, linkRequestScanDocumentAppointments, loadRequestScanJobAppointments, renewRequestScanLeaseExecutionState, RequestScanCancellationRequestedError, RequestScanLeaseLostError, updateRequestScanCheckpoint, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanJobAppointmentCheckpoint, type RequestScanLease } from "./request-scan-processing-service.js";
+import { assertRequestScanLeaseOwned, beginRequestScanArchive, beginRequestScanAttachment, checkpointRequestScanJobAppointments, claimNextRequestScanJob, claimRequestScanJob, createRequestScanWorkerId, finishRequestScanJob, linkRequestScanDocumentAppointments, loadRequestScanJobAppointments, prepareRequestScanFailureMove, renewRequestScanLeaseExecutionState, RequestScanCancellationRequestedError, RequestScanLeaseLostError, updateRequestScanCheckpoint, updateRequestScanProgress, type ClaimedRequestScanJob, type RequestScanJobAppointmentCheckpoint, type RequestScanLease } from "./request-scan-processing-service.js";
 import { createRequestScanProgressCoalescer } from "./request-scan-progress-coalescer.js";
 import { requestRequestScanWorkerRun } from "./request-scan-worker-control-service.js";
 import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
+import { sha256File } from "./backup-v3-checksums.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "modality_mismatch" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
 export type RequestScanMatchedAppointment = { id: number; accessionNumber: string; patientId: number; modality?: string; examination?: string };
-export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; workflow_source?: "reception" | "modality"; modality_id?: number | null; barcode_value: string | null; appointment_id: number | null; document_id: number | null; manual_assignment_requested_at?: string | null; manual_assignment_requested_by?: number | null; manual_assignment_confirmed_at?: string | null; manual_assignment_appointment_id?: number | null; matchedAppointments?: RequestScanMatchedAppointment[]; identifier_verified_at?: string | null; identifier_strategy?: string | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; archive_attempt_count?: number; last_archive_attempt_at?: string | null; archive_last_error?: string | null; archive_next_retry_at?: string | null; return_requested_at?: string | null; return_source_path?: string | null; return_destination_path?: string | null; return_completed_at?: string | null; cancel_requested_at?: string | null; cancel_requested_by?: number | null; cancel_reason?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn?: string | null; patient_date_of_birth?: string | null; modality_name?: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name?: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; appointment_date?: string | null; accession_number?: string | null; clinical_document_export_status?: "pending" | "exporting" | "exported" | "failed" | "blocked" | null; clinical_document_export_last_attempt_at?: string | null; clinical_document_export_next_retry_at?: string | null; clinical_document_exported_at?: string | null; clinical_document_export_last_error?: string | null };
+export type RequestScanJob = { id: number; filename: string; source_relative_path: string; mime_type: string; status: "pending" | "processing" | "processed" | "duplicate" | "failed"; workflow_source?: "reception" | "modality"; modality_id?: number | null; barcode_value: string | null; appointment_id: number | null; document_id: number | null; manual_assignment_requested_at?: string | null; manual_assignment_requested_by?: number | null; manual_assignment_confirmed_at?: string | null; manual_assignment_appointment_id?: number | null; matchedAppointments?: RequestScanMatchedAppointment[]; identifier_verified_at?: string | null; identifier_strategy?: string | null; attachment_completed_at?: string | null; attachment_created?: boolean | null; intended_destination_path?: string | null; source_moved_at?: string | null; failure_destination_path?: string | null; failure_moved_at?: string | null; archive_recovered_from_path?: string | null; archive_recovered_at?: string | null; archive_attempt_count?: number; last_archive_attempt_at?: string | null; archive_last_error?: string | null; archive_next_retry_at?: string | null; return_requested_at?: string | null; return_source_path?: string | null; return_destination_path?: string | null; return_completed_at?: string | null; cancel_requested_at?: string | null; cancel_requested_by?: number | null; cancel_reason?: string | null; error_message: string | null; failure_category?: RequestScanFailureCategory | null; dismissed_at?: string | null; dismissed_by?: number | null; dismiss_reason?: string | null; dismissed_by_name?: string | null; attempt_count: number; created_at: string; updated_at: string; completed_at: string | null; processing_stage?: string | null; processing_started_at?: string | null; stage_started_at?: string | null; heartbeat_at?: string | null; worker_id?: string | null; lease_token?: string | null; lease_expires_at?: string | null; progress_current?: number | null; progress_total?: number | null; recovery_count?: number; patient_name?: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn?: string | null; patient_date_of_birth?: string | null; modality_name?: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name?: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; appointment_date?: string | null; accession_number?: string | null; clinical_document_export_status?: "pending" | "exporting" | "exported" | "failed" | "blocked" | null; clinical_document_export_last_attempt_at?: string | null; clinical_document_export_next_retry_at?: string | null; clinical_document_exported_at?: string | null; clinical_document_export_last_error?: string | null };
 export type RequestScanJobFilter = "active" | "processed" | "duplicate" | "failed" | "dismissed" | "all";
 type EligibleAppointment = { id: number; patient_id: number; modality_id?: number; accession_number: string };
 export type RequestScanInbox = { workflowSource: "reception" | "modality"; modalityId: number | null; modalityCode: string | null; incomingSubfolder: string; processedSubfolder: string; failedSubfolder: string };
@@ -41,6 +42,8 @@ export type RequestScanServiceDependencies = {
   uploadDocumentIdempotently?: typeof uploadDocumentIdempotently;
   findDocumentByIdempotencyKey?: typeof findDocumentByIdempotencyKey;
   upsertDocumentAppointmentLinks?: typeof upsertDocumentAppointmentLinks;
+  updateCheckpoint?: typeof updateRequestScanCheckpoint;
+  verifyFailedFileIdentity?: (settings: RequestScanSettings, remotePath: string, document: DocumentRow) => Promise<"match" | "mismatch" | "missing">;
   automatedDocumentExists: (appointmentId: number) => Promise<boolean>;
   findEligibleAppointment: (accession: string) => Promise<EligibleAppointment>;
   verifyPublicAppointmentToken: (token: string) => Promise<{ bookingId: number }>;
@@ -105,6 +108,39 @@ export function requestScanFailureCategory(message: string): RequestScanFailureC
   if (value.includes("barcode") || value.includes("identifier") || value.includes("pdf") || value.includes("scan")) return "recognition";
   return "internal_processing";
 }
+export async function verifyFailedRequestScanFileIdentity(
+  settings: RequestScanSettings,
+  remotePath: string,
+  document: DocumentRow,
+  downloadFile: typeof downloadRequestScanFile = downloadRequestScanFile,
+): Promise<"match" | "mismatch" | "missing"> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-recovery-"));
+  try {
+    const candidatePath = path.join(tempDir, "failed-candidate");
+    try {
+      await downloadFile(settings, remotePath, candidatePath);
+    } catch (error) {
+      if (classifyRequestScanSmbError(error) === "source_missing") return "missing";
+      throw error;
+    }
+    let candidateDigest;
+    let documentDigest;
+    try {
+      [candidateDigest, documentDigest] = await Promise.all([
+        sha256File(candidatePath),
+        sha256File(getDocumentAbsolutePath(document)),
+      ]);
+    } catch (error) {
+      throw new RequestScanProcessingError("The stored Request Scan document could not be read for Failed-file identity verification. Manual review is required.", "internal_processing", { cause: error });
+    }
+    if (documentDigest.byteSize !== Number(document.file_size)) {
+      throw new RequestScanProcessingError("The stored Request Scan document size does not match its database metadata. Manual review is required.", "internal_processing");
+    }
+    return candidateDigest.byteSize === documentDigest.byteSize && candidateDigest.sha256 === documentDigest.sha256 ? "match" : "mismatch";
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
 const defaultDependencies: RequestScanServiceDependencies = {
   listRequestScanFiles,
   ensureRequestScanFolders,
@@ -116,6 +152,7 @@ const defaultDependencies: RequestScanServiceDependencies = {
   uploadDocumentIdempotently,
   findDocumentByIdempotencyKey,
   upsertDocumentAppointmentLinks,
+  verifyFailedFileIdentity: verifyFailedRequestScanFileIdentity,
   automatedDocumentExists,
   findEligibleAppointment: findRequestScanAppointment,
   verifyPublicAppointmentToken: resolveRequestScanAppointmentToken,
@@ -210,7 +247,7 @@ export async function reconcileIncomingRequestScanFile(filename: string, sourceR
     }
     const returned = owned.rows.find((row) => row.return_requested_at && !row.return_completed_at && row.return_destination_path === sourceRelativePath);
     if (returned) {
-      const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set filename=$2,source_relative_path=$3,status='pending',return_requested_at=null,return_source_path=null,return_destination_path=null,return_completed_at=null,error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 returning *`, [returned.id, filename, sourceRelativePath]);
+      const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set filename=$2,source_relative_path=$3,status='pending',return_requested_at=null,return_source_path=null,return_destination_path=null,return_completed_at=null,failure_destination_path=null,failure_moved_at=null,error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 returning *`, [returned.id, filename, sourceRelativePath]);
       await client.query("commit"); return { job: rows[0]!, outcome: "reactivated" };
     }
     if (owned.rows[0]) {
@@ -259,7 +296,7 @@ function isRequestScanIdentifierSourceConstraintError(error: unknown): boolean {
 }
 export function requestScanProcessingErrorMessage(error: unknown): string {
   if (isRequestScanIdentifierSourceConstraintError(error)) return REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT_MESSAGE;
-  return error instanceof HttpError ? error.message : "Request scan processing failed";
+  return error instanceof RequestScanProcessingError || error instanceof HttpError ? error.message : "Request scan processing failed";
 }
 function safeRequestScanDiagnosticMessage(error: unknown): string {
   if (isRequestScanIdentifierSourceConstraintError(error)) return REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT_MESSAGE;
@@ -378,24 +415,96 @@ async function resolveFilenameEvidence(
 
 async function moveOutcome(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, folder: string, duplicate = false): Promise<string> { return dependencies.moveRequestScanFile(settings, job.source_relative_path, destination(folder, duplicate), job.filename); }
 
+function legacyFailedRequestScanPath(job: RequestScanJob, settings: RequestScanSettings): string | null {
+  if (!job.attachment_completed_at) return null;
+  const date = new Date(job.attachment_completed_at);
+  if (Number.isNaN(date.getTime())) return null;
+  const filename = validateRequestScanRemoteFilename(path.basename(job.filename));
+  return joinInboxPath(inboxForJob(settings, job).failedSubfolder, getTripoliToday(date), filename);
+}
+
+async function reconcileCheckpointedRequestScanArchive(
+  job: RequestScanJob,
+  settings: RequestScanSettings,
+  intended: string,
+  dependencies: RequestScanServiceDependencies,
+): Promise<{ outcome: Awaited<ReturnType<typeof reconcileRequestScanMove>>; recoveredFrom: string | null }> {
+  if (!dependencies.reconcileRequestScanMove) return { outcome: "moved", recoveredFrom: null };
+  const context = { jobId: job.id, logDiagnostic: dependencies.logDiagnostic };
+  const outcome = await dependencies.reconcileRequestScanMove(settings, job.source_relative_path, intended, undefined, context);
+  if (outcome !== "missing") return { outcome, recoveredFrom: null };
+
+  const recoveryPath = job.failure_destination_path || legacyFailedRequestScanPath(job, settings);
+  if (!recoveryPath || recoveryPath.replace(/\//g, "\\").toLowerCase() === job.source_relative_path.replace(/\//g, "\\").toLowerCase()) {
+    return { outcome, recoveredFrom: null };
+  }
+  const document = await getDocumentById(job.document_id!);
+  const identity = await (dependencies.verifyFailedFileIdentity ?? verifyFailedRequestScanFileIdentity)(settings, recoveryPath, document);
+  if (identity === "missing") return { outcome, recoveredFrom: null };
+  if (identity === "mismatch") {
+    throw new RequestScanProcessingError("A same-named file exists in the Request Scan Failed folder, but its size or SHA-256 does not match the stored document. The file was preserved for manual review.", "smb_storage");
+  }
+  const recovered = await dependencies.reconcileRequestScanMove(settings, recoveryPath, intended, undefined, context);
+  if (recovered === "conflict") {
+    throw new RequestScanProcessingError("The verified Failed file and archive destination have different contents. Both files were preserved for manual review.", "smb_storage");
+  }
+  if (recovered === "missing") {
+    throw new RequestScanProcessingError("The verified Request Scan Failed file disappeared before archive recovery completed.", "source_missing");
+  }
+  return { outcome: recovered, recoveredFrom: recoveryPath };
+}
+
 async function archiveCheckpointedRequestScanJob(job: RequestScanJob, lease: RequestScanLease, settings: RequestScanSettings, dependencies: RequestScanServiceDependencies, created: boolean): Promise<RequestScanJob> {
+  const checkpoint = dependencies.updateCheckpoint ?? updateRequestScanCheckpoint;
   const folder = destination(inboxForJob(settings, job).processedSubfolder, !created);
   const intended = job.intended_destination_path || requestScanArchivePath(folder, Number(job.id), job.filename);
-  if (!job.intended_destination_path) job = await updateRequestScanCheckpoint(job.id, lease, { intended_destination_path: intended });
+  if (!job.intended_destination_path) job = await checkpoint(job.id, lease, { intended_destination_path: intended });
   await assertRequestScanLeaseOwned(job.id, lease);
   if (!job.source_moved_at) {
     job = await beginRequestScanArchive(job.id, lease);
-    const outcome = dependencies.reconcileRequestScanMove ? await dependencies.reconcileRequestScanMove(settings, job.source_relative_path, intended, undefined, { jobId: job.id, logDiagnostic: dependencies.logDiagnostic }) : "moved";
+    const reconciliation = await reconcileCheckpointedRequestScanArchive(job, settings, intended, dependencies);
+    const outcome = reconciliation.outcome;
     if (!dependencies.reconcileRequestScanMove) await dependencies.moveRequestScanFile(settings, job.source_relative_path, folder, requestScanArchivePath("", Number(job.id), job.filename));
     if (outcome === "conflict") throw new RequestScanProcessingError("The Incoming file and archived file have the same job destination but different contents. Both files were preserved for manual review.", "smb_storage");
     if (outcome === "missing") throw new RequestScanProcessingError("The Request Scan source and archive destination are both missing.", "source_missing");
     await assertRequestScanLeaseOwned(job.id, lease);
-    job = await updateRequestScanCheckpoint(job.id, lease, { source_relative_path: intended, source_moved_at: new Date().toISOString() });
+    const movedAt = new Date().toISOString();
+    job = await checkpoint(job.id, lease, {
+      source_relative_path: intended,
+      source_moved_at: movedAt,
+      ...(reconciliation.recoveredFrom ? { archive_recovered_from_path: reconciliation.recoveredFrom, archive_recovered_at: movedAt } : {}),
+    });
   }
   await assertRequestScanLeaseOwned(job.id, lease);
   const completed = await finishRequestScanJob(job.id, lease, { status: created ? "processed" : "duplicate", source_relative_path: intended, error_message: null });
   if (!completed) throw new RequestScanLeaseLostError();
   return completed;
+}
+
+function failedRequestScanDestination(job: RequestScanJob, inbox: RequestScanInbox): string {
+  return joinInboxPath(destination(inbox.failedSubfolder), validateRequestScanRemoteFilename(path.basename(job.filename)));
+}
+
+async function movePreparedRequestScanFailure(
+  job: RequestScanJob,
+  lease: RequestScanLease,
+  settings: RequestScanSettings,
+  dependencies: RequestScanServiceDependencies,
+): Promise<RequestScanJob> {
+  const failureDestination = job.failure_destination_path;
+  if (!failureDestination) throw new Error("Request Scan Failed movement intent is missing.");
+  if (dependencies.reconcileRequestScanMove) {
+    const outcome = await dependencies.reconcileRequestScanMove(settings, job.source_relative_path, failureDestination, undefined, { jobId: job.id, logDiagnostic: dependencies.logDiagnostic });
+    if (outcome === "conflict") throw new RequestScanProcessingError("The Request Scan Failed destination contains a different file. Both files were preserved for manual review.", "smb_storage");
+    if (outcome === "missing") throw new RequestScanProcessingError("The Request Scan source and Failed destination are both missing.", "source_missing");
+  } else {
+    await dependencies.moveRequestScanFile(settings, job.source_relative_path, path.win32.dirname(failureDestination), path.win32.basename(failureDestination));
+  }
+  await assertRequestScanLeaseOwned(job.id, lease, true);
+  return (dependencies.updateCheckpoint ?? updateRequestScanCheckpoint)(job.id, lease, {
+    source_relative_path: failureDestination,
+    failure_moved_at: new Date().toISOString(),
+  });
 }
 
 const requestScanWorkerId = createRequestScanWorkerId();
@@ -598,7 +707,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       return { appointment_id: Number(value.id), patient_id: Number(value.patient_id), identifier_source };
     });
     await checkpointRequestScanJobAppointments(job.id, lease, appointmentCheckpoints);
-    if (!job.identifier_verified_at) job = await updateRequestScanCheckpoint(job.id, lease, { appointment_id: appointment.id, barcode_value: appointment.accession_number, identifier_verified_at: new Date().toISOString(), identifier_strategy: identifierStrategy });
+    if (!job.identifier_verified_at) job = await (dependencies.updateCheckpoint ?? updateRequestScanCheckpoint)(job.id, lease, { appointment_id: appointment.id, barcode_value: appointment.accession_number, identifier_verified_at: new Date().toISOString(), identifier_strategy: identifierStrategy });
     await stage({ stage: "checking_duplicate" });
     const modalityWorkflow = inbox.workflowSource === "modality";
     const idempotencyKey = `request-scan:job:${job.id}:${modalityWorkflow ? "clinical-document" : "appointment-request"}`;
@@ -614,7 +723,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
     else await linkRequestScanDocumentAppointments(job.id, lease, attachment.document.id, appointments.map((value) => Number(value.id)));
     await ensureLease();
     const createdByThisJob = attachment.created || attachment.document.request_scan_job_id === job.id;
-    job = await updateRequestScanCheckpoint(job.id, lease, { appointment_id: appointment.id, document_id: attachment.document.id, barcode_value: appointment.accession_number, attachment_completed_at: new Date().toISOString(), attachment_created: createdByThisJob });
+    job = await (dependencies.updateCheckpoint ?? updateRequestScanCheckpoint)(job.id, lease, { appointment_id: appointment.id, document_id: attachment.document.id, barcode_value: appointment.accession_number, attachment_completed_at: new Date().toISOString(), attachment_created: createdByThisJob });
     await stage({ stage: "moving_file" });
     await progress.flush();
     return await archiveCheckpointedRequestScanJob(job, lease, settings, dependencies, createdByThisJob);
@@ -623,22 +732,38 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
     if (error instanceof RequestScanCancellationRequestedError || cancellationRequested || (error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError")) {
       progress.cancel(); cancellationController.abort();
       const stoppedMessage = "Automatic scanning was stopped after manual review. No QR code or barcode was confirmed. Assign the document manually.";
-      let moved = job.source_relative_path;
       try {
-        await assertRequestScanLeaseOwned(job.id, lease, true);
-        moved = await moveOutcome(dependencies, settings, job, inbox.failedSubfolder);
-        await assertRequestScanLeaseOwned(job.id, lease, true);
+        const prepared = await prepareRequestScanFailureMove(job.id, lease, failedRequestScanDestination(job, inbox));
+        job = prepared.job;
+        if (prepared.shouldMove) job = await movePreparedRequestScanFailure(job, lease, settings, dependencies);
       } catch (moveError) {
         if (moveError instanceof RequestScanLeaseLostError) return getRequestScanJob(job.id);
+        dependencies.logDiagnostic?.("request_scan_failure_move_pending", { jobId: job.id, category: failureCategory(moveError), message: safeRequestScanDiagnosticMessage(moveError) });
       }
-      return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: stoppedMessage, failure_category: "recognition" })) ?? getRequestScanJob(job.id);
+      const archiveFailure = Boolean(job.attachment_completed_at && job.document_id && !job.source_moved_at);
+      const message = archiveFailure ? ARCHIVE_PENDING_MESSAGE : stoppedMessage;
+      const category: RequestScanFailureCategory = archiveFailure ? "smb_storage" : "recognition";
+      return (await finishRequestScanJob(job.id, lease, {
+        status: "failed",
+        source_relative_path: job.source_relative_path,
+        error_message: message,
+        failure_category: category,
+        ...(archiveFailure ? { archive_last_error: message, archive_next_retry_at: new Date(Date.now() + 60_000).toISOString() } : {}),
+      })) ?? getRequestScanJob(job.id);
     }
     await progress.flush().catch(() => undefined);
-    const category = failureCategory(error); const message = requestScanProcessingErrorMessage(error); logUnexpectedRequestScanFailure(dependencies, job, error); let moved = job.source_relative_path;
-    if (!job.attachment_completed_at) { try { await ensureLease(); moved = await moveOutcome(dependencies, settings, job, inbox.failedSubfolder); } catch (moveError) { if (moveError instanceof RequestScanLeaseLostError) return getRequestScanJob(job.id); } }
+    const category = failureCategory(error); const message = requestScanProcessingErrorMessage(error); logUnexpectedRequestScanFailure(dependencies, job, error);
+    try {
+      const prepared = await prepareRequestScanFailureMove(job.id, lease, failedRequestScanDestination(job, inbox));
+      job = prepared.job;
+      if (prepared.shouldMove) job = await movePreparedRequestScanFailure(job, lease, settings, dependencies);
+    } catch (moveError) {
+      if (moveError instanceof RequestScanLeaseLostError) return getRequestScanJob(job.id);
+      dependencies.logDiagnostic?.("request_scan_failure_move_pending", { jobId: job.id, category: failureCategory(moveError), message: safeRequestScanDiagnosticMessage(moveError) });
+    }
     const archiveFailure = Boolean(job.attachment_completed_at && job.document_id && !job.source_moved_at);
     const retryDelayMinutes = Math.min(60, 2 ** Math.min(6, Math.max(0, Number(job.archive_attempt_count ?? 1) - 1)));
-    return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: moved, error_message: message, failure_category: category, ...(archiveFailure ? { archive_last_error: message, archive_next_retry_at: new Date(Date.now() + retryDelayMinutes * 60_000).toISOString() } : {}), completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
+    return (await finishRequestScanJob(job.id, lease, { status: "failed", source_relative_path: job.source_relative_path, error_message: message, failure_category: category, ...(archiveFailure ? { archive_last_error: message, archive_next_retry_at: new Date(Date.now() + retryDelayMinutes * 60_000).toISOString() } : {}), completed_at: new Date().toISOString() })) ?? getRequestScanJob(job.id);
   } finally { progress.cancel(); if (heartbeat) clearInterval(heartbeat); if (renewalPromise) await renewalPromise; if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined); }
 }
 
@@ -764,7 +889,7 @@ export async function retryRequestScanJob(id: number, overrides: Partial<Request
   if (job.attachment_completed_at && job.document_id) return dependencies.updateJob(id, { ...pendingRetryFields, stage_started_at: new Date().toISOString() });
   if (Object.keys(overrides).length) {
     const settings = await dependencies.readSettings(); const moved = await dependencies.moveFile(settings, job.source_relative_path, inboxForJob(settings, job).incomingSubfolder, job.filename);
-    return dependencies.updateJob(id, { ...pendingRetryFields, source_relative_path: moved, stage_started_at: new Date().toISOString() });
+    return dependencies.updateJob(id, { ...pendingRetryFields, source_relative_path: moved, failure_destination_path: null, failure_moved_at: null, stage_started_at: new Date().toISOString() });
   }
   return returnRequestScanToIncoming(id);
 }
@@ -815,10 +940,11 @@ export async function returnRequestScanToIncoming(id: number, overrides: Partial
     job = persisted.rows[0]!;
     await client.query("commit");
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
-  const outcome = await dependencies.reconcileMove(settings, job.return_source_path!, job.return_destination_path!, undefined, { jobId: Number(job.id) });
+  const samePath = job.return_source_path!.replace(/\//g, "\\").toLowerCase() === job.return_destination_path!.replace(/\//g, "\\").toLowerCase();
+  const outcome = samePath ? "already_moved" : await dependencies.reconcileMove(settings, job.return_source_path!, job.return_destination_path!, undefined, { jobId: Number(job.id) });
   if (outcome === "conflict") throw new HttpError(409, "The previous source and Incoming file have different contents. Both files were preserved for manual reconciliation.");
   if (outcome === "missing") throw new HttpError(404, "The Request Scan source and Incoming destination are both missing.");
-  const { rows } = await pool.query<RequestScanJob>(`update request_scan_jobs set source_relative_path=$2,status='pending',return_requested_at=null,return_source_path=null,return_destination_path=null,return_completed_at=null,error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 and status='failed' and attachment_completed_at is null and document_id is null and return_destination_path is not null returning *`, [id, destinationPath]);
+  const { rows } = await pool.query<RequestScanJob>(`update request_scan_jobs set source_relative_path=$2,status='pending',return_requested_at=null,return_source_path=null,return_destination_path=null,return_completed_at=null,failure_destination_path=null,failure_moved_at=null,error_message=null,failure_category=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,cancel_requested_at=null,cancel_requested_by=null,cancel_reason=null,completed_at=null,processing_stage='queued',processing_started_at=null,stage_started_at=now(),heartbeat_at=null,worker_id=null,lease_token=null,lease_expires_at=null,progress_current=null,progress_total=null,updated_at=now() where id=$1 and status='failed' and attachment_completed_at is null and document_id is null and return_destination_path is not null returning *`, [id, destinationPath]);
   if (!rows[0]) throw new HttpError(409, "The Request Scan Return checkpoint could not be completed.");
   await dependencies.triggerWorker();
   return rows[0];
@@ -852,7 +978,7 @@ export async function downloadRequestScanJobFile(id: number, overrides: Partial<
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-request-scan-preview-"));
   try {
     const activeReturnDestination = job.return_requested_at && !job.return_completed_at ? job.return_destination_path : null;
-    const candidates = [...new Set([job.source_relative_path, job.intended_destination_path, activeReturnDestination].filter((value): value is string => Boolean(value)))];
+    const candidates = [...new Set([job.source_relative_path, job.intended_destination_path, job.failure_destination_path, activeReturnDestination].filter((value): value is string => Boolean(value)))];
     for (const [index, remotePath] of candidates.entries()) {
       const localPath = path.join(tempDir, `preview-${index}${path.extname(job.filename)}`);
       try { await dependencies.downloadFile(settings, remotePath, localPath); return { job, buffer: await dependencies.readFile(localPath) }; }
@@ -863,7 +989,9 @@ export async function downloadRequestScanJobFile(id: number, overrides: Partial<
 }
 
 export function withSafeRequestScanFilename<T extends Pick<RequestScanJob, "filename">>(job: T): T {
-  const safe = { ...job, filename: requestScanSafeDisplayFilename(job.filename) } as T & { source_relative_path?: unknown };
+  const safe = { ...job, filename: requestScanSafeDisplayFilename(job.filename) } as T & { source_relative_path?: unknown; failure_destination_path?: unknown; archive_recovered_from_path?: unknown };
   delete safe.source_relative_path;
+  delete safe.failure_destination_path;
+  delete safe.archive_recovered_from_path;
   return safe;
 }

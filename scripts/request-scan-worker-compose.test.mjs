@@ -34,6 +34,15 @@ test("Compose app disables embedded Request Scan processing and worker waits for
   assert.match(internal, /request-scan-worker:[\s\S]*postgres:[\s\S]*condition: service_healthy/);
 });
 
+test("Compose defaults cannot inherit one shared flag that unexpectedly enables both Request Scan processors", () => {
+  const app = compose.slice(compose.indexOf("  app:"), compose.indexOf("\n  request-scan-worker:"));
+  const worker = compose.slice(compose.indexOf("  request-scan-worker:"), compose.indexOf("\n  ohif:"));
+  assert.match(app, /REQUEST_SCAN_WORKER_PROCESS_ENABLED: "\$\{REQUEST_SCAN_APP_WORKER_ENABLED:-false\}"/);
+  assert.match(worker, /REQUEST_SCAN_WORKER_PROCESS_ENABLED: "\$\{REQUEST_SCAN_DEDICATED_WORKER_ENABLED:-true\}"/);
+  assert.doesNotMatch(app, /REQUEST_SCAN_WORKER_PROCESS_ENABLED: "\$\{REQUEST_SCAN_WORKER_PROCESS_ENABLED/);
+  assert.doesNotMatch(worker, /REQUEST_SCAN_WORKER_PROCESS_ENABLED: "\$\{REQUEST_SCAN_WORKER_PROCESS_ENABLED/);
+});
+
 test("worker bootstrap waits for PostgreSQL but skips migrations and seeding", () => {
   assert.doesNotMatch(entrypoint, /\r\n/);
   assert.match(entrypoint, /wait_for_postgres/);
