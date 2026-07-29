@@ -16,9 +16,10 @@ export const documentsRouter = express.Router();
 
 documentsRouter.use(requireAuth);
 
-function toDocumentResponse(document: DocumentRow): Omit<DocumentRow, "stored_path"> & { stored_path: string } {
+function toDocumentResponse(document: DocumentRow): Omit<DocumentRow, "stored_path" | "content_sha256"> & { stored_path: string } {
+  const { content_sha256: _contentSha256, ...safeDocument } = document;
   return {
-    ...document,
+    ...safeDocument,
     stored_path: "",
   };
 }

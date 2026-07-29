@@ -419,14 +419,19 @@ async function findRequestScanDocumentDuplicate(
   );
   if (exact.rows[0]) return exact.rows[0];
 
-  if (!appointmentId) return null;
+  if (!profile.reuseAcrossAppointments && !appointmentId) return null;
+  const legacyAppointmentPredicate = profile.reuseAcrossAppointments
+    ? ""
+    : "and (d.v2_booking_id=$5 or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=$5))";
   const legacy = await queryable.query<DocumentRow>(
     `select d.* from documents d
       where d.patient_id=$1 and d.document_type=$2 and d.source=$3
         and d.file_size=$4 and d.content_sha256 is null
-        and (d.v2_booking_id=$5 or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=$5))
+        ${legacyAppointmentPredicate}
       order by d.id asc`,
-    [patientId, profile.documentType, profile.source, fingerprint.byteSize, appointmentId],
+    profile.reuseAcrossAppointments
+      ? [patientId, profile.documentType, profile.source, fingerprint.byteSize]
+      : [patientId, profile.documentType, profile.source, fingerprint.byteSize, appointmentId],
   );
   for (const candidate of legacy.rows) {
     const digest = await sha256File(getDocumentAbsolutePath(candidate)).catch(() => null);
@@ -629,6 +634,7 @@ export async function uploadDocument(
         stored_path,
         mime_type,
         file_size,
+        content_sha256,
         storage_location_type,
         source,
         scan_session_id,

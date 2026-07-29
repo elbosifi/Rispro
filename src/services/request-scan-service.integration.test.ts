@@ -262,6 +262,7 @@ test("reception Request Scans detect a renamed exact file only for the same appo
   const second = await processRequestScanJob(secondId, settings, fingerprintedRequestScanDependencies(booking.accession, "same-request-bytes"));
   assert.equal(first.status, "processed"); assert.equal(second.status, "duplicate");
   assert.equal(Number(second.document_id), Number(first.document_id));
+  assert.equal(second.error_message, "This file is identical to an existing document and was not attached again.");
   assert.equal((await pool.query("select id from documents where patient_id=$1 and v2_booking_id=$2 and document_type='appointment_request' and source='request_scan_automation'", [booking.patientId, booking.id])).rowCount, 1);
 });
 
@@ -357,6 +358,21 @@ test("a legacy modality document is lazily fingerprinted before it is reused", a
   const secondId = await createModalityJob(booking.modalityId, code, "legacy-hash.pdf");
   const second = await processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "legacy-content"));
   assert.equal(second.status, "duplicate"); assert.equal(Number(second.document_id), Number(first.document_id));
+  assert.match(String((await pool.query<{ content_sha256: string }>("select content_sha256 from documents where id=$1", [first.document_id])).rows[0]!.content_sha256), /^[0-9a-f]{64}$/);
+});
+
+test("a legacy modality fingerprint is recovered and reused for another appointment of the same patient", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const firstBooking = await createBooking(); const secondBooking = await createBookingForSamePatient(firstBooking.id); const code = `LX${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [firstBooking.modalityId, code]);
+  const firstId = await createModalityJob(firstBooking.modalityId, code, "legacy-cross-appointment.pdf");
+  const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
+  const first = await processRequestScanJob(firstId, settingsWithRoot, modalityDuplicateDependencies(firstBooking.accession, "legacy-cross-content"));
+  await pool.query("update documents set content_sha256=null where id=$1", [first.document_id]);
+  const secondId = await createModalityJob(firstBooking.modalityId, code, "legacy-cross-renamed.pdf");
+  const second = await processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(secondBooking.accession, "legacy-cross-content"));
+  assert.equal(second.status, "duplicate"); assert.equal(Number(second.document_id), Number(first.document_id));
+  assert.equal((await pool.query("select 1 from document_appointment_links where document_id=$1 and appointment_id=$2", [first.document_id, secondBooking.id])).rowCount, 1);
   assert.match(String((await pool.query<{ content_sha256: string }>("select content_sha256 from documents where id=$1", [first.document_id])).rows[0]!.content_sha256), /^[0-9a-f]{64}$/);
 });
 

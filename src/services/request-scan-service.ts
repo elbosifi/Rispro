@@ -157,7 +157,7 @@ const defaultDependencies: RequestScanServiceDependencies = {
   listActiveModalities: async () => (await pool.query<{ id: number; code: string }>("select id,code from modalities where is_active=true order by id")).rows,
   logDiagnostic(event, metadata) { console.info("[RequestScanIdentifier]", event, metadata); },
 };
-const MODALITY_DUPLICATE_MESSAGE = "This file is identical to an existing document and was not attached again.";
+const REQUEST_SCAN_DUPLICATE_MESSAGE = "This file is identical to an existing document and was not attached again.";
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
 function destination(folder: string, duplicate = false): string { return `${folder.replace(/[\\/]+$/g, "")}\\${duplicate ? "Duplicates\\" : ""}${getTripoliToday()}`; }
 
@@ -474,7 +474,7 @@ async function archiveCheckpointedRequestScanJob(job: RequestScanJob, lease: Req
     });
   }
   await assertRequestScanLeaseOwned(job.id, lease);
-  const completed = await finishRequestScanJob(job.id, lease, { status: created ? "processed" : "duplicate", source_relative_path: intended, error_message: created || job.workflow_source !== "modality" ? null : MODALITY_DUPLICATE_MESSAGE });
+  const completed = await finishRequestScanJob(job.id, lease, { status: created ? "processed" : "duplicate", source_relative_path: intended, error_message: created ? null : REQUEST_SCAN_DUPLICATE_MESSAGE });
   if (!completed) throw new RequestScanLeaseLostError();
   return completed;
 }
