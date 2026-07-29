@@ -23,11 +23,23 @@ function parse(buffer: Buffer): Record<string, unknown> {
   return DicomMetaDictionary.naturalizeDataset(parsed.dict) as Record<string, unknown>;
 }
 
+function parseRaw(buffer: Buffer): Record<string, { vr?: string; Value?: unknown[] }> {
+  const parsed = DicomMessage.readFile(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+  return parsed.dict as Record<string, { vr?: string; Value?: unknown[] }>;
+}
+
 function encapsulatedBytes(value: unknown): Buffer {
   const item = Array.isArray(value) ? value[0] : value;
   if (item instanceof ArrayBuffer) return Buffer.from(item);
   if (ArrayBuffer.isView(item)) return Buffer.from(item.buffer, item.byteOffset, item.byteLength);
   throw new Error("DICOM EncapsulatedDocument did not contain bytes.");
+}
+
+function pixelBytes(value: unknown): Buffer {
+  if (Array.isArray(value)) return pixelBytes(value[0]);
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  throw new Error("DICOM PixelData did not contain native bytes.");
 }
 
 test("creates a valid Encapsulated PDF DICOM instance with stable supplied UIDs", async () => {
@@ -59,17 +71,24 @@ test("converts JPEG and PNG input to PDF before encapsulation", async () => {
   }
 });
 
-test("creates parseable RGB Secondary Capture pages with the appointment modality", async () => {
-  const dicom = await createClinicalDocumentSecondaryCapture(Buffer.from([255, 0, 0, 0, 255, 0]), 1, 2, { ...metadata, modality: "MR", seriesNumber: 9000, instanceNumber: 4 });
-  const dataset = parse(dicom);
-  assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
-  assert.equal(dataset.Modality, "MR");
-  assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
-  assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]);
-  assert.equal(dataset.ConversionType, "SD");
-  assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3);
-  assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.HighBit, 7);
-  assert.equal(dataset.InstanceNumber, 4); assert.equal(dataset.BurnedInAnnotation, "YES");
+test("creates parseable RGB Secondary Capture MR and CT pages with native PixelData", async () => {
+  const pixels = Buffer.from([255, 0, 0, 0, 255, 0]);
+  for (const [modality, sopInstanceUid, instanceNumber] of [["MR", "2.25.457", 4], ["CT", "2.25.458", 5]] as const) {
+    const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 2, { ...metadata, sopInstanceUid, modality, seriesNumber: 9000, instanceNumber });
+    const dataset = parse(dicom);
+    assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
+    assert.equal(dataset.StudyInstanceUID, metadata.studyInstanceUid); assert.equal(dataset.SeriesInstanceUID, metadata.seriesInstanceUid);
+    assert.equal(dataset.Modality, modality); assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
+    assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]); assert.equal(dataset.ConversionType, "SD");
+    assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3); assert.equal(dataset.PlanarConfiguration, 0);
+    assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.BitsStored, 8); assert.equal(dataset.HighBit, 7); assert.equal(dataset.PixelRepresentation, 0);
+    assert.equal(pixelBytes(dataset.PixelData).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
+    const rawPixelData = parseRaw(dicom)["7FE00010"];
+    assert.equal(rawPixelData?.vr, "OW");
+    assert.equal(pixelBytes(rawPixelData?.Value).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
+    assert.equal(dataset.InstanceNumber, instanceNumber); assert.equal(dataset.BurnedInAnnotation, "YES");
+    for (const tag of ["SliceThickness", "ImagePositionPatient", "ImageOrientationPatient", "MagneticFieldStrength", "EchoTime", "RepetitionTime"]) assert.equal(dataset[tag], undefined);
+  }
 });
 
 test("maps only supported RISpro modality aliases", () => {
