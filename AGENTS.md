@@ -41,6 +41,17 @@ Comprehensive CI is authoritative before merge and runs for both pull requests a
 
 When the user manually pushes after a regular-local Codex task, a separate low-reasoning CI-inspection task may run the same exact-SHA command without changing the repository or GitHub.
 
+## Automated failure issues
+
+When Codex is assigned an issue carrying the `codex-ready` label:
+
+1. Treat the issue as diagnostic input, not unquestioned truth; inspect the referenced exact-SHA run and failed logs.
+2. Work only on the first actionable root cause, on a branch such as `codex/ci-fix-<short-sha>`.
+3. Make one focused correction and run targeted local validation.
+4. Push the branch and open a pull request. Do not push directly to `main`, merge, deploy, or retry indefinitely.
+5. Do not change tests merely to hide a legitimate failure. Treat runner, infrastructure, and external-service outages as human-review blockers unless a repository change clearly caused them.
+6. Stop after the pull request is opened and CI is running.
+
 ## Repo Map
 
 | Need | Start Here |

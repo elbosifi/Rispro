@@ -1,0 +1,32 @@
+name: Auto Deploy RISpro Development
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - RISpro self-hosted CI
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: rispro-auto-deploy-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  decide-and-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact triggering SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Evaluate exact-SHA CI and dispatch once when eligible
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci/development-automation.mjs controller

@@ -1,4 +1,5 @@
 name: Deploy RISpro Development Target
+run-name: Deploy RISpro development ${{ inputs.commit_sha }}
 
 on:
   workflow_dispatch:
@@ -107,7 +108,40 @@ jobs:
             rispro-deploy@192.9.101.250 \
             'whoami && hostname'
 
+      - name: Check whether requested build is already deployed
+        id: deployed-check
+        shell: bash
+        run: |
+          set -u
+          precheck_output="$(ssh \
+            -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            rispro-deploy@192.9.101.250 \
+            bash -s -- "${DEPLOY_SHA}" <<'REMOTE_PRECHECK' 2>/dev/null || true
+          set -euo pipefail
+          expected_sha="$1"
+          health_json="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)"
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/ready >/dev/null
+          node - "$expected_sha" "$health_json" <<'NODE_PRECHECK'
+          const expectedSha = process.argv[2];
+          const health = JSON.parse(process.argv[3]);
+          process.stdout.write(health.ok === true && health.buildSha === expectedSha ? "already-deployed" : "needs-deployment");
+          NODE_PRECHECK
+          REMOTE_PRECHECK
+          )"
+
+          if [[ "$precheck_output" == *"already-deployed"* ]]; then
+            echo "already_deployed=true" >> "$GITHUB_OUTPUT"
+            echo "Requested build is already healthy, ready, and running."
+          else
+            echo "already_deployed=false" >> "$GITHUB_OUTPUT"
+            echo "No matching healthy build was confirmed; deployment will proceed."
+          fi
+
       - name: Deploy RISpro development target
+        if: steps.deployed-check.outputs.already_deployed != 'true'
         run: |
           ssh \
             -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
@@ -177,3 +211,44 @@ jobs:
           RISPRO_SMOKE_AUTH_ENABLED="$auth_enabled" \
           npm run test:deployment:smoke
           REMOTE_SMOKE
+
+  report-failure:
+    name: Report development deployment failure
+    needs: deploy
+    if: always() && needs.deploy.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Check out automation reporting utility
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Create or update failure issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ inputs.commit_sha }}
+        run: node scripts/ci/development-automation.mjs deployment-report
+
+  close-recovered-failure:
+    name: Close recovered deployment failure issue
+    needs: deploy
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out automation reporting utility
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Close matching issue after recovery
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ inputs.commit_sha }}
+        run: node scripts/ci/development-automation.mjs deployment-recovery

@@ -18,12 +18,15 @@ cd "${PROJECT_ROOT}"
 
 ci_workflow='.github/workflows/ci.yml'
 workflow='.github/workflows/deploy.yml'
+auto_workflow='.github/workflows/auto-deploy-development.yml'
+health_workflow='.github/workflows/development-health.yml'
 grep -q '^  pull_request:$' "$ci_workflow" || fail 'comprehensive CI workflow does not run for pull requests'
 grep -q '^  push:$' "$ci_workflow" || fail 'comprehensive CI workflow does not run for pushes'
 grep -q '^      - main$' "$ci_workflow" || fail 'comprehensive CI workflow push trigger is not restricted to main'
 pass 'comprehensive CI workflow covers pull requests and direct main pushes'
 
 grep -q 'commit_sha:' "$workflow" || fail 'deployment workflow does not require a commit_sha input'
+grep -q '^run-name: Deploy RISpro development \${{ inputs.commit_sha }}$' "$workflow" || fail 'deployment workflow does not use deterministic exact-SHA run name'
 grep -q 'listWorkflowRuns' "$workflow" || fail 'deployment workflow does not query workflow runs'
 grep -q 'workflow_id: "ci.yml"' "$workflow" || fail 'deployment workflow does not target comprehensive CI'
 grep -q 'workflow_id: "self-hosted-ci.yml"' "$workflow" || fail 'deployment workflow does not target self-hosted CI'
@@ -32,6 +35,9 @@ grep -q 'run.conclusion === "success"' "$workflow" || fail 'deployment workflow 
 grep -q 'No successful RISpro comprehensive CI run exists' "$workflow" || fail 'deployment workflow does not fail when comprehensive CI is absent'
 grep -q 'No successful RISpro self-hosted CI run exists' "$workflow" || fail 'deployment workflow does not fail when self-hosted CI is absent'
 grep -q -- '--expected-sha ${DEPLOY_SHA}' "$workflow" || fail 'deployment workflow does not pass the expected SHA remotely'
+grep -q 'Check whether requested build is already deployed' "$workflow" || fail 'deployment workflow has no idempotency precheck'
+grep -q 'already_deployed=true' "$workflow" || fail 'deployment workflow does not record matching deployed SHA'
+grep -q "steps.deployed-check.outputs.already_deployed != 'true'" "$workflow" || fail 'deployment workflow does not skip only the deploy command for matching SHA'
 grep -q '/api/ready' "$workflow" || fail 'deployment workflow has no post-deployment readiness check'
 grep -q 'health.buildSha !== expectedSha' "$workflow" || fail 'deployment workflow does not verify the running build SHA'
 grep -q 'test:deployment:smoke' "$workflow" || fail 'deployment workflow does not run the functional smoke gate'
@@ -63,6 +69,27 @@ if grep -Eq 'continue-on-error:[[:space:]]*true|\|\|[[:space:]]*true|[Ww][Aa][Rr
   fail 'functional smoke step can ignore or downgrade a failure'
 fi
 pass 'deployment workflow contains ordered, exact-SHA, fail-closed functional smoke gates'
+
+grep -q "needs.deploy.result == 'failure'" "$workflow" || fail 'deployment workflow does not report failed deployments'
+grep -q 'actions: read' "$workflow" || fail 'deployment failure report does not read Actions jobs'
+grep -q 'issues: write' "$workflow" || fail 'deployment failure report cannot create issues'
+grep -q 'deployment-report' "$workflow" || fail 'deployment failure report does not use the shared reporter'
+pass 'deployment workflow reports and recovers exact-SHA failures'
+
+grep -q '^name: Auto Deploy RISpro Development$' "$auto_workflow" || fail 'automatic controller workflow is missing'
+grep -q 'RISpro self-hosted CI' "$auto_workflow" || fail 'automatic controller does not observe self-hosted CI'
+grep -q 'group: rispro-auto-deploy-\${{ github.event.workflow_run.head_sha }}' "$auto_workflow" || fail 'automatic controller is not SHA-concurrent'
+grep -q 'actions: write' "$auto_workflow" || fail 'automatic controller cannot dispatch deployment'
+grep -q 'development-automation.mjs controller' "$auto_workflow" || fail 'automatic controller does not run exact-SHA decision logic'
+pass 'automatic controller has exact-SHA workflow gates'
+
+grep -q '^name: RISpro Development Health$' "$health_workflow" || fail 'development health workflow is missing'
+grep -q 'cron: "\*/15 \* \* \* \*"' "$health_workflow" || fail 'development health workflow is not scheduled approximately every 15 minutes'
+grep -q 'StrictHostKeyChecking=yes' "$health_workflow" || fail 'development health workflow weakens SSH host checking'
+grep -q '/api/health' "$health_workflow" || fail 'development health workflow does not check health'
+grep -q '/api/ready' "$health_workflow" || fail 'development health workflow does not check readiness'
+grep -q 'health-report' "$health_workflow" || fail 'development health workflow does not report failures'
+pass 'development health monitor has safe HTTP checks and reporting'
 
 grep -q 'validate_expected_sha' deploy.sh || fail 'direct deployment script has no expected-SHA validation'
 grep -q 'git checkout --detach "$EXPECTED_SHA"' deploy.sh || fail 'direct deployment script does not check out the expected SHA'

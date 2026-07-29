@@ -33,6 +33,7 @@
     "agent:preflight": "node scripts/dev/preflight-env.mjs",
     "test:deployment:smoke": "node scripts/deployment/run-functional-smoke.mjs",
     "test:deployment:smoke:unit": "node --test scripts/deployment/run-functional-smoke.test.mjs",
+    "test:ci:automation": "node --test scripts/ci/github-automation-issues.test.mjs",
     "test:deployment:gate": "bash scripts/test-deployment-gate.sh",
     "test:db:one": "node scripts/dev/test-one-db.mjs",
     "ci:inspect": "node scripts/dev/ci-inspect.mjs",

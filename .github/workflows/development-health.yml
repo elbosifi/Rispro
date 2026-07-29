@@ -1,0 +1,87 @@
+name: RISpro Development Health
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: rispro-development-health
+  cancel-in-progress: true
+
+jobs:
+  check-development-health:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - rispro-ci
+    steps:
+      - name: Check out health reporting utility
+        uses: actions/checkout@v4
+
+      - name: Check development HTTP health through existing SSH path
+        id: health
+        shell: bash
+        run: |
+          set +e
+          remote_output="$(ssh \
+            -i /home/ci-runner/.ssh/rispro_deploy_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            rispro-deploy@192.9.101.250 \
+            bash -s <<'REMOTE_HEALTH' 2>/dev/null
+          set -u
+          health_json="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health 2>/dev/null)"
+          health_exit=$?
+          if [ "$health_exit" -ne 0 ]; then
+            echo 'health=failed'
+            echo 'ready=not-run'
+            exit 1
+          fi
+          node - "$health_json" <<'NODE_HEALTH'
+          const health = JSON.parse(process.argv[2]);
+          const buildSha = typeof health.buildSha === "string" && /^[0-9a-f]{40}$/i.test(health.buildSha) ? health.buildSha : "";
+          console.log(`health=${health.ok === true ? "ok" : "failed"}`);
+          console.log(`build_sha=${buildSha}`);
+          process.exit(health.ok === true && buildSha ? 0 : 1);
+          NODE_HEALTH
+          health_node_exit=$?
+          if ! curl --fail --silent --show-error http://127.0.0.1:3000/api/ready >/dev/null 2>&1; then
+            echo 'ready=failed'
+            exit 1
+          fi
+          echo 'ready=ok'
+          exit "$health_node_exit"
+          REMOTE_HEALTH
+          )"
+          ssh_exit=$?
+          set -e
+
+          health_status="$(printf '%s\n' "$remote_output" | sed -n 's/^health=//p' | tail -n1)"
+          ready_status="$(printf '%s\n' "$remote_output" | sed -n 's/^ready=//p' | tail -n1)"
+          build_sha="$(printf '%s\n' "$remote_output" | sed -n 's/^build_sha=//p' | tail -n1)"
+          if [ "$ssh_exit" -eq 0 ] && [ "$health_status" = "ok" ] && [ "$ready_status" = "ok" ] && [[ "$build_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo 'HEALTH_PASSED=true' >> "$GITHUB_ENV"
+          else
+            echo 'HEALTH_PASSED=false' >> "$GITHUB_ENV"
+          fi
+          echo "SSH_STATUS=$([ "$ssh_exit" -eq 0 ] && echo ok || echo failed)" >> "$GITHUB_ENV"
+          echo "HEALTH_STATUS=${health_status:-failed}" >> "$GITHUB_ENV"
+          echo "READINESS_STATUS=${ready_status:-failed}" >> "$GITHUB_ENV"
+          echo "HEALTH_BUILD_SHA=${build_sha}" >> "$GITHUB_ENV"
+          echo 'HEALTH_DETAILS=Authoritative HTTP health/readiness check did not pass; inspect this workflow run.' >> "$GITHUB_ENV"
+
+      - name: Create, update, or close health issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci/development-automation.mjs health-report
+
+      - name: Fail when development health is unhealthy
+        if: env.HEALTH_PASSED != 'true'
+        run: exit 1
