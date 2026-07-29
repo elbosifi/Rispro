@@ -86,11 +86,11 @@ test("uploads one DICOM instance and verifies the returned study, series, and SO
       return json({ ID: "instance-1", ParentSeries: "series-1", ParentStudy: "study-1" });
     }
     if (path === "/instances/instance-1") return json({ ParentSeries: "series-1", ParentStudy: "study-1" });
-    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042" });
+    if (path === "/instances/instance-1/simplified-tags") return json({ StudyInstanceUID: "1.2.3", SeriesInstanceUID: "2.25.3", SOPInstanceUID: "2.25.4", PatientID: "PATIENT-1", AccessionNumber: "V2-000042", Modality: "MR" });
     throw new Error(`Unexpected ${init?.method || "GET"} ${path}`);
   });
   const instance = await new service.AuthoritativeOrthancClient(enabled).uploadDicomInstance(Buffer.from("DICOM"), "1.2.3");
-  assert.deepEqual(instance, { orthancInstanceId: "instance-1", orthancSeriesId: "series-1", orthancStudyId: "study-1", studyInstanceUid: "1.2.3", seriesInstanceUid: "2.25.3", sopInstanceUid: "2.25.4", patientId: "PATIENT-1", accessionNumber: "V2-000042", modality: null });
+  assert.deepEqual(instance, { orthancInstanceId: "instance-1", orthancSeriesId: "series-1", orthancStudyId: "study-1", studyInstanceUid: "1.2.3", seriesInstanceUid: "2.25.3", sopInstanceUid: "2.25.4", patientId: "PATIENT-1", accessionNumber: "V2-000042", modality: "MR" });
   assert.deepEqual(calls.map((call) => `${call.method} ${call.path}`), ["POST /instances", "GET /instances/instance-1", "GET /instances/instance-1/simplified-tags"]);
 });
 

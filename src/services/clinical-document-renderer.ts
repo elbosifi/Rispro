@@ -8,6 +8,8 @@ import sharp from "sharp";
 const execFileAsync = promisify(execFile);
 const MAX_PAGES = 100;
 const MAX_PAGE_PIXELS = 40_000_000;
+const MAX_TOTAL_PIXELS = 120_000_000;
+const MAX_RENDER_DIMENSION = 6000;
 
 export type RenderedClinicalDocument = { directory: string; pages: Array<{ pageNumber: number; path: string; rows: number; columns: number }> };
 
@@ -18,21 +20,25 @@ export async function renderClinicalDocument(source: Buffer, mimeType: string): 
     if (mime === "application/pdf") {
       const input = join(directory, "source.pdf");
       await writeFile(input, source);
-      await execFileAsync("pdftoppm", ["-r", "180", "-png", input, join(directory, "page")], { timeout: 120_000, maxBuffer: 1024 * 1024 });
+      const info = await execFileAsync("pdfinfo", [input], { timeout: 30_000, maxBuffer: 1024 * 1024 });
+      const pageCount = Number((`${info.stdout}\n${info.stderr}`).match(/^Pages:\s*(\d+)\s*$/mi)?.[1]);
+      if (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > MAX_PAGES) throw new Error("Clinical document page count is outside the supported export limit.");
+      await execFileAsync("pdftoppm", ["-r", "180", "-scale-to-x", String(MAX_RENDER_DIMENSION), "-scale-to-y", String(MAX_RENDER_DIMENSION), "-f", "1", "-l", String(Math.min(pageCount, MAX_PAGES + 1)), "-png", input, join(directory, "page")], { timeout: 120_000, maxBuffer: 1024 * 1024 });
     } else if (mime === "image/jpeg" || mime === "image/png") {
-      await writeFile(join(directory, "page-1.png"), await sharp(source, { failOn: "error" }).flatten({ background: "#ffffff" }).png().toBuffer());
+      await writeFile(join(directory, "page-1.png"), await sharp(source, { failOn: "error", limitInputPixels: MAX_PAGE_PIXELS }).flatten({ background: "#ffffff" }).toColourspace("srgb").removeAlpha().png().toBuffer());
     } else throw new Error("Unsupported clinical document source type.");
     const files = (await (await import("node:fs/promises")).readdir(directory)).filter((name) => /^page-\d+\.png$/.test(name)).sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
     if (!files.length || files.length > MAX_PAGES) throw new Error("Clinical document page count is outside the supported export limit.");
-    const pages = [];
+    const pages = []; let totalPixels = 0;
     for (let index = 0; index < files.length; index += 1) {
-      const path = join(directory, files[index]!); const meta = await sharp(path).metadata();
+      const path = join(directory, files[index]!); const meta = await sharp(path, { limitInputPixels: MAX_PAGE_PIXELS }).metadata();
       if (!meta.width || !meta.height || meta.width * meta.height > MAX_PAGE_PIXELS) throw new Error("Clinical document rendered page dimensions exceed the export limit.");
+      totalPixels += meta.width * meta.height; if (totalPixels > MAX_TOTAL_PIXELS) throw new Error("Clinical document rendered total pixels exceed the export limit.");
       pages.push({ pageNumber: index + 1, path, rows: meta.height, columns: meta.width });
     }
     return { directory, pages };
   } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
 }
 
-export async function readRenderedRgbPage(path: string): Promise<Buffer> { return sharp(await readFile(path)).flatten({ background: "#ffffff" }).removeAlpha().raw().toBuffer(); }
+export async function readRenderedRgbPage(path: string): Promise<Buffer> { return sharp(await readFile(path), { limitInputPixels: MAX_PAGE_PIXELS }).flatten({ background: "#ffffff" }).toColourspace("srgb").removeAlpha().raw().toBuffer(); }
 export async function cleanupRenderedClinicalDocument(rendered: RenderedClinicalDocument | null): Promise<void> { if (rendered) await rm(rendered.directory, { recursive: true, force: true }); }
