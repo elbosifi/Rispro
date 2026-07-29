@@ -262,7 +262,7 @@ async function processSecondaryCaptureExport(row: ExportWorkRow, study: OrthancS
   let rendered: RenderedClinicalDocument | null = null;
   let activePage: ClinicalDocumentExportInstanceRow | null = null;
   try {
-    await renewLease(row); const source = await readFile(getDocumentAbsolutePath({ stored_path: row.document_stored_path })); rendered = await renderClinicalDocument(source, row.document_mime_type);
+    await renewLease(row); const source = await readFile(getDocumentAbsolutePath({ stored_path: row.document_stored_path })); rendered = await renderClinicalDocument(source, row.document_mime_type, { onProgress: async () => renewLease(row) });
     const pages = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered); const client = await createAuthoritativeOrthancClient();
     for (const page of pages) {
       activePage = page;
