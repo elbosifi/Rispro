@@ -7,7 +7,7 @@ import jwt from "jsonwebtoken";
 import { pool } from "../db/pool.js";
 import { issueLegacyPublicCancelToken, issuePublicCancelToken, verifyPublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
 import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
-import { listDocuments, uploadDocumentIdempotently, type DocumentRow, type DocumentUploadPayload } from "./document-service.js";
+import { listDocuments, uploadDocumentIdempotently, upsertDocumentAppointmentLinks, type DocumentRow, type DocumentUploadPayload } from "./document-service.js";
 import { resolveStoredPath } from "./document-storage-path.js";
 import type { RequestScanBarcodeResult } from "./request-scan-barcode-service.js";
 import {
@@ -141,16 +141,15 @@ async function createJob(status = "pending", filename?: string) {
   created.jobs.push(id);
   return id;
 }
-async function createModalityJob(modalityId: number, modalityCode: string, filename = `clinical-${suffix()}.jpg`) {
+async function createModalityJob(modalityId: number, modalityCode: string, filename = `clinical-${suffix()}.jpg`, sourceRelativePath?: string) {
   const result = await pool.query<{ id: number }>(
     "insert into request_scan_jobs(filename,source_relative_path,mime_type,status,workflow_source,modality_id) values($1,$2,'image/jpeg','pending','modality',$3) returning id",
-    [filename, `ModalityDocuments\\${modalityCode}\\Incoming\\${filename}`, modalityId],
+    [filename, sourceRelativePath ?? `ModalityDocuments\\${modalityCode}\\Incoming\\${filename}`, modalityId],
   );
   const id = Number(result.rows[0].id); created.jobs.push(id); return id;
 }
 
 function dependencies(result: RequestScanBarcodeResult, options: {
-  existingDocument?: () => boolean;
   failProcessedMove?: boolean;
   failAllMoves?: boolean;
   uploads?: Array<{ payload: unknown; userId: string | number | null }>;
@@ -176,11 +175,6 @@ function dependencies(result: RequestScanBarcodeResult, options: {
         [payload.patientId, payload.appointmentId, payload.documentType, payload.originalFilename, `tests/${payload.originalFilename}`, payload.mimeType, payload.fileContentBuffer?.length ?? 0, userId ?? null, payload.source]
       );
       return { id: Number(inserted.rows[0].id) } as DocumentRow;
-    },
-    automatedDocumentExists: async (appointmentId) => {
-      if (options.existingDocument) return options.existingDocument();
-      const existing = await pool.query("select 1 from documents where v2_booking_id=$1 and document_type='appointment_request' and source='request_scan_automation' limit 1", [appointmentId]);
-      return Boolean(existing.rowCount);
     },
     findEligibleAppointment: findEligibleRequestScanAppointment,
     verifyPublicAppointmentToken: options.verifyToken ?? verifyPublicCancelToken,
@@ -249,6 +243,161 @@ test("modality ingestion attaches clinical documents, rejects modality mismatche
   assert.ok([firstId, secondId, mismatchId].every((id) => ctJobs.some((job) => Number(job.id) === id)));
   assert.ok(ctJobs.every((job) => job.workflow_source === "modality" && Number(job.modality_id) === ct.modalityId));
   assert.ok(!(await listRequestScanJobs("all", undefined, "reception")).some((job) => [firstId, secondId, mismatchId].includes(Number(job.id))));
+});
+
+function fingerprintedRequestScanDependencies(accession: string, content: string, options: { failAllMoves?: boolean; recognitionCalls?: string[] } = {}): RequestScanServiceDependencies {
+  const result = dependencies({ ok: true, accession }, { failAllMoves: options.failAllMoves, recognitionCalls: options.recognitionCalls });
+  result.downloadRequestScanFile = async (_settings, _remotePath, localPath) => { await fs.writeFile(localPath, content); };
+  result.uploadDocumentIdempotently = uploadDocumentIdempotently;
+  result.upsertDocumentAppointmentLinks = upsertDocumentAppointmentLinks;
+  return result;
+}
+
+test("reception Request Scans detect a renamed exact file only for the same appointment", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const firstId = await createJob("pending", "request-original.pdf");
+  const first = await processRequestScanJob(firstId, settings, fingerprintedRequestScanDependencies(booking.accession, "same-request-bytes"));
+  const secondId = await createJob("pending", "request-renamed.pdf");
+  const second = await processRequestScanJob(secondId, settings, fingerprintedRequestScanDependencies(booking.accession, "same-request-bytes"));
+  assert.equal(first.status, "processed"); assert.equal(second.status, "duplicate");
+  assert.equal(Number(second.document_id), Number(first.document_id));
+  assert.equal((await pool.query("select id from documents where patient_id=$1 and v2_booking_id=$2 and document_type='appointment_request' and source='request_scan_automation'", [booking.patientId, booking.id])).rowCount, 1);
+});
+
+test("reception Request Scans accept same-named files with different bytes and different request documents", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const firstId = await createJob("pending", "same-name.pdf");
+  const first = await processRequestScanJob(firstId, settings, fingerprintedRequestScanDependencies(booking.accession, "scan-bytes-one"));
+  const secondId = await createJob("pending", "same-name.pdf");
+  const second = await processRequestScanJob(secondId, settings, fingerprintedRequestScanDependencies(booking.accession, "scan-bytes-two"));
+  const thirdId = await createJob("pending", "different-request.pdf");
+  const third = await processRequestScanJob(thirdId, settings, fingerprintedRequestScanDependencies(booking.accession, "different-request-bytes"));
+  assert.deepEqual([first.status, second.status, third.status], ["processed", "processed", "processed"]);
+  assert.equal((await pool.query("select id from documents where patient_id=$1 and v2_booking_id=$2 and document_type='appointment_request' and source='request_scan_automation'", [booking.patientId, booking.id])).rowCount, 3);
+});
+
+test("different PDF bytes with the same visible pages are not perceptually deduplicated", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking();
+  const firstId = await createJob("pending", "visible-page.pdf");
+  const first = await processRequestScanJob(firstId, settings, fingerprintedRequestScanDependencies(booking.accession, "%PDF same visible page metadata-a"));
+  const secondId = await createJob("pending", "visible-page-renamed.pdf");
+  const second = await processRequestScanJob(secondId, settings, fingerprintedRequestScanDependencies(booking.accession, "%PDF same visible page metadata-b"));
+  assert.deepEqual([first.status, second.status], ["processed", "processed"]);
+  assert.notEqual(Number(first.document_id), Number(second.document_id));
+});
+
+function modalityDuplicateDependencies(accession: string, content: string, options: { failAllMoves?: boolean; recognitionCalls?: string[] } = {}): RequestScanServiceDependencies {
+  const result = dependencies({ ok: true, accession }, { failAllMoves: options.failAllMoves, recognitionCalls: options.recognitionCalls });
+  result.downloadRequestScanFile = async (_settings, _remotePath, localPath) => { await fs.writeFile(localPath, content); };
+  result.uploadDocumentIdempotently = uploadDocumentIdempotently;
+  result.upsertDocumentAppointmentLinks = upsertDocumentAppointmentLinks;
+  return result;
+}
+
+test("modality ingestion reuses an identical file for the same appointment without a second export", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const code = `DU${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const firstId = await createModalityJob(booking.modalityId, code, "duplicate-same.pdf");
+  const first = await processRequestScanJob(firstId, { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, modalityDuplicateDependencies(booking.accession, "identical modality PDF"));
+  const secondId = await createModalityJob(booking.modalityId, code, "duplicate-renamed.pdf");
+  const second = await processRequestScanJob(secondId, { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" }, modalityDuplicateDependencies(booking.accession, "identical modality PDF"));
+  assert.equal(first.status, "processed"); assert.equal(second.status, "duplicate");
+  assert.equal(Number(second.document_id), Number(first.document_id));
+  assert.equal(second.attachment_created, false);
+  assert.equal(second.error_message, "This file is identical to an existing document and was not attached again.");
+  assert.equal((await pool.query("select id from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId])).rowCount, 1);
+  assert.equal((await pool.query("select id from clinical_document_exports where document_id=$1 and appointment_id=$2", [first.document_id, booking.id])).rowCount, 1);
+});
+
+test("modality ingestion does not use a filename or hash alone as duplicate evidence", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking(); const second = await createBooking();
+  const firstCode = `DF${suffix().slice(-6)}`; const secondCode = `DG${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [first.modalityId, firstCode]);
+  await pool.query("update modalities set code=$2 where id=$1", [second.modalityId, secondCode]);
+  const differentBytesA = await createModalityJob(first.modalityId, firstCode, "same-name.pdf");
+  const otherPatient = await createModalityJob(second.modalityId, secondCode, "same-name.pdf");
+  const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
+  const a = await processRequestScanJob(differentBytesA, settingsWithRoot, modalityDuplicateDependencies(first.accession, "bytes-a"));
+  const differentBytesB = await createModalityJob(first.modalityId, firstCode, "same-name.pdf");
+  const b = await processRequestScanJob(differentBytesB, settingsWithRoot, modalityDuplicateDependencies(first.accession, "bytes-b"));
+  const c = await processRequestScanJob(otherPatient, settingsWithRoot, modalityDuplicateDependencies(second.accession, "bytes-a"));
+  assert.deepEqual([a.status, b.status, c.status], ["processed", "processed", "processed"]);
+  assert.equal((await pool.query("select id from documents where document_type='clinical_document' and original_filename='same-name.pdf' and source='modality_scan_automation' and patient_id=any($1::bigint[])", [[first.patientId, second.patientId]])).rowCount, 3);
+});
+
+test("an identical modality document is linked and exported only for a newly identified appointment", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const first = await createBooking(); const second = await createBookingForSamePatient(first.id); const code = `DA${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [first.modalityId, code]);
+  const firstId = await createModalityJob(first.modalityId, code, "same-patient.pdf");
+  const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
+  const original = await processRequestScanJob(firstId, settingsWithRoot, modalityDuplicateDependencies(first.accession, "same-patient-content"));
+  const secondId = await createModalityJob(first.modalityId, code, "same-patient.pdf");
+  const reused = await processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(second.accession, "same-patient-content"));
+  assert.equal(reused.status, "duplicate"); assert.equal(Number(reused.document_id), Number(original.document_id));
+  const links = await pool.query<{ appointment_id: number }>("select appointment_id from document_appointment_links where document_id=$1 order by appointment_id", [original.document_id]);
+  assert.deepEqual(links.rows.map((row) => Number(row.appointment_id)), [first.id, second.id].sort((a, b) => a - b));
+  const exports = await pool.query<{ appointment_id: number }>("select appointment_id from clinical_document_exports where document_id=$1 order by appointment_id", [original.document_id]);
+  assert.deepEqual(exports.rows.map((row) => Number(row.appointment_id)), [first.id, second.id].sort((a, b) => a - b));
+});
+
+test("a legacy modality document is lazily fingerprinted before it is reused", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const code = `DL${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const firstId = await createModalityJob(booking.modalityId, code, "legacy-hash.pdf");
+  const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
+  const first = await processRequestScanJob(firstId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "legacy-content"));
+  await pool.query("update documents set content_sha256=null where id=$1", [first.document_id]);
+  const secondId = await createModalityJob(booking.modalityId, code, "legacy-hash.pdf");
+  const second = await processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "legacy-content"));
+  assert.equal(second.status, "duplicate"); assert.equal(Number(second.document_id), Number(first.document_id));
+  assert.match(String((await pool.query<{ content_sha256: string }>("select content_sha256 from documents where id=$1", [first.document_id])).rows[0]!.content_sha256), /^[0-9a-f]{64}$/);
+});
+
+test("modality fingerprint reuse requires the matching SHA-256 and byte size", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const code = `DS${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const firstId = await createModalityJob(booking.modalityId, code, "size-check.pdf");
+  const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
+  const first = await processRequestScanJob(firstId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "size-check-content"));
+  await pool.query("update documents set file_size=file_size+1 where id=$1", [first.document_id]);
+  const secondId = await createModalityJob(booking.modalityId, code, "size-check.pdf");
+  const second = await processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "size-check-content"));
+  assert.equal(second.status, "processed");
+  assert.notEqual(Number(second.document_id), Number(first.document_id));
+});
+
+test("concurrent identical modality jobs create one document and an archive retry stays archive-only", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const booking = await createBooking(); const code = `DC${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
+  const firstId = await createModalityJob(booking.modalityId, code, "concurrent.pdf");
+  const secondId = await createModalityJob(booking.modalityId, code, "concurrent.pdf", `ModalityDocuments\\${code}\\Incoming\\parallel\\concurrent.pdf`);
+  const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
+  const recognitionCalls: string[] = [];
+  const [first, second] = await Promise.all([
+    processRequestScanJob(firstId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "concurrent-content", { recognitionCalls })),
+    processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "concurrent-content", { recognitionCalls })),
+  ]);
+  assert.deepEqual([first.status, second.status].sort(), ["duplicate", "processed"]);
+  assert.equal((await pool.query("select id from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId])).rowCount, 1);
+  assert.equal((await pool.query("select id from clinical_document_exports where appointment_id=$1", [booking.id])).rowCount, 1);
+
+  const failedId = await createModalityJob(booking.modalityId, code, "concurrent.pdf");
+  const failed = await processRequestScanJob(failedId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "concurrent-content", { failAllMoves: true, recognitionCalls }));
+  assert.equal(failed.status, "failed"); assert.equal(failed.attachment_created, false);
+  await retryRequestScanJob(failedId, { readSettings: async () => settingsWithRoot, moveFile: async () => { throw new Error("duplicate archive retry must not return to Incoming"); } });
+  const resumed = await processRequestScanJob(failedId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "different-content", { recognitionCalls }));
+  assert.equal(resumed.status, "duplicate");
+  assert.equal(recognitionCalls.length, 3);
+  assert.equal((await pool.query("select id from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId])).rowCount, 1);
 });
 
 test("modality inbox paths are exact and unsafe modality codes are rejected", () => {
@@ -400,7 +549,7 @@ test("attaches a matched request through the document service and marks the job 
   assert.equal(typeof uploads[0].payload.fileSourcePath, "string");
 });
 
-test("marks an existing automated request as a duplicate without attaching another document", async (t) => {
+test("allows a different automated request document for an appointment that already has one", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking();
   const jobId = await createJob();
@@ -418,10 +567,10 @@ test("marks an existing automated request as a duplicate without attaching anoth
   }, null);
 
   const job = await processRequestScanJob(jobId, settings, dependencies({ ok: true, accession: booking.accession }, { uploads }));
-  assert.equal(job.status, "duplicate");
+  assert.equal(job.status, "processed");
   assert.equal(Number(job.appointment_id), booking.id);
-  assert.equal(uploads.length, 0);
-  assert.match(job.source_relative_path, /^Requests\/Processed\\Duplicates\\/);
+  assert.equal(uploads.length, 1);
+  assert.match(job.source_relative_path, /^Requests[\\/]Processed[\\/]/);
 });
 
 test("requires matching document evidence for an accession filename", async (t) => {
@@ -448,7 +597,7 @@ test("requires matching document evidence for an accession filename", async (t) 
     settings,
     dependencies({ ok: true, accession: booking.accession }, { recognitionCalls: duplicateRecognitionCalls })
   );
-  assert.equal(duplicate.status, "duplicate");
+  assert.equal(duplicate.status, "processed");
   assert.equal(duplicateRecognitionCalls.length, 1);
 });
 
@@ -478,13 +627,10 @@ test("requires matching document QR evidence for a QR filename", async (t) => {
 
   const normalUrlJobId = await createJob("pending", `https://rispro.nccb.com.ly/public/appointment?t=${token}.pdf`);
   const normalUrlRecognitionCalls: string[] = [];
-  const normalUrlDependencies = dependencies(
-    { ok: true, qrTokens: [token] },
-    { existingDocument: () => true, recognitionCalls: normalUrlRecognitionCalls }
-  );
+  const normalUrlDependencies = dependencies({ ok: true, qrTokens: [token] }, { recognitionCalls: normalUrlRecognitionCalls });
   normalUrlDependencies.downloadRequestScanFile = async () => {};
   const normalUrlJob = await processRequestScanJob(normalUrlJobId, settings, normalUrlDependencies);
-  assert.equal(normalUrlJob.status, "duplicate");
+  assert.equal(normalUrlJob.status, "processed");
   assert.equal(Number(normalUrlJob.appointment_id), booking.id);
   assert.equal(normalUrlRecognitionCalls.length, 1);
 });
@@ -572,7 +718,7 @@ test("invalid, expired, and wrong-action filename tokens all invoke document fal
         }
       )
     );
-    assert.equal(job.status, rejection === "invalid" ? "processed" : "duplicate");
+    assert.equal(job.status, "processed");
     assert.equal(recognitionCalls.length, 1);
     assert.equal(String(job.error_message ?? "").includes(token), false);
     if (uploads[0]) assert.equal(uploads[0].payload.originalFilename, filename);

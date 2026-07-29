@@ -44,7 +44,6 @@ export type RequestScanServiceDependencies = {
   upsertDocumentAppointmentLinks?: typeof upsertDocumentAppointmentLinks;
   updateCheckpoint?: typeof updateRequestScanCheckpoint;
   verifyFailedFileIdentity?: (settings: RequestScanSettings, remotePath: string, document: DocumentRow) => Promise<"match" | "mismatch" | "missing">;
-  automatedDocumentExists: (appointmentId: number) => Promise<boolean>;
   findEligibleAppointment: (accession: string) => Promise<EligibleAppointment>;
   verifyPublicAppointmentToken: (token: string) => Promise<{ bookingId: number }>;
   listActiveModalities?: () => Promise<Array<{ id: number; code: string }>>;
@@ -153,12 +152,12 @@ const defaultDependencies: RequestScanServiceDependencies = {
   findDocumentByIdempotencyKey,
   upsertDocumentAppointmentLinks,
   verifyFailedFileIdentity: verifyFailedRequestScanFileIdentity,
-  automatedDocumentExists,
   findEligibleAppointment: findRequestScanAppointment,
   verifyPublicAppointmentToken: resolveRequestScanAppointmentToken,
   listActiveModalities: async () => (await pool.query<{ id: number; code: string }>("select id,code from modalities where is_active=true order by id")).rows,
   logDiagnostic(event, metadata) { console.info("[RequestScanIdentifier]", event, metadata); },
 };
+const MODALITY_DUPLICATE_MESSAGE = "This file is identical to an existing document and was not attached again.";
 function mime(filename: string): string { return MIME_BY_EXTENSION[path.extname(filename).toLowerCase()] || "application/octet-stream"; }
 function destination(folder: string, duplicate = false): string { return `${folder.replace(/[\\/]+$/g, "")}\\${duplicate ? "Duplicates\\" : ""}${getTripoliToday()}`; }
 
@@ -284,7 +283,6 @@ export async function findRequestScanAppointment(accession: string): Promise<Eli
   if (!rows.length) throw new HttpError(404, "No appointment matches this accession");
   return { ...rows[0]!, id: Number(rows[0]!.id), patient_id: Number(rows[0]!.patient_id) };
 }
-async function automatedDocumentExists(appointmentId: number): Promise<boolean> { const result = await pool.query("select 1 from documents where v2_booking_id=$1 and document_type='appointment_request' and source='request_scan_automation' limit 1", [appointmentId]); return Boolean(result.rowCount); }
 const REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT = "request_scan_job_appointments_identifier_source_check";
 const REQUEST_SCAN_IDENTIFIER_SOURCE_CONSTRAINT_MESSAGE = "The document could not be attached because the Request Scan database configuration is incompatible. Contact an administrator.";
 type RequestScanDatabaseError = { code?: unknown; constraint?: unknown };
@@ -476,7 +474,7 @@ async function archiveCheckpointedRequestScanJob(job: RequestScanJob, lease: Req
     });
   }
   await assertRequestScanLeaseOwned(job.id, lease);
-  const completed = await finishRequestScanJob(job.id, lease, { status: created ? "processed" : "duplicate", source_relative_path: intended, error_message: null });
+  const completed = await finishRequestScanJob(job.id, lease, { status: created ? "processed" : "duplicate", source_relative_path: intended, error_message: created || job.workflow_source !== "modality" ? null : MODALITY_DUPLICATE_MESSAGE });
   if (!completed) throw new RequestScanLeaseLostError();
   return completed;
 }
@@ -711,10 +709,6 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
     await stage({ stage: "checking_duplicate" });
     const modalityWorkflow = inbox.workflowSource === "modality";
     const idempotencyKey = `request-scan:job:${job.id}:${modalityWorkflow ? "clinical-document" : "appointment-request"}`;
-    if (!modalityWorkflow && !dependencies.uploadDocumentIdempotently && await dependencies.automatedDocumentExists(appointment.id)) {
-      const existing = dependencies.findDocumentByIdempotencyKey ? await dependencies.findDocumentByIdempotencyKey(idempotencyKey) : null;
-      await ensureLease(); const moved = await moveOutcome(dependencies, settings, job, settings.processedSubfolder, true); await ensureLease(); const completed = await finishRequestScanJob(job.id, lease, { status: "duplicate", barcode_value: appointment.accession_number, appointment_id: appointment.id, document_id: existing?.id ?? null, source_relative_path: moved, error_message: null }); if (!completed) throw new RequestScanLeaseLostError(); return completed;
-    }
     await progress.flush(); job = await beginRequestScanAttachment(job.id, lease);
     const payload = { patientId: appointment.patient_id, appointmentId: appointment.id, appointmentRefType: "v2_booking", documentType: modalityWorkflow ? "clinical_document" : "appointment_request", originalFilename: job.filename, mimeType: job.mime_type, fileSourcePath: localPath, source: modalityWorkflow ? "modality_scan_automation" : "request_scan_automation", requestScanJobId: job.id };
     const attachment = dependencies.uploadDocumentIdempotently ? await dependencies.uploadDocumentIdempotently(payload, null, idempotencyKey) : { document: await dependencies.uploadDocument(payload, null), created: true };

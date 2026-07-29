@@ -17,6 +17,7 @@ import {
 import type { UserId, OptionalUserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
 import { enqueueClinicalDocumentExportsForAppointment } from "./clinical-document-export-queue-service.js";
+import { sha256Buffer, sha256File } from "./backup-v3-checksums.js";
 
 export interface DocumentUploadPayload {
   patientId?: UserId;
@@ -48,6 +49,7 @@ export interface DocumentRow {
   stored_path: string;
   mime_type: string;
   file_size: number;
+  content_sha256?: string | null;
   storage_location_type: "network" | "local_fallback";
   source: "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation";
   scan_session_id?: number | null;
@@ -377,6 +379,69 @@ export function getDocumentAbsolutePath(document: { stored_path?: string }): str
   return resolveStoredPath(document.stored_path);
 }
 
+type RequestScanFingerprintProfile = {
+  documentType: "clinical_document" | "appointment_request";
+  source: "modality_scan_automation" | "request_scan_automation";
+  reuseAcrossAppointments: boolean;
+};
+
+function requestScanFingerprintProfile(payload: DocumentUploadPayload): RequestScanFingerprintProfile | null {
+  const documentType = String(payload.documentType || "appointment_request").trim();
+  const source = normalizeDocumentSource(payload.source);
+  if (documentType === "clinical_document" && source === "modality_scan_automation") {
+    return { documentType, source, reuseAcrossAppointments: true };
+  }
+  if (documentType === "appointment_request" && source === "request_scan_automation") {
+    return { documentType, source, reuseAcrossAppointments: false };
+  }
+  return null;
+}
+
+async function findRequestScanDocumentDuplicate(
+  queryable: { query: typeof pool.query },
+  profile: RequestScanFingerprintProfile,
+  patientId: number,
+  appointmentId: number | null,
+  fingerprint: { sha256: string; byteSize: number },
+): Promise<DocumentRow | null> {
+  if (!profile.reuseAcrossAppointments && !appointmentId) return null;
+  const appointmentPredicate = profile.reuseAcrossAppointments
+    ? ""
+    : "and (d.v2_booking_id=$6 or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=$6))";
+  const exact = await queryable.query<DocumentRow>(
+    `select d.* from documents d
+      where d.patient_id=$1 and d.document_type=$2 and d.source=$3
+        and d.file_size=$4 and d.content_sha256=$5 ${appointmentPredicate}
+      order by id asc limit 1`,
+    profile.reuseAcrossAppointments
+      ? [patientId, profile.documentType, profile.source, fingerprint.byteSize, fingerprint.sha256]
+      : [patientId, profile.documentType, profile.source, fingerprint.byteSize, fingerprint.sha256, appointmentId],
+  );
+  if (exact.rows[0]) return exact.rows[0];
+
+  if (!appointmentId) return null;
+  const legacy = await queryable.query<DocumentRow>(
+    `select d.* from documents d
+      where d.patient_id=$1 and d.document_type=$2 and d.source=$3
+        and d.file_size=$4 and d.content_sha256 is null
+        and (d.v2_booking_id=$5 or exists(select 1 from document_appointment_links link where link.document_id=d.id and link.appointment_id=$5))
+      order by d.id asc`,
+    [patientId, profile.documentType, profile.source, fingerprint.byteSize, appointmentId],
+  );
+  for (const candidate of legacy.rows) {
+    const digest = await sha256File(getDocumentAbsolutePath(candidate)).catch(() => null);
+    if (!digest || digest.byteSize !== Number(candidate.file_size)) continue;
+    await queryable.query(
+      "update documents set content_sha256=$2 where id=$1 and content_sha256 is null",
+      [candidate.id, digest.sha256],
+    );
+    if (digest.sha256 === fingerprint.sha256 && digest.byteSize === fingerprint.byteSize) {
+      return { ...candidate, content_sha256: digest.sha256 };
+    }
+  }
+  return null;
+}
+
 function isValidIsoDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -486,6 +551,13 @@ export async function uploadDocument(
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
     throw new HttpError(400, "Document type must be PDF, JPEG, or PNG.");
   }
+  const fingerprintProfile = requestScanFingerprintProfile(payload);
+  const contentFingerprint = fingerprintProfile
+    ? await requestScanContentFingerprint(fileSourcePath, fileBuffer)
+    : null;
+  if (contentFingerprint && contentFingerprint.byteSize !== fileSize) {
+    throw new HttpError(400, "Document file size changed while calculating its fingerprint.");
+  }
 
   await ensureRelatedRecords(patientId, appointmentId);
   const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType);
@@ -533,6 +605,7 @@ export async function uploadDocument(
         stored_path,
         mime_type,
         file_size,
+        content_sha256,
         storage_location_type,
         last_move_error,
         uploaded_by_user_id,
@@ -545,7 +618,7 @@ export async function uploadDocument(
         idempotency_key,
         request_scan_job_id
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       returning
         id,
         patient_id,
@@ -576,6 +649,7 @@ export async function uploadDocument(
       storedPath,
       mimeType,
       fileSize,
+      contentFingerprint?.sha256 ?? null,
       storageLocationType,
       fallbackReason,
       currentUserId,
@@ -624,6 +698,15 @@ export async function uploadDocument(
   return savedDocument;
 }
 
+async function requestScanContentFingerprint(fileSourcePath: string | null, fileBuffer: Buffer | null): Promise<{ sha256: string; byteSize: number }> {
+  if (fileSourcePath) {
+    const digest = await sha256File(fileSourcePath);
+    return { sha256: digest.sha256, byteSize: digest.byteSize };
+  }
+  const buffer = fileBuffer!;
+  return { sha256: sha256Buffer(buffer), byteSize: buffer.length };
+}
+
 export async function findDocumentByIdempotencyKey(idempotencyKey: string): Promise<DocumentRow | null> {
   const result = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1 limit 1", [idempotencyKey]);
   return result.rows[0] ?? null;
@@ -632,6 +715,32 @@ export async function findDocumentByIdempotencyKey(idempotencyKey: string): Prom
 export async function uploadDocumentIdempotently(payload: DocumentUploadPayload, currentUserId: OptionalUserId, idempotencyKey: string): Promise<{ document: DocumentRow; created: boolean }> {
   const existing = await pool.query<DocumentRow>("select * from documents where idempotency_key=$1", [idempotencyKey]);
   if (existing.rows[0]) return { document: existing.rows[0], created: false };
+  const fingerprintProfile = requestScanFingerprintProfile(payload);
+  if (fingerprintProfile) {
+    const patientId = normalizePositiveInteger(payload.patientId, "patientId");
+    const appointmentId = normalizePositiveInteger(payload.appointmentId, "appointmentId", { required: false });
+    const fileSourcePath = payload.fileSourcePath ? path.resolve(payload.fileSourcePath) : null;
+    const fileBuffer = fileSourcePath ? null : resolveFileBuffer(payload);
+    const fingerprint = await requestScanContentFingerprint(fileSourcePath, fileBuffer);
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`request-scan-document:${fingerprintProfile.source}:${patientId}:${fingerprint.byteSize}:${fingerprint.sha256}`]);
+      const duplicate = await findRequestScanDocumentDuplicate(client, fingerprintProfile, patientId!, appointmentId, fingerprint);
+      if (duplicate) {
+        await client.query("commit");
+        return { document: duplicate, created: false };
+      }
+      const created = await uploadDocument({ ...payload, idempotencyKey }, currentUserId);
+      await client.query("commit");
+      return { document: created, created: true };
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   try { return { document: await uploadDocument({ ...payload, idempotencyKey }, currentUserId), created: true }; }
   catch (error) {
     if ((error as { code?: string }).code !== "23505") throw error;
@@ -647,16 +756,18 @@ export async function upsertDocumentAppointmentLinks(documentId: number, appoint
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const insertedAppointmentIds: number[] = [];
     for (const appointmentId of ids) {
-      await client.query(
-        "insert into document_appointment_links(document_id,appointment_id) values($1,$2) on conflict do nothing",
+      const inserted = await client.query<{ appointment_id: number }>(
+        "insert into document_appointment_links(document_id,appointment_id) values($1,$2) on conflict do nothing returning appointment_id",
         [documentId, appointmentId],
       );
+      if (inserted.rows[0]) insertedAppointmentIds.push(Number(inserted.rows[0].appointment_id));
     }
     await client.query("commit");
     const { rows } = await pool.query<{ source: string; document_type: string }>("select source, document_type from documents where id=$1", [documentId]);
     if (rows[0]?.source === "modality_scan_automation" && rows[0].document_type === "clinical_document") {
-      for (const appointmentId of ids) {
+      for (const appointmentId of insertedAppointmentIds) {
         await enqueueClinicalDocumentExportsForAppointment(appointmentId).catch((error) => {
           console.warn(JSON.stringify({ type: "clinical_document_export_link_queue_failed", documentId, appointmentId, error: error instanceof Error ? error.message : String(error) }));
         });
