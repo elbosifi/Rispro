@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, ExternalLink, FileImage, FileText, MoreVertical, ScanLine, Trash2, Upload } from "lucide-react";
 import { useLanguage } from "@/providers/language-provider";
 import {
   deleteAppointmentDocument,
@@ -37,6 +38,8 @@ interface RequestDocumentsPanelProps {
   enableLocalScan?: boolean;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  layout?: "default" | "workspace";
+  supplementaryPanel?: ReactNode;
 }
 
 export function RequestDocumentsPanel({
@@ -48,12 +51,15 @@ export function RequestDocumentsPanel({
   enableLocalScan = false,
   expanded = false,
   onExpandedChange,
+  layout = "default",
+  supplementaryPanel,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
+  const [fileMenuDocumentId, setFileMenuDocumentId] = useState<number | null>(null);
   const [scanUploading, setScanUploading] = useState(false);
   const [scannerAppLaunching, setScannerAppLaunching] = useState(false);
   const [lastScannerAppLaunchUrl, setLastScannerAppLaunchUrl] = useState("");
@@ -364,6 +370,150 @@ export function RequestDocumentsPanel({
     } finally {
       setRetryingFailedUploads(false);
     }
+  }
+
+  const deleteDocument = (documentId: number) => {
+    if (!window.confirm(t("documents.deleteConfirm"))) return;
+    deleteMutation.mutate(documentId);
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const scanControls = (
+    <section id="request-documents-scan-upload" className="rounded-xl border border-border bg-background p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{t("documents.scanAndAttach")}</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">PDF, JPG, PNG</p>
+        </div>
+        <ScanLine size={18} className="text-accent" aria-hidden="true" />
+      </div>
+      <div className="grid gap-2">
+        {scannerAppEnabled ? (
+          <button
+            type="button"
+            onClick={handleLaunchScannerApp}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending}
+          >
+            <ScanLine size={15} aria-hidden="true" />
+            {scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}
+          </button>
+        ) : null}
+        {!scannerAppEnabled && naps2ScannerEnabled ? (
+          <button
+            type="button"
+            onClick={handleScanAndAttach}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+          >
+            <ScanLine size={15} aria-hidden="true" />
+            {scanUploading ? t("documents.scanning") : t("documents.scanAppointmentRequest")}
+          </button>
+        ) : null}
+        <label htmlFor="request-documents-upload-file" className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
+          <Upload size={15} aria-hidden="true" />
+          {file ? file.name : t("documents.open")}
+        </label>
+        <input
+          id="request-documents-upload-file"
+          data-testid="document-file-input"
+          type="file"
+          accept="application/pdf,image/jpeg,image/png"
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
+          className="sr-only"
+        />
+        <button
+          type="button"
+          onClick={() => uploadMutation.mutate()}
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!file || uploadMutation.isPending || scanUploading || retryingFailedUploads || !canScanOrUpload}
+        >
+          <Upload size={15} aria-hidden="true" />
+          {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
+        </button>
+      </div>
+      {!naps2ScannerEnabled && canScanOrUpload ? <p className="mt-2 text-[11px] text-muted-foreground">{t("documents.scanNotSupportedMessage")}</p> : null}
+      {enableLocalScan && canScanOrUpload ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          {scannerAppEnabled ? <a href={scannerAppDownloadUrl} className="underline" download>{t("documents.downloadScannerApp")}</a> : null}
+          {showScannerAppFallback ? <button type="button" className="underline" onClick={() => lastScannerAppLaunchUrl && launchScannerApp(lastScannerAppLaunchUrl)}>{t("documents.retryLaunchScannerApp")}</button> : null}
+          {naps2ScannerEnabled ? <button type="button" className="underline" onClick={handleScanAndAttach} disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}>{t("documents.useNaps2WebScan")}</button> : null}
+        </div>
+      ) : null}
+      {failedScanUploads.length > 0 ? (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
+          <p>{t("documents.failedUploadsRemaining")}: {failedScanUploads.length}</p>
+          <button type="button" className="mt-2 rounded-md bg-amber-600 px-2.5 py-1.5 font-semibold text-white disabled:opacity-50" onClick={handleRetryFailedUploads} disabled={retryingFailedUploads || scanUploading}>
+            {retryingFailedUploads ? t("documents.retryingFailedUploads") : t("documents.retryFailedUploads")}
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+
+  if (layout === "workspace") {
+    return (
+      <div data-expanded={expanded ? "true" : "false"} data-layout="appointment-workspace" data-testid="appointment-document-workspace" className="flex h-full min-h-0 min-w-0 flex-col">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-background p-2 sm:p-3" aria-label={resolvedTitle}>
+            <div className="flex min-h-0 flex-1 flex-col">
+              {isLoading ? <div className="flex min-h-48 flex-1 items-center justify-center text-sm text-muted-foreground" role="status">{t("documents.loading")}</div> : null}
+              {error ? <div className="flex min-h-48 flex-1 items-center justify-center rounded-lg border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700" role="alert">{error instanceof Error ? error.message : t("documents.failedLoad")}</div> : null}
+              {!isLoading && !error && !selectedDocument ? (
+                <div className="flex min-h-64 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 p-6 text-center">
+                  <FileText size={30} className="mb-3 text-muted-foreground" aria-hidden="true" />
+                  <p className="text-sm font-semibold text-foreground">{t("documents.noDocuments")}</p>
+                  <p className="mt-1 max-w-sm text-xs text-muted-foreground">{t("documents.scanNotSupportedMessage")}</p>
+                </div>
+              ) : null}
+              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage /> : null}
+            </div>
+          </section>
+
+          <aside className="min-h-0 space-y-3 overflow-y-auto pb-20 lg:pb-0" aria-label={t("documents.documentSelector")}>
+            {scanControls}
+            <section className="rounded-xl border border-border bg-background p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-foreground">{t("documents.documentSelector")}</h3>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{documents.length}</span>
+              </div>
+              {documents.length === 0 ? <p className="text-xs text-muted-foreground">{t("documents.noDocuments")}</p> : (
+                <div className="space-y-2">
+                  {documents.map((doc) => {
+                    const isSelected = doc.id === selectedDocumentId;
+                    const isPdf = doc.mimeType.toLowerCase() === "application/pdf" || doc.originalFilename.toLowerCase().endsWith(".pdf");
+                    return (
+                      <div key={doc.id} className={`relative rounded-lg border p-2 transition ${isSelected ? "border-accent bg-accent/5" : "border-border bg-muted/10"}`}>
+                        <div className="flex items-start gap-2">
+                          <button type="button" className="min-w-0 flex-1 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => setSelectedDocumentId(doc.id)} aria-pressed={isSelected}>
+                            <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground"><span dir="ltr" className="truncate" title={doc.originalFilename}>{isPdf ? <FileText size={14} className="shrink-0 text-red-500" aria-hidden="true" /> : <FileImage size={14} className="shrink-0 text-emerald-500" aria-hidden="true" />}{doc.originalFilename}</span></span>
+                            <span className="mt-1 block text-[10px] text-muted-foreground">{doc.pageCount ? `${doc.pageCount} ${t("documents.pagesCount").replace("{count}", "").trim()}` : doc.mimeType || "file"} · {formatFileSize(doc.fileSize)}</span>
+                            <span className="mt-1 block text-[10px] text-muted-foreground">{doc.createdAt ? new Date(doc.createdAt).toLocaleString() : "—"}</span>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={t("documents.openInNewTab")}><ExternalLink size={14} aria-hidden="true" /></a>
+                            {canDelete ? <button type="button" className="rounded-md p-1.5 text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50" onClick={() => deleteDocument(doc.id)} disabled={deleteMutation.isPending} aria-label={t("documents.delete")}><Trash2 size={14} aria-hidden="true" /></button> : null}
+                            <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={t("requestScans.actions.more")} onClick={() => setFileMenuDocumentId((current) => current === doc.id ? null : doc.id)}><MoreVertical size={14} aria-hidden="true" /></button>
+                          </div>
+                        </div>
+                        {fileMenuDocumentId === doc.id ? <div className="absolute end-2 top-10 z-20 w-36 rounded-lg border border-border bg-background p-1 shadow-lg"><button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => { setSelectedDocumentId(doc.id); setFileMenuDocumentId(null); }}>{t("documents.view")}</button><a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => setFileMenuDocumentId(null)}>{t("documents.openInNewTab")}</a>{canDelete ? <button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs text-red-700 hover:bg-red-50" onClick={() => { setFileMenuDocumentId(null); deleteDocument(doc.id); }}>{t("documents.delete")}</button> : null}</div> : null}
+                        {isSelected ? <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-accent"><CheckCircle2 size={13} aria-hidden="true" />{t("documents.view")}</div> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+            {supplementaryPanel}
+          </aside>
+        </div>
+      </div>
+    );
   }
 
   return (

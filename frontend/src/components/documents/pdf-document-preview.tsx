@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RequestDocument } from "@/lib/api-hooks";
@@ -13,6 +13,7 @@ interface PdfDocumentPreviewProps {
   includeOpenAction: boolean;
   isRtl: boolean;
   expanded: boolean;
+  preferSinglePage: boolean;
 }
 
 type PdfViewMode = "overview" | "single";
@@ -80,6 +81,8 @@ function LazyPdfPageCard({
 
   useEffect(() => {
     if (isPriority) {
+      // The priority flag is a direct rendering hint for the thumbnail rail.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsVisible(true);
       return;
     }
@@ -101,11 +104,13 @@ function LazyPdfPageCard({
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [isPriority]);
+  }, [isPriority, isVisible]);
 
   useEffect(() => {
     if (!isVisible || !pdfDocument) return;
     let cancelled = false;
+    // Reset the lazy card before measuring its next page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPageSize(null);
     setRenderError(false);
     void pdfDocument
@@ -168,29 +173,22 @@ function LazyPdfPageCard({
   );
 }
 
-export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded }: PdfDocumentPreviewProps) {
+export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded, preferSinglePage }: PdfDocumentPreviewProps) {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
   const [viewMode, setViewMode] = useState<PdfViewMode>("overview");
   const [sizingMode, setSizingMode] = useState<PdfSizingMode>("fit-page");
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [selectedPageSize, setSelectedPageSize] = useState<PdfPageSize | null>(null);
   const [mainSize, setMainSize] = useState({ width: 760, height: 640 });
   const [overviewCardSize, setOverviewCardSize] = useState<PdfPageSize>({ width: 184, height: 244 });
   const mainPreviewRef = useRef<HTMLDivElement>(null);
   const overviewRef = useRef<HTMLDivElement>(null);
   const file = useMemo(() => ({ url: `/api/documents/${document.id}/view`, withCredentials: true }), [document.id]);
   const page = pageCount ? Math.min(selectedPage, pageCount) : 1;
-
-  useEffect(() => {
-    setPageCount(null);
-    setPdfDocument(null);
-    setSelectedPage(1);
-    setViewMode("overview");
-    setSizingMode("fit-page");
-    setSelectedPageSize(null);
-    setPreviewError(null);
-  }, [document.id]);
 
   useEffect(() => {
     if (viewMode !== "single") return;
@@ -209,11 +207,19 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
 
   useEffect(() => {
     if (!expanded) return;
-    setSizingMode("fit-page");
-    setViewMode("single");
+    const frame = requestAnimationFrame(() => {
+      setSizingMode("fit-page");
+      setViewMode("single");
+    });
+    return () => cancelAnimationFrame(frame);
   }, [expanded]);
 
-  const [selectedPageSize, setSelectedPageSize] = useState<PdfPageSize | null>(null);
+  useEffect(() => {
+    if (!preferSinglePage || expanded) return;
+    const frame = requestAnimationFrame(() => setViewMode("single"));
+    return () => cancelAnimationFrame(frame);
+  }, [expanded, preferSinglePage]);
+
   useEffect(() => {
     if (viewMode !== "single" || !pdfDocument) return;
     let cancelled = false;
@@ -226,9 +232,9 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
   }, [page, pdfDocument, viewMode]);
 
   const pageScale = selectedPageSize
-    ? sizingMode === "fit-page"
+    ? (sizingMode === "fit-page"
       ? Math.min(mainSize.width / selectedPageSize.width, mainSize.height / selectedPageSize.height)
-      : mainSize.width / selectedPageSize.width
+      : mainSize.width / selectedPageSize.width) * zoom
     : null;
 
   useEffect(() => {
@@ -385,10 +391,19 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                   <button type="button" className={`rounded-md px-2 py-1 text-[11px] ${sizingMode === "fit-page" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-page")} aria-pressed={sizingMode === "fit-page"}>{labels.fitPage}</button>
                   <button type="button" className={`rounded-md px-2 py-1 text-[11px] ${sizingMode === "fit-width" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-width")} aria-pressed={sizingMode === "fit-width"}>{labels.fitWidth}</button>
                 </div>
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="group" aria-label="Zoom">
+                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={() => setZoom((current) => Math.max(0.5, Number((current - 0.1).toFixed(1))))} disabled={zoom <= 0.5} aria-label="Zoom out"><ZoomOut size={14} aria-hidden="true" /></button>
+                  <span className="min-w-10 text-center text-[10px] font-semibold text-muted-foreground">{Math.round(zoom * 100)}%</span>
+                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={() => setZoom((current) => Math.min(2, Number((current + 0.1).toFixed(1))))} disabled={zoom >= 2} aria-label="Zoom in"><ZoomIn size={14} aria-hidden="true" /></button>
+                </div>
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="group" aria-label="Rotate">
+                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={() => setRotation((current) => (current + 270) % 360)} aria-label="Rotate counter-clockwise"><RotateCcw size={14} aria-hidden="true" /></button>
+                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={() => setRotation((current) => (current + 90) % 360)} aria-label="Rotate clockwise"><RotateCw size={14} aria-hidden="true" /></button>
+                </div>
               </div>
             </div>
             <div ref={mainPreviewRef} className="min-h-0 min-w-0 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
-              <div className={`flex min-h-full min-w-full justify-center ${sizingMode === "fit-page" ? "items-center" : "items-start"}`}>
+              <div className={`flex min-h-full min-w-full justify-center ${sizingMode === "fit-page" && zoom === 1 ? "items-center" : "items-start"}`}>
                 <Page
                   pageNumber={page}
                   width={sizingMode === "fit-width" ? mainSize.width : undefined}
@@ -397,6 +412,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                   renderAnnotationLayer={false}
                   loading={<span className="text-sm text-muted-foreground">{labels.loading}</span>}
                   onRenderError={() => setPreviewError(labels.pageFailed)}
+                  rotate={rotation}
                 />
               </div>
             </div>

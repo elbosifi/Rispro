@@ -166,6 +166,7 @@ interface DocumentPreviewWorkspaceProps {
   showOpenAction?: boolean;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  preferSinglePage?: boolean;
 }
 
 export function DocumentPreviewWorkspace({
@@ -173,6 +174,7 @@ export function DocumentPreviewWorkspace({
   showOpenAction = true,
   expanded = false,
   onExpandedChange,
+  preferSinglePage = false,
 }: DocumentPreviewWorkspaceProps) {
   const { t, isArabic } = useLanguage();
   const labels = labelsFor(t);
@@ -229,7 +231,7 @@ export function DocumentPreviewWorkspace({
           </div>
         }
       >
-        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} expanded={expanded} />
+        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} />
       </Suspense>
       </PreviewErrorBoundary>
     </div>

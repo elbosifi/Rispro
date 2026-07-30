@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -91,7 +91,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -114,6 +114,8 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           enableLocalScan
           expanded={options.expanded}
           onExpandedChange={options.onExpandedChange}
+          layout={options.layout}
+          supplementaryPanel={options.supplementaryPanel}
         />
       </LanguageProvider>
     </QueryClientProvider>
@@ -488,6 +490,17 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Retry failed uploads" })).toBeNull();
     });
+  });
+
+  it("renders the appointment workspace layout with attached-file and supplementary sections", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+
+    renderPanel({ layout: "workspace", supplementaryPanel: <section>Images and report</section> });
+
+    expect(await screen.findByTestId("appointment-document-workspace")).toBeTruthy();
+    expect(screen.getByText("Attached documents")).toBeTruthy();
+    expect(await screen.findByText("request.png")).toBeTruthy();
+    expect(screen.getByText("Images and report")).toBeTruthy();
   });
 
   it("selects the first document once and preserves selection after refetch", async () => {

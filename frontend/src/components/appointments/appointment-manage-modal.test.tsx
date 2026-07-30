@@ -161,9 +161,9 @@ describe("AppointmentManageModal", () => {
     expect((screen.getAllByText("Test Patient")).length).toBeGreaterThan(0);
     expect((screen.getAllByText("ACC-42")).length).toBeGreaterThan(0);
     expect((screen.getAllByText(/CT/)).length).toBeGreaterThan(0);
-    expect(screen.getByText("Head")).toBeTruthy();
+    expect(screen.getAllByText("Head").length).toBeGreaterThan(0);
     expect(screen.getByText("26/07/2026")).toBeTruthy();
-    expect(screen.getByText("Scheduled")).toBeTruthy();
+    expect(screen.getAllByText("Scheduled").length).toBeGreaterThan(0);
     expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Patient profile" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Print" })).toBeTruthy();
@@ -174,11 +174,12 @@ describe("AppointmentManageModal", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
-  it("retains the full appointment header and protocol summary outside Documents", async () => {
+  it("opens edit in a focused secondary panel without replacing the document workspace", async () => {
     renderModal({ initialTab: "details" });
 
-    expect(await screen.findByText("Protocol: Not protocolled")).toBeTruthy();
-    expect(screen.queryByTestId("compact-document-appointment-header")).toBeNull();
+    expect(await screen.findByTestId("appointment-editor")).toBeTruthy();
+    expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
+    expect(screen.getByTestId("request-documents-panel")).toBeTruthy();
     expect((screen.getAllByText("Test Patient")).length).toBeGreaterThan(1);
   });
 
@@ -198,15 +199,15 @@ describe("AppointmentManageModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Exit expanded review" }));
 
     expect(screen.getByTestId("request-documents-panel").getAttribute("data-expanded")).toBe("false");
-    expect(screen.getByRole("tab", { name: "Request Documents" })).toBeTruthy();
+    expect(screen.queryByRole("tab")).toBeNull();
   });
 
-  it("switches tabs and refreshes displayed appointment data after an update", async () => {
-    renderModal();
+  it("opens the More actions menu and refreshes displayed appointment data after an edit", async () => {
+    renderModal({ initialTab: "details" });
     await screen.findByTestId("appointment-editor");
-    fireEvent.click(screen.getByRole("tab", { name: "Report" }));
-    expect(await screen.findByText("Check the patient report status using the same QR access rules.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "Details / Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Change status" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Details / Edit" }));
     fireEvent.click(await screen.findByRole("button", { name: "Update appointment" }));
     expect((await screen.findAllByText("Updated Patient")).length).toBeGreaterThan(0);
     expect((screen.getAllByText("ACC-UPDATED")).length).toBeGreaterThan(0);
