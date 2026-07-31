@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Printer, Upload, UserRound, X } from "lucide-react";
 import {
@@ -12,7 +12,7 @@ import {
   type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
+import { formatDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { normalizeAppointmentId } from "@/lib/appointment-id";
@@ -23,7 +23,7 @@ import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/shared";
+import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import {
   useCreateSchedulingOverrideRequest,
   rescheduleV2Booking,
@@ -35,7 +35,7 @@ import type {
   RescheduleBookingRequest,
   SchedulingOverrideType,
 } from "@/v2/appointments/types";
-import { RESCHEDULABLE_STATUSES } from "@/v2/appointments/types";
+import { CANCELLABLE_STATUSES, RESCHEDULABLE_STATUSES } from "@/v2/appointments/types";
 import { AvailabilityPanel } from "@/v2/appointments/components/AvailabilityPanel";
 import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSection";
 import { SupervisorOverrideModal } from "@/v2/appointments/components/SupervisorOverrideModal";
@@ -64,7 +64,7 @@ export type AppointmentManageModalProps = {
   onAppointmentDeleted?: (appointmentId: number) => void;
 };
 
-const MANAGE_TABS: AppointmentManageTab[] = ["details", "documents", "report", "reschedule", "status", "cancel"];
+const MANAGE_TABS: AppointmentManageTab[] = ["details", "documents", "report", "reschedule", "cancel"];
 const MANUAL_STATUS_OPTIONS = ["scheduled", "arrived", "waiting", "completed", "no-show", "discontinued"] as const;
 const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "discontinued"]);
 const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
@@ -82,17 +82,6 @@ function publicAppointmentToken(appointment: AppointmentWithDetails): string {
   } catch {
     return new URLSearchParams(rawUrl.split("?")[1] || "").get("t")?.trim() || "";
   }
-}
-
-function formatElapsedSince(language: string, value: string | null | undefined): string {
-  if (!value) return "—";
-  const startedAt = new Date(value).getTime();
-  if (!Number.isFinite(startedAt)) return "—";
-  const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return language === "ar" ? `${hours}س ${remainingMinutes}د` : `${hours}h ${remainingMinutes}m`;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -127,58 +116,10 @@ function offsetFromStartDate(isoDate: string): number {
   return clampAvailabilityOffset(Math.floor((selected - start) / DAY_MS));
 }
 
-function Field({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 p-2">
-      <p className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{label}</p>
-      <p className="text-[13px] font-medium leading-snug">{value == null ? "—" : value}</p>
-    </div>
-  );
-}
-
 function protocolVersionText(appointment: AppointmentWithDetails): string | null {
   const summary = appointment.protocolAssignmentSummary;
   if (!summary) return null;
   return [summary.protocolName, summary.versionNumber ? `v${summary.versionNumber}` : null].filter(Boolean).join(" ");
-}
-
-function usesProtocolWorkflow(appointment: AppointmentWithDetails): boolean {
-  const modality = (appointment.modalityCode || appointment.modalityNameEn || "").toUpperCase();
-  return modality === "CT" || modality === "MRI";
-}
-
-function ProtocolDetailSummary({ appointment }: { appointment: AppointmentWithDetails }) {
-  if (!usesProtocolWorkflow(appointment)) return null;
-  const summary = appointment.protocolAssignmentSummary;
-
-  return (
-    <div className="mt-3 rounded-xl border border-border bg-muted/20 p-3">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-            summary ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white/70 text-slate-600"
-          }`}
-        >
-          {summary ? "Protocol assigned" : "Not protocolled"}
-        </span>
-        <span className="text-xs font-semibold text-foreground">
-          {summary ? protocolVersionText(appointment) : "Protocol: Not protocolled"}
-        </span>
-      </div>
-      {summary ? (
-        <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-          <Field label="Protocol" value={protocolVersionText(appointment)} />
-          <Field label="Scanner" value={summary.scannerName || "Not selected"} />
-          <Field label="Assigned by" value={summary.assignedBy || "Not recorded"} />
-          <Field label="Assigned at" value={summary.assignedAt ? formatDateTimeLy(summary.assignedAt) : "Not recorded"} />
-          <Field label="Protocol notes" value={summary.protocolNotes || "None recorded"} />
-          <Field label="Contrast notes" value={summary.contrastNotes || "None recorded"} />
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No protocol assignment is recorded for this CT/MRI appointment.</p>
-      )}
-    </div>
-  );
 }
 
 export function AppointmentManageModal({
@@ -223,6 +164,9 @@ export function AppointmentManageModal({
   const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
   const [manualStatus, setManualStatus] = useState<(typeof MANUAL_STATUS_OPTIONS)[number]>("scheduled");
   const [manualStatusReason, setManualStatusReason] = useState("");
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [statusDialogError, setStatusDialogError] = useState<string | null>(null);
+  const legacyStatusKeyRef = useRef<string | null>(null);
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -272,6 +216,7 @@ export function AppointmentManageModal({
   const canAttachDocuments = user?.role === "receptionist" || user?.role === "supervisor" || user?.role === "super_admin";
   const canUseNonStandardCapacityModes = user?.role === "supervisor" || user?.role === "super_admin";
   const selectedCanReschedule = Boolean(appointment && RESCHEDULABLE_STATUSES.includes(appointment.status as BookingStatus));
+  const selectedCanCancel = Boolean(appointment && CANCELLABLE_STATUSES.includes(appointment.status as BookingStatus));
   const rescheduleAvailability = useAppointmentAvailability({
     patientId: activeTab === "reschedule" && selectedCanReschedule ? appointment?.patientId ?? null : null,
     modalityId: appointment?.modalityId ?? null,
@@ -317,6 +262,8 @@ export function AppointmentManageModal({
     setDocumentReviewExpanded(false);
     setActionMenuOpen(false);
     setCancelConfirmOpen(false);
+    setStatusDialogOpen(false);
+    setStatusDialogError(null);
     setVoidDialogOpen(false);
     setVoidReason("");
     onClose();
@@ -335,6 +282,12 @@ export function AppointmentManageModal({
   }, [documentReviewExpanded, open]);
 
   const selectTab = (tab: AppointmentManageTab) => {
+    if (tab === "status") {
+      setActionMenuOpen(false);
+      setStatusDialogError(null);
+      setStatusDialogOpen(true);
+      return;
+    }
     if (tab !== "documents") setDocumentReviewExpanded(false);
     setActiveTab(tab);
     setActionMenuOpen(false);
@@ -416,9 +369,12 @@ export function AppointmentManageModal({
       updateDisplayedAppointment(updated);
       setManualStatus(updated.status as (typeof MANUAL_STATUS_OPTIONS)[number]);
       setManualStatusReason("");
+      setStatusDialogError(null);
+      setStatusDialogOpen(false);
       pushToast({ type: "success", title: chooseLocalized(language, "تم تحديث الحالة", "Status updated"), message: statusLabel(language, updated.status) });
     },
     onError: (err: unknown) => {
+      setStatusDialogError(getErrorMessage(err, chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed")));
       pushToast({ type: "error", title: chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed"), message: getErrorMessage(err, chooseLocalized(language, "حاول مرة أخرى.", "Please try again.")) });
     },
   });
@@ -561,7 +517,8 @@ export function AppointmentManageModal({
   };
 
   useEffect(() => {
-    setActiveTab(MANAGE_TABS.includes(initialTab) ? initialTab : "documents");
+    const nextTab = initialTab === "status" ? "documents" : MANAGE_TABS.includes(initialTab) ? initialTab : "documents";
+    setActiveTab(nextTab);
     setReportStatus(null);
     setReportError("");
     setSelectedPatientId(null);
@@ -570,7 +527,17 @@ export function AppointmentManageModal({
     setCancelConfirmOpen(initialTab === "cancel");
     setVoidDialogOpen(false);
     setVoidReason("");
-  }, [initialTab, normalizedAppointmentId]);
+    const statusKey = `${normalizedAppointmentId ?? "none"}`;
+    if (initialTab === "status" && legacyStatusKeyRef.current !== statusKey) {
+      legacyStatusKeyRef.current = statusKey;
+      setStatusDialogOpen(true);
+      setStatusDialogError(null);
+      onTabChange?.("documents");
+    } else if (normalizedAppointmentId !== null && legacyStatusKeyRef.current !== statusKey) {
+      setStatusDialogOpen(false);
+      setStatusDialogError(null);
+    }
+  }, [initialTab, normalizedAppointmentId, onTabChange]);
 
   useEffect(() => {
     setRescheduleDate("");
@@ -618,10 +585,8 @@ export function AppointmentManageModal({
 
   if (!open) return null;
 
-  const selectedAppointmentCreatedBy = appointment
-    ? appointment.createdByName || appointment.createdByUsername || (appointment.createdByUserId ? `#${appointment.createdByUserId}` : "—")
-    : "—";
   const dialogTitle = appointment ? chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName) : t("registrations.manage");
+  const statusReasonRequired = Boolean(appointment && (STATUS_REASON_REQUIRED.has(manualStatus) || (appointment.status === "completed" && manualStatus === "arrived")));
   const reportPanel = appointment ? (
     <section className="rounded-xl border border-border bg-background p-3">
       <div className="flex items-center justify-between gap-2"><div><h3 className="text-sm font-semibold">{chooseLocalized(language, "الصور والتقرير", "Images and report")}</h3><p className="mt-1 text-[11px] text-muted-foreground"><span dir="ltr" className="font-mono-data">{appointment.accessionNumber}</span> · {chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)}</p></div><FileText size={17} className="text-muted-foreground" aria-hidden="true" /></div>
@@ -635,6 +600,7 @@ export function AppointmentManageModal({
   ) : null;
 
   return (
+    <>
     <Dialog open={open} onClose={closeModal}>
       <DialogContent
         maxWidth={documentReviewExpanded ? "calc(100vw - 16px)" : "min(98vw, 1500px)"}
@@ -650,7 +616,7 @@ export function AppointmentManageModal({
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><DialogTitle className="truncate text-sm sm:text-base">{dialogTitle}</DialogTitle><PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" /></div><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"><span dir="ltr" className="font-mono-data">MRN {appointment.mrn || appointment.patientPrimaryIdentifierValue || "—"}</span><span dir="ltr" className="font-mono-data">{appointment.accessionNumber}</span></div></div>
             <div className="min-w-0 border-s border-border ps-3"><p className="truncate text-xs font-semibold text-foreground">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—"}</p><p className="mt-1 truncate text-[11px] text-muted-foreground">{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)} · {appointment.modalityCode || "—"}</p></div>
             <div className="min-w-0 border-s border-border ps-3"><div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">{statusLabel(language, appointment.status)}</span>{appointment.priorityNameAr || appointment.priorityNameEn ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn)}</span> : null}{appointment.protocolAssignmentSummary ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">{chooseLocalized(language, "بروتوكول", "Protocol")}</span> : null}</div><p className="mt-1 text-[11px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)} · {appointment.bookingTime || "—"}</p></div>
-            <div className="relative flex items-center justify-start gap-1 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => selectTab("details")}><Edit3 size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => void printAppointmentSlipById(appointment.id, language)}><Printer size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")} onClick={() => setActionMenuOpen((current) => !current)}><MoreHorizontal size={16} aria-hidden="true" /></Button>{actionMenuOpen ? <div className="absolute end-0 top-11 z-50 w-56 rounded-xl border border-border bg-background p-1.5 shadow-xl" role="menu"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => selectTab("reschedule")}><CalendarClock size={15} aria-hidden="true" />{t("registrations.reschedule")}</button><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => selectTab("status")}><FileText size={15} aria-hidden="true" />{chooseLocalized(language, "تغيير الحالة", "Change status")}</button><div className="my-1 border-t border-border" /><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500" onClick={() => selectTab("cancel")}><X size={15} aria-hidden="true" />{t("registrations.cancelAppointment")}</button></div> : null}</div>
+            <div className="relative flex items-center justify-start gap-1 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => selectTab("details")}><Edit3 size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => void printAppointmentSlipById(appointment.id, language)}><Printer size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")} onClick={() => setActionMenuOpen((current) => !current)}><MoreHorizontal size={16} aria-hidden="true" /></Button>{actionMenuOpen ? <div className="absolute end-0 top-11 z-50 w-56 rounded-xl border border-border bg-background p-1.5 shadow-xl" role="menu">{selectedCanReschedule ? <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => selectTab("reschedule")}><CalendarClock size={15} aria-hidden="true" />{t("registrations.reschedule")}</button> : null}<button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" onClick={() => selectTab("status")}><FileText size={15} aria-hidden="true" />{chooseLocalized(language, "تغيير الحالة", "Change status")}</button>{selectedCanCancel ? <><div className="my-1 border-t border-border" /><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-red-700 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500" onClick={() => selectTab("cancel")}><X size={15} aria-hidden="true" />{t("registrations.cancelAppointment")}</button></> : null}</div> : null}</div>
           </div> : <DialogTitle>{t("registrations.manage")}</DialogTitle>}
         </DialogHeader>
         {/*
@@ -728,7 +694,7 @@ export function AppointmentManageModal({
           {appointmentQuery.isLoading && !appointment ? <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground" role="status">{t("registrations.appointmentLoading")}</div> : null}
           {appointmentQuery.isError && !appointment ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><p className="font-semibold">{t("registrations.appointmentLoadFailed")}</p><p className="mt-1">{getErrorMessage(appointmentQuery.error, t("registrations.appointmentLoadFailed"))}</p></div> : null}
 
-          {appointment && activeTab === "details" ? <div className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={() => selectTab("reschedule")} onOpenStatus={() => selectTab("status")} onAppointmentUpdated={updateDisplayedAppointment} onVoid={(user?.role === "supervisor" || user?.role === "super_admin") ? () => { setVoidDialogOpen(true); setVoidReason(""); } : undefined} /></div> : null}
+          {appointment && activeTab === "details" ? <div className="absolute inset-2 z-30 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5"><AppointmentInformationView key={appointment.id} appointment={appointment} lookups={lookups} reportStatus={reportStatus} onBack={() => selectTab("documents")} onOpenPatientProfile={() => setSelectedPatientId(appointment.patientId)} onOpenReschedule={selectedCanReschedule ? () => selectTab("reschedule") : undefined} onOpenStatus={() => selectTab("status")} onAppointmentUpdated={updateDisplayedAppointment} onVoid={(user?.role === "supervisor" || user?.role === "super_admin") ? () => { setVoidDialogOpen(true); setVoidReason(""); } : undefined} /></div> : null}
 
 
           {appointment && activeTab === "documents" ? <div className="h-full min-h-0"><RequestDocumentsPanel appointmentId={appointment.id} patientId={appointment.patientId} appointmentRefType="v2_booking" title={t("registrations.requestDocuments")} previewMode="inline" enableLocalScan layout="workspace" supplementaryPanel={<>{reportPanel}{protocolPanel}</>} expanded={documentReviewExpanded} onExpandedChange={setDocumentReviewExpanded} /></div> : null}
@@ -758,8 +724,6 @@ export function AppointmentManageModal({
             </div> : <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">{t("registrations.rescheduleNotAllowed")}</div>
           ) : null}
 
-          {appointment && activeTab === "status" ? <div className="rounded-2xl border border-border bg-muted/20 p-3"><div className="mb-3"><h4 className="text-sm font-semibold">{chooseLocalized(language, "تغيير حالة الموعد", "Change appointment status")}</h4><p className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "استخدمها لتصحيح حالة الموعد يدوياً عند الحاجة.", "Use this to correct the appointment status manually when needed.")}</p></div><div className="mb-3 rounded-xl border border-border bg-background p-3 text-sm"><span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span><span className="font-semibold">{statusLabel(language, appointment.status)}</span></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{MANUAL_STATUS_OPTIONS.map((status) => <button key={status} type="button" className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${manualStatus === status ? "border-accent/40 bg-accent/10 text-accent" : "border-border bg-background text-foreground hover:border-accent/30"}`} onClick={() => setManualStatus(status)}>{statusLabel(language, status)}</button>)}</div>{STATUS_REASON_REQUIRED.has(manualStatus) ? <div className="mt-3"><label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">{chooseLocalized(language, "السبب", "Reason")}</label><textarea value={manualStatusReason} onChange={(event) => setManualStatusReason(event.target.value)} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")} /></div> : null}<div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}><Button type="button" size="sm" disabled={statusMutation.isPending || manualStatus === appointment.status || (STATUS_REASON_REQUIRED.has(manualStatus) && !manualStatusReason.trim())} onClick={() => statusMutation.mutate({ appointmentId: appointment.id, status: manualStatus, reason: manualStatusReason.trim() || null })}>{statusMutation.isPending ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{chooseLocalized(language, "جار الحفظ", "Saving")}</span> : chooseLocalized(language, "حفظ الحالة", "Save status")}</Button></div></div> : null}
-
          {appointment && activeTab === "cancel" ? ["scheduled", "arrived", "waiting"].includes(appointment.status) ? <div className="rounded-2xl border border-border bg-muted/20 p-3"><div className="mb-2 text-xs text-muted-foreground">{t("registrations.cancelAppointment")}</div><div className={isRtl ? "flex justify-start" : "flex justify-end"}><Button size="sm" variant="ghost" style={{ color: "#ef4444" }} onClick={() => { if (window.confirm(t("common.confirmCancelAppointment"))) cancelMutation.mutate(appointment.id); }}>{t("registrations.cancelAppointment")}</Button></div></div> : <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">{t("registrations.cancelNotAllowed")}</div> : null}
            </div>
          </div>
@@ -768,13 +732,25 @@ export function AppointmentManageModal({
         */}
         {isMobileViewport && appointment && activeTab === "documents" && !documentReviewExpanded && canAttachDocuments ? <div className="sticky bottom-0 z-30 grid shrink-0 grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-2 border-t border-border bg-background/95 p-2 backdrop-blur"><button type="button" className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-accent px-2 text-xs font-semibold text-accent-foreground" onClick={() => window.document.getElementById("request-documents-upload-file")?.click()}><Upload size={15} aria-hidden="true" />{t("documents.uploadRequest")}</button><button type="button" className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-semibold" onClick={() => setActionMenuOpen(true)}><MoreHorizontal size={15} aria-hidden="true" />{t("requestScans.actions.more")}</button></div> : null}
         {appointment && cancelConfirmOpen ? <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" role="presentation"><div className="w-full max-w-md rounded-2xl border border-border bg-background p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="appointment-cancel-title"><h2 id="appointment-cancel-title" className="text-base font-semibold text-red-700">{t("registrations.cancelAppointment")}</h2><p className="mt-2 text-sm text-muted-foreground">{t("common.confirmCancelAppointment")}</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setCancelConfirmOpen(false)}>{t("common.cancel")}</Button><Button type="button" style={{ backgroundColor: "#dc2626", color: "white" }} disabled={cancelMutation.isPending} onClick={() => { setCancelConfirmOpen(false); cancelMutation.mutate(appointment.id); }}>{cancelMutation.isPending ? t("documents.uploading") : t("registrations.cancelAppointment")}</Button></div></div></div> : null}
-        {appointment && voidDialogOpen ? <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40 p-4" role="presentation"><div className="w-full max-w-md rounded-2xl border border-border bg-background p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="appointment-void-title"><h2 id="appointment-void-title" className="text-base font-semibold text-red-700">{t("appointmentEditor.void")}</h2><p className="mt-2 text-sm text-muted-foreground">{t("appointmentEditor.voidConfirm")}</p><label htmlFor="appointment-void-reason" className="mt-4 block text-xs font-semibold">{t("appointmentEditor.voidReasonPrompt")}</label><textarea id="appointment-void-reason" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} rows={3} className="input-premium mt-1 w-full resize-none" required /><div className="mt-5 flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => { setVoidDialogOpen(false); setVoidReason(""); }}>{t("common.cancel")}</Button><Button type="button" variant="destructive" disabled={!voidReason.trim() || voidMutation.isPending} onClick={() => voidMutation.mutate()}>{voidMutation.isPending ? t("appointmentEditor.voiding") : t("appointmentEditor.void")}</Button></div></div></div> : null}
+      {appointment && voidDialogOpen ? <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40 p-4" role="presentation"><div className="w-full max-w-md rounded-2xl border border-border bg-background p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="appointment-void-title"><h2 id="appointment-void-title" className="text-base font-semibold text-red-700">{t("appointmentEditor.void")}</h2><p className="mt-2 text-sm text-muted-foreground">{t("appointmentEditor.voidConfirm")}</p><label htmlFor="appointment-void-reason" className="mt-4 block text-xs font-semibold">{t("appointmentEditor.voidReasonPrompt")}</label><textarea id="appointment-void-reason" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} rows={3} className="input-premium mt-1 w-full resize-none" required /><div className="mt-5 flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => { setVoidDialogOpen(false); setVoidReason(""); }}>{t("common.cancel")}</Button><Button type="button" variant="destructive" disabled={!voidReason.trim() || voidMutation.isPending} onClick={() => voidMutation.mutate()}>{voidMutation.isPending ? t("appointmentEditor.voiding") : t("appointmentEditor.void")}</Button></div></div></div> : null}
       </DialogContent>
+    </Dialog>
+
+      <Dialog open={statusDialogOpen && Boolean(appointment)} onClose={() => { setStatusDialogOpen(false); setStatusDialogError(null); }}>
+        <DialogContent maxWidth="min(94vw, 460px)" role="dialog" aria-labelledby="appointment-status-dialog-title" aria-describedby="appointment-status-dialog-description" className="!p-5">
+          <DialogHeader closeLabel={t("toast.close")}>
+            <DialogTitle id="appointment-status-dialog-title">{chooseLocalized(language, "تغيير حالة الموعد", "Change appointment status")}</DialogTitle>
+            <DialogDescription id="appointment-status-dialog-description">{chooseLocalized(language, "حدّث الحالة مع الحفاظ على صفحة الموعد مفتوحة.", "Update the status while keeping the appointment workspace open.")}</DialogDescription>
+          </DialogHeader>
+          {appointment ? <div className="space-y-4"><div className="rounded-lg border border-border bg-muted/20 p-3 text-sm"><span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span><Badge variant="neutral" size="sm">{statusLabel(language, appointment.status)}</Badge></div><div><label htmlFor="appointment-status-select" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "الحالة الجديدة", "New status")}</label><select id="appointment-status-select" value={manualStatus} onChange={(event) => { setManualStatus(event.target.value as (typeof MANUAL_STATUS_OPTIONS)[number]); setStatusDialogError(null); }} className="input-premium w-full" aria-describedby={statusReasonRequired ? "appointment-status-reason-help" : undefined}>{MANUAL_STATUS_OPTIONS.map((status) => <option key={status} value={status} disabled={status === appointment.status}>{statusLabel(language, status)}</option>)}</select></div>{statusReasonRequired ? <div><label htmlFor="appointment-status-reason" className="mb-1 block text-xs font-semibold">{chooseLocalized(language, "السبب", "Reason")}</label><textarea id="appointment-status-reason" value={manualStatusReason} onChange={(event) => { setManualStatusReason(event.target.value); setStatusDialogError(null); }} rows={3} className="input-premium w-full resize-none" placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")} required /><p id="appointment-status-reason-help" className="mt-1 text-xs text-muted-foreground">{chooseLocalized(language, "هذا التغيير يتطلب سبباً.", "A reason is required for this change.")}</p></div> : null}{statusDialogError ? <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700" role="alert">{statusDialogError}</p> : null}</div> : null}
+          <DialogFooter className="mt-5"><Button type="button" variant="secondary" onClick={() => { setStatusDialogOpen(false); setStatusDialogError(null); }}>{t("common.cancel")}</Button><Button type="button" disabled={!appointment || statusMutation.isPending || manualStatus === appointment.status || (statusReasonRequired && !manualStatusReason.trim())} onClick={() => { if (!appointment) return; statusMutation.mutate({ appointmentId: appointment.id, status: manualStatus, reason: manualStatusReason.trim() || null }); }}>{statusMutation.isPending ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{chooseLocalized(language, "جار الحفظ", "Saving")}</span> : chooseLocalized(language, "حفظ الحالة", "Save status")}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {selectedPatientId ? <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} /> : null}
 
       <SupervisorOverrideModal open={rescheduleOverrideOpen} onClose={() => { setRescheduleOverrideOpen(false); setRescheduleOverrideError(null); setPendingReschedulePayload(null); }} onConfirm={handleRescheduleOverrideConfirm} loading={rescheduleOverrideLoading || rescheduleMutation.isPending} authError={rescheduleOverrideError} />
       <SchedulingOverrideRequestModal open={rescheduleRequestOpen} requestType="reschedule_booking" overrideType={rescheduleRequestOverrideType} patientLabel={appointment?.englishFullName || appointment?.arabicFullName || `Patient #${appointment?.patientId ?? ""}`} modalityLabel={appointment?.modalityNameEn || appointment?.modalityNameAr || `Modality #${appointment?.modalityId ?? ""}`} examTypeLabel={appointment?.examNameEn || appointment?.examNameAr || `Exam #${appointment?.examTypeId ?? ""}`} requestedDate={rescheduleDate} requestedTime={null} decision={selectedRescheduleAvailabilityItem?.decision ?? null} loading={createRescheduleOverrideRequest.isPending} error={rescheduleRequestError} onClose={() => { setRescheduleRequestOpen(false); setRescheduleRequestError(null); }} onSubmit={submitRescheduleOverrideRequest} />
-    </Dialog>
+    </>
   );
 }

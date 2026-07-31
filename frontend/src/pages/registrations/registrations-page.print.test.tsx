@@ -556,10 +556,10 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const initialParams = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
-    expect(initialParams.get("tab")).toBe("status");
+    expect(initialParams.has("tab")).toBe(false);
     expect(initialParams.get("customFilter")).toBe("keep");
 
-    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
     await waitFor(() => {
       const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
       expect(screen.queryByRole("dialog", { name: "Manage" })).toBeNull();

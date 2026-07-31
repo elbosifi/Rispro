@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { LanguageProvider } from "@/providers/language-provider-component";
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchAppointmentLookups: vi.fn(),
   fetchPatientDirectorySummary: vi.fn(),
   fetchPublicAppointmentReportStatus: vi.fn(),
+  updateAppointmentStatus: vi.fn(),
 }));
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -22,7 +23,7 @@ vi.mock("@/lib/api-hooks", () => ({
     can_request_scheduling_override: "enabled",
   })),
   getAppointmentById: (...args: unknown[]) => mocks.getAppointmentById(...args),
-  updateAppointmentStatus: vi.fn(),
+  updateAppointmentStatus: (...args: unknown[]) => mocks.updateAppointmentStatus(...args),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
@@ -132,6 +133,8 @@ beforeEach(() => {
   });
   mocks.fetchPublicAppointmentReportStatus.mockReset();
   mocks.fetchPublicAppointmentReportStatus.mockResolvedValue({ enabled: true, state: "final", canViewReport: true, message: "Report is ready.", checkButtonLabel: "Check report status", viewButtonLabel: "Open report" });
+  mocks.updateAppointmentStatus.mockReset();
+  mocks.updateAppointmentStatus.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -198,6 +201,102 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
     expect(screen.queryByTestId("appointment-editor")).toBeNull();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("prioritizes formatted appointment and patient identity information", async () => {
+    renderModal({ initialTab: "details" });
+
+    const summary = await screen.findByLabelText("Appointment summary");
+    await screen.findAllByText("NAT-42");
+    expect(summary.textContent).toContain("Time not assigned");
+    expect(screen.getAllByText("Scheduled").length).toBeGreaterThan(0);
+    expect(screen.getByText("Not required")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Patient details" }).parentElement?.parentElement?.textContent).toContain("Female");
+    expect(screen.queryByText(/^F$/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Examination" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Schedule and workflow" })).toBeTruthy();
+    const demographics = screen.getByText("More demographics").closest("details");
+    expect(demographics?.hasAttribute("open")).toBe(false);
+    fireEvent.click(screen.getByText("More demographics"));
+    expect(demographics?.hasAttribute("open")).toBe(true);
+    expect(demographics?.textContent).toContain("01/01/1986");
+  });
+
+  it("opens status in a compact dialog without replacing the Documents workspace", async () => {
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Change status" }));
+
+    expect(screen.getByRole("heading", { name: "Change appointment status" })).toBeTruthy();
+    expect(screen.getByTestId("request-documents-panel")).toBeTruthy();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.getByLabelText("New status")).toBeTruthy();
+  });
+
+  it("canonicalizes a legacy status deep link and opens the dialog over Documents", async () => {
+    const onTabChange = vi.fn();
+    renderModal({ initialTab: "status", onTabChange });
+
+    expect(await screen.findByRole("heading", { name: "Change appointment status" })).toBeTruthy();
+    expect(screen.getByTestId("request-documents-panel")).toBeTruthy();
+    expect(onTabChange).toHaveBeenCalledWith("documents");
+  });
+
+  it("requires a reason for reopening a completed appointment and preserves dialog input on failure", async () => {
+    const completedAppointment = { ...appointment, status: "completed" as const };
+    mocks.getAppointmentById.mockResolvedValueOnce(completedAppointment);
+    mocks.updateAppointmentStatus.mockRejectedValueOnce(new Error("Status correction rejected"));
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Change status" }));
+    fireEvent.change(screen.getByLabelText("New status"), { target: { value: "arrived" } });
+    expect(screen.getByLabelText("Reason")).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save status" });
+    expect(save).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Correction requested by supervisor" } });
+    expect(save).toHaveProperty("disabled", false);
+    fireEvent.click(save);
+    expect((await screen.findByRole("alert")).textContent).toContain("Status correction rejected");
+    expect(screen.getByDisplayValue("Correction requested by supervisor")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Change appointment status" })).toBeTruthy();
+  });
+
+  it("updates the visible status and closes the compact dialog after a successful mutation", async () => {
+    const updatedAppointment = { ...appointment, status: "completed" as const };
+    mocks.getAppointmentById.mockResolvedValueOnce(appointment).mockResolvedValueOnce(updatedAppointment);
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("request-documents-panel");
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Change status" }));
+    fireEvent.change(screen.getByLabelText("New status"), { target: { value: "completed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save status" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Change appointment status" })).toBeNull());
+    expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);
+    expect(mocks.updateAppointmentStatus).toHaveBeenCalledWith(42, "completed", null);
+  });
+
+  it("closes only the status dialog on Escape", async () => {
+    renderModal({ initialTab: "details" });
+    await screen.findByRole("heading", { name: "Appointment details" });
+    fireEvent.click(screen.getByRole("button", { name: "Change status" }));
+    expect(screen.getByRole("heading", { name: "Change appointment status" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("heading", { name: "Change appointment status" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Appointment details" })).toBeTruthy();
+  });
+
+  it("does not expose ordinary reschedule or cancellation actions for completed appointments", async () => {
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...appointment, status: "completed" as const });
+    renderModal({ initialTab: "details" });
+    await screen.findByRole("heading", { name: "Appointment details" });
+    expect(screen.queryByRole("button", { name: "Reschedule" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.queryByRole("menuitem", { name: "Reschedule" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Cancel appointment" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Change status" })).toBeTruthy();
   });
 
   it("enters and exits expanded document review with compact identity and close controls intact", async () => {
