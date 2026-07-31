@@ -8,7 +8,7 @@ const authState = vi.hoisted(() => ({ role: "super_admin" as string }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar", t: (key: string) => key }) }));
 vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { id: 1, role: authState.role } }) }));
 
-import RequestScansPage from "./request-scans-page";
+import RequestScansPage, { sanitizeClinicalDocumentExportError } from "./request-scans-page";
 
 const response = (value: unknown) => ({ ok: true, json: async () => value }) as Response;
 const health = { name: "archive-share", state: "unavailable", affectedCount: 31, lastConnectionCheck: "2026-07-24T10:00:00Z", lastSuccessfulArchive: "2026-07-24T09:00:00Z", nextRetryAt: "2026-07-24T10:02:00Z", lastError: "Connection unavailable" };
@@ -178,7 +178,26 @@ describe("RequestScansPage", () => {
     expect(screen.getByText("Secondary Capture")).toBeTruthy();
     expect(screen.getByText("1/2 exported; 1/2 verified")).toBeTruthy();
     expect(screen.queryByText(/secret|C:\\scans/i)).toBeNull();
-    expect(screen.getByText(/configuration detail local path/i)).toBeTruthy();
+    expect(screen.getByText(/\[redacted\]|local path/i)).toBeTruthy();
+  });
+
+  it("shows a failed page only for failed or blocked exports, not stale retry state", async () => {
+    mock([
+      { ...completed, id: 41, filename: "failed-page.pdf", appointment_status: "completed", clinical_document_export_status: "failed", clinical_document_export_failed_page_number: 2, clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
+      { ...completed, id: 42, filename: "blocked-page.pdf", appointment_status: "completed", clinical_document_export_status: "blocked", clinical_document_export_failed_page_number: 2, clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
+      { ...completed, id: 43, filename: "pending-page.pdf", appointment_status: "completed", clinical_document_export_status: "pending", clinical_document_export_failed_page_number: 2, clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
+      { ...completed, id: 44, filename: "exporting-page.pdf", appointment_status: "completed", clinical_document_export_status: "exporting", clinical_document_export_failed_page_number: 2, clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
+      { ...completed, id: 45, filename: "exported-page.pdf", appointment_status: "completed", clinical_document_export_status: "exported", clinical_document_export_failed_page_number: 2, clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 2 },
+    ]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findAllByText("Failed on page 2")).toHaveLength(2);
+    expect(screen.getAllByText("1/2 pages verified")).toHaveLength(2);
+    expect(screen.getByText("2/2 pages verified")).toBeTruthy();
+  });
+
+  it("redacts unsafe export details as a client-side defense in depth", () => {
+    const value = sanitizeClinicalDocumentExportError("Authorization: Bearer secret Cookie: sid=secret X-API-Key: secret C:\\scans\\patient.pdf \\\\server\\share\\patient.pdf /srv/rispro/file.pdf https://user:password@host/path?token=secret");
+    expect(value).not.toMatch(/secret|C:\\scans|\\\\server\\share|\/srv\/rispro|user:password/i);
   });
 
   it("scopes modality jobs, status, preview, and browser links to the selected modality", async () => {

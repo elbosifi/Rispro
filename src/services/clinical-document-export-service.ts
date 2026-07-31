@@ -98,9 +98,19 @@ function errorCode(error: unknown): string {
   return "";
 }
 
-function safeErrorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return raw.replace(/\b(?:password|authorization|basic)\b[^.\n]*/gi, "configuration detail").replace(/\s+/g, " ").trim().slice(0, 300) || "Clinical document export failed.";
+export function sanitizeClinicalDocumentExportError(value: unknown): string {
+  const raw = value instanceof Error ? value.message : String(value ?? "");
+  const redacted = raw
+    .replace(/(https?:\/\/)([^\s/@]+)@/gi, "$1[redacted]@")
+    .replace(/([?&](?:token|access_token|api[_-]?key|apikey|password)\s*=)[^&#\s]*/gi, "$1[redacted]")
+    .replace(/\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|apikey)\s*[:=]\s*[^\r\n]*/gi, "$1: [redacted]")
+    .replace(/\b(?:basic|bearer|token|apikey|api[- ]?key)\s+[A-Za-z0-9._~+\/-]+=*/gi, "authentication [redacted]")
+    .replace(/(?:[A-Za-z]:\\|\\\\)[^\s"']+/g, "local path")
+    .replace(/\/(?:srv|home|var|tmp|opt|mnt|data)(?:\/[^\s"']*)?/gi, "local path")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return redacted.slice(0, 300) || "Clinical document export failed.";
 }
 
 function logClinicalDocumentExportWorker(event: string, fields: Record<string, unknown> = {}): void {
@@ -111,7 +121,7 @@ function isRetryableError(error: unknown): boolean {
   const code = errorCode(error);
   if (["orthanc_unavailable", "orthanc_timeout"].includes(code)) return true;
   if (code === "orthanc_auth_failed" || code === "orthanc_invalid_response" || code === "orthanc_study_mismatch" || code === "orthanc_invalid_dicom") return false;
-  return /study was not found|not available|temporarily|connection refused|timeout|fetch failed|econnrefused|enotfound/i.test(safeErrorMessage(error));
+  return /study was not found|not available|temporarily|connection refused|timeout|fetch failed|econnrefused|enotfound/i.test(sanitizeClinicalDocumentExportError(error));
 }
 
 function retryDelayMs(attemptCount: number): number {
@@ -300,7 +310,7 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
     }
     await markSecondaryCaptureComplete(row, study);
   } catch (error) {
-    if (activePage) await pool.query("update clinical_document_export_instances i set status=$2,last_error=$3,updated_at=now() where i.id=$1 and i.status<>'verified' and exists(select 1 from clinical_document_exports e where e.id=i.export_id and e.status='exporting' and e.export_lease_owner=$4)", [activePage.id, error instanceof ClinicalDocumentExportBlockedError ? "blocked" : "failed", safeErrorMessage(error), row.export_lease_owner]).catch(() => undefined);
+    if (activePage) await pool.query("update clinical_document_export_instances i set status=$2,last_error=$3,updated_at=now() where i.id=$1 and i.status<>'verified' and exists(select 1 from clinical_document_exports e where e.id=i.export_id and e.status='exporting' and e.export_lease_owner=$4)", [activePage.id, error instanceof ClinicalDocumentExportBlockedError ? "blocked" : "failed", sanitizeClinicalDocumentExportError(error), row.export_lease_owner]).catch(() => undefined);
     throw error;
   } finally { await dependencies.cleanupRenderedDocument(rendered); }
 }
@@ -315,7 +325,7 @@ async function markExported(row: ClinicalDocumentExportWorkRow, study: OrthancSt
 }
 
 async function markFailure(row: ClinicalDocumentExportWorkRow, error: unknown): Promise<void> {
-  const message = safeErrorMessage(error);
+  const message = sanitizeClinicalDocumentExportError(error);
   const retryable = isRetryableError(error);
   const exhausted = retryable && row.attempt_count >= MAX_AUTOMATIC_ATTEMPTS;
   const nextRetryAt = !retryable || exhausted ? null : new Date(Date.now() + retryDelayMs(row.attempt_count)).toISOString();
@@ -395,7 +405,7 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
 export async function runClinicalDocumentExportTick(options: { batchSize?: number; shouldStop?: () => boolean } = {}): Promise<{ reconciled: number; processed: number; exported: number; failed: number }> {
   let reconciled: number;
   try { reconciled = await reconcileClinicalDocumentExports(); }
-  catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_reconciliation_failed", error: safeErrorMessage(error) })); throw error; }
+  catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_reconciliation_failed", error: sanitizeClinicalDocumentExportError(error) })); throw error; }
   const settings = await readAuthoritativeOrthancSettings();
   if (!settings.enabled) return { reconciled, processed: 0, exported: 0, failed: 0 };
   const workerId = `clinical-document-export-${randomUUID()}`;
@@ -408,13 +418,13 @@ export async function runClinicalDocumentExportTick(options: { batchSize?: numbe
     if (!row) break;
     logClinicalDocumentExportWorker("export_claimed", { exportId: row.id, appointmentId: row.appointment_id, documentId: row.document_id });
     processed += 1;
-    try { await processClaimedClinicalDocumentExport(row); } catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_processing_error", exportId: row.id, error: safeErrorMessage(error) })); }
+    try { await processClaimedClinicalDocumentExport(row); } catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_processing_error", exportId: row.id, error: sanitizeClinicalDocumentExportError(error) })); }
     const latest = await loadExportWork(row.id);
     if (latest?.status === "exported") exported += 1;
     else if (latest?.status === "failed" || latest?.status === "blocked") failed += 1;
     if (latest?.status === "exported") logClinicalDocumentExportWorker("export_succeeded", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id });
-    else if (latest?.status === "failed") logClinicalDocumentExportWorker("export_retry_scheduled", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id, nextRetryAt: latest.next_retry_at, error: latest.last_error });
-    else if (latest?.status === "blocked") logClinicalDocumentExportWorker("export_blocked", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id, error: latest.last_error });
+    else if (latest?.status === "failed") logClinicalDocumentExportWorker("export_retry_scheduled", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id, nextRetryAt: latest.next_retry_at, error: sanitizeClinicalDocumentExportError(latest.last_error) });
+    else if (latest?.status === "blocked") logClinicalDocumentExportWorker("export_blocked", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id, error: sanitizeClinicalDocumentExportError(latest.last_error) });
   }
   if (reconciled > 0) logClinicalDocumentExportWorker("exports_reconciled", { count: reconciled });
   return { reconciled, processed, exported, failed };
@@ -431,11 +441,11 @@ export async function startClinicalDocumentExportWorker(options: { intervalMs?: 
   workerStopped = false;
   workerRunning = true;
   logClinicalDocumentExportWorker("worker_started", { intervalMs, batchSize: options.batchSize ?? DEFAULT_BATCH_SIZE });
-  void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_startup_tick_failed", error: safeErrorMessage(error) }))).finally(() => { workerRunning = false; });
+  void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_startup_tick_failed", error: sanitizeClinicalDocumentExportError(error) }))).finally(() => { workerRunning = false; });
   workerInterval = setInterval(() => {
     if (workerRunning || workerStopped) return;
     workerRunning = true;
-    void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_tick_failed", error: safeErrorMessage(error) }))).finally(() => { workerRunning = false; });
+    void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_tick_failed", error: sanitizeClinicalDocumentExportError(error) }))).finally(() => { workerRunning = false; });
   }, intervalMs);
   workerInterval.unref();
   return { async stop() { workerStopped = true; if (workerInterval) { clearInterval(workerInterval); workerInterval = null; } while (workerRunning) await new Promise((resolve) => setTimeout(resolve, 100)); } };

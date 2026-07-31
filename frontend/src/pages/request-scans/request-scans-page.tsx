@@ -162,7 +162,7 @@ const archivePending = (job: Job) => Boolean(job.attachment_completed_at && job.
 const actionItemClass = "flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-start text-sm text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 active:bg-muted/80";
 
 export function sanitizeClinicalDocumentExportError(value: unknown): string | null {
-  const text = String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/(?:authorization|proxy-authorization|cookie|set-cookie)\s*[:=][^,; ]+/gi, "configuration detail").replace(/\b(?:basic|bearer)\s+[a-z0-9._~+\/-]+=*/gi, "configuration detail").replace(/[A-Za-z]:\\[^\s]+|\/(?:[^\s/]+\/){2,}[^\s]*/g, "local path").replace(/\s+/g, " ").trim();
+  const text = String(value ?? "").replace(/(https?:\/\/)([^\s/@]+)@/gi, "$1[redacted]@").replace(/([?&](?:token|access_token|api[_-]?key|apikey|password)\s*=)[^&#\s]*/gi, "$1[redacted]").replace(/\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|apikey)\s*[:=]\s*[^\r\n]*/gi, "$1: [redacted]").replace(/\b(?:basic|bearer|token|apikey|api[- ]?key)\s+[A-Za-z0-9._~+\/-]+=*/gi, "authentication [redacted]").replace(/(?:[A-Za-z]:\\|\\\\)[^\s"']+/g, "local path").replace(/\/(?:srv|home|var|tmp|opt|mnt|data)(?:\/[^\s"']*)?/gi, "local path").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
   return text ? text.slice(0, 300) : null;
 }
 
@@ -170,7 +170,7 @@ function exportLabel(language: Language, english: string, arabic: string): strin
 
 function exportProgress(job: Job, language: Language): string | null {
   const failedPage = Number(job.clinical_document_export_failed_page_number);
-  if (Number.isSafeInteger(failedPage) && failedPage > 0) return exportLabel(language, `Failed on page ${failedPage}`, `فشل في الصفحة ${failedPage}`);
+  if ((job.clinical_document_export_status === "failed" || job.clinical_document_export_status === "blocked") && Number.isSafeInteger(failedPage) && failedPage > 0) return exportLabel(language, `Failed on page ${failedPage}`, `فشل في الصفحة ${failedPage}`);
   const expected = Number(job.clinical_document_export_expected_page_count);
   const verified = Number(job.clinical_document_export_verified_page_count ?? 0);
   if (Number.isSafeInteger(expected) && expected > 0 && Number.isSafeInteger(verified) && verified >= 0) return exportLabel(language, `${verified}/${expected} pages verified`, `${verified}/${expected} صفحات تم التحقق منها`);
