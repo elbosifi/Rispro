@@ -511,6 +511,25 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByText("Images and report")).toBeTruthy();
   });
 
+  it("keeps the document rail narrow and collapsible", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    renderPanel({ layout: "workspace" });
+
+    expect(await screen.findByTestId("document-rail")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Collapse document rail" }));
+    expect(screen.queryByTestId("document-rail")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Expand document rail" }));
+    expect(screen.getByTestId("document-rail")).toBeTruthy();
+  });
+
+  it("keeps the empty-state message and upload action in the document viewer", async () => {
+    renderPanel({ layout: "workspace" });
+
+    expect(await screen.findByText("No request documents yet.")).toBeTruthy();
+    expect(screen.getByText("Upload request document")).toBeTruthy();
+    expect(screen.getAllByText("No request documents yet.")).toHaveLength(1);
+  });
+
   it("selects the first document once and preserves selection after refetch", async () => {
     const documents = [documentFixture(1, "first.png", "image/png"), documentFixture(2, "second.png", "image/png")];
     mockListAppointmentDocuments.mockResolvedValue(documents);

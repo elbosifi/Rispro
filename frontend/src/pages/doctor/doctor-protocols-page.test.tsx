@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 
@@ -31,7 +31,7 @@ const appointment: DoctorProtocolingAppointment = {
   assignment: null,
 };
 
-const { mockCreateAssignment } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -39,8 +39,8 @@ vi.mock("@/lib/api-hooks", () => ({
   createProtocolLibraryDraftFromActive: vi.fn(), createProtocolLibraryMriSequencePreset: vi.fn(), createProtocolLibraryMriSequenceRow: vi.fn(),
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
   confirmMriSequenceImport: vi.fn(), downloadMriSequenceImportTemplate: vi.fn(), exportMriSequencePresetsWorkbook: vi.fn(),
-  fetchDoctorProtocolingAppointmentDetail: vi.fn(async () => ({ appointment, assignmentDetail: null })),
-  fetchDoctorProtocolingAppointments: vi.fn(async () => [appointment]),
+  fetchDoctorProtocolingAppointmentDetail: mockFetchAppointmentDetail,
+  fetchDoctorProtocolingAppointments: mockFetchAppointments,
   fetchProtocolLibraryAnatomyRegions: vi.fn(async () => []), fetchProtocolLibraryCtPhasePresets: vi.fn(async () => []),
   fetchProtocolLibraryMriSequencePresets: vi.fn(async () => []), fetchProtocolLibraryVersionDetail: vi.fn(async () => null),
   fetchProtocolLibraryProtocols: vi.fn(async () => []), fetchProtocolLibraryScanners: vi.fn(async () => []),
@@ -71,11 +71,17 @@ const me = {
 } as DoctorMe;
 
 describe("Doctor protocoling request documents", () => {
+  beforeEach(() => {
+    mockFetchAppointments.mockResolvedValue([appointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    mockCreateAssignment.mockReset();
+  });
+
   it("renders the existing request-document panel for the selected V2 appointment", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click((await screen.findAllByRole("button", { name: "Assign" }))[0]);
     const panel = await screen.findByTestId("protocoling-request-documents");
     expect(panel.textContent).toBe("Appointment request documents");
     expect(panel.getAttribute("data-appointment-id")).toBe("42");
@@ -94,5 +100,21 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("button", { name: "Assign and next" }));
 
     expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ protocolId: null, freeTextProtocol: "Axial T2 and DWI; no contrast." }));
+  });
+
+  it("navigates through the current filtered worklist and shows position", async () => {
+    const nextAppointment = { ...appointment, appointmentId: 43, patientId: 10, patientMrn: "MRN-10", patientEnglishName: "Next Patient" };
+    mockFetchAppointments.mockResolvedValue([appointment, nextAppointment]);
+    mockFetchAppointmentDetail.mockImplementation(async (appointmentId: number) => ({ appointment: appointmentId === 43 ? nextAppointment : appointment, assignmentDetail: null }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click((await screen.findAllByRole("button", { name: "Assign" }))[0]);
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Next appointment/ }));
+    expect(await screen.findByText("2 of 2")).toBeTruthy();
+    expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("43");
+    expect(screen.getByRole("button", { name: /Next appointment/ }).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Previous appointment/ }).getAttribute("disabled")).toBeNull();
   });
 });
