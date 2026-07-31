@@ -25,7 +25,7 @@ export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onRe
   if (!settings) return <Card className="p-4">Loading Authoritative Orthanc settings...</Card>;
   const change = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft({ ...settings, [key]: value });
   return <Card className="space-y-4 p-4" data-testid="authoritative-orthanc-settings">
-    <div><h2 className="text-lg font-semibold">Authoritative Orthanc</h2><p className="text-sm text-muted-foreground">Read-only connection foundation for safe study verification. No export or Orthanc mutation is enabled here.</p></div>
+    <div><h2 className="text-lg font-semibold">Authoritative Orthanc</h2><p className="text-sm text-muted-foreground">Connection used to verify RISpro-linked studies and export approved scanned clinical documents as DICOM Secondary Capture series. RISpro does not upload original modality images or create a replacement study; it adds only the approved scanned-document series to the matched study.</p></div>
     <div className="grid gap-3 md:grid-cols-2">
       <label><input type="checkbox" checked={settings.enabled} onChange={(event) => change("enabled", event.target.checked)} /> Enabled</label>
       <label>Display name<input className="input w-full" value={settings.displayName} onChange={(event) => change("displayName", event.target.value)} /></label>

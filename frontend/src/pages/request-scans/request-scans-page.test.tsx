@@ -13,7 +13,7 @@ import RequestScansPage from "./request-scans-page";
 const response = (value: unknown) => ({ ok: true, json: async () => value }) as Response;
 const health = { name: "archive-share", state: "unavailable", affectedCount: 31, lastConnectionCheck: "2026-07-24T10:00:00Z", lastSuccessfulArchive: "2026-07-24T09:00:00Z", nextRetryAt: "2026-07-24T10:02:00Z", lastError: "Connection unavailable" };
 const status = { enabled: true, lastRunAt: "2026-07-24T10:00:00Z", lastError: null, running: false, workerOnline: true, pending: 2, processing: 1, processedToday: 2, failed: 1, canRetryArchives: true, archiveDestination: health };
-type JobFixture = { id: number; filename: string; status: string; barcode_value: string | null; appointment_id: number | null; document_id: number | null; attachment_completed_at: string | null; source_moved_at: string | null; archive_attempt_count: number; last_archive_attempt_at: string | null; archive_last_error: string | null; error_message: string | null; attempt_count: number; created_at: string; patient_name: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn: string | null; patient_date_of_birth: string | null; modality_name: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; failure_category?: string | null; processing_stage?: string | null; appointment_date?: string | null; appointment_status?: string | null; clinical_document_export_status?: "pending" | "exporting" | "exported" | "failed" | "blocked" | null; clinical_document_export_id?: number | null; clinical_document_export_last_attempt_at?: string | null; clinical_document_export_next_retry_at?: string | null; clinical_document_exported_at?: string | null; clinical_document_export_last_error?: string | null };
+type JobFixture = { id: number; filename: string; status: string; barcode_value: string | null; appointment_id: number | null; document_id: number | null; attachment_completed_at: string | null; source_moved_at: string | null; archive_attempt_count: number; last_archive_attempt_at: string | null; archive_last_error: string | null; error_message: string | null; attempt_count: number; created_at: string; patient_name: string | null; patient_name_ar?: string | null; patient_name_en?: string | null; patient_mrn: string | null; patient_date_of_birth: string | null; modality_name: string | null; modality_name_ar?: string | null; modality_name_en?: string | null; exam_name: string | null; exam_name_ar?: string | null; exam_name_en?: string | null; failure_category?: string | null; processing_stage?: string | null; appointment_date?: string | null; appointment_status?: string | null; clinical_document_export_status?: "pending" | "exporting" | "exported" | "failed" | "blocked" | null; clinical_document_export_id?: number | null; clinical_document_export_representation_type?: "secondary_capture"; clinical_document_export_expected_page_count?: number | null; clinical_document_export_exported_page_count?: number | null; clinical_document_export_verified_page_count?: number | null; clinical_document_export_failed_page_number?: number | null; clinical_document_export_last_attempt_at?: string | null; clinical_document_export_next_retry_at?: string | null; clinical_document_exported_at?: string | null; clinical_document_export_last_error?: string | null };
 const archiveFailure: JobFixture = { id: 9, filename: "request.pdf", status: "failed", barcode_value: "V2-000009", appointment_id: 9, document_id: 55, attachment_completed_at: "2026-07-24T09:30:00Z", source_moved_at: null, archive_attempt_count: 7, last_archive_attempt_at: "2026-07-24T10:00:00Z", archive_last_error: "Connection unavailable", error_message: "Connection unavailable", attempt_count: 7, created_at: "2026-07-24T09:00:00Z", patient_name: "Patient One", patient_name_ar: "المريض الأول", patient_name_en: "Patient One", patient_mrn: "MRN-9", patient_date_of_birth: "1980-01-01", modality_name: "CT", modality_name_ar: "التصوير المقطعي", modality_name_en: "CT", exam_name: "Head", exam_name_ar: "الرأس", exam_name_en: "Head", failure_category: "smb_storage", processing_stage: "archive", appointment_date: "2026-07-25" };
 const completed = { ...archiveFailure, id: 10, filename: "completed.pdf", status: "processed", source_moved_at: "2026-07-24T10:01:00Z", archive_last_error: null };
 const pending = { ...archiveFailure, id: 20, filename: "queued.pdf", status: "pending", barcode_value: null, appointment_id: null, document_id: null, attachment_completed_at: null, source_moved_at: null, processing_stage: "queued" };
@@ -150,6 +150,35 @@ describe("RequestScansPage", () => {
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry matching" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+  });
+
+  it("shows waiting, pending, exporting progress, and verified page progress without missing-count artifacts", async () => {
+    mock([
+      { ...completed, id: 31, filename: "waiting.pdf", appointment_status: "scheduled", clinical_document_export_status: null },
+      { ...completed, id: 32, filename: "pending.pdf", appointment_status: "completed", clinical_document_export_status: "pending" },
+      { ...completed, id: 33, filename: "exporting.pdf", appointment_status: "completed", clinical_document_export_status: "exporting", clinical_document_export_expected_page_count: 2, clinical_document_export_verified_page_count: 1 },
+      { ...completed, id: 34, filename: "exported.pdf", appointment_status: "completed", clinical_document_export_status: "exported", clinical_document_export_expected_page_count: 2, clinical_document_export_exported_page_count: 2, clinical_document_export_verified_page_count: 2 },
+    ]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByText("Waiting for study completion")).toBeTruthy();
+    expect(screen.getByText("Pending export")).toBeTruthy();
+    expect(screen.getByText("Exporting")).toBeTruthy();
+    expect(screen.getByText("Exported to PACS")).toBeTruthy();
+    expect(screen.getAllByText(/1\/2 pages verified|2\/2 pages verified/)).toHaveLength(2);
+    expect(screen.queryByText(/undefined|NaN/)).toBeNull();
+  });
+
+  it("shows sanitized export details, retry timing, and a failed page in the existing details dialog", async () => {
+    mock([{ ...completed, filename: "export-details.pdf", appointment_status: "completed", clinical_document_export_status: "failed", clinical_document_export_id: 121, clinical_document_export_representation_type: "secondary_capture", clinical_document_export_expected_page_count: 2, clinical_document_export_exported_page_count: 1, clinical_document_export_verified_page_count: 1, clinical_document_export_failed_page_number: 2, clinical_document_export_last_attempt_at: "2026-07-28T10:00:00Z", clinical_document_export_next_retry_at: "2026-07-28T10:15:00Z", clinical_document_exported_at: "2026-07-28T09:59:00Z", clinical_document_export_last_error: "Authorization: Basic secret C:\\scans\\patient.pdf" }]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    expect(await screen.findByText("Failed on page 2")).toBeTruthy();
+    const menu = await openMenu("export-details.pdf");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "View processing details" }));
+    expect(await screen.findByRole("region", { name: "Clinical document export details" })).toBeTruthy();
+    expect(screen.getByText("Secondary Capture")).toBeTruthy();
+    expect(screen.getByText("1/2 exported; 1/2 verified")).toBeTruthy();
+    expect(screen.queryByText(/secret|C:\\scans/i)).toBeNull();
+    expect(screen.getByText(/configuration detail local path/i)).toBeTruthy();
   });
 
   it("scopes modality jobs, status, preview, and browser links to the selected modality", async () => {

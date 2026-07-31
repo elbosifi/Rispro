@@ -103,6 +103,10 @@ function safeErrorMessage(error: unknown): string {
   return raw.replace(/\b(?:password|authorization|basic)\b[^.\n]*/gi, "configuration detail").replace(/\s+/g, " ").trim().slice(0, 300) || "Clinical document export failed.";
 }
 
+function logClinicalDocumentExportWorker(event: string, fields: Record<string, unknown> = {}): void {
+  console.info(JSON.stringify({ type: "clinical_document_export_worker", event, ...fields }));
+}
+
 function isRetryableError(error: unknown): boolean {
   const code = errorCode(error);
   if (["orthanc_unavailable", "orthanc_timeout"].includes(code)) return true;
@@ -389,7 +393,9 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
 }
 
 export async function runClinicalDocumentExportTick(options: { batchSize?: number; shouldStop?: () => boolean } = {}): Promise<{ reconciled: number; processed: number; exported: number; failed: number }> {
-  const reconciled = await reconcileClinicalDocumentExports();
+  let reconciled: number;
+  try { reconciled = await reconcileClinicalDocumentExports(); }
+  catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_reconciliation_failed", error: safeErrorMessage(error) })); throw error; }
   const settings = await readAuthoritativeOrthancSettings();
   if (!settings.enabled) return { reconciled, processed: 0, exported: 0, failed: 0 };
   const workerId = `clinical-document-export-${randomUUID()}`;
@@ -400,12 +406,17 @@ export async function runClinicalDocumentExportTick(options: { batchSize?: numbe
     if (options.shouldStop?.()) break;
     const row = await claimNextClinicalDocumentExport(workerId);
     if (!row) break;
+    logClinicalDocumentExportWorker("export_claimed", { exportId: row.id, appointmentId: row.appointment_id, documentId: row.document_id });
     processed += 1;
     try { await processClaimedClinicalDocumentExport(row); } catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_processing_error", exportId: row.id, error: safeErrorMessage(error) })); }
     const latest = await loadExportWork(row.id);
     if (latest?.status === "exported") exported += 1;
     else if (latest?.status === "failed" || latest?.status === "blocked") failed += 1;
+    if (latest?.status === "exported") logClinicalDocumentExportWorker("export_succeeded", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id });
+    else if (latest?.status === "failed") logClinicalDocumentExportWorker("export_retry_scheduled", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id, nextRetryAt: latest.next_retry_at, error: latest.last_error });
+    else if (latest?.status === "blocked") logClinicalDocumentExportWorker("export_blocked", { exportId: latest.id, appointmentId: latest.appointment_id, documentId: latest.document_id, error: latest.last_error });
   }
+  if (reconciled > 0) logClinicalDocumentExportWorker("exports_reconciled", { count: reconciled });
   return { reconciled, processed, exported, failed };
 }
 
@@ -419,6 +430,7 @@ export async function startClinicalDocumentExportWorker(options: { intervalMs?: 
   const intervalMs = Math.max(5_000, options.intervalMs ?? 15_000);
   workerStopped = false;
   workerRunning = true;
+  logClinicalDocumentExportWorker("worker_started", { intervalMs, batchSize: options.batchSize ?? DEFAULT_BATCH_SIZE });
   void runClinicalDocumentExportTick({ batchSize: options.batchSize, shouldStop: () => workerStopped }).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_startup_tick_failed", error: safeErrorMessage(error) }))).finally(() => { workerRunning = false; });
   workerInterval = setInterval(() => {
     if (workerRunning || workerStopped) return;

@@ -77,12 +77,15 @@ test("creates parseable RGB Secondary Capture MR and CT pages with native PixelD
     const dicom = await createClinicalDocumentSecondaryCapture(pixels, 1, 2, { ...metadata, sopInstanceUid, modality, seriesNumber: 9000, instanceNumber });
     const dataset = parse(dicom);
     assert.equal(dataset.SOPClassUID, SECONDARY_CAPTURE_IMAGE_STORAGE_SOP_CLASS_UID);
+    assert.match(dicom.toString("latin1"), /1\.2\.840\.10008\.1\.2\.1/);
     assert.equal(dataset.StudyInstanceUID, metadata.studyInstanceUid); assert.equal(dataset.SeriesInstanceUID, metadata.seriesInstanceUid);
+    assert.equal(dataset.SOPInstanceUID, sopInstanceUid); assert.equal(dataset.PatientID, metadata.patientId); assert.equal(dataset.AccessionNumber, metadata.accessionNumber);
     assert.equal(dataset.Modality, expectedModality); assert.equal(dataset.SeriesDescription, "RISpro Scanned Documents");
     assert.deepEqual(dataset.ImageType, ["DERIVED", "SECONDARY"]); assert.equal(dataset.ConversionType, "SD");
     assert.equal(dataset.Rows, 1); assert.equal(dataset.Columns, 2); assert.equal(dataset.SamplesPerPixel, 3); assert.equal(dataset.PlanarConfiguration, 0);
     assert.equal(dataset.PhotometricInterpretation, "RGB"); assert.equal(dataset.BitsAllocated, 8); assert.equal(dataset.BitsStored, 8); assert.equal(dataset.HighBit, 7); assert.equal(dataset.PixelRepresentation, 0);
     assert.equal(pixelBytes(dataset.PixelData).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);
+    assert.equal(dataset.BurnedInAnnotation, "YES"); assert.equal(dataset.SeriesNumber, 9000); assert.equal(dataset.InstanceNumber, instanceNumber);
     const rawPixelData = parseRaw(dicom)["7FE00010"];
     assert.equal(rawPixelData?.vr, "OW");
     assert.equal(pixelBytes(rawPixelData?.Value).length, Number(dataset.Rows) * Number(dataset.Columns) * 3);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { pool } from "../db/pool.js";
-import { enqueueClinicalDocumentExportsForAppointment } from "./clinical-document-export-queue-service.js";
+import { enqueueClinicalDocumentExportsForAppointment, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
 import { claimNextClinicalDocumentExport, retryClinicalDocumentExport } from "./clinical-document-export-service.js";
 
 test.after(async () => { await pool.end().catch(() => undefined); });
@@ -18,6 +18,9 @@ test("clinical document export queue is idempotent, excludes Reception documents
   let bookingId: number | null = null;
   let clinicalDocumentId: number | null = null;
   let receptionDocumentId: number | null = null;
+  let linkedClinicalDocumentId: number | null = null;
+  let historicalClinicalDocumentId: number | null = null;
+  let unrelatedClinicalDocumentId: number | null = null;
   let userId: number | null = null;
   let exportId: number | null = null;
 
@@ -70,6 +73,30 @@ test("clinical document export queue is idempotent, excludes Reception documents
     const secondQueue = await enqueueClinicalDocumentExportsForAppointment(bookingId);
     assert.deepEqual(secondQueue, []);
 
+    const linkedClinicalDocument = await client.query<{ id: number }>(
+      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'clinical_document','modality_scan_automation',$2,$3,'application/pdf',5) returning id",
+      [patientId, `linked-${suffix}.pdf`, `documents/export-test/${suffix}-linked.pdf`],
+    );
+    linkedClinicalDocumentId = linkedClinicalDocument.rows[0]!.id;
+    await client.query("insert into document_appointment_links(document_id,appointment_id) values($1,$2)", [linkedClinicalDocumentId, bookingId]);
+    assert.equal((await enqueueClinicalDocumentExportsForAppointment(bookingId)).length, 1);
+    assert.deepEqual(await enqueueClinicalDocumentExportsForAppointment(bookingId), []);
+
+    const historical = await client.query<{ id: number }>(
+      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','modality_scan_automation',$2,$3,'application/pdf',5,$4) returning id",
+      [patientId, `historical-${suffix}.pdf`, `documents/export-test/${suffix}-historical.pdf`, bookingId],
+    );
+    historicalClinicalDocumentId = historical.rows[0]!.id;
+    const unrelated = await client.query<{ id: number }>(
+      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','manual_upload',$2,$3,'application/pdf',5,$4) returning id",
+      [patientId, `unrelated-${suffix}.pdf`, `documents/export-test/${suffix}-unrelated.pdf`, bookingId],
+    );
+    unrelatedClinicalDocumentId = unrelated.rows[0]!.id;
+    assert.equal(await reconcileClinicalDocumentExports(), 1);
+    assert.equal(await reconcileClinicalDocumentExports(), 0);
+    assert.equal((await client.query("select 1 from clinical_document_exports where document_id=$1", [historicalClinicalDocumentId])).rowCount, 1);
+    assert.equal((await client.query("select 1 from clinical_document_exports where document_id=$1", [unrelatedClinicalDocumentId])).rowCount, 0);
+
     const incompleteClaim = await claimNextClinicalDocumentExport(`queue-test-${suffix}`);
     assert.equal(incompleteClaim, null);
 
@@ -117,7 +144,7 @@ test("clinical document export queue is idempotent, excludes Reception documents
     assert.equal(receptionRows.rowCount, 0);
   } finally {
     await client.query("delete from clinical_document_exports where appointment_id=$1", [bookingId]);
-    await client.query("delete from documents where id = any($1::bigint[])", [[clinicalDocumentId, receptionDocumentId].filter((id): id is number => id !== null)]);
+    await client.query("delete from documents where id = any($1::bigint[])", [[clinicalDocumentId, receptionDocumentId, linkedClinicalDocumentId, historicalClinicalDocumentId, unrelatedClinicalDocumentId].filter((id): id is number => id !== null)]);
     await client.query("delete from appointments_v2.bookings where id=$1", [bookingId]);
     await client.query("delete from patients where id=$1", [patientId]);
     await client.query("delete from exam_types where id=$1", [examTypeId]);
