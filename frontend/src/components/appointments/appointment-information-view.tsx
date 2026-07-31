@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { CalendarClock, Check, Copy, Edit3, UserRound } from "lucide-react";
+import { CalendarClock, Check, ChevronLeft, ChevronRight, Copy, Edit3 } from "lucide-react";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { pushToast } from "@/lib/toast";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AppointmentLookups, PatientDirectorySummary } from "@/types/api";
-import { Badge, Button } from "@/components/shared";
+import { Badge, Button, DisclosureSection } from "@/components/shared";
 import { PatientSummaryContent } from "@/components/patients/patient-summary-content";
 import { usePatientDirectorySummary } from "@/components/patients/patient-summary-formatters";
 import { AppointmentEditor } from "./appointment-editor";
@@ -40,8 +40,7 @@ function text(language: "ar" | "en", ar: string, en: string) {
 function statusVariant(status: string): "success" | "warning" | "error" | "info" | "neutral" {
   if (status === "completed") return "success";
   if (["no-show", "cancelled", "voided"].includes(status)) return "error";
-  if (["arrived", "waiting"].includes(status)) return "warning";
-  if (status === "discontinued") return "warning";
+  if (["arrived", "waiting", "discontinued"].includes(status)) return "warning";
   if (status === "scheduled" || status === "in-progress") return "info";
   return "neutral";
 }
@@ -65,20 +64,21 @@ function CopyValueButton({ value, label }: { value: string | null | undefined; l
       pushToast({ type: "error", title: text(language, "فشل النسخ", "Copy failed"), message: label });
     }
   };
-  return <button type="button" onClick={() => void copy()} className="ms-1 inline-flex min-h-7 min-w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={`${text(language, "نسخ", "Copy")} ${label}`} title={`${text(language, "نسخ", "Copy")} ${label}`}>{copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}</button>;
+  return <button type="button" onClick={() => void copy()} className="ms-1 inline-flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={`${text(language, "نسخ", "Copy")} ${label}`} title={`${text(language, "نسخ", "Copy")} ${label}`}>{copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}</button>;
 }
 
 function CopyableValue({ value, label }: { value: string | number | null | undefined; label: string }) {
   const raw = value === null || value === undefined ? "" : String(value);
-  return <span className="inline-flex max-w-full items-center" dir="ltr"><span className="break-all">{valueOrDash(value)}</span><CopyValueButton value={raw} label={label} /></span>;
+  return <span className="inline-flex max-w-full items-center [unicode-bidi:isolate]" dir="ltr"><span className="break-all">{valueOrDash(value)}</span><CopyValueButton value={raw} label={label} /></span>;
 }
 
 function DefinitionGrid({ rows }: { rows: DefinitionRow[] }) {
-  return <dl className="grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">{rows.map((row) => <div key={row.label} className="min-w-0"><dt className="text-[11px] font-medium leading-4 text-muted-foreground">{row.label}</dt><dd dir={row.dir} className={`mt-0.5 min-w-0 break-words leading-5 ${row.emphasis === "strong" ? "text-sm font-semibold text-foreground" : "text-[13px] font-medium text-foreground"}`}>{row.value}</dd></div>)}</dl>;
+  return <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">{rows.map((row) => <div key={row.label} className="min-w-0"><dt className="text-xs font-medium leading-5 text-muted-foreground">{row.label}</dt><dd dir={row.dir} className={`mt-1 min-w-0 break-words leading-6 ${row.emphasis === "strong" ? "text-[15px] font-semibold text-foreground" : "text-sm font-medium text-foreground"}`}>{row.value}</dd></div>)}</dl>;
 }
 
 function DetailGroup({ title, rows, prominent = false }: { title: string; rows: DefinitionRow[]; prominent?: boolean }) {
-  return <section className={prominent ? "rounded-lg bg-muted/20 p-3" : "pt-1"} aria-labelledby={`appointment-group-${title.replace(/\s+/g, "-").toLowerCase()}`}><h3 id={`appointment-group-${title.replace(/\s+/g, "-").toLowerCase()}`} className="mb-2 text-xs font-semibold text-foreground">{title}</h3><DefinitionGrid rows={rows} /></section>;
+  const id = `appointment-group-${title.replace(/\s+/g, "-").toLowerCase()}`;
+  return <section className={prominent ? "rounded-lg bg-muted/20 p-3.5" : "pt-1"} aria-labelledby={id}><h3 id={id} className="mb-3 text-sm font-semibold text-foreground">{title}</h3><DefinitionGrid rows={rows} /></section>;
 }
 
 function LongTextDisclosure({ title, textValue }: { title: string; textValue: string | null | undefined }) {
@@ -86,7 +86,7 @@ function LongTextDisclosure({ title, textValue }: { title: string; textValue: st
   const [expanded, setExpanded] = useState(false);
   const content = String(textValue ?? "").trim();
   if (!content) return null;
-  return <section className="rounded-lg bg-muted/20 p-3"><h3 className="text-xs font-semibold text-foreground">{title}</h3><p className={`mt-1 whitespace-pre-wrap text-[13px] leading-5 text-foreground ${expanded ? "" : "line-clamp-3"}`}>{content}</p><button type="button" className="mt-2 text-xs font-semibold text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? text(language, "عرض أقل", "Show less") : text(language, "عرض التعليمات كاملة", "Show full instructions")}</button></section>;
+  return <section className="rounded-lg bg-muted/20 p-3.5"><h3 className="text-sm font-semibold text-foreground">{title}</h3><p className={`mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground ${expanded ? "" : "line-clamp-3"}`}>{content}</p><button type="button" className="mt-2 min-h-9 text-xs font-semibold text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? text(language, "عرض أقل", "Show less") : text(language, "عرض التعليمات كاملة", "Show full instructions")}</button></section>;
 }
 
 function reportAvailabilityLabel(language: "ar" | "en", state: string | null | undefined, canViewReport?: boolean) {
@@ -162,22 +162,36 @@ function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenR
     { label: text(language, "ملاحظات التباين", "Contrast notes"), value: valueOrDash(protocol?.contrastNotes) },
   ];
   const hasCapacity = [appointment.isOverbooked, appointment.overbookingReason, appointment.approvedByName, appointment.specialReasonCode, appointment.specialReasonNote].some(Boolean);
-  return <><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 id="appointment-details-heading" className="text-sm font-semibold">{t("registrations.appointmentDetails")}</h2><Button type="button" size="sm" onClick={onEdit}><Edit3 size={14} className="me-1.5" aria-hidden="true" />{t("common.edit")}</Button></div><div className="space-y-5"><DetailGroup title={text(language, "الفحص", "Examination")} rows={examinationRows} prominent /><DetailGroup title={text(language, "الجدولة وسير العمل", "Schedule and workflow")} rows={scheduleRows} /><details className="border-t border-border/70 pt-3"><summary className="cursor-pointer text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{text(language, "الأوقات الإضافية لسير العمل", "Additional workflow timestamps")}</summary><div className="mt-3"><DefinitionGrid rows={workflowRows} /></div></details><section className="space-y-3" aria-labelledby="appointment-clinical-heading"><h3 id="appointment-clinical-heading" className="text-xs font-semibold">{text(language, "المعلومات السريرية", "Clinical information")}</h3><DefinitionGrid rows={[{ label: text(language, "الطبيب الطالب", "Ordering / requesting doctor"), value: dash }]} /><LongTextDisclosure title={text(language, "ملاحظات الموعد", "Appointment notes")} textValue={appointment.notes} /><LongTextDisclosure title={text(language, "تعليمات الجهاز", "Modality instructions")} textValue={chooseLocalized(language, appointment.modalityGeneralInstructionAr, appointment.modalityGeneralInstructionEn)} /><LongTextDisclosure title={text(language, "تعليمات الفحص", "Examination instructions")} textValue={chooseLocalized(language, appointment.examSpecificInstructionAr, appointment.examSpecificInstructionEn)} /></section>{hasCapacity ? <details className="border-t border-border/70 pt-3"><summary className="cursor-pointer text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{text(language, "السعة واستثناءات الحجز", "Capacity and booking exceptions")}</summary><div className="mt-3"><DefinitionGrid rows={capacityRows} /></div></details> : null}<details className="border-t border-border/70 pt-3"><summary className="cursor-pointer text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{text(language, "التفاصيل الإدارية والتدقيق", "Administrative and audit details")}</summary><div className="mt-3"><DefinitionGrid rows={auditRows} /></div></details><details className="border-t border-border/70 pt-3"><summary className="cursor-pointer text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{text(language, "تفاصيل PACS التقنية", "Technical PACS details")}</summary><div className="mt-3"><DefinitionGrid rows={technicalRows} /></div></details></div><div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">{onOpenReschedule ? <Button type="button" variant="outline" size="sm" onClick={onOpenReschedule}><CalendarClock size={14} className="me-1.5" aria-hidden="true" />{t("registrations.reschedule")}</Button> : null}<Button type="button" variant="outline" size="sm" onClick={onOpenStatus}>{text(language, "تغيير الحالة", "Change status")}</Button></div></>;
+
+  return <>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2><Button type="button" size="sm" onClick={onEdit}><Edit3 size={15} className="me-1.5" aria-hidden="true" />{t("common.edit")}</Button></div>
+    <div className="space-y-6">
+      <DetailGroup title={text(language, "الفحص", "Examination")} rows={examinationRows} prominent />
+      <DetailGroup title={text(language, "الجدولة وسير العمل", "Schedule and workflow")} rows={scheduleRows} />
+      <DisclosureSection title={text(language, "الأوقات الإضافية لسير العمل", "Additional workflow timestamps")}><DefinitionGrid rows={workflowRows} /></DisclosureSection>
+      <section className="space-y-4" aria-labelledby="appointment-clinical-heading"><h3 id="appointment-clinical-heading" className="text-sm font-semibold">{text(language, "المعلومات السريرية", "Clinical information")}</h3><DefinitionGrid rows={[{ label: text(language, "الطبيب الطالب", "Ordering / requesting doctor"), value: dash }]} /><LongTextDisclosure title={text(language, "ملاحظات الموعد", "Appointment notes")} textValue={appointment.notes} /><LongTextDisclosure title={text(language, "تعليمات الجهاز", "Modality instructions")} textValue={chooseLocalized(language, appointment.modalityGeneralInstructionAr, appointment.modalityGeneralInstructionEn)} /><LongTextDisclosure title={text(language, "تعليمات الفحص", "Examination instructions")} textValue={chooseLocalized(language, appointment.examSpecificInstructionAr, appointment.examSpecificInstructionEn)} /></section>
+      {hasCapacity ? <DisclosureSection title={text(language, "السعة واستثناءات الحجز", "Capacity and booking exceptions")}><DefinitionGrid rows={capacityRows} /></DisclosureSection> : null}
+      <DisclosureSection title={text(language, "التفاصيل الإدارية والتدقيق", "Administrative and audit details")}><DefinitionGrid rows={auditRows} /></DisclosureSection>
+      <DisclosureSection title={text(language, "تفاصيل PACS التقنية", "Technical PACS details")}><DefinitionGrid rows={technicalRows} /></DisclosureSection>
+    </div>
+    <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">{onOpenReschedule ? <Button type="button" variant="outline" size="sm" onClick={onOpenReschedule}><CalendarClock size={15} className="me-1.5" aria-hidden="true" />{t("registrations.reschedule")}</Button> : null}<Button type="button" variant="outline" size="sm" onClick={onOpenStatus}>{text(language, "تغيير الحالة", "Change status")}</Button></div>
+  </>;
 }
 
 function AppointmentDetailsSection({ appointment, lookups, reportStatus, onOpenReschedule, onOpenStatus, onAppointmentUpdated }: { appointment: AppointmentWithDetails; lookups: AppointmentLookups | undefined; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onOpenReschedule?: () => void; onOpenStatus: () => void; onAppointmentUpdated: (appointment: AppointmentWithDetails) => void }) {
   const { t } = useLanguage();
   const [mode, setMode] = useState<AppointmentDetailsMode>("view");
-  return <section aria-labelledby="appointment-details-heading" className="min-w-0 rounded-xl border border-border bg-background p-3 sm:p-4">{mode === "edit" ? <><div className="mb-3 flex items-center justify-between gap-2"><h2 id="appointment-details-heading" className="text-sm font-semibold">{t("registrations.appointmentDetails")}</h2></div><AppointmentEditor key={appointment.id} appointment={appointment} lookups={lookups} editing onCancel={() => setMode("view")} onUpdated={(updated) => { onAppointmentUpdated(updated); setMode("view"); }} /></> : <AppointmentDetailsReadOnly appointment={appointment} reportStatus={reportStatus} onEdit={() => setMode("edit")} onOpenReschedule={onOpenReschedule} onOpenStatus={onOpenStatus} />}</section>;
+  return <section aria-labelledby="appointment-details-heading" className="min-w-0 rounded-xl border border-border bg-background p-4 sm:p-5">{mode === "edit" ? <><div className="mb-4 flex items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2></div><AppointmentEditor key={appointment.id} appointment={appointment} lookups={lookups} editing onCancel={() => setMode("view")} onUpdated={(updated) => { onAppointmentUpdated(updated); setMode("view"); }} /></> : <AppointmentDetailsReadOnly appointment={appointment} reportStatus={reportStatus} onEdit={() => setMode("edit")} onOpenReschedule={onOpenReschedule} onOpenStatus={onOpenStatus} />}</section>;
 }
 
-function PatientDetailsSection({ appointment, onOpenPatientProfile }: { appointment: AppointmentWithDetails; onOpenPatientProfile: () => void }) {
+function PatientDetailsSection({ appointment }: { appointment: AppointmentWithDetails }) {
   const { t, language } = useLanguage();
   const patientQuery = usePatientDirectorySummary(appointment.patientId);
-  return <section aria-labelledby="appointment-patient-details-heading" className="min-w-0 rounded-xl border border-border bg-background p-3 sm:p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 id="appointment-patient-details-heading" className="text-sm font-semibold">{t("registrations.patientDetails")}</h2><Button type="button" variant="outline" size="sm" onClick={onOpenPatientProfile}><UserRound size={14} className="me-1.5" aria-hidden="true" />{t("registrations.openPatientProfile")}</Button></div>{patientQuery.isLoading ? <p className="mb-3 text-xs text-muted-foreground" role="status">{t("common.loading")}</p> : null}{patientQuery.isError ? <p className="mb-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700" role="alert">{t("registrations.patientDetailsLoadFailed")}</p> : null}{patientQuery.data ? <PatientSummaryContent summary={patientQuery.data as PatientDirectorySummary} variant="embedded" /> : <p className="text-sm text-muted-foreground">{text(language, "لا تتوفر بيانات المريض.", "Patient details are unavailable.")}</p>}</section>;
+  return <section aria-labelledby="appointment-patient-details-heading" className="min-w-0 rounded-xl border border-border bg-background p-4 sm:p-5"><div className="mb-4"><h2 id="appointment-patient-details-heading" className="text-base font-semibold">{t("registrations.patientDetails")}</h2></div>{patientQuery.isLoading ? <p className="mb-3 text-sm text-muted-foreground" role="status">{t("common.loading")}</p> : null}{patientQuery.isError ? <p className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{t("registrations.patientDetailsLoadFailed")}</p> : null}{patientQuery.data ? <PatientSummaryContent summary={patientQuery.data as PatientDirectorySummary} variant="embedded" /> : <p className="text-sm text-muted-foreground">{text(language, "لا تتوفر بيانات المريض.", "Patient details are unavailable.")}</p>}</section>;
 }
 
 export function AppointmentInformationView(props: AppointmentInformationViewProps) {
-  const { t } = useLanguage();
-  return <div data-testid="appointment-information-view" className="min-h-full min-w-0"><div className="mb-3 flex flex-wrap items-center gap-2"><Button type="button" variant="ghost" size="sm" onClick={props.onBack} aria-label={t("common.back")}><span aria-hidden="true">←</span></Button><h1 className="text-base font-semibold">{t("registrations.information")}</h1></div><div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]"><PatientDetailsSection appointment={props.appointment} onOpenPatientProfile={props.onOpenPatientProfile} /><AppointmentDetailsSection appointment={props.appointment} lookups={props.lookups} reportStatus={props.reportStatus} onOpenReschedule={props.onOpenReschedule} onOpenStatus={props.onOpenStatus} onAppointmentUpdated={props.onAppointmentUpdated} /></div></div>;
+  const { t, language } = useLanguage();
+  const isRtl = language === "ar";
+  return <div data-testid="appointment-information-view" className="min-h-full min-w-0"><div className="mb-4 flex flex-wrap items-center gap-2"><Button type="button" variant="ghost" size="sm" className="min-h-10 gap-1.5 px-2 text-sm" onClick={props.onBack} aria-label={t("common.back")}>{isRtl ? <ChevronRight data-testid="appointment-information-back-icon" data-direction="right" size={18} aria-hidden="true" /> : <ChevronLeft data-testid="appointment-information-back-icon" data-direction="left" size={18} aria-hidden="true" />}<span>{t("common.back")}</span></Button><h1 className="text-lg font-semibold">{t("registrations.information")}</h1></div><div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(370px,410px)_minmax(0,1fr)]"><PatientDetailsSection appointment={props.appointment} /><AppointmentDetailsSection appointment={props.appointment} lookups={props.lookups} reportStatus={props.reportStatus} onOpenReschedule={props.onOpenReschedule} onOpenStatus={props.onOpenStatus} onAppointmentUpdated={props.onAppointmentUpdated} /></div></div>;
 }

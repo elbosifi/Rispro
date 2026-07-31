@@ -192,6 +192,50 @@ describe("AppointmentManageModal", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
+  it("keeps the persistent header badge cluster useful when values are missing", async () => {
+    renderModal({ initialTab: "documents" });
+    await screen.findByTestId("appointment-header-badge-cluster");
+
+    const cluster = screen.getByTestId("appointment-header-badge-cluster");
+    expect(cluster.textContent).toContain("Non-Oncology");
+    expect(cluster.textContent).toContain("Scheduled");
+    expect(cluster.textContent).toContain("Priority not assigned");
+    expect(cluster.textContent).toContain("Report not required");
+    expect(cluster.textContent).toContain("Protocol not assigned");
+    expect(cluster.textContent).not.toContain("scheduled");
+  });
+
+  it("shows assigned priority, report requirement, and protocol state without adding protocol badges to ultrasound", async () => {
+    const protocolAppointment = {
+      ...appointment,
+      modalityCode: "MRI",
+      modalityNameEn: "MRI",
+      priorityNameEn: "STAT",
+      requiresReport: true,
+      protocolAssignmentSummary: {
+        assignmentId: 1,
+        protocolName: "MRI Brain",
+        versionNumber: "1.0",
+        scannerName: "MRI A",
+        assignedBy: "Doctor",
+        assignedAt: null,
+        protocolNotes: null,
+        contrastNotes: null,
+      },
+    } as AppointmentWithDetails;
+    mocks.getAppointmentById.mockResolvedValueOnce(protocolAppointment);
+    renderModal({ initialTab: "documents" });
+    const cluster = await screen.findByTestId("appointment-header-badge-cluster");
+    expect(cluster.textContent).toContain("STAT");
+    expect(cluster.textContent).toContain("Report required");
+    expect(cluster.textContent).toContain("Protocol assigned");
+
+    cleanup();
+    mocks.getAppointmentById.mockResolvedValueOnce({ ...protocolAppointment, modalityCode: "US", modalityNameEn: "Ultrasound", protocolAssignmentSummary: null });
+    renderModal({ initialTab: "documents" });
+    expect((await screen.findByTestId("appointment-header-badge-cluster")).textContent).not.toContain("Protocol");
+  });
+
   it("opens the Information page with both populated sections", async () => {
     renderModal({ initialTab: "details" });
 
@@ -215,11 +259,11 @@ describe("AppointmentManageModal", () => {
     expect(screen.queryByLabelText("Appointment summary")).toBeNull();
     expect(screen.getByRole("heading", { name: "Examination" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Schedule and workflow" })).toBeTruthy();
-    const demographics = screen.getByText("More demographics").closest("details");
-    expect(demographics?.hasAttribute("open")).toBe(false);
-    fireEvent.click(screen.getByText("More demographics"));
-    expect(demographics?.hasAttribute("open")).toBe(true);
-    expect(demographics?.textContent).toContain("01/01/1986");
+    const demographics = screen.getByRole("button", { name: "More demographics" });
+    expect(demographics.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(demographics);
+    expect(demographics.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("01/01/1986")).toBeTruthy();
   });
 
   it("opens status in a compact dialog without replacing the Documents workspace", async () => {

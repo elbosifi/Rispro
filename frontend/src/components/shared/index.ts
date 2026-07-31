@@ -15,3 +15,4 @@ export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
 export { Alert, AlertTitle, AlertDescription } from "./Alert";
 export { AnchoredMenu } from "./AnchoredMenu";
+export { DisclosureSection } from "./DisclosureSection";

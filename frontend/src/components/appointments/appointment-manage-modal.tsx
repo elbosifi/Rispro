@@ -122,6 +122,38 @@ function protocolVersionText(appointment: AppointmentWithDetails): string | null
   return [summary.protocolName, summary.versionNumber ? `v${summary.versionNumber}` : null].filter(Boolean).join(" ");
 }
 
+function isProtocolModality(appointment: AppointmentWithDetails): boolean {
+  const code = String(appointment.modalityCode || "").trim().toUpperCase();
+  return code === "CT" || code === "MRI";
+}
+
+function appointmentStatusVariant(status: string): "success" | "warning" | "error" | "info" | "neutral" {
+  if (status === "completed") return "success";
+  if (["no-show", "cancelled", "voided"].includes(status)) return "error";
+  if (["arrived", "waiting", "discontinued"].includes(status)) return "warning";
+  if (["scheduled", "in-progress"].includes(status)) return "info";
+  return "neutral";
+}
+
+function priorityVariant(priority: string | null | undefined): "warning" | "error" | "neutral" {
+  const normalized = String(priority || "").toLowerCase();
+  if (!normalized) return "neutral";
+  if (normalized.includes("stat") || normalized.includes("urgent")) return "error";
+  return "warning";
+}
+
+function AppointmentHeaderBadgeCluster({ appointment, language }: { appointment: AppointmentWithDetails; language: "ar" | "en" }) {
+  const priority = chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn);
+  const protocolAssigned = Boolean(appointment.protocolAssignmentSummary);
+  return <div data-testid="appointment-header-badge-cluster" className="flex min-w-0 flex-wrap items-center gap-2">
+    <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset size="default" />
+    <Badge variant={appointmentStatusVariant(appointment.status)} className="whitespace-nowrap">{statusLabel(language, appointment.status)}</Badge>
+    <Badge variant={priorityVariant(priority)} className="whitespace-nowrap">{priority || chooseLocalized(language, "الأولوية غير محددة", "Priority not assigned")}</Badge>
+    <Badge variant={appointment.requiresReport ? "info" : "neutral"} className="whitespace-nowrap">{appointment.requiresReport ? chooseLocalized(language, "التقرير مطلوب", "Report required") : chooseLocalized(language, "التقرير غير مطلوب", "Report not required")}</Badge>
+    {isProtocolModality(appointment) ? <Badge variant={protocolAssigned ? "success" : "neutral"} className="whitespace-nowrap">{protocolAssigned ? chooseLocalized(language, "البروتوكول معين", "Protocol assigned") : chooseLocalized(language, "البروتوكول غير معين", "Protocol not assigned")}</Badge> : null}
+  </div>;
+}
+
 export function AppointmentManageModal({
   appointmentId,
   open,
@@ -619,11 +651,11 @@ export function AppointmentManageModal({
         className={`flex min-h-0 flex-col overflow-hidden !p-0 ${documentReviewExpanded ? "!m-2 !h-[calc(100dvh-16px)] !max-h-[calc(100dvh-16px)] !rounded-lg" : "h-[94dvh] !rounded-2xl"}`}
       >
         <DialogHeader closeLabel={t("toast.close")} className="sticky top-0 z-30 mb-0 shrink-0 border-b border-border bg-background px-3 py-2.5 sm:px-5 sm:py-3">
-          {appointment ? <div data-testid="compact-document-appointment-header" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(220px,1.2fr)_minmax(240px,1fr)_minmax(190px,0.8fr)_auto] lg:items-center">
-            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><DialogTitle className="truncate text-sm sm:text-base">{dialogTitle}</DialogTitle><PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" /></div><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"><span dir="ltr" className="font-mono-data">MRN {appointment.mrn || appointment.patientPrimaryIdentifierValue || "—"}</span><span dir="ltr" className="font-mono-data">{appointment.accessionNumber}</span></div></div>
-            <div className="min-w-0 border-s border-border ps-3"><p className="truncate text-xs font-semibold text-foreground">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—"}</p><p className="mt-1 truncate text-[11px] text-muted-foreground">{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)} · {appointment.modalityCode || "—"}</p></div>
-            <div className="min-w-0 border-s border-border ps-3"><div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">{statusLabel(language, appointment.status)}</span>{appointment.priorityNameAr || appointment.priorityNameEn ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">{chooseLocalized(language, appointment.priorityNameAr, appointment.priorityNameEn)}</span> : null}{appointment.protocolAssignmentSummary ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">{chooseLocalized(language, "بروتوكول", "Protocol")}</span> : null}</div><p className="mt-1 text-[11px] text-muted-foreground">{formatDateLy(appointment.appointmentDate)} · {appointment.bookingTime || "—"}</p></div>
-            <div className="relative flex items-center justify-start gap-1 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => selectTab("details")}><Edit3 size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => void printAppointmentSlipById(appointment.id, language)}><Printer size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-2.5 text-[11px]" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><AnchoredMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen} dir={isRtl ? "rtl" : "ltr"} trigger={<Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")}><MoreHorizontal size={16} aria-hidden="true" /></Button>}>{moreMenuItems}</AnchoredMenu></div>
+          {appointment ? <div data-testid="compact-document-appointment-header" className="grid min-w-0 gap-3 lg:grid-cols-[minmax(220px,1.1fr)_minmax(240px,1fr)_minmax(280px,1.4fr)_auto] lg:items-center">
+            <div className="min-w-0"><DialogTitle className="truncate text-base font-semibold sm:text-lg">{dialogTitle}</DialogTitle><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">MRN {appointment.mrn || appointment.patientPrimaryIdentifierValue || "—"}</span><span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.accessionNumber}</span></div></div>
+            <div className="min-w-0 border-s border-border ps-3"><p className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—"}</p><p className="mt-1 truncate text-xs text-muted-foreground">{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)} · {appointment.modalityCode || "—"}</p></div>
+            <div className="min-w-0 border-s border-border ps-3"><AppointmentHeaderBadgeCluster appointment={appointment} language={language} /><p className="mt-2 text-xs text-muted-foreground"><span dir="ltr" className="[unicode-bidi:isolate]">{formatDateLy(appointment.appointmentDate)} · {appointment.bookingTime || chooseLocalized(language, "الوقت غير محدد", "Time not assigned")}</span></p></div>
+            <div className="relative flex flex-wrap items-center justify-start gap-1.5 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => selectTab("details")}><Edit3 size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => void printAppointmentSlipById(appointment.id, language)}><Printer size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><AnchoredMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen} dir={isRtl ? "rtl" : "ltr"} trigger={<Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")}><MoreHorizontal size={16} aria-hidden="true" /></Button>}>{moreMenuItems}</AnchoredMenu></div>
           </div> : <DialogTitle>{t("registrations.manage")}</DialogTitle>}
         </DialogHeader>
         {/*

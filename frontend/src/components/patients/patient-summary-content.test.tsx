@@ -37,7 +37,8 @@ describe("PatientSummaryContent", () => {
 
     expect(screen.getByText("Khaled Walid Mahmoud")).toBeTruthy();
     expect(screen.getByText(/19 years · Female/)).toBeTruthy();
-    expect(screen.getByText("More demographics").closest("details")?.hasAttribute("open")).toBe(false);
+    const demographics = screen.getByRole("button", { name: "More demographics" });
+    expect(demographics.getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByText("N4609871")).toBeTruthy();
     expect(screen.queryAllByText("N4609871")).toHaveLength(1);
     expect(screen.getByText("More demographics")).toBeTruthy();

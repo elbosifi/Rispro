@@ -4,7 +4,7 @@ import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
-import { Badge, Button } from "@/components/shared";
+import { Badge, Button, DisclosureSection } from "@/components/shared";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import type { PatientDirectorySummary } from "@/types/api";
 import { formatPatientIdentifierRows, formatPatientSex } from "@/components/patients/patient-summary-formatters";
@@ -41,7 +41,7 @@ function CopyValueButton({ value, label }: { value: string | null | undefined; l
 function Value({ value, dir = "auto", copyLabel }: { value: string | number | null | undefined; dir?: "auto" | "ltr"; copyLabel?: string }) {
   const text = value === null || value === undefined || String(value).trim() === "" ? "—" : String(value);
   return (
-    <span dir={dir} className="inline-flex max-w-full items-center break-words text-end text-[13px] font-medium text-foreground">
+    <span dir={dir} className="inline-flex max-w-full items-center break-words text-end text-sm font-medium leading-6 text-foreground [unicode-bidi:isolate]">
       <span className={dir === "ltr" ? "break-all" : ""}>{text}</span>
       {copyLabel ? <CopyValueButton value={text === "—" ? null : text} label={copyLabel} /> : null}
     </span>
@@ -49,11 +49,11 @@ function Value({ value, dir = "auto", copyLabel }: { value: string | number | nu
 }
 
 function WarningBadge({ label }: { label: string }) {
-  return <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"><AlertTriangle size={10} aria-hidden="true" />{label}</span>;
+  return <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"><AlertTriangle size={12} aria-hidden="true" />{label}</span>;
 }
 
 function DefinitionRows({ rows }: { rows: Array<{ label: string; value: React.ReactNode }> }) {
-  return <dl className="space-y-2">{rows.map((row) => <div key={row.label} className="flex min-w-0 items-start justify-between gap-3"><dt className="shrink-0 text-[11px] font-medium text-muted-foreground">{row.label}</dt><dd className="min-w-0 text-end">{row.value}</dd></div>)}</dl>;
+  return <dl className="space-y-3">{rows.map((row) => <div key={row.label} className="flex min-w-0 items-start justify-between gap-3"><dt className="shrink-0 text-xs font-medium leading-5 text-muted-foreground">{row.label}</dt><dd className="min-w-0 text-end">{row.value}</dd></div>)}</dl>;
 }
 
 type PatientSummaryContentProps = {
@@ -96,7 +96,7 @@ export function PatientSummaryContent({
       <section aria-labelledby={`${variant}-patient-identity-heading`}>
         <h3 id={`${variant}-patient-identity-heading`} className="sr-only">{t(language, "patients.directory.drawer.demographics")}</h3>
         <div className="border-b border-border/70 pb-3">
-          <p className="text-lg font-semibold leading-7 text-foreground">{demographics.arabicFullName || "—"}</p>
+          <p className="text-base font-semibold leading-7 text-foreground">{demographics.arabicFullName || "—"}</p>
           <p className="text-sm font-medium leading-6 text-muted-foreground">{demographics.englishFullName || "—"}</p>
         </div>
         <div className="mt-3">
@@ -110,34 +110,33 @@ export function PatientSummaryContent({
       </section>
 
       <section aria-labelledby={`${variant}-patient-identifiers-heading`}>
-        <h3 id={`${variant}-patient-identifiers-heading`} className="mb-2 text-xs font-semibold text-foreground">{t(language, "patients.directory.drawer.identifiers")}</h3>
+        <h3 id={`${variant}-patient-identifiers-heading`} className="mb-2 text-sm font-semibold text-foreground">{t(language, "patients.directory.drawer.identifiers")}</h3>
         <div className="space-y-2">
-          {identifiers.length ? identifiers.map((identifier) => <div key={identifier.id} className="flex items-center justify-between gap-3"><span className="text-[11px] text-muted-foreground">{identifier.typeLabel}{identifier.isPrimary ? ` · ${t(language, "patients.identifier.primary")}` : ""}</span><Value value={identifier.value} dir="ltr" copyLabel={identifier.typeLabel} /></div>) : <Value value={null} />}
+          {identifiers.length ? identifiers.map((identifier) => <div key={identifier.id} className="flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">{identifier.typeLabel}{identifier.isPrimary ? ` · ${t(language, "patients.identifier.primary")}` : ""}</span><Value value={identifier.value} dir="ltr" copyLabel={identifier.typeLabel} /></div>) : <Value value={null} />}
         </div>
       </section>
 
       <section aria-labelledby={`${variant}-patient-contact-heading`}>
-        <h3 id={`${variant}-patient-contact-heading`} className="mb-2 text-xs font-semibold text-foreground">{t(language, "patients.directory.drawer.contact")}</h3>
+        <h3 id={`${variant}-patient-contact-heading`} className="mb-2 text-sm font-semibold text-foreground">{t(language, "patients.directory.drawer.contact")}</h3>
         <DefinitionRows rows={[
           { label: t(language, "patients.phone") + " 2", value: <Value value={contact.phone2} dir="ltr" copyLabel={contact.phone2 ? `${t(language, "patients.phone")} 2` : undefined} /> },
           { label: t(language, "patients.address"), value: <Value value={contact.address} /> },
         ]} />
       </section>
 
-      <details open={variant === "drawer"} className="border-t border-border/70 pt-3">
-        <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{t(language, "patients.demographics.more")}</summary>
-        <div className="mt-3"><DefinitionRows rows={[
+      <DisclosureSection title={t(language, "patients.demographics.more")} defaultOpen={variant === "drawer"}>
+        <DefinitionRows rows={[
           { label: t(language, "patients.dateOfBirth"), value: <Value value={formatDateLy(demographics.dateOfBirth)} dir="ltr" /> },
           { label: t(language, "patients.directory.drawer.registeredAt"), value: <Value value={formatDateTimeLy(summary.registration.createdAt)} dir="ltr" /> },
           { label: t(language, "patients.directory.drawer.registeredBy"), value: <Value value={summary.registration.createdByName || summary.registration.createdByUsername || (summary.registration.createdByUserId ? `#${summary.registration.createdByUserId}` : null)} /> },
           { label: t(language, "patients.internalId"), value: <Value value={demographics.id} dir="ltr" copyLabel={t(language, "patients.internalId")} /> },
           { label: t(language, "patients.demographics.estimated"), value: <Value value={estimated ? t(language, "patients.boolean.yes") : t(language, "patients.boolean.no")} /> },
-        ]} /></div>
-      </details>
+        ]} />
+      </DisclosureSection>
 
-      {summary.noShow.bookingRestricted || variant === "drawer" ? <details open={variant === "drawer" && summary.noShow.bookingRestricted} className="border-t border-border/70 pt-3"><summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{t(language, "patients.noShowRestriction.title")}</summary><div className="mt-3 space-y-2"><DefinitionRows rows={noShowRows} />{summary.noShow.lastAuthorizationReason ? <div className="rounded-lg bg-muted/20 p-2 text-xs"><p className="text-muted-foreground">{t(language, "patients.noShowRestriction.lastAuthorizationReason")}</p><p className="mt-1">{summary.noShow.lastAuthorizationReason}</p></div> : null}{summary.noShow.bookingRestricted && canAuthorizeNoShow && onAuthorizeNoShow ? <Button size="sm" variant="outline" onClick={onAuthorizeNoShow} disabled={authorizeNoShowPending}>{t(language, "patients.noShowRestriction.authorize")}</Button> : null}</div></details> : null}
+      {summary.noShow.bookingRestricted || variant === "drawer" ? <DisclosureSection title={t(language, "patients.noShowRestriction.title")} defaultOpen={variant === "drawer" && summary.noShow.bookingRestricted}><div className="space-y-3"><DefinitionRows rows={noShowRows} />{summary.noShow.lastAuthorizationReason ? <div className="rounded-lg bg-muted/20 p-2 text-sm"><p className="text-muted-foreground">{t(language, "patients.noShowRestriction.lastAuthorizationReason")}</p><p className="mt-1">{summary.noShow.lastAuthorizationReason}</p></div> : null}{summary.noShow.bookingRestricted && canAuthorizeNoShow && onAuthorizeNoShow ? <Button size="sm" variant="outline" onClick={onAuthorizeNoShow} disabled={authorizeNoShowPending}>{t(language, "patients.noShowRestriction.authorize")}</Button> : null}</div></DisclosureSection> : null}
 
-      {warnings.length > 0 ? <section aria-labelledby={`${variant}-patient-warnings-heading`}><h3 id={`${variant}-patient-warnings-heading`} className="mb-2 text-xs font-semibold text-foreground">{t(language, "patients.directory.drawer.warnings")}</h3><div className="flex flex-wrap gap-2">{warnings.map((warning) => <WarningBadge key={warning} label={warning} />)}</div></section> : null}
+      {warnings.length > 0 ? <section aria-labelledby={`${variant}-patient-warnings-heading`}><h3 id={`${variant}-patient-warnings-heading`} className="mb-2 text-sm font-semibold text-foreground">{t(language, "patients.directory.drawer.warnings")}</h3><div className="flex flex-wrap gap-2">{warnings.map((warning) => <WarningBadge key={warning} label={warning} />)}</div></section> : null}
     </div>
   );
 }

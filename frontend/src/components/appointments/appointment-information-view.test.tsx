@@ -47,4 +47,16 @@ describe("AppointmentInformationView", () => {
     expect(screen.queryByLabelText("Notes")).toBeNull();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
+
+  it("uses direction-aware back icons and removes the embedded duplicate profile action", async () => {
+    renderInformation();
+    expect(screen.getByTestId("appointment-information-back-icon").getAttribute("data-direction")).toBe("left");
+    expect(screen.queryByRole("button", { name: "Patient profile" })).toBeNull();
+  });
+
+  it("uses a right-pointing back icon for Arabic RTL", () => {
+    localStorage.setItem("rispro-language", "ar");
+    renderInformation();
+    expect(screen.getByTestId("appointment-information-back-icon").getAttribute("data-direction")).toBe("right");
+  });
 });

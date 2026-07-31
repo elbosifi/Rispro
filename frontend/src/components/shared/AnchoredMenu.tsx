@@ -22,10 +22,26 @@ export function AnchoredMenu({ open, onOpenChange, trigger, children, dir = "ltr
   const updatePosition = useCallback(() => {
     const anchor = anchorRef.current?.getBoundingClientRect();
     if (!anchor) return;
-    const margin = 8;
+    const margin = 10;
+    const menuWidth = menuRef.current?.offsetWidth || width;
     const menuHeight = menuRef.current?.offsetHeight ?? 260;
-    const leftFromEdge = dir === "rtl" ? anchor.right - width : anchor.left;
-    const left = Math.min(Math.max(margin, leftFromEdge), Math.max(margin, window.innerWidth - width - margin));
+    const maxLeft = Math.max(margin, window.innerWidth - menuWidth - margin);
+    const leftCandidate = anchor.right - menuWidth;
+    const rightCandidate = anchor.left;
+    const leftSpace = Math.max(0, anchor.left - margin);
+    const rightSpace = Math.max(0, window.innerWidth - anchor.right - margin);
+    const preferredCandidate = dir === "rtl" ? rightCandidate : leftCandidate;
+    const preferredSpace = dir === "rtl" ? rightSpace : leftSpace;
+    const oppositeCandidate = dir === "rtl" ? leftCandidate : rightCandidate;
+    const oppositeSpace = dir === "rtl" ? leftSpace : rightSpace;
+    const rawLeft = preferredSpace >= menuWidth
+      ? preferredCandidate
+      : oppositeSpace >= menuWidth
+        ? oppositeCandidate
+        : preferredSpace >= oppositeSpace
+          ? preferredCandidate
+          : oppositeCandidate;
+    const left = Math.min(Math.max(margin, rawLeft), maxLeft);
     const below = anchor.bottom + margin;
     const top = below + menuHeight <= window.innerHeight - margin || anchor.top < menuHeight + margin
       ? below

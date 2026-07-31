@@ -30,4 +30,20 @@ describe("AnchoredMenu", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
+
+  it("opens inward from an RTL trigger near the left edge", async () => {
+    const rect = vi.spyOn(HTMLSpanElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 40, right: 64, top: 40, bottom: 64, width: 24, height: 24, x: 40, y: 40, toJSON: () => ({}) });
+    render(<AnchoredMenu open onOpenChange={vi.fn()} dir="rtl" width={120} trigger={<button type="button">More actions</button>}><button type="button" role="menuitem">First action</button></AnchoredMenu>);
+
+    await waitFor(() => expect(screen.getByRole("menu").style.left).toBe("40px"));
+    rect.mockRestore();
+  });
+
+  it("opens inward from an LTR trigger near the right edge and flips when needed", async () => {
+    const rect = vi.spyOn(HTMLSpanElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 860, right: 884, top: 40, bottom: 64, width: 24, height: 24, x: 860, y: 40, toJSON: () => ({}) });
+    render(<AnchoredMenu open onOpenChange={vi.fn()} dir="ltr" width={120} trigger={<button type="button">More actions</button>}><button type="button" role="menuitem">First action</button></AnchoredMenu>);
+
+    await waitFor(() => expect(screen.getByRole("menu").style.left).toBe("764px"));
+    rect.mockRestore();
+  });
 });
