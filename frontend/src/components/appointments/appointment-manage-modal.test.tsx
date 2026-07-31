@@ -8,12 +8,14 @@ import { AppointmentManageModal } from "./appointment-manage-modal";
 const mocks = vi.hoisted(() => ({
   getAppointmentById: vi.fn(),
   fetchAppointmentLookups: vi.fn(),
+  fetchPatientDirectorySummary: vi.fn(),
   fetchPublicAppointmentReportStatus: vi.fn(),
 }));
 
 vi.mock("@/lib/api-hooks", () => ({
   cancelAppointment: vi.fn(),
   fetchAppointmentLookups: (...args: unknown[]) => mocks.fetchAppointmentLookups(...args),
+  fetchPatientDirectorySummary: (...args: unknown[]) => mocks.fetchPatientDirectorySummary(...args),
   fetchPublicAppointmentReportStatus: (...args: unknown[]) => mocks.fetchPublicAppointmentReportStatus(...args),
   fetchPublicSchedulingCapacitySettings: vi.fn(async () => ({
     allow_reception_override_requests_from_availability: "enabled",
@@ -35,12 +37,12 @@ vi.mock("@/v2/appointments/api", () => ({
 }));
 
 vi.mock("@/components/appointments/appointment-editor", () => ({
-  AppointmentEditor: ({ appointment, onUpdated }: { appointment: AppointmentWithDetails; onUpdated?: (value: AppointmentWithDetails) => void }) => (
+  AppointmentEditor: ({ appointment, editing, onUpdated }: { appointment: AppointmentWithDetails; editing?: boolean; onUpdated?: (value: AppointmentWithDetails) => void }) => editing ? (
     <div data-testid="appointment-editor">
       <span>{appointment.englishFullName}</span>
       <button type="button" onClick={() => onUpdated?.({ ...appointment, englishFullName: "Updated Patient", accessionNumber: "ACC-UPDATED" })}>Update appointment</button>
     </div>
-  ),
+  ) : null,
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
@@ -115,6 +117,19 @@ beforeEach(() => {
   mocks.getAppointmentById.mockResolvedValue(appointment);
   mocks.fetchAppointmentLookups.mockReset();
   mocks.fetchAppointmentLookups.mockResolvedValue({ modalities: [], priorities: [] });
+  mocks.fetchPatientDirectorySummary.mockReset();
+  mocks.fetchPatientDirectorySummary.mockResolvedValue({
+    demographics: { id: 7, mrn: "MRN-42", arabicFullName: "Ø§Ù„Ù…Ø±ÙŠØ¶", englishFullName: "Test Patient", sex: "F", ageYears: 40, demographicsEstimated: false, dateOfBirth: "1986-01-01" },
+    identifiers: { nationalId: "NAT-42", identifierType: "national_id", identifierValue: "NAT-42", items: [{ id: 1, typeCode: "national_id", value: "NAT-42", isPrimary: true }] },
+    contact: { phone1: "0912345678", phone2: "0922222222", address: "Tripoli" },
+    category: "non_oncology",
+    registration: { createdAt: null, createdByUserId: null, createdByName: null, createdByUsername: null },
+    warnings: { missingPhone: false, missingDob: false, missingSex: false, missingName: false, incompleteData: false, possibleDuplicate: false, duplicateReasons: [] },
+    lastAppointment: null,
+    nextAppointment: null,
+    recentAppointments: [],
+    noShow: { noShowCount: 0, bookingRestricted: false, lastNoShowAppointment: null, lastAuthorizationUser: null, lastAuthorizationDate: null, lastAuthorizationReason: null },
+  });
   mocks.fetchPublicAppointmentReportStatus.mockReset();
   mocks.fetchPublicAppointmentReportStatus.mockResolvedValue({ enabled: true, state: "final", canViewReport: true, message: "Report is ready.", checkButtonLabel: "Check report status", viewButtonLabel: "Open report" });
 });
@@ -162,7 +177,7 @@ describe("AppointmentManageModal", () => {
     expect((screen.getAllByText("ACC-42")).length).toBeGreaterThan(0);
     expect((screen.getAllByText(/CT/)).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Head").length).toBeGreaterThan(0);
-    expect(screen.getByText("26/07/2026")).toBeTruthy();
+    expect(screen.getByText(/26\/07\/2026/)).toBeTruthy();
     expect(screen.getAllByText("Scheduled").length).toBeGreaterThan(0);
     expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Patient profile" })).toBeTruthy();
@@ -174,13 +189,15 @@ describe("AppointmentManageModal", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
   });
 
-  it("opens edit in a focused secondary panel without replacing the document workspace", async () => {
+  it("opens the Information page with both populated sections", async () => {
     renderModal({ initialTab: "details" });
 
-    expect(await screen.findByTestId("appointment-editor")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Patient details" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Appointment details" })).toBeTruthy();
+    expect((await screen.findAllByText("NAT-42")).length).toBeGreaterThan(0);
     expect(screen.getByTestId("compact-document-appointment-header")).toBeTruthy();
-    expect(screen.getByTestId("request-documents-panel")).toBeTruthy();
-    expect((screen.getAllByText("Test Patient")).length).toBeGreaterThan(1);
+    expect(screen.queryByTestId("appointment-editor")).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
 
   it("enters and exits expanded document review with compact identity and close controls intact", async () => {
@@ -204,10 +221,11 @@ describe("AppointmentManageModal", () => {
 
   it("opens the More actions menu and refreshes displayed appointment data after an edit", async () => {
     renderModal({ initialTab: "details" });
-    await screen.findByTestId("appointment-editor");
+    await screen.findByRole("heading", { name: "Appointment details" });
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menuitem", { name: "Change status" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Details / Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Information" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.click(await screen.findByRole("button", { name: "Update appointment" }));
     expect((await screen.findAllByText("Updated Patient")).length).toBeGreaterThan(0);
     expect((screen.getAllByText("ACC-UPDATED")).length).toBeGreaterThan(0);

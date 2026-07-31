@@ -66,8 +66,18 @@ export function RequestDocumentsPanel({
   const [showScannerAppFallback, setShowScannerAppFallback] = useState(false);
   const [retryingFailedUploads, setRetryingFailedUploads] = useState(false);
   const [failedScanUploads, setFailedScanUploads] = useState<Array<{ file: File; error: string; documentType: string }>>([]);
+  const [isMobile, setIsMobile] = useState(false);
   const resolvedTitle = title ?? t("documents.title");
   const documentType = "appointment_request";
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
 
   const queryKey = useMemo(
     () => ["appointment-documents", appointmentRefType, appointmentId],
@@ -392,12 +402,12 @@ export function RequestDocumentsPanel({
         </div>
         <ScanLine size={18} className="text-accent" aria-hidden="true" />
       </div>
-      <div className="grid gap-2">
+      <div className="flex flex-col gap-2">
         {scannerAppEnabled ? (
           <button
             type="button"
             onClick={handleLaunchScannerApp}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="order-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending}
           >
             <ScanLine size={15} aria-hidden="true" />
@@ -408,16 +418,16 @@ export function RequestDocumentsPanel({
           <button
             type="button"
             onClick={handleScanAndAttach}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="order-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
           >
             <ScanLine size={15} aria-hidden="true" />
             {scanUploading ? t("documents.scanning") : t("documents.scanAppointmentRequest")}
           </button>
         ) : null}
-        <label htmlFor="request-documents-upload-file" className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
+        <label htmlFor="request-documents-upload-file" className="order-0 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground transition hover:opacity-90 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
           <Upload size={15} aria-hidden="true" />
-          {file ? file.name : t("documents.open")}
+          <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span>
         </label>
         <input
           id="request-documents-upload-file"
@@ -430,7 +440,7 @@ export function RequestDocumentsPanel({
         <button
           type="button"
           onClick={() => uploadMutation.mutate()}
-          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="order-0 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!file || uploadMutation.isPending || scanUploading || retryingFailedUploads || !canScanOrUpload}
         >
           <Upload size={15} aria-hidden="true" />
@@ -468,7 +478,7 @@ export function RequestDocumentsPanel({
                 <div className="flex min-h-64 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 p-6 text-center">
                   <FileText size={30} className="mb-3 text-muted-foreground" aria-hidden="true" />
                   <p className="text-sm font-semibold text-foreground">{t("documents.noDocuments")}</p>
-                  <p className="mt-1 max-w-sm text-xs text-muted-foreground">{t("documents.scanNotSupportedMessage")}</p>
+                  <p className="mt-1 max-w-sm text-xs text-muted-foreground">{!canScanOrUpload ? t("documents.emptyNoPermission") : !isMobile && (scannerAppEnabled || naps2ScannerEnabled) ? t("documents.emptyScannerHint") : t("documents.emptyUploadHint")}</p>
                 </div>
               ) : null}
               {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage /> : null}
@@ -476,7 +486,7 @@ export function RequestDocumentsPanel({
           </section>
 
           <aside className="min-h-0 space-y-3 overflow-y-auto pb-20 lg:pb-0" aria-label={t("documents.documentSelector")}>
-            {scanControls}
+            {isMobile ? (canScanOrUpload ? <section className="rounded-xl border border-border bg-background p-3"><label htmlFor="request-documents-upload-file" className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span></label><input id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" /><button type="button" onClick={() => uploadMutation.mutate()} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent disabled:opacity-50" disabled={!file || uploadMutation.isPending || !canScanOrUpload}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button></section> : null) : canScanOrUpload ? scanControls : null}
             <section className="rounded-xl border border-border bg-background p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-foreground">{t("documents.documentSelector")}</h3>

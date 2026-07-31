@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { deleteAppointment, updateAppointment } from "@/lib/api-hooks";
+import { updateAppointment } from "@/lib/api-hooks";
 import type { AppointmentLookups } from "@/types/api";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { chooseLocalized, t } from "@/lib/i18n";
@@ -11,6 +11,9 @@ import { useV2ExamTypes } from "@/v2/appointments/api";
 interface AppointmentEditorProps {
   appointment: AppointmentWithDetails;
   lookups: AppointmentLookups | undefined;
+  editing?: boolean;
+  onEdit?: () => void;
+  onCancel?: () => void;
   onUpdated?: (appointment: AppointmentWithDetails) => void;
   onDeleted?: () => void;
   defaultOpen?: boolean;
@@ -69,8 +72,10 @@ export function AppointmentEditor(props: AppointmentEditorProps) {
 function AppointmentEditorForm({
   appointment,
   lookups,
+  editing,
+  onEdit,
+  onCancel,
   onUpdated,
-  onDeleted,
   defaultOpen,
   routinePriorityIdString,
 }: AppointmentEditorProps & { defaultOpen: boolean; routinePriorityIdString: string }) {
@@ -80,7 +85,7 @@ function AppointmentEditorForm({
   const modalityId = Number.isFinite(parsedModalityId) ? parsedModalityId : null;
   const modalityExamTypes = useV2ExamTypes(modalityId);
   const [examTypeId, setExamTypeId] = useState(String(appointment.examTypeId ?? ""));
-  const [isEditing, setIsEditing] = useState(defaultOpen);
+  const [internalEditing, setInternalEditing] = useState(defaultOpen);
   const [notes, setNotes] = useState(String(appointment.notes ?? ""));
   const [requiresReport, setRequiresReport] = useState(Boolean(appointment.requiresReport));
   const initialPriorityId = String(appointment.reportingPriorityId ?? routinePriorityIdString);
@@ -144,7 +149,11 @@ function AppointmentEditorForm({
         title: t(language, "appointmentEditor.toastUpdated"),
         message: t(language, "appointmentEditor.toastUpdatedMsg")
       });
-      queryClient.invalidateQueries();
+      queryClient.setQueryData(["appointment-manage-modal", updated.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      setInternalEditing(false);
       onUpdated?.(updated);
     },
     onError: (err: unknown) => {
@@ -156,35 +165,17 @@ function AppointmentEditorForm({
     }
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (voidReason: string) => deleteAppointment(appointment.id, voidReason),
-    meta: {
-      suppressGlobalToast: true
-    },
-    onSuccess: () => {
-      pushToast({
-        type: "success",
-        title: t(language, "appointmentEditor.toastVoided"),
-        message: t(language, "appointmentEditor.toastVoidedMsg")
-      });
-      queryClient.invalidateQueries();
-      onDeleted?.();
-    },
-    onError: (err: unknown) => {
-      pushToast({
-        type: "error",
-        title: t(language, "appointmentEditor.toastVoidFailed"),
-        message: getErrorMessage(err, t(language, "appointmentEditor.toastVoidFailedMsg"))
-      });
-    }
-  });
+  const isEditing = editing ?? internalEditing;
 
   if (!isEditing) {
     return (
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={() => setIsEditing(true)}
+          onClick={() => {
+            setInternalEditing(true);
+            onEdit?.();
+          }}
           className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
         >
           {t(language, "common.edit")}
@@ -211,10 +202,11 @@ function AppointmentEditorForm({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+          <label htmlFor="appointment-editor-exam-type" className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
             {t(language, "appointmentEditor.examType")}
           </label>
           <select
+            id="appointment-editor-exam-type"
             value={examTypeId}
             onChange={(e) => setExamTypeId(e.target.value)}
             className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
@@ -229,10 +221,11 @@ function AppointmentEditorForm({
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+          <label htmlFor="appointment-editor-priority" className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
             {t(language, "appointmentEditor.priority")}
           </label>
           <select
+            id="appointment-editor-priority"
             value={priorityId}
             onChange={(e) => setPriorityId(e.target.value)}
             className={`w-full px-3 py-2 rounded-lg border text-sm focus:ring-2 focus:ring-teal-500 outline-none ${priorityToneClass}`}
@@ -264,10 +257,11 @@ function AppointmentEditorForm({
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+        <label htmlFor="appointment-editor-notes" className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
           {t(language, "appointmentEditor.notes")}
         </label>
         <textarea
+          id="appointment-editor-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
@@ -280,33 +274,13 @@ function AppointmentEditorForm({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setIsEditing(false)}
+            onClick={() => {
+              setInternalEditing(false);
+              onCancel?.();
+            }}
             className="px-4 py-2 rounded-lg bg-stone-200 hover:bg-stone-300 dark:bg-stone-700 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-200 text-sm font-medium transition-colors"
           >
             {t(language, "common.cancel")}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const voidReason = window.prompt(t(language, "appointmentEditor.voidReasonPrompt"), "");
-              if (voidReason == null) return;
-              const trimmed = voidReason.trim();
-              if (!trimmed) {
-                pushToast({
-                  type: "error",
-                  title: t(language, "appointmentEditor.toastVoidFailed"),
-                  message: t(language, "appointmentEditor.voidReasonRequired")
-                });
-                return;
-              }
-              if (window.confirm(t(language, "appointmentEditor.voidConfirm"))) {
-                deleteMutation.mutate(trimmed);
-              }
-            }}
-            disabled={deleteMutation.isPending}
-            className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium transition-colors"
-          >
-            {deleteMutation.isPending ? t(language, "appointmentEditor.voiding") : t(language, "appointmentEditor.void")}
           </button>
           <button
             type="button"

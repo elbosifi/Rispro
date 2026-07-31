@@ -35,6 +35,13 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchAppointmentSlipSettings: (...args: unknown[]) => fetchAppointmentSlipSettingsMock(...args),
   fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
+  fetchCurrentSession: vi.fn(async () => ({ id: 91, role: mockAuthRole, username: "test", fullName: "Test User" })),
+  fetchIntegrationStatus: vi.fn(async () => ({ scanner: { scannerAppEnabled: false, naps2WebScanEnabled: false } })),
+  listAppointmentDocuments: vi.fn(async () => []),
+  deleteAppointmentDocument: vi.fn(),
+  uploadAppointmentDocument: vi.fn(),
+  prepareScanSession: vi.fn(),
+  createScanSession: vi.fn(),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
   fetchPublicSchedulingCapacitySettings: (...args: unknown[]) => fetchPublicSchedulingCapacitySettingsMock(...args),
@@ -486,7 +493,7 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
-  it("opens the appointment drawer from an appointmentId deep link", async () => {
+  it("opens the Documents workspace from an appointmentId deep link", async () => {
     fetchAppointmentsMock.mockResolvedValueOnce([
       {
         id: 99,
@@ -535,6 +542,8 @@ describe("RegistrationsPage print actions", () => {
       expect(screen.getAllByText("Test Patient").length).toBeGreaterThan(0);
       expect(getFirstText("ACC-7")).toBeTruthy();
       expect(screen.getByText(/Showing registrations for Test Patient\./i)).toBeTruthy();
+      expect(screen.getByTestId("appointment-document-workspace")).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: "Patient details" })).toBeNull();
     });
   });
 
@@ -543,17 +552,12 @@ describe("RegistrationsPage print actions", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
-      expect(screen.getByRole("tab", { name: "Status" }).getAttribute("aria-selected")).toBe("true");
+      expect(screen.getByText("Change appointment status")).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByRole("tab", { name: "Report" }));
-    await waitFor(() => {
-      const params = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
-      expect(params.get("appointmentId")).toBe("7");
-      expect(params.get("tab")).toBe("report");
-      expect(params.get("customFilter")).toBe("keep");
-      expect(params.getAll("status[]")).toEqual(["scheduled"]);
-    });
+    const initialParams = new URLSearchParams(screen.getByTestId("location-probe").getAttribute("data-search") || "");
+    expect(initialParams.get("tab")).toBe("status");
+    expect(initialParams.get("customFilter")).toBe("keep");
 
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => {
@@ -596,6 +600,33 @@ describe("RegistrationsPage print actions", () => {
         publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
       },
     ]);
+    getAppointmentByIdMock.mockResolvedValueOnce({
+      id: 7,
+      modalityId: 1,
+      examTypeId: 3,
+      accessionNumber: "ACC-7",
+      dailySequence: 1,
+      patientId: 1,
+      caseCategory: "non_oncology",
+      arabicFullName: "Test Patient",
+      englishFullName: "Test Patient",
+      modalityNameAr: "CT",
+      modalityNameEn: "CT",
+      examNameAr: "CT Head",
+      examNameEn: "CT Head",
+      priorityNameAr: null,
+      priorityNameEn: null,
+      appointmentDate: "2027-01-03",
+      status: "waiting",
+      isWalkIn: false,
+      notes: null,
+      arrivedAt: "2027-01-03T08:15:00Z",
+      waitingStartedAt: "2027-01-03T08:20:00Z",
+      completedAt: "2027-01-03T09:30:00Z",
+      phone1: "0912345678",
+      patientWebPushSubscribed: true,
+      publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
+    });
 
     renderRegistrationsPage();
 
@@ -605,10 +636,11 @@ describe("RegistrationsPage print actions", () => {
 
     await userEvent.click(getAppointmentRow("ACC-7"));
     const dialog = await screen.findByRole("dialog", { name: "Manage" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
 
     expect(within(dialog).getByText("Arrival time")).toBeTruthy();
     expect(within(dialog).getByText("Waiting duration")).toBeTruthy();
-    expect(within(dialog).getByText("Completed at")).toBeTruthy();
+    expect(within(dialog).getByText("Completion time")).toBeTruthy();
     expect(within(dialog).getByText(/10:15/)).toBeTruthy();
     expect(within(dialog).getByText(/11:30/)).toBeTruthy();
   });
@@ -689,6 +721,7 @@ describe("RegistrationsPage print actions", () => {
 
     await userEvent.click(getAppointmentRow("ACC-7"));
     const dialog = await screen.findByRole("dialog", { name: "Manage" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
 
     expect(within(dialog).getByText("Protocol notes")).toBeTruthy();
     expect(within(dialog).getByText("Hydration instructions reviewed.")).toBeTruthy();
@@ -965,7 +998,8 @@ describe("RegistrationsPage print actions", () => {
     const row = getAppointmentRow("ACC-7");
     expect(within(row).queryByRole("button", { name: "Reschedule" })).toBeNull();
     await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
-    await userEvent.click(screen.getAllByRole("tab", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reschedule" }));
 
     await waitFor(() => {
       expect(useV2AvailabilityMock).toHaveBeenCalledWith(
@@ -1040,7 +1074,8 @@ describe("RegistrationsPage print actions", () => {
     });
 
     await userEvent.click(within(getAppointmentRow("ACC-7")).getByRole("button", { name: "Manage" }));
-    await userEvent.click(screen.getAllByRole("tab", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reschedule" }));
     await waitFor(() => expect(fetchPublicSchedulingCapacitySettingsMock).toHaveBeenCalled());
     await userEvent.click(await screen.findByRole("button", { name: "Show full days" }));
     const restrictedDate = await screen.findByRole("button", { name: /2027-01-05 available/i });
@@ -1116,7 +1151,8 @@ describe("RegistrationsPage print actions", () => {
 
     const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
-    await userEvent.click(screen.getAllByRole("tab", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reschedule" }));
 
     await waitFor(() => {
       expect(screen.getByText("Choose a new date for this appointment. Other appointment details stay unchanged.")).toBeTruthy();

@@ -104,7 +104,7 @@ export default function RegistrationsPage() {
   const isStatisticsDrilldown = searchParams.get("source") === "statistics";
   const hasUrlAppointmentFilters = DRILLDOWN_FILTER_PARAM_KEYS.some((key) => key !== "source" && searchParams.has(key));
   const appointmentManageTabs: AppointmentManageTab[] = ["details", "documents", "report", "reschedule", "status", "cancel"];
-  const initialManageTab = appointmentManageTabs.includes(tabParam as AppointmentManageTab) ? (tabParam as AppointmentManageTab) : "details";
+  const initialManageTab = appointmentManageTabs.includes(tabParam as AppointmentManageTab) ? (tabParam as AppointmentManageTab) : "documents";
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [reportCheckOnOpen, setReportCheckOnOpen] = useState(false);
@@ -475,7 +475,7 @@ export default function RegistrationsPage() {
     if (!selectedAppointment && !appointmentIdParam) return;
     const nextSearchParams = new URLSearchParams(searchParams);
     if (selectedAppointment) nextSearchParams.set("appointmentId", String(selectedAppointment.id));
-    if (tab === "details") {
+    if (tab === "documents") {
       nextSearchParams.delete("tab");
     } else {
       nextSearchParams.set("tab", tab);

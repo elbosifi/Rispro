@@ -178,6 +178,13 @@ function renderPanelWithoutLocalScan() {
   );
 }
 
+function setMobileViewport(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockReturnValue({ matches, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+  });
+}
+
 function documentFixture(id: number, filename: string, mimeType: string) {
   return {
     id,
@@ -200,6 +207,7 @@ function documentFixture(id: number, filename: string, mimeType: string) {
 describe("RequestDocumentsPanel local scan flow", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    setMobileViewport(false);
     mockListAppointmentDocuments.mockReset();
     mockUploadAppointmentDocument.mockReset();
     mockDeleteAppointmentDocument.mockReset();
@@ -532,6 +540,38 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await rendered.queryClient.invalidateQueries({ queryKey: ["appointment-documents", "v2_booking", 42] });
 
     await waitFor(() => expect(screen.getByRole("button", { name: "uploaded.png" }).getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  it("makes upload primary and shows the selected filename and size before attaching", async () => {
+    renderPanel({ layout: "workspace" });
+
+    const file = new File([new Uint8Array(2048)], "request.pdf", { type: "application/pdf" });
+    await userEvent.upload(await screen.findByTestId("document-file-input") as HTMLInputElement, file);
+
+    expect(await screen.findByText("request.pdf · 2 KB")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
+    expect(screen.getByText("Scan Appointment Request")).toBeTruthy();
+  });
+
+  it("does not mount scanner controls on mobile and keeps upload available", async () => {
+    setMobileViewport(true);
+    renderPanel({ layout: "workspace" });
+
+    expect(await screen.findByText("Upload request document")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Scan Paper" })).toBeNull();
+    expect(screen.queryByText("Download Scanner App")).toBeNull();
+    expect(screen.queryByText("Use NAPS2.WebScan")).toBeNull();
+  });
+
+  it("does not show upload or scanner actions when the user lacks attachment permission", async () => {
+    setMobileViewport(true);
+    mockFetchCurrentSession.mockResolvedValue({ id: 2, role: "doctor", username: "doctor", fullName: "Doctor" });
+    renderPanel({ layout: "workspace" });
+
+    expect(await screen.findByText("No document has been attached to this appointment.")).toBeTruthy();
+    expect(screen.queryByText("Upload request document")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
   });
 
   it("keeps upload, delete, and open actions available when inline preview is unsupported", async () => {
