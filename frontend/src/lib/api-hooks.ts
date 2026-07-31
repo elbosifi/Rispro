@@ -94,6 +94,9 @@ import type {
   DoctorProtocolingFilters,
   ModalityProtocolAssignment,
   ProtocolAssignmentPayload,
+  ProtocolDocumentAnnotation,
+  ProtocolDocumentAnnotationType,
+  ProtocolingPreviousAppointment,
   ProtocolTask,
   ImagingScanner,
   CtPhasePreset,
@@ -3691,6 +3694,50 @@ export async function fetchModalitiesSettings(includeInactive = false): Promise<
   const query = includeInactive ? "?includeInactive=true" : "";
   const raw = await api<{ modalities: ModalitySettingsRow[] }>(`/settings/modalities${query}`);
   return raw;
+}
+
+export async function fetchProtocolingPreviousAppointments(appointmentId: number, limit = 5, offset = 0): Promise<ProtocolingPreviousAppointment[]> {
+  const raw = await api<{ appointments: ProtocolingPreviousAppointment[] }>(`/doctor/protocoling/appointments/${appointmentId}/history?limit=${limit}&offset=${offset}`);
+  return raw.appointments;
+}
+
+export async function openProtocolingSonicDicom(appointmentId: number, scope: "study" | "patient"): Promise<void> {
+  window.open(`/api/doctor/protocoling/appointments/${appointmentId}/open-sonicdicom?scope=${scope}`, "_blank", "noopener,noreferrer");
+}
+
+export async function openProtocolingReport(appointmentId: number): Promise<void> {
+  window.open(`/api/doctor/protocoling/appointments/${appointmentId}/open-report`, "_blank", "noopener,noreferrer");
+}
+
+export async function listProtocolDocumentAnnotations(documentId: number): Promise<ProtocolDocumentAnnotation[]> {
+  const raw = await api<{ annotations: ProtocolDocumentAnnotation[] }>(`/doctor/protocoling/documents/${documentId}/annotations`);
+  return raw.annotations;
+}
+
+export async function createProtocolDocumentAnnotation(documentId: number, payload: {
+  pageNumber: number;
+  annotationType: ProtocolDocumentAnnotationType;
+  geometry: Record<string, unknown>;
+  textContent?: string | null;
+  style?: Record<string, unknown> | null;
+}): Promise<ProtocolDocumentAnnotation> {
+  const raw = await api<{ annotation: ProtocolDocumentAnnotation }>(`/doctor/protocoling/documents/${documentId}/annotations`, { method: "POST", body: JSON.stringify(payload) });
+  return raw.annotation;
+}
+
+export async function updateProtocolDocumentAnnotation(documentId: number, annotationId: number, payload: {
+  pageNumber: number;
+  annotationType: ProtocolDocumentAnnotationType;
+  geometry: Record<string, unknown>;
+  textContent?: string | null;
+  style?: Record<string, unknown> | null;
+}): Promise<ProtocolDocumentAnnotation> {
+  const raw = await api<{ annotation: ProtocolDocumentAnnotation }>(`/doctor/protocoling/documents/${documentId}/annotations/${annotationId}`, { method: "PATCH", body: JSON.stringify(payload) });
+  return raw.annotation;
+}
+
+export async function deleteProtocolDocumentAnnotation(documentId: number, annotationId: number): Promise<void> {
+  await api(`/doctor/protocoling/documents/${documentId}/annotations/${annotationId}`, { method: "DELETE" });
 }
 
 export interface PasskeyConfiguration {

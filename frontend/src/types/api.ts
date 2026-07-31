@@ -930,14 +930,15 @@ export type DoctorProtocolingStatus = "NOT_PROTOCOLLED" | ProtocolAssignmentStat
 
 export interface ProtocolAssignment {
   assignmentId: number;
-  protocolId: number;
-  protocolVersionId: number;
-  protocolName: string;
-  versionNumber: string;
+  protocolId: number | null;
+  protocolVersionId: number | null;
+  protocolName: string | null;
+  versionNumber: string | null;
   scannerId: number | null;
   scannerName: string | null;
   protocolNotes: string | null;
   contrastNotes: string | null;
+  freeTextProtocol: string | null;
   status: ProtocolAssignmentStatus;
   assignedBy: number | null;
   assignedAt: string | null;
@@ -962,6 +963,8 @@ export interface DoctorProtocolingAppointment {
   examTypeName: string | null;
   caseCategory: string | null;
   clinicalNotes: string | null;
+  patientDicomId: string | null;
+  studyInstanceUid: string | null;
   appointmentStatus: string;
   protocolStatus: DoctorProtocolingStatus;
   assignment: ProtocolAssignment | null;
@@ -1015,11 +1018,41 @@ export interface DoctorProtocolingFilters {
 }
 
 export interface ProtocolAssignmentPayload {
-  protocolId: number;
+  protocolId: number | null;
   scannerId: number | null;
   protocolNotes: string | null;
   contrastNotes: string | null;
+  freeTextProtocol: string | null;
   status: ProtocolAssignmentStatus;
+}
+
+export type ProtocolDocumentAnnotationType = "arrow" | "rectangle" | "freehand" | "text";
+
+export interface ProtocolDocumentAnnotation {
+  id: number;
+  documentId: number;
+  pageNumber: number;
+  annotationType: ProtocolDocumentAnnotationType;
+  geometry: Record<string, unknown>;
+  textContent: string | null;
+  style: Record<string, unknown> | null;
+  createdByUserId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProtocolingPreviousAppointment {
+  appointmentId: number;
+  accessionNumber: string;
+  appointmentDate: string;
+  appointmentTime: string | null;
+  modalityCode: string;
+  modalityName: string | null;
+  examTypeName: string | null;
+  appointmentStatus: string;
+  studyInstanceUid: string | null;
+  patientDicomId: string | null;
+  reportAvailable: boolean;
 }
 
 export interface ModalityCtProtocolPhase {

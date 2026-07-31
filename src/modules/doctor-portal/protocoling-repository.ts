@@ -1,5 +1,8 @@
 import { pool } from "../../db/pool.js";
 import { HttpError } from "../../utils/http-error.js";
+import { logAuditEntry } from "../../services/audit-service.js";
+import { buildPublicSonicDicomReportUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
+import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import type {
   DoctorProtocolingAppointmentDetail,
   DoctorProtocolingAppointmentRow,
@@ -11,6 +14,8 @@ import type {
   ProtocolingFilters,
   ProtocolingMriSequenceRow,
   ProtocolingModality,
+  ProtocolDocumentAnnotation,
+  ProtocolDocumentAnnotationType,
 } from "./protocoling-types.js";
 
 type RawRecord = Record<string, unknown>;
@@ -32,14 +37,15 @@ function mapAssignment(row: RawRecord): ProtocolAssignmentSummary | null {
   if (row.assignment_id == null) return null;
   return {
     assignmentId: Number(row.assignment_id),
-    protocolId: Number(row.protocol_id),
-    protocolVersionId: Number(row.protocol_version_id),
-    protocolName: String(row.protocol_name),
-    versionNumber: String(row.version_number),
+    protocolId: numberOrNull(row.protocol_id),
+    protocolVersionId: numberOrNull(row.protocol_version_id),
+    protocolName: stringOrNull(row.protocol_name),
+    versionNumber: stringOrNull(row.version_number),
     scannerId: numberOrNull(row.scanner_id),
     scannerName: stringOrNull(row.scanner_name),
     protocolNotes: stringOrNull(row.protocol_notes),
     contrastNotes: stringOrNull(row.contrast_notes),
+    freeTextProtocol: stringOrNull(row.free_text_protocol),
     status: String(row.assignment_status) as ProtocolAssignmentStatus,
     assignedBy: numberOrNull(row.assigned_by),
     assignedAt: stringOrNull(row.assigned_at),
@@ -67,6 +73,8 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
     examTypeName: stringOrNull(row.exam_type_name),
     caseCategory: stringOrNull(row.case_category),
     clinicalNotes: stringOrNull(row.clinical_notes),
+    patientDicomId: stringOrNull(row.patient_dicom_id),
+    studyInstanceUid: stringOrNull(row.study_instance_uid),
     appointmentStatus: String(row.appointment_status),
     protocolStatus: String(row.protocol_status) as DoctorProtocolingAppointmentRow["protocolStatus"],
     assignment,
@@ -139,6 +147,8 @@ const APPOINTMENT_SELECT = `
     et.name_en as exam_type_name,
     b.case_category,
     b.notes as clinical_notes,
+    coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as patient_dicom_id,
+    b.study_instance_uid,
     b.status as appointment_status,
     coalesce(apa.status, 'NOT_PROTOCOLLED') as protocol_status,
     apa.assignment_id,
@@ -150,6 +160,7 @@ const APPOINTMENT_SELECT = `
     apa.scanner_name,
     apa.protocol_notes,
     apa.contrast_notes,
+    apa.free_text_protocol,
     apa.status as assignment_status,
     apa.assigned_by,
     apa.assigned_at
@@ -161,6 +172,13 @@ const APPOINTMENT_SELECT = `
   ) protocoling_modality
   left join exam_types et on et.id = b.exam_type_id
   left join lateral (
+    select pi.value
+    from patient_identifiers pi
+    where pi.patient_id = p.id and pi.is_primary = true
+    order by pi.id asc
+    limit 1
+  ) primary_identifier on true
+  left join lateral (
     select
       assignment.id as assignment_id,
       assignment.protocol_id,
@@ -171,12 +189,13 @@ const APPOINTMENT_SELECT = `
       scanner.name as scanner_name,
       assignment.protocol_notes,
       assignment.contrast_notes,
+      assignment.free_text_protocol,
       assignment.status,
       assignment.assigned_by,
       assignment.assigned_at
     from appointment_protocol_assignments assignment
-    join protocols protocol on protocol.id = assignment.protocol_id
-    join protocol_versions version on version.id = assignment.protocol_version_id
+    left join protocols protocol on protocol.id = assignment.protocol_id
+    left join protocol_versions version on version.id = assignment.protocol_version_id
     left join imaging_scanners scanner on scanner.id = assignment.scanner_id
     where assignment.appointment_id = b.id
       and assignment.status <> 'CANCELLED'
@@ -235,6 +254,7 @@ async function getProtocolingAppointment(appointmentId: number): Promise<DoctorP
 }
 
 async function getAssignmentDetail(assignment: ProtocolAssignmentSummary): Promise<ProtocolAssignmentDetail> {
+  if (!assignment.protocolVersionId) return { assignment, ctPhases: [], mriSequences: [] };
   const ctRows = await pool.query<RawRecord>(
     `
       select
@@ -325,12 +345,14 @@ async function scannerModality(scannerId: number): Promise<ProtocolingModality |
 async function validateAssignment(appointmentId: number, input: ProtocolAssignmentInput) {
   const appointment = await getProtocolingAppointment(appointmentId);
   if (!appointment) throw new HttpError(404, "Appointment not found.");
-  const protocol = await activeProtocol(input.protocolId);
-  if (!protocol?.active_version_id || protocol.version_status !== "ACTIVE") {
-    throw new HttpError(400, "Protocol version must be ACTIVE.");
-  }
-  if (protocol.modality !== appointment.modalityCode) {
-    throw new HttpError(400, "Protocol modality must match appointment modality.");
+  let protocolVersionId: number | null = null;
+  if (input.protocolId !== null) {
+    const protocol = await activeProtocol(input.protocolId);
+    if (!protocol?.active_version_id || protocol.version_status !== "ACTIVE") throw new HttpError(400, "Protocol version must be ACTIVE.");
+    if (protocol.modality !== appointment.modalityCode) throw new HttpError(400, "Protocol modality must match appointment modality.");
+    protocolVersionId = protocol.active_version_id;
+  } else if (!input.freeTextProtocol?.trim()) {
+    throw new HttpError(400, "Select a saved protocol or enter a free-text protocol.");
   }
   if (input.scannerId) {
     const modality = await scannerModality(input.scannerId);
@@ -338,7 +360,7 @@ async function validateAssignment(appointmentId: number, input: ProtocolAssignme
       throw new HttpError(400, "Scanner modality must match appointment modality.");
     }
   }
-  return { appointment, protocolVersionId: protocol.active_version_id };
+  return { appointment, protocolVersionId };
 }
 
 export async function saveProtocolAssignment(
@@ -370,7 +392,8 @@ export async function saveProtocolAssignment(
             assigned_at = now(),
             protocol_notes = $6,
             contrast_notes = $7,
-            status = $8,
+            free_text_protocol = $8,
+            status = $9,
             updated_at = now()
         where id = $1
       `,
@@ -382,6 +405,7 @@ export async function saveProtocolAssignment(
         assignedBy,
         input.protocolNotes,
         input.contrastNotes,
+        input.freeTextProtocol,
         input.status,
       ]
     );
@@ -397,9 +421,10 @@ export async function saveProtocolAssignment(
           assigned_at,
           protocol_notes,
           contrast_notes,
+          free_text_protocol,
           status
         )
-        values ($1, $2, $3, $4, $5, now(), $6, $7, $8)
+        values ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9)
       `,
       [
         appointmentId,
@@ -409,6 +434,7 @@ export async function saveProtocolAssignment(
         assignedBy,
         input.protocolNotes,
         input.contrastNotes,
+        input.freeTextProtocol,
         input.status,
       ]
     );
@@ -433,4 +459,174 @@ export async function cancelProtocolAssignment(appointmentId: number): Promise<D
   const detail = await getProtocolingAppointmentDetail(appointmentId);
   if (!detail) throw new HttpError(404, "Appointment not found.");
   return detail;
+}
+
+export async function listProtocolingPreviousAppointments(appointmentId: number, limit = 5, offset = 0) {
+  const current = await pool.query<{ patient_id: number; modality_id: number; exam_type_id: number | null }>(
+    "select patient_id, modality_id, exam_type_id from appointments_v2.bookings where id = $1",
+    [appointmentId]
+  );
+  const row = current.rows[0];
+  if (!row) throw new HttpError(404, "Appointment not found.");
+  const result = await pool.query<RawRecord>(
+    `
+      select
+        b.id as appointment_id,
+        ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
+        b.booking_date::text as appointment_date,
+        b.booking_time::text as appointment_time,
+        m.code as modality_code,
+        m.name_en as modality_name,
+        et.name_en as exam_type_name,
+        b.status as appointment_status,
+        b.study_instance_uid,
+        coalesce(nullif(trim(primary_identifier.value), ''), nullif(trim(p.identifier_value), ''), nullif(trim(p.national_id), '')) as patient_dicom_id,
+        coalesce(cache.report_status = 'final', false) as report_available
+      from appointments_v2.bookings b
+      join patients p on p.id = b.patient_id
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      left join lateral (
+        select pi.value from patient_identifiers pi
+        where pi.patient_id = p.id and pi.is_primary = true
+        order by pi.id asc limit 1
+      ) primary_identifier on true
+      left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+      where b.patient_id = $1 and b.id <> $2
+      order by (b.modality_id = $3) desc, (b.exam_type_id is not distinct from $4) desc,
+        b.booking_date desc, b.booking_time desc nulls last, b.id desc
+      limit $5 offset $6
+    `,
+    [row.patient_id, appointmentId, row.modality_id, row.exam_type_id, limit + 1, offset]
+  );
+  return result.rows.map((value) => ({
+    appointmentId: Number(value.appointment_id),
+    accessionNumber: String(value.accession_number),
+    appointmentDate: String(value.appointment_date),
+    appointmentTime: stringOrNull(value.appointment_time),
+    modalityCode: String(value.modality_code),
+    modalityName: stringOrNull(value.modality_name),
+    examTypeName: stringOrNull(value.exam_type_name),
+    appointmentStatus: String(value.appointment_status),
+    studyInstanceUid: stringOrNull(value.study_instance_uid),
+    patientDicomId: stringOrNull(value.patient_dicom_id),
+    reportAvailable: Boolean(value.report_available),
+  }));
+}
+
+async function assertProtocolingDocument(documentId: number): Promise<void> {
+  const result = await pool.query(
+    `select d.id
+     from documents d
+     join appointments_v2.bookings b on b.id = d.v2_booking_id
+     join modalities m on m.id = b.modality_id
+     where d.id = $1 and m.code in ('CT', 'MRI')
+     limit 1`,
+    [documentId]
+  );
+  if (!result.rows[0]) throw new HttpError(404, "Protocoling document not found.");
+}
+
+function mapAnnotation(row: RawRecord): ProtocolDocumentAnnotation {
+  return {
+    id: Number(row.id),
+    documentId: Number(row.document_id),
+    pageNumber: Number(row.page_number),
+    annotationType: String(row.annotation_type) as ProtocolDocumentAnnotationType,
+    geometry: (row.geometry && typeof row.geometry === "object" && !Array.isArray(row.geometry) ? row.geometry : {}) as Record<string, unknown>,
+    textContent: stringOrNull(row.text_content),
+    style: (row.style && typeof row.style === "object" && !Array.isArray(row.style) ? row.style : null) as Record<string, unknown> | null,
+    createdByUserId: numberOrNull(row.created_by_user_id),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export async function listProtocolDocumentAnnotations(documentId: number): Promise<ProtocolDocumentAnnotation[]> {
+  await assertProtocolingDocument(documentId);
+  const result = await pool.query<RawRecord>(
+    `select id, document_id, page_number, annotation_type, geometry, text_content, style, created_by_user_id, created_at, updated_at
+     from doctor_protocol_document_annotations
+     where document_id = $1 and deleted_at is null
+     order by page_number asc, id asc`,
+    [documentId]
+  );
+  return result.rows.map(mapAnnotation);
+}
+
+export async function createProtocolDocumentAnnotation(input: {
+  documentId: number;
+  pageNumber: number;
+  annotationType: ProtocolDocumentAnnotationType;
+  geometry: Record<string, unknown>;
+  textContent: string | null;
+  style: Record<string, unknown> | null;
+  createdByUserId: number | null;
+}): Promise<ProtocolDocumentAnnotation> {
+  await assertProtocolingDocument(input.documentId);
+  const result = await pool.query<RawRecord>(
+    `insert into doctor_protocol_document_annotations (document_id, page_number, annotation_type, geometry, text_content, style, created_by_user_id)
+     values ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7)
+     returning id, document_id, page_number, annotation_type, geometry, text_content, style, created_by_user_id, created_at, updated_at`,
+    [input.documentId, input.pageNumber, input.annotationType, JSON.stringify(input.geometry), input.textContent, input.style ? JSON.stringify(input.style) : null, input.createdByUserId]
+  );
+  await logAuditEntry({ entityType: "document_annotation", entityId: Number(result.rows[0]?.id), actionType: "doctor_protocol_annotation_created", oldValues: null, newValues: { documentId: input.documentId, pageNumber: input.pageNumber, annotationType: input.annotationType }, changedByUserId: input.createdByUserId }).catch(() => null);
+  return mapAnnotation(result.rows[0]!);
+}
+
+export async function updateProtocolDocumentAnnotation(input: {
+  documentId: number;
+  annotationId: number;
+  pageNumber: number;
+  annotationType: ProtocolDocumentAnnotationType;
+  geometry: Record<string, unknown>;
+  textContent: string | null;
+  style: Record<string, unknown> | null;
+  updatedByUserId: number | null;
+}): Promise<ProtocolDocumentAnnotation> {
+  await assertProtocolingDocument(input.documentId);
+  const result = await pool.query<RawRecord>(
+    `update doctor_protocol_document_annotations
+     set page_number = $3, annotation_type = $4, geometry = $5::jsonb, text_content = $6, style = $7::jsonb
+     where id = $1 and document_id = $2 and deleted_at is null
+     returning id, document_id, page_number, annotation_type, geometry, text_content, style, created_by_user_id, created_at, updated_at`,
+    [input.annotationId, input.documentId, input.pageNumber, input.annotationType, JSON.stringify(input.geometry), input.textContent, input.style ? JSON.stringify(input.style) : null]
+  );
+  if (!result.rows[0]) throw new HttpError(404, "Annotation not found.");
+  await logAuditEntry({ entityType: "document_annotation", entityId: input.annotationId, actionType: "doctor_protocol_annotation_updated", oldValues: null, newValues: { documentId: input.documentId }, changedByUserId: input.updatedByUserId }).catch(() => null);
+  return mapAnnotation(result.rows[0]);
+}
+
+export async function deleteProtocolDocumentAnnotation(documentId: number, annotationId: number, deletedByUserId: number | null): Promise<void> {
+  await assertProtocolingDocument(documentId);
+  const result = await pool.query("update doctor_protocol_document_annotations set deleted_at = now() where id = $1 and document_id = $2 and deleted_at is null", [annotationId, documentId]);
+  if (!result.rowCount) throw new HttpError(404, "Annotation not found.");
+  await logAuditEntry({ entityType: "document_annotation", entityId: annotationId, actionType: "doctor_protocol_annotation_deleted", oldValues: null, newValues: { documentId }, changedByUserId: deletedByUserId }).catch(() => null);
+}
+
+export async function getProtocolingSonicDicomRedirect(appointmentId: number, scope: "study" | "patient"): Promise<string> {
+  const appointment = await getProtocolingAppointment(appointmentId);
+  if (!appointment) throw new HttpError(404, "Appointment not found.");
+  const value = scope === "study" ? appointment.accessionNumber : appointment.patientDicomId;
+  if (!value) throw new HttpError(400, scope === "study" ? "Accession number is unavailable." : "DICOM Patient ID is unavailable.");
+  return buildSonicDicomStaffViewerUrl({
+    settings: await readSonicDicomReportSettings(),
+    target: scope === "study" ? "studyViewer" : "patientList",
+    value,
+  });
+}
+
+export async function getProtocolingReportRedirect(appointmentId: number): Promise<string> {
+  const appointment = await getProtocolingAppointment(appointmentId);
+  if (!appointment) throw new HttpError(404, "Appointment not found.");
+  const context = {
+    bookingId: appointment.appointmentId,
+    accessionNumber: appointment.accessionNumber,
+    studyInstanceUid: appointment.studyInstanceUid,
+    requiresReport: true,
+    status: appointment.appointmentStatus,
+  };
+  const status = await checkSonicDicomReportStatus(context, { useCache: true });
+  if (!status.canViewReport) throw new HttpError(409, "The report is not available.");
+  return buildPublicSonicDicomReportUrl(context);
 }

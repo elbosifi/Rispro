@@ -128,4 +128,18 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /ct_phase_preset_name/);
     assert.match(repo, /mri_sequence_preset_name/);
   });
+
+  it("supports nullable saved-protocol references with persisted free text and document annotations", () => {
+    const migration = readFileSync(`${root}/src/db/migrations/155_doctor_protocol_free_text_annotations.sql`, "utf8");
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocoling-routes.ts`, "utf8");
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    assert.match(migration, /alter column protocol_id drop not null/);
+    assert.match(migration, /free_text_protocol text/);
+    assert.match(migration, /doctor_protocol_document_annotations/);
+    assert.match(migration, /geometry jsonb/);
+    assert.match(routes, /documents\/:documentId\/annotations/);
+    assert.match(routes, /freeTextProtocol/);
+    assert.match(repo, /Select a saved protocol or enter a free-text protocol/);
+    assert.match(repo, /listProtocolingPreviousAppointments/);
+  });
 });

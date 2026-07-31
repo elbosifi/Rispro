@@ -13,6 +13,8 @@ const appointment: DoctorProtocolingAppointment = {
   patientNationalId: null,
   patientArabicName: null,
   patientEnglishName: "Request Scan Patient",
+  patientDicomId: null,
+  studyInstanceUid: null,
   ageYears: 35,
   sex: "M",
   appointmentDate: "2026-07-22",
@@ -29,8 +31,10 @@ const appointment: DoctorProtocolingAppointment = {
   assignment: null,
 };
 
+const { mockCreateAssignment } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn() }));
+
 vi.mock("@/lib/api-hooks", () => ({
-  activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: vi.fn(),
+  activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
   createProtocolLibraryAnatomyRegion: vi.fn(), createProtocolLibraryCtPhasePreset: vi.fn(), createProtocolLibraryCtPhaseRow: vi.fn(),
   createProtocolLibraryDraftFromActive: vi.fn(), createProtocolLibraryMriSequencePreset: vi.fn(), createProtocolLibraryMriSequenceRow: vi.fn(),
   createProtocolLibraryProtocol: vi.fn(), deleteProtocolLibraryCtPhaseRow: vi.fn(), deleteProtocolLibraryMriSequenceRow: vi.fn(),
@@ -77,5 +81,18 @@ describe("Doctor protocoling request documents", () => {
     expect(panel.getAttribute("data-appointment-id")).toBe("42");
     expect(panel.getAttribute("data-patient-id")).toBe("9");
     expect(panel.getAttribute("data-ref-type")).toBe("v2_booking");
+  });
+
+  it("offers free-text mode and submits it without a saved protocol", async () => {
+    mockCreateAssignment.mockResolvedValue({ appointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Free-text protocol" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Free-text protocol" }), "Axial T2 and DWI; no contrast.");
+    await userEvent.click(screen.getByRole("button", { name: "Assign and next" }));
+
+    expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ protocolId: null, freeTextProtocol: "Axial T2 and DWI; no contrast." }));
   });
 });

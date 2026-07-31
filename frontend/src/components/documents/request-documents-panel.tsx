@@ -10,14 +10,21 @@ import {
   listAppointmentDocuments,
   prepareScanSession,
   uploadAppointmentDocument,
+  createProtocolDocumentAnnotation,
+  deleteProtocolDocumentAnnotation,
+  listProtocolDocumentAnnotations,
+  updateProtocolDocumentAnnotation,
   type AppointmentRefType,
   type RequestDocument,
 } from "@/lib/api-hooks";
+import type { ProtocolDocumentAnnotation, ProtocolDocumentAnnotationType } from "@/types/api";
+import type { AnnotationTool } from "./document-annotation-overlay";
 import { scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
 import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 
 export type DocumentPreviewMode = "link" | "modal" | "inline";
+const EMPTY_ANNOTATIONS: ProtocolDocumentAnnotation[] = [];
 
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
@@ -40,6 +47,8 @@ interface RequestDocumentsPanelProps {
   onExpandedChange?: (expanded: boolean) => void;
   layout?: "default" | "workspace";
   supplementaryPanel?: ReactNode;
+  enableAnnotations?: boolean;
+  onAnnotationDirtyChange?: (dirty: boolean) => void;
 }
 
 export function RequestDocumentsPanel({
@@ -53,6 +62,8 @@ export function RequestDocumentsPanel({
   onExpandedChange,
   layout = "default",
   supplementaryPanel,
+  enableAnnotations = false,
+  onAnnotationDirtyChange,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -92,6 +103,51 @@ export function RequestDocumentsPanel({
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
     [documents, selectedDocumentId]
   );
+  const [annotations, setAnnotations] = useState<ProtocolDocumentAnnotation[]>([]);
+  const [savedAnnotationIds, setSavedAnnotationIds] = useState<Set<number>>(new Set());
+  const [deletedAnnotationIds, setDeletedAnnotationIds] = useState<number[]>([]);
+  const [annotationTool, setAnnotationTool] = useState<AnnotationTool>("select");
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
+  const [annotationPast, setAnnotationPast] = useState<ProtocolDocumentAnnotation[][]>([]);
+  const [annotationFuture, setAnnotationFuture] = useState<ProtocolDocumentAnnotation[][]>([]);
+  const { data: loadedAnnotations = EMPTY_ANNOTATIONS, refetch: refetchAnnotations } = useQuery({
+    queryKey: ["doctor", "protocol-document-annotations", selectedDocument?.id],
+    queryFn: () => listProtocolDocumentAnnotations(selectedDocument!.id),
+    enabled: enableAnnotations && Boolean(selectedDocument?.id),
+  });
+
+  useEffect(() => {
+    if (!enableAnnotations) return;
+    setAnnotations(loadedAnnotations);
+    setSavedAnnotationIds(new Set(loadedAnnotations.map((annotation) => annotation.id)));
+    setDeletedAnnotationIds([]);
+    setSelectedAnnotationId(null);
+    setAnnotationPast([]);
+    setAnnotationFuture([]);
+  }, [enableAnnotations, loadedAnnotations, selectedDocument?.id]);
+
+  const annotationDirty = deletedAnnotationIds.length > 0 || annotations.some((annotation) => !savedAnnotationIds.has(annotation.id));
+  useEffect(() => onAnnotationDirtyChange?.(annotationDirty), [annotationDirty, onAnnotationDirtyChange]);
+  const changeAnnotations = (next: ProtocolDocumentAnnotation[]) => {
+    setAnnotationPast((current) => [...current.slice(-19), annotations]);
+    setAnnotationFuture([]);
+    setAnnotations(next);
+  };
+  const annotationToolbar = enableAnnotations ? (
+    <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-border bg-background p-1" role="toolbar" aria-label="Document annotations">
+      {(["select", "arrow", "rectangle", "freehand", "text"] as AnnotationTool[]).map((tool) => <button key={tool} type="button" className={`shrink-0 rounded px-2 py-1 text-[10px] font-semibold ${annotationTool === tool ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setAnnotationTool(tool)} aria-pressed={annotationTool === tool}>{tool === "freehand" ? "Pen" : tool[0]!.toUpperCase() + tool.slice(1)}</button>)}
+      <button type="button" className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={selectedAnnotationId === null} onClick={() => { const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId); if (!selected) return; changeAnnotations(annotations.filter((annotation) => annotation.id !== selected.id)); if (selected.id > 0) setDeletedAnnotationIds((current) => [...current, selected.id]); setSelectedAnnotationId(null); }}>Delete</button>
+      <button type="button" className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationPast.length === 0} onClick={() => { const previous = annotationPast.at(-1); if (!previous) return; setAnnotationPast((current) => current.slice(0, -1)); setAnnotationFuture((current) => [...current, annotations]); setAnnotations(previous); }}>Undo</button>
+      <button type="button" className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationFuture.length === 0} onClick={() => { const next = annotationFuture.at(-1); if (!next) return; setAnnotationFuture((current) => current.slice(0, -1)); setAnnotationPast((current) => [...current, annotations]); setAnnotations(next); }}>Redo</button>
+      <button type="button" className="shrink-0 rounded bg-teal-700 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40" disabled={!annotationDirty || !selectedDocument} onClick={async () => { if (!selectedDocument) return; for (const annotation of annotations) { const payload = { pageNumber: annotation.pageNumber, annotationType: annotation.annotationType, geometry: annotation.geometry, textContent: annotation.textContent, style: annotation.style }; if (annotation.id < 0) await createProtocolDocumentAnnotation(selectedDocument.id, payload); else await updateProtocolDocumentAnnotation(selectedDocument.id, annotation.id, payload); } for (const id of deletedAnnotationIds) await deleteProtocolDocumentAnnotation(selectedDocument.id, id); await refetchAnnotations(); }}>Save</button>
+      {annotationDirty ? <span className="shrink-0 px-1 text-[10px] font-semibold text-amber-700">Unsaved</span> : null}
+    </div>
+  ) : null;
+  const createAnnotation = (input: { pageNumber: number; annotationType: ProtocolDocumentAnnotationType; geometry: Record<string, unknown>; textContent?: string | null }) => {
+    const temporaryId = -Date.now();
+    changeAnnotations([...annotations, { id: temporaryId, documentId: selectedDocument?.id ?? 0, pageNumber: input.pageNumber, annotationType: input.annotationType, geometry: input.geometry, textContent: input.textContent ?? null, style: { color: "#0f766e" }, createdByUserId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
+    setSelectedAnnotationId(temporaryId);
+  };
 
   useEffect(() => {
     if (documents.length === 0) {
@@ -481,7 +537,7 @@ export function RequestDocumentsPanel({
                   <p className="mt-1 max-w-sm text-xs text-muted-foreground">{!canScanOrUpload ? t("documents.emptyNoPermission") : !isMobile && (scannerAppEnabled || naps2ScannerEnabled) ? t("documents.emptyScannerHint") : t("documents.emptyUploadHint")}</p>
                 </div>
               ) : null}
-              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage /> : null}
+              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage annotationToolbar={annotationToolbar} annotations={annotations} annotationTool={annotationTool} selectedAnnotationId={selectedAnnotationId} onSelectAnnotation={setSelectedAnnotationId} onCreateAnnotation={createAnnotation} /> : null}
             </div>
           </section>
 
@@ -708,6 +764,12 @@ export function RequestDocumentsPanel({
               document={selectedDocument}
               expanded={expanded}
               onExpandedChange={onExpandedChange}
+              annotationToolbar={annotationToolbar}
+              annotations={annotations}
+              annotationTool={annotationTool}
+              selectedAnnotationId={selectedAnnotationId}
+              onSelectAnnotation={setSelectedAnnotationId}
+              onCreateAnnotation={createAnnotation}
             />
           ) : null}
         </div>

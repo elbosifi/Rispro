@@ -8,10 +8,17 @@ import { getDoctorMe } from "./profile-service.js";
 import {
   cancelProtocolAssignment,
   getProtocolingAppointmentDetail,
+  getProtocolingReportRedirect,
+  getProtocolingSonicDicomRedirect,
+  listProtocolingPreviousAppointments,
+  listProtocolDocumentAnnotations,
+  createProtocolDocumentAnnotation,
+  updateProtocolDocumentAnnotation,
+  deleteProtocolDocumentAnnotation,
   listProtocolingAppointments,
   saveProtocolAssignment,
 } from "./protocoling-repository.js";
-import type { ProtocolAssignmentStatus, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
+import type { ProtocolAssignmentStatus, ProtocolDocumentAnnotationType, ProtocolingModality, ProtocolingStatusFilter } from "./protocoling-types.js";
 
 const router = Router();
 
@@ -80,12 +87,36 @@ function filters(req: DoctorRequest) {
 }
 
 function assignmentInput(body: Record<string, unknown>) {
+  const rawProtocolId = body.protocolId ?? body.protocol_id;
+  const freeTextProtocol = optionalText(body.freeTextProtocol ?? body.free_text_protocol);
+  if ((rawProtocolId === null || rawProtocolId === undefined || rawProtocolId === "") && !freeTextProtocol) {
+    throw new HttpError(400, "Select a saved protocol or enter a free-text protocol.");
+  }
   return {
-    protocolId: positiveInteger(body.protocolId ?? body.protocol_id, "protocolId"),
+    protocolId: rawProtocolId === null || rawProtocolId === undefined || rawProtocolId === "" ? null : positiveInteger(rawProtocolId, "protocolId"),
     scannerId: optionalPositiveInteger(body.scannerId ?? body.scanner_id, "scannerId"),
     protocolNotes: optionalText(body.protocolNotes ?? body.protocol_notes),
     contrastNotes: optionalText(body.contrastNotes ?? body.contrast_notes),
+    freeTextProtocol,
     status: assignmentStatus(body.status),
+  };
+}
+
+function annotationType(value: unknown): ProtocolDocumentAnnotationType {
+  const parsed = String(value ?? "");
+  if (parsed !== "arrow" && parsed !== "rectangle" && parsed !== "freehand" && parsed !== "text") throw new HttpError(400, "annotationType is invalid.");
+  return parsed;
+}
+
+function annotationInput(body: Record<string, unknown>) {
+  const geometry = body.geometry;
+  if (!geometry || typeof geometry !== "object" || Array.isArray(geometry)) throw new HttpError(400, "geometry must be an object.");
+  return {
+    pageNumber: positiveInteger(body.pageNumber ?? body.page_number, "pageNumber"),
+    annotationType: annotationType(body.annotationType ?? body.annotation_type),
+    geometry: geometry as Record<string, unknown>,
+    textContent: optionalText(body.textContent ?? body.text_content),
+    style: body.style && typeof body.style === "object" && !Array.isArray(body.style) ? body.style as Record<string, unknown> : null,
   };
 }
 
@@ -105,6 +136,69 @@ router.get(
     const detail = await getProtocolingAppointmentDetail(positiveInteger(req.params.appointmentId, "appointmentId"));
     if (!detail) throw new HttpError(404, "Appointment not found.");
     res.json({ detail });
+  })
+);
+
+router.get(
+  "/appointments/:appointmentId/history",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolingAccess(req);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 5)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+    const appointments = await listProtocolingPreviousAppointments(positiveInteger(req.params.appointmentId, "appointmentId"), limit, offset);
+    res.json({ appointments, hasMore: appointments.length > limit });
+  })
+);
+
+router.get(
+  "/appointments/:appointmentId/open-sonicdicom",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolingAccess(req);
+    const scope = req.query.scope === "patient" ? "patient" : "study";
+    res.redirect(await getProtocolingSonicDicomRedirect(positiveInteger(req.params.appointmentId, "appointmentId"), scope));
+  })
+);
+
+router.get(
+  "/appointments/:appointmentId/open-report",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolingAccess(req);
+    res.redirect(await getProtocolingReportRedirect(positiveInteger(req.params.appointmentId, "appointmentId")));
+  })
+);
+
+router.get(
+  "/documents/:documentId/annotations",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolingAccess(req);
+    res.json({ annotations: await listProtocolDocumentAnnotations(positiveInteger(req.params.documentId, "documentId")) });
+  })
+);
+
+router.post(
+  "/documents/:documentId/annotations",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const userId = await requireProtocolingAccess(req);
+    const annotation = await createProtocolDocumentAnnotation({ documentId: positiveInteger(req.params.documentId, "documentId"), ...annotationInput(asUnknownRecord(req.body)), createdByUserId: userId });
+    res.status(201).json({ annotation });
+  })
+);
+
+router.patch(
+  "/documents/:documentId/annotations/:annotationId",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const userId = await requireProtocolingAccess(req);
+    const annotation = await updateProtocolDocumentAnnotation({ documentId: positiveInteger(req.params.documentId, "documentId"), annotationId: positiveInteger(req.params.annotationId, "annotationId"), ...annotationInput(asUnknownRecord(req.body)), updatedByUserId: userId });
+    res.json({ annotation });
+  })
+);
+
+router.delete(
+  "/documents/:documentId/annotations/:annotationId",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const userId = await requireProtocolingAccess(req);
+    await deleteProtocolDocumentAnnotation(positiveInteger(req.params.documentId, "documentId"), positiveInteger(req.params.annotationId, "annotationId"), userId);
+    res.json({ deleted: true });
   })
 );
 

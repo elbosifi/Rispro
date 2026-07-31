@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -14,6 +14,7 @@ interface PdfDocumentPreviewProps {
   isRtl: boolean;
   expanded: boolean;
   preferSinglePage: boolean;
+  annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode;
 }
 
 type PdfViewMode = "overview" | "single";
@@ -173,7 +174,7 @@ function LazyPdfPageCard({
   );
 }
 
-export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded, preferSinglePage }: PdfDocumentPreviewProps) {
+export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded, preferSinglePage, annotationOverlay }: PdfDocumentPreviewProps) {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
@@ -404,16 +405,19 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
             </div>
             <div ref={mainPreviewRef} className="min-h-0 min-w-0 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
               <div className={`flex min-h-full min-w-full justify-center ${sizingMode === "fit-page" && zoom === 1 ? "items-center" : "items-start"}`}>
-                <Page
-                  pageNumber={page}
-                  width={sizingMode === "fit-width" ? mainSize.width : undefined}
-                  scale={sizingMode === "fit-page" ? pageScale ?? 1 : undefined}
-                  renderTextLayer={false}
-                  renderAnnotationLayer={false}
-                  loading={<span className="text-sm text-muted-foreground">{labels.loading}</span>}
-                  onRenderError={() => setPreviewError(labels.pageFailed)}
-                  rotate={rotation}
-                />
+                <div className="relative">
+                  <Page
+                    pageNumber={page}
+                    width={sizingMode === "fit-width" ? mainSize.width : undefined}
+                    scale={sizingMode === "fit-page" ? pageScale ?? 1 : undefined}
+                    renderTextLayer={false}
+                    renderAnnotationLayer={false}
+                    loading={<span className="text-sm text-muted-foreground">{labels.loading}</span>}
+                    onRenderError={() => setPreviewError(labels.pageFailed)}
+                    rotate={rotation}
+                  />
+                  {annotationOverlay?.(page, rotation)}
+                </div>
               </div>
             </div>
             <div className="min-h-0 rounded-xl border border-border bg-muted/10 p-2">

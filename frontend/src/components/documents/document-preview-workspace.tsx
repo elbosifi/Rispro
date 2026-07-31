@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, useState, type ReactNode } from "react";
 import { useLanguage } from "@/providers/language-provider";
 import type { TranslationKey } from "@/lib/i18n";
 import type { RequestDocument } from "@/lib/api-hooks";
+import type { ProtocolDocumentAnnotation } from "@/types/api";
+import { DocumentAnnotationOverlay, type AnnotationTool } from "./document-annotation-overlay";
 
 export interface DocumentPreviewLabels {
   loading: string;
@@ -91,7 +93,7 @@ function PreviewFailure({ message, href, label, includeOpenAction = true }: { me
   );
 }
 
-function ImagePreview({ document, labels, includeOpenAction }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean }) {
+function ImagePreview({ document, labels, includeOpenAction, annotationOverlay }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode }) {
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const src = viewUrl(document);
@@ -105,13 +107,16 @@ function ImagePreview({ document, labels, includeOpenAction }: { document: Reque
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-3">
         <div className="flex min-h-full items-center justify-center">
           {!imageLoaded ? <span className="text-sm text-muted-foreground" role="status">{labels.imageLoading}</span> : null}
-          <img
-            src={src}
-            alt={document.originalFilename}
-            className={`max-h-full max-w-full object-contain ${imageLoaded ? "" : "hidden"}`}
-            onLoad={() => setImageLoaded(true)}
-            onError={() => setImageError(true)}
-          />
+          <div className="relative max-h-full max-w-full">
+            <img
+              src={src}
+              alt={document.originalFilename}
+              className={`max-h-full max-w-full object-contain ${imageLoaded ? "" : "hidden"}`}
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageError(true)}
+            />
+            {imageLoaded ? annotationOverlay?.(1, 0) : null}
+          </div>
         </div>
       </div>
       <div className="h-[120px] shrink-0 rounded-xl border border-border bg-muted/10 p-2">
@@ -167,6 +172,12 @@ interface DocumentPreviewWorkspaceProps {
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
   preferSinglePage?: boolean;
+  annotationToolbar?: ReactNode;
+  annotations?: ProtocolDocumentAnnotation[];
+  annotationTool?: AnnotationTool;
+  selectedAnnotationId?: number | null;
+  onSelectAnnotation?: (id: number) => void;
+  onCreateAnnotation?: (input: { pageNumber: number; annotationType: "arrow" | "rectangle" | "freehand" | "text"; geometry: Record<string, unknown>; textContent?: string | null }) => void;
 }
 
 export function DocumentPreviewWorkspace({
@@ -175,13 +186,25 @@ export function DocumentPreviewWorkspace({
   expanded = false,
   onExpandedChange,
   preferSinglePage = false,
+  annotationToolbar,
+  annotations = [],
+  annotationTool = "select",
+  selectedAnnotationId = null,
+  onSelectAnnotation,
+  onCreateAnnotation,
 }: DocumentPreviewWorkspaceProps) {
   const { t, isArabic } = useLanguage();
   const labels = labelsFor(t);
   const kind = previewKind(document);
   const src = viewUrl(document);
-  const toolbar = showOpenAction || onExpandedChange ? (
+  const annotationOverlay = onCreateAnnotation && onSelectAnnotation ? (pageNumber: number, rotation: number) => (
+    <div className="absolute inset-0">
+      <DocumentAnnotationOverlay pageNumber={pageNumber} rotation={rotation} tool={annotationTool} annotations={annotations} selectedAnnotationId={selectedAnnotationId} onSelect={onSelectAnnotation} onCreate={onCreateAnnotation} />
+    </div>
+  ) : undefined;
+  const toolbar = showOpenAction || onExpandedChange || annotationToolbar ? (
     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {annotationToolbar}
       {onExpandedChange ? (
         <button
           type="button"
@@ -212,7 +235,7 @@ export function DocumentPreviewWorkspace({
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         {toolbar}
-        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} />
+        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} />
       </div>
     );
   }
@@ -231,7 +254,7 @@ export function DocumentPreviewWorkspace({
           </div>
         }
       >
-        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} />
+        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} annotationOverlay={annotationOverlay} />
       </Suspense>
       </PreviewErrorBoundary>
     </div>
