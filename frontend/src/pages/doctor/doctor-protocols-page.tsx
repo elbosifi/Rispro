@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, MoreVertical, Pencil, X } from "lucide-react";
 import {
   activateProtocolLibraryVersion,
   cancelDoctorProtocolAssignment,
@@ -54,6 +54,9 @@ import {
 import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail, ProtocolingPreviousAppointment } from "@/types/api";
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
+import { formatDateLy } from "@/lib/date-format";
+import { Badge } from "@/components/shared";
+import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { ProtocolingAppointmentDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
@@ -1144,6 +1147,10 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
           worklistPosition={appointments.findIndex((item) => item.appointmentId === selectedAppointment.appointmentId) + 1}
           worklistTotal={appointments.length}
           onNavigate={(direction) => navigateWorklist(direction)}
+          onExamTypeUpdated={(examTypeId, examTypeName) => {
+            queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, examTypeId, examTypeName } : item));
+            queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], (current) => current ? { ...current, appointment: { ...current.appointment, examTypeId, examTypeName } } : current);
+          }}
           onClose={closeAssignmentModal}
           onSave={(payload, assignNext) => {
             const mutationPayload = { appointmentId: selectedAppointment.appointmentId, payload };
@@ -1181,6 +1188,7 @@ function ProtocolAssignmentModal({
   worklistPosition,
   worklistTotal,
   onNavigate,
+  onExamTypeUpdated,
   onSave,
   onClear,
   onClose,
@@ -1196,10 +1204,12 @@ function ProtocolAssignmentModal({
   worklistPosition: number;
   worklistTotal: number;
   onNavigate: (direction: -1 | 1) => void;
+  onExamTypeUpdated: (examTypeId: number, examTypeName: string) => void;
   onSave: (payload: ProtocolAssignmentPayload, assignNext: boolean) => void;
   onClear: () => void;
   onClose: () => void;
 }) {
+  const queryClient = useQueryClient();
   const existing = appointment.assignment;
   const activeProtocols = protocols.filter((protocol) => protocol.isActive && protocol.modality === appointment.modalityCode && protocol.activeVersionId && protocol.activeVersionStatus === "ACTIVE");
   const matchingScanners = scanners.filter((scanner) => scanner.isActive && scanner.modality === appointment.modalityCode);
@@ -1218,6 +1228,11 @@ function ProtocolAssignmentModal({
   const [annotationDirty, setAnnotationDirty] = useState(false);
   const [documentExpanded, setDocumentExpanded] = useState(false);
   const [additionalInstructionsOpen, setAdditionalInstructionsOpen] = useState(Boolean(existing?.scannerId || existing?.protocolNotes || existing?.contrastNotes));
+  const [examEditorOpen, setExamEditorOpen] = useState(false);
+  const [examTypeDraftId, setExamTypeDraftId] = useState(String(appointment.examTypeId ?? ""));
+  const [examTypeSearch, setExamTypeSearch] = useState("");
+  const [examTypeOverride, setExamTypeOverride] = useState<{ appointmentId: number; id: number; name: string } | null>(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const title = existing ? "Change assigned protocol" : "Assign protocol";
   const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols are available. Enter a free-text protocol.`;
   const selectedProtocol = activeProtocols.find((protocol) => String(protocol.id) === protocolId) ?? null;
@@ -1225,6 +1240,41 @@ function ProtocolAssignmentModal({
   const selectedProtocolLabel = selectedProtocol ? protocolOptionLabel(selectedProtocol) : protocolSearch;
   const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
   const selectedVersionId = selectedProtocol?.activeVersionId ?? null;
+  const examTypesQuery = useV2ExamTypes(appointment.modalityId);
+  const examTypeOptions = useMemo(() => {
+    const search = examTypeSearch.trim().toLowerCase();
+    return (examTypesQuery.data ?? []).filter((examType) => examType.isActive && Number(examType.modalityId) === Number(appointment.modalityId) && (!search || [examType.name, examType.nameEn, examType.nameAr, examType.code].filter(Boolean).some((value) => String(value).toLowerCase().includes(search))));
+  }, [appointment.modalityId, examTypeSearch, examTypesQuery.data]);
+  const selectedExamType = (examTypesQuery.data ?? []).find((examType) => String(examType.id) === examTypeDraftId) ?? null;
+  const displayedExamTypeId = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.id : appointment.examTypeId;
+  const displayedExamTypeName = examTypeOverride?.appointmentId === appointment.appointmentId ? examTypeOverride.name : appointment.examTypeName;
+  const examTypeUpdateMutation = useMutation({
+    mutationFn: () => rescheduleV2Booking(appointment.appointmentId, {
+      bookingDate: appointment.appointmentDate,
+      bookingTime: appointment.appointmentTime,
+      examTypeId: Number(examTypeDraftId),
+    }),
+    onSuccess: async () => {
+      const updatedExamType = selectedExamType;
+      if (!updatedExamType) return;
+      const updatedExamTypeName = updatedExamType.nameEn || updatedExamType.name;
+      setExamTypeOverride({ appointmentId: appointment.appointmentId, id: updatedExamType.id, name: updatedExamTypeName });
+      onExamTypeUpdated(updatedExamType.id, updatedExamTypeName);
+      setExamEditorOpen(false);
+      setExamTypeSearch("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling", "appointment-details", appointment.appointmentId] }),
+        queryClient.invalidateQueries({ queryKey: ["appointment-manage-modal", appointment.appointmentId] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "protocol-library", "protocols"] }),
+        queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }),
+        queryClient.invalidateQueries({ queryKey: ["registrations"] }),
+        queryClient.invalidateQueries({ queryKey: ["queue"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
+      ]);
+      pushToast({ type: "success", title: "Examination type updated.", message: "The appointment date and time were kept unchanged." });
+    },
+  });
   const selectedVersionQuery = useQuery({
     queryKey: ["doctor", "protocol-library", "protocol-version-preview", selectedVersionId],
     queryFn: () => fetchProtocolLibraryVersionDetail(selectedVersionId!),
@@ -1283,25 +1333,47 @@ function ProtocolAssignmentModal({
         aria-label={title}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="sticky top-0 z-20 shrink-0 border-b bg-background px-3 py-2 sm:px-4" style={{ borderColor: "var(--border)" }}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0"><h3 className="truncate text-base font-semibold">{protocolingPatientName(appointment)}</h3><p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>MRN {appointment.patientMrn ?? "-"} · {appointment.ageYears ?? "-"} / {appointment.sex ?? "-"} · {appointment.modalityName ?? appointment.modalityCode} · {appointment.examTypeName ?? "-"}</p></div>
-            <div className="flex flex-wrap items-center justify-end gap-1.5 text-xs">
+        <header className="sticky top-0 z-20 shrink-0 border-b bg-background px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
+          <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+            <div className="min-w-0">
+              <h3 className="truncate text-xl font-bold leading-tight text-foreground">{appointment.patientArabicName || appointment.patientEnglishName || `Patient ${appointment.patientId}`}</h3>
+              {appointment.patientEnglishName ? <p className="mt-0.5 truncate text-sm text-muted-foreground">{appointment.patientEnglishName}</p> : null}
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span><span className="font-semibold text-muted-foreground">Age / sex</span> <span className="font-semibold text-foreground">{appointment.ageYears ?? "—"} / {appointment.sex ?? "—"}</span></span>
+                <span dir="ltr"><span className="font-semibold text-muted-foreground">Primary ID</span> <span className="font-semibold text-foreground">{appointment.patientDicomId || "—"}</span></span>
+                <span dir="ltr"><span className="font-semibold text-muted-foreground">MRN</span> <span className="font-semibold text-foreground">{appointment.patientMrn || "—"}</span></span>
+              </div>
+              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" style={{ borderColor: "var(--border)" }}>
+                <span dir="ltr"><span className="font-semibold text-muted-foreground">Appointment</span> <span className="font-semibold text-foreground">{formatDateLy(appointment.appointmentDate)} · {appointment.appointmentTime?.slice(0, 5) || "—"}</span></span>
+                <span><span className="font-semibold text-muted-foreground">Modality</span> <span className="font-semibold text-foreground">{appointment.modalityName || appointment.modalityCode}</span></span>
+                <span className="inline-flex min-w-0 items-center gap-1"><span className="font-semibold text-muted-foreground">Examination</span> <span className="truncate font-semibold text-foreground">{displayedExamTypeName || "—"}</span><button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={() => { setExamTypeDraftId(String(displayedExamTypeId ?? "")); setExamTypeSearch(""); setExamEditorOpen((current) => !current); }} disabled={examTypesQuery.isLoading || examTypeUpdateMutation.isPending} aria-label="Edit examination type" title="Edit examination type"><Pencil size={13} aria-hidden="true" /></button></span>
+                <span className="inline-flex items-center gap-1"><span className="font-semibold text-muted-foreground">Category</span><ProtocolCategoryBadge category={appointment.caseCategory} /></span>
+              </div>
+              {examEditorOpen ? <div className="relative z-10 mt-2 max-w-xl rounded-lg border bg-background p-3 shadow-lg" style={{ borderColor: "var(--border)" }} role="dialog" aria-label="Edit examination type">
+                <label className="block text-xs font-semibold">Search examination types<input aria-label="Search examination types" value={examTypeSearch} onChange={(event) => setExamTypeSearch(event.target.value)} className={`${inputClass()} mt-1`} placeholder="Search active exam types" /></label>
+                <label className="mt-2 block text-xs font-semibold">Examination type<select aria-label="Examination type" value={examTypeDraftId} onChange={(event) => setExamTypeDraftId(event.target.value)} className={inputClass()} disabled={examTypesQuery.isLoading}>
+                  <option value="">Select examination type</option>
+                  {examTypeOptions.map((examType) => <option key={examType.id} value={examType.id}>{examType.nameEn || examType.name}{examType.code ? ` (${examType.code})` : ""}</option>)}
+                </select></label>
+                {examTypesQuery.isError ? <p className="mt-2 text-xs text-red-700" role="alert">Unable to load examination types.</p> : null}
+                {examTypeUpdateMutation.isError ? <p className="mt-2 text-xs text-red-700" role="alert">{examTypeUpdateMutation.error instanceof Error ? examTypeUpdateMutation.error.message : "Unable to update examination type."}</p> : null}
+                <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => setExamEditorOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => examTypeUpdateMutation.mutate()} disabled={!selectedExamType || String(selectedExamType.id) === String(displayedExamTypeId ?? "") || examTypeUpdateMutation.isPending}>{examTypeUpdateMutation.isPending ? "Updating..." : "Update exam"}</button></div>
+              </div> : null}
+              <div className="mt-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs leading-5 text-foreground" title={appointment.clinicalNotes || undefined}><span className="font-semibold text-muted-foreground">Clinical indication:</span> <span className="line-clamp-2">{appointment.clinicalNotes || "—"}</span></div>
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 text-xs lg:max-w-[420px] lg:justify-end">
               <div className="flex items-center gap-1 rounded-md border px-1 py-0.5" style={{ borderColor: "var(--border)" }}>
                 <button type="button" onClick={() => requestNavigate(-1)} disabled={saving || worklistPosition <= 1} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Previous appointment" title="Previous appointment"><ChevronLeft size={15} aria-hidden="true" /></button>
                 {worklistPosition > 0 ? <span className="whitespace-nowrap px-1 text-[11px] font-semibold" style={{ color: "var(--text-muted)" }}>{worklistPosition} of {worklistTotal}</span> : null}
                 <button type="button" onClick={() => requestNavigate(1)} disabled={saving || worklistPosition <= 0 || worklistPosition >= worklistTotal} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next appointment" title="Next appointment"><ChevronRight size={15} aria-hidden="true" /></button>
               </div>
-              <span className="hidden lg:inline" style={{ color: "var(--text-muted)" }}>{appointment.appointmentDate} {appointment.appointmentTime ?? ""}</span>
-              <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=study`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 font-semibold ${appointment.accessionNumber || appointment.studyInstanceUid ? "" : "pointer-events-none opacity-40"}`} title={appointment.accessionNumber || appointment.studyInstanceUid ? undefined : "No usable study identifier"}>Open current study</a>
-              <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "DICOM Patient ID unavailable"}>Patient studies</a>
-              <a href={appointment.accessionNumber ? buildRadiantPacsTagUrl("00080050", appointment.accessionNumber) : undefined} className={`rounded border px-2 py-1.5 font-semibold ${appointment.accessionNumber ? "" : "pointer-events-none opacity-40"}`} title={appointment.accessionNumber ? "RadiAnt must be installed on this workstation." : "Accession number unavailable"}>Open in RadiAnt</a>
+              <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies</a>
+              <a href={appointment.patientDicomId ? buildRadiantPacsTagUrl("00100020", appointment.patientDicomId) : undefined} className={`rounded border px-2 py-1.5 font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? "RadiAnt must be installed on this workstation." : "Primary patient identifier is unavailable."} aria-disabled={!appointment.patientDicomId}>Patient studies in RadiAnt</a>
               <button type="button" onClick={() => setHistoryOpen((current) => !current)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold">Patient history</button>
               <button type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</button>
               <button type="button" onClick={requestClose} disabled={saving} className="rounded border p-1.5 font-semibold" aria-label="Close" title="Close"><X size={16} aria-hidden="true" /></button>
             </div>
           </div>
-          {appointment.clinicalNotes ? <p className="mt-1 truncate text-xs" title={appointment.clinicalNotes} style={{ color: "var(--text-muted)" }}>Indication: {appointment.clinicalNotes}</p> : null}
         </header>
 
         {loading ? (
@@ -1320,11 +1392,12 @@ function ProtocolAssignmentModal({
               <div className={`min-h-0 min-w-0 overflow-hidden ${documentExpanded ? "lg:col-span-2" : ""}`}>
                 <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" layout="workspace" expanded={documentExpanded} onExpandedChange={setDocumentExpanded} enableAnnotations onAnnotationDirtyChange={setAnnotationDirty} />
               </div>
-              {!documentExpanded ? (historyOpen ? <aside className="min-h-0 overflow-y-auto rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+               {!documentExpanded ? (historyOpen ? <aside className="min-h-0 overflow-y-auto rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
                 <div className="flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">Patient history</h4><button type="button" className="text-xs font-semibold text-accent" onClick={() => setHistoryOpen(false)}>Back to protocol</button></div>
                 {historyQuery.isLoading ? <p className="mt-4 text-xs" style={{ color: "var(--text-muted)" }}>Loading history...</p> : historyQuery.error ? <p className="mt-4 text-xs text-red-700">Unable to load previous appointments.</p> : <div className="mt-3 space-y-2">{(historyQuery.data ?? []).slice(0, 5).map((history: ProtocolingPreviousAppointment) => <div key={history.appointmentId} className="rounded-lg border p-2 text-xs" style={{ borderColor: "var(--border)" }}><p className="font-semibold">{history.appointmentDate} {history.appointmentTime ?? ""} · {history.modalityName ?? history.modalityCode}</p><p className="mt-1" style={{ color: "var(--text-muted)" }}>{history.examTypeName ?? "-"} · {history.appointmentStatus}</p><div className="mt-2 flex flex-wrap gap-1">{history.accessionNumber ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">SonicDICOM</a> : null}{history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 font-semibold">RadiAnt</a> : null}{history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">Open report</a> : null}</div></div>)}</div>}
                 {(historyQuery.data?.length ?? 0) > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
-              </aside> : <aside className="min-h-0 overflow-y-auto rounded-xl border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+               </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
+                 <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {existing && <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}><p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p><p className="mt-1 text-sm font-semibold">{existing.freeTextProtocol ? "Free-text protocol" : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}{existing.scannerName ? ` · ${existing.scannerName}` : ""}</p></div>}
                 <div className="mb-3 flex rounded-lg border p-1" role="radiogroup" aria-label="Protocol entry mode" style={{ borderColor: "var(--border)" }}>
                   <button type="button" role="radio" aria-checked={protocolMode === "saved"} onClick={() => { setModeTouched(true); setProtocolModeOverride("saved"); }} className={`flex-1 rounded px-2 py-1.5 text-xs font-semibold ${protocolMode === "saved" ? "bg-accent/10 text-accent" : "text-muted-foreground"}`}>Saved protocol</button>
@@ -1343,24 +1416,35 @@ function ProtocolAssignmentModal({
                     <Field label="Contrast/preparation instructions"><textarea aria-label="Contrast/preparation instructions" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
                   </div> : null}
                 </div>
-                {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
-              </aside>) : null}
-            </div>
-            <footer className="sticky bottom-0 z-20 mt-1 flex shrink-0 flex-wrap items-center justify-end gap-1.5 border-t bg-background pt-1" style={{ borderColor: "var(--border)" }}>
-              {annotationDirty ? <span className="me-auto text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}
-              <button type="button" onClick={requestClose} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
-              {printableSheet ? <button type="button" disabled={saving} onClick={() => printProtocolSheet(printableSheet)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Print protocol</button> : null}
-              {existing ? <button type="button" disabled={saving} onClick={onClear} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">Clear assignment</button> : null}
-              <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{saving ? "Saving..." : "Save"}</button>
-              <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), true)} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Assign and next</button>
-            </footer>
-            </div>
+                 {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
+                 </div>
+                 <div className="sticky bottom-0 z-20 mt-auto flex shrink-0 items-center justify-end gap-1.5 border-t bg-background p-2" style={{ borderColor: "var(--border)" }}>
+                   {annotationDirty ? <span className="me-auto text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}
+                   <div className="relative">
+                     <button type="button" disabled={saving} onClick={() => setActionMenuOpen((current) => !current)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
+                     {actionMenuOpen ? <div className="absolute bottom-11 end-0 z-30 w-40 rounded-lg border bg-background p-1 shadow-lg" style={{ borderColor: "var(--border)" }} role="menu">
+                       {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
+                       {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
+                     </div> : null}
+                   </div>
+                   <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{saving ? "Saving..." : "Save"}</button>
+                   <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), true)} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Assign and next</button>
+                 </div>
+               </aside>) : null}
+             </div>
+             </div>
           </>
         )}
         {detailsOpen ? <ProtocolingAppointmentDetailsDrawer key={appointment.appointmentId} appointment={appointment} onClose={() => setDetailsOpen(false)} /> : null}
       </section>
     </div>
   );
+}
+
+function ProtocolCategoryBadge({ category }: { category: string | null }) {
+  if (category === "oncology") return <Badge variant="error" size="sm">Oncology</Badge>;
+  if (category === "non_oncology") return <Badge variant="info" size="sm">Non-oncology</Badge>;
+  return <Badge variant="neutral" size="sm">Not set</Badge>;
 }
 
 function combineProtocolValues(...values: Array<string | number | null | undefined>): string | null {

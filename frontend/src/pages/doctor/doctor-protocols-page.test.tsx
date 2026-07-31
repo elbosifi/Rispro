@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
@@ -10,10 +10,10 @@ const appointment: DoctorProtocolingAppointment = {
   accessionNumber: "V2-000042",
   patientId: 9,
   patientMrn: "MRN-9",
-  patientNationalId: null,
-  patientArabicName: null,
+  patientNationalId: "LEGACY-9",
+  patientArabicName: "مريض عربي",
   patientEnglishName: "Request Scan Patient",
-  patientDicomId: null,
+  patientDicomId: "002888",
   studyInstanceUid: null,
   ageYears: 35,
   sex: "M",
@@ -22,16 +22,16 @@ const appointment: DoctorProtocolingAppointment = {
   modalityId: 4,
   modalityCode: "CT",
   modalityName: "CT",
-  examTypeId: null,
-  examTypeName: null,
+  examTypeId: 10,
+  examTypeName: "CT Chest",
   caseCategory: "non_oncology",
-  clinicalNotes: null,
+  clinicalNotes: "Pre-operative staging and chest review.",
   appointmentStatus: "scheduled",
   protocolStatus: "NOT_PROTOCOLLED",
   assignment: null,
 };
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockGetAppointmentById, mockPatientSummary } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -53,6 +53,10 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
+vi.mock("@/v2/appointments/api", () => ({
+  rescheduleV2Booking: mockRescheduleBooking,
+  useV2ExamTypes: () => ({ data: [{ id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true }, { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true }, { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true }], isLoading: false, isError: false }),
+}));
 vi.mock("@/components/appointments/appointment-information-view", () => ({
   AppointmentDetailsReadOnly: ({ readOnly }: { readOnly?: boolean }) => <div data-testid="read-only-appointment-details">{readOnly ? "Read-only appointment details" : "Editable appointment details"}</div>,
 }));
@@ -87,6 +91,62 @@ describe("Doctor protocoling request documents", () => {
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
+    mockRescheduleBooking.mockReset();
+    mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
+  });
+
+  it("shows the Arabic-first clinical header and prior-study actions", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    expect(screen.getByRole("heading", { name: "مريض عربي" })).toBeTruthy();
+    expect(screen.getAllByText("Request Scan Patient").some((element) => element.tagName === "P")).toBe(true);
+    expect(screen.getByText("Age / sex").parentElement?.textContent).toContain("35 / M");
+    expect(screen.getByText("Primary ID").parentElement?.textContent).toContain("002888");
+    expect(screen.getByText("MRN").parentElement?.textContent).toContain("MRN-9");
+    expect(screen.getByText("Appointment").parentElement?.textContent).toContain("22/07/2026 · 09:00");
+    const modal = screen.getByRole("dialog", { name: "Assign protocol" });
+    expect(within(modal).getByText("Modality").parentElement?.textContent).toContain("CT");
+    expect(within(modal).getByText("Examination").parentElement?.textContent).toContain("CT Chest");
+    expect(within(modal).getByText("Non-oncology")).toBeTruthy();
+    expect(within(modal).getByText("Clinical indication:").parentElement?.textContent).toContain("Pre-operative staging");
+    expect(screen.queryByRole("link", { name: "Open current study" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Patient studies" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("00100020");
+    expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("002888");
+  });
+
+  it("edits examination type within the current modality and refreshes the header", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
+    expect(screen.getByRole("option", { name: /CT Chest Abdomen/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /MRI Brain/ })).toBeNull();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
+    await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
+
+    await waitFor(() => expect(mockRescheduleBooking).toHaveBeenCalledWith(42, { bookingDate: "2026-07-22", bookingTime: "09:00:00", examTypeId: 11 }));
+    expect(await within(screen.getByRole("dialog", { name: "Assign protocol" })).findByText("CT Chest Abdomen")).toBeTruthy();
+  });
+
+  it("preserves entered protocol text when an examination update fails", async () => {
+    mockRescheduleBooking.mockRejectedValue(new Error("Exam update denied"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Free-text protocol" }));
+    const protocol = screen.getByRole("textbox", { name: "Free-text protocol" });
+    await userEvent.type(protocol, "Keep this protocol draft.");
+    await userEvent.click(screen.getByRole("button", { name: "Edit examination type" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Examination type" }), "11");
+    await userEvent.click(screen.getByRole("button", { name: "Update exam" }));
+
+    expect(await screen.findByText("Exam update denied")).toBeTruthy();
+    expect((protocol as HTMLTextAreaElement).value).toBe("Keep this protocol draft.");
   });
 
   it("renders the existing request-document panel for the selected V2 appointment", async () => {
@@ -145,7 +205,7 @@ describe("Doctor protocoling request documents", () => {
     expect(drawer.className).toContain("w-full");
     expect(drawer.className).toContain("sm:w-[480px]");
     expect(screen.getByTestId("read-only-appointment-details").textContent).toBe("Read-only appointment details");
-    expect(screen.queryByRole("button", { name: /Edit|Change status|Reschedule/ })).toBeNull();
+    expect(within(drawer).queryByRole("button", { name: /Edit|Change status|Reschedule/ })).toBeNull();
     await userEvent.click(screen.getByRole("tab", { name: "Patient" }));
     expect(screen.getByTestId("shared-patient-summary-content")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Appointment" }).getAttribute("aria-selected")).toBe("false");

@@ -309,7 +309,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     {expandAction}
     {openDocumentAction}
   </>;
-  const singlePageToolbar = (pageNavigation: ReactNode) => <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="PDF document controls"><div className="flex shrink-0 items-center gap-1">{pageNavigation}</div>{annotationToolbar}<div className="ms-auto flex min-w-0 flex-wrap items-center gap-1">{pageTools}</div></div>;
+  const documentUtilityBar = previewError ? null : <div className="flex min-h-9 min-w-0 shrink-0 items-center justify-end gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document utilities">{pageTools}</div>;
+  const singlePageToolbar = (pageNavigation: ReactNode) => <div className="flex min-h-9 min-w-0 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="PDF document controls"><div className="flex shrink-0 items-center gap-1">{pageNavigation}</div>{annotationToolbar}</div>;
 
   return (
     <Document
@@ -327,12 +328,13 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
       onSourceError={handlePreviewError}
       error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} />}
     >
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-1">
+      <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-1">
+        <div className="min-h-0 min-w-0 overflow-hidden">
         {previewError ? (
           <PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={previewError} />
         ) : viewMode === "overview" ? (
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-muted/10" aria-label={labels.pageOverview}>
-            <div className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1" role="toolbar" aria-label="PDF page overview controls">
+              <div className="flex min-h-9 min-w-0 shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border px-2 py-1" role="toolbar" aria-label="PDF page overview controls">
               <span className="shrink-0 text-xs font-semibold text-foreground">
                 {pageCount ? labels.pagesCount.replace("{count}", String(pageCount)) : labels.loading}
               </span>
@@ -355,7 +357,6 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 </button>
               </div>
               {annotationToolbar}
-              <div className="ms-auto flex min-w-0 flex-wrap items-center gap-1">{expandAction}{openDocumentAction}</div>
             </div>
             <div
               ref={overviewRef}
@@ -452,6 +453,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
             </div> : null}
           </div>
         )}
+        </div>
+        {documentUtilityBar}
       </div>
     </Document>
   );

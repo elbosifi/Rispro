@@ -109,8 +109,9 @@ export function RequestDocumentsPanel({
   const [deletedAnnotationIds, setDeletedAnnotationIds] = useState<number[]>([]);
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>("select");
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
-  const [annotationPast, setAnnotationPast] = useState<ProtocolDocumentAnnotation[][]>([]);
-  const [annotationFuture, setAnnotationFuture] = useState<ProtocolDocumentAnnotation[][]>([]);
+  type AnnotationHistory = { annotations: ProtocolDocumentAnnotation[]; deletedAnnotationIds: number[] };
+  const [annotationPast, setAnnotationPast] = useState<AnnotationHistory[]>([]);
+  const [annotationFuture, setAnnotationFuture] = useState<AnnotationHistory[]>([]);
   const [annotationSaving, setAnnotationSaving] = useState(false);
   const { data: loadedAnnotations = EMPTY_ANNOTATIONS, refetch: refetchAnnotations } = useQuery({
     queryKey: ["doctor", "protocol-document-annotations", selectedDocument?.id],
@@ -130,10 +131,11 @@ export function RequestDocumentsPanel({
 
   const annotationDirty = deletedAnnotationIds.length > 0 || annotations.some((annotation) => !savedAnnotationIds.has(annotation.id));
   useEffect(() => onAnnotationDirtyChange?.(annotationDirty), [annotationDirty, onAnnotationDirtyChange]);
-  const changeAnnotations = (next: ProtocolDocumentAnnotation[]) => {
-    setAnnotationPast((current) => [...current.slice(-19), annotations]);
+  const changeAnnotations = (next: ProtocolDocumentAnnotation[], nextDeletedAnnotationIds = deletedAnnotationIds) => {
+    setAnnotationPast((current) => [...current.slice(-19), { annotations, deletedAnnotationIds }]);
     setAnnotationFuture([]);
     setAnnotations(next);
+    setDeletedAnnotationIds(nextDeletedAnnotationIds);
   };
   const saveAnnotations = async () => {
     if (annotationSaving || !selectedDocument) return;
@@ -178,9 +180,10 @@ export function RequestDocumentsPanel({
   const annotationToolbar = enableAnnotations ? (
     <div className="flex min-w-0 max-w-full items-center gap-0.5 overflow-x-auto" role="group" aria-label="Document annotation tools">
       {(["select", "arrow", "rectangle", "freehand", "text"] as AnnotationTool[]).map((tool) => <button key={tool} type="button" className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded ${annotationTool === tool ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setAnnotationTool(tool)} aria-label={annotationToolLabel(tool)} title={annotationToolLabel(tool)} aria-pressed={annotationTool === tool}>{annotationToolIcon(tool)}</button>)}
-      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={selectedAnnotationId === null} onClick={() => { const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId); if (!selected) return; changeAnnotations(annotations.filter((annotation) => annotation.id !== selected.id)); if (selected.id > 0) setDeletedAnnotationIds((current) => [...current, selected.id]); setSelectedAnnotationId(null); }} aria-label="Delete selected annotation" title="Delete selected annotation"><Trash2 size={14} aria-hidden="true" /></button>
-      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationPast.length === 0} onClick={() => { const previous = annotationPast.at(-1); if (!previous) return; setAnnotationPast((current) => current.slice(0, -1)); setAnnotationFuture((current) => [...current, annotations]); setAnnotations(previous); }} aria-label="Undo annotation change" title="Undo"><Undo2 size={14} aria-hidden="true" /></button>
-      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationFuture.length === 0} onClick={() => { const next = annotationFuture.at(-1); if (!next) return; setAnnotationFuture((current) => current.slice(0, -1)); setAnnotationPast((current) => [...current, annotations]); setAnnotations(next); }} aria-label="Redo annotation change" title="Redo"><Redo2 size={14} aria-hidden="true" /></button>
+       <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={selectedAnnotationId === null} onClick={() => { const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId); if (!selected) return; changeAnnotations(annotations.filter((annotation) => annotation.id !== selected.id), selected.id > 0 ? [...new Set([...deletedAnnotationIds, selected.id])] : deletedAnnotationIds); setSelectedAnnotationId(null); }} aria-label="Delete selected annotation" title="Delete selected annotation"><Trash2 size={14} aria-hidden="true" /></button>
+       <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotations.length === 0} onClick={() => { if (!window.confirm("Clear all annotations from this document? This will be applied when annotations are saved.")) return; changeAnnotations([], [...new Set([...deletedAnnotationIds, ...annotations.filter((annotation) => annotation.id > 0).map((annotation) => annotation.id)])]); setSelectedAnnotationId(null); }} aria-label="Clear all annotations" title="Clear all annotations"><Trash2 size={14} aria-hidden="true" /></button>
+       <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationPast.length === 0} onClick={() => { const previous = annotationPast.at(-1); if (!previous) return; setAnnotationPast((current) => current.slice(0, -1)); setAnnotationFuture((current) => [...current, { annotations, deletedAnnotationIds }]); setAnnotations(previous.annotations); setDeletedAnnotationIds(previous.deletedAnnotationIds); setSelectedAnnotationId(null); }} aria-label="Undo annotation change" title="Undo"><Undo2 size={14} aria-hidden="true" /></button>
+       <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationFuture.length === 0} onClick={() => { const next = annotationFuture.at(-1); if (!next) return; setAnnotationFuture((current) => current.slice(0, -1)); setAnnotationPast((current) => [...current, { annotations, deletedAnnotationIds }]); setAnnotations(next.annotations); setDeletedAnnotationIds(next.deletedAnnotationIds); setSelectedAnnotationId(null); }} aria-label="Redo annotation change" title="Redo"><Redo2 size={14} aria-hidden="true" /></button>
       <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded bg-teal-700 text-white disabled:opacity-40" disabled={!annotationDirty || !selectedDocument || annotationSaving} onClick={() => void saveAnnotations()} aria-label={annotationSaving ? "Saving annotations" : "Save annotations"} title={annotationSaving ? "Saving annotations" : "Save annotations"}><SaveIcon size={14} aria-hidden="true" /></button>
       {annotationDirty ? <span className="shrink-0 px-1 text-[10px] font-semibold text-amber-700">Unsaved</span> : null}
     </div>

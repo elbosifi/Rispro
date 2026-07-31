@@ -95,13 +95,13 @@ function PreviewFailure({ message, href, label, includeOpenAction = true }: { me
   );
 }
 
-function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, toolbar }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode; toolbar?: ReactNode }) {
+function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, toolbar, utilityToolbar }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode; toolbar?: ReactNode; utilityToolbar?: ReactNode }) {
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const src = viewUrl(document);
 
   if (imageError) {
-    return <div className="flex min-h-0 flex-1 flex-col gap-1">{toolbar}<PreviewFailure message={labels.imageFailed} href={src} label={labels.openInNewTab} includeOpenAction={!toolbar && includeOpenAction} /></div>;
+    return <div className="flex min-h-0 flex-1 flex-col gap-1">{toolbar}<PreviewFailure message={labels.imageFailed} href={src} label={labels.openInNewTab} includeOpenAction={!toolbar && includeOpenAction} />{utilityToolbar}</div>;
   }
 
   return (
@@ -137,6 +137,7 @@ function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, 
           </button>
         </div>
       </div>
+      {utilityToolbar}
     </div>
   );
 }
@@ -207,9 +208,13 @@ export function DocumentPreviewWorkspace({
       <DocumentAnnotationOverlay pageNumber={pageNumber} rotation={rotation} tool={annotationTool} annotations={annotations} selectedAnnotationId={selectedAnnotationId} onSelect={onSelectAnnotation} onCreate={onCreateAnnotation} />
     </div>
   ) : undefined;
-  const toolbar = showOpenAction || onExpandedChange || annotationToolbar ? (
-    <div className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document preview controls">
+  const toolbar = annotationToolbar ? (
+    <div className="flex min-h-9 min-w-0 shrink-0 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document annotation controls">
       {annotationToolbar}
+    </div>
+  ) : null;
+  const utilityToolbar = showOpenAction || onExpandedChange ? (
+    <div className="flex min-h-9 min-w-0 shrink-0 items-center justify-end gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document utilities">
       {onExpandedChange ? (
         <button
           type="button"
@@ -221,7 +226,6 @@ export function DocumentPreviewWorkspace({
         </button>
       ) : null}
       {showOpenAction ? <OpenDocumentAction href={src} label={labels.openInNewTab} /> : null}
-      <span className="sr-only" aria-live="polite">{expanded ? labels.exitExpandedReview : labels.expandReview}</span>
     </div>
   ) : null;
 
@@ -230,6 +234,7 @@ export function DocumentPreviewWorkspace({
       <div className="flex min-h-0 flex-1 flex-col gap-1">
         {toolbar}
         <PreviewFailure message={labels.unsupported} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />
+        {utilityToolbar}
       </div>
     );
   }
@@ -237,7 +242,7 @@ export function DocumentPreviewWorkspace({
   if (kind === "image") {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-1">
-        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} toolbar={toolbar} />
+        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} toolbar={toolbar} utilityToolbar={utilityToolbar} />
       </div>
     );
   }
@@ -246,7 +251,7 @@ export function DocumentPreviewWorkspace({
     <div className="flex min-h-0 flex-1 flex-col gap-1">
       <PreviewErrorBoundary
         key={document.id}
-        fallback={<div className="flex min-h-0 flex-1 flex-col gap-1">{toolbar}<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!toolbar && showOpenAction} /></div>}
+         fallback={<div className="flex min-h-0 flex-1 flex-col gap-1">{toolbar}{utilityToolbar}<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!toolbar && !utilityToolbar && showOpenAction} /></div>}
       >
       <Suspense
         fallback={
