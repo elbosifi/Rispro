@@ -169,7 +169,7 @@ describe("RequestScansPage", () => {
   });
 
   it("shows sanitized export details, retry timing, and a failed page in the existing details dialog", async () => {
-    mock([{ ...completed, filename: "export-details.pdf", appointment_status: "completed", clinical_document_export_status: "failed", clinical_document_export_id: 121, clinical_document_export_representation_type: "secondary_capture", clinical_document_export_expected_page_count: 2, clinical_document_export_exported_page_count: 1, clinical_document_export_verified_page_count: 1, clinical_document_export_failed_page_number: 2, clinical_document_export_last_attempt_at: "2026-07-28T10:00:00Z", clinical_document_export_next_retry_at: "2026-07-28T10:15:00Z", clinical_document_exported_at: "2026-07-28T09:59:00Z", clinical_document_export_last_error: "Authorization: Basic secret C:\\scans\\patient.pdf" }]);
+    mock([{ ...completed, filename: "export-details.pdf", appointment_status: "completed", clinical_document_export_status: "failed", clinical_document_export_id: 121, clinical_document_export_representation_type: "secondary_capture", clinical_document_export_expected_page_count: 2, clinical_document_export_exported_page_count: 1, clinical_document_export_verified_page_count: 1, clinical_document_export_failed_page_number: 2, clinical_document_export_last_attempt_at: "2026-07-28T10:00:00Z", clinical_document_export_next_retry_at: "2026-07-28T10:15:00Z", clinical_document_exported_at: "2026-07-28T09:59:00Z", clinical_document_export_last_error: "Failed to open C:\\Patient Documents\\John Doe.pdf Authorization: Bearer secret" }]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     expect(await screen.findByText("Failed on page 2")).toBeTruthy();
     const menu = await openMenu("export-details.pdf");
@@ -177,7 +177,7 @@ describe("RequestScansPage", () => {
     expect(await screen.findByRole("region", { name: "Clinical document export details" })).toBeTruthy();
     expect(screen.getByText("Secondary Capture")).toBeTruthy();
     expect(screen.getByText("1/2 exported; 1/2 verified")).toBeTruthy();
-    expect(screen.queryByText(/secret|C:\\scans/i)).toBeNull();
+    expect(screen.queryByText(/John Doe|Doe\.pdf|secret|C:\\Patient/i)).toBeNull();
     expect(screen.getByText(/\[redacted\]|local path/i)).toBeTruthy();
   });
 
@@ -196,8 +196,21 @@ describe("RequestScansPage", () => {
   });
 
   it("redacts unsafe export details as a client-side defense in depth", () => {
-    const value = sanitizeClinicalDocumentExportError("Authorization: Bearer secret Cookie: sid=secret X-API-Key: secret C:\\scans\\patient.pdf \\\\server\\share\\patient.pdf /srv/rispro/file.pdf https://user:password@host/path?token=secret");
-    expect(value).not.toMatch(/secret|C:\\scans|\\\\server\\share|\/srv\/rispro|user:password/i);
+    const unsafeValues = [
+      String.raw`C:\Patient Documents\John Doe.pdf`,
+      String.raw`\\server\Clinical Documents\John Doe.pdf`,
+      "/usr/local/rispro/John Doe.pdf",
+      "/root/scans/patient.pdf",
+    ];
+    for (const unsafeValue of unsafeValues) {
+      const value = sanitizeClinicalDocumentExportError(`Renderer failed for ${unsafeValue} after timeout.`);
+      expect(value).not.toMatch(/John Doe|Doe\.pdf|Patient Documents|C:\\Patient|\\\\server|\/usr\/local|\/root\/scans/i);
+      expect(value).toMatch(/Renderer failed/);
+      expect(value).toMatch(/after timeout/);
+    }
+
+    const credentials = sanitizeClinicalDocumentExportError("Authorization: Bearer secret\nCookie: sid=secret\nX-API-Key: secret\nhttps://user:password@host/path?token=secret");
+    expect(credentials).not.toMatch(/secret|user:password/i);
   });
 
   it("scopes modality jobs, status, preview, and browser links to the selected modality", async () => {

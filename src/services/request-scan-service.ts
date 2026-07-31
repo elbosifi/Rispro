@@ -23,6 +23,7 @@ import { createRequestScanProgressCoalescer } from "./request-scan-progress-coal
 import { requestRequestScanWorkerRun } from "./request-scan-worker-control-service.js";
 import { resolveRequestScanAppointmentToken } from "./request-scan-appointment-token-service.js";
 import { sha256File } from "./backup-v3-checksums.js";
+import { sanitizeClinicalDocumentExportError } from "./clinical-document-export-service.js";
 
 export type RequestScanFailureCategory = "recognition" | "identifier_conflict" | "modality_mismatch" | "smb_storage" | "source_missing" | "processing_interrupted" | "duplicate_or_existing" | "internal_processing" | "unknown";
 export class RequestScanProcessingError extends Error { constructor(message: string, readonly category: RequestScanFailureCategory, options?: ErrorOptions) { super(message, options); } }
@@ -198,7 +199,13 @@ export async function listRequestScanJobs(filterInput?: unknown, categoryInput?:
     ? "case when j.status = 'processing' then 0 else 1 end, j.created_at asc, j.id asc"
     : "j.created_at desc, j.id desc";
   const { rows } = await pool.query(`select j.*, u.full_name as dismissed_by_name, ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, b.status as appointment_status, coalesce(p.english_full_name, p.arabic_full_name) as patient_name, p.arabic_full_name as patient_name_ar, p.english_full_name as patient_name_en, p.mrn as patient_mrn, p.estimated_date_of_birth as patient_date_of_birth, m.name_en as modality_name, m.name_ar as modality_name_ar, m.name_en as modality_name_en, e.name_en as exam_name, e.name_ar as exam_name_ar, e.name_en as exam_name_en, b.booking_date as appointment_date, export.id as clinical_document_export_id, export.status as clinical_document_export_status, export.representation_type as clinical_document_export_representation_type, export.expected_page_count as clinical_document_export_expected_page_count, export.exported_page_count as clinical_document_export_exported_page_count, export.verified_page_count as clinical_document_export_verified_page_count, export.failed_page_number as clinical_document_export_failed_page_number, export.last_attempt_at as clinical_document_export_last_attempt_at, export.next_retry_at as clinical_document_export_next_retry_at, export.exported_at as clinical_document_export_exported_at, export.last_error as clinical_document_export_last_error from request_scan_jobs j left join users u on u.id=j.dismissed_by left join appointments_v2.bookings b on b.id=j.appointment_id left join patients p on p.id=b.patient_id left join modalities m on m.id=b.modality_id left join exam_types e on e.id=b.exam_type_id left join lateral (select e.id, e.status, e.representation_type, e.expected_page_count, e.exported_page_count, e.verified_page_count, (select i.page_number from clinical_document_export_instances i where i.export_id=e.id and i.status in ('failed','blocked') order by i.page_number limit 1) as failed_page_number, e.last_attempt_at, e.next_retry_at, e.exported_at, e.last_error from clinical_document_exports e where e.document_id=j.document_id and e.appointment_id=j.appointment_id and e.destination_key='authoritative_orthanc' order by e.id desc limit 1) export on true ${finalWhere} order by ${order} limit 250`, values);
-  return hydrateMatchedAppointments(rows as RequestScanJob[]);
+  const jobs = (rows as RequestScanJob[]).map((job) => ({
+    ...job,
+    clinical_document_export_last_error: job.clinical_document_export_last_error
+      ? sanitizeClinicalDocumentExportError(job.clinical_document_export_last_error)
+      : null,
+  }));
+  return hydrateMatchedAppointments(jobs);
 }
 
 async function hydrateMatchedAppointments(jobs: RequestScanJob[]): Promise<RequestScanJob[]> {
