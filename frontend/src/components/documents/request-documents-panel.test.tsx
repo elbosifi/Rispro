@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
@@ -46,6 +46,11 @@ const mockScanAppointmentRequest = vi.fn<(customOptions?: unknown) => Promise<{ 
     source: "naps2_webscan",
   })
 );
+const mockListProtocolDocumentAnnotations = vi.fn(async (_documentId?: number) => [] as unknown[]);
+const mockCreateProtocolDocumentAnnotation = vi.fn<(documentId: number, payload: unknown) => Promise<unknown>>(async (_documentId, payload) => ({ id: 11, documentId: 1, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
+const mockUpdateProtocolDocumentAnnotation = vi.fn<(documentId: number, annotationId: number, payload: unknown) => Promise<unknown>>(async (_documentId, annotationId, payload) => ({ id: annotationId, documentId: 1, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
+const mockDeleteProtocolDocumentAnnotation = vi.fn(async (_documentId: number, _annotationId: number) => undefined);
+const { mockPushToast } = vi.hoisted(() => ({ mockPushToast: vi.fn() }));
 const mockFetchCurrentSession = vi.fn(async () => ({
   id: 1,
   role: "receptionist",
@@ -81,17 +86,19 @@ vi.mock("@/lib/api-hooks", () => ({
   createScanSession: (payload: unknown) => mockCreateScanSession(payload),
   fetchCurrentSession: () => mockFetchCurrentSession(),
   fetchIntegrationStatus: () => mockFetchIntegrationStatus(),
+  listProtocolDocumentAnnotations: () => mockListProtocolDocumentAnnotations(),
+  createProtocolDocumentAnnotation: (documentId: number, payload: unknown) => mockCreateProtocolDocumentAnnotation(documentId, payload),
+  updateProtocolDocumentAnnotation: (documentId: number, annotationId: number, payload: unknown) => mockUpdateProtocolDocumentAnnotation(documentId, annotationId, payload),
+  deleteProtocolDocumentAnnotation: (documentId: number, annotationId: number) => mockDeleteProtocolDocumentAnnotation(documentId, annotationId),
 }));
 
-vi.mock("@/lib/toast", () => ({
-  pushToast: vi.fn(),
-}));
+vi.mock("@/lib/toast", () => ({ pushToast: mockPushToast }));
 
 vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -116,6 +123,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           onExpandedChange={options.onExpandedChange}
           layout={options.layout}
           supplementaryPanel={options.supplementaryPanel}
+          enableAnnotations={options.enableAnnotations}
         />
       </LanguageProvider>
     </QueryClientProvider>
@@ -214,6 +222,11 @@ describe("RequestDocumentsPanel local scan flow", () => {
     mockPrepareScanSession.mockReset();
     mockCreateScanSession.mockReset();
     mockScanAppointmentRequest.mockReset();
+    mockListProtocolDocumentAnnotations.mockReset();
+    mockCreateProtocolDocumentAnnotation.mockReset();
+    mockUpdateProtocolDocumentAnnotation.mockReset();
+    mockDeleteProtocolDocumentAnnotation.mockReset();
+    mockPushToast.mockReset();
     mockFetchCurrentSession.mockClear();
     mockFetchIntegrationStatus.mockClear();
 
@@ -237,6 +250,8 @@ describe("RequestDocumentsPanel local scan flow", () => {
       pageCount: 1,
       source: "naps2_webscan",
     });
+    mockListProtocolDocumentAnnotations.mockResolvedValue([]);
+    mockCreateProtocolDocumentAnnotation.mockImplementation(async (_documentId: number, payload: unknown) => ({ id: 11, documentId: 1, ...(payload as object), createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }));
     mockUploadAppointmentDocument.mockResolvedValue({
       id: 1,
       patientId: 9,
@@ -622,5 +637,50 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     expect(screen.getByTestId("document-file-input")).toBeTruthy();
     expect(screen.getByRole("button", { name: "second.png" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("saves annotation creates with pending feedback and clears dirty state after reload", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    let resolveCreate!: (value: unknown) => void;
+    mockCreateProtocolDocumentAnnotation.mockImplementationOnce(() => new Promise((resolve) => { resolveCreate = resolve; }));
+    renderPanel({ layout: "workspace", enableAnnotations: true });
+
+    const image = await screen.findByRole("img", { name: "request.png" });
+    fireEvent.load(image);
+    const svg = await screen.findByLabelText("Annotations for page 1");
+    Object.defineProperty(svg, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 100, height: 100 }) });
+    await userEvent.click(screen.getByRole("button", { name: "Arrow" }));
+    fireEvent.pointerDown(svg, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(svg, { clientX: 70, clientY: 70, pointerId: 1 });
+
+    const save = screen.getByRole("button", { name: "Save annotations" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await userEvent.click(save);
+    expect(save.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Saving annotations" })).toBeTruthy();
+    await userEvent.click(save);
+    expect(mockCreateProtocolDocumentAnnotation).toHaveBeenCalledTimes(1);
+    resolveCreate({ id: 11, documentId: 1, pageNumber: 1, annotationType: "arrow", geometry: { x1: 0.1, y1: 0.1, x2: 0.7, y2: 0.7 }, textContent: null, style: null, createdByUserId: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    await waitFor(() => expect(screen.queryByText("Unsaved")).toBeNull());
+    expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "success", title: "Annotations saved" }));
+  });
+
+  it("keeps annotations dirty and reports a failed save", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    mockCreateProtocolDocumentAnnotation.mockRejectedValueOnce(new Error("save failed"));
+    renderPanel({ layout: "workspace", enableAnnotations: true });
+
+    const image = await screen.findByRole("img", { name: "request.png" });
+    fireEvent.load(image);
+    const svg = await screen.findByLabelText("Annotations for page 1");
+    Object.defineProperty(svg, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 100, height: 100 }) });
+    await userEvent.click(screen.getByRole("button", { name: "Rectangle" }));
+    fireEvent.pointerDown(svg, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(svg, { clientX: 70, clientY: 70, pointerId: 1 });
+    await userEvent.click(screen.getByRole("button", { name: "Save annotations" }));
+
+    await waitFor(() => expect(screen.getByText("Unsaved")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Save annotations" })).toBeTruthy();
+    expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "error", title: "Annotation save failed" }));
   });
 });

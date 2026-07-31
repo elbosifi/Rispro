@@ -15,6 +15,9 @@ interface PdfDocumentPreviewProps {
   expanded: boolean;
   preferSinglePage: boolean;
   annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode;
+  annotationToolbar?: ReactNode;
+  onExpandedChange?: (expanded: boolean) => void;
+  showOpenAction: boolean;
 }
 
 type PdfViewMode = "overview" | "single";
@@ -72,10 +75,10 @@ function LazyPdfPageCard({
   const [renderError, setRenderError] = useState(false);
   const [pageSize, setPageSize] = useState<PdfPageSize | null>(null);
   const pageCardRef = useRef<HTMLButtonElement>(null);
-  const cardWidth = isOverview ? overviewCardSize.width : 92;
-  const cardHeight = isOverview ? overviewCardSize.height : 96;
+  const cardWidth = isOverview ? overviewCardSize.width : 72;
+  const cardHeight = isOverview ? overviewCardSize.height : 68;
   const pageViewportWidth = Math.max(24, cardWidth - (isOverview ? 20 : 16));
-  const pageViewportHeight = Math.max(24, cardHeight - (isOverview ? 42 : 22));
+  const pageViewportHeight = Math.max(24, cardHeight - (isOverview ? 42 : 18));
   const renderScale = pageSize
     ? Math.min(pageViewportWidth / pageSize.width, pageViewportHeight / pageSize.height)
     : null;
@@ -174,7 +177,7 @@ function LazyPdfPageCard({
   );
 }
 
-export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded, preferSinglePage, annotationOverlay }: PdfDocumentPreviewProps) {
+export default function PdfDocumentPreview({ document, labels, includeOpenAction, isRtl, expanded, preferSinglePage, annotationOverlay, annotationToolbar, onExpandedChange, showOpenAction }: PdfDocumentPreviewProps) {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [selectedPage, setSelectedPage] = useState(1);
@@ -186,6 +189,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
   const [selectedPageSize, setSelectedPageSize] = useState<PdfPageSize | null>(null);
   const [mainSize, setMainSize] = useState({ width: 760, height: 640 });
   const [overviewCardSize, setOverviewCardSize] = useState<PdfPageSize>({ width: 184, height: 244 });
+  const [thumbnailsVisible, setThumbnailsVisible] = useState(true);
   const mainPreviewRef = useRef<HTMLDivElement>(null);
   const overviewRef = useRef<HTMLDivElement>(null);
   const file = useMemo(() => ({ url: `/api/documents/${document.id}/view`, withCredentials: true }), [document.id]);
@@ -195,7 +199,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     if (viewMode !== "single") return;
     const element = mainPreviewRef.current;
     if (!element) return;
-    const updateSize = () => setMainSize({ width: Math.max(240, element.clientWidth - 32), height: Math.max(240, element.clientHeight - 32) });
+    const updateSize = () => setMainSize({ width: Math.max(240, element.clientWidth - 16), height: Math.max(240, element.clientHeight - 16) });
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
@@ -283,6 +287,29 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
       behavior: "smooth",
     });
   };
+  const openDocumentAction = showOpenAction ? <a href={`/api/documents/${document.id}/view`} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground hover:bg-muted">{labels.openInNewTab}</a> : null;
+  const expandAction = onExpandedChange ? <button type="button" className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground hover:bg-muted" onClick={() => onExpandedChange(!expanded)} aria-pressed={expanded}>{expanded ? labels.exitExpandedReview : labels.expandReview}</button> : null;
+  const pageTools = <>
+    <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex items-center gap-0.5 rounded-md border border-border bg-background p-0.5" role="group" aria-label="PDF sizing">
+        <button type="button" className={`rounded px-1.5 py-1 text-[10px] ${sizingMode === "fit-page" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-page")} aria-pressed={sizingMode === "fit-page"}>{labels.fitPage}</button>
+        <button type="button" className={`rounded px-1.5 py-1 text-[10px] ${sizingMode === "fit-width" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-width")} aria-pressed={sizingMode === "fit-width"}>{labels.fitWidth}</button>
+      </div>
+      <div className="flex items-center gap-0.5 rounded-md border border-border bg-background p-0.5" role="group" aria-label="Zoom">
+        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={() => setZoom((current) => Math.max(0.5, Number((current - 0.1).toFixed(1))))} disabled={zoom <= 0.5} aria-label="Zoom out" title="Zoom out"><ZoomOut size={14} aria-hidden="true" /></button>
+        <span className="min-w-9 text-center text-[10px] font-semibold text-muted-foreground">{Math.round(zoom * 100)}%</span>
+        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={() => setZoom((current) => Math.min(2, Number((current + 0.1).toFixed(1))))} disabled={zoom >= 2} aria-label="Zoom in" title="Zoom in"><ZoomIn size={14} aria-hidden="true" /></button>
+      </div>
+      <div className="flex items-center gap-0.5 rounded-md border border-border bg-background p-0.5" role="group" aria-label="Rotate">
+        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-muted" onClick={() => setRotation((current) => (current + 270) % 360)} aria-label="Rotate counter-clockwise" title="Rotate counter-clockwise"><RotateCcw size={14} aria-hidden="true" /></button>
+        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-muted" onClick={() => setRotation((current) => (current + 90) % 360)} aria-label="Rotate clockwise" title="Rotate clockwise"><RotateCw size={14} aria-hidden="true" /></button>
+      </div>
+      <button type="button" className="h-8 shrink-0 rounded-md border border-border bg-background px-2 text-[10px] font-semibold text-foreground hover:bg-muted" onClick={() => setThumbnailsVisible((current) => !current)} aria-pressed={thumbnailsVisible}>{thumbnailsVisible ? labels.hidePages : labels.showPages}</button>
+    </div>
+    {expandAction}
+    {openDocumentAction}
+  </>;
+  const singlePageToolbar = (pageNavigation: ReactNode) => <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="PDF document controls"><div className="flex shrink-0 items-center gap-1">{pageNavigation}</div>{annotationToolbar}<div className="ms-auto flex min-w-0 flex-wrap items-center gap-1">{pageTools}</div></div>;
 
   return (
     <Document
@@ -300,19 +327,19 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
       onSourceError={handlePreviewError}
       error={<PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={labels.pdfFailed} />}
     >
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-1">
         {previewError ? (
           <PdfFailure document={document} labels={labels} includeOpenAction={includeOpenAction} message={previewError} />
         ) : viewMode === "overview" ? (
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-muted/10" aria-label={labels.pageOverview}>
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
-              <span className="text-xs font-semibold text-foreground">
+            <div className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1" role="toolbar" aria-label="PDF page overview controls">
+              <span className="shrink-0 text-xs font-semibold text-foreground">
                 {pageCount ? labels.pagesCount.replace("{count}", String(pageCount)) : labels.loading}
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
-                  className="rounded-lg border border-border bg-background p-1.5 text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  className="rounded-md border border-border bg-background p-1 text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                   onClick={() => scrollOverview(-1)}
                   aria-label={isRtl ? labels.scrollPagesRight : labels.scrollPagesLeft}
                 >
@@ -320,13 +347,15 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-border bg-background p-1.5 text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  className="rounded-md border border-border bg-background p-1 text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                   onClick={() => scrollOverview(1)}
                   aria-label={isRtl ? labels.scrollPagesLeft : labels.scrollPagesRight}
                 >
                   {isRtl ? <ChevronLeft size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
                 </button>
               </div>
+              {annotationToolbar}
+              <div className="ms-auto flex min-w-0 flex-wrap items-center gap-1">{expandAction}{openDocumentAction}</div>
             </div>
             <div
               ref={overviewRef}
@@ -356,23 +385,22 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
             </div>
           </section>
         ) : (
-          <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_112px] gap-2">
-            <div className="flex min-h-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/10 px-3 py-2">
+          <div className={`grid h-full min-h-0 min-w-0 flex-1 gap-1 grid-rows-[auto_minmax(0,1fr)_${thumbnailsVisible ? "80px" : "0px"}]`}>
+            {singlePageToolbar(<>
               <button
                 type="button"
-                className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                className="h-8 shrink-0 rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                 onClick={() => setViewMode("overview")}
                 aria-label={labels.backToAllPages}
               >
                 {labels.backToAllPages}
               </button>
-              <div className="flex items-center gap-2">
-                <span className="whitespace-nowrap text-xs font-semibold text-foreground">
+              <span className="whitespace-nowrap text-xs font-semibold text-foreground">
                   {pageCount ? labels.pageOf.replace("{page}", String(page)).replace("{count}", String(pageCount)) : labels.loading}
-                </span>
+              </span>
                 <button
                   type="button"
-                  className="rounded-lg border border-border bg-background p-1.5 text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  className="rounded-md border border-border bg-background p-1 text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                   onClick={() => setSelectedPage((current) => Math.max(1, current - 1))}
                   disabled={!pageCount || page <= 1}
                   aria-label={labels.previous}
@@ -381,29 +409,15 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-border bg-background p-1.5 text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  className="rounded-md border border-border bg-background p-1 text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                   onClick={() => setSelectedPage((current) => Math.min(pageCount ?? current, current + 1))}
                   disabled={!pageCount || page >= pageCount}
                   aria-label={labels.next}
                 >
                   {isRtl ? <ChevronLeft size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
                 </button>
-                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="group" aria-label="PDF sizing">
-                  <button type="button" className={`rounded-md px-2 py-1 text-[11px] ${sizingMode === "fit-page" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-page")} aria-pressed={sizingMode === "fit-page"}>{labels.fitPage}</button>
-                  <button type="button" className={`rounded-md px-2 py-1 text-[11px] ${sizingMode === "fit-width" ? "bg-accent/10 font-semibold text-foreground" : "text-muted-foreground"}`} onClick={() => setSizingMode("fit-width")} aria-pressed={sizingMode === "fit-width"}>{labels.fitWidth}</button>
-                </div>
-                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="group" aria-label="Zoom">
-                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={() => setZoom((current) => Math.max(0.5, Number((current - 0.1).toFixed(1))))} disabled={zoom <= 0.5} aria-label="Zoom out"><ZoomOut size={14} aria-hidden="true" /></button>
-                  <span className="min-w-10 text-center text-[10px] font-semibold text-muted-foreground">{Math.round(zoom * 100)}%</span>
-                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-50" onClick={() => setZoom((current) => Math.min(2, Number((current + 0.1).toFixed(1))))} disabled={zoom >= 2} aria-label="Zoom in"><ZoomIn size={14} aria-hidden="true" /></button>
-                </div>
-                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="group" aria-label="Rotate">
-                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={() => setRotation((current) => (current + 270) % 360)} aria-label="Rotate counter-clockwise"><RotateCcw size={14} aria-hidden="true" /></button>
-                  <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" onClick={() => setRotation((current) => (current + 90) % 360)} aria-label="Rotate clockwise"><RotateCw size={14} aria-hidden="true" /></button>
-                </div>
-              </div>
-            </div>
-            <div ref={mainPreviewRef} className="min-h-0 min-w-0 overflow-auto rounded-xl border border-border bg-muted/20 p-4">
+            </>)}
+            <div ref={mainPreviewRef} className="min-h-0 min-w-0 overflow-auto rounded-xl border border-border bg-muted/20 p-2">
               <div className={`flex min-h-full min-w-full justify-center ${sizingMode === "fit-page" && zoom === 1 ? "items-center" : "items-start"}`}>
                 <div className="relative">
                   <Page
@@ -420,8 +434,8 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                 </div>
               </div>
             </div>
-            <div className="min-h-0 rounded-xl border border-border bg-muted/10 p-2">
-              <div className="flex h-full min-w-0 snap-x items-center gap-2 overflow-x-auto overflow-y-hidden scroll-smooth py-1" aria-label={labels.allPages}>
+            {thumbnailsVisible ? <div className="min-h-0 rounded-xl border border-border bg-muted/10 p-1">
+              <div className="flex h-full min-w-0 snap-x items-center gap-2 overflow-x-auto overflow-y-hidden scroll-smooth py-1" role="list" aria-label={labels.allPages}>
                 {pages.map((pageNumber) => (
                   <LazyPdfPageCard
                     key={pageNumber}
@@ -435,7 +449,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
                   />
                 ))}
               </div>
-            </div>
+            </div> : null}
           </div>
         )}
       </div>

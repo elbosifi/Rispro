@@ -55,6 +55,7 @@ import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProto
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
+import { ProtocolingAppointmentDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
 
 function todayIso(): string {
@@ -1212,6 +1213,7 @@ function ProtocolAssignmentModal({
   const protocolMode = protocolModeOverride ?? (modeTouched ? "free-text" : activeProtocols.length > 0 ? "saved" : "free-text");
   const [protocolSearch, setProtocolSearch] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(5);
   const [annotationDirty, setAnnotationDirty] = useState(false);
   const [documentExpanded, setDocumentExpanded] = useState(false);
@@ -1275,7 +1277,7 @@ function ProtocolAssignmentModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/45 p-2 sm:p-4" onClick={() => { if (!saving) requestClose(); }} role="presentation" data-testid="protocol-assignment-modal-backdrop">
       <section
-        className="flex h-[94vh] w-[96vw] max-w-[1800px] min-w-0 flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
+        className="relative flex h-[94vh] w-[96vw] max-w-[1800px] min-w-0 flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -1285,23 +1287,21 @@ function ProtocolAssignmentModal({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0"><h3 className="truncate text-base font-semibold">{protocolingPatientName(appointment)}</h3><p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>MRN {appointment.patientMrn ?? "-"} · {appointment.ageYears ?? "-"} / {appointment.sex ?? "-"} · {appointment.modalityName ?? appointment.modalityCode} · {appointment.examTypeName ?? "-"}</p></div>
             <div className="flex flex-wrap items-center justify-end gap-1.5 text-xs">
+              <div className="flex items-center gap-1 rounded-md border px-1 py-0.5" style={{ borderColor: "var(--border)" }}>
+                <button type="button" onClick={() => requestNavigate(-1)} disabled={saving || worklistPosition <= 1} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Previous appointment" title="Previous appointment"><ChevronLeft size={15} aria-hidden="true" /></button>
+                {worklistPosition > 0 ? <span className="whitespace-nowrap px-1 text-[11px] font-semibold" style={{ color: "var(--text-muted)" }}>{worklistPosition} of {worklistTotal}</span> : null}
+                <button type="button" onClick={() => requestNavigate(1)} disabled={saving || worklistPosition <= 0 || worklistPosition >= worklistTotal} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next appointment" title="Next appointment"><ChevronRight size={15} aria-hidden="true" /></button>
+              </div>
               <span className="hidden lg:inline" style={{ color: "var(--text-muted)" }}>{appointment.appointmentDate} {appointment.appointmentTime ?? ""}</span>
               <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=study`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 font-semibold ${appointment.accessionNumber || appointment.studyInstanceUid ? "" : "pointer-events-none opacity-40"}`} title={appointment.accessionNumber || appointment.studyInstanceUid ? undefined : "No usable study identifier"}>Open current study</a>
               <a href={`/api/doctor/protocoling/appointments/${appointment.appointmentId}/open-sonicdicom?scope=patient`} target="_blank" rel="noopener noreferrer" className={`rounded border px-2 py-1.5 font-semibold ${appointment.patientDicomId ? "" : "pointer-events-none opacity-40"}`} title={appointment.patientDicomId ? undefined : "DICOM Patient ID unavailable"}>Patient studies</a>
               <a href={appointment.accessionNumber ? buildRadiantPacsTagUrl("00080050", appointment.accessionNumber) : undefined} className={`rounded border px-2 py-1.5 font-semibold ${appointment.accessionNumber ? "" : "pointer-events-none opacity-40"}`} title={appointment.accessionNumber ? "RadiAnt must be installed on this workstation." : "Accession number unavailable"}>Open in RadiAnt</a>
               <button type="button" onClick={() => setHistoryOpen((current) => !current)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold">Patient history</button>
+              <button type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</button>
               <button type="button" onClick={requestClose} disabled={saving} className="rounded border p-1.5 font-semibold" aria-label="Close" title="Close"><X size={16} aria-hidden="true" /></button>
             </div>
           </div>
           {appointment.clinicalNotes ? <p className="mt-1 truncate text-xs" title={appointment.clinicalNotes} style={{ color: "var(--text-muted)" }}>Indication: {appointment.clinicalNotes}</p> : null}
-          <p className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>RadiAnt must be installed on the workstation to open the study.</p>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs" style={{ borderColor: "var(--border)" }}>
-            <div className="flex items-center gap-1.5">
-              <button type="button" onClick={() => requestNavigate(-1)} disabled={saving || worklistPosition <= 1} className="inline-flex items-center gap-1 rounded border px-2 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-40" style={{ borderColor: "var(--border)" }}><ChevronLeft size={14} aria-hidden="true" />Previous appointment</button>
-              <button type="button" onClick={() => requestNavigate(1)} disabled={saving || worklistPosition <= 0 || worklistPosition >= worklistTotal} className="inline-flex items-center gap-1 rounded border px-2 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-40" style={{ borderColor: "var(--border)" }}>Next appointment<ChevronRight size={14} aria-hidden="true" /></button>
-            </div>
-            {worklistPosition > 0 ? <span className="font-semibold" style={{ color: "var(--text-muted)" }}>{worklistPosition} of {worklistTotal}</span> : null}
-          </div>
         </header>
 
         {loading ? (
@@ -1310,13 +1310,13 @@ function ProtocolAssignmentModal({
           </div>
         ) : (
           <>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2 sm:p-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1 sm:p-2">
             {error && (
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
               </div>
             )}
-            <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+            <div className="mt-1 grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
               <div className={`min-h-0 min-w-0 overflow-hidden ${documentExpanded ? "lg:col-span-2" : ""}`}>
                 <RequestDocumentsPanel appointmentId={appointment.appointmentId} patientId={appointment.patientId} appointmentRefType="v2_booking" title="Appointment request documents" layout="workspace" expanded={documentExpanded} onExpandedChange={setDocumentExpanded} enableAnnotations onAnnotationDirtyChange={setAnnotationDirty} />
               </div>
@@ -1346,7 +1346,7 @@ function ProtocolAssignmentModal({
                 {detail?.assignmentDetail ? <div className="mt-3"><ProtocolAssignmentSummary detail={detail} /></div> : null}
               </aside>) : null}
             </div>
-            <footer className="sticky bottom-0 z-20 mt-2 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-background pt-2" style={{ borderColor: "var(--border)" }}>
+            <footer className="sticky bottom-0 z-20 mt-1 flex shrink-0 flex-wrap items-center justify-end gap-1.5 border-t bg-background pt-1" style={{ borderColor: "var(--border)" }}>
               {annotationDirty ? <span className="me-auto text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}
               <button type="button" onClick={requestClose} disabled={saving} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
               {printableSheet ? <button type="button" disabled={saving} onClick={() => printProtocolSheet(printableSheet)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Print protocol</button> : null}
@@ -1357,6 +1357,7 @@ function ProtocolAssignmentModal({
             </div>
           </>
         )}
+        {detailsOpen ? <ProtocolingAppointmentDetailsDrawer key={appointment.appointmentId} appointment={appointment} onClose={() => setDetailsOpen(false)} /> : null}
       </section>
     </div>
   );

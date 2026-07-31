@@ -166,6 +166,21 @@ describe("DocumentPreviewWorkspace", () => {
     expect(screen.getByText("Page 2 of 3")).toBeTruthy();
   });
 
+  it("uses one compact PDF toolbar and collapses the thumbnail rail", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(pdfDocument());
+    await screen.findByText("3 pages");
+    await user.click(screen.getByRole("button", { name: "Open page 1" }));
+
+    expect(screen.getAllByRole("toolbar")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Hide pages" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Hide pages" }));
+    expect(screen.getByRole("button", { name: "Show pages" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "All pages" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show pages" }));
+    expect(await screen.findByRole("list", { name: "All pages" })).toBeTruthy();
+  });
+
   it("returns to overview while preserving the selected page", async () => {
     const user = userEvent.setup();
     renderWorkspace(pdfDocument());

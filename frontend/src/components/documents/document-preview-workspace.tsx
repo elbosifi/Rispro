@@ -29,6 +29,8 @@ export interface DocumentPreviewLabels {
   exitExpandedReview: string;
   fitPage: string;
   fitWidth: string;
+  hidePages: string;
+  showPages: string;
 }
 
 const LazyPdfDocumentPreview = lazy(() => import("./pdf-document-preview"));
@@ -77,7 +79,7 @@ function OpenDocumentAction({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      className="inline-flex h-8 items-center rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
     >
       {label}
     </a>
@@ -93,17 +95,18 @@ function PreviewFailure({ message, href, label, includeOpenAction = true }: { me
   );
 }
 
-function ImagePreview({ document, labels, includeOpenAction, annotationOverlay }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode }) {
+function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, toolbar }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode; toolbar?: ReactNode }) {
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const src = viewUrl(document);
 
   if (imageError) {
-    return <PreviewFailure message={labels.imageFailed} href={src} label={labels.openInNewTab} includeOpenAction={includeOpenAction} />;
+    return <div className="flex min-h-0 flex-1 flex-col gap-1">{toolbar}<PreviewFailure message={labels.imageFailed} href={src} label={labels.openInNewTab} includeOpenAction={!toolbar && includeOpenAction} /></div>;
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-1">
+      {toolbar}
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-3">
         <div className="flex min-h-full items-center justify-center">
           {!imageLoaded ? <span className="text-sm text-muted-foreground" role="status">{labels.imageLoading}</span> : null}
@@ -163,6 +166,8 @@ function labelsFor(t: (key: TranslationKey) => string): DocumentPreviewLabels {
     exitExpandedReview: t("documents.exitExpandedReview"),
     fitPage: t("documents.fitPage"),
     fitWidth: t("documents.fitWidth"),
+    hidePages: t("documents.hidePages"),
+    showPages: t("documents.showPages"),
   };
 }
 
@@ -176,7 +181,7 @@ interface DocumentPreviewWorkspaceProps {
   annotations?: ProtocolDocumentAnnotation[];
   annotationTool?: AnnotationTool;
   selectedAnnotationId?: number | null;
-  onSelectAnnotation?: (id: number) => void;
+  onSelectAnnotation?: (id: number | null) => void;
   onCreateAnnotation?: (input: { pageNumber: number; annotationType: "arrow" | "rectangle" | "freehand" | "text"; geometry: Record<string, unknown>; textContent?: string | null }) => void;
 }
 
@@ -203,12 +208,12 @@ export function DocumentPreviewWorkspace({
     </div>
   ) : undefined;
   const toolbar = showOpenAction || onExpandedChange || annotationToolbar ? (
-    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+    <div className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document preview controls">
       {annotationToolbar}
       {onExpandedChange ? (
         <button
           type="button"
-          className="inline-flex items-center rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           onClick={() => onExpandedChange(!expanded)}
           aria-pressed={expanded}
         >
@@ -216,15 +221,13 @@ export function DocumentPreviewWorkspace({
         </button>
       ) : null}
       {showOpenAction ? <OpenDocumentAction href={src} label={labels.openInNewTab} /> : null}
-      <span className="sr-only" aria-live="polite">
-        {expanded ? labels.exitExpandedReview : labels.expandReview}
-      </span>
+      <span className="sr-only" aria-live="polite">{expanded ? labels.exitExpandedReview : labels.expandReview}</span>
     </div>
   ) : null;
 
   if (kind === "unsupported") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-1">
         {toolbar}
         <PreviewFailure message={labels.unsupported} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />
       </div>
@@ -233,19 +236,17 @@ export function DocumentPreviewWorkspace({
 
   if (kind === "image") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
-        {toolbar}
-        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} />
+      <div className="flex min-h-0 flex-1 flex-col gap-1">
+        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} toolbar={toolbar} />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {toolbar}
+    <div className="flex min-h-0 flex-1 flex-col gap-1">
       <PreviewErrorBoundary
         key={document.id}
-        fallback={<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!showOpenAction} />}
+        fallback={<div className="flex min-h-0 flex-1 flex-col gap-1">{toolbar}<PreviewFailure message={labels.pdfFailed} href={src} label={labels.openInNewTab} includeOpenAction={!toolbar && showOpenAction} /></div>}
       >
       <Suspense
         fallback={
@@ -254,7 +255,7 @@ export function DocumentPreviewWorkspace({
           </div>
         }
       >
-        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={!showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} annotationOverlay={annotationOverlay} />
+        <LazyPdfDocumentPreview document={document} labels={labels} includeOpenAction={showOpenAction} isRtl={isArabic} expanded={expanded} preferSinglePage={preferSinglePage} annotationOverlay={annotationOverlay} annotationToolbar={annotationToolbar} onExpandedChange={onExpandedChange} showOpenAction={showOpenAction} />
       </Suspense>
       </PreviewErrorBoundary>
     </div>

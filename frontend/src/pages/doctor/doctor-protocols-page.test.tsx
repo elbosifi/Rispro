@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
@@ -31,7 +31,7 @@ const appointment: DoctorProtocolingAppointment = {
   assignment: null,
 };
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockGetAppointmentById, mockPatientSummary } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -41,6 +41,7 @@ vi.mock("@/lib/api-hooks", () => ({
   confirmMriSequenceImport: vi.fn(), downloadMriSequenceImportTemplate: vi.fn(), exportMriSequencePresetsWorkbook: vi.fn(),
   fetchDoctorProtocolingAppointmentDetail: mockFetchAppointmentDetail,
   fetchDoctorProtocolingAppointments: mockFetchAppointments,
+  getAppointmentById: mockGetAppointmentById,
   fetchProtocolLibraryAnatomyRegions: vi.fn(async () => []), fetchProtocolLibraryCtPhasePresets: vi.fn(async () => []),
   fetchProtocolLibraryMriSequencePresets: vi.fn(async () => []), fetchProtocolLibraryVersionDetail: vi.fn(async () => null),
   fetchProtocolLibraryProtocols: vi.fn(async () => []), fetchProtocolLibraryScanners: vi.fn(async () => []),
@@ -52,6 +53,15 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
+vi.mock("@/components/appointments/appointment-information-view", () => ({
+  AppointmentDetailsReadOnly: ({ readOnly }: { readOnly?: boolean }) => <div data-testid="read-only-appointment-details">{readOnly ? "Read-only appointment details" : "Editable appointment details"}</div>,
+}));
+vi.mock("@/components/patients/patient-summary-formatters", () => ({
+  usePatientDirectorySummary: () => mockPatientSummary(),
+}));
+vi.mock("@/components/patients/patient-summary-content", () => ({
+  PatientSummaryContent: () => <div data-testid="shared-patient-summary-content">Shared patient summary</div>,
+}));
 vi.mock("@/components/documents/request-documents-panel", () => ({
   RequestDocumentsPanel: ({ appointmentId, patientId, appointmentRefType, title }: { appointmentId: number; patientId: number; appointmentRefType: string; title: string }) => (
     <div data-testid="protocoling-request-documents" data-appointment-id={appointmentId} data-patient-id={patientId} data-ref-type={appointmentRefType}>{title}</div>
@@ -74,6 +84,8 @@ describe("Doctor protocoling request documents", () => {
   beforeEach(() => {
     mockFetchAppointments.mockResolvedValue([appointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
+    mockGetAppointmentById.mockResolvedValue(appointment);
+    mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
   });
 
@@ -116,5 +128,68 @@ describe("Doctor protocoling request documents", () => {
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("43");
     expect(screen.getByRole("button", { name: /Next appointment/ }).getAttribute("disabled")).not.toBeNull();
     expect(screen.getByRole("button", { name: /Previous appointment/ }).getAttribute("disabled")).toBeNull();
+  });
+
+  it("opens read-only appointment and patient details without resetting protocol work", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Free-text protocol" }));
+    const protocol = screen.getByRole("textbox", { name: "Free-text protocol" });
+    await userEvent.type(protocol, "Preserve this protocol while reviewing details.");
+    await userEvent.click(screen.getByRole("button", { name: "Open appointment and patient details" }));
+
+    const drawer = await screen.findByTestId("protocoling-details-drawer");
+    expect(drawer).toBeTruthy();
+    expect(drawer.className).toContain("w-full");
+    expect(drawer.className).toContain("sm:w-[480px]");
+    expect(screen.getByTestId("read-only-appointment-details").textContent).toBe("Read-only appointment details");
+    expect(screen.queryByRole("button", { name: /Edit|Change status|Reschedule/ })).toBeNull();
+    await userEvent.click(screen.getByRole("tab", { name: "Patient" }));
+    expect(screen.getByTestId("shared-patient-summary-content")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Appointment" }).getAttribute("aria-selected")).toBe("false");
+    const closeButtons = screen.getAllByRole("button", { name: "Close appointment and patient details" });
+    await userEvent.click(closeButtons[closeButtons.length - 1]);
+    expect(screen.queryByTestId("protocoling-details-drawer")).toBeNull();
+    expect((protocol as HTMLTextAreaElement).value).toBe("Preserve this protocol while reviewing details.");
+    expect(screen.getByTestId("protocoling-request-documents")).toBeTruthy();
+  });
+
+  it("refreshes the details drawer for the appointment selected by worklist navigation", async () => {
+    const nextAppointment = { ...appointment, appointmentId: 43, patientId: 10, patientMrn: "MRN-10", patientEnglishName: "Next Patient" };
+    mockFetchAppointments.mockResolvedValue([appointment, nextAppointment]);
+    mockFetchAppointmentDetail.mockImplementation(async (appointmentId: number) => ({ appointment: appointmentId === 43 ? nextAppointment : appointment, assignmentDetail: null }));
+    mockGetAppointmentById.mockImplementation(async (appointmentId: number) => ({ ...appointment, appointmentId, patientId: appointmentId === 43 ? 10 : 9, patientEnglishName: appointmentId === 43 ? "Next Patient" : appointment.patientEnglishName }));
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click((await screen.findAllByRole("button", { name: "Assign" }))[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Open appointment and patient details" }));
+    expect(await screen.findByText("Read-only appointment details")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Next appointment/ }));
+    expect(await screen.findByText("2 of 2")).toBeTruthy();
+    expect(screen.queryByTestId("protocoling-details-drawer")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open appointment and patient details" }));
+    expect(within(screen.getByTestId("protocoling-details-drawer")).getByText("Next Patient")).toBeTruthy();
+    expect(mockGetAppointmentById).toHaveBeenLastCalledWith(43);
+  });
+
+  it("shows appointment detail loading and retryable error states", async () => {
+    mockGetAppointmentById.mockImplementation(() => new Promise(() => undefined));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const loadingView = render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open appointment and patient details" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Loading appointment details...");
+
+    loadingView.unmount();
+    mockGetAppointmentById.mockRejectedValue(new Error("temporary failure"));
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open appointment and patient details" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Appointment details are unavailable right now.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 });

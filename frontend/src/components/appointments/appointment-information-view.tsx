@@ -111,7 +111,7 @@ function elapsedSince(value: string | null | undefined) {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenReschedule, onOpenStatus }: { appointment: AppointmentWithDetails; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onEdit: () => void; onOpenReschedule?: () => void; onOpenStatus: () => void }) {
+export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenReschedule, onOpenStatus, readOnly = false }: { appointment: AppointmentWithDetails; reportStatus?: { canViewReport?: boolean; state?: string | null } | null; onEdit?: () => void; onOpenReschedule?: () => void; onOpenStatus?: () => void; readOnly?: boolean }) {
   const { language, t } = useLanguage();
   const protocol = appointment.protocolAssignmentSummary;
   const examinationRows: DefinitionRow[] = [
@@ -164,7 +164,7 @@ function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenR
   const hasCapacity = [appointment.isOverbooked, appointment.overbookingReason, appointment.approvedByName, appointment.specialReasonCode, appointment.specialReasonNote].some(Boolean);
 
   return <>
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2><Button type="button" size="sm" onClick={onEdit}><Edit3 size={15} className="me-1.5" aria-hidden="true" />{t("common.edit")}</Button></div>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 id="appointment-details-heading" className="text-base font-semibold">{t("registrations.appointmentDetails")}</h2>{!readOnly && onEdit ? <Button type="button" size="sm" onClick={onEdit}><Edit3 size={15} className="me-1.5" aria-hidden="true" />{t("common.edit")}</Button> : null}</div>
     <div className="space-y-6">
       <DetailGroup title={text(language, "الفحص", "Examination")} rows={examinationRows} prominent />
       <DetailGroup title={text(language, "الجدولة وسير العمل", "Schedule and workflow")} rows={scheduleRows} />
@@ -174,7 +174,7 @@ function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, onOpenR
       <DisclosureSection title={text(language, "التفاصيل الإدارية والتدقيق", "Administrative and audit details")}><DefinitionGrid rows={auditRows} /></DisclosureSection>
       <DisclosureSection title={text(language, "تفاصيل PACS التقنية", "Technical PACS details")}><DefinitionGrid rows={technicalRows} /></DisclosureSection>
     </div>
-    <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">{onOpenReschedule ? <Button type="button" variant="outline" size="sm" onClick={onOpenReschedule}><CalendarClock size={15} className="me-1.5" aria-hidden="true" />{t("registrations.reschedule")}</Button> : null}<Button type="button" variant="outline" size="sm" onClick={onOpenStatus}>{text(language, "تغيير الحالة", "Change status")}</Button></div>
+    {!readOnly ? <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">{onOpenReschedule ? <Button type="button" variant="outline" size="sm" onClick={onOpenReschedule}><CalendarClock size={15} className="me-1.5" aria-hidden="true" />{t("registrations.reschedule")}</Button> : null}{onOpenStatus ? <Button type="button" variant="outline" size="sm" onClick={onOpenStatus}>{text(language, "تغيير الحالة", "Change status")}</Button> : null}</div> : null}
   </>;
 }
 

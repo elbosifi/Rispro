@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileImage, FileText, MoreVertical, ScanLine, Trash2, Upload } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileImage, FileText, MoreVertical, MousePointer2, Pencil, Redo2, Save as SaveIcon, ScanLine, Square, Trash2, Type, Undo2, Upload } from "lucide-react";
 import { useLanguage } from "@/providers/language-provider";
 import {
   deleteAppointmentDocument,
@@ -111,6 +111,7 @@ export function RequestDocumentsPanel({
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   const [annotationPast, setAnnotationPast] = useState<ProtocolDocumentAnnotation[][]>([]);
   const [annotationFuture, setAnnotationFuture] = useState<ProtocolDocumentAnnotation[][]>([]);
+  const [annotationSaving, setAnnotationSaving] = useState(false);
   const { data: loadedAnnotations = EMPTY_ANNOTATIONS, refetch: refetchAnnotations } = useQuery({
     queryKey: ["doctor", "protocol-document-annotations", selectedDocument?.id],
     queryFn: () => listProtocolDocumentAnnotations(selectedDocument!.id),
@@ -134,13 +135,53 @@ export function RequestDocumentsPanel({
     setAnnotationFuture([]);
     setAnnotations(next);
   };
+  const saveAnnotations = async () => {
+    if (annotationSaving || !selectedDocument) return;
+    setAnnotationSaving(true);
+    let workingAnnotations = annotations;
+    try {
+      for (const annotation of annotations) {
+        const payload = { pageNumber: annotation.pageNumber, annotationType: annotation.annotationType, geometry: annotation.geometry, textContent: annotation.textContent, style: annotation.style };
+        const persisted = annotation.id < 0
+          ? await createProtocolDocumentAnnotation(selectedDocument.id, payload)
+          : await updateProtocolDocumentAnnotation(selectedDocument.id, annotation.id, payload);
+        workingAnnotations = workingAnnotations.map((current) => current.id === annotation.id ? persisted : current);
+        setAnnotations(workingAnnotations);
+      }
+      for (const id of deletedAnnotationIds) {
+        await deleteProtocolDocumentAnnotation(selectedDocument.id, id);
+        workingAnnotations = workingAnnotations.filter((annotation) => annotation.id !== id);
+        setAnnotations(workingAnnotations);
+      }
+      const refreshed = await refetchAnnotations();
+      if (refreshed.error) throw refreshed.error;
+      const reloaded = refreshed.data ?? [];
+      setAnnotations(reloaded);
+      setSavedAnnotationIds(new Set(reloaded.map((annotation) => annotation.id)));
+      setDeletedAnnotationIds([]);
+      setSelectedAnnotationId((current) => reloaded.some((annotation) => annotation.id === current) ? current : null);
+      pushToast({ type: "success", title: "Annotations saved", message: "Document annotations were saved successfully." });
+    } catch (error) {
+      pushToast({ type: "error", title: "Annotation save failed", message: error instanceof Error ? error.message : "Document annotations could not be saved." });
+    } finally {
+      setAnnotationSaving(false);
+    }
+  };
+  const annotationToolIcon = (tool: AnnotationTool) => {
+    if (tool === "select") return <MousePointer2 size={14} aria-hidden="true" />;
+    if (tool === "arrow") return <ArrowUpRight size={14} aria-hidden="true" />;
+    if (tool === "rectangle") return <Square size={14} aria-hidden="true" />;
+    if (tool === "freehand") return <Pencil size={14} aria-hidden="true" />;
+    return <Type size={14} aria-hidden="true" />;
+  };
+  const annotationToolLabel = (tool: AnnotationTool) => tool === "freehand" ? "Pen" : tool[0]!.toUpperCase() + tool.slice(1);
   const annotationToolbar = enableAnnotations ? (
-    <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-border bg-background p-1" role="toolbar" aria-label="Document annotations">
-      {(["select", "arrow", "rectangle", "freehand", "text"] as AnnotationTool[]).map((tool) => <button key={tool} type="button" className={`shrink-0 rounded px-2 py-1 text-[10px] font-semibold ${annotationTool === tool ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setAnnotationTool(tool)} aria-pressed={annotationTool === tool}>{tool === "freehand" ? "Pen" : tool[0]!.toUpperCase() + tool.slice(1)}</button>)}
-      <button type="button" className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={selectedAnnotationId === null} onClick={() => { const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId); if (!selected) return; changeAnnotations(annotations.filter((annotation) => annotation.id !== selected.id)); if (selected.id > 0) setDeletedAnnotationIds((current) => [...current, selected.id]); setSelectedAnnotationId(null); }}>Delete</button>
-      <button type="button" className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationPast.length === 0} onClick={() => { const previous = annotationPast.at(-1); if (!previous) return; setAnnotationPast((current) => current.slice(0, -1)); setAnnotationFuture((current) => [...current, annotations]); setAnnotations(previous); }}>Undo</button>
-      <button type="button" className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationFuture.length === 0} onClick={() => { const next = annotationFuture.at(-1); if (!next) return; setAnnotationFuture((current) => current.slice(0, -1)); setAnnotationPast((current) => [...current, annotations]); setAnnotations(next); }}>Redo</button>
-      <button type="button" className="shrink-0 rounded bg-teal-700 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40" disabled={!annotationDirty || !selectedDocument} onClick={async () => { if (!selectedDocument) return; for (const annotation of annotations) { const payload = { pageNumber: annotation.pageNumber, annotationType: annotation.annotationType, geometry: annotation.geometry, textContent: annotation.textContent, style: annotation.style }; if (annotation.id < 0) await createProtocolDocumentAnnotation(selectedDocument.id, payload); else await updateProtocolDocumentAnnotation(selectedDocument.id, annotation.id, payload); } for (const id of deletedAnnotationIds) await deleteProtocolDocumentAnnotation(selectedDocument.id, id); await refetchAnnotations(); }}>Save</button>
+    <div className="flex min-w-0 max-w-full items-center gap-0.5 overflow-x-auto" role="group" aria-label="Document annotation tools">
+      {(["select", "arrow", "rectangle", "freehand", "text"] as AnnotationTool[]).map((tool) => <button key={tool} type="button" className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded ${annotationTool === tool ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setAnnotationTool(tool)} aria-label={annotationToolLabel(tool)} title={annotationToolLabel(tool)} aria-pressed={annotationTool === tool}>{annotationToolIcon(tool)}</button>)}
+      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={selectedAnnotationId === null} onClick={() => { const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId); if (!selected) return; changeAnnotations(annotations.filter((annotation) => annotation.id !== selected.id)); if (selected.id > 0) setDeletedAnnotationIds((current) => [...current, selected.id]); setSelectedAnnotationId(null); }} aria-label="Delete selected annotation" title="Delete selected annotation"><Trash2 size={14} aria-hidden="true" /></button>
+      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationPast.length === 0} onClick={() => { const previous = annotationPast.at(-1); if (!previous) return; setAnnotationPast((current) => current.slice(0, -1)); setAnnotationFuture((current) => [...current, annotations]); setAnnotations(previous); }} aria-label="Undo annotation change" title="Undo"><Undo2 size={14} aria-hidden="true" /></button>
+      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={annotationFuture.length === 0} onClick={() => { const next = annotationFuture.at(-1); if (!next) return; setAnnotationFuture((current) => current.slice(0, -1)); setAnnotationPast((current) => [...current, annotations]); setAnnotations(next); }} aria-label="Redo annotation change" title="Redo"><Redo2 size={14} aria-hidden="true" /></button>
+      <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded bg-teal-700 text-white disabled:opacity-40" disabled={!annotationDirty || !selectedDocument || annotationSaving} onClick={() => void saveAnnotations()} aria-label={annotationSaving ? "Saving annotations" : "Save annotations"} title={annotationSaving ? "Saving annotations" : "Save annotations"}><SaveIcon size={14} aria-hidden="true" /></button>
       {annotationDirty ? <span className="shrink-0 px-1 text-[10px] font-semibold text-amber-700">Unsaved</span> : null}
     </div>
   ) : null;
@@ -528,8 +569,8 @@ export function RequestDocumentsPanel({
   if (layout === "workspace") {
     return (
       <div data-expanded={expanded ? "true" : "false"} data-layout="appointment-workspace" data-testid="appointment-document-workspace" className="flex h-full min-h-0 min-w-0 flex-col">
-        <div className={`grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 ${documentRailCollapsed ? "lg:grid-cols-[minmax(0,1fr)_44px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]"}`}>
-          <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-background p-2 sm:p-3" aria-label={resolvedTitle}>
+        <div className={`grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 ${documentRailCollapsed ? "lg:grid-cols-[minmax(0,1fr)_44px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]"}`}>
+          <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-background p-1 sm:p-1.5" aria-label={resolvedTitle}>
             <div className="flex min-h-0 flex-1 flex-col">
               {isLoading ? <div className="flex min-h-48 flex-1 items-center justify-center text-sm text-muted-foreground" role="status">{t("documents.loading")}</div> : null}
               {error ? <div className="flex min-h-48 flex-1 items-center justify-center rounded-lg border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700" role="alert">{error instanceof Error ? error.message : t("documents.failedLoad")}</div> : null}
