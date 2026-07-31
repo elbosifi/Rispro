@@ -206,13 +206,13 @@ describe("AppointmentManageModal", () => {
   it("prioritizes formatted appointment and patient identity information", async () => {
     renderModal({ initialTab: "details" });
 
-    const summary = await screen.findByLabelText("Appointment summary");
     await screen.findAllByText("NAT-42");
-    expect(summary.textContent).toContain("Time not assigned");
     expect(screen.getAllByText("Scheduled").length).toBeGreaterThan(0);
     expect(screen.getByText("Not required")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Patient details" }).parentElement?.parentElement?.textContent).toContain("Female");
     expect(screen.queryByText(/^F$/)).toBeNull();
+    expect(screen.getByText("Time not assigned")).toBeTruthy();
+    expect(screen.queryByLabelText("Appointment summary")).toBeNull();
     expect(screen.getByRole("heading", { name: "Examination" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Schedule and workflow" })).toBeTruthy();
     const demographics = screen.getByText("More demographics").closest("details");
@@ -328,6 +328,18 @@ describe("AppointmentManageModal", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Update appointment" }));
     expect((await screen.findAllByText("Updated Patient")).length).toBeGreaterThan(0);
     expect((screen.getAllByText("ACC-UPDATED")).length).toBeGreaterThan(0);
+  });
+
+  it("renders the authorized Void action only inside the separated More menu", async () => {
+    renderModal({ initialTab: "details" });
+    await screen.findByRole("heading", { name: "Appointment details" });
+    expect(screen.queryByRole("button", { name: "Void appointment" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Void appointment" })).toBeTruthy();
+    expect(screen.getByRole("menu").parentElement).toBe(document.body);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Void appointment" }));
+    expect(screen.getByRole("heading", { name: "Void appointment" })).toBeTruthy();
+    expect(screen.getByLabelText(/void reason/i)).toBeTruthy();
   });
 
   it("closes from the close button and Escape", async () => {

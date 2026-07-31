@@ -14,3 +14,4 @@ export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./Dialog";
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
 export { Alert, AlertTitle, AlertDescription } from "./Alert";
+export { AnchoredMenu } from "./AnchoredMenu";
