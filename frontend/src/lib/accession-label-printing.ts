@@ -2,6 +2,7 @@ import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { containsArabic, drawPdfText, ensureArabicPdfFonts, processPdfText } from "@/lib/pdf-text-utils";
+import { expectedOrientation } from "@/lib/printing-orientation";
 
 function patientName(appointment: AppointmentWithDetails): string {
   return appointment.arabicFullName || appointment.englishFullName || "Patient";
@@ -11,7 +12,7 @@ export async function createAccessionLabelPdfBlob(
   appointment: AppointmentWithDetails,
   size: { widthMm: number; heightMm: number }
 ): Promise<Blob> {
-  const doc = new jsPDF({ orientation: size.widthMm >= size.heightMm ? "landscape" : "portrait", unit: "mm", format: [size.widthMm, size.heightMm], compress: true });
+  const doc = new jsPDF({ orientation: expectedOrientation(size.widthMm, size.heightMm), unit: "mm", format: [size.widthMm, size.heightMm], compress: true });
   await ensureArabicPdfFonts(doc);
   const margin = 2;
   const qrSize = Math.max(10, Math.min(size.heightMm - margin * 2, size.widthMm * 0.32));

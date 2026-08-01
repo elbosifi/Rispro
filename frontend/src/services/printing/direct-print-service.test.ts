@@ -116,10 +116,50 @@ describe("direct print service", () => {
     await expect(directPrint(request)).resolves.toMatchObject({ success: true, printerName: "A4" });
   });
 
+  it("times out printer discovery, releases the job lock, prevents submission, and allows retry", async () => {
+    vi.useFakeTimers();
+    const previous = DIRECT_PRINT_TIMEOUTS.discoveryMs;
+    DIRECT_PRINT_TIMEOUTS.discoveryMs = 20;
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockReturnValueOnce(new Promise<string[]>(() => undefined)).mockResolvedValueOnce(["A4"]);
+    const request = { documentType: "A4_DOCUMENT" as const, appointmentId: 7 };
+
+    const first = directPrint(request);
+    await vi.advanceTimersByTimeAsync(21);
+    await expect(first).resolves.toMatchObject({ success: false, errorCode: "PRINTER_DISCOVERY_FAILED" });
+    expect(getDirectPrintJobState(request)).toBeUndefined();
+    expect(printPdf).not.toHaveBeenCalled();
+    await expect(directPrint(request)).resolves.toMatchObject({ success: true, printerName: "A4" });
+
+    DIRECT_PRINT_TIMEOUTS.discoveryMs = previous;
+    vi.useRealTimers();
+  });
+
+  it("applies the same discovery timeout to test prints", async () => {
+    vi.useFakeTimers();
+    const previous = DIRECT_PRINT_TIMEOUTS.discoveryMs;
+    DIRECT_PRINT_TIMEOUTS.discoveryMs = 20;
+    const profile = { ...createDefaultQzPrinterSettings().profiles[2], printerName: "Label Queue" };
+    getInstalledPrinters.mockReturnValue(new Promise<string[]>(() => undefined));
+
+    const result = directTestPrint(profile);
+    await vi.advanceTimersByTimeAsync(21);
+    await expect(result).resolves.toMatchObject({ success: false, errorCode: "PRINTER_DISCOVERY_FAILED" });
+    expect(printPdf).not.toHaveBeenCalled();
+
+    DIRECT_PRINT_TIMEOUTS.discoveryMs = previous;
+    vi.useRealTimers();
+  });
+
   it("validates standard page dimensions", () => {
     const profile = createDefaultQzPrinterSettings().profiles[1];
     expect(validateProfilePageSize(profile)).toBe(true);
     expect(validateProfilePageSize({ ...profile, paperWidthMm: 210 })).toBe(false);
+    expect(validateProfilePageSize({ ...profile, orientation: "landscape" })).toBe(false);
+    const label = createDefaultQzPrinterSettings().profiles[2];
+    expect(validateProfilePageSize({ ...label, orientation: "portrait" })).toBe(false);
   });
 
   it("routes a PDF test print through validation, installed-printer checking, and audit", async () => {

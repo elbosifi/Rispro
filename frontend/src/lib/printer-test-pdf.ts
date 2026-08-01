@@ -1,8 +1,9 @@
 import { jsPDF } from "jspdf";
 import type { PrinterProfile } from "@/types/printing";
+import { expectedOrientation } from "@/lib/printing-orientation";
 
 export function createPrinterTestPdfBlob(profile: PrinterProfile, generatedAt = new Date()): Blob {
-  const doc = new jsPDF({ orientation: profile.paperWidthMm >= profile.paperHeightMm ? "landscape" : "portrait", unit: "mm", format: [profile.paperWidthMm, profile.paperHeightMm], compress: false });
+  const doc = new jsPDF({ orientation: expectedOrientation(profile.paperWidthMm, profile.paperHeightMm), unit: "mm", format: [profile.paperWidthMm, profile.paperHeightMm], compress: false });
   const margin = Math.min(8, Math.max(2, Math.min(profile.paperWidthMm, profile.paperHeightMm) * 0.06));
   const lineHeight = Math.min(7, Math.max(2.5, (profile.paperHeightMm - margin * 2) / 8));
   doc.setFont("helvetica", "bold");

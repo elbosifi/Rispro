@@ -1,3 +1,4 @@
+import { createHash, generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type WireMessage = {
@@ -5,8 +6,10 @@ type WireMessage = {
   call?: string;
   params?: unknown;
   signature?: string;
+  signAlgorithm?: string;
   timestamp?: number;
   certificate?: string | null;
+  position?: unknown;
 };
 
 const sentMessages: WireMessage[] = [];
@@ -37,6 +40,7 @@ class FakeWebSocket {
     sentMessages.push(message);
     let result: unknown = null;
     if (message.call === "getVersion") result = "2.2.6";
+    if (message.call === "printers.find") result = ["RISPRO-LABEL"];
     queueMicrotask(() => this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ uid: message.uid, result }) })));
   }
 
@@ -44,6 +48,20 @@ class FakeWebSocket {
     this.readyState = FakeWebSocket.CLOSED;
     queueMicrotask(() => this.onclose?.(new CloseEvent("close")));
   }
+}
+
+function desktopSignedContent(message: WireMessage): string {
+  return JSON.stringify({ call: message.call, params: message.params, timestamp: message.timestamp });
+}
+
+function signLikeRispro(privateKey: KeyObject, content: string): string {
+  const digest = createHash("sha256").update(content, "utf8").digest("hex");
+  return sign("RSA-SHA512", Buffer.from(digest, "utf8"), privateKey).toString("base64");
+}
+
+function desktopVerifies(message: WireMessage, publicKey: KeyObject, algorithm: "SHA1" | "SHA512"): boolean {
+  const digest = createHash("sha256").update(desktopSignedContent(message), "utf8").digest("hex");
+  return verify(`RSA-${algorithm}`, Buffer.from(digest, "utf8"), publicKey, Buffer.from(message.signature!, "base64"));
 }
 
 describe("QZ Tray 2.2.6 real request lifecycle", () => {
@@ -58,33 +76,73 @@ describe("QZ Tray 2.2.6 real request lifecycle", () => {
     vi.unstubAllGlobals();
   });
 
-  it("sends the exact pre-signed print request with the explicit signature and timestamp", async () => {
+  it("adds SHA512 to pre-signed discovery and print transport while QZ desktop-style verification succeeds", async () => {
     vi.resetModules();
     const qz = await import("qz-tray");
-    const { serializeQzRequest, sha256Hex } = await import("./qz-tray-service");
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    let callbackSigningCalls = 0;
+    qz.security.setCertificatePromise((resolve) => resolve("test-certificate"));
+    qz.security.setSignatureAlgorithm("SHA512");
+    qz.security.setSignaturePromise(async () => { callbackSigningCalls += 1; throw new Error("callback signing must not run"); });
+    await qz.websocket.connect({ host: ["localhost"], port: { secure: [8181], insecure: [8182] }, usingSecure: true, keepAlive: 0 });
+
+    const dateNowBefore = Date.now;
+    const discoveryTimestamp = 1_725_123_456_700;
+    const discoveryContent = JSON.stringify({ call: "printers.find", params: {}, timestamp: discoveryTimestamp });
+    const discoverySignature = signLikeRispro(privateKey, discoveryContent);
+    await qz.printers.find(undefined, discoverySignature, discoveryTimestamp);
+
+    const config = qz.configs.create("RISPRO-LABEL", { units: "mm", size: { width: 50, height: 30, custom: true } as qz.Size, orientation: "landscape", copies: 1 });
+    const data = [{ type: "pixel" as const, format: "pdf" as const, flavor: "base64" as const, data: "JVBERi0xLjQ=" }];
+    const runtimeConfig = config as unknown as { getPrinter(): unknown; getOptions(): unknown };
+    expect(Object.keys(runtimeConfig.getOptions() as Record<string, unknown>).sort()).toEqual([
+      "bounds", "colorType", "copies", "density", "duplex", "encoding", "fallbackDensity", "forceRaw", "interpolation", "jobName", "legacy",
+      "margins", "orientation", "paperThickness", "printerTray", "rasterize", "rotation", "scaleContent", "size", "spool", "units",
+    ]);
+    const printTimestamp = 1_725_123_456_789;
+    const printContent = JSON.stringify({ call: "print", params: { printer: runtimeConfig.getPrinter(), options: runtimeConfig.getOptions(), data }, timestamp: printTimestamp });
+    const printSignature = signLikeRispro(privateKey, printContent);
+    await (qz.print as unknown as (configuration: unknown, printData: unknown, signed: string, signedAt: number) => Promise<void>)(config, data, printSignature, printTimestamp);
+
+    const signedMessages = sentMessages.filter((message) => message.call === "printers.find" || message.call === "print");
+    expect(signedMessages).toHaveLength(2);
+    expect(signedMessages.map((message) => message.signAlgorithm)).toEqual(["SHA512", "SHA512"]);
+    expect(signedMessages.map((message) => message.timestamp)).toEqual([discoveryTimestamp, printTimestamp]);
+    expect(signedMessages.map((message) => message.signature)).toEqual([discoverySignature, printSignature]);
+    expect(desktopSignedContent(signedMessages[0])).toBe(discoveryContent);
+    expect(desktopSignedContent(signedMessages[1])).toBe(printContent);
+    for (const message of signedMessages) {
+      expect(Object.keys(JSON.parse(desktopSignedContent(message)) as object)).toEqual(["call", "params", "timestamp"]);
+      expect(desktopSignedContent(message)).not.toContain("signAlgorithm");
+      expect(desktopSignedContent(message)).not.toContain("signature");
+      expect(desktopSignedContent(message)).not.toContain("uid");
+      expect(desktopSignedContent(message)).not.toContain("position");
+      expect(desktopVerifies(message, publicKey, "SHA512")).toBe(true);
+      expect(desktopVerifies(message, publicKey, "SHA1")).toBe(false);
+    }
+    expect(callbackSigningCalls).toBe(0);
+    expect(Date.now).toBe(dateNowBefore);
+  });
+
+  it("keeps concurrent pre-signed calls associated with their own signatures, algorithms, and timestamps", async () => {
+    vi.resetModules();
+    const qz = await import("qz-tray");
     qz.security.setCertificatePromise((resolve) => resolve("test-certificate"));
     qz.security.setSignatureAlgorithm("SHA512");
     qz.security.setSignaturePromise(async () => { throw new Error("callback signing must not run"); });
     await qz.websocket.connect({ host: ["localhost"], port: { secure: [8181], insecure: [8182] }, usingSecure: true, keepAlive: 0 });
-
-    const options = { units: "mm" as const, size: { width: 50, height: 30 }, copies: 1 };
-    const config = qz.configs.create("RISPRO-LABEL", options);
+    const config = qz.configs.create("RISPRO-LABEL", { units: "mm", size: { width: 50, height: 30, custom: true } as qz.Size, orientation: "landscape", copies: 1 });
     const data = [{ type: "pixel" as const, format: "pdf" as const, flavor: "base64" as const, data: "JVBERi0xLjQ=" }];
-    const runtimeConfig = config as unknown as { getPrinter(): unknown; getOptions(): unknown };
-    const params = { printer: runtimeConfig.getPrinter(), options: runtimeConfig.getOptions(), data };
-    const timestamp = 1_725_123_456_789;
-    const request = serializeQzRequest("print", params, timestamp);
-    const digest = await sha256Hex(request);
-    const signature = `rsa-sha512:${digest}`;
-    const dateNowBefore = Date.now;
 
-    await (qz.print as unknown as (configuration: unknown, printData: unknown, signed: string, signedAt: number) => Promise<void>)(config, data, signature, timestamp);
+    await Promise.all([
+      qz.printers.find(undefined, "discovery-signature", 101),
+      (qz.print as unknown as (configuration: unknown, printData: unknown, signed: string, signedAt: number) => Promise<void>)(config, data, "print-signature", 202),
+    ]);
 
-    const wire = sentMessages.find((message) => message.call === "print");
-    expect(wire).toBeDefined();
-    expect(JSON.stringify({ call: wire!.call, params: wire!.params, timestamp: wire!.timestamp })).toBe(request);
-    expect(wire).toMatchObject({ signature, timestamp });
-    expect(await sha256Hex(JSON.stringify({ call: wire!.call, params: wire!.params, timestamp: wire!.timestamp }))).toBe(digest);
-    expect(Date.now).toBe(dateNowBefore);
+    const messages = sentMessages.filter((message) => message.call === "printers.find" || message.call === "print");
+    expect(messages.map(({ call, signature, signAlgorithm, timestamp }) => ({ call, signature, signAlgorithm, timestamp }))).toEqual([
+      { call: "printers.find", signature: "discovery-signature", signAlgorithm: "SHA512", timestamp: 101 },
+      { call: "print", signature: "print-signature", signAlgorithm: "SHA512", timestamp: 202 },
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import type { PrinterDocumentType, PrinterProfile, QzPrinterSettings } from "@/types/printing";
+import { expectedOrientation } from "@/lib/printing-orientation";
 
 export const QZ_PRINTER_SETTINGS_KEY = "rispro.qzPrinterSettings.v1";
 export const RISPRO_WORKSTATION_ID_KEY = "rispro.workstationId.v1";
@@ -18,7 +19,7 @@ function profile(documentType: PrinterDocumentType, width: number, height: numbe
     printerName: "",
     paperWidthMm: width,
     paperHeightMm: height,
-    orientation: width > height ? "landscape" : "portrait",
+    orientation: expectedOrientation(width, height),
     copies: 1,
     scaleContent,
     customPaperSize,
@@ -80,11 +81,11 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
         printerName: String(saved.printerName || "").trim(),
         paperWidthMm: width,
         paperHeightMm: height,
-        orientation: saved.orientation === "landscape" ? "landscape" : "portrait",
+        orientation: expectedOrientation(width, height),
         copies: Math.floor(finiteBounded(saved.copies, 1, PRINTER_SETTING_LIMITS.copies.min, PRINTER_SETTING_LIMITS.copies.max)),
         scaleContent: saved.scaleContent == null ? fallback.scaleContent : saved.scaleContent === true,
         marginsMm: normalizedMargins(saved.marginsMm, fallback.marginsMm!, width, height),
-        printerTray: String(saved.printerTray || "").trim() || undefined,
+        printerTray: normalizePrinterTray(saved.printerTray),
         customPaperSize: standard ? false : true,
         rasterize: saved.rasterize == null ? fallback.rasterize : saved.rasterize === true,
         enabled: saved.enabled !== false,
@@ -94,9 +95,11 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
   };
 }
 
-export function clearUnavailablePrinterTrays(settings: QzPrinterSettings, details: Array<{ name: string; trays: string[] }>): QzPrinterSettings {
-  const byName = new Map(details.map((detail) => [detail.name, detail.trays]));
-  return { ...settings, profiles: settings.profiles.map((profile) => profile.printerTray && byName.has(profile.printerName) && !byName.get(profile.printerName)!.includes(profile.printerTray) ? { ...profile, printerTray: undefined } : profile) };
+function normalizePrinterTray(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 255 || /[\u0000-\u001f\u007f]/.test(normalized)) return undefined;
+  return normalized;
 }
 
 export function loadQzPrinterSettings(storage: Storage = window.localStorage): QzPrinterSettings {

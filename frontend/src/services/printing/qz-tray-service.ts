@@ -1,7 +1,8 @@
 import * as qz from "qz-tray";
-import type { PrinterProfile, QzPrinterDetail } from "@/types/printing";
+import type { PrinterProfile } from "@/types/printing";
+import { expectedOrientation } from "@/lib/printing-orientation";
 
-type ApprovedQzCall = "printers.find" | "printers.detail" | "print";
+type ApprovedQzCall = "printers.find" | "print";
 type RuntimeQzConfig = { getPrinter(): Record<string, unknown>; getOptions(): Record<string, unknown> };
 type QzPrintData = Array<{ type: "pixel"; format: "pdf"; flavor: "base64"; data: string }>;
 
@@ -96,17 +97,9 @@ export async function getInstalledPrinters(): Promise<string[]> {
   return Array.isArray(result) ? result.map(String) : [String(result)];
 }
 
-export async function getPrinterDetails(): Promise<QzPrinterDetail[]> {
-  await connectQzTray();
-  // qz.printers.details() in QZ Tray 2.2.6 has no public signature/timestamp
-  // parameters. Calling it would fall back to unverifiable callback signing,
-  // so deterministic mode intentionally omits driver details/tray discovery.
-  return [];
-}
-
 function qzConfig(profile: PrinterProfile, copies: number, jobName: string) {
   const size = { width: profile.paperWidthMm, height: profile.paperHeightMm, custom: profile.customPaperSize } as qz.Size & { custom: boolean };
-  return qz.configs.create(profile.printerName, { units: "mm", size, orientation: profile.orientation, copies, scaleContent: profile.scaleContent, margins: profile.marginsMm ?? 0, printerTray: profile.printerTray || null, jobName, rasterize: profile.rasterize });
+  return qz.configs.create(profile.printerName, { units: "mm", size, orientation: expectedOrientation(profile.paperWidthMm, profile.paperHeightMm), copies, scaleContent: profile.scaleContent, margins: profile.marginsMm ?? 0, printerTray: profile.printerTray || null, jobName, rasterize: profile.rasterize });
 }
 
 async function submitApprovedPrint(config: unknown, data: QzPrintData): Promise<void> {

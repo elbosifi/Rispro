@@ -11,7 +11,7 @@ import { allowInsecureQzWebsocket } from "../config/env.js";
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
 const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
 const OUTCOMES = new Set(["submitted", "failed", "status_unknown"]);
-const FAILURE_CODES = new Set(["QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECTION_FAILED", "QZ_CSP_BLOCKED", "LOCAL_NETWORK_PERMISSION_DENIED", "PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PRINTER_SETTINGS_INVALID", "DOCUMENT_GENERATION_FAILED", "PAGE_SIZE_MISMATCH", "INVALID_PDF", "DUPLICATE_PRINT", "PRINT_TIMEOUT", "PRINT_STATUS_UNKNOWN", "CERTIFICATE_REJECTED", "SIGNATURE_FAILED", "SIGNING_PAYLOAD_TOO_LARGE", "PRINT_FAILED"]);
+const FAILURE_CODES = new Set(["QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECTION_FAILED", "PRINTER_DISCOVERY_FAILED", "QZ_CSP_BLOCKED", "LOCAL_NETWORK_PERMISSION_DENIED", "PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PRINTER_SETTINGS_INVALID", "DOCUMENT_GENERATION_FAILED", "PAGE_SIZE_MISMATCH", "INVALID_PDF", "DUPLICATE_PRINT", "PRINT_TIMEOUT", "PRINT_STATUS_UNKNOWN", "CERTIFICATE_REJECTED", "SIGNATURE_FAILED", "SIGNING_PAYLOAD_TOO_LARGE", "PRINT_FAILED"]);
 const signingLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60, message: "Too many QZ signing requests. Try again shortly.", errorCode: "QZ_SIGN_RATE_LIMIT", key: (req) => String(req.user?.sub ?? req.ip) });
 
 function optionalString(value: unknown, max: number, pattern?: RegExp): string | null {

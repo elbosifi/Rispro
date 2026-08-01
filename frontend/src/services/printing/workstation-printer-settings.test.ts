@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { QZ_PRINTER_SETTINGS_KEY, clearUnavailablePrinterTrays, createDefaultQzPrinterSettings, loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile, saveQzPrinterSettings } from "./workstation-printer-settings";
+import { QZ_PRINTER_SETTINGS_KEY, createDefaultQzPrinterSettings, loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile, saveQzPrinterSettings } from "./workstation-printer-settings";
 
 describe("workstation printer settings", () => {
   beforeEach(() => { localStorage.clear(); vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001"); });
@@ -53,9 +53,41 @@ describe("workstation printer settings", () => {
     expect(corrupt.profiles[2].scaleContent).toBe(false);
   });
 
-  it("clears a tray that the refreshed driver no longer exposes", () => {
+  it("preserves a normalized manual tray without driver-detail discovery", () => {
     const settings = createDefaultQzPrinterSettings();
-    Object.assign(settings.profiles[0], { printerName: "A4", printerTray: "Old tray" });
-    expect(clearUnavailablePrinterTrays(settings, [{ name: "A4", trays: ["Tray 1"] }]).profiles[0].printerTray).toBeUndefined();
+    Object.assign(settings.profiles[0], { printerName: "A4", printerTray: "  Manual Tray 1  " });
+    saveQzPrinterSettings(settings);
+    expect(loadQzPrinterSettings().profiles[0].printerTray).toBe("Manual Tray 1");
+    expect(normalizeQzPrinterSettings({ profiles: [{ ...settings.profiles[0], printerTray: "x".repeat(256) }] }).profiles[0].printerTray).toBeUndefined();
+    expect(normalizeQzPrinterSettings({ profiles: [{ ...settings.profiles[0], printerTray: "Tray\u0000One" }] }).profiles[0].printerTray).toBeUndefined();
+  });
+
+  it("inherits orientation from each physical profile when saved orientation is missing or invalid", () => {
+    const profiles = createDefaultQzPrinterSettings().profiles.map(({ orientation: _orientation, ...profile }) => profile);
+    const missing = normalizeQzPrinterSettings({ profiles });
+    expect(missing.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "portrait", "landscape", "portrait"]);
+
+    const invalid = normalizeQzPrinterSettings({ profiles: profiles.map((profile) => ({ ...profile, orientation: "sideways" })) });
+    expect(invalid.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "portrait", "landscape", "portrait"]);
+  });
+
+  it("preserves explicit portrait and landscape when they agree with physical dimensions", () => {
+    const defaults = createDefaultQzPrinterSettings();
+    const normalized = normalizeQzPrinterSettings({ profiles: [
+      { ...defaults.profiles[0], orientation: "portrait" },
+      { ...defaults.profiles[2], orientation: "landscape" },
+    ] });
+    expect(normalized.profiles[0].orientation).toBe("portrait");
+    expect(normalized.profiles[2].orientation).toBe("landscape");
+  });
+
+  it("derives custom-media orientation after dimensions change", () => {
+    const defaults = createDefaultQzPrinterSettings();
+    const normalized = normalizeQzPrinterSettings({ profiles: [
+      { ...defaults.profiles[2], paperWidthMm: 30, paperHeightMm: 50, orientation: "landscape" },
+      { ...defaults.profiles[3], paperWidthMm: 200, paperHeightMm: 80, orientation: "portrait" },
+    ] });
+    expect(normalized.profiles[2].orientation).toBe("portrait");
+    expect(normalized.profiles[3].orientation).toBe("landscape");
   });
 });

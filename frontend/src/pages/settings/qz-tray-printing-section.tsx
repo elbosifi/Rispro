@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
-import { connectQzTray, getInstalledPrinters, getPrinterDetails, isQzConnected } from "@/services/printing/qz-tray-service";
+import { connectQzTray, getInstalledPrinters, isQzConnected } from "@/services/printing/qz-tray-service";
 import { directTestPrint } from "@/services/printing/direct-print-service";
-import { clearUnavailablePrinterTrays, createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
-import type { PrinterProfile, QzPrinterDetail, QzPrinterSettings } from "@/types/printing";
+import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import { expectedOrientation } from "@/lib/printing-orientation";
+import type { PrinterProfile, QzPrinterSettings } from "@/types/printing";
 
 const PROFILE_LABELS: Record<PrinterProfile["documentType"], string> = {
   A4_DOCUMENT: "A4 document",
@@ -17,7 +18,6 @@ const PROFILE_LABELS: Record<PrinterProfile["documentType"], string> = {
 export default function QzTrayPrintingSection() {
   const [settings, setSettings] = useState<QzPrinterSettings>(() => loadQzPrinterSettings());
   const [printers, setPrinters] = useState<string[]>([]);
-  const [details, setDetails] = useState<QzPrinterDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState("");
@@ -27,13 +27,10 @@ export default function QzTrayPrintingSection() {
     setConnectionError("");
     try {
       await connectQzTray();
-      const [names, detailRows] = await Promise.all([getInstalledPrinters(), getPrinterDetails()]);
+      const names = await getInstalledPrinters();
       setPrinters(names);
-      setDetails(detailRows);
-      setSettings((current) => clearUnavailablePrinterTrays(current, detailRows));
     } catch (error) {
       setPrinters([]);
-      setDetails([]);
       setConnectionError(error instanceof Error ? error.message : "Unable to connect to QZ Tray.");
     } finally {
       setLoading(false);
@@ -63,8 +60,6 @@ export default function QzTrayPrintingSection() {
     }
   }
 
-  const detailByName = useMemo(() => new Map(details.map((item) => [item.name, item])), [details]);
-
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -86,18 +81,17 @@ export default function QzTrayPrintingSection() {
       </div>
 
       {settings.profiles.map((profile) => {
-        const trays = detailByName.get(profile.printerName)?.trays ?? [];
         const standardPaper = profile.documentType === "A4_DOCUMENT" || profile.documentType === "A5_DOCUMENT";
         return (
           <section key={profile.documentType} className="rounded-xl border border-border p-4">
             <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">{PROFILE_LABELS[profile.documentType]}</h4><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile.enabled} onChange={(event) => updateProfile(profile.documentType, { enabled: event.target.checked })} />Enabled</label></div>
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <Field label="Printer" wide><select className="input-premium h-10 w-full" value={profile.printerName} onChange={(event) => updateProfile(profile.documentType, { printerName: event.target.value, printerTray: undefined })}><option value="">Select printer</option>{printers.map((printer) => <option key={printer} value={printer}>{printer}</option>)}</select></Field>
-              <Field label="Paper width (mm)"><input className="input-premium h-10 w-full" type="number" min="10" max="500" step="0.1" disabled={standardPaper} value={profile.paperWidthMm} onChange={(event) => updateProfile(profile.documentType, { paperWidthMm: Number(event.target.value) })} /></Field>
-              <Field label="Paper height (mm)"><input className="input-premium h-10 w-full" type="number" min="10" max="1000" step="0.1" disabled={standardPaper} value={profile.paperHeightMm} onChange={(event) => updateProfile(profile.documentType, { paperHeightMm: Number(event.target.value) })} /></Field>
-              <Field label="Orientation"><select className="input-premium h-10 w-full" value={profile.orientation} onChange={(event) => updateProfile(profile.documentType, { orientation: event.target.value as PrinterProfile["orientation"] })}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></Field>
+              <Field label="Paper width (mm)"><input className="input-premium h-10 w-full" type="number" min="10" max="500" step="0.1" disabled={standardPaper} value={profile.paperWidthMm} onChange={(event) => { const paperWidthMm = Number(event.target.value); updateProfile(profile.documentType, { paperWidthMm, orientation: expectedOrientation(paperWidthMm, profile.paperHeightMm) }); }} /></Field>
+              <Field label="Paper height (mm)"><input className="input-premium h-10 w-full" type="number" min="10" max="1000" step="0.1" disabled={standardPaper} value={profile.paperHeightMm} onChange={(event) => { const paperHeightMm = Number(event.target.value); updateProfile(profile.documentType, { paperHeightMm, orientation: expectedOrientation(profile.paperWidthMm, paperHeightMm) }); }} /></Field>
+              <Field label="Orientation"><input className="input-premium h-10 w-full" value={expectedOrientation(profile.paperWidthMm, profile.paperHeightMm) === "landscape" ? "Landscape" : "Portrait"} readOnly aria-readonly="true" /></Field>
               <Field label="Copies"><input className="input-premium h-10 w-full" type="number" min="1" max="99" value={profile.copies} onChange={(event) => updateProfile(profile.documentType, { copies: Number(event.target.value) })} /></Field>
-              <Field label="Printer tray"><select className="input-premium h-10 w-full" value={profile.printerTray || ""} onChange={(event) => updateProfile(profile.documentType, { printerTray: event.target.value || undefined })}><option value="">Printer default</option>{trays.map((tray) => <option key={tray} value={tray}>{tray}</option>)}</select></Field>
+              <Field label="Printer tray name"><input className="input-premium h-10 w-full" type="text" maxLength={255} value={profile.printerTray || ""} placeholder="Printer default" onChange={(event) => updateProfile(profile.documentType, { printerTray: event.target.value || undefined })} /><span className="mt-1 block text-xs text-muted-foreground">Optional. Enter the exact Windows driver tray name only when required. Automatic tray discovery is unavailable with the current QZ Tray version.</span></Field>
               <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={profile.scaleContent} onChange={(event) => updateProfile(profile.documentType, { scaleContent: event.target.checked })} />Scale content to page</label>
               <label className="flex items-center gap-2 self-end pb-2 text-sm" title={standardPaper ? "Standard A4/A5 media is fixed." : "Required for label and receipt driver media."}><input type="checkbox" checked={profile.customPaperSize} disabled onChange={() => undefined} />Use custom printer media</label>
               <label className="flex items-center gap-2 self-end pb-2 text-sm" title="Rasterize only when the printer driver requires it."><input type="checkbox" checked={profile.rasterize} onChange={(event) => updateProfile(profile.documentType, { rasterize: event.target.checked })} />Rasterize PDF for this driver</label>

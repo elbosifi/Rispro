@@ -31,12 +31,6 @@ export interface QzPrinterSettings {
   updatedAt: string;
 }
 
-export interface QzPrinterDetail {
-  name: string;
-  trays: string[];
-  raw: Record<string, unknown>;
-}
-
 export interface DirectPrintRequest {
   documentType: PrinterDocumentType;
   documentId?: string;
@@ -49,6 +43,7 @@ export interface DirectPrintRequest {
 export type DirectPrintErrorCode =
   | "QZ_NOT_INSTALLED"
   | "QZ_CONNECTION_FAILED"
+  | "PRINTER_DISCOVERY_FAILED"
   | "QZ_NOT_RUNNING"
   | "QZ_CSP_BLOCKED"
   | "LOCAL_NETWORK_PERMISSION_DENIED"

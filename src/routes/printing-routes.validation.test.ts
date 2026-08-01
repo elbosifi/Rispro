@@ -13,6 +13,7 @@ const valid = { workstationId: "00000000-0000-4000-8000-000000000001", documentT
 describe("printing audit validation", () => {
   it("accepts a submitted client-reported audit", () => assert.equal(__printingRouteTestables.parseAudit(valid).outcome, "submitted"));
   it("accepts a boolean test-print marker without expanding document types", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, testPrint: true }).testPrint, true));
+  it("accepts the typed printer-discovery failure code", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, outcome: "failed", failureCode: "PRINTER_DISCOVERY_FAILED" }).failureCode, "PRINTER_DISCOVERY_FAILED"));
   it("rejects arbitrary document types, failure codes, nested values, and dimensions", () => {
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, documentType: "PATIENT_NAME" }));
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, outcome: "failed", failureCode: "anything" }));

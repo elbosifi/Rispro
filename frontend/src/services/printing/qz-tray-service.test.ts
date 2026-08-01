@@ -36,7 +36,6 @@ import {
   __qzTrayTestables,
   connectQzTray,
   getInstalledPrinters,
-  getPrinterDetails,
   printPdf,
   serializeQzRequest,
   sha256Hex,
@@ -104,12 +103,6 @@ describe("QZ Tray service", () => {
     expect(Date.now).toBe(originalDateNow);
   });
 
-  it("does not invoke nondeterministic printer-details signing in QZ 2.2.6", async () => {
-    await expect(getPrinterDetails()).resolves.toEqual([]);
-    expect(qzMocks.details).not.toHaveBeenCalled();
-    expect(signingBodies).toHaveLength(0);
-  });
-
   it("creates and deterministically signs a millimetre pixel-PDF job", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_456);
     const profile = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "RISPRO A4", printerTray: "Tray 1" };
@@ -159,7 +152,13 @@ describe("QZ Tray service", () => {
   it("uses custom media and profile-controlled rasterization for a 50 x 30 mm label", async () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[2], printerName: "Xprinter" };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "label" });
-    expect(qzMocks.create).toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 50, height: 30, custom: true }, rasterize: true }));
+    expect(qzMocks.create).toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", rasterize: true }));
+  });
+
+  it("derives QZ orientation from final physical dimensions", async () => {
+    const receipt = { ...DEFAULT_PRINTER_PROFILES[3], printerName: "Receipt", orientation: "landscape" as const };
+    await printPdf(receipt, "JVBERi0xLjQ=", { jobName: "receipt" });
+    expect(qzMocks.create).toHaveBeenCalledWith("Receipt", expect.objectContaining({ size: { width: 80, height: 200, custom: true }, orientation: "portrait" }));
   });
 
   it("removes a PDF data URL prefix and leaves raw Base64", () => {

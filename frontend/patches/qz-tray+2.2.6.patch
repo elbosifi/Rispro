@@ -1,0 +1,13 @@
+diff --git a/node_modules/qz-tray/qz-tray.js b/node_modules/qz-tray/qz-tray.js
+index a776faa..29551b7 100644
+--- a/node_modules/qz-tray/qz-tray.js
++++ b/node_modules/qz-tray/qz-tray.js
+@@ -436,7 +436,8 @@ var qz = (function() {
+                         params: params,
+                         signature: signature,
+                         timestamp: signingTimestamp
+                     };
++                    if (signature != undefined) msg.signAlgorithm = qz.security.getSignatureAlgorithm();
+ 
+                     _qz.websocket.connection.sendData(msg);
+                 });

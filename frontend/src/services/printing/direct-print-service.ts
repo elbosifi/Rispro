@@ -3,11 +3,12 @@ import { getAppointmentById, fetchAppointmentSlipSettings } from "@/lib/api-hook
 import { createAccessionLabelPdfBlob } from "@/lib/accession-label-printing";
 import { createAppointmentSlipPdfBlob } from "@/lib/print-utils";
 import { createPrinterTestPdfBlob } from "@/lib/printer-test-pdf";
+import { expectedOrientation } from "@/lib/printing-orientation";
 import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile } from "@/types/printing";
 import { connectQzTray, getInstalledPrinters, printPdf, QzTrayError } from "./qz-tray-service";
 import { loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile } from "./workstation-printer-settings";
 
-export const DIRECT_PRINT_TIMEOUTS = { connectionMs: 15_000, preparationMs: 60_000, submissionStatusMs: 30_000 };
+export const DIRECT_PRINT_TIMEOUTS = { connectionMs: 15_000, discoveryMs: 15_000, preparationMs: 60_000, submissionStatusMs: 30_000 };
 const activeJobs = new Map<string, DirectPrintJobState>();
 
 export class DirectPrintError extends Error {
@@ -15,6 +16,7 @@ export class DirectPrintError extends Error {
 }
 
 export function validateProfilePageSize(profile: PrinterProfile): boolean {
+  if (profile.orientation !== expectedOrientation(profile.paperWidthMm, profile.paperHeightMm)) return false;
   const matches = (width: number, height: number) => Math.abs(profile.paperWidthMm - width) <= 0.5 && Math.abs(profile.paperHeightMm - height) <= 0.5;
   if (profile.documentType === "A4_DOCUMENT") return matches(210, 297) && !profile.customPaperSize;
   if (profile.documentType === "A5_DOCUMENT") return matches(148, 210) && !profile.customPaperSize;
@@ -101,7 +103,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     if (!profile.enabled) throw new DirectPrintError("PRINTER_SETTINGS_INVALID", `The ${request.documentType} printer profile is disabled.`);
     if (!validateProfilePageSize(profile)) throw new DirectPrintError("PRINTER_SETTINGS_INVALID", `The ${request.documentType} printer profile has invalid paper or custom-media settings.`);
     await withStageTimeout(connectQzTray(), DIRECT_PRINT_TIMEOUTS.connectionMs, new DirectPrintError("QZ_CONNECTION_FAILED", "QZ Tray did not connect within 15 seconds."));
-    const printers = await getInstalledPrinters();
+    const printers = await withStageTimeout(getInstalledPrinters(), DIRECT_PRINT_TIMEOUTS.discoveryMs, new DirectPrintError("PRINTER_DISCOVERY_FAILED", "RISpro could not retrieve the installed printers from QZ Tray."));
     if (!printers.includes(profile.printerName)) throw new DirectPrintError("PRINTER_NOT_FOUND", `The configured printer “${profile.printerName}” is not installed on this workstation.`);
     const blob = await withStageTimeout(options.generate ? options.generate(profile) : generatePdf(request, profile), DIRECT_PRINT_TIMEOUTS.preparationMs, new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Document preparation exceeded 60 seconds."));
     const base64 = await blobToBase64(blob);

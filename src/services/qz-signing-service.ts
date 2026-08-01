@@ -2,8 +2,13 @@ import { createHash, createPrivateKey, sign, timingSafeEqual } from "node:crypto
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
 
-export const QZ_SIGNING_CALL_ALLOWLIST = ["printers.find", "printers.detail", "print"] as const;
+export const QZ_SIGNING_CALL_ALLOWLIST = ["printers.find", "print"] as const;
 const ALLOWED_CALLS = new Set<string>(QZ_SIGNING_CALL_ALLOWLIST);
+const QZ_PRINT_OPTION_KEYS = new Set([
+  "bounds", "colorType", "copies", "density", "duplex", "encoding", "fallbackDensity", "forceRaw", "interpolation", "jobName", "legacy",
+  "margins", "orientation", "paperThickness", "printerTray", "rasterize", "rotation", "scaleContent", "size", "spool", "units",
+]);
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 function envPem(name: "QZ_CERTIFICATE" | "QZ_PRIVATE_KEY"): string {
   const value = String(process.env[name] || "").trim().replace(/\\n/g, "\n");
@@ -19,24 +24,62 @@ function reject(message: string, statusCode = 403): never {
   throw new HttpError(statusCode, message);
 }
 
-function validatePrinterDiscovery(call: string, params: unknown): void {
-  if (call === "printers.detail") {
-    if (params !== undefined && params !== null) reject("QZ printer-details parameters are invalid.", 400);
-    return;
-  }
+function validatePrinterDiscovery(params: unknown): void {
   if (!isRecord(params) || Object.keys(params).some((key) => key !== "query")) reject("QZ printer-discovery parameters are invalid.", 400);
   if (params.query != null && typeof params.query !== "string") reject("QZ printer-discovery query is invalid.", 400);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function validatePrintOptions(options: unknown): void {
+  if (!isRecord(options) || Object.keys(options).some((key) => !QZ_PRINT_OPTION_KEYS.has(key))) reject("QZ print options contain an unapproved field.", 400);
+
+  const printerTray = options.printerTray;
+  if (printerTray !== null && (typeof printerTray !== "string" || printerTray !== printerTray.trim() || printerTray.length === 0 || printerTray.length > 255 || CONTROL_CHARACTERS.test(printerTray))) {
+    reject("QZ printer tray is invalid.", 400);
+  }
+  if (options.units !== "mm") reject("QZ print units must be millimetres.", 400);
+  if (!Number.isInteger(options.copies) || Number(options.copies) < 1 || Number(options.copies) > 99) reject("QZ print copies are invalid.", 400);
+  if (options.orientation !== "portrait" && options.orientation !== "landscape") reject("QZ print orientation is invalid.", 400);
+  if (typeof options.scaleContent !== "boolean" || typeof options.rasterize !== "boolean") reject("QZ print boolean options are invalid.", 400);
+  if (typeof options.jobName !== "string" || !options.jobName.trim() || options.jobName.length > 200 || CONTROL_CHARACTERS.test(options.jobName)) reject("QZ print job name is invalid.", 400);
+
+  if (!isRecord(options.size) || !hasExactKeys(options.size, ["width", "height", "custom"])) reject("QZ print size is invalid.", 400);
+  const width = options.size.width;
+  const height = options.size.height;
+  if (typeof width !== "number" || !Number.isFinite(width) || width < 10 || width > 500 || typeof height !== "number" || !Number.isFinite(height) || height < 10 || height > 1000 || typeof options.size.custom !== "boolean") reject("QZ print size is invalid.", 400);
+  const standardMedia = (width === 210 && height === 297) || (width === 148 && height === 210);
+  if (options.size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
+  const expectedOrientation = width > height ? "landscape" : "portrait";
+  if (options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
+
+  if (!isRecord(options.margins) || !hasExactKeys(options.margins, ["top", "right", "bottom", "left"])) reject("QZ print margins are invalid.", 400);
+  const margins = options.margins as Record<"top" | "right" | "bottom" | "left", unknown>;
+  if (Object.values(margins).some((margin) => typeof margin !== "number" || !Number.isFinite(margin) || margin < 0)
+      || Number(margins.left) >= width || Number(margins.right) >= width || Number(margins.top) >= height || Number(margins.bottom) >= height
+      || Number(margins.left) + Number(margins.right) >= width || Number(margins.top) + Number(margins.bottom) >= height) reject("QZ print margins are invalid.", 400);
+
+  const expectedDefaults: Record<string, unknown> = {
+    bounds: null, colorType: "color", density: 0, duplex: false, encoding: null, fallbackDensity: null, forceRaw: false, interpolation: "bicubic",
+    legacy: false, paperThickness: null, rotation: 0, spool: null,
+  };
+  for (const [key, expected] of Object.entries(expectedDefaults)) {
+    if (!Object.hasOwn(options, key) || options[key] !== expected) reject(`QZ print option ${key} is not approved.`, 400);
+  }
 }
 
 function validatePrint(params: unknown): void {
   if (!isRecord(params) || Object.keys(params).some((key) => !["printer", "options", "data"].includes(key))) {
     reject("QZ print parameters are invalid.", 400);
   }
-  if (!isRecord(params.printer) || typeof params.printer.name !== "string" || !params.printer.name.trim() || Object.keys(params.printer).some((key) => key !== "name")) {
+  if (!isRecord(params.printer) || typeof params.printer.name !== "string" || params.printer.name !== params.printer.name.trim() || params.printer.name.length < 1 || params.printer.name.length > 255 || CONTROL_CHARACTERS.test(params.printer.name) || Object.keys(params.printer).some((key) => key !== "name")) {
     reject("QZ print requests must target one named local printer.", 403);
   }
-  if (!isRecord(params.options) || !Array.isArray(params.data) || params.data.length === 0) reject("QZ print parameters are incomplete.", 400);
-  if (params.options.forceRaw === true) reject("Raw printer-driver bypass is not approved for RISpro printing.", 403);
+  if (!Array.isArray(params.data) || params.data.length === 0) reject("QZ print parameters are incomplete.", 400);
+  validatePrintOptions(params.options);
   for (const item of params.data) {
     if (!isRecord(item) || Object.keys(item).some((key) => !["type", "format", "flavor", "data"].includes(key)) || item.type !== "pixel" || item.format !== "pdf" || item.flavor !== "base64" || typeof item.data !== "string") {
       reject("Only Base64 pixel PDF print data may be signed.", 403);
@@ -56,7 +99,7 @@ export function validateQzSigningRequest(request: unknown): string {
   if (!isRecord(parsed) || Object.keys(parsed).some((key) => !["call", "params", "timestamp"].includes(key))) reject("QZ signing request has an invalid structure.", 400);
   if (typeof parsed.call !== "string" || !ALLOWED_CALLS.has(parsed.call)) reject("This QZ function is not approved for RISpro printing.", 403);
   if (!Number.isSafeInteger(parsed.timestamp) || Number(parsed.timestamp) <= 0) reject("QZ signing request timestamp is invalid.", 400);
-  if (parsed.call === "print") validatePrint(parsed.params); else validatePrinterDiscovery(parsed.call, parsed.params);
+  if (parsed.call === "print") validatePrint(parsed.params); else validatePrinterDiscovery(parsed.params);
   return request;
 }
 

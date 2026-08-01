@@ -25,7 +25,7 @@ before(async () => {
 after(async () => { await cleanup(); await pool.end(); });
 
 describe("print audit route persistence", () => {
-  it("records a validated submitted event through the authenticated route without document content", async () => {
+  it("records validated submitted and discovery-failed events without document content", async () => {
     const app = express();
     app.use(express.json());
     app.use(cookieParser());
@@ -38,12 +38,16 @@ describe("print audit route persistence", () => {
     try {
       const response = await fetch(`http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/audit`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: `${env.cookieName}=${token}` }, body: JSON.stringify({ workstationId: WORKSTATION_SENTINEL, documentType: "A4_DOCUMENT", appointmentId: null, printerName: "TEST-QUEUE", paperWidthMm: 210, paperHeightMm: 297, outcome: "submitted", failureCode: null, testPrint: true }) });
       assert.equal(response.status, 201);
-      const { rows } = await pool.query<{ action_type: string; new_values: Record<string, unknown> }>("select action_type,new_values from audit_log where entity_type='print_job' and new_values->>'workstationId'=$1", [WORKSTATION_SENTINEL]);
+      const failedResponse = await fetch(`http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/audit`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: `${env.cookieName}=${token}` }, body: JSON.stringify({ workstationId: WORKSTATION_SENTINEL, documentType: "A4_DOCUMENT", appointmentId: null, printerName: "TEST-QUEUE", paperWidthMm: 210, paperHeightMm: 297, outcome: "failed", failureCode: "PRINTER_DISCOVERY_FAILED", testPrint: true }) });
+      assert.equal(failedResponse.status, 201);
+      const { rows } = await pool.query<{ action_type: string; new_values: Record<string, unknown> }>("select action_type,new_values from audit_log where entity_type='print_job' and new_values->>'workstationId'=$1 order by id", [WORKSTATION_SENTINEL]);
       assert.equal(rows[0]?.action_type, "print_job_submitted");
       assert.equal(rows[0]?.new_values.outcome, "submitted");
       assert.equal(rows[0]?.new_values.clientReported, true);
       assert.equal(rows[0]?.new_values.testPrint, true);
       assert.equal("documentContent" in rows[0].new_values, false);
+      assert.equal(rows[1]?.action_type, "print_job_failed");
+      assert.equal(rows[1]?.new_values.failureCode, "PRINTER_DISCOVERY_FAILED");
     } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
   });
 });

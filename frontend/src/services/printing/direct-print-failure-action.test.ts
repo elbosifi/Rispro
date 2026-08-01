@@ -16,6 +16,8 @@ describe("direct print failure actions", () => {
 
   it("offers QZ browser fallback only when a valid fallback exists and is enabled", () => {
     expect(resolveDirectPrintFailureAction("QZ_NOT_RUNNING", true, true)).toBe("BROWSER_PRINT");
+    expect(resolveDirectPrintFailureAction("PRINTER_DISCOVERY_FAILED", true, true)).toBe("BROWSER_PRINT");
+    expect(resolveDirectPrintFailureAction("PRINTER_DISCOVERY_FAILED", false, true)).toBe("OPEN_SETTINGS");
     expect(resolveDirectPrintFailureAction("QZ_NOT_RUNNING", true, false)).toBe("OPEN_SETTINGS");
     expect(resolveDirectPrintFailureAction("QZ_NOT_RUNNING", false, true)).toBe("OPEN_SETTINGS");
     expect(resolveDirectPrintFailureAction("DOCUMENT_GENERATION_FAILED", false, true)).toBe("NONE");

@@ -30,21 +30,79 @@ function signed(payload: object): string {
   return signature;
 }
 
+function printOptions(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    bounds: null,
+    colorType: "color",
+    copies: 1,
+    density: 0,
+    duplex: false,
+    encoding: null,
+    fallbackDensity: null,
+    forceRaw: false,
+    interpolation: "bicubic",
+    jobName: "RISpro print test",
+    legacy: false,
+    margins: { top: 0, right: 0, bottom: 0, left: 0 },
+    orientation: "portrait",
+    paperThickness: null,
+    printerTray: null,
+    rasterize: false,
+    rotation: 0,
+    scaleContent: true,
+    size: { width: 210, height: 297, custom: false },
+    spool: null,
+    units: "mm",
+    ...overrides,
+  };
+}
+
+function printPayload(options: Record<string, unknown>, printer: Record<string, unknown> = { name: "RISPRO A4" }): object {
+  return { call: "print", params: { printer, options, data: [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0=" }] }, timestamp: Date.now() };
+}
+
 describe("QZ request signing", () => {
-  it("signs the exact QZ 2.2.6 discovery and details calls", () => {
+  it("signs the exact QZ 2.2.6 discovery call and rejects printer details", () => {
     assert.equal(getQzCertificate(), "test-certificate");
     assert.ok(signed({ call: "printers.find", params: {}, timestamp: Date.now() }));
-    assert.ok(signed({ call: "printers.detail", timestamp: Date.now() }));
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.detail", timestamp: Date.now() })), /not approved/);
   });
-  it("signs pixel PDF print calls and verifies RSA SHA-512", () => {
-    assert.ok(signed({ call: "print", params: { printer: { name: "RISPRO A4" }, options: {}, data: [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0=" }] }, timestamp: Date.now() }));
+  it("accepts valid A4, A5, and 50 x 30 mm label options", () => {
+    assert.ok(signed(printPayload(printOptions())));
+    assert.ok(signed(printPayload(printOptions({ size: { width: 148, height: 210, custom: false }, jobName: "RISpro A5" }))));
+    assert.ok(signed(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", scaleContent: false, rasterize: true, printerTray: "Tray 1", jobName: "RISpro label" }))));
   });
   it("rejects unknown, file, socket, USB, HID, raw, and HTML print calls", () => {
     for (const call of ["unknown.call", "file.read", "socket.sendData", "usb.listDevices", "hid.listDevices"]) assert.throws(() => validateQzSigningRequest(JSON.stringify({ call, params: {}, timestamp: Date.now() })), /not approved/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "raw", format: "command", flavor: "plain", data: "danger" }] }, timestamp: Date.now() })), /Base64 pixel PDF/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "pixel", format: "html", flavor: "plain", data: "<p>unsafe</p>" }] }, timestamp: Date.now() })), /Base64 pixel PDF/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "pixel", format: "pdf", flavor: "file", data: "file:///patient.pdf" }] }, timestamp: Date.now() })), /Base64 pixel PDF/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: { forceRaw: true }, data: [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0=" }] }, timestamp: Date.now() })), /driver bypass/);
+    const options = printOptions();
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ ...printPayload(options), params: { printer: { name: "P" }, options, data: [{ type: "raw", format: "command", flavor: "plain", data: "danger" }] } })), /Base64 pixel PDF/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ ...printPayload(options), params: { printer: { name: "P" }, options, data: [{ type: "pixel", format: "html", flavor: "plain", data: "<p>unsafe</p>" }] } })), /Base64 pixel PDF/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ ...printPayload(options), params: { printer: { name: "P" }, options, data: [{ type: "pixel", format: "pdf", flavor: "file", data: "file:///patient.pdf" }] } })), /Base64 pixel PDF/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ forceRaw: true })))), /forceRaw/);
+  });
+  it("rejects invalid copies, units, unknown options, dimensions, custom flags, and orientation", () => {
+    for (const copies of [0, 100, 1.5]) assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ copies })))), /copies/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ units: "in" })))), /units/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ unapproved: true })))), /unapproved field/);
+    for (const size of [{ width: Infinity, height: 297, custom: false }, { width: 501, height: 297, custom: true }, { width: 210, height: 297, custom: true }, { width: 50, height: 30, custom: false }]) {
+      assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size })))), /size|custom-media/);
+    }
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ orientation: "landscape" })))), /orientation/);
+  });
+  it("rejects invalid margins, job names, trays, and boolean options", () => {
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ margins: { top: -1, right: 0, bottom: 0, left: 0 } })))), /margins/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ margins: { top: 0, right: 110, bottom: 0, left: 100 } })))), /margins/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ jobName: "x".repeat(201) })))), /job name/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ jobName: "RISpro\njob" })))), /job name/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ printerTray: { name: "Tray 1" } })))), /tray/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ printerTray: "Tray\u0000One" })))), /tray/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ rasterize: "true" })))), /boolean/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ scaleContent: "true" })))), /boolean/);
+  });
+  it("rejects file and network printer targets and invalid local queue names", () => {
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions(), { name: "P", file: "C:\\patient.pdf" }))), /named local printer/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions(), { name: "P", host: "10.0.0.5", port: 9100 }))), /named local printer/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions(), { name: " P " }))), /named local printer/);
   });
   it("rejects malformed JSON and missing or invalid timestamps", () => {
     assert.throws(() => validateQzSigningRequest("not json"), /valid JSON/);
@@ -61,6 +119,8 @@ describe("QZ request signing", () => {
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.find", params: { query: "é".repeat(600_000) }, timestamp: Date.now() })), /size limit/);
     env.qzSigningRequestLimitMb = 4;
     const data = "A".repeat(2 * 1024 * 1024);
-    assert.ok(signed({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "pixel", format: "pdf", flavor: "base64", data }] }, timestamp: Date.now() }));
+    const payload = printPayload(printOptions(), { name: "P" }) as { params: { data: Array<Record<string, unknown>> } };
+    payload.params.data[0].data = data;
+    assert.ok(signed(payload));
   });
 });

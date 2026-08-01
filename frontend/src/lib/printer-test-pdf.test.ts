@@ -12,5 +12,14 @@ describe("printer test PDF", () => {
     expect(pdf).toMatch(/\/MediaBox\s*\[0 0 (?:141\.7\d*) (?:85\.0\d*)\]/);
     expect(pdf).toContain("RISpro printer test");
     expect(pdf).toContain("Xprinter 50x30");
+    expect(pdf).toContain("Orientation: landscape");
+  });
+
+  it("uses portrait orientation for an 80 x 200 mm receipt test PDF", async () => {
+    const profile = { ...createDefaultQzPrinterSettings().profiles[3], printerName: "Receipt 80x200" };
+    const blob = createPrinterTestPdfBlob(profile, new Date("2026-08-01T12:00:00.000Z"));
+    const pdf = new TextDecoder("latin1").decode(await blob.arrayBuffer());
+    expect(pdf).toMatch(/\/MediaBox\s*\[0 0 (?:226\.7\d*) (?:566\.9\d*)\]/);
+    expect(pdf).toContain("Orientation: portrait");
   });
 });
