@@ -2,6 +2,8 @@ node_modules/
 .DS_Store
 .env
 .env.local
+secrets/
+var/qz-bootstrap/
 docker/orthanc/generated/
 
 # Persistent runtime data; protected from update-script git cleanup.

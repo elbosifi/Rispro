@@ -217,6 +217,10 @@ load_existing_config() {
   CURRENT_APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS="$(read_env_value APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS)"
   CURRENT_APPOINTMENT_PUBLIC_CANCEL_USER_ID="$(read_env_value APPOINTMENT_PUBLIC_CANCEL_USER_ID)"
   CURRENT_PUBLIC_APP_BASE_URL="$(read_env_value PUBLIC_APP_BASE_URL)"
+  CURRENT_QZ_TRUST_MODE="$(read_env_value QZ_TRUST_MODE)"
+  CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE="$(read_env_value QZ_ROOT_CERTIFICATE_HOST_FILE)"
+  CURRENT_QZ_CERTIFICATE_HOST_FILE="$(read_env_value QZ_CERTIFICATE_HOST_FILE)"
+  CURRENT_QZ_PRIVATE_KEY_HOST_FILE="$(read_env_value QZ_PRIVATE_KEY_HOST_FILE)"
   CURRENT_OHIF_ENABLED="$(read_env_value OHIF_ENABLED)"
   CURRENT_OHIF_INFRASTRUCTURE_DISABLED="$(read_env_value OHIF_INFRASTRUCTURE_DISABLED)"
   CURRENT_OHIF_CACHE_CLEANUP_ENABLED="$(read_env_value OHIF_CACHE_CLEANUP_ENABLED)"
@@ -259,6 +263,11 @@ hydrate_deployment_config_from_current_env() {
   APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS="${CURRENT_APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS:-1209600}"
   APPOINTMENT_PUBLIC_CANCEL_USER_ID="${CURRENT_APPOINTMENT_PUBLIC_CANCEL_USER_ID:-1}"
   PUBLIC_APP_BASE_URL="${CURRENT_PUBLIC_APP_BASE_URL:-https://rispro.nccb.com.ly}"
+  QZ_TRUST_MODE="${CURRENT_QZ_TRUST_MODE:-internal_ca}"
+  QZ_ROOT_CERTIFICATE_HOST_FILE="${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}"
+  QZ_CERTIFICATE_HOST_FILE="${CURRENT_QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}"
+  QZ_PRIVATE_KEY_HOST_FILE="${CURRENT_QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}"
+  if [ "$QZ_TRUST_MODE" = "qz_issued" ] && [ -z "${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-}" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
   OHIF_INFRASTRUCTURE_DISABLED="${CURRENT_OHIF_INFRASTRUCTURE_DISABLED:-false}"
   OHIF_ENABLED="true"
   OHIF_PUBLIC_BASE_URL="/ohif"
@@ -415,6 +424,11 @@ collect_deployment_config() {
   APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS="${CURRENT_APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS:-1209600}"
   APPOINTMENT_PUBLIC_CANCEL_USER_ID="${CURRENT_APPOINTMENT_PUBLIC_CANCEL_USER_ID:-1}"
   PUBLIC_APP_BASE_URL="${CURRENT_PUBLIC_APP_BASE_URL:-https://rispro.nccb.com.ly}"
+  QZ_TRUST_MODE="${CURRENT_QZ_TRUST_MODE:-internal_ca}"
+  QZ_ROOT_CERTIFICATE_HOST_FILE="${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}"
+  QZ_CERTIFICATE_HOST_FILE="${CURRENT_QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}"
+  QZ_PRIVATE_KEY_HOST_FILE="${CURRENT_QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}"
+  if [ "$QZ_TRUST_MODE" = "qz_issued" ] && [ -z "${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-}" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
   OHIF_INFRASTRUCTURE_DISABLED="${CURRENT_OHIF_INFRASTRUCTURE_DISABLED:-false}"
   OHIF_ENABLED="true"
   OHIF_PUBLIC_BASE_URL="/ohif"
@@ -642,6 +656,16 @@ APPOINTMENT_PUBLIC_TOKEN_SECRET=${APPOINTMENT_PUBLIC_TOKEN_SECRET}
 APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS=${APPOINTMENT_PUBLIC_TOKEN_TTL_SECONDS}
 APPOINTMENT_PUBLIC_CANCEL_USER_ID=${APPOINTMENT_PUBLIC_CANCEL_USER_ID}
 PUBLIC_APP_BASE_URL=${PUBLIC_APP_BASE_URL}
+
+# -- QZ Tray Printing --
+QZ_TRUST_MODE=${QZ_TRUST_MODE}
+QZ_ROOT_CERTIFICATE_HOST_FILE=${QZ_ROOT_CERTIFICATE_HOST_FILE}
+QZ_CERTIFICATE_HOST_FILE=${QZ_CERTIFICATE_HOST_FILE}
+QZ_PRIVATE_KEY_HOST_FILE=${QZ_PRIVATE_KEY_HOST_FILE}
+QZ_ROOT_CERTIFICATE_FILE=/run/secrets/qz_root_certificate
+QZ_CERTIFICATE_FILE=/run/secrets/qz_signing_certificate
+QZ_PRIVATE_KEY_FILE=/run/secrets/qz_signing_private_key
+QZ_INSTALLER_FILE=/var/lib/rispro/qz-bootstrap/qz-tray-2.2.6-x86_64.exe
 
 # -- OHIF Viewer --
 OHIF_ENABLED=${OHIF_ENABLED}
@@ -911,16 +935,37 @@ build_compose_args() {
   fi
 }
 
+prepare_qz_printing() {
+  local trust_mode="${QZ_TRUST_MODE:-${CURRENT_QZ_TRUST_MODE:-internal_ca}}"
+  if [ "$trust_mode" = "internal_ca" ]; then
+    bash "${PROJECT_ROOT}/scripts/qz/generate-qz-signing-identity.sh"
+  elif [ "$trust_mode" != "qz_issued" ]; then
+    err 'QZ_TRUST_MODE must be internal_ca or qz_issued.'
+    return 1
+  fi
+  bash "${PROJECT_ROOT}/scripts/qz/cache-qz-installer.sh"
+}
+
 run_compose_preflight() {
   log "Running deployment preflight validation..."
   mkdir -p "${SANTE_HL7_HOST_OUTBOX_DIR}"
   preflight_validate_env
+  prepare_qz_printing
   write_env_file
   render_orthanc_config
   build_compose_args
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" config >/dev/null
   ok "Deployment configuration is valid."
   ok "Sante HL7 host outbox folder is ready: ${SANTE_HL7_HOST_OUTBOX_DIR}"
+}
+
+verify_qz_bootstrap_readiness() {
+  local base_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+  local manifest_url="${QZ_BOOTSTRAP_MANIFEST_URL:-${base_url%/api/health}/api/public/printing-bootstrap/manifest}"
+  local response
+  response="$(curl --fail --silent --show-error "$manifest_url")" || { err "QZ bootstrap manifest is unreachable: ${manifest_url}"; return 1; }
+  node -e 'const value=JSON.parse(process.argv[1]); if(value.ready!==true) throw new Error(value.reason || "QZ bootstrap is not ready");' "$response" || { err 'QZ bootstrap manifest reported not ready.'; return 1; }
+  ok "QZ printing bootstrap is ready: ${manifest_url}"
 }
 
 wait_for_app_health() {

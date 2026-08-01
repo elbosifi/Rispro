@@ -33,16 +33,18 @@ Self-hosted CI separately builds the real Dockerfile's `frontend-builder` target
 
 ## Server configuration
 
-Set these secrets on the RISpro application server and restart it:
+Phase 1 defaults to the self-managed NCCB internal QZ signing authority. Supported Docker setup/update runs generate and validate the identity and cache the pinned installer; operators do not paste PEM data into `.env`:
 
 ```env
-QZ_CERTIFICATE="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
-QZ_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+QZ_TRUST_MODE=internal_ca
+QZ_ROOT_CERTIFICATE_FILE=/run/secrets/qz_root_certificate
+QZ_CERTIFICATE_FILE=/run/secrets/qz_signing_certificate
+QZ_PRIVATE_KEY_FILE=/run/secrets/qz_signing_private_key
 QZ_ALLOW_INSECURE_WEBSOCKET=false
 QZ_SIGNING_REQUEST_LIMIT_MB=25
 ```
 
-Use the QZ-issued `digital-certificate.txt` content for `QZ_CERTIFICATE`, or deploy and trust a self-managed certificate on every workstation. Use its matching RSA private key for `QZ_PRIVATE_KEY`. The private key must remain server-side; never put it in frontend source or commit it. Trusted silent printing requires certificate provisioning, workstation trust, and physical verification with the target QZ Tray desktop and printer.
+`internal_ca` validates the root, leaf, PKCS#8 RSA key, dates, CA constraints, key match, and chain. `qz_issued` preserves support for externally supplied QZ certificate/private-key files and does not require the internal root. Configured files take precedence over the backwards-compatible `QZ_CERTIFICATE` and `QZ_PRIVATE_KEY` inline fallbacks; an unreadable or invalid configured file is an error and never silently falls back. The signing private key remains server-side. See [QZ workstation bootstrap](qz-workstation-bootstrap.md) for provisioning and recovery.
 
 Production RISpro must use HTTPS. CSP always permits secure QZ WebSockets for `localhost`, `localhost.qz.io`, and `127.0.0.1` on ports 8181, 8282, 8383, and 8484. The browser may also require local-network-access permission. Plain-HTTP development can explicitly enable QZ ports 8182, 8283, 8384, and 8485 with `QZ_ALLOW_INSECURE_WEBSOCKET=true`; this is off by default. The authenticated runtime-config endpoint supplies this decision to the frontend, which passes QZ's exact `usingSecure` connection option. Production forcibly returns secure mode even if the environment variable is mistakenly enabled.
 

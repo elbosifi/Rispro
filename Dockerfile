@@ -156,6 +156,7 @@ COPY assets/ ./assets/
 
 # Copy DICOM gateway scripts
 COPY scripts/dicom-gateway/ ./scripts/dicom-gateway/
+COPY scripts/qz/windows/ ./scripts/qz/windows/
 
 # Copy frontend build from previous stage
 COPY --from=frontend-builder /app/dist-frontend ./dist-frontend/

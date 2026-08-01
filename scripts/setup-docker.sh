@@ -66,6 +66,11 @@ main() {
       OHIF_DICOMWEB_USERNAME="${CURRENT_OHIF_DICOMWEB_USERNAME:-}"
       OHIF_DICOMWEB_PASSWORD="${CURRENT_OHIF_DICOMWEB_PASSWORD:-}"
       OHIF_DICOMWEB_BEARER_TOKEN="${CURRENT_OHIF_DICOMWEB_BEARER_TOKEN:-}"
+      QZ_TRUST_MODE="${CURRENT_QZ_TRUST_MODE:-internal_ca}"
+      QZ_ROOT_CERTIFICATE_HOST_FILE="${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}"
+      QZ_CERTIFICATE_HOST_FILE="${CURRENT_QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}"
+      QZ_PRIVATE_KEY_HOST_FILE="${CURRENT_QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}"
+      if [ "$QZ_TRUST_MODE" = "qz_issued" ] && [ -z "${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-}" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
       if [ "$OHIF_INFRASTRUCTURE_DISABLED" = "true" ]; then
         OHIF_ENABLED="false"
         OHIF_COMPOSE_PROFILES=""
@@ -76,6 +81,7 @@ main() {
       bring_up_stack
       wait_for_internal_orthanc_worklists
       wait_for_app_health || true
+      verify_qz_bootstrap_readiness
       print_deployment_summary 'RISpro is running.'
       exit 0
     fi
@@ -87,6 +93,7 @@ main() {
   bring_up_stack
   wait_for_internal_orthanc_worklists
   wait_for_app_health || true
+  verify_qz_bootstrap_readiness
   print_deployment_summary 'RISpro is ready.'
 }
 

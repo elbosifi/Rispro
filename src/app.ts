@@ -28,6 +28,8 @@ import { createAppointmentsV2Router } from "./modules/appointments-v2/index.js";
 import { createDoctorPortalRouter } from "./modules/doctor-portal/index.js";
 import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { reportingBoardPublicRouter } from "./modules/doctor-portal/reporting-board-public-routes.js";
+import { publicPrintingBootstrapRouter } from "./routes/public-printing-bootstrap-routes.js";
+import { validateConfiguredQzIdentityAtStartup } from "./services/qz-signing-service.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
@@ -56,6 +58,7 @@ function sendFrontendFile(fileName: string, cacheSeconds = 0) {
 }
 
 export function createApp(): Application {
+  validateConfiguredQzIdentityAtStartup();
   const app = express();
 
   void cleanupStaleDicomRemapUploadTempDirs().catch((error) => {
@@ -136,6 +139,7 @@ export function createApp(): Application {
   });
 
   app.use("/api/auth", authRouter);
+  app.use("/api/public/printing-bootstrap", publicPrintingBootstrapRouter);
   app.use("/api", blockForcedPasswordChange);
   app.use("/api/action-pin", actionPinRouter);
   app.use("/api/users", usersRouter);

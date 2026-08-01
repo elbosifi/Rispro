@@ -30,6 +30,11 @@ services:
       RISPRO_BUILD_COMMIT_SHA: ${RISPRO_BUILD_COMMIT_SHA:-unknown}
       REQUEST_SCAN_WORKER_PROCESS_ENABLED: "${REQUEST_SCAN_APP_WORKER_ENABLED:-false}"
       REQUEST_SCAN_MAX_CONCURRENCY: "1"
+      QZ_TRUST_MODE: ${QZ_TRUST_MODE:-internal_ca}
+      QZ_ROOT_CERTIFICATE_FILE: /run/secrets/qz_root_certificate
+      QZ_CERTIFICATE_FILE: /run/secrets/qz_signing_certificate
+      QZ_PRIVATE_KEY_FILE: /run/secrets/qz_signing_private_key
+      QZ_INSTALLER_FILE: /var/lib/rispro/qz-bootstrap/qz-tray-2.2.6-x86_64.exe
     expose:
       - "3000"
     ports:
@@ -67,6 +72,11 @@ services:
     volumes:
       - rispro-storage:/app/storage
       - ./storage/sante-hl7-outbox:/app/storage/sante-hl7-outbox
+      - ./var/qz-bootstrap:/var/lib/rispro/qz-bootstrap:ro
+    secrets:
+      - qz_root_certificate
+      - qz_signing_certificate
+      - qz_signing_private_key
     healthcheck:
       test: ["CMD", "npm", "run", "healthcheck:request-scan-worker"]
       interval: 30s
@@ -134,3 +144,11 @@ volumes:
 networks:
   rispro-network:
     driver: bridge
+
+secrets:
+  qz_root_certificate:
+    file: ${QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}
+  qz_signing_certificate:
+    file: ${QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}
+  qz_signing_private_key:
+    file: ${QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}

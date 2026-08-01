@@ -1,4 +1,5 @@
-import { createHash, createPrivateKey, sign, timingSafeEqual } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign, timingSafeEqual, X509Certificate, type KeyObject } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -10,10 +11,78 @@ const QZ_PRINT_OPTION_KEYS = new Set([
 ]);
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
-function envPem(name: "QZ_CERTIFICATE" | "QZ_PRIVATE_KEY"): string {
-  const value = String(process.env[name] || "").trim().replace(/\\n/g, "\n");
-  if (!value) throw new HttpError(503, `${name} is not configured.`);
-  return value;
+export type QzTrustMode = "internal_ca" | "qz_issued";
+
+export type QzIdentity = {
+  trustMode: QzTrustMode;
+  rootCertificate: string | null;
+  signingCertificate: string;
+  signingPrivateKey: string;
+  root: X509Certificate | null;
+  signing: X509Certificate;
+  privateKey: KeyObject;
+};
+
+function configuredPem(fileName: string, inlineName: string | null, label: string): string {
+  const configuredPath = String(process.env[fileName] || "").trim();
+  if (configuredPath) {
+    try {
+      const value = readFileSync(configuredPath, "utf8").trim();
+      if (!value) throw new Error("file is empty");
+      return value;
+    } catch {
+      throw new HttpError(503, `${label} file is configured but could not be read.`);
+    }
+  }
+  const inline = inlineName ? String(process.env[inlineName] || "").trim().replace(/\\n/g, "\n") : "";
+  if (!inline) throw new HttpError(503, `${label} is not configured.`);
+  return inline;
+}
+
+function assertRsaPkcs8(privateKeyPem: string, privateKey: KeyObject): void {
+  if (!/^-----BEGIN PRIVATE KEY-----/m.test(privateKeyPem)) throw new HttpError(503, "QZ signing private key must use PKCS#8 PEM format.");
+  if (privateKey.asymmetricKeyType !== "rsa") throw new HttpError(503, "QZ signing private key must be RSA.");
+  if ((privateKey.asymmetricKeyDetails?.modulusLength || 0) < 2048) throw new HttpError(503, "QZ signing private key must be at least 2048 bits.");
+}
+
+function publicDer(key: KeyObject): Buffer {
+  const publicKey = key.type === "public" ? key : createPublicKey(key);
+  return publicKey.export({ format: "der", type: "spki" });
+}
+
+export function loadValidatedQzIdentity(): QzIdentity {
+  const trustMode = env.qzTrustMode;
+  if (!trustMode) throw new HttpError(503, "QZ_TRUST_MODE is not configured.");
+  const signingCertificate = configuredPem("QZ_CERTIFICATE_FILE", "QZ_CERTIFICATE", "QZ signing certificate");
+  const signingPrivateKey = configuredPem("QZ_PRIVATE_KEY_FILE", "QZ_PRIVATE_KEY", "QZ signing private key");
+  let signing: X509Certificate;
+  let privateKey: KeyObject;
+  try { signing = new X509Certificate(signingCertificate); } catch { throw new HttpError(503, "QZ signing certificate is invalid."); }
+  try { privateKey = createPrivateKey(signingPrivateKey); } catch { throw new HttpError(503, "QZ signing private key is invalid."); }
+  assertRsaPkcs8(signingPrivateKey, privateKey);
+  if (signing.ca) throw new HttpError(503, "QZ signing certificate must not be a CA certificate.");
+  const now = Date.now();
+  if (now < Date.parse(signing.validFrom) || now > Date.parse(signing.validTo)) throw new HttpError(503, "QZ signing certificate is not currently valid.");
+  if (!publicDer(signing.publicKey).equals(publicDer(privateKey))) throw new HttpError(503, "QZ signing certificate does not match the private key.");
+
+  let rootCertificate: string | null = null;
+  let root: X509Certificate | null = null;
+  if (trustMode === "internal_ca") {
+    rootCertificate = configuredPem("QZ_ROOT_CERTIFICATE_FILE", null, "QZ root certificate");
+    try { root = new X509Certificate(rootCertificate); } catch { throw new HttpError(503, "QZ root certificate is invalid."); }
+    if (!root.ca) throw new HttpError(503, "QZ root certificate must be a CA certificate.");
+    if (root.subject !== root.issuer || !root.verify(root.publicKey)) throw new HttpError(503, "QZ root certificate must be self-issued and self-signed.");
+    if (signing.issuer !== root.subject || !signing.verify(root.publicKey)) throw new HttpError(503, "QZ signing certificate does not chain to the configured root.");
+  }
+  return { trustMode, rootCertificate, signingCertificate, signingPrivateKey, root, signing, privateKey };
+}
+
+export function validateConfiguredQzIdentityAtStartup(): void {
+  if (env.qzTrustMode) loadValidatedQzIdentity();
+}
+
+function legacyPem(name: "QZ_CERTIFICATE" | "QZ_PRIVATE_KEY"): string {
+  return configuredPem(name === "QZ_CERTIFICATE" ? "QZ_CERTIFICATE_FILE" : "QZ_PRIVATE_KEY_FILE", name, name);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,7 +206,13 @@ export function validateQzSigningRequest(request: unknown): string {
   return request;
 }
 
-export function getQzCertificate(): string { return envPem("QZ_CERTIFICATE"); }
+export function getQzCertificate(): string { return env.qzTrustMode ? loadValidatedQzIdentity().signingCertificate : legacyPem("QZ_CERTIFICATE"); }
+
+export function getQzRootCertificate(): string {
+  const root = loadValidatedQzIdentity().rootCertificate;
+  if (!root) throw new HttpError(404, "A custom QZ root certificate is not used in qz_issued mode.");
+  return root;
+}
 
 export function signQzRequest(request: unknown, digest: unknown): string {
   const payload = validateQzSigningRequest(request);
@@ -145,7 +220,7 @@ export function signQzRequest(request: unknown, digest: unknown): string {
   const expectedDigest = createHash("sha256").update(payload, "utf8").digest("hex");
   if (!suppliedDigest || !timingSafeEqual(Buffer.from(suppliedDigest, "hex"), Buffer.from(expectedDigest, "hex"))) throw new HttpError(400, "QZ signing digest does not match the validated request.");
   try {
-    const key = createPrivateKey(envPem("QZ_PRIVATE_KEY"));
+    const key = env.qzTrustMode ? loadValidatedQzIdentity().privateKey : createPrivateKey(legacyPem("QZ_PRIVATE_KEY"));
     return sign("RSA-SHA512", Buffer.from(suppliedDigest, "utf8"), key).toString("base64");
   } catch (error) {
     if (error instanceof HttpError) throw error;

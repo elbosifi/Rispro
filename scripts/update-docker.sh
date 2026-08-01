@@ -158,6 +158,7 @@ main() {
     fi
   fi
   verify_app_build_sha
+  verify_qz_bootstrap_readiness
   log 'Migration diagnostics from rispro-app startup:'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
   print_deployment_summary 'Update complete.'

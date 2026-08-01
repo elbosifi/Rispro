@@ -103,6 +103,9 @@ export interface EnvConfig {
   requestBodyLimit: string;
   qzAllowInsecureWebsocket: boolean;
   qzSigningRequestLimitMb: number;
+  qzTrustMode: "internal_ca" | "qz_issued" | null;
+  qzInstallerFile: string;
+  qzWindowsScriptFile: string;
   trustProxy: boolean | number | string;
   uploadsDir: string;
   dicomRemapStagingDir: string;
@@ -193,6 +196,11 @@ export const env: EnvConfig = {
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "75mb",
   qzAllowInsecureWebsocket: readBoolean("QZ_ALLOW_INSECURE_WEBSOCKET", false),
   qzSigningRequestLimitMb: readPositiveInteger("QZ_SIGNING_REQUEST_LIMIT_MB", 25),
+  qzTrustMode: process.env.QZ_TRUST_MODE
+    ? readDeploymentEnum("QZ_TRUST_MODE", ["internal_ca", "qz_issued"] as const, "internal_ca")
+    : null,
+  qzInstallerFile: String(process.env.QZ_INSTALLER_FILE || "/var/lib/rispro/qz-bootstrap/qz-tray-2.2.6-x86_64.exe").trim(),
+  qzWindowsScriptFile: String(process.env.QZ_WINDOWS_SCRIPT_FILE || "scripts/qz/windows/RISpro-Printing-Setup.ps1").trim(),
   trustProxy: readTrustProxy(),
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",
   dicomRemapStagingDir: String(process.env.DICOM_REMAP_STAGING_DIR || "storage/dicom/remap-staging").trim(),
