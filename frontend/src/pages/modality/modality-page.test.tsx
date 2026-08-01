@@ -7,12 +7,16 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModalityPage from "./modality-page";
 import type { AppointmentWithDetails } from "@/lib/mappers";
+import { t as translate, type TranslationKey } from "@/lib/i18n";
 import type { ModalityProtocolAssignment } from "@/types/api";
 
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchModalityWorklistMock = vi.fn();
 const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
+const listAppointmentDocumentsMock = vi.fn();
+const fetchCurrentSessionMock = vi.fn();
+const fetchIntegrationStatusMock = vi.fn();
 const completeAppointmentMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
@@ -26,6 +30,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchModalityWorklist: (...args: unknown[]) => fetchModalityWorklistMock(...args),
   fetchModalityProtocolAssignment: (...args: unknown[]) => fetchModalityProtocolAssignmentMock(...args),
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
+  listAppointmentDocuments: (...args: unknown[]) => listAppointmentDocumentsMock(...args),
+  fetchCurrentSession: (...args: unknown[]) => fetchCurrentSessionMock(...args),
+  fetchIntegrationStatus: (...args: unknown[]) => fetchIntegrationStatusMock(...args),
   completeAppointment: (...args: unknown[]) => completeAppointmentMock(...args),
   updateAppointmentStatus: (...args: unknown[]) => updateAppointmentStatusMock(...args),
 }));
@@ -39,7 +46,11 @@ vi.mock("@/lib/protocol-printing", () => ({
 }));
 
 vi.mock("@/providers/language-provider", () => ({
-  useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar" }),
+  useLanguage: () => ({
+    language: languageState.language,
+    isArabic: languageState.language === "ar",
+    t: (key: TranslationKey) => translate(languageState.language, key),
+  }),
 }));
 
 vi.mock("@/lib/date-format", async () => {
@@ -201,6 +212,9 @@ function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality") 
   });
   fetchModalityWorklistMock.mockResolvedValue(rows);
   fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
+  listAppointmentDocumentsMock.mockResolvedValue([]);
+  fetchCurrentSessionMock.mockResolvedValue({ id: 1, role: "super_admin", username: "modality", fullName: "Modality Staff" });
+  fetchIntegrationStatusMock.mockResolvedValue({ scanner: null });
   fetchStatisticsMock.mockResolvedValue({
     statusBreakdown: [
       { status: "waiting", count: rows.filter((row) => row.status === "waiting").length },
@@ -1036,10 +1050,65 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("NAT-DETAIL")).toBeTruthy();
     expect(within(drawer).getByText(/63 years.*Male/)).toBeTruthy();
     expect(within(drawer).getByText("ACC-DETAIL")).toBeTruthy();
-    expect(within(drawer).getByText("MRI")).toBeTruthy();
-    expect(within(drawer).getByText("MRI Abdomen")).toBeTruthy();
+    expect(within(drawer).getByTitle("MRI Abdomen · MRI")).toBeTruthy();
     expect(within(drawer).getByText("Urgent")).toBeTruthy();
-    expect(within(drawer).getByText("Needs interpreter")).toBeTruthy();
+    expect(within(drawer).getByTestId("clinical-appointment-notes").textContent).toContain("Needs interpreter");
+  });
+
+  it("opens the read-only clinical workspace with an empty request-document state", async () => {
+    const user = await openBoard([appointment({ id: 6, accessionNumber: "ACC-WORKSPACE" })]);
+
+    await user.click(screen.getByTestId("modality-board-row-6"));
+
+    const workspace = await screen.findByTestId("clinical-workspace");
+    expect(workspace).toBeTruthy();
+    expect(within(workspace).getByTestId("clinical-protocol")).toBeTruthy();
+    expect(within(workspace).getByTestId("clinical-request-documents")).toBeTruthy();
+    expect(within(workspace).getByText("No request documents yet.")).toBeTruthy();
+    expect(within(workspace).queryByTestId("document-file-input")).toBeNull();
+    expect(within(workspace).queryByRole("button", { name: "Attach Request" })).toBeNull();
+    expect(within(workspace).queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("places protocol before request documents in the mobile workspace order", async () => {
+    const user = await openBoard([appointment({ id: 6, accessionNumber: "ACC-MOBILE" })]);
+
+    await user.click(screen.getByTestId("modality-board-row-6"));
+
+    const workspace = await screen.findByTestId("clinical-workspace");
+    expect(workspace.firstElementChild).toBe(screen.getByTestId("clinical-protocol"));
+    expect(workspace.lastElementChild).toBe(screen.getByTestId("clinical-request-documents"));
+    const workspaceMain = workspace.closest("main");
+    expect(workspaceMain?.className).toContain("overflow-y-auto");
+    expect(workspaceMain?.className).toContain("overscroll-contain");
+  });
+
+  it("renders an attached request document in the read-only clinical workspace", async () => {
+    const user = await openBoard([appointment({ id: 16, accessionNumber: "ACC-DOCUMENT" })]);
+    listAppointmentDocumentsMock.mockResolvedValue([{
+      id: 41,
+      patientId: 10,
+      appointmentId: null,
+      v2BookingId: 16,
+      documentType: "appointment_request",
+      originalFilename: "referral.png",
+      storedPath: "documents/referral.png",
+      mimeType: "image/png",
+      fileSize: 64,
+      storageLocationType: "local_fallback",
+      lastMoveAttemptAt: null,
+      lastMoveError: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }]);
+
+    await user.click(screen.getByTestId("modality-board-row-16"));
+
+    const requestSection = await screen.findByTestId("clinical-request-documents");
+    expect(await within(requestSection).findByText("referral.png")).toBeTruthy();
+    expect(within(requestSection).getAllByRole("img", { name: "referral.png" }).length).toBeGreaterThan(0);
+    expect(within(requestSection).queryByTestId("document-file-input")).toBeNull();
+    expect(within(requestSection).queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(within(requestSection).queryByRole("toolbar", { name: "Document annotation controls" })).toBeNull();
   });
 
   it("shows assigned protocol as one compact board-row line", async () => {

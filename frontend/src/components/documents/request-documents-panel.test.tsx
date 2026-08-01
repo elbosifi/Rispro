@@ -98,7 +98,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean; readOnly?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -124,6 +124,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           layout={options.layout}
           supplementaryPanel={options.supplementaryPanel}
           enableAnnotations={options.enableAnnotations}
+          readOnly={options.readOnly}
         />
       </LanguageProvider>
     </QueryClientProvider>
@@ -566,6 +567,21 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await userEvent.upload(input, new File(["second"], "second.pdf", { type: "application/pdf" }));
 
     expect(await screen.findByRole("button", { name: "Attach Request" })).toBeTruthy();
+  });
+
+  it("keeps the request workspace read-only when requested", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    renderPanel({ layout: "workspace", readOnly: true, enableAnnotations: true });
+
+    expect(await screen.findByText("request.png")).toBeTruthy();
+    expect(screen.queryByTestId("document-file-input")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.queryByRole("toolbar", { name: "Document annotation controls" })).toBeNull();
+    const image = await screen.findByRole("img", { name: "request.png" });
+    fireEvent.load(image);
+    expect(screen.queryByLabelText("Annotations for page 1")).toBeNull();
+    expect(screen.getAllByRole("link", { name: "Open in new tab" }).length).toBeGreaterThan(0);
   });
 
   it("keeps the empty-state message and upload action in the document viewer", async () => {

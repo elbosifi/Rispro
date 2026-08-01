@@ -53,6 +53,7 @@ interface RequestDocumentsPanelProps {
   supplementaryPanel?: ReactNode;
   enableAnnotations?: boolean;
   onAnnotationDirtyChange?: (dirty: boolean) => void;
+  readOnly?: boolean;
 }
 
 export function RequestDocumentsPanel({
@@ -68,6 +69,7 @@ export function RequestDocumentsPanel({
   supplementaryPanel,
   enableAnnotations = false,
   onAnnotationDirtyChange,
+  readOnly = false,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -150,18 +152,18 @@ export function RequestDocumentsPanel({
   const { data: loadedAnnotations = EMPTY_ANNOTATIONS, refetch: refetchAnnotations } = useQuery({
     queryKey: ["doctor", "protocol-document-annotations", selectedDocument?.id],
     queryFn: () => listProtocolDocumentAnnotations(selectedDocument!.id),
-    enabled: enableAnnotations && Boolean(selectedDocument?.id),
+    enabled: !readOnly && enableAnnotations && Boolean(selectedDocument?.id),
   });
 
   useEffect(() => {
-    if (!enableAnnotations) return;
+    if (!enableAnnotations || readOnly) return;
     setAnnotations(loadedAnnotations);
     setSavedAnnotationIds(new Set(loadedAnnotations.map((annotation) => annotation.id)));
     setDeletedAnnotationIds([]);
     setSelectedAnnotationId(null);
     setAnnotationPast([]);
     setAnnotationFuture([]);
-  }, [enableAnnotations, loadedAnnotations, selectedDocument?.id]);
+  }, [enableAnnotations, loadedAnnotations, readOnly, selectedDocument?.id]);
 
   const annotationDirty = deletedAnnotationIds.length > 0 || annotations.some((annotation) => !savedAnnotationIds.has(annotation.id));
   useEffect(() => onAnnotationDirtyChange?.(annotationDirty), [annotationDirty, onAnnotationDirtyChange]);
@@ -211,7 +213,7 @@ export function RequestDocumentsPanel({
     return <Type size={14} aria-hidden="true" />;
   };
   const annotationToolLabel = (tool: AnnotationTool) => tool === "freehand" ? "Pen" : tool[0]!.toUpperCase() + tool.slice(1);
-  const annotationToolbar = enableAnnotations ? (
+  const annotationToolbar = enableAnnotations && !readOnly ? (
     <div className="flex min-w-0 max-w-full items-center gap-0.5 overflow-x-auto" role="group" aria-label="Document annotation tools">
       {(["select", "arrow", "rectangle", "freehand", "text"] as AnnotationTool[]).map((tool) => <button key={tool} type="button" className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded ${annotationTool === tool ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setAnnotationTool(tool)} aria-label={annotationToolLabel(tool)} title={annotationToolLabel(tool)} aria-pressed={annotationTool === tool}>{annotationToolIcon(tool)}</button>)}
        <button type="button" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted disabled:opacity-40" disabled={selectedAnnotationId === null} onClick={() => { const selected = annotations.find((annotation) => annotation.id === selectedAnnotationId); if (!selected) return; changeAnnotations(annotations.filter((annotation) => annotation.id !== selected.id), selected.id > 0 ? [...new Set([...deletedAnnotationIds, selected.id])] : deletedAnnotationIds); setSelectedAnnotationId(null); }} aria-label="Delete selected annotation" title="Delete selected annotation"><Trash2 size={14} aria-hidden="true" /></button>
@@ -252,10 +254,12 @@ export function RequestDocumentsPanel({
     currentUser?.role === "supervisor" ||
     currentUser?.role === "super_admin";
   const canDelete = currentUser?.role === "supervisor" || currentUser?.role === "super_admin";
+  const canAttachDocuments = !readOnly && canScanOrUpload;
+  const canRemoveDocuments = !readOnly && canDelete;
   const hasAppointmentContext = Number.isFinite(appointmentId) && appointmentId > 0 && Number.isFinite(patientId) && Number(patientId) > 0;
   const naps2ScannerEnabled =
     enableLocalScan &&
-    canScanOrUpload &&
+    canAttachDocuments &&
     hasAppointmentContext &&
     Boolean(
       integrationStatus?.scanner?.naps2WebScanEnabled ||
@@ -263,7 +267,7 @@ export function RequestDocumentsPanel({
     );
   const scannerAppEnabled =
     enableLocalScan &&
-    canScanOrUpload &&
+    canAttachDocuments &&
     hasAppointmentContext &&
     Boolean(integrationStatus?.scanner) &&
     integrationStatus?.scanner?.scannerAppEnabled !== false;
@@ -579,15 +583,15 @@ export function RequestDocumentsPanel({
             type="button"
             onClick={() => uploadMutation.mutate()}
             className="order-0 inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads || !canScanOrUpload}
+            disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads || !canAttachDocuments}
           >
             <Upload size={15} aria-hidden="true" />
             {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
           </button>
         ) : null}
       </div>
-      {!naps2ScannerEnabled && canScanOrUpload ? <p className="mt-2 text-[11px] text-muted-foreground">{t("documents.scanNotSupportedMessage")}</p> : null}
-      {enableLocalScan && canScanOrUpload && (layout !== "workspace" || !isMobile) ? (
+      {!naps2ScannerEnabled && canAttachDocuments ? <p className="mt-2 text-[11px] text-muted-foreground">{t("documents.scanNotSupportedMessage")}</p> : null}
+      {enableLocalScan && canAttachDocuments && (layout !== "workspace" || !isMobile) ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
           {scannerAppEnabled ? <a href={scannerAppDownloadUrl} className="underline" download>{t("documents.downloadScannerApp")}</a> : null}
           {scannerAppEnabled && showScannerAppFallback ? <button type="button" className="underline" onClick={() => lastScannerAppLaunchUrl && launchScannerApp(lastScannerAppLaunchUrl)}>{t("documents.retryLaunchScannerApp")}</button> : null}
@@ -619,11 +623,11 @@ export function RequestDocumentsPanel({
                 <div className="flex min-h-64 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 p-6 text-center">
                   <FileText size={30} className="mb-3 text-muted-foreground" aria-hidden="true" />
                   <p className="text-sm font-semibold text-foreground">{t("documents.noDocuments")}</p>
-                  <p className="mt-1 max-w-sm text-xs text-muted-foreground">{!canScanOrUpload ? t("documents.emptyNoPermission") : t("documents.emptyUploadHint")}</p>
-                  {canScanOrUpload ? <div className="mt-4 w-full max-w-sm">{scanControlsContent}</div> : null}
+                  <p className="mt-1 max-w-sm text-xs text-muted-foreground">{!canAttachDocuments ? t("documents.emptyNoPermission") : t("documents.emptyUploadHint")}</p>
+                  {canAttachDocuments ? <div className="mt-4 w-full max-w-sm">{scanControlsContent}</div> : null}
                 </div>
               ) : null}
-              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage annotationToolbar={annotationToolbar} annotations={annotations} annotationTool={annotationTool} selectedAnnotationId={selectedAnnotationId} onSelectAnnotation={setSelectedAnnotationId} onCreateAnnotation={createAnnotation} /> : null}
+              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage annotationToolbar={annotationToolbar} annotations={annotationToolbar ? annotations : []} annotationTool={annotationTool} selectedAnnotationId={annotationToolbar ? selectedAnnotationId : null} onSelectAnnotation={annotationToolbar ? setSelectedAnnotationId : undefined} onCreateAnnotation={annotationToolbar ? createAnnotation : undefined} /> : null}
             </div>
           </section>
 
@@ -633,14 +637,14 @@ export function RequestDocumentsPanel({
               <span className="mt-2 text-[10px] font-semibold text-muted-foreground [writing-mode:vertical-rl]">{t("documents.documentSelector")}</span>
             </aside>
           ) : <aside className="min-h-0 space-y-3 overflow-y-auto pb-20 lg:pb-0" aria-label={t("documents.documentSelector")} data-testid="document-rail">
-            {layout === "workspace" ? null : (isMobile ? (canScanOrUpload ? <section className="rounded-xl border border-border bg-background p-3"><label htmlFor="request-documents-upload-file" className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span></label><input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />{file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent disabled:opacity-50" disabled={uploadMutation.isPending || !canScanOrUpload}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button> : null}</section> : null) : canScanOrUpload ? scanControls : null)}
+            {layout === "workspace" ? null : (isMobile ? (canAttachDocuments ? <section className="rounded-xl border border-border bg-background p-3"><label htmlFor="request-documents-upload-file" className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span></label><input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />{file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent disabled:opacity-50" disabled={uploadMutation.isPending || !canAttachDocuments}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button> : null}</section> : null) : canAttachDocuments ? scanControls : null)}
             <section className="rounded-xl border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="truncate text-xs font-semibold text-foreground">{t("documents.documentSelector")}</h3>
                 <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted" onClick={() => setDocumentRailCollapsed(true)} aria-label="Collapse document rail" title="Collapse document rail"><ChevronRight size={14} aria-hidden="true" /></button>
               </div>
               <span className="block text-[10px] text-muted-foreground">{documents.length} {documents.length === 1 ? "document" : "documents"}</span>
-              {canScanOrUpload && documents.length > 0 ? <>
+              {canAttachDocuments && documents.length > 0 ? <>
                 <label htmlFor="request-documents-upload-file" className="mt-2 inline-flex min-h-8 w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] font-semibold text-accent focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={13} aria-hidden="true" />{t("documents.uploadRequest")}</label>
                 <input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />
                 {file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[11px] font-semibold text-accent-foreground disabled:opacity-50" disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button> : null}
@@ -663,11 +667,11 @@ export function RequestDocumentsPanel({
                           </button>
                           <div className="flex shrink-0 items-center gap-1">
                             <a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={t("documents.openInNewTab")}><ExternalLink size={14} aria-hidden="true" /></a>
-                            {canDelete ? <button type="button" className="rounded-md p-1.5 text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50" onClick={() => deleteDocument(doc.id)} disabled={deleteMutation.isPending} aria-label={t("documents.delete")}><Trash2 size={14} aria-hidden="true" /></button> : null}
+                            {canRemoveDocuments ? <button type="button" className="rounded-md p-1.5 text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50" onClick={() => deleteDocument(doc.id)} disabled={deleteMutation.isPending} aria-label={t("documents.delete")}><Trash2 size={14} aria-hidden="true" /></button> : null}
                             <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={t("requestScans.actions.more")} onClick={() => setFileMenuDocumentId((current) => current === doc.id ? null : doc.id)}><MoreVertical size={14} aria-hidden="true" /></button>
                           </div>
                         </div>
-                        {fileMenuDocumentId === doc.id ? <div className="absolute end-2 top-10 z-20 w-40 rounded-lg border border-border bg-background p-1 shadow-lg"><button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => { setSelectedDocumentId(doc.id); setFileMenuDocumentId(null); }}>{t("documents.view")}</button><a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => setFileMenuDocumentId(null)}>{t("documents.openInNewTab")}</a>{isPdf ? <><button type="button" disabled={printingDocumentId != null} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted disabled:opacity-50" onClick={() => void printPdfDocument(doc, "A4_DOCUMENT")}>{printingDocumentId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}Print A4</button><button type="button" disabled={printingDocumentId != null} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted disabled:opacity-50" onClick={() => void printPdfDocument(doc, "A5_DOCUMENT")}>{printingDocumentId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}Print A5</button></> : null}{canDelete ? <button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs text-red-700 hover:bg-red-50" onClick={() => { setFileMenuDocumentId(null); deleteDocument(doc.id); }}>{t("documents.delete")}</button> : null}</div> : null}
+                        {fileMenuDocumentId === doc.id ? <div className="absolute end-2 top-10 z-20 w-40 rounded-lg border border-border bg-background p-1 shadow-lg"><button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => { setSelectedDocumentId(doc.id); setFileMenuDocumentId(null); }}>{t("documents.view")}</button><a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => setFileMenuDocumentId(null)}>{t("documents.openInNewTab")}</a>{isPdf ? <><button type="button" disabled={printingDocumentId != null} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted disabled:opacity-50" onClick={() => void printPdfDocument(doc, "A4_DOCUMENT")}>{printingDocumentId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}Print A4</button><button type="button" disabled={printingDocumentId != null} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted disabled:opacity-50" onClick={() => void printPdfDocument(doc, "A5_DOCUMENT")}>{printingDocumentId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}Print A5</button></> : null}{canRemoveDocuments ? <button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs text-red-700 hover:bg-red-50" onClick={() => { setFileMenuDocumentId(null); deleteDocument(doc.id); }}>{t("documents.delete")}</button> : null}</div> : null}
                         {isSelected ? <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-accent"><CheckCircle2 size={13} aria-hidden="true" />{t("documents.view")}</div> : null}
                       </div>
                     );
@@ -693,7 +697,7 @@ export function RequestDocumentsPanel({
         </div>
       ) : null}
 
-      {!expanded ? <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
+      {!expanded && canAttachDocuments ? <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
         <label htmlFor="request-documents-upload-file" className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
           <Upload size={15} aria-hidden="true" />
           <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span>
@@ -732,17 +736,17 @@ export function RequestDocumentsPanel({
             type="button"
             onClick={() => uploadMutation.mutate()}
             className="px-3 py-2 rounded-lg bg-teal-600 text-white text-sm"
-            disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads || !canScanOrUpload}
+            disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads || !canAttachDocuments}
           >
             {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
           </button> : null}
         </div>
       </div> : null}
-      {!expanded && enableLocalScan && canScanOrUpload && !naps2ScannerEnabled && (
+      {!expanded && enableLocalScan && canAttachDocuments && !naps2ScannerEnabled && (
         <p className="mt-2 shrink-0 text-xs text-stone-500">{t("documents.scanNotSupportedMessage")}</p>
       )}
 
-      {!expanded && enableLocalScan && canScanOrUpload && (
+      {!expanded && enableLocalScan && canAttachDocuments && (
         <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 text-xs text-stone-500">
           {scannerAppEnabled ? (
             <>
@@ -821,7 +825,7 @@ export function RequestDocumentsPanel({
               >
                 {documents.map((doc) => <option key={doc.id} value={doc.id}>{doc.originalFilename}</option>)}
               </select>
-              {canDelete && selectedDocument ? (
+              {canRemoveDocuments && selectedDocument ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -848,7 +852,7 @@ export function RequestDocumentsPanel({
                 >
                   {doc.originalFilename}
                 </button>
-                {canDelete ? (
+                {canRemoveDocuments ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -871,11 +875,11 @@ export function RequestDocumentsPanel({
               expanded={expanded}
               onExpandedChange={onExpandedChange}
               annotationToolbar={annotationToolbar}
-              annotations={annotations}
+              annotations={annotationToolbar ? annotations : []}
               annotationTool={annotationTool}
-              selectedAnnotationId={selectedAnnotationId}
-              onSelectAnnotation={setSelectedAnnotationId}
-              onCreateAnnotation={createAnnotation}
+              selectedAnnotationId={annotationToolbar ? selectedAnnotationId : null}
+              onSelectAnnotation={annotationToolbar ? setSelectedAnnotationId : undefined}
+              onCreateAnnotation={annotationToolbar ? createAnnotation : undefined}
             />
           ) : null}
         </div>
@@ -912,7 +916,7 @@ export function RequestDocumentsPanel({
                       {t("documents.open")}
                     </a>
                   )}
-                  {canDelete && (
+                  {canRemoveDocuments && (
                     <button
                       type="button"
                       onClick={() => {

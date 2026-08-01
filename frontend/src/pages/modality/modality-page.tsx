@@ -16,6 +16,7 @@ import {
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import {
   Badge,
   Button,
@@ -1276,16 +1277,21 @@ export default function ModalityPage() {
       ) : null}
 
       <Dialog open={Boolean(selectedAppointment)} onClose={() => setSelectedAppointmentId(null)}>
-        <DialogContent maxWidth="760px">
+        <DialogContent
+          maxWidth="100vw"
+          scrollable={false}
+          className="!m-0 !max-h-screen !max-w-none !rounded-none !p-0 h-screen w-screen overflow-hidden"
+        >
           {selectedAppointment ? (
-            <div data-testid="selected-appointment-drawer">
-              <DialogHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+            <div data-testid="selected-appointment-drawer" className="flex h-full min-h-0 flex-col">
+              <DialogHeader className="!mb-0 shrink-0 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+                <div data-testid="clinical-patient-banner" className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{chooseLocalized(language, "الموعد المختار", "Selected appointment")}</p>
                     <DialogTitle>{selectedName}</DialogTitle>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
+                      <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset size="sm" />
+                      <Badge variant="warning" size="sm">{selectedPriority}</Badge>
                       {selectedEdited ? (
                         <Badge variant="warning" size="sm">
                           {t(language, "appointmentEditor.edited")}
@@ -1295,6 +1301,25 @@ export default function ModalityPage() {
                         {normalizeStatusLabel(language, selectedAppointment.status)}
                       </Badge>
                     </div>
+                    <div className="mt-3 flex w-full flex-wrap items-start gap-x-5 gap-y-2 border-t border-slate-100 pt-2">
+                      <ClinicalBannerField
+                        label={chooseLocalized(language, "Ù…Ø¹Ø±Ù Ø§Ù„Ù…Ø±ÙŠØ¶", "MRN / primary ID")}
+                        value={selectedAppointment.mrn}
+                      />
+                      <ClinicalBannerField
+                        label={chooseLocalized(language, "Ø§Ù„Ù…Ø¹Ø±Ù Ø§Ù„Ø£Ø³Ø§Ø³ÙŠ", "Primary identifier")}
+                        value={selectedAppointment.patientPrimaryIdentifierValue
+                          ? primaryIdentifierText(language, selectedAppointment)
+                          : selectedAppointment.nationalId
+                            ? selectedAppointment.nationalId
+                            : null}
+                      />
+                      <ClinicalBannerField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
+                      <ClinicalBannerField label={chooseLocalized(language, "Ø§Ù„ÙØ­Øµ / Ø§Ù„Ø¬Ù‡Ø§Ø²", "Exam / modality")} value={`${selectedExam} · ${selectedModality}`} />
+                      <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
+                      <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
+                      <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
+                    </div>
                   </div>
                   <Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}>
                     <Printer size={16} />
@@ -1302,26 +1327,31 @@ export default function ModalityPage() {
                 </div>
               </DialogHeader>
 
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <DetailField label={t(language, "settings.fieldMRN")} value={selectedAppointment.mrn ?? null} />
-                <DetailField label={t(language, "settings.fieldNationalId")} value={selectedAppointment.nationalId ?? null} />
-                <DetailField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
-                <DetailField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
-                <DetailField label={t(language, "modality.fieldModality")} value={selectedModality} />
-                <DetailField label={t(language, "modality.fieldExam")} value={selectedExam} />
-                <DetailField label={t(language, "modality.fieldPriority")} value={selectedPriority} />
-                <DetailField label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes?.trim() || selectedAppointment.specialReasonNote?.trim() || null} />
-              </div>
+              <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
+                <div data-testid="clinical-workspace" className="grid min-h-full gap-3 lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
+                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "Ø§Ù„Ø¨Ø±ÙˆØªÙˆÙƒÙˆÙ„ Ø§Ù„Ù…Ø¹ÙŠÙ†", "Assigned protocol")} className="order-1 min-w-0 lg:order-2">
+                    <ProtocolAssignmentPanel
+                      appointment={selectedAppointment}
+                      assignment={selectedProtocolQuery.data ?? null}
+                      isLoading={selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching}
+                    />
+                  </section>
 
-              {isProtocolModality(selectedAppointment) ? (
-                <ProtocolAssignmentPanel
-                  appointment={selectedAppointment}
-                  assignment={selectedProtocolQuery.data ?? null}
-                  isLoading={selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching}
-                />
-              ) : null}
+                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "ÙˆØ«Ø§Ø¦Ù‚ Ø§Ù„Ø·Ù„Ø¨", "Request documents")} className="order-2 flex min-h-[560px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-2 shadow-sm lg:order-1 lg:min-h-0">
+                    <RequestDocumentsPanel
+                      appointmentId={selectedAppointment.id}
+                      patientId={selectedAppointment.patientId}
+                      appointmentRefType="v2_booking"
+                      previewMode="inline"
+                      layout="workspace"
+                      readOnly
+                      title={chooseLocalized(language, "ÙˆØ«Ø§Ø¦Ù‚ Ø·Ù„Ø¨ Ø§Ù„ÙØ­Øµ", "Examination request documents")}
+                    />
+                  </section>
+                </div>
+              </main>
 
-              <DialogFooter>
+              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-wrap border-t border-slate-200 bg-white px-3 py-3 sm:px-5 !justify-start sm:!justify-end">
                 <Button
                   type="button"
                   variant="secondary"
@@ -1530,6 +1560,21 @@ export default function ModalityPage() {
   );
 }
 
+function ClinicalBannerField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number | null | undefined;
+}) {
+  return (
+    <div className="min-w-[9rem] max-w-full">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p className="mt-0.5 truncate text-xs font-semibold text-foreground" title={value == null ? undefined : String(value)}>{value ?? EMPTY_VALUE}</p>
+    </div>
+  );
+}
+
 function DetailField({
   label,
   value,
@@ -1617,6 +1662,17 @@ function protocolPrintSheetFromModality(appointment: AppointmentWithDetails, ass
   };
 }
 
+function modalitySpecialInstructions(language: Language, appointment: AppointmentWithDetails): string | null {
+  return [
+    [
+      chooseLocalized(language, appointment.specialReasonLabelAr, appointment.specialReasonLabelEn),
+      appointment.specialReasonNote?.trim(),
+    ].filter(Boolean).join(": "),
+    chooseLocalized(language, appointment.modalityGeneralInstructionAr, appointment.modalityGeneralInstructionEn),
+    chooseLocalized(language, appointment.examSpecificInstructionAr, appointment.examSpecificInstructionEn),
+  ].filter(Boolean).join("\n") || null;
+}
+
 function ProtocolAssignmentPanel({
   appointment,
   assignment,
@@ -1626,9 +1682,12 @@ function ProtocolAssignmentPanel({
   assignment: ModalityProtocolAssignment | null;
   isLoading: boolean;
 }) {
+  const { language: protocolLanguage } = useLanguage();
+  const specialInstructions = modalitySpecialInstructions(protocolLanguage, appointment);
+
   if (isLoading) {
     return (
-      <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
+      <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
         Loading assigned protocol...
       </section>
     );
@@ -1636,8 +1695,18 @@ function ProtocolAssignmentPanel({
 
   if (!assignment) {
     return (
-      <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
-        No protocol assigned
+      <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-muted-foreground">
+        <p className="font-semibold text-foreground">No protocol assigned</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Special instructions</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{specialInstructions || EMPTY_VALUE}</p>
+          </div>
+          <div data-testid="clinical-appointment-notes" className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Appointment notes</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{appointment.notes?.trim() || EMPTY_VALUE}</p>
+          </div>
+        </div>
       </section>
     );
   }
@@ -1646,7 +1715,7 @@ function ProtocolAssignmentPanel({
   const printSheet = protocolPrintSheetFromModality(appointment, assignment);
 
   return (
-    <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Read-only protocol</p>
@@ -1670,12 +1739,23 @@ function ProtocolAssignmentPanel({
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Doctor instructions</p>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Protocol notes</p>
           <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.protocolNotes || EMPTY_VALUE}</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Contrast/prep instructions</p>
           <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.contrastNotes || EMPTY_VALUE}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Special instructions</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{specialInstructions || EMPTY_VALUE}</p>
+        </div>
+        <div data-testid="clinical-appointment-notes" className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Appointment notes</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{appointment.notes?.trim() || EMPTY_VALUE}</p>
         </div>
       </div>
 
