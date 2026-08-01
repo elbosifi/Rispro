@@ -36,12 +36,13 @@ describe("print audit route persistence", () => {
     const address = server.address();
     const token = jwt.sign({ sub: userId, role: "receptionist", username: "qz-audit" }, env.jwtSecret);
     try {
-      const response = await fetch(`http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/audit`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: `${env.cookieName}=${token}` }, body: JSON.stringify({ workstationId: WORKSTATION_SENTINEL, documentType: "A4_DOCUMENT", appointmentId: null, printerName: "TEST-QUEUE", paperWidthMm: 210, paperHeightMm: 297, outcome: "submitted", failureCode: null }) });
+      const response = await fetch(`http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/audit`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: `${env.cookieName}=${token}` }, body: JSON.stringify({ workstationId: WORKSTATION_SENTINEL, documentType: "A4_DOCUMENT", appointmentId: null, printerName: "TEST-QUEUE", paperWidthMm: 210, paperHeightMm: 297, outcome: "submitted", failureCode: null, testPrint: true }) });
       assert.equal(response.status, 201);
       const { rows } = await pool.query<{ action_type: string; new_values: Record<string, unknown> }>("select action_type,new_values from audit_log where entity_type='print_job' and new_values->>'workstationId'=$1", [WORKSTATION_SENTINEL]);
       assert.equal(rows[0]?.action_type, "print_job_submitted");
       assert.equal(rows[0]?.new_values.outcome, "submitted");
       assert.equal(rows[0]?.new_values.clientReported, true);
+      assert.equal(rows[0]?.new_values.testPrint, true);
       assert.equal("documentContent" in rows[0].new_values, false);
     } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
   });

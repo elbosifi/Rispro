@@ -23,6 +23,7 @@ import { scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
 import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 import { directPrint } from "@/services/printing/direct-print-service";
+import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import type { PrinterDocumentType } from "@/types/printing";
 
@@ -96,14 +97,17 @@ export function RequestDocumentsPanel({
         return;
       }
       const settings = loadQzPrinterSettings();
-      const configurationError = ["PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PAGE_SIZE_MISMATCH"].includes(result.errorCode);
+      const action = resolveDirectPrintFailureAction(result.errorCode, true, settings.browserPrintFallbackEnabled);
+      const toastAction = action === "OPEN_SETTINGS"
+        ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
+        : action === "BROWSER_PRINT"
+          ? { label: "Use browser printing", onClick: () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") }
+          : null;
       pushToast({
         type: "error",
         title: "Document print failed",
         message: result.message,
-        action: configurationError || !settings.browserPrintFallbackEnabled
-          ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
-          : { label: "Use browser printing", onClick: () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") },
+        ...(toastAction ? { action: toastAction } : {}),
       }, 10_000);
     } finally {
       setPrintingDocumentId(null);

@@ -38,11 +38,9 @@ function validatePrint(params: unknown): void {
   if (!isRecord(params.options) || !Array.isArray(params.data) || params.data.length === 0) reject("QZ print parameters are incomplete.", 400);
   if (params.options.forceRaw === true) reject("Raw printer-driver bypass is not approved for RISpro printing.", 403);
   for (const item of params.data) {
-    if (!isRecord(item) || item.type !== "pixel" || !["pdf", "html"].includes(String(item.format)) || typeof item.data !== "string") {
-      reject("Only RISpro pixel PDF or HTML print data may be signed.", 403);
+    if (!isRecord(item) || Object.keys(item).some((key) => !["type", "format", "flavor", "data"].includes(key)) || item.type !== "pixel" || item.format !== "pdf" || item.flavor !== "base64" || typeof item.data !== "string") {
+      reject("Only Base64 pixel PDF print data may be signed.", 403);
     }
-    if (item.format === "pdf" && item.flavor !== "base64") reject("PDF printing must use Base64 pixel data.", 403);
-    if (item.format === "html" && item.flavor !== "plain") reject("HTML printing must use plain pixel data.", 403);
   }
 }
 

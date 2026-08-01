@@ -18,8 +18,15 @@ async function loadFontAsBase64(url: string): Promise<string> {
 }
 
 export async function ensureArabicPdfFonts(doc: jsPDF): Promise<void> {
-  fontData ??= Promise.all([loadFontAsBase64(NOTO_NASKH_REGULAR_URL), loadFontAsBase64(NOTO_NASKH_BOLD_URL)]);
-  const [regular, bold] = await fontData;
+  let regular: string;
+  let bold: string;
+  try {
+    fontData ??= Promise.all([loadFontAsBase64(NOTO_NASKH_REGULAR_URL), loadFontAsBase64(NOTO_NASKH_BOLD_URL)]);
+    [regular, bold] = await fontData;
+  } catch (error) {
+    fontData = null;
+    throw error;
+  }
   const instance = doc as jsPDF & { addFileToVFS?: (fileName: string, base64: string) => void; addFont?: (fileName: string, fontName: string, fontStyle: string) => void };
   if (!instance.addFileToVFS || !instance.addFont) throw new Error("jsPDF font registration is unavailable.");
   instance.addFileToVFS("NotoNaskhArabic-Regular.ttf", regular);
@@ -27,6 +34,8 @@ export async function ensureArabicPdfFonts(doc: jsPDF): Promise<void> {
   instance.addFileToVFS("NotoNaskhArabic-Bold.ttf", bold);
   instance.addFont("NotoNaskhArabic-Bold.ttf", NOTO_ARABIC_FONT_FAMILY, "bold");
 }
+
+export const __pdfTextTestables = { resetFontCache() { fontData = null; } };
 
 export function processPdfText(doc: jsPDF, value: string): string {
   const cleaned = String(value || "").trim();

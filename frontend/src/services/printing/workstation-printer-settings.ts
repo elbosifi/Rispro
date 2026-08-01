@@ -82,7 +82,7 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
         paperHeightMm: height,
         orientation: saved.orientation === "landscape" ? "landscape" : "portrait",
         copies: Math.floor(finiteBounded(saved.copies, 1, PRINTER_SETTING_LIMITS.copies.min, PRINTER_SETTING_LIMITS.copies.max)),
-        scaleContent: saved.scaleContent !== false,
+        scaleContent: saved.scaleContent == null ? fallback.scaleContent : saved.scaleContent === true,
         marginsMm: normalizedMargins(saved.marginsMm, fallback.marginsMm!, width, height),
         printerTray: String(saved.printerTray || "").trim() || undefined,
         customPaperSize: standard ? false : true,

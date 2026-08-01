@@ -54,14 +54,28 @@ describe("securityHeaders", () => {
 
   it("adds QZ insecure development endpoints only when explicitly enabled", () => {
     const previous = env.qzAllowInsecureWebsocket;
+    const previousProduction = env.isProduction;
     env.qzAllowInsecureWebsocket = true;
+    env.isProduction = false;
     try {
       const headers: Record<string, string> = {};
       securityHeaders({} as any, { setHeader(name: string, value: string) { headers[name] = value; } } as any, () => {});
       assert.equal(headers["Content-Security-Policy"].includes("ws://localhost:8182"), true);
       assert.equal(headers["Content-Security-Policy"].includes("ws://localhost.qz.io:8283"), true);
       assert.equal(headers["Content-Security-Policy"].includes("ws://127.0.0.1:8485"), true);
-    } finally { env.qzAllowInsecureWebsocket = previous; }
+    } finally { env.qzAllowInsecureWebsocket = previous; env.isProduction = previousProduction; }
+  });
+
+  it("forcibly excludes insecure QZ endpoints in production", () => {
+    const previous = env.qzAllowInsecureWebsocket;
+    const previousProduction = env.isProduction;
+    env.qzAllowInsecureWebsocket = true;
+    env.isProduction = true;
+    try {
+      const headers: Record<string, string> = {};
+      securityHeaders({} as any, { setHeader(name: string, value: string) { headers[name] = value; } } as any, () => {});
+      assert.equal(headers["Content-Security-Policy"].includes(" ws://"), false);
+    } finally { env.qzAllowInsecureWebsocket = previous; env.isProduction = previousProduction; }
   });
 
   it("allows local scanner bridge endpoints in connect-src when configured", () => {

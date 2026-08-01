@@ -2,9 +2,10 @@ import { api } from "@/lib/api-client";
 import { getAppointmentById, fetchAppointmentSlipSettings } from "@/lib/api-hooks";
 import { createAccessionLabelPdfBlob } from "@/lib/accession-label-printing";
 import { createAppointmentSlipPdfBlob } from "@/lib/print-utils";
+import { createPrinterTestPdfBlob } from "@/lib/printer-test-pdf";
 import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile } from "@/types/printing";
 import { connectQzTray, getInstalledPrinters, printPdf, QzTrayError } from "./qz-tray-service";
-import { loadQzPrinterSettings, resolvePrinterProfile } from "./workstation-printer-settings";
+import { loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile } from "./workstation-printer-settings";
 
 export const DIRECT_PRINT_TIMEOUTS = { connectionMs: 15_000, preparationMs: 60_000, submissionStatusMs: 30_000 };
 const activeJobs = new Map<string, DirectPrintJobState>();
@@ -64,11 +65,11 @@ function jobName(request: DirectPrintRequest): string {
   return `RISpro ${request.documentType} - ${identity}`;
 }
 
-async function audit(request: DirectPrintRequest, profile: PrinterProfile | null, result: DirectPrintResult, outcome?: "submitted" | "failed" | "status_unknown"): Promise<void> {
+async function audit(request: DirectPrintRequest, profile: PrinterProfile | null, result: DirectPrintResult, outcome?: "submitted" | "failed" | "status_unknown", testPrint = false): Promise<void> {
   const settings = loadQzPrinterSettings();
   const resolvedOutcome = outcome ?? (result.success ? "submitted" : result.errorCode === "PRINT_STATUS_UNKNOWN" ? "status_unknown" : "failed");
   try {
-    await api("/printing/audit", { method: "POST", body: JSON.stringify({ workstationId: settings.workstationId, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, accessionNumber: request.accessionNumber || request.appointmentSnapshot?.accessionNumber, printerName: profile?.printerName || null, paperWidthMm: profile?.paperWidthMm || null, paperHeightMm: profile?.paperHeightMm || null, outcome: resolvedOutcome, failureCode: resolvedOutcome === "submitted" ? null : result.success ? "PRINT_STATUS_UNKNOWN" : result.errorCode }) });
+    await api("/printing/audit", { method: "POST", body: JSON.stringify({ workstationId: settings.workstationId, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, accessionNumber: request.accessionNumber || request.appointmentSnapshot?.accessionNumber, printerName: profile?.printerName || null, paperWidthMm: profile?.paperWidthMm || null, paperHeightMm: profile?.paperHeightMm || null, outcome: resolvedOutcome, failureCode: resolvedOutcome === "submitted" ? null : result.success ? "PRINT_STATUS_UNKNOWN" : result.errorCode, testPrint }) });
   } catch (error) { console.error("Unable to record direct-print audit", { error }); }
 }
 
@@ -80,58 +81,83 @@ async function withStageTimeout<T>(promise: Promise<T>, milliseconds: number, er
 
 export function getDirectPrintJobState(request: DirectPrintRequest): DirectPrintJobState | undefined { return activeJobs.get(jobKey(request)); }
 
-export async function directPrint(request: DirectPrintRequest): Promise<DirectPrintResult> {
-  const key = jobKey(request);
-  if (activeJobs.has(key)) return errorResult("DUPLICATE_PRINT", "This print request is still being processed. Do not retry yet.");
+interface DirectPrintExecutionOptions {
+  profile?: PrinterProfile | null;
+  generate?: (profile: PrinterProfile) => Promise<Blob>;
+  key?: string;
+  name?: string;
+  testPrint?: boolean;
+}
+
+async function executeDirectPrint(request: DirectPrintRequest, options: DirectPrintExecutionOptions = {}): Promise<DirectPrintResult> {
+  const key = options.key ?? jobKey(request);
+  if (activeJobs.has(key)) return errorResult("DUPLICATE_PRINT", "This print job is already being processed.");
   activeJobs.set(key, "preparing");
   let profile: PrinterProfile | null = null;
   let retainLock = false;
   try {
-    profile = resolvePrinterProfile(request.documentType);
+    profile = options.profile === undefined ? resolvePrinterProfile(request.documentType) : options.profile;
     if (!profile?.printerName) throw new DirectPrintError("PRINTER_NOT_CONFIGURED", `No ${request.documentType.toLowerCase().replaceAll("_", " ")} printer is configured for this workstation.`);
+    if (!profile.enabled) throw new DirectPrintError("PRINTER_SETTINGS_INVALID", `The ${request.documentType} printer profile is disabled.`);
     if (!validateProfilePageSize(profile)) throw new DirectPrintError("PRINTER_SETTINGS_INVALID", `The ${request.documentType} printer profile has invalid paper or custom-media settings.`);
     await withStageTimeout(connectQzTray(), DIRECT_PRINT_TIMEOUTS.connectionMs, new DirectPrintError("QZ_CONNECTION_FAILED", "QZ Tray did not connect within 15 seconds."));
     const printers = await getInstalledPrinters();
     if (!printers.includes(profile.printerName)) throw new DirectPrintError("PRINTER_NOT_FOUND", `The configured printer “${profile.printerName}” is not installed on this workstation.`);
-    const blob = await withStageTimeout(generatePdf(request, profile), DIRECT_PRINT_TIMEOUTS.preparationMs, new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Document preparation exceeded 60 seconds."));
+    const blob = await withStageTimeout(options.generate ? options.generate(profile) : generatePdf(request, profile), DIRECT_PRINT_TIMEOUTS.preparationMs, new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Document preparation exceeded 60 seconds."));
     const base64 = await blobToBase64(blob);
-    const name = jobName(request);
+    const name = options.name ?? jobName(request);
     activeJobs.set(key, "submitting");
     const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name });
     pendingSubmissions.set(key, submission);
     const settled = submission.then(() => ({ ok: true as const })).catch((error: unknown) => ({ ok: false as const, error }));
-    const status = await withStageTimeout(settled, DIRECT_PRINT_TIMEOUTS.submissionStatusMs, new DirectPrintError("PRINT_STATUS_UNKNOWN", "The print request is still being processed. Do not retry yet."));
+    const status = await withStageTimeout(settled, DIRECT_PRINT_TIMEOUTS.submissionStatusMs, new DirectPrintError("PRINT_STATUS_UNKNOWN", "The original print request is still being processed. Do not retry or use browser printing yet."));
     if (!status.ok) throw status.error;
     pendingSubmissions.delete(key);
     activeJobs.set(key, "submitted");
     const result: DirectPrintResult = { success: true, printerName: profile.printerName, jobName: name };
-    await audit(request, profile, result);
+    await audit(request, profile, result, undefined, options.testPrint);
     return result;
   } catch (error) {
     const result = mapDirectPrintError(error);
     if (!result.success && result.errorCode === "PRINT_STATUS_UNKNOWN" && profile) {
       retainLock = true;
       activeJobs.set(key, "status_unknown");
-      await audit(request, profile, result, "status_unknown");
+      await audit(request, profile, result, "status_unknown", options.testPrint);
       // The underlying QZ promise owns the lock after the UI stops waiting.
-      void printStatusSettlement(key, request, profile);
+      void printStatusSettlement(key, request, profile, options.testPrint === true, nameForSettlement(options, request));
       return result;
     }
     activeJobs.set(key, "failed");
     console.error("Direct print failed", { code: result.success ? null : result.errorCode, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, technicalError: error instanceof Error ? { name: error.name, message: error.message.slice(0, 500) } : { name: "UnknownError" } });
-    await audit(request, profile, result);
+    await audit(request, profile, result, undefined, options.testPrint);
     return result;
   } finally {
     if (!retainLock) { pendingSubmissions.delete(key); activeJobs.delete(key); }
   }
 }
 
+function nameForSettlement(options: DirectPrintExecutionOptions, request: DirectPrintRequest): string { return options.name ?? jobName(request); }
+
+export async function directPrint(request: DirectPrintRequest): Promise<DirectPrintResult> { return executeDirectPrint(request); }
+
+export async function directTestPrint(profile: PrinterProfile): Promise<DirectPrintResult> {
+  const normalized = normalizeQzPrinterSettings({ profiles: [profile] }).profiles.find((candidate) => candidate.documentType === profile.documentType) ?? null;
+  const request: DirectPrintRequest = { documentType: profile.documentType };
+  return executeDirectPrint(request, {
+    profile: normalized,
+    generate: async (validatedProfile) => createPrinterTestPdfBlob(validatedProfile),
+    key: `printer-test:${profile.documentType}:${profile.printerName}`,
+    name: `RISpro printer test - ${profile.documentType}`,
+    testPrint: true,
+  });
+}
+
 const pendingSubmissions = new Map<string, Promise<void>>();
-async function printStatusSettlement(key: string, request: DirectPrintRequest, profile: PrinterProfile): Promise<void> {
+async function printStatusSettlement(key: string, request: DirectPrintRequest, profile: PrinterProfile, testPrint: boolean, submittedJobName: string): Promise<void> {
   const pending = pendingSubmissions.get(key);
   if (!pending) { activeJobs.delete(key); return; }
-  try { await pending; await audit(request, profile, { success: true, printerName: profile.printerName, jobName: jobName(request) }, "submitted"); }
-  catch (error) { await audit(request, profile, mapDirectPrintError(error), "failed"); }
+  try { await pending; await audit(request, profile, { success: true, printerName: profile.printerName, jobName: submittedJobName }, "submitted", testPrint); }
+  catch (error) { await audit(request, profile, mapDirectPrintError(error), "failed", testPrint); }
   finally { pendingSubmissions.delete(key); activeJobs.delete(key); }
 }
 

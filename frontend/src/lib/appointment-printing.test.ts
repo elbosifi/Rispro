@@ -66,6 +66,17 @@ describe("printAppointmentSlipById", () => {
     expect(mockPrintAppointmentSlip).toHaveBeenCalledWith(appointment);
   });
 
+  it.each([
+    ["PRINT_STATUS_UNKNOWN", "The original print request is still being processed. Do not retry or use browser printing yet."],
+    ["DUPLICATE_PRINT", "This print job is already being processed."],
+  ])("does not offer browser printing for %s", async (errorCode, message) => {
+    mockGetAppointmentById.mockResolvedValue({ id: 42, accessionNumber: "ACC-42" });
+    mockDirectPrint.mockResolvedValue({ success: false, errorCode, message });
+    await printAppointmentSlipById(42);
+    expect(mockPrintAppointmentSlip).not.toHaveBeenCalled();
+    expect(mockPushToast.mock.calls[0][0]).not.toHaveProperty("action");
+  });
+
   it("shows a small toast when the appointment cannot be loaded", async () => {
     mockGetAppointmentById.mockRejectedValue(new Error("Network down"));
 

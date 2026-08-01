@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { env } from "../config/env.js";
+import { allowInsecureQzWebsocket, env } from "../config/env.js";
 
 function buildConnectSources(): string[] {
   const qzHosts = ["localhost", "localhost.qz.io", "127.0.0.1"];
@@ -14,7 +14,7 @@ function buildConnectSources(): string[] {
     ...qzHosts.flatMap((host) => qzSecurePorts.map((port) => `wss://${host}:${port}`)),
   ];
 
-  if (env.qzAllowInsecureWebsocket) {
+  if (allowInsecureQzWebsocket()) {
     sources.push(...qzHosts.flatMap((host) => qzInsecurePorts.map((port) => `ws://${host}:${port}`)));
   }
 

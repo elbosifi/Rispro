@@ -249,6 +249,10 @@ export const env: EnvConfig = {
   requestScanMaxConcurrency: readRequestScanMaxConcurrency(process.env.REQUEST_SCAN_MAX_CONCURRENCY),
 };
 
+export function allowInsecureQzWebsocket(): boolean {
+  return !env.isProduction && env.qzAllowInsecureWebsocket;
+}
+
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
   throw new Error("COOKIE_SAME_SITE=none requires COOKIE_SECURE=true.");
 }

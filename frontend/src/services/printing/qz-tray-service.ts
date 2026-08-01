@@ -1,10 +1,13 @@
 import * as qz from "qz-tray";
 import type { PrinterProfile, QzPrinterDetail } from "@/types/printing";
 
+type ApprovedQzCall = "printers.find" | "printers.detail" | "print";
+type RuntimeQzConfig = { getPrinter(): Record<string, unknown>; getOptions(): Record<string, unknown> };
+type QzPrintData = Array<{ type: "pixel"; format: "pdf"; flavor: "base64"; data: string }>;
+
 let connectionPromise: Promise<void> | null = null;
+let runtimeConfigPromise: Promise<{ allowInsecureWebsocket: boolean }> | null = null;
 let securityConfigured = false;
-const approvedSigningRequests = new Map<string, string>();
-const signingFailures = new Map<string, QzTrayError>();
 let certificateFailure: QzTrayError | null = null;
 
 export type QzTrayErrorCode = "QZ_NOT_RUNNING" | "QZ_CSP_BLOCKED" | "LOCAL_NETWORK_PERMISSION_DENIED" | "CERTIFICATE_REJECTED" | "SIGNATURE_FAILED" | "SIGNING_PAYLOAD_TOO_LARGE" | "INVALID_PDF" | "PRINT_FAILED";
@@ -33,135 +36,99 @@ function configureSecurity(): void {
       .catch((error) => { certificateFailure = new QzTrayError("CERTIFICATE_REJECTED", "RISpro could not load its QZ certificate.", error); reject(certificateFailure.message); });
   }, { rejectOnFailure: true });
   qz.security.setSignatureAlgorithm("SHA512");
-  qz.security.setSignaturePromise(async (digest) => {
-    const key = String(digest).toLowerCase();
-    try {
-      const request = approvedSigningRequests.get(key);
-      if (!request) throw new QzTrayError("SIGNATURE_FAILED", "QZ requested a signature for an unapproved operation.");
-      const response = await fetch("/api/printing/qz-sign", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, digest }) });
-      if (response.status === 413) throw new QzTrayError("SIGNING_PAYLOAD_TOO_LARGE", "The PDF is too large for the configured QZ signing limit.");
-      if (!response.ok) throw new QzTrayError("SIGNATURE_FAILED", "RISpro rejected the QZ signing request.");
-      const result = await response.json() as { signature?: string };
-      if (!result.signature) throw new QzTrayError("SIGNATURE_FAILED", "QZ signing response did not contain a signature.");
-      return result.signature;
-    } catch (error) {
-      const typed = error instanceof QzTrayError ? error : new QzTrayError("SIGNATURE_FAILED", "RISpro could not sign the QZ request.", error);
-      signingFailures.set(key, typed);
-      throw typed;
-    }
-  });
+  // All supported RISpro QZ operations are explicitly pre-signed. A callback
+  // request therefore means a caller attempted an unapproved/non-deterministic operation.
+  qz.security.setSignaturePromise(async () => { throw new QzTrayError("SIGNATURE_FAILED", "QZ requested a non-deterministic signature."); });
   securityConfigured = true;
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function approvedQzCall<T>(call: "printers.find" | "printers.detail" | "print", params: unknown, invoke: () => Promise<T>): Promise<T> {
-  const timestamp = Date.now();
-  const request = JSON.stringify({ call, ...(params === undefined ? {} : { params }), timestamp });
-  const digest = await sha256Hex(request);
-  approvedSigningRequests.set(digest, request);
-  const originalNow = Date.now;
-  let operation: Promise<T>;
-  try {
-    Date.now = () => timestamp;
-    operation = invoke();
-  } finally { Date.now = originalNow; }
-  try { return await operation; }
-  catch (error) {
-    const signingFailure = signingFailures.get(digest);
-    if (signingFailure) throw signingFailure;
-    if (error instanceof QzTrayError) throw error;
-    if (!qz.websocket.isActive()) throw new QzTrayError("QZ_NOT_RUNNING", "QZ Tray disconnected before the request completed.", error);
-    throw error;
-  } finally { approvedSigningRequests.delete(digest); signingFailures.delete(digest); }
+async function getRuntimeConfig(): Promise<{ allowInsecureWebsocket: boolean }> {
+  runtimeConfigPromise ??= fetch("/api/printing/runtime-config", { credentials: "include", cache: "default" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error("Unable to load QZ runtime configuration.");
+      const body = await response.json() as { allowInsecureWebsocket?: unknown };
+      return { allowInsecureWebsocket: body.allowInsecureWebsocket === true };
+    })
+    .catch((error) => { runtimeConfigPromise = null; throw error; });
+  return runtimeConfigPromise;
 }
 
 export async function connectQzTray(): Promise<void> {
   configureSecurity();
   if (qz.websocket.isActive()) return;
   if (!connectionPromise) {
-    connectionPromise = qz.websocket.connect({ retries: 3, delay: 1 })
+    connectionPromise = getRuntimeConfig()
+      .then((runtime) => qz.websocket.connect({ retries: 3, delay: 1, usingSecure: !runtime.allowInsecureWebsocket }))
       .finally(() => { connectionPromise = null; });
   }
   try { await connectionPromise; } catch (error) { if (certificateFailure) throw certificateFailure; throw connectionError(error); }
 }
 
-export async function disconnectQzTray(): Promise<void> {
-  if (qz.websocket.isActive()) await qz.websocket.disconnect();
+export async function disconnectQzTray(): Promise<void> { if (qz.websocket.isActive()) await qz.websocket.disconnect(); }
+export function isQzConnected(): boolean { return qz.websocket.isActive(); }
+
+export function serializeQzRequest(call: ApprovedQzCall, params: unknown, timestamp: number): string {
+  return JSON.stringify({ call, ...(params === undefined ? {} : { params }), timestamp });
 }
 
-export function isQzConnected(): boolean {
-  return qz.websocket.isActive();
+export async function sha256Hex(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function signQzRequest(call: ApprovedQzCall, params: unknown, timestamp: number): Promise<string> {
+  const request = serializeQzRequest(call, params, timestamp);
+  const digest = await sha256Hex(request);
+  const response = await fetch("/api/printing/qz-sign", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, digest }) });
+  if (response.status === 413) throw new QzTrayError("SIGNING_PAYLOAD_TOO_LARGE", "The PDF is too large for the configured QZ signing limit.");
+  if (!response.ok) throw new QzTrayError("SIGNATURE_FAILED", "RISpro rejected the QZ signing request.");
+  const result = await response.json() as { signature?: string };
+  if (!result.signature) throw new QzTrayError("SIGNATURE_FAILED", "QZ signing response did not contain a signature.");
+  return result.signature;
 }
 
 export async function getInstalledPrinters(): Promise<string[]> {
   await connectQzTray();
-  const result = await approvedQzCall("printers.find", {}, () => qz.printers.find());
+  const timestamp = Date.now();
+  const params = {};
+  const signature = await signQzRequest("printers.find", params, timestamp);
+  const result = await qz.printers.find(undefined, signature, timestamp);
   return Array.isArray(result) ? result.map(String) : [String(result)];
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
 export async function getPrinterDetails(): Promise<QzPrinterDetail[]> {
   await connectQzTray();
-  const result = await approvedQzCall("printers.detail", undefined, () => qz.printers.details());
-  const rows = Array.isArray(result) ? result : [result];
-  return rows.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const raw = item as Record<string, unknown>;
-    const name = String(raw.name || raw.printer || "").trim();
-    if (!name) return [];
-    return [{ name, trays: stringArray(raw.trays ?? raw.paperTrays ?? raw.printerTrays), raw }];
-  });
+  // qz.printers.details() in QZ Tray 2.2.6 has no public signature/timestamp
+  // parameters. Calling it would fall back to unverifiable callback signing,
+  // so deterministic mode intentionally omits driver details/tray discovery.
+  return [];
 }
 
 function qzConfig(profile: PrinterProfile, copies: number, jobName: string) {
   const size = { width: profile.paperWidthMm, height: profile.paperHeightMm, custom: profile.customPaperSize } as qz.Size & { custom: boolean };
-  return qz.configs.create(profile.printerName, {
-    units: "mm",
-    size,
-    orientation: profile.orientation,
-    copies,
-    scaleContent: profile.scaleContent,
-    margins: profile.marginsMm ?? 0,
-    printerTray: profile.printerTray || null,
-    jobName,
-    rasterize: profile.rasterize,
-  });
+  return qz.configs.create(profile.printerName, { units: "mm", size, orientation: profile.orientation, copies, scaleContent: profile.scaleContent, margins: profile.marginsMm ?? 0, printerTray: profile.printerTray || null, jobName, rasterize: profile.rasterize });
 }
 
-type RuntimeQzConfig = { getPrinter(): Record<string, unknown>; getOptions(): Record<string, unknown> };
-async function submitApprovedPrint(config: unknown, data: Array<Record<string, unknown>>): Promise<void> {
+async function submitApprovedPrint(config: unknown, data: QzPrintData): Promise<void> {
   const runtime = config as RuntimeQzConfig;
   const params = { printer: runtime.getPrinter(), options: runtime.getOptions(), data };
-  await approvedQzCall("print", params, () => qz.print(config as never, data as never));
+  const timestamp = Date.now();
+  const signature = await signQzRequest("print", params, timestamp);
+  const deterministicPrint = qz.print as unknown as (config: unknown, data: QzPrintData, signature: string, timestamp: number) => Promise<void>;
+  await deterministicPrint(config, data, signature, timestamp);
 }
 
-export function stripPdfDataUrlPrefix(value: string): string {
-  return value.replace(/^data:application\/pdf;base64,/i, "").trim();
-}
+export function stripPdfDataUrlPrefix(value: string): string { return value.replace(/^data:application\/pdf;base64,/i, "").trim(); }
 
 export async function printPdf(profile: PrinterProfile, pdfBase64: string, options: { copies?: number; jobName: string }): Promise<void> {
   const data = stripPdfDataUrlPrefix(pdfBase64);
   if (!data || !/^[A-Za-z0-9+/=\r\n]+$/.test(data)) throw new QzTrayError("INVALID_PDF", "Invalid PDF Base64 data.");
   await connectQzTray();
-  const printData = [{ type: "pixel", format: "pdf", flavor: "base64", data }];
+  const printData: QzPrintData = [{ type: "pixel", format: "pdf", flavor: "base64", data }];
   try { await submitApprovedPrint(qzConfig(profile, options.copies ?? profile.copies, options.jobName), printData); }
   catch (error) { if (error instanceof QzTrayError) throw error; throw new QzTrayError("PRINT_FAILED", "QZ Tray rejected the print submission.", error); }
 }
 
-export async function printHtml(profile: PrinterProfile, html: string, options: { copies?: number; jobName: string }): Promise<void> {
-  await connectQzTray();
-  const printData = [{ type: "pixel", format: "html", flavor: "plain", data: html }];
-  await submitApprovedPrint(qzConfig(profile, options.copies ?? profile.copies, options.jobName), printData);
-}
-
-export async function testPrinter(profile: PrinterProfile): Promise<void> {
-  const html = `<html><body style="font-family:Arial,sans-serif;padding:4mm"><strong>RISpro QZ Tray test</strong><br>${profile.documentType}<br>${profile.paperWidthMm} x ${profile.paperHeightMm} mm<br>${new Date().toISOString()}</body></html>`;
-  await printHtml(profile, html, { copies: 1, jobName: `RISpro test - ${profile.documentType}` });
-}
+export const __qzTrayTestables = {
+  resetRuntimeConfig() { runtimeConfigPromise = null; },
+};

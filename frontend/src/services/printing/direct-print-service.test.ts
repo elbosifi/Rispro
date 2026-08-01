@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
+import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 
 const getInstalledPrinters = vi.fn();
 const printPdf = vi.fn();
 const createAppointmentSlipPdfBlob = vi.fn();
 const connectQzTray = vi.fn();
+const auditApi = vi.fn();
 
 vi.mock("./qz-tray-service", () => ({
   QzTrayError: class QzTrayError extends Error { constructor(public code: string, message: string) { super(message); } },
@@ -13,7 +14,7 @@ vi.mock("./qz-tray-service", () => ({
   getInstalledPrinters: (...args: unknown[]) => getInstalledPrinters(...args),
   printPdf: (...args: unknown[]) => printPdf(...args),
 }));
-vi.mock("@/lib/api-client", () => ({ api: vi.fn().mockResolvedValue({ ok: true }) }));
+vi.mock("@/lib/api-client", () => ({ api: (...args: unknown[]) => auditApi(...args) }));
 vi.mock("@/lib/api-hooks", () => ({
   getAppointmentById: vi.fn().mockResolvedValue({ id: 7, accessionNumber: "ACC-7" }),
   fetchAppointmentSlipSettings: vi.fn().mockResolvedValue({ paperSize: "a4" }),
@@ -33,6 +34,8 @@ describe("direct print service", () => {
     createAppointmentSlipPdfBlob.mockResolvedValue(pdf());
     connectQzTray.mockReset();
     connectQzTray.mockResolvedValue(undefined);
+    auditApi.mockReset();
+    auditApi.mockResolvedValue({ ok: true });
   });
 
   it("returns a structured missing-configuration failure", async () => {
@@ -117,5 +120,42 @@ describe("direct print service", () => {
     const profile = createDefaultQzPrinterSettings().profiles[1];
     expect(validateProfilePageSize(profile)).toBe(true);
     expect(validateProfilePageSize({ ...profile, paperWidthMm: 210 })).toBe(false);
+  });
+
+  it("routes a PDF test print through validation, installed-printer checking, and audit", async () => {
+    const profile = { ...createDefaultQzPrinterSettings().profiles[2], printerName: "Label Queue" };
+    getInstalledPrinters.mockResolvedValue(["Label Queue"]);
+    await expect(directTestPrint(profile)).resolves.toMatchObject({ success: true, printerName: "Label Queue", jobName: "RISpro printer test - ACCESSION_LABEL" });
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ paperWidthMm: 50, paperHeightMm: 30, customPaperSize: true }), expect.any(String), expect.objectContaining({ jobName: "RISpro printer test - ACCESSION_LABEL" }));
+    const auditBody = JSON.parse(auditApi.mock.calls[0][1].body);
+    expect(auditBody).toMatchObject({ documentType: "ACCESSION_LABEL", outcome: "submitted", testPrint: true, printerName: "Label Queue" });
+  });
+
+  it("rejects a test print when its exact printer queue is not installed", async () => {
+    const profile = { ...createDefaultQzPrinterSettings().profiles[0], printerName: "Missing Queue" };
+    getInstalledPrinters.mockResolvedValue(["Other Queue"]);
+    await expect(directTestPrint(profile)).resolves.toMatchObject({ success: false, errorCode: "PRINTER_NOT_FOUND" });
+    expect(printPdf).not.toHaveBeenCalled();
+  });
+
+  it("keeps a timed-out test print locked until QZ settles", async () => {
+    vi.useFakeTimers();
+    const previous = DIRECT_PRINT_TIMEOUTS.submissionStatusMs;
+    DIRECT_PRINT_TIMEOUTS.submissionStatusMs = 20;
+    const profile = { ...createDefaultQzPrinterSettings().profiles[0], printerName: "A4" };
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+    let release!: () => void;
+    printPdf.mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+    const first = directTestPrint(profile);
+    await vi.advanceTimersByTimeAsync(21);
+    await expect(first).resolves.toMatchObject({ success: false, errorCode: "PRINT_STATUS_UNKNOWN" });
+    await expect(directTestPrint(profile)).resolves.toMatchObject({ success: false, errorCode: "DUPLICATE_PRINT" });
+    release();
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+    printPdf.mockResolvedValue(undefined);
+    await expect(directTestPrint(profile)).resolves.toMatchObject({ success: true });
+    DIRECT_PRINT_TIMEOUTS.submissionStatusMs = previous;
+    vi.useRealTimers();
   });
 });

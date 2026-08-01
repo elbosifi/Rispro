@@ -6,6 +6,7 @@ import { asUnknownRecord } from "../utils/records.js";
 import { getQzCertificate, qzSigningRequestLimitBytes, signQzRequest } from "../services/qz-signing-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import { HttpError } from "../utils/http-error.js";
+import { allowInsecureQzWebsocket } from "../config/env.js";
 
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
 const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
@@ -40,12 +41,17 @@ function parseAudit(body: unknown) {
   if (failureCode && !FAILURE_CODES.has(failureCode)) throw new HttpError(400, "Print audit failure code is invalid.");
   if (outcome === "submitted" && failureCode) throw new HttpError(400, "Submitted print audits cannot include a failure code.");
   if (outcome !== "submitted" && !failureCode) throw new HttpError(400, "Failed or unknown print audits require a failure code.");
-  return { workstationId, documentType, outcome, documentId: optionalString(raw.documentId, 100, /^(?:[1-9]\d{0,19}|[0-9a-f]{8}-[0-9a-f-]{27})$/i), appointmentId, accessionNumber: optionalString(raw.accessionNumber, 100), printerName: optionalString(raw.printerName, 255), paperWidthMm: dimension(raw.paperWidthMm, 500), paperHeightMm: dimension(raw.paperHeightMm, 1000), failureCode };
+  if (raw.testPrint != null && typeof raw.testPrint !== "boolean") throw new HttpError(400, "Print audit test marker is invalid.");
+  return { workstationId, documentType, outcome, documentId: optionalString(raw.documentId, 100, /^(?:[1-9]\d{0,19}|[0-9a-f]{8}-[0-9a-f-]{27})$/i), appointmentId, accessionNumber: optionalString(raw.accessionNumber, 100), printerName: optionalString(raw.printerName, 255), paperWidthMm: dimension(raw.paperWidthMm, 500), paperHeightMm: dimension(raw.paperHeightMm, 1000), failureCode, testPrint: raw.testPrint === true };
 }
 
 export const printingRouter = express.Router();
 printingRouter.use(requireAuth, requireAnyRole([...PRINTING_ROLES]));
 printingRouter.get("/qz-certificate", (_req: Request, res: Response) => { res.type("text/plain").send(getQzCertificate()); });
+printingRouter.get("/runtime-config", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.json({ allowInsecureWebsocket: allowInsecureQzWebsocket() });
+});
 printingRouter.post("/qz-sign", express.json({ limit: qzSigningRequestLimitBytes() + 64 * 1024 }), signingLimiter, (req: Request, res: Response) => { const body = asUnknownRecord(req.body); res.json({ signature: signQzRequest(body.request, body.digest) }); });
 printingRouter.post("/audit", asyncRoute(async (req: Request, res: Response) => {
   const audit = parseAudit(req.body);

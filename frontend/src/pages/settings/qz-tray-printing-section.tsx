@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
-import { connectQzTray, getInstalledPrinters, getPrinterDetails, isQzConnected, testPrinter } from "@/services/printing/qz-tray-service";
+import { connectQzTray, getInstalledPrinters, getPrinterDetails, isQzConnected } from "@/services/printing/qz-tray-service";
+import { directTestPrint } from "@/services/printing/direct-print-service";
 import { clearUnavailablePrinterTrays, createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import type { PrinterProfile, QzPrinterDetail, QzPrinterSettings } from "@/types/printing";
 
@@ -52,8 +53,9 @@ export default function QzTrayPrintingSection() {
     }
     setTesting(profile.documentType);
     try {
-      await testPrinter(profile);
-      pushToast({ type: "success", title: "Test job submitted", message: `Print job sent to ${profile.printerName}.` });
+      const result = await directTestPrint(profile);
+      if (result.success) pushToast({ type: "success", title: "Test job submitted", message: `Print job sent to ${result.printerName}.` });
+      else pushToast({ type: "error", title: "Test print failed", message: result.message });
     } catch (error) {
       pushToast({ type: "error", title: "Test print failed", message: error instanceof Error ? error.message : "QZ Tray rejected the test job." });
     } finally {

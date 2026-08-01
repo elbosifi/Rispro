@@ -39,15 +39,18 @@ describe("QZ request signing", () => {
   it("signs pixel PDF print calls and verifies RSA SHA-512", () => {
     assert.ok(signed({ call: "print", params: { printer: { name: "RISPRO A4" }, options: {}, data: [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0=" }] }, timestamp: Date.now() }));
   });
-  it("rejects unknown, file, socket, USB, HID, and raw print calls", () => {
+  it("rejects unknown, file, socket, USB, HID, raw, and HTML print calls", () => {
     for (const call of ["unknown.call", "file.read", "socket.sendData", "usb.listDevices", "hid.listDevices"]) assert.throws(() => validateQzSigningRequest(JSON.stringify({ call, params: {}, timestamp: Date.now() })), /not approved/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "raw", format: "command", flavor: "plain", data: "danger" }] }, timestamp: Date.now() })), /pixel PDF or HTML/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "raw", format: "command", flavor: "plain", data: "danger" }] }, timestamp: Date.now() })), /Base64 pixel PDF/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "pixel", format: "html", flavor: "plain", data: "<p>unsafe</p>" }] }, timestamp: Date.now() })), /Base64 pixel PDF/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: {}, data: [{ type: "pixel", format: "pdf", flavor: "file", data: "file:///patient.pdf" }] }, timestamp: Date.now() })), /Base64 pixel PDF/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "print", params: { printer: { name: "P" }, options: { forceRaw: true }, data: [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0=" }] }, timestamp: Date.now() })), /driver bypass/);
   });
   it("rejects malformed JSON and missing or invalid timestamps", () => {
     assert.throws(() => validateQzSigningRequest("not json"), /valid JSON/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.find", params: {} })), /timestamp/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.find", params: {}, timestamp: Infinity })), /timestamp/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.find", params: {}, timestamp: Date.now(), unexpected: true })), /invalid structure/);
   });
   it("rejects a digest that does not belong to the validated request", () => {
     const request = JSON.stringify({ call: "printers.find", params: {}, timestamp: Date.now() });

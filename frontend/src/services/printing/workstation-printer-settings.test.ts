@@ -36,6 +36,23 @@ describe("workstation printer settings", () => {
     expect(Object.values(corrupted.profiles[2].marginsMm!)).toEqual([0, 0, 0, 0]);
   });
 
+  it("uses each profile fallback when stored scaleContent is missing or corrupt", () => {
+    const profiles = createDefaultQzPrinterSettings().profiles.map(({ scaleContent: _scaleContent, ...profile }) => profile);
+    const missing = normalizeQzPrinterSettings({ profiles });
+    expect(missing.profiles.find((profile) => profile.documentType === "A4_DOCUMENT")?.scaleContent).toBe(true);
+    expect(missing.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")?.scaleContent).toBe(false);
+
+    const explicit = normalizeQzPrinterSettings({ profiles: [
+      { ...profiles[0], scaleContent: false },
+      { ...profiles[2], scaleContent: true },
+    ] });
+    expect(explicit.profiles[0].scaleContent).toBe(false);
+    expect(explicit.profiles[2].scaleContent).toBe(true);
+
+    const corrupt = normalizeQzPrinterSettings({ profiles: [{ ...profiles[2], scaleContent: "true" }] });
+    expect(corrupt.profiles[2].scaleContent).toBe(false);
+  });
+
   it("clears a tray that the refreshed driver no longer exposes", () => {
     const settings = createDefaultQzPrinterSettings();
     Object.assign(settings.profiles[0], { printerName: "A4", printerTray: "Old tray" });

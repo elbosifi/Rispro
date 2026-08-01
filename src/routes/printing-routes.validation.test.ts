@@ -12,15 +12,47 @@ import { env } from "../config/env.js";
 const valid = { workstationId: "00000000-0000-4000-8000-000000000001", documentType: "ACCESSION_LABEL", appointmentId: 7, accessionNumber: "ACC-7", printerName: "Label Queue", paperWidthMm: 50, paperHeightMm: 30, outcome: "submitted", failureCode: null };
 describe("printing audit validation", () => {
   it("accepts a submitted client-reported audit", () => assert.equal(__printingRouteTestables.parseAudit(valid).outcome, "submitted"));
+  it("accepts a boolean test-print marker without expanding document types", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, testPrint: true }).testPrint, true));
   it("rejects arbitrary document types, failure codes, nested values, and dimensions", () => {
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, documentType: "PATIENT_NAME" }));
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, outcome: "failed", failureCode: "anything" }));
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, accessionNumber: { patient: "secret" } }));
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, paperWidthMm: Infinity }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, testPrint: "true" }));
   });
 });
 
 describe("QZ signing route limits", () => {
+  it("returns authenticated runtime configuration and forces secure mode in production", async () => {
+    const app = express();
+    app.use(cookieParser());
+    app.use("/api/printing", printingRouter);
+    app.use(errorHandler);
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/runtime-config`;
+    const cookie = `${env.cookieName}=${jwt.sign({ sub: 42, role: "receptionist" }, env.jwtSecret)}`;
+    const previousEnabled = env.qzAllowInsecureWebsocket;
+    const previousProduction = env.isProduction;
+    try {
+      env.qzAllowInsecureWebsocket = true;
+      env.isProduction = false;
+      const development = await fetch(url, { headers: { Cookie: cookie } });
+      assert.equal(development.status, 200);
+      assert.deepEqual(await development.json(), { allowInsecureWebsocket: true });
+      assert.equal(development.headers.get("cache-control"), "private, max-age=60");
+      env.isProduction = true;
+      const production = await fetch(url, { headers: { Cookie: cookie } });
+      assert.deepEqual(await production.json(), { allowInsecureWebsocket: false });
+      assert.equal((await fetch(url)).status, 401);
+    } finally {
+      env.qzAllowInsecureWebsocket = previousEnabled;
+      env.isProduction = previousProduction;
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("returns 413 for an oversized route-specific JSON request and rate-limits by user", async () => {
     const app = express();
     app.use(cookieParser());
