@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, verify } from "node:crypto";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { env } from "../config/env.js";
-import { getQzCertificate, signQzRequest, validateQzSigningRequest } from "./qz-signing-service.js";
+import { __qzSigningTestables, getQzCertificate, signQzRequest, validateQzSigningRequest } from "./qz-signing-service.js";
 
 const originalCertificate = process.env.QZ_CERTIFICATE;
 const originalPrivateKey = process.env.QZ_PRIVATE_KEY;
@@ -94,13 +94,29 @@ describe("QZ request signing", () => {
     assert.match(validationError(printPayload(printOptions(), { name: "P" }, [pdfItem(), { type: "raw", format: "command", flavor: "plain", data: "PRINT" }])), /Exactly one PDF/);
   });
   it("accepts only canonical unwrapped Base64 whose decoded bytes begin with a PDF header", () => {
-    assert.ok(signed(printPayload(printOptions())));
+    const canonicalCases = [
+      Buffer.from("%PDF-1.4\n").toString("base64"),
+      Buffer.from("%PDF-1.4\nxx").toString("base64"),
+      Buffer.from("%PDF-1.4\nx").toString("base64"),
+      Buffer.from("%PDF-1.7\nrealistic test document body\n%%EOF\n").toString("base64"),
+    ];
+    assert.equal(canonicalCases[0].endsWith("="), false);
+    assert.equal(canonicalCases[1].endsWith("="), true);
+    assert.equal(canonicalCases[1].endsWith("=="), false);
+    assert.equal(canonicalCases[2].endsWith("=="), true);
+    for (const data of canonicalCases) assert.ok(signed(printPayload(printOptions(), { name: "P" }, [pdfItem(data)])));
+
+    const noncanonicalPadBits = `${VALID_PDF_BASE64.slice(0, -4)}eB==`;
     const invalidCases: Array<[unknown, RegExp]> = [
       ["", /PDF data is invalid/],
       ["JVBERi0*", /not valid Base64/],
       ["JVBERi0===", /not valid Base64/],
       ["JVBERi0", /not valid Base64/],
+      ["JVBE=Ri0", /not valid Base64/],
+      ["JVBERi0_", /not valid Base64/],
+      [noncanonicalPadBits, /not canonical Base64/],
       [` ${VALID_PDF_BASE64}`, /not valid Base64/],
+      [`${VALID_PDF_BASE64} `, /not valid Base64/],
       [`${VALID_PDF_BASE64}\n`, /not valid Base64/],
       [`${VALID_PDF_BASE64}\t`, /not valid Base64/],
       [`data:application/pdf;base64,${VALID_PDF_BASE64}`, /must not use a data URL/],
@@ -175,5 +191,20 @@ describe("QZ request signing", () => {
     const payload = printPayload(printOptions(), { name: "P" }) as { params: { data: Array<Record<string, unknown>> } };
     payload.params.data[0].data = data;
     assert.ok(signed(payload));
+  });
+
+  it("decodes only bounded Base64 prefix and tail segments for a multi-megabyte PDF", () => {
+    const pdfBytes = Buffer.alloc(3 * 1024 * 1024, 0x20);
+    Buffer.from("%PDF-1.7\n").copy(pdfBytes);
+    const data = pdfBytes.toString("base64");
+    const decodedSegmentLengths: number[] = [];
+
+    __qzSigningTestables.validateBase64Pdf(data, (segment) => {
+      decodedSegmentLengths.push(segment.length);
+      return Buffer.from(segment, "base64");
+    });
+
+    assert.deepEqual(decodedSegmentLengths, [8, 4]);
+    assert.equal(Math.max(...decodedSegmentLengths), 8);
   });
 });

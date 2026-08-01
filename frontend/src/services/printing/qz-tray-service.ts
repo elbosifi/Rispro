@@ -82,6 +82,12 @@ export async function signQzRequest(call: ApprovedQzCall, params: unknown, times
   const digest = await sha256Hex(request);
   const response = await fetch("/api/printing/qz-sign", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, digest }) });
   if (response.status === 413) throw new QzTrayError("SIGNING_PAYLOAD_TOO_LARGE", "The PDF is too large for the configured QZ signing limit.");
+  if (response.status === 503) {
+    const failure = await response.json().catch(() => null) as { error?: { details?: { code?: unknown } } } | null;
+    if (failure?.error?.details?.code === "QZ_SIGN_BUSY") {
+      throw new QzTrayError("SIGNATURE_FAILED", "The RISpro signing service is busy. Try again shortly.");
+    }
+  }
   if (!response.ok) throw new QzTrayError("SIGNATURE_FAILED", "RISpro rejected the QZ signing request.");
   const result = await response.json() as { signature?: string };
   if (!result.signature) throw new QzTrayError("SIGNATURE_FAILED", "QZ signing response did not contain a signature.");

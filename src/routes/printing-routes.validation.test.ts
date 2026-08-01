@@ -24,6 +24,16 @@ describe("printing audit validation", () => {
 });
 
 describe("QZ signing route limits", () => {
+  it("places per-user and global concurrency limiting before the route-specific JSON parser", () => {
+    const route = __printingRouteTestables;
+    assert.deepEqual(route.qzSignMiddlewares, [
+      route.signingLimiter,
+      route.qzSigningConcurrencyLimiter,
+      route.qzSigningJsonParser,
+      route.qzSignHandler,
+    ]);
+  });
+
   it("returns authenticated runtime configuration and forces secure mode in production", async () => {
     const app = express();
     app.use(cookieParser());

@@ -71,19 +71,38 @@ function validatePrintOptions(options: unknown): void {
   }
 }
 
-function validateBase64Pdf(value: unknown): void {
-  if (typeof value !== "string" || value.length === 0) reject("QZ PDF data is invalid.", 400);
-  if (/^data:/i.test(value)) reject("QZ PDF data must not use a data URL.", 400);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) reject("QZ PDF data is not valid Base64.", 400);
+type Base64SegmentDecoder = (value: string) => Buffer;
 
-  let decoded: Buffer;
-  try {
-    decoded = Buffer.from(value, "base64");
-  } catch {
+function decodeBase64Segment(value: string): Buffer {
+  return Buffer.from(value, "base64");
+}
+
+function validateBase64Syntax(value: string): void {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
     reject("QZ PDF data is not valid Base64.", 400);
   }
-  if (decoded.toString("base64") !== value) reject("QZ PDF data is not canonical Base64.", 400);
-  if (decoded.length < 5 || decoded.subarray(0, 5).toString("ascii") !== "%PDF-") reject("QZ print data is not a PDF document.", 400);
+}
+
+function validateBase64PdfHeader(value: string, decode: Base64SegmentDecoder): void {
+  const prefix = decode(value.slice(0, 8));
+  if (prefix.length < 5 || prefix.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    reject("QZ print data is not a PDF document.", 400);
+  }
+}
+
+function validateCanonicalBase64Tail(value: string, decode: Base64SegmentDecoder): void {
+  const finalQuartet = value.slice(-4);
+  if (decode(finalQuartet).toString("base64") !== finalQuartet) {
+    reject("QZ PDF data is not canonical Base64.", 400);
+  }
+}
+
+function validateBase64Pdf(value: unknown, decode: Base64SegmentDecoder = decodeBase64Segment): void {
+  if (typeof value !== "string" || value.length === 0) reject("QZ PDF data is invalid.", 400);
+  if (/^data:/i.test(value)) reject("QZ PDF data must not use a data URL.", 400);
+  validateBase64Syntax(value);
+  validateBase64PdfHeader(value, decode);
+  validateCanonicalBase64Tail(value, decode);
 }
 
 function validatePrint(params: unknown): void {
@@ -133,3 +152,7 @@ export function signQzRequest(request: unknown, digest: unknown): string {
     throw new HttpError(503, "QZ request signing failed.");
   }
 }
+
+export const __qzSigningTestables = {
+  validateBase64Pdf,
+};

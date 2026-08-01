@@ -149,6 +149,18 @@ describe("QZ Tray service", () => {
     await expect(printPdf(profile, "JVBERi0=", { jobName: "large" })).rejects.toMatchObject({ code: "SIGNING_PAYLOAD_TOO_LARGE" });
   });
 
+  it("maps a typed busy signing response to the existing retryable signature failure", async () => {
+    const profile = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "A4" };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("runtime-config")
+      ? new Response(JSON.stringify({ allowInsecureWebsocket: false }), { status: 200 })
+      : new Response(JSON.stringify({ error: { message: "busy", details: { code: "QZ_SIGN_BUSY" } } }), { status: 503 })));
+    __qzTrayTestables.resetRuntimeConfig();
+    await expect(printPdf(profile, "JVBERi0=", { jobName: "busy" })).rejects.toMatchObject({
+      code: "SIGNATURE_FAILED",
+      message: "The RISpro signing service is busy. Try again shortly.",
+    });
+  });
+
   it("uses custom media and profile-controlled rasterization for a 50 x 30 mm label", async () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[2], printerName: "Xprinter" };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "label" });

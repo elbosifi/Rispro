@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from "express";
 import { requireAnyRole, requireAuth } from "../middleware/auth.js";
 import { createRateLimiter } from "../middleware/rate-limit.js";
+import { createConcurrencyLimiter } from "../middleware/concurrency-limit.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { getQzCertificate, qzSigningRequestLimitBytes, signQzRequest } from "../services/qz-signing-service.js";
@@ -13,6 +14,8 @@ const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL",
 const OUTCOMES = new Set(["submitted", "failed", "status_unknown"]);
 const FAILURE_CODES = new Set(["QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECTION_FAILED", "PRINTER_DISCOVERY_FAILED", "QZ_CSP_BLOCKED", "LOCAL_NETWORK_PERMISSION_DENIED", "PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PRINTER_SETTINGS_INVALID", "DOCUMENT_GENERATION_FAILED", "PAGE_SIZE_MISMATCH", "INVALID_PDF", "DUPLICATE_PRINT", "PRINT_TIMEOUT", "PRINT_STATUS_UNKNOWN", "CERTIFICATE_REJECTED", "SIGNATURE_FAILED", "SIGNING_PAYLOAD_TOO_LARGE", "PRINT_FAILED"]);
 const signingLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60, message: "Too many QZ signing requests. Try again shortly.", errorCode: "QZ_SIGN_RATE_LIMIT", key: (req) => String(req.user?.sub ?? req.ip) });
+const qzSigningConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The QZ signing service is busy. Try again shortly.", errorCode: "QZ_SIGN_BUSY" });
+const qzSigningJsonParser = express.json({ limit: qzSigningRequestLimitBytes() + 64 * 1024 });
 
 function optionalString(value: unknown, max: number, pattern?: RegExp): string | null {
   if (value == null || value === "") return null;
@@ -52,7 +55,12 @@ printingRouter.get("/runtime-config", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "private, max-age=60");
   res.json({ allowInsecureWebsocket: allowInsecureQzWebsocket() });
 });
-printingRouter.post("/qz-sign", express.json({ limit: qzSigningRequestLimitBytes() + 64 * 1024 }), signingLimiter, (req: Request, res: Response) => { const body = asUnknownRecord(req.body); res.json({ signature: signQzRequest(body.request, body.digest) }); });
+const qzSignHandler = (req: Request, res: Response): void => {
+  const body = asUnknownRecord(req.body);
+  res.json({ signature: signQzRequest(body.request, body.digest) });
+};
+const qzSignMiddlewares = [signingLimiter, qzSigningConcurrencyLimiter, qzSigningJsonParser, qzSignHandler] as const;
+printingRouter.post("/qz-sign", ...qzSignMiddlewares);
 printingRouter.post("/audit", asyncRoute(async (req: Request, res: Response) => {
   const audit = parseAudit(req.body);
   const actionType = audit.outcome === "submitted" ? "print_job_submitted" : audit.outcome === "status_unknown" ? "print_job_status_unknown" : "print_job_failed";
@@ -60,4 +68,11 @@ printingRouter.post("/audit", asyncRoute(async (req: Request, res: Response) => 
   res.status(201).json({ ok: true });
 }));
 
-export const __printingRouteTestables = { parseAudit };
+export const __printingRouteTestables = {
+  parseAudit,
+  qzSignMiddlewares,
+  signingLimiter,
+  qzSigningConcurrencyLimiter,
+  qzSigningJsonParser,
+  qzSignHandler,
+};
