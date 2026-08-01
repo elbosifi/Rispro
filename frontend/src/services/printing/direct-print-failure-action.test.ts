@@ -7,19 +7,22 @@ describe("direct print failure actions", () => {
     expect(resolveDirectPrintFailureAction("DUPLICATE_PRINT", true, true)).toBe("NONE");
   });
 
-  it("opens workstation settings for missing and invalid printer mappings", () => {
-    expect(resolveDirectPrintFailureAction("PRINTER_NOT_CONFIGURED", true, true)).toBe("OPEN_SETTINGS");
-    expect(resolveDirectPrintFailureAction("PRINTER_NOT_FOUND", true, true)).toBe("OPEN_SETTINGS");
-    expect(resolveDirectPrintFailureAction("PRINTER_SETTINGS_INVALID", true, true)).toBe("OPEN_SETTINGS");
-    expect(resolveDirectPrintFailureAction("PAGE_SIZE_MISMATCH", true, true)).toBe("OPEN_SETTINGS");
+  const fallbackErrors = [
+    "PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PRINTER_SETTINGS_INVALID", "PAGE_SIZE_MISMATCH",
+    "QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECTION_FAILED", "PRINTER_DISCOVERY_FAILED", "QZ_CSP_BLOCKED",
+    "LOCAL_NETWORK_PERMISSION_DENIED", "CERTIFICATE_REJECTED", "SIGNATURE_FAILED", "SIGNING_PAYLOAD_TOO_LARGE",
+    "DOCUMENT_GENERATION_FAILED", "INVALID_PDF", "PRINT_FAILED", "PRINT_TIMEOUT",
+  ] as const;
+
+  it.each(fallbackErrors)("offers browser fallback for %s when a callback exists and fallback is enabled", (code) => {
+    expect(resolveDirectPrintFailureAction(code, true, true)).toBe("BROWSER_PRINT");
   });
 
-  it("offers QZ browser fallback only when a valid fallback exists and is enabled", () => {
-    expect(resolveDirectPrintFailureAction("QZ_NOT_RUNNING", true, true)).toBe("BROWSER_PRINT");
-    expect(resolveDirectPrintFailureAction("PRINTER_DISCOVERY_FAILED", true, true)).toBe("BROWSER_PRINT");
-    expect(resolveDirectPrintFailureAction("PRINTER_DISCOVERY_FAILED", false, true)).toBe("OPEN_SETTINGS");
+  it.each(fallbackErrors)("opens workstation settings for %s when no browser callback exists", (code) => {
+    expect(resolveDirectPrintFailureAction(code, false, true)).toBe("OPEN_SETTINGS");
+  });
+
+  it("opens workstation settings when browser fallback is disabled", () => {
     expect(resolveDirectPrintFailureAction("QZ_NOT_RUNNING", true, false)).toBe("OPEN_SETTINGS");
-    expect(resolveDirectPrintFailureAction("QZ_NOT_RUNNING", false, true)).toBe("OPEN_SETTINGS");
-    expect(resolveDirectPrintFailureAction("DOCUMENT_GENERATION_FAILED", false, true)).toBe("NONE");
   });
 });

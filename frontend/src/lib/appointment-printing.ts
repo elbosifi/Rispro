@@ -26,6 +26,16 @@ export async function printAppointmentSlipById(appointmentId: number, language?:
   try {
     const appointment = await getAppointmentById(appointmentId);
     const documentType = await resolveAppointmentDocumentType();
+    const settings = loadQzPrinterSettings();
+    const profile = settings.profiles.find((candidate) => candidate.documentType === documentType);
+    if (profile && !profile.enabled) {
+      if (settings.browserPrintFallbackEnabled) {
+        printAppointmentSlip(appointment);
+        return;
+      }
+      showDirectPrintFailure({ success: false, errorCode: "PRINTER_NOT_CONFIGURED", message: `${documentType === "A4_DOCUMENT" ? "A4" : "A5"} direct printing is disabled for this workstation.` }, () => printAppointmentSlip(appointment), language);
+      return;
+    }
     const result = await directPrint({ documentType, appointmentId, accessionNumber: appointment.accessionNumber, appointmentSnapshot: appointment });
     if (result.success) {
       pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });

@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { QZ_PRINTER_SETTINGS_KEY, createDefaultQzPrinterSettings, loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile, saveQzPrinterSettings } from "./workstation-printer-settings";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QZ_PRINTER_SETTINGS_KEY, RISPRO_WORKSTATION_ID_KEY, createDefaultQzPrinterSettings, loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile, saveQzPrinterSettings } from "./workstation-printer-settings";
 
 describe("workstation printer settings", () => {
   beforeEach(() => { localStorage.clear(); vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001"); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it("creates all required document-type profiles with physical defaults", () => {
     const settings = createDefaultQzPrinterSettings();
@@ -25,6 +26,30 @@ describe("workstation printer settings", () => {
   it("replaces a corrupted workstation identifier with a stable UUID", () => {
     localStorage.setItem("rispro.workstationId.v1", "user-agent-not-an-id");
     expect(createDefaultQzPrinterSettings().workstationId).toBe("00000000-0000-4000-8000-000000000001");
+  });
+
+  it("uses getRandomValues to generate a valid UUID v4 when randomUUID is unavailable", () => {
+    vi.restoreAllMocks();
+    vi.stubGlobal("crypto", {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.fill(0xab);
+        return bytes;
+      },
+    });
+
+    const workstationId = createDefaultQzPrinterSettings().workstationId;
+
+    expect(workstationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(workstationId).toBe("abababab-abab-4bab-abab-abababababab");
+  });
+
+  it("preserves an existing valid workstation identifier without using browser crypto", () => {
+    const existing = "4cc81e1f-d319-4e29-b3e2-403da70a079f";
+    localStorage.setItem(RISPRO_WORKSTATION_ID_KEY, existing);
+    vi.restoreAllMocks();
+    vi.stubGlobal("crypto", {});
+
+    expect(createDefaultQzPrinterSettings().workstationId).toBe(existing);
   });
 
   it("normalizes corrupt and unreasonable local values", () => {

@@ -15,7 +15,10 @@ const PROFILE_LABELS: Record<PrinterProfile["documentType"], string> = {
   RECEIPT: "Receipt",
 };
 
+const SECURE_ORIGIN_MESSAGE = "QZ direct printing requires RISpro to be opened through HTTPS. Browser printing remains available on this address.";
+
 export default function QzTrayPrintingSection() {
+  const secureContext = typeof window !== "undefined" && window.isSecureContext === true;
   const [settings, setSettings] = useState<QzPrinterSettings>(() => loadQzPrinterSettings());
   const [printers, setPrinters] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -23,6 +26,10 @@ export default function QzTrayPrintingSection() {
   const [connectionError, setConnectionError] = useState("");
 
   async function refreshPrinters() {
+    if (!secureContext) {
+      setConnectionError(SECURE_ORIGIN_MESSAGE);
+      return;
+    }
     setLoading(true);
     setConnectionError("");
     try {
@@ -37,13 +44,20 @@ export default function QzTrayPrintingSection() {
     }
   }
 
-  useEffect(() => { void refreshPrinters(); }, []);
+  useEffect(() => {
+    if (secureContext) void refreshPrinters();
+  }, [secureContext]);
 
   function updateProfile(documentType: PrinterProfile["documentType"], patch: Partial<PrinterProfile>) {
     setSettings((current) => ({ ...current, profiles: current.profiles.map((profile) => profile.documentType === documentType ? { ...profile, ...patch } : profile) }));
   }
 
   async function runTest(profile: PrinterProfile) {
+    if (!secureContext) {
+      setConnectionError(SECURE_ORIGIN_MESSAGE);
+      pushToast({ type: "error", title: "HTTPS required", message: SECURE_ORIGIN_MESSAGE });
+      return;
+    }
     if (!profile.printerName) {
       pushToast({ type: "error", title: "Printer not configured", message: `Select a printer for ${PROFILE_LABELS[profile.documentType]} first.` });
       return;
@@ -72,12 +86,13 @@ export default function QzTrayPrintingSection() {
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${isQzConnected() ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
               {isQzConnected() ? <CheckCircle2 size={14} /> : <Unplug size={14} />}{isQzConnected() ? "Connected" : "Disconnected"}
             </span>
-            <Button type="button" size="sm" variant="secondary" onClick={() => void refreshPrinters()} disabled={loading}>
+            <Button type="button" size="sm" variant="secondary" onClick={() => void refreshPrinters()} disabled={loading || !secureContext}>
               {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}Refresh printers
             </Button>
           </div>
         </div>
-        {connectionError ? <p className="mt-3 text-sm text-red-700" role="alert">{connectionError}</p> : null}
+        {!secureContext ? <p className="mt-3 text-sm text-amber-700" role="alert">{SECURE_ORIGIN_MESSAGE}</p> : null}
+        {connectionError && secureContext ? <p className="mt-3 text-sm text-red-700" role="alert">{connectionError}</p> : null}
       </div>
 
       {settings.profiles.map((profile) => {
@@ -95,7 +110,7 @@ export default function QzTrayPrintingSection() {
               <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={profile.scaleContent} onChange={(event) => updateProfile(profile.documentType, { scaleContent: event.target.checked })} />Scale content to page</label>
               <label className="flex items-center gap-2 self-end pb-2 text-sm" title={standardPaper ? "Standard A4/A5 media is fixed." : "Required for label and receipt driver media."}><input type="checkbox" checked={profile.customPaperSize} disabled onChange={() => undefined} />Use custom printer media</label>
               <label className="flex items-center gap-2 self-end pb-2 text-sm" title="Rasterize only when the printer driver requires it."><input type="checkbox" checked={profile.rasterize} onChange={(event) => updateProfile(profile.documentType, { rasterize: event.target.checked })} />Rasterize PDF for this driver</label>
-              <div className="self-end"><Button type="button" size="sm" variant="secondary" onClick={() => void runTest(profile)} disabled={testing != null || !profile.enabled}>{testing === profile.documentType ? <Loader2 size={14} className="animate-spin" /> : null}Test print</Button></div>
+              <div className="self-end"><Button type="button" size="sm" variant="secondary" onClick={() => void runTest(profile)} disabled={testing != null || !profile.enabled || !secureContext}>{testing === profile.documentType ? <Loader2 size={14} className="animate-spin" /> : null}Test print</Button></div>
             </div>
           </section>
         );
