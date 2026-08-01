@@ -558,6 +558,16 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByTestId("document-rail")).toBeTruthy();
   });
 
+  it("keeps the upload picker connected when the document rail already has documents", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    renderPanel({ layout: "workspace" });
+
+    const input = await screen.findByTestId("document-file-input") as HTMLInputElement;
+    await userEvent.upload(input, new File(["second"], "second.pdf", { type: "application/pdf" }));
+
+    expect(await screen.findByRole("button", { name: "Attach Request" })).toBeTruthy();
+  });
+
   it("keeps the empty-state message and upload action in the document viewer", async () => {
     renderPanel({ layout: "workspace" });
 
