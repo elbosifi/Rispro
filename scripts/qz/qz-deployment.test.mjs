@@ -93,3 +93,15 @@ test("qz_issued deployment never requires an internal root path and preflight ch
   assert.match(library, /for configured_path in "\$QZ_ROOT_CERTIFICATE_HOST_FILE" "\$QZ_CERTIFICATE_HOST_FILE" "\$QZ_PRIVATE_KEY_HOST_FILE"/);
   assert.match(library, /Configured QZ runtime file is missing or unreadable/);
 });
+
+test("every application runtime target inherits the rendered Windows bootstrap template", () => {
+  const dockerfile = readFileSync("Dockerfile", "utf8");
+  const runtimeBase = dockerfile.indexOf("FROM node:22-bookworm-slim AS runtime-base");
+  const qzTemplateCopy = dockerfile.indexOf("COPY scripts/qz/windows/ ./scripts/qz/windows/");
+  const production = dockerfile.indexOf("FROM runtime-base AS production");
+  const productionOrthanc = dockerfile.indexOf("FROM runtime-base AS production-orthanc");
+  assert.ok(runtimeBase >= 0);
+  assert.ok(qzTemplateCopy > runtimeBase && qzTemplateCopy < production);
+  assert.ok(productionOrthanc > qzTemplateCopy);
+  assert.equal((dockerfile.match(/COPY scripts\/qz\/windows\/ \.\/scripts\/qz\/windows\//g) || []).length, 1);
+});
