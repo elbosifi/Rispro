@@ -8,8 +8,8 @@ import { logAuditEntry } from "./audit-service.js";
 import { getDocumentAbsolutePath } from "./document-service.js";
 import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
-import { createAuthoritativeOrthancClient, readAuthoritativeOrthancSettings, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
-import { CLINICAL_DOCUMENT_EXPORT_DESTINATION, enqueueClinicalDocumentExportsForAppointment, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
+import { createAuthoritativeOrthancClient, isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
+import { CLINICAL_DOCUMENT_EXPORT_DESTINATION, enqueueClinicalDocumentExportsForAppointmentAutomatically, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
 
 const EXPORT_LEASE_SECONDS = 300;
 const DEFAULT_BATCH_SIZE = 10;
@@ -404,11 +404,11 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
 }
 
 export async function runClinicalDocumentExportTick(options: { batchSize?: number; shouldStop?: () => boolean } = {}): Promise<{ reconciled: number; processed: number; exported: number; failed: number }> {
+  const settings = await readAuthoritativeOrthancSettings();
+  if (!isClinicalDocumentAutoExportEnabled(settings)) return { reconciled: 0, processed: 0, exported: 0, failed: 0 };
   let reconciled: number;
   try { reconciled = await reconcileClinicalDocumentExports(); }
   catch (error) { console.warn(JSON.stringify({ type: "clinical_document_export_reconciliation_failed", error: sanitizeClinicalDocumentExportError(error) })); throw error; }
-  const settings = await readAuthoritativeOrthancSettings();
-  if (!settings.enabled) return { reconciled, processed: 0, exported: 0, failed: 0 };
   const workerId = `clinical-document-export-${randomUUID()}`;
   let processed = 0;
   let exported = 0;
@@ -490,5 +490,5 @@ export async function reconcileClinicalDocumentExportsManually(changedByUserId: 
 }
 
 export async function queueClinicalDocumentExportForCompletedAppointment(appointmentId: number, changedByUserId: OptionalUserId = null): Promise<number[]> {
-  return enqueueClinicalDocumentExportsForAppointment(appointmentId, changedByUserId);
+  return enqueueClinicalDocumentExportsForAppointmentAutomatically(appointmentId, changedByUserId);
 }

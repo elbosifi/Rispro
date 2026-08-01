@@ -4,7 +4,7 @@ process.env.DATABASE_URL ||= "postgres://user:password@localhost:5432/rispro_tes
 process.env.JWT_SECRET ||= "test-secret";
 const service = await import("./authoritative-orthanc-service.js");
 
-const enabled = { enabled: true, baseUrl: "http://orthanc.test:8042", username: "", password: "", timeoutSeconds: 1, verifyTls: true, displayName: "" };
+const enabled = { enabled: true, autoExportClinicalDocuments: true, baseUrl: "http://orthanc.test:8042", username: "", password: "", timeoutSeconds: 1, verifyTls: true, displayName: "" };
 const study = (overrides: Record<string, unknown> = {}) => ({ MainDicomTags: { StudyInstanceUID: "1.2.3", AccessionNumber: "V2-000042", StudyDate: "20260727", ModalitiesInStudy: "CT", ...overrides }, PatientMainDicomTags: { PatientID: "MRN42" }, CountSeries: 2, CountInstances: 5 });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 
@@ -46,6 +46,12 @@ test("disabled integration cannot make a network request", async () => {
   service.__setAuthoritativeOrthancSettingsForTests({ ...enabled, enabled: false });
   service.__setAuthoritativeOrthancFetchForTests(async () => { throw new Error("network must not be called"); });
   await assert.rejects(() => new service.AuthoritativeOrthancClient({ ...enabled, enabled: false }).getSystem(), /disabled/i);
+});
+
+test("automatic clinical-document export requires both settings", () => {
+  assert.equal(service.isClinicalDocumentAutoExportEnabled(enabled), true);
+  assert.equal(service.isClinicalDocumentAutoExportEnabled({ ...enabled, autoExportClinicalDocuments: false }), false);
+  assert.equal(service.isClinicalDocumentAutoExportEnabled({ ...enabled, enabled: false }), false);
 });
 
 test("uses an exact StudyInstanceUID before accession and returns study metadata", async () => {

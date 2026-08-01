@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { OptionalUserId } from "../types/http.js";
+import { isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings } from "./authoritative-orthanc-service.js";
 
 export const CLINICAL_DOCUMENT_EXPORT_DESTINATION = "authoritative_orthanc";
 
@@ -46,6 +47,14 @@ export async function enqueueClinicalDocumentExportsForAppointment(
   return result.rows.map((row) => Number(row.id));
 }
 
+export async function enqueueClinicalDocumentExportsForAppointmentAutomatically(
+  appointmentId: number,
+  changedByUserId: OptionalUserId = null,
+): Promise<number[]> {
+  if (!isClinicalDocumentAutoExportEnabled(await readAuthoritativeOrthancSettings())) return [];
+  return enqueueClinicalDocumentExportsForAppointment(appointmentId, changedByUserId);
+}
+
 export async function reconcileClinicalDocumentExports(changedByUserId: OptionalUserId = null): Promise<number> {
   const result = await pool.query<{ id: number; appointment_id: number }>(
     `
@@ -88,7 +97,7 @@ export async function queueClinicalDocumentExportsForLinkedAppointments(
   const ids = [...new Set(appointmentIds.map(Number).filter((value) => Number.isSafeInteger(value) && value > 0))];
   let queued = 0;
   for (const appointmentId of ids) {
-    queued += (await enqueueClinicalDocumentExportsForAppointment(appointmentId)).length;
+    queued += (await enqueueClinicalDocumentExportsForAppointmentAutomatically(appointmentId)).length;
   }
   return queued;
 }

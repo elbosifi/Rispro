@@ -12,6 +12,7 @@ type Settings = {
   incomingSubfolder: string;
   processedSubfolder: string;
   failedSubfolder: string;
+  modalityDocumentsRootSubfolder: string;
   pollingIntervalSeconds: number;
   fileReadyDelaySeconds: number;
   password?: string;
@@ -117,6 +118,7 @@ export default function RequestScanAutomationSection({ onReAuthRequired, reauthV
         <label>Incoming subfolder<input className="input-premium mt-1 w-full" value={settings.incomingSubfolder} onChange={(event) => change("incomingSubfolder", event.target.value)} /></label>
         <label>Processed subfolder<input className="input-premium mt-1 w-full" value={settings.processedSubfolder} onChange={(event) => change("processedSubfolder", event.target.value)} /></label>
         <label>Failed subfolder<input className="input-premium mt-1 w-full" value={settings.failedSubfolder} onChange={(event) => change("failedSubfolder", event.target.value)} /></label>
+        <label>Modality documents root folder<input aria-label="Modality documents root folder" className="input-premium mt-1 w-full" value={settings.modalityDocumentsRootSubfolder} onChange={(event) => change("modalityDocumentsRootSubfolder", event.target.value)} /><span className="mt-1 block text-xs text-muted-foreground">Root folder used for modality document folders such as CT and MRI.</span></label>
         <label>Polling interval (seconds)<input type="number" min="1" className="input-premium mt-1 w-full" value={settings.pollingIntervalSeconds} onChange={(event) => change("pollingIntervalSeconds", Number(event.target.value))} /></label>
         <label>File-ready delay (seconds)<input type="number" min="1" className="input-premium mt-1 w-full" value={settings.fileReadyDelaySeconds} onChange={(event) => change("fileReadyDelaySeconds", Number(event.target.value))} /></label>
       </div>

@@ -49,6 +49,11 @@ test("resolves submitted request-scan test settings without saving them", async 
     pollingIntervalSeconds: 30,
     fileReadyDelaySeconds: 20,
   });
+
+  await assert.rejects(() => resolveRequestScanSettingsForTest({
+    ...settings,
+    modalityDocumentsRootSubfolder: "../outside",
+  }), /subfolder|traversal|relative/i);
 });
 
 test("saves the request-scan SMB password without the Backup V3 master key", async (t) => {

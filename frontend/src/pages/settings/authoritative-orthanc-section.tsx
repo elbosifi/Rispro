@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button, Card } from "@/components/shared";
 import { api } from "@/lib/api-client";
 
-type Settings = { enabled: boolean; baseUrl: string; username: string; timeoutSeconds: number; verifyTls: boolean; displayName: string; passwordConfigured: boolean };
+type Settings = { enabled: boolean; autoExportClinicalDocuments: boolean; baseUrl: string; username: string; timeoutSeconds: number; verifyTls: boolean; displayName: string; passwordConfigured: boolean };
 
 export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const queryClient = useQueryClient();
@@ -27,7 +27,8 @@ export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onRe
   return <Card className="space-y-4 p-4" data-testid="authoritative-orthanc-settings">
     <div><h2 className="text-lg font-semibold">Authoritative Orthanc</h2><p className="text-sm text-muted-foreground">Connection used to verify RISpro-linked studies and export approved scanned clinical documents as DICOM Secondary Capture series. RISpro does not upload original modality images or create a replacement study; it adds only the approved scanned-document series to the matched study.</p></div>
     <div className="grid gap-3 md:grid-cols-2">
-      <label><input type="checkbox" checked={settings.enabled} onChange={(event) => change("enabled", event.target.checked)} /> Enabled</label>
+      <label><input type="checkbox" checked={settings.enabled} onChange={(event) => change("enabled", event.target.checked)} /> Enable Orthanc connection</label>
+      <label className="md:col-span-2"><span className="flex items-center gap-2"><input aria-label="Automatically send approved scanned documents to PACS" type="checkbox" checked={settings.autoExportClinicalDocuments} disabled={!settings.enabled} onChange={(event) => change("autoExportClinicalDocuments", event.target.checked)} /> Automatically send approved scanned documents to PACS</span><span className="mt-1 block text-xs text-muted-foreground">When enabled, eligible scanned clinical documents are added to the matched completed study as DICOM Secondary Capture. Turning this off pauses automatic document sending. Eligible documents will resume when it is enabled again.</span></label>
       <label>Display name<input className="input w-full" value={settings.displayName} onChange={(event) => change("displayName", event.target.value)} /></label>
       <label className="md:col-span-2">Base URL<input className="input w-full" placeholder="http://orthanc-host:8042" value={settings.baseUrl} onChange={(event) => change("baseUrl", event.target.value)} /></label>
       <label>Username<input className="input w-full" value={settings.username} onChange={(event) => change("username", event.target.value)} /></label>

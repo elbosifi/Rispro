@@ -13,6 +13,7 @@ const storedSettings = {
   incomingSubfolder: "Requests/Incoming",
   processedSubfolder: "Requests/Processed",
   failedSubfolder: "Requests/Failed",
+  modalityDocumentsRootSubfolder: "ModalityDocuments",
   pollingIntervalSeconds: 15,
   fileReadyDelaySeconds: 15,
 };
@@ -50,12 +51,34 @@ describe("RequestScanAutomationSection", () => {
       server: "draft-server",
       password: "draft-password",
       share: "stored-share",
+      modalityDocumentsRootSubfolder: "ModalityDocuments",
     }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/settings/request-scan-automation",
       expect.objectContaining({ method: "PUT" })
     );
     expect(screen.getByText("SMB connection succeeded.")).toBeTruthy();
+  });
+
+  it("loads and saves the modality documents root folder", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/settings/request-scan-automation" && init?.method === "PUT") return response({ settings: { ...storedSettings, modalityDocumentsRootSubfolder: "ImagingDocuments" } });
+      if (url === "/api/settings/request-scan-automation") return response({ settings: storedSettings });
+      return response({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<RequestScanAutomationSection onReAuthRequired={vi.fn()} />);
+    const root = await screen.findByLabelText("Modality documents root folder");
+    expect((root as HTMLInputElement).value).toBe("ModalityDocuments");
+    expect(screen.getByText("Root folder used for modality document folders such as CT and MRI.")).toBeTruthy();
+    await user.clear(root);
+    await user.type(root, "ImagingDocuments");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const saveCall = await waitFor(() => fetchMock.mock.calls.find(([url, init]) => url === "/api/settings/request-scan-automation" && init?.method === "PUT"));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ modalityDocumentsRootSubfolder: "ImagingDocuments" }));
   });
 
   it("shows the backend error message and opens the shared re-authentication flow", async () => {

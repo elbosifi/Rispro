@@ -7,7 +7,7 @@ import type { UserId } from "../types/http.js";
 import { normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 
 export const AUTHORITATIVE_ORTHANC_CATEGORY = "authoritative_orthanc";
-export type AuthoritativeOrthancSettings = { enabled: boolean; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
+export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
@@ -36,15 +36,17 @@ function count(value: unknown) { const parsed = Number(first(value) ?? 0); retur
 export async function readAuthoritativeOrthancSettings(): Promise<AuthoritativeOrthancSettings> {
   if (settingsForTests) return settingsForTests;
   const values = (await loadSettingsMap([AUTHORITATIVE_ORTHANC_CATEGORY]))[AUTHORITATIVE_ORTHANC_CATEGORY] || {};
-  return { enabled: bool(values.enabled), baseUrl: validateBaseUrl(values.base_url), username: text(values.username), password: text(values.password), timeoutSeconds: positive(values.timeout_seconds, 10), verifyTls: bool(values.verify_tls, true), displayName: text(values.display_name) };
+  const enabled = bool(values.enabled);
+  return { enabled, autoExportClinicalDocuments: bool(values.auto_export_clinical_documents, enabled), baseUrl: validateBaseUrl(values.base_url), username: text(values.username), password: text(values.password), timeoutSeconds: positive(values.timeout_seconds, 10), verifyTls: bool(values.verify_tls, true), displayName: text(values.display_name) };
 }
+export function isClinicalDocumentAutoExportEnabled(settings: AuthoritativeOrthancSettings): boolean { return settings.enabled && settings.autoExportClinicalDocuments; }
 export async function readAuthoritativeOrthancSettingsForDisplay() { return display(await readAuthoritativeOrthancSettings()); }
 export async function saveAuthoritativeOrthancSettings(input: Record<string, unknown>, userId: UserId) {
   const current = await readAuthoritativeOrthancSettings();
   const password = text(input.password) || current.password;
-  const settings: AuthoritativeOrthancSettings = { enabled: bool(input.enabled), baseUrl: validateBaseUrl(input.baseUrl ?? input.base_url), username: text(input.username), password, timeoutSeconds: positive(input.timeoutSeconds ?? input.timeout_seconds, 10), verifyTls: bool(input.verifyTls ?? input.verify_tls, true), displayName: text(input.displayName ?? input.display_name) };
+  const settings: AuthoritativeOrthancSettings = { enabled: bool(input.enabled), autoExportClinicalDocuments: bool(input.autoExportClinicalDocuments ?? input.auto_export_clinical_documents, current.autoExportClinicalDocuments), baseUrl: validateBaseUrl(input.baseUrl ?? input.base_url), username: text(input.username), password, timeoutSeconds: positive(input.timeoutSeconds ?? input.timeout_seconds, 10), verifyTls: bool(input.verifyTls ?? input.verify_tls, true), displayName: text(input.displayName ?? input.display_name) };
   if (settings.enabled && !settings.baseUrl) throw new HttpError(400, "Authoritative Orthanc base URL is required when enabled.");
-  await upsertSettings(AUTHORITATIVE_ORTHANC_CATEGORY, [{ key: "enabled", value: settings.enabled ? "enabled" : "disabled" }, { key: "base_url", value: settings.baseUrl }, { key: "username", value: settings.username }, { key: "password", value: settings.password }, { key: "timeout_seconds", value: String(settings.timeoutSeconds) }, { key: "verify_tls", value: settings.verifyTls ? "true" : "false" }, { key: "display_name", value: settings.displayName }], userId);
+  await upsertSettings(AUTHORITATIVE_ORTHANC_CATEGORY, [{ key: "enabled", value: settings.enabled ? "enabled" : "disabled" }, { key: "auto_export_clinical_documents", value: settings.autoExportClinicalDocuments ? "enabled" : "disabled" }, { key: "base_url", value: settings.baseUrl }, { key: "username", value: settings.username }, { key: "password", value: settings.password }, { key: "timeout_seconds", value: String(settings.timeoutSeconds) }, { key: "verify_tls", value: settings.verifyTls ? "true" : "false" }, { key: "display_name", value: settings.displayName }], userId);
   await logAuditEntry({ entityType: "integration", entityId: null, actionType: "authoritative_orthanc_settings_saved", oldValues: null, newValues: { ...display(settings), passwordChanged: Boolean(text(input.password)) }, changedByUserId: userId });
   return display(settings);
 }

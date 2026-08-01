@@ -6,7 +6,7 @@ import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import { api } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({ api: vi.fn() }));
-const settings = { enabled: true, baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
+const settings = { enabled: true, autoExportClinicalDocuments: true, baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
 function renderSection() { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthoritativeOrthancSection onReAuthRequired={vi.fn()} /></QueryClientProvider>); }
 
 describe("AuthoritativeOrthancSection", () => {
@@ -18,6 +18,17 @@ describe("AuthoritativeOrthancSection", () => {
       if (path.endsWith("/test")) return { connected: true, system: { name: "Authoritative", version: "1.12.4", apiVersion: "19" }, testedAt: "2026-07-27T10:00:00.000Z" };
       throw new Error(`Unexpected ${path}`);
     });
+  });
+
+  it("saves the automatic PACS export setting and retains it while the connection is disabled", async () => {
+    const user = userEvent.setup(); renderSection();
+    const autoExport = await screen.findByRole("checkbox", { name: "Automatically send approved scanned documents to PACS" });
+    expect((autoExport as HTMLInputElement).checked).toBe(true);
+    await user.click(screen.getByRole("checkbox", { name: "Enable Orthanc connection" }));
+    expect((autoExport as HTMLInputElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const saveCall = await waitFor(() => vi.mocked(api).mock.calls.find(([path, options]) => path.endsWith("/settings") && options?.method === "PUT"));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ enabled: false, autoExportClinicalDocuments: true }));
   });
 
   it("renders safe settings, retains an empty password field, and shows compact connection details", async () => {

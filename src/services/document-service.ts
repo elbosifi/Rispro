@@ -17,7 +17,7 @@ import {
 } from "./document-storage-path.js";
 import type { UserId, OptionalUserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
-import { enqueueClinicalDocumentExportsForAppointment } from "./clinical-document-export-queue-service.js";
+import { enqueueClinicalDocumentExportsForAppointmentAutomatically } from "./clinical-document-export-queue-service.js";
 import { sha256Buffer, sha256File } from "./backup-v3-checksums.js";
 
 export interface DocumentUploadPayload {
@@ -580,7 +580,7 @@ async function finalizeDocumentUpload(savedDocument: DocumentRow, storedFile: St
     console.warn(JSON.stringify({ type: "document_upload_audit_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) }));
   }
   if (savedDocument.source === "modality_scan_automation" && savedDocument.document_type === "clinical_document" && savedDocument.v2_booking_id) {
-    await enqueueClinicalDocumentExportsForAppointment(Number(savedDocument.v2_booking_id), currentUserId).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_queue_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) })));
+    await enqueueClinicalDocumentExportsForAppointmentAutomatically(Number(savedDocument.v2_booking_id), currentUserId).catch((error) => console.warn(JSON.stringify({ type: "clinical_document_export_queue_failed", documentId: savedDocument.id, error: error instanceof Error ? error.message : String(error) })));
   }
 }
 
@@ -861,7 +861,7 @@ export async function upsertDocumentAppointmentLinks(documentId: number, appoint
     const { rows } = await pool.query<{ source: string; document_type: string }>("select source, document_type from documents where id=$1", [documentId]);
     if (rows[0]?.source === "modality_scan_automation" && rows[0].document_type === "clinical_document") {
       for (const appointmentId of insertedAppointmentIds) {
-        await enqueueClinicalDocumentExportsForAppointment(appointmentId).catch((error) => {
+        await enqueueClinicalDocumentExportsForAppointmentAutomatically(appointmentId).catch((error) => {
           console.warn(JSON.stringify({ type: "clinical_document_export_link_queue_failed", documentId, appointmentId, error: error instanceof Error ? error.message : String(error) }));
         });
       }
