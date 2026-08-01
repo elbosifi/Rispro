@@ -124,7 +124,7 @@ export function AppointmentDetailsReadOnly({ appointment, reportStatus, onEdit, 
   const scheduleRows: DefinitionRow[] = [
     { label: text(language, "تاريخ الموعد", "Appointment date"), value: formatDateLy(appointment.appointmentDate), dir: "ltr", emphasis: "strong" },
     { label: text(language, "وقت الحجز", "Booking time"), value: appointment.bookingTime || text(language, "الوقت غير محدد", "Time not assigned"), dir: "ltr", emphasis: "strong" },
-    { label: text(language, "التسلسل اليومي / الفتحة", "Daily sequence / slot"), value: valueOrDash(appointment.dailySequence || appointment.modalitySlotNumber) },
+    { label: text(language, "التسلسل اليومي / الترتيب", "Daily sequence / slot"), value: valueOrDash(appointment.dailySequence || appointment.modalitySlotNumber) },
     { label: text(language, "الحضور المباشر", "Walk-in"), value: appointment.isWalkIn ? text(language, "حضور مباشر", "Walk-in") : text(language, "مجدول", "Scheduled") },
     { label: text(language, "الحالة الحالية", "Current status"), value: <StatusBadge language={language} status={appointment.status} /> },
   ];
