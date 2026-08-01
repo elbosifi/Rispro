@@ -956,6 +956,7 @@ export interface DoctorProtocolingAppointment {
   sex: string | null;
   appointmentDate: string;
   appointmentTime: string | null;
+  requiresReport: boolean;
   modalityId: number;
   modalityCode: "CT" | "MRI";
   modalityName: string | null;

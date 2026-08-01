@@ -1,6 +1,7 @@
-import { Children, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, MoreVertical, Pencil, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import {
   activateProtocolLibraryVersion,
   cancelDoctorProtocolAssignment,
@@ -1151,6 +1152,10 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
             queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, examTypeId, examTypeName } : item));
             queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], (current) => current ? { ...current, appointment: { ...current.appointment, examTypeId, examTypeName } } : current);
           }}
+           onRequiresReportUpdated={(requiresReport) => {
+             queryClient.setQueryData<DoctorProtocolingAppointment[]>(["doctor", "protocoling", "appointments", filters], (current) => current?.map((item) => item.appointmentId === selectedAppointment.appointmentId ? { ...item, requiresReport } : item));
+             queryClient.setQueryData<DoctorProtocolingAppointmentDetail>(["doctor", "protocoling", "appointments", selectedAppointment.appointmentId], (current) => current ? { ...current, appointment: { ...current.appointment, requiresReport } } : current);
+           }}
           onClose={closeAssignmentModal}
           onSave={(payload, assignNext) => {
             const mutationPayload = { appointmentId: selectedAppointment.appointmentId, payload };
@@ -1189,6 +1194,7 @@ function ProtocolAssignmentModal({
   worklistTotal,
   onNavigate,
   onExamTypeUpdated,
+  onRequiresReportUpdated,
   onSave,
   onClear,
   onClose,
@@ -1205,6 +1211,7 @@ function ProtocolAssignmentModal({
   worklistTotal: number;
   onNavigate: (direction: -1 | 1) => void;
   onExamTypeUpdated: (examTypeId: number, examTypeName: string) => void;
+  onRequiresReportUpdated: (requiresReport: boolean) => void;
   onSave: (payload: ProtocolAssignmentPayload, assignNext: boolean) => void;
   onClear: () => void;
   onClose: () => void;
@@ -1233,6 +1240,12 @@ function ProtocolAssignmentModal({
   const [examTypeSearch, setExamTypeSearch] = useState("");
   const [examTypeOverride, setExamTypeOverride] = useState<{ appointmentId: number; id: number; name: string } | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [reportEditorOpen, setReportEditorOpen] = useState(false);
+  const [reportDraft, setReportDraft] = useState(appointment.requiresReport);
+  const [reportOverride, setReportOverride] = useState<{ appointmentId: number; value: boolean } | null>(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState({ right: 8, bottom: 56 });
+  const actionMenuAnchorRef = useRef<HTMLDivElement>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
   const title = existing ? "Change assigned protocol" : "Assign protocol";
   const noActiveProtocolsMessage = `No active ${appointment.modalityCode} protocols are available. Enter a free-text protocol.`;
   const selectedProtocol = activeProtocols.find((protocol) => String(protocol.id) === protocolId) ?? null;
@@ -1275,6 +1288,31 @@ function ProtocolAssignmentModal({
       pushToast({ type: "success", title: "Examination type updated.", message: "The appointment date and time were kept unchanged." });
     },
   });
+  const reportUpdateMutation = useMutation({
+    mutationFn: () => rescheduleV2Booking(appointment.appointmentId, {
+      bookingDate: appointment.appointmentDate,
+      bookingTime: appointment.appointmentTime,
+      examTypeId: appointment.examTypeId,
+      requiresReport: reportDraft,
+    }),
+    onSuccess: async (result) => {
+      const updatedRequiresReport = result.booking.requiresReport ?? reportDraft;
+      setReportOverride({ appointmentId: appointment.appointmentId, value: updatedRequiresReport });
+      onRequiresReportUpdated(updatedRequiresReport);
+      setReportDraft(updatedRequiresReport);
+      setReportEditorOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling", "appointment-details", appointment.appointmentId] }),
+        queryClient.invalidateQueries({ queryKey: ["appointment-manage-modal", appointment.appointmentId] }),
+        queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }),
+        queryClient.invalidateQueries({ queryKey: ["registrations"] }),
+        queryClient.invalidateQueries({ queryKey: ["queue"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
+      ]);
+      pushToast({ type: "success", title: "Report requirement updated." });
+    },
+  });
   const selectedVersionQuery = useQuery({
     queryKey: ["doctor", "protocol-library", "protocol-version-preview", selectedVersionId],
     queryFn: () => fetchProtocolLibraryVersionDetail(selectedVersionId!),
@@ -1305,6 +1343,7 @@ function ProtocolAssignmentModal({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && actionMenuOpen) { event.preventDefault(); setActionMenuOpen(false); return; }
       if (event.key === "Escape" && !saving) requestClose();
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement).tagName) && !(event.target as HTMLElement).isContentEditable) {
         if (event.key === "ArrowLeft" && worklistPosition > 1) { event.preventDefault(); requestNavigate(-1); }
@@ -1313,7 +1352,17 @@ function ProtocolAssignmentModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
+  }, [actionMenuOpen, requestClose, requestNavigate, saving, worklistPosition, worklistTotal]);
+
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!actionMenuAnchorRef.current?.contains(target) && !actionMenuRef.current?.contains(target)) setActionMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [actionMenuOpen]);
 
   const payload = (): ProtocolAssignmentPayload => ({
     protocolId: protocolMode === "saved" && protocolId ? Number(protocolId) : null,
@@ -1323,6 +1372,17 @@ function ProtocolAssignmentModal({
     freeTextProtocol: protocolMode === "free-text" ? nullableText(freeTextProtocol) : null,
     status: "ASSIGNED",
   });
+  const hasMoreProtocolActions = Boolean(printableSheet || existing);
+  const displayedRequiresReport = reportOverride?.appointmentId === appointment.appointmentId ? reportOverride.value : appointment.requiresReport;
+  const toggleActionMenu = () => {
+    if (actionMenuOpen) {
+      setActionMenuOpen(false);
+      return;
+    }
+    const rect = actionMenuAnchorRef.current?.getBoundingClientRect();
+    if (rect) setActionMenuPosition({ right: Math.max(8, window.innerWidth - rect.right), bottom: Math.max(8, window.innerHeight - rect.top + 8) });
+    setActionMenuOpen(true);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/45 p-2 sm:p-4" onClick={() => { if (!saving) requestClose(); }} role="presentation" data-testid="protocol-assignment-modal-backdrop">
@@ -1334,22 +1394,32 @@ function ProtocolAssignmentModal({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="sticky top-0 z-20 shrink-0 border-b bg-background px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
-          <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+          <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(220px,1.05fr)_minmax(0,1.65fr)_minmax(300px,1.45fr)] lg:items-center">
             <div className="min-w-0">
-              <h3 className="truncate text-xl font-bold leading-tight text-foreground">{appointment.patientArabicName || appointment.patientEnglishName || `Patient ${appointment.patientId}`}</h3>
-              {appointment.patientEnglishName ? <p className="mt-0.5 truncate text-sm text-muted-foreground">{appointment.patientEnglishName}</p> : null}
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h3 className="truncate text-lg font-bold leading-tight text-foreground">{appointment.patientArabicName || appointment.patientEnglishName || `Patient ${appointment.patientId}`}</h3>
+                {appointment.patientEnglishName && appointment.patientEnglishName !== appointment.patientArabicName ? <p className="truncate text-xs text-muted-foreground">{appointment.patientEnglishName}</p> : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
                 <span><span className="font-semibold text-muted-foreground">Age / sex</span> <span className="font-semibold text-foreground">{appointment.ageYears ?? "—"} / {appointment.sex ?? "—"}</span></span>
                 <span dir="ltr"><span className="font-semibold text-muted-foreground">Primary ID</span> <span className="font-semibold text-foreground">{appointment.patientDicomId || "—"}</span></span>
                 <span dir="ltr"><span className="font-semibold text-muted-foreground">MRN</span> <span className="font-semibold text-foreground">{appointment.patientMrn || "—"}</span></span>
               </div>
-              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" style={{ borderColor: "var(--border)" }}>
+              </div>
+              <div className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                 <span dir="ltr"><span className="font-semibold text-muted-foreground">Appointment</span> <span className="font-semibold text-foreground">{formatDateLy(appointment.appointmentDate)} · {appointment.appointmentTime?.slice(0, 5) || "—"}</span></span>
                 <span><span className="font-semibold text-muted-foreground">Modality</span> <span className="font-semibold text-foreground">{appointment.modalityName || appointment.modalityCode}</span></span>
                 <span className="inline-flex min-w-0 items-center gap-1"><span className="font-semibold text-muted-foreground">Examination</span> <span className="truncate font-semibold text-foreground">{displayedExamTypeName || "—"}</span><button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={() => { setExamTypeDraftId(String(displayedExamTypeId ?? "")); setExamTypeSearch(""); setExamEditorOpen((current) => !current); }} disabled={examTypesQuery.isLoading || examTypeUpdateMutation.isPending} aria-label="Edit examination type" title="Edit examination type"><Pencil size={13} aria-hidden="true" /></button></span>
                 <span className="inline-flex items-center gap-1"><span className="font-semibold text-muted-foreground">Category</span><ProtocolCategoryBadge category={appointment.caseCategory} /></span>
-              </div>
-              {examEditorOpen ? <div className="relative z-10 mt-2 max-w-xl rounded-lg border bg-background p-3 shadow-lg" style={{ borderColor: "var(--border)" }} role="dialog" aria-label="Edit examination type">
+              <span className="relative inline-flex items-center gap-1"><button type="button" className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${displayedRequiresReport ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-300 bg-slate-100 text-slate-700"}`} onClick={() => { setReportDraft(displayedRequiresReport); setReportEditorOpen((current) => !current); }} disabled={reportUpdateMutation.isPending} aria-label="Edit report requirement" aria-expanded={reportEditorOpen}>{displayedRequiresReport ? "Report required" : "No report required"}<Pencil size={11} aria-hidden="true" /></button>
+                {reportEditorOpen ? <div className="absolute start-0 top-full z-40 mt-2 w-56 rounded-lg border bg-background p-3 shadow-xl" style={{ borderColor: "var(--border)" }} role="dialog" aria-label="Edit report requirement">
+                  <p className="text-xs font-semibold">Report required</p>
+                  <div className="mt-2 space-y-1 text-xs"><label className="flex items-center gap-2"><input type="radio" name={`requires-report-${appointment.appointmentId}`} checked={reportDraft} onChange={() => setReportDraft(true)} />Yes</label><label className="flex items-center gap-2"><input type="radio" name={`requires-report-${appointment.appointmentId}`} checked={!reportDraft} onChange={() => setReportDraft(false)} />No</label></div>
+                  {reportUpdateMutation.isError ? <p className="mt-2 text-xs text-red-700" role="alert">{reportUpdateMutation.error instanceof Error ? reportUpdateMutation.error.message : "Unable to update report requirement."}</p> : null}
+                  <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => { setReportDraft(displayedRequiresReport); setReportEditorOpen(false); }} disabled={reportUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => reportUpdateMutation.mutate()} disabled={reportUpdateMutation.isPending || reportDraft === displayedRequiresReport}>{reportUpdateMutation.isPending ? "Updating..." : "Update"}</button></div>
+                </div> : null}
+              </span>
+              {examEditorOpen ? <div className="absolute start-0 top-full z-40 mt-2 max-w-xl rounded-lg border bg-background p-3 shadow-lg" style={{ borderColor: "var(--border)" }} role="dialog" aria-label="Edit examination type">
                 <label className="block text-xs font-semibold">Search examination types<input aria-label="Search examination types" value={examTypeSearch} onChange={(event) => setExamTypeSearch(event.target.value)} className={`${inputClass()} mt-1`} placeholder="Search active exam types" /></label>
                 <label className="mt-2 block text-xs font-semibold">Examination type<select aria-label="Examination type" value={examTypeDraftId} onChange={(event) => setExamTypeDraftId(event.target.value)} className={inputClass()} disabled={examTypesQuery.isLoading}>
                   <option value="">Select examination type</option>
@@ -1359,9 +1429,8 @@ function ProtocolAssignmentModal({
                 {examTypeUpdateMutation.isError ? <p className="mt-2 text-xs text-red-700" role="alert">{examTypeUpdateMutation.error instanceof Error ? examTypeUpdateMutation.error.message : "Unable to update examination type."}</p> : null}
                 <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => setExamEditorOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => examTypeUpdateMutation.mutate()} disabled={!selectedExamType || String(selectedExamType.id) === String(displayedExamTypeId ?? "") || examTypeUpdateMutation.isPending}>{examTypeUpdateMutation.isPending ? "Updating..." : "Update exam"}</button></div>
               </div> : null}
-              <div className="mt-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs leading-5 text-foreground" title={appointment.clinicalNotes || undefined}><span className="font-semibold text-muted-foreground">Clinical indication:</span> <span className="line-clamp-2">{appointment.clinicalNotes || "—"}</span></div>
             </div>
-            <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 text-xs lg:max-w-[420px] lg:justify-end">
+            <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 text-xs md:col-span-2 lg:col-span-1 lg:justify-end">
               <div className="flex items-center gap-1 rounded-md border px-1 py-0.5" style={{ borderColor: "var(--border)" }}>
                 <button type="button" onClick={() => requestNavigate(-1)} disabled={saving || worklistPosition <= 1} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Previous appointment" title="Previous appointment"><ChevronLeft size={15} aria-hidden="true" /></button>
                 {worklistPosition > 0 ? <span className="whitespace-nowrap px-1 text-[11px] font-semibold" style={{ color: "var(--text-muted)" }}>{worklistPosition} of {worklistTotal}</span> : null}
@@ -1420,13 +1489,13 @@ function ProtocolAssignmentModal({
                  </div>
                  <div className="sticky bottom-0 z-20 mt-auto flex shrink-0 items-center justify-end gap-1.5 border-t bg-background p-2" style={{ borderColor: "var(--border)" }}>
                    {annotationDirty ? <span className="me-auto text-xs font-semibold text-amber-700">Save document annotations before assigning the protocol.</span> : null}
-                   <div className="relative">
-                     <button type="button" disabled={saving} onClick={() => setActionMenuOpen((current) => !current)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
-                     {actionMenuOpen ? <div className="absolute bottom-11 end-0 z-30 w-40 rounded-lg border bg-background p-1 shadow-lg" style={{ borderColor: "var(--border)" }} role="menu">
-                       {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
-                       {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
-                     </div> : null}
-                   </div>
+                    {hasMoreProtocolActions ? <div ref={actionMenuAnchorRef} className="relative">
+                      <button type="button" disabled={saving} onClick={toggleActionMenu} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border" style={{ borderColor: "var(--border)" }} aria-label="More protocol actions" aria-expanded={actionMenuOpen} title="More protocol actions"><MoreVertical size={16} aria-hidden="true" /></button>
+                      {actionMenuOpen ? createPortal(<div ref={actionMenuRef} className="fixed z-[100] w-40 rounded-lg border bg-background p-1 shadow-xl" style={{ borderColor: "var(--border)", right: actionMenuPosition.right, bottom: actionMenuPosition.bottom }} role="menu">
+                        {printableSheet ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); printProtocolSheet(printableSheet); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold hover:bg-muted">Print protocol</button> : null}
+                        {existing ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
+                      </div>, document.body) : null}
+                    </div> : null}
                    <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>{saving ? "Saving..." : "Save"}</button>
                    <button type="button" disabled={saving || annotationDirty || (protocolMode === "saved" ? !protocolId : !freeTextProtocol.trim())} onClick={() => onSave(payload(), true)} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Assign and next</button>
                  </div>

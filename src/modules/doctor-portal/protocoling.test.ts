@@ -18,6 +18,7 @@ function protocolingAppointmentRow(overrides: Record<string, unknown> = {}) {
     sex: "F",
     appointment_date: "2026-07-03",
     appointment_time: "09:00:00",
+    requires_report: true,
     modality_id: 2,
     modality_code: "MR",
     modality_name: "MR",
@@ -58,6 +59,8 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /scanner_name/);
     assert.match(repo, /as accession_number/);
     assert.match(repo, /coalesce\(apa\.status, 'NOT_PROTOCOLLED'\)/);
+    assert.match(repo, /b\.requires_report/);
+    assert.match(repo, /requiresReport: Boolean\(row\.requires_report\)/);
   });
 
   it("normalizes MR modality rows to MRI in the protocoling worklist", async () => {
@@ -71,6 +74,7 @@ describe("Doctor Portal protocoling worklist backend", () => {
       const rows = await listProtocolingAppointments({ dateFrom: "2026-07-03", dateTo: "2026-07-03" });
 
       assert.equal(rows[0].modalityCode, "MRI");
+      assert.equal(rows[0].requiresReport, true);
     } finally {
       queryMock.mock.restore();
     }

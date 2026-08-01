@@ -19,6 +19,7 @@ const appointment: DoctorProtocolingAppointment = {
   sex: "M",
   appointmentDate: "2026-07-22",
   appointmentTime: "09:00:00",
+  requiresReport: true,
   modalityId: 4,
   modalityCode: "CT",
   modalityName: "CT",
@@ -110,11 +111,99 @@ describe("Doctor protocoling request documents", () => {
     expect(within(modal).getByText("Modality").parentElement?.textContent).toContain("CT");
     expect(within(modal).getByText("Examination").parentElement?.textContent).toContain("CT Chest");
     expect(within(modal).getByText("Non-oncology")).toBeTruthy();
-    expect(within(modal).getByText("Clinical indication:").parentElement?.textContent).toContain("Pre-operative staging");
+    expect(within(modal).queryByText("Clinical indication:")).toBeNull();
+    expect(within(modal).getByRole("button", { name: "Edit report requirement" }).textContent).toContain("Report required");
     expect(screen.queryByRole("link", { name: "Open current study" })).toBeNull();
     expect(screen.getByRole("link", { name: "Patient studies" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("00100020");
     expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("002888");
+  });
+
+  it("shows and edits No report required through the V2 appointment update", async () => {
+    const noReportAppointment = { ...appointment, requiresReport: false };
+    mockFetchAppointments.mockResolvedValue([noReportAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: noReportAppointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    const reportButton = within(screen.getByRole("dialog", { name: "Assign protocol" })).getByRole("button", { name: "Edit report requirement" });
+    expect(reportButton.textContent).toContain("No report required");
+    await userEvent.click(reportButton);
+    expect(screen.getByRole("dialog", { name: "Edit report requirement" })).toBeTruthy();
+    expect((screen.getByRole("radio", { name: "No" }) as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(screen.getByRole("radio", { name: "Yes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => expect(mockRescheduleBooking).toHaveBeenCalledWith(42, { bookingDate: "2026-07-22", bookingTime: "09:00:00", examTypeId: 10, requiresReport: true }));
+    expect((await within(screen.getByRole("dialog", { name: "Assign protocol" })).findByRole("button", { name: "Edit report requirement" })).textContent).toContain("Report required");
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["appointment-manage-modal", 42] }));
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["modality-worklist"] });
+  });
+
+  it("keeps the report editor and protocol form state open when the report update fails", async () => {
+    mockRescheduleBooking.mockRejectedValue(new Error("Report update denied"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Free-text protocol" }));
+    const protocol = screen.getByRole("textbox", { name: "Free-text protocol" });
+    await userEvent.type(protocol, "Keep this protocol draft.");
+    await userEvent.click(screen.getByRole("button", { name: "Edit report requirement" }));
+    await userEvent.click(screen.getByRole("radio", { name: "No" }));
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(await screen.findByText("Report update denied")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Edit report requirement" })).toBeTruthy();
+    expect((protocol as HTMLTextAreaElement).value).toBe("Keep this protocol draft.");
+  });
+
+  it("hides More protocol actions for a new blank assignment", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    expect(screen.queryByRole("button", { name: "More protocol actions" })).toBeNull();
+  });
+
+  it("shows printable and clear actions in an overflow-safe menu and closes after printing", async () => {
+    const assignedAppointment = {
+      ...appointment,
+      assignment: {
+        assignmentId: 77,
+        protocolId: null,
+        protocolVersionId: null,
+        protocolName: null,
+        versionNumber: null,
+        scannerId: null,
+        scannerName: null,
+        protocolNotes: null,
+        contrastNotes: null,
+        freeTextProtocol: "Axial T2",
+        status: "ASSIGNED" as const,
+        assignedBy: 3,
+        assignedAt: "2026-07-22T08:00:00Z",
+      },
+    };
+    mockFetchAppointments.mockResolvedValue([assignedAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Change" }));
+    await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toBeTruthy();
+    expect(menu.className).toContain("fixed");
+    expect(screen.getByRole("menuitem", { name: "Print protocol" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Clear assignment" })).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Print protocol" }));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("edits examination type within the current modality and refreshes the header", async () => {
