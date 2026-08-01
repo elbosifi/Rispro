@@ -7,6 +7,8 @@ Phase 1 uses `NCCB RISpro QZ Root CA` to issue `NCCB RISpro Printing`. This auth
 - `internal_ca` is the supported automated bootstrap mode. `scripts/qz/generate-qz-signing-identity.sh` creates a 3072-bit RSA SHA-256 root (10 years) and leaf (3 years), with a PKCS#8 signing key. It validates and preserves a complete identity, refuses partial/inconsistent files, and replaces them only with the explicit `--repair` workflow. Approaching expiry is reported by metadata/validation and never triggers silent rotation.
 - `qz_issued` retains externally supplied certificate/private-key file support for a future QZ-issued identity. Inline `QZ_CERTIFICATE` and `QZ_PRIVATE_KEY` remain fallback compatibility only.
 
+Compose declares a stable three-secret service shape in both modes. Because Compose resolves every secret source before container startup, `qz_issued` maps the unused root-secret slot to the public QZ-issued signing certificate; the backend does not read it as a root. Deployment preflight verifies every configured runtime file is readable before beginning an image rebuild.
+
 Persistent host files are under ignored directories:
 
 ```text

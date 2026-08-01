@@ -84,3 +84,12 @@ test("deployment readiness checks mounted files in app and denies them to the re
   assert.match(source, /exec -T app sh -c 'test -r \/run\/secrets\/qz_root_certificate && test -r \/run\/secrets\/qz_signing_certificate && test -r \/run\/secrets\/qz_signing_private_key && test -r \/var\/lib\/rispro\/qz-bootstrap\/qz-tray-2\.2\.6-x86_64\.exe'/);
   assert.match(source, /exec -T request-scan-worker sh -c 'test ! -e \/run\/secrets\/qz_root_certificate && test ! -e \/run\/secrets\/qz_signing_certificate && test ! -e \/run\/secrets\/qz_signing_private_key && test ! -e \/var\/lib\/rispro\/qz-bootstrap'/);
 });
+
+test("qz_issued deployment never requires an internal root path and preflight checks configured files", () => {
+  const library = readFileSync("scripts/docker-deployment-lib.sh", "utf8");
+  const setup = readFileSync("scripts/setup-docker.sh", "utf8");
+  assert.equal((library.match(/if \[ "\$QZ_TRUST_MODE" = "qz_issued" \]; then QZ_ROOT_CERTIFICATE_HOST_FILE="\$QZ_CERTIFICATE_HOST_FILE"; fi/g) || []).length, 2);
+  assert.equal((setup.match(/if \[ "\$QZ_TRUST_MODE" = "qz_issued" \]; then QZ_ROOT_CERTIFICATE_HOST_FILE="\$QZ_CERTIFICATE_HOST_FILE"; fi/g) || []).length, 1);
+  assert.match(library, /for configured_path in "\$QZ_ROOT_CERTIFICATE_HOST_FILE" "\$QZ_CERTIFICATE_HOST_FILE" "\$QZ_PRIVATE_KEY_HOST_FILE"/);
+  assert.match(library, /Configured QZ runtime file is missing or unreadable/);
+});

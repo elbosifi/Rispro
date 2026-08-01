@@ -70,7 +70,7 @@ main() {
       QZ_ROOT_CERTIFICATE_HOST_FILE="${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}"
       QZ_CERTIFICATE_HOST_FILE="${CURRENT_QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}"
       QZ_PRIVATE_KEY_HOST_FILE="${CURRENT_QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}"
-      if [ "$QZ_TRUST_MODE" = "qz_issued" ] && [ -z "${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-}" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
+      if [ "$QZ_TRUST_MODE" = "qz_issued" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
       if [ "$OHIF_INFRASTRUCTURE_DISABLED" = "true" ]; then
         OHIF_ENABLED="false"
         OHIF_COMPOSE_PROFILES=""

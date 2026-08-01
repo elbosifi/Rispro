@@ -267,7 +267,9 @@ hydrate_deployment_config_from_current_env() {
   QZ_ROOT_CERTIFICATE_HOST_FILE="${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}"
   QZ_CERTIFICATE_HOST_FILE="${CURRENT_QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}"
   QZ_PRIVATE_KEY_HOST_FILE="${CURRENT_QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}"
-  if [ "$QZ_TRUST_MODE" = "qz_issued" ] && [ -z "${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-}" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
+  # Compose resolves every declared secret source even though qz_issued does not consume an internal root.
+  # Point the unused root-secret slot at the public signing certificate so qz_issued never requires a root file.
+  if [ "$QZ_TRUST_MODE" = "qz_issued" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
   OHIF_INFRASTRUCTURE_DISABLED="${CURRENT_OHIF_INFRASTRUCTURE_DISABLED:-false}"
   OHIF_ENABLED="true"
   OHIF_PUBLIC_BASE_URL="/ohif"
@@ -428,7 +430,7 @@ collect_deployment_config() {
   QZ_ROOT_CERTIFICATE_HOST_FILE="${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-root-ca.crt}"
   QZ_CERTIFICATE_HOST_FILE="${CURRENT_QZ_CERTIFICATE_HOST_FILE:-./secrets/qz/identity/qz-signing-certificate.pem}"
   QZ_PRIVATE_KEY_HOST_FILE="${CURRENT_QZ_PRIVATE_KEY_HOST_FILE:-./secrets/qz/identity/qz-signing-private-key.pem}"
-  if [ "$QZ_TRUST_MODE" = "qz_issued" ] && [ -z "${CURRENT_QZ_ROOT_CERTIFICATE_HOST_FILE:-}" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
+  if [ "$QZ_TRUST_MODE" = "qz_issued" ]; then QZ_ROOT_CERTIFICATE_HOST_FILE="$QZ_CERTIFICATE_HOST_FILE"; fi
   OHIF_INFRASTRUCTURE_DISABLED="${CURRENT_OHIF_INFRASTRUCTURE_DISABLED:-false}"
   OHIF_ENABLED="true"
   OHIF_PUBLIC_BASE_URL="/ohif"
@@ -944,6 +946,18 @@ prepare_qz_printing() {
     return 1
   fi
   bash "${PROJECT_ROOT}/scripts/qz/cache-qz-installer.sh"
+
+  local configured_path resolved_path
+  for configured_path in "$QZ_ROOT_CERTIFICATE_HOST_FILE" "$QZ_CERTIFICATE_HOST_FILE" "$QZ_PRIVATE_KEY_HOST_FILE"; do
+    case "$configured_path" in
+      /*) resolved_path="$configured_path" ;;
+      *) resolved_path="${PROJECT_ROOT}/${configured_path#./}" ;;
+    esac
+    if [ ! -r "$resolved_path" ]; then
+      err "Configured QZ runtime file is missing or unreadable: ${resolved_path}"
+      return 1
+    fi
+  done
 }
 
 run_compose_preflight() {
