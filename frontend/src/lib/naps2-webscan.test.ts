@@ -50,10 +50,10 @@ describe("naps2 direct eSCL adapter", () => {
   });
 
   it("falls back to JPEG only when PDF job creation is rejected and creates one PDF", async () => {
-    let jobs = 0; let next = 0;
-    const fetchMock = vi.fn(async (url: string) => { if (url.endsWith("ScannerCapabilities")) return response(); if (url.endsWith("ScanJobs")) { jobs += 1; return jobs === 1 ? response({ status: 400 }) : response({ status: 201, headers: { Location: "/eSCL/ScanJobs/9" } }); } if (url.endsWith("NextDocument")) { next += 1; return next <= 2 ? response({ blob: jpeg, headers: { "Content-Type": "image/jpeg" } }) : response({ status: 404 }); } return response(); }); vi.stubGlobal("fetch", fetchMock);
+    let jobs = 0; let next = 0; const scanJobBodies: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => { if (url.endsWith("ScannerCapabilities")) return response(); if (url.endsWith("ScanJobs")) { scanJobBodies.push(String(init?.body)); jobs += 1; return jobs === 1 ? response({ status: 400 }) : response({ status: 201, headers: { Location: "/eSCL/ScanJobs/9" } }); } if (url.endsWith("NextDocument")) { next += 1; return next <= 2 ? response({ blob: jpeg, headers: { "Content-Type": "image/jpeg" } }) : response({ status: 404 }); } return response(); }); vi.stubGlobal("fetch", fetchMock);
     const result = await scanAppointmentRequest({ endpoint: "http://scanner:9801" });
-    expect(jobs).toBe(2); expect(result.pageCount).toBe(2); expect(await result.file.text()).toContain("/Count 2"); expect(String(fetchMock.mock.calls[2][1]?.body)).toContain("image/jpeg");
+    expect(jobs).toBe(2); expect(result.pageCount).toBe(2); expect(await result.file.text()).toContain("/Count 2"); expect(scanJobBodies[1]).toContain("image/jpeg");
   });
 
   it("uses ErrorDetails after a NAPS2 500 and deletes a failed job", async () => {
