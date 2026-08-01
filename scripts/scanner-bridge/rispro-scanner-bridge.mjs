@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import http from "node:http";
 
+// Legacy rollback service. Direct browser-to-NAPS2 eSCL is the primary RISpro scanner path.
 const HOST = "127.0.0.1";
 const PORT = Number.parseInt(process.env.RISPRO_SCANNER_BRIDGE_PORT || "9810", 10);
 const NAPS2_BASE_URL = (process.env.NAPS2_ESCL_BASE_URL || "http://127.0.0.1:9801").replace(/\/+$/, "");

@@ -5156,7 +5156,7 @@ function normalizeDocumentsStorageForm(
     authDomain: settings?.storage_auth_domain || "",
     fallbackEnabled: String(settings?.storage_fallback_enabled || "true").toLowerCase() === "true",
     naps2WebScanEnabled: String(settings?.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled",
-    naps2WebScanEndpoint: settings?.scanner_bridge_endpoint || settings?.naps2_webscan_endpoint || "",
+    naps2WebScanEndpoint: settings?.naps2_webscan_endpoint || "http://127.0.0.1:9801",
     scannerAppEnabled: String(settings?.scanner_app_enabled || "enabled").toLowerCase() === "enabled",
     scannerAppDownloadUrl: settings?.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi",
     scanSessionExpiryMinutes: settings?.scan_session_expiry_minutes || "15",
@@ -5215,7 +5215,6 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           { key: "storage_auth_domain", value: { value: form.authDomain } },
           { key: "storage_fallback_enabled", value: { value: String(form.fallbackEnabled) } },
           { key: "naps2_webscan_enabled", value: { value: form.naps2WebScanEnabled ? "enabled" : "disabled" } },
-          { key: "scanner_bridge_endpoint", value: { value: form.naps2WebScanEndpoint } },
           { key: "naps2_webscan_endpoint", value: { value: form.naps2WebScanEndpoint } },
           { key: "scanner_bridge_mode", value: { value: form.naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
           { key: "scanner_app_enabled", value: { value: form.scannerAppEnabled ? "enabled" : "disabled" } },
@@ -5370,7 +5369,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             <input
               value={form.naps2WebScanEndpoint}
               onChange={(e) => updateForm("naps2WebScanEndpoint", e.target.value)}
-              placeholder="http://127.0.0.1:9810"
+              placeholder="http://127.0.0.1:9801"
               className="input-premium w-full"
             />
           </div>

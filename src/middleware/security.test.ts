@@ -16,7 +16,7 @@ describe("securityHeaders", () => {
     assert.equal(headers["Content-Security-Policy"].includes("object-src 'none'"), true);
   });
 
-  it("allows local scanner bridge and diagnostic NAPS2 endpoints in connect-src without env config", () => {
+  it("allows local direct NAPS2 endpoints in connect-src without env config", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = false;
@@ -31,8 +31,8 @@ describe("securityHeaders", () => {
 
       const csp = headers["Content-Security-Policy"];
       assert.equal(csp.includes("connect-src 'self'"), true);
-      assert.equal(csp.includes("http://127.0.0.1:9810"), true);
-      assert.equal(csp.includes("http://localhost:9810"), true);
+      assert.equal(csp.includes("http://127.0.0.1:9810"), false);
+      assert.equal(csp.includes("http://localhost:9810"), false);
       assert.equal(csp.includes("http://127.0.0.1:9801"), true);
       assert.equal(csp.includes("http://localhost:9801"), true);
     } finally {
@@ -78,7 +78,7 @@ describe("securityHeaders", () => {
     } finally { env.qzAllowInsecureWebsocket = previous; env.isProduction = previousProduction; }
   });
 
-  it("allows local scanner bridge endpoints in connect-src when configured", () => {
+  it("allows the exact configured NAPS2 eSCL origin without weakening connect-src", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = true;
@@ -94,7 +94,7 @@ describe("securityHeaders", () => {
       const csp = headers["Content-Security-Policy"];
       assert.equal(
         csp.includes(
-          "connect-src 'self' http://127.0.0.1:9810 http://localhost:9810 http://127.0.0.1:9801 http://localhost:9801"
+          "connect-src 'self' http://127.0.0.1:9801 http://localhost:9801"
         ),
         true
       );

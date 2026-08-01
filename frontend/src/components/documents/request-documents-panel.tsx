@@ -537,7 +537,18 @@ export function RequestDocumentsPanel({
         <ScanLine size={18} className="text-accent" aria-hidden="true" />
       </div>
       <div className="flex flex-col gap-2">
-        {scannerAppEnabled && (layout !== "workspace" || !isMobile) ? (
+        {naps2ScannerEnabled && (layout !== "workspace" || !isMobile) ? (
+          <button
+            type="button"
+            onClick={handleScanAndAttach}
+            className="order-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+          >
+            <ScanLine size={15} aria-hidden="true" />
+            {scanUploading ? t("documents.scanning") : t("documents.scanPaper")}
+          </button>
+        ) : null}
+        {!naps2ScannerEnabled && scannerAppEnabled && (layout !== "workspace" || !isMobile) ? (
           <button
             type="button"
             onClick={handleLaunchScannerApp}
@@ -546,17 +557,6 @@ export function RequestDocumentsPanel({
           >
             <ScanLine size={15} aria-hidden="true" />
             {scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}
-          </button>
-        ) : null}
-        {!scannerAppEnabled && naps2ScannerEnabled && (layout !== "workspace" || !isMobile) ? (
-          <button
-            type="button"
-            onClick={handleScanAndAttach}
-            className="order-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
-          >
-            <ScanLine size={15} aria-hidden="true" />
-            {scanUploading ? t("documents.scanning") : t("documents.scanAppointmentRequest")}
           </button>
         ) : null}
         <label htmlFor="request-documents-upload-file" className="order-0 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground transition hover:opacity-90 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
@@ -585,8 +585,8 @@ export function RequestDocumentsPanel({
       {enableLocalScan && canScanOrUpload && (layout !== "workspace" || !isMobile) ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
           {scannerAppEnabled ? <a href={scannerAppDownloadUrl} className="underline" download>{t("documents.downloadScannerApp")}</a> : null}
-          {showScannerAppFallback ? <button type="button" className="underline" onClick={() => lastScannerAppLaunchUrl && launchScannerApp(lastScannerAppLaunchUrl)}>{t("documents.retryLaunchScannerApp")}</button> : null}
-          {naps2ScannerEnabled ? <button type="button" className="underline" onClick={handleScanAndAttach} disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}>{t("documents.useNaps2WebScan")}</button> : null}
+          {scannerAppEnabled && showScannerAppFallback ? <button type="button" className="underline" onClick={() => lastScannerAppLaunchUrl && launchScannerApp(lastScannerAppLaunchUrl)}>{t("documents.retryLaunchScannerApp")}</button> : null}
+          {naps2ScannerEnabled && scannerAppEnabled ? <button type="button" className="underline" onClick={handleLaunchScannerApp} disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending}>{t("documents.useScannerApp")}</button> : null}
         </div>
       ) : null}
       {failedScanUploads.length > 0 ? (
@@ -638,8 +638,8 @@ export function RequestDocumentsPanel({
               {canScanOrUpload && documents.length > 0 ? <>
                 <label htmlFor="request-documents-upload-file" className="mt-2 inline-flex min-h-8 w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] font-semibold text-accent focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={13} aria-hidden="true" />{t("documents.uploadRequest")}</label>
                 <button type="button" onClick={() => uploadMutation.mutate()} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[11px] font-semibold text-accent-foreground disabled:opacity-50" disabled={!file || uploadMutation.isPending || scanUploading || retryingFailedUploads}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button>
-                {!isMobile && scannerAppEnabled ? <button type="button" onClick={handleLaunchScannerApp} disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}</button> : null}
-                {!isMobile && !scannerAppEnabled && naps2ScannerEnabled ? <button type="button" onClick={handleScanAndAttach} disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scanUploading ? t("documents.scanning") : t("documents.scanAppointmentRequest")}</button> : null}
+                {!isMobile && naps2ScannerEnabled ? <button type="button" onClick={handleScanAndAttach} disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scanUploading ? t("documents.scanning") : t("documents.scanPaper")}</button> : null}
+                {!isMobile && !naps2ScannerEnabled && scannerAppEnabled ? <button type="button" onClick={handleLaunchScannerApp} disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}</button> : null}
               </> : null}
               {documents.length === 0 ? null : (
                 <div className="space-y-2">
@@ -696,7 +696,17 @@ export function RequestDocumentsPanel({
           className="input-premium"
         />
         <div className="flex gap-2">
-          {scannerAppEnabled && (
+          {naps2ScannerEnabled && (
+            <button
+              type="button"
+              onClick={handleScanAndAttach}
+              className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm"
+              disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+            >
+              {scanUploading ? t("documents.scanning") : t("documents.scanPaper")}
+            </button>
+          )}
+          {!naps2ScannerEnabled && scannerAppEnabled && (
             <button
               type="button"
               onClick={handleLaunchScannerApp}
@@ -704,16 +714,6 @@ export function RequestDocumentsPanel({
               disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending}
             >
               {scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}
-            </button>
-          )}
-          {!scannerAppEnabled && naps2ScannerEnabled && (
-            <button
-              type="button"
-              onClick={handleScanAndAttach}
-              className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm"
-              disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
-            >
-              {scanUploading ? t("documents.scanning") : t("documents.scanAppointmentRequest")}
             </button>
           )}
           <button

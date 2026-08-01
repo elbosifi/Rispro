@@ -192,9 +192,7 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   const printSettings = settings.printing_and_labels || {};
   const documentSettings = settings.documents_and_uploads || {};
   const rawScannerMode = documentSettings.scanner_bridge_mode || "";
-  const naps2WebScanEndpoint =
-    env.naps2WebscanEndpoint ||
-    String(documentSettings.scanner_bridge_endpoint || documentSettings.naps2_webscan_endpoint || "").trim();
+  const naps2WebScanEndpoint = env.naps2WebscanEndpoint || String(documentSettings.naps2_webscan_endpoint || "").trim() || "http://127.0.0.1:9801";
   const naps2WebScanEnabled =
     env.naps2WebscanEnabled ||
     String(documentSettings.naps2_webscan_enabled || "").trim().toLowerCase() === "enabled";
@@ -227,7 +225,8 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
       scanDpi: documentSettings.scan_dpi || "200",
       scanColorMode: documentSettings.scan_color_mode || "grayscale",
       scanFileFormat: documentSettings.scan_file_format || "pdf",
-      bridgeReady: String(scannerBridgeMode || "") === "naps2_webscan",
+      // Deprecated compatibility field: browser workstations determine direct eSCL reachability.
+      bridgeReady: false,
       naps2WebScanEnabled,
       naps2WebScanEndpoint,
       scannerAppEnabled: String(documentSettings.scanner_app_enabled || "enabled").trim().toLowerCase() === "enabled",

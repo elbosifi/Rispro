@@ -7,8 +7,6 @@ function buildConnectSources(): string[] {
   const qzInsecurePorts = [8182, 8283, 8384, 8485];
   const sources = [
     "'self'",
-    "http://127.0.0.1:9810",
-    "http://localhost:9810",
     "http://127.0.0.1:9801",
     "http://localhost:9801",
     ...qzHosts.flatMap((host) => qzSecurePorts.map((port) => `wss://${host}:${port}`)),

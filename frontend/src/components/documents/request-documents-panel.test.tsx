@@ -297,7 +297,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
   it("prepares scan and uploads a NAPS2 scanned appointment request through existing document upload API", async () => {
     renderPanel();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Scan Appointment Request" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
 
     await waitFor(() => {
       expect(mockPrepareScanSession).toHaveBeenCalledTimes(1);
@@ -335,10 +335,10 @@ describe("RequestDocumentsPanel local scan flow", () => {
   it("shows the NAPS2 scan button when the feature is enabled and user has access", async () => {
     renderPanel();
 
-    expect(await screen.findByRole("button", { name: "Scan Appointment Request" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Scan Paper" })).toBeTruthy();
   });
 
-  it("creates a durable scan session and shows scanner app fallback actions", async () => {
+  it("keeps Scanner Companion optional while direct NAPS2 remains the Scan Paper action", async () => {
     mockFetchIntegrationStatus.mockResolvedValue({
       scanner: {
         referralUploadEnabled: true,
@@ -363,17 +363,10 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
 
-    await waitFor(() => {
-      expect(mockCreateScanSession).toHaveBeenCalledWith({
-        appointmentId: 42,
-        patientId: 9,
-        documentType: "appointment_request",
-        appointmentRefType: "v2_booking",
-      });
-    });
+    await waitFor(() => expect(mockScanAppointmentRequest).toHaveBeenCalledTimes(1));
+    expect(mockCreateScanSession).not.toHaveBeenCalled();
     expect(await screen.findByText("Download Scanner App")).toBeTruthy();
-    expect(await screen.findByText("Retry Launch")).toBeTruthy();
-    expect(await screen.findByText("Use NAPS2.WebScan")).toBeTruthy();
+    expect(screen.queryByText("Retry Launch")).toBeNull();
   });
 
   it("does not show the NAPS2 scan action when local scan is disabled", async () => {
@@ -412,7 +405,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
   });
 
-  it("passes configured RISpro Scanner Bridge endpoint from integration status to scanner adapter", async () => {
+  it("passes configured direct NAPS2 endpoint from integration status to scanner adapter", async () => {
     mockFetchIntegrationStatus.mockResolvedValue({
       scanner: {
         referralUploadEnabled: true,
@@ -435,7 +428,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     renderPanel();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Scan Appointment Request" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
 
     await waitFor(() => {
       expect(mockScanAppointmentRequest).toHaveBeenCalledWith(
@@ -498,7 +491,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     renderPanel();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Scan Appointment Request" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
 
     await waitFor(() => {
       expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(1);
@@ -584,7 +577,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     expect(await screen.findByText("request.pdf · 2 KB")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
-    expect(screen.getByText("Scan Appointment Request")).toBeTruthy();
+    expect(screen.getByText("Scan Paper")).toBeTruthy();
   });
 
   it("does not mount scanner controls on mobile and keeps upload available", async () => {
