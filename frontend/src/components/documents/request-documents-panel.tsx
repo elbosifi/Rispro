@@ -102,7 +102,7 @@ export function RequestDocumentsPanel({
         title: "Document print failed",
         message: result.message,
         action: configurationError || !settings.browserPrintFallbackEnabled
-          ? { label: "Open Printing settings", onClick: () => window.location.assign("/settings?section=qz_tray") }
+          ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
           : { label: "Use browser printing", onClick: () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") },
       }, 10_000);
     } finally {

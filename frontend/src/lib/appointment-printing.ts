@@ -25,7 +25,7 @@ export async function printAppointmentSlipById(appointmentId: number, language?:
   try {
     const appointment = await getAppointmentById(appointmentId);
     const documentType = await resolveAppointmentDocumentType();
-    const result = await directPrint({ documentType, appointmentId, accessionNumber: appointment.accessionNumber });
+    const result = await directPrint({ documentType, appointmentId, accessionNumber: appointment.accessionNumber, appointmentSnapshot: appointment });
     if (result.success) {
       pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
       return;
@@ -44,7 +44,7 @@ export async function printAppointmentSlipById(appointmentId: number, language?:
 export async function printAccessionLabelById(appointmentId: number, language?: Language): Promise<void> {
   try {
     const appointment = await getAppointmentById(appointmentId);
-    const result = await directPrint({ documentType: "ACCESSION_LABEL", appointmentId, accessionNumber: appointment.accessionNumber });
+    const result = await directPrint({ documentType: "ACCESSION_LABEL", appointmentId, accessionNumber: appointment.accessionNumber, appointmentSnapshot: appointment });
     if (result.success) {
       pushToast({ type: "success", title: "Label job submitted", message: `Print job sent to ${result.printerName}.` });
       return;
@@ -64,7 +64,7 @@ function showDirectPrintFailure(result: Extract<DirectPrintResult, { success: fa
     title: t(resolvePrintLanguage(language), "print.failed"),
     message: result.message,
     action: configurationError || !browserFallback || !settings.browserPrintFallbackEnabled
-      ? { label: "Open Printing settings", onClick: () => window.location.assign("/settings?section=qz_tray") }
+      ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
       : { label: "Use browser printing", onClick: browserFallback },
   }, 10_000);
 }

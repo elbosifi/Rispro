@@ -18,6 +18,8 @@ export interface PrinterProfile {
   scaleContent: boolean;
   marginsMm?: { top: number; right: number; bottom: number; left: number };
   printerTray?: string;
+  customPaperSize: boolean;
+  rasterize: boolean;
   enabled: boolean;
 }
 
@@ -41,23 +43,31 @@ export interface DirectPrintRequest {
   appointmentId?: string | number;
   accessionNumber?: string;
   copies?: number;
+  appointmentSnapshot?: import("@/lib/mappers").AppointmentWithDetails;
 }
 
 export type DirectPrintErrorCode =
   | "QZ_NOT_INSTALLED"
   | "QZ_CONNECTION_FAILED"
+  | "QZ_NOT_RUNNING"
+  | "QZ_CSP_BLOCKED"
+  | "LOCAL_NETWORK_PERMISSION_DENIED"
   | "PRINTER_NOT_CONFIGURED"
   | "PRINTER_NOT_FOUND"
+  | "PRINTER_SETTINGS_INVALID"
   | "DOCUMENT_GENERATION_FAILED"
   | "PAGE_SIZE_MISMATCH"
   | "INVALID_PDF"
   | "DUPLICATE_PRINT"
   | "PRINT_TIMEOUT"
+  | "PRINT_STATUS_UNKNOWN"
   | "CERTIFICATE_REJECTED"
   | "SIGNATURE_FAILED"
+  | "SIGNING_PAYLOAD_TOO_LARGE"
   | "PRINT_FAILED";
 
 export type DirectPrintResult =
   | { success: true; printerName: string; jobName: string }
   | { success: false; errorCode: DirectPrintErrorCode; message: string };
 
+export type DirectPrintJobState = "preparing" | "submitting" | "submitted" | "failed" | "status_unknown";

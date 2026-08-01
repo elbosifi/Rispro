@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { directPrint, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
-import { createDefaultQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
+import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
+import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 
 const getInstalledPrinters = vi.fn();
 const printPdf = vi.fn();
 const createAppointmentSlipPdfBlob = vi.fn();
+const connectQzTray = vi.fn();
 
 vi.mock("./qz-tray-service", () => ({
+  QzTrayError: class QzTrayError extends Error { constructor(public code: string, message: string) { super(message); } },
+  connectQzTray: (...args: unknown[]) => connectQzTray(...args),
   getInstalledPrinters: (...args: unknown[]) => getInstalledPrinters(...args),
   printPdf: (...args: unknown[]) => printPdf(...args),
 }));
@@ -25,8 +28,11 @@ describe("direct print service", () => {
     localStorage.clear();
     getInstalledPrinters.mockReset();
     printPdf.mockReset();
+    printPdf.mockResolvedValue(undefined);
     createAppointmentSlipPdfBlob.mockReset();
     createAppointmentSlipPdfBlob.mockResolvedValue(pdf());
+    connectQzTray.mockReset();
+    connectQzTray.mockResolvedValue(undefined);
   });
 
   it("returns a structured missing-configuration failure", async () => {
@@ -45,9 +51,10 @@ describe("direct print service", () => {
 
   it("rejects an A4 profile with label-sized paper", async () => {
     const settings = createDefaultQzPrinterSettings();
+    expect(validateProfilePageSize({ ...settings.profiles[0], printerName: "A4", paperWidthMm: 50, paperHeightMm: 30 })).toBe(false);
     Object.assign(settings.profiles[0], { printerName: "A4", paperWidthMm: 50, paperHeightMm: 30 });
     saveQzPrinterSettings(settings);
-    await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: false, errorCode: "PAGE_SIZE_MISMATCH" });
+    expect(loadQzPrinterSettings().profiles[0]).toMatchObject({ paperWidthMm: 210, paperHeightMm: 297 });
   });
 
   it("prevents duplicate in-flight clicks", async () => {
@@ -63,10 +70,47 @@ describe("direct print service", () => {
     await expect(first).resolves.toMatchObject({ success: true, printerName: "A4" });
   });
 
-  it("maps signing and timeout failures to stable codes", () => {
-    expect(mapDirectPrintError(new Error("Unable to sign QZ request"))).toMatchObject({ errorCode: "SIGNATURE_FAILED" });
-    expect(mapDirectPrintError(new Error("Print timeout"))).toMatchObject({ errorCode: "PRINT_TIMEOUT" });
-    expect(mapDirectPrintError(new Error("QZ Tray is not installed"))).toMatchObject({ errorCode: "QZ_NOT_INSTALLED" });
+  it("maps typed service failures without unsafe substring guessing", () => {
+    expect(mapDirectPrintError(new DirectPrintError("SIGNATURE_FAILED", "Signing rejected"))).toMatchObject({ errorCode: "SIGNATURE_FAILED" });
+    expect(mapDirectPrintError(new Error("document connect sign"))).toMatchObject({ errorCode: "PRINT_FAILED" });
+  });
+
+  it("keeps a timed-out submission locked until the underlying QZ promise settles", async () => {
+    vi.useFakeTimers();
+    const previous = DIRECT_PRINT_TIMEOUTS.submissionStatusMs;
+    DIRECT_PRINT_TIMEOUTS.submissionStatusMs = 20;
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+    let release!: () => void;
+    printPdf.mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+    const request = { documentType: "A4_DOCUMENT" as const, appointmentId: 7 };
+    const first = directPrint(request);
+    await vi.advanceTimersByTimeAsync(21);
+    await expect(first).resolves.toMatchObject({ success: false, errorCode: "PRINT_STATUS_UNKNOWN" });
+    expect(getDirectPrintJobState(request)).toBe("status_unknown");
+    await expect(directPrint(request)).resolves.toMatchObject({ errorCode: "DUPLICATE_PRINT" });
+    release();
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+    expect(getDirectPrintJobState(request)).toBeUndefined();
+    printPdf.mockResolvedValue(undefined);
+    await expect(directPrint(request)).resolves.toMatchObject({ success: true, printerName: "A4" });
+    DIRECT_PRINT_TIMEOUTS.submissionStatusMs = previous;
+    vi.useRealTimers();
+  });
+
+  it("releases the duplicate lock after a normal submission failure", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+    printPdf.mockRejectedValueOnce(new DirectPrintError("PRINT_FAILED", "Queue rejected the job"));
+    const request = { documentType: "A4_DOCUMENT" as const, appointmentId: 7 };
+    await expect(directPrint(request)).resolves.toMatchObject({ success: false, errorCode: "PRINT_FAILED" });
+    expect(getDirectPrintJobState(request)).toBeUndefined();
+    await expect(directPrint(request)).resolves.toMatchObject({ success: true, printerName: "A4" });
   });
 
   it("validates standard page dimensions", () => {

@@ -11,16 +11,9 @@ import {
 } from "@/lib/api-hooks";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
+import { containsArabic, drawPdfText, ensureArabicPdfFonts, NOTO_NASKH_BOLD_URL, NOTO_NASKH_REGULAR_URL, processPdfText } from "@/lib/pdf-text-utils";
 
-const NOTO_NASKH_REGULAR_URL = new URL("../assets/fonts/NotoNaskhArabic-Regular.ttf", import.meta.url).toString();
-const NOTO_NASKH_BOLD_URL = new URL("../assets/fonts/NotoNaskhArabic-Bold.ttf", import.meta.url).toString();
-const ARABIC_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
-const NOTO_FONT_FAMILY = "NotoNaskhArabic";
-const NOTO_REGULAR_FILE = "NotoNaskhArabic-Regular.ttf";
-const NOTO_BOLD_FILE = "NotoNaskhArabic-Bold.ttf";
 const HIDDEN_APPOINTMENT_STATUSES = new Set(["cancelled", "discontinued", "voided"]);
-
-let notoFontsLoaded: Promise<void> | null = null;
 
 function escapeHtml(str: string = ""): string {
   return String(str)
@@ -158,20 +151,6 @@ function shorten(value: string, maxLength: number): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
-function containsArabic(value: string): boolean {
-  return ARABIC_REGEX.test(String(value || ""));
-}
-
-function processPdfText(doc: jsPDF, value: string): string {
-  const cleaned = String(value || "").trim();
-  if (!cleaned) return "";
-  const processor = (doc as jsPDF & { processArabic?: (input: string) => string }).processArabic;
-  if (containsArabic(cleaned) && typeof processor === "function") {
-    return processor(cleaned);
-  }
-  return cleaned;
-}
-
 function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
   const cleaned = processPdfText(doc, String(value || "").trim());
   if (!cleaned) return ["—"];
@@ -180,58 +159,6 @@ function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number
   const visible = lines.slice(0, maxLines);
   visible[maxLines - 1] = shorten(visible[maxLines - 1], Math.max(12, visible[maxLines - 1].length - 1));
   return visible;
-}
-
-function setPdfFont(doc: jsPDF, style: "normal" | "bold" = "normal"): void {
-  doc.setFont(NOTO_FONT_FAMILY, style);
-}
-
-async function loadFontAsBase64(url: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load font: ${url}`);
-  }
-  const buffer = await response.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
-
-async function ensureArabicFontsLoaded(doc: jsPDF): Promise<void> {
-  if (!notoFontsLoaded) {
-    notoFontsLoaded = (async () => {
-      const [regular, bold] = await Promise.all([loadFontAsBase64(NOTO_NASKH_REGULAR_URL), loadFontAsBase64(NOTO_NASKH_BOLD_URL)]);
-      const instance = doc as jsPDF & { addFileToVFS?: (fileName: string, base64: string) => void; addFont?: (fileName: string, fontName: string, fontStyle: string) => void };
-      if (!instance.addFileToVFS || !instance.addFont) {
-        throw new Error("jsPDF font registration is unavailable.");
-      }
-      instance.addFileToVFS(NOTO_REGULAR_FILE, regular);
-      instance.addFont(NOTO_REGULAR_FILE, NOTO_FONT_FAMILY, "normal");
-      instance.addFileToVFS(NOTO_BOLD_FILE, bold);
-      instance.addFont(NOTO_BOLD_FILE, NOTO_FONT_FAMILY, "bold");
-    })();
-  }
-  await notoFontsLoaded;
-}
-
-function drawPdfText(
-  doc: jsPDF,
-  text: string,
-  x: number,
-  y: number,
-  options?: { align?: "left" | "right" | "center"; bold?: boolean }
-) {
-  const processed = processPdfText(doc, text);
-  const align = options?.align ?? "left";
-  const bold = options?.bold ?? false;
-  setPdfFont(doc, bold ? "bold" : "normal");
-  doc.setR2L(containsArabic(text) || align === "right");
-  doc.text(processed, x, y, { align });
-  doc.setR2L(false);
 }
 
 function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
@@ -764,7 +691,7 @@ export async function createAppointmentSlipPdfBlob(
     format: [paper.widthPt, paper.heightPt],
     compress: true,
   });
-  await ensureArabicFontsLoaded(doc);
+  await ensureArabicPdfFonts(doc);
 
   doc.setFillColor("#ffffff");
   doc.rect(0, 0, layout.page.w, layout.page.h, "F");

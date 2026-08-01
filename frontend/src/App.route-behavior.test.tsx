@@ -152,6 +152,9 @@ vi.mock("@/pages/worklist-monitor/worklist-monitor-page", () => ({
 vi.mock("@/pages/settings/settings-page", () => ({
   default: () => <TestPage testId="settings-page" label="Settings Page" />,
 }));
+vi.mock("@/pages/workstation/workstation-printing-page", () => ({
+  default: () => <TestPage testId="workstation-printing-page" label="Workstation Printing Page" />,
+}));
 vi.mock("@/pages/legacy-access-viewer/legacy-access-viewer-page", () => ({
   default: () => <TestPage testId="legacy-page" label="Legacy Page" />,
 }));
@@ -213,6 +216,20 @@ describe("App route behavior", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/appointments"));
     expect(await screen.findByTestId("appointment-create-page")).toBeTruthy();
+  });
+
+  it.each(["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const)("allows %s to open workstation printing without exposing admin settings", async (role) => {
+    testState.user = { id: 10, username: role, fullName: role, role } as User;
+    renderAppAt("/workstation/printing");
+    expect(await screen.findByTestId("workstation-printing-page")).toBeTruthy();
+    expect(screen.queryByTestId("settings-page")).toBeNull();
+  });
+
+  it("blocks a non-printing administrative role from workstation printing", async () => {
+    testState.user = { id: 11, username: "administrative", fullName: "Administrative", role: "administrative" } as User;
+    renderAppAt("/workstation/printing");
+    await waitFor(() => expect(window.location.pathname).not.toBe("/workstation/printing"));
+    expect(screen.queryByTestId("workstation-printing-page")).toBeNull();
   });
 
   it("allows supervisor access to appointment administration when page visibility allows it", async () => {

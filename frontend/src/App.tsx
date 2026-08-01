@@ -9,6 +9,9 @@ import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
 import { PasskeySettingsButton } from "@/components/auth/passkey-settings-button";
+import { WorkstationPrintingButton } from "@/components/printing/workstation-printing-button";
+import WorkstationPrintingPage from "@/pages/workstation/workstation-printing-page";
+import { canAccessWorkstationPrinting } from "@/lib/workstation-printing-access";
 import { LoginPage } from "@/pages/auth/login-page";
 import { DashboardPage } from "@/pages/dashboard/dashboard-page";
 import SearchPage from "@/pages/search/search-page";
@@ -255,7 +258,7 @@ function AppContent() {
             <SchedulingOverrideApprovalCenter user={user} />
           </>
         )}
-        accountMenuActions={<><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
+        accountMenuActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
         canAccessSettings={canRoleAccessRoute(normalizedMatrix, "settings", user.role)}
         onSettings={() => navigate("/settings")}
         onUndo={() => navigate(-1)}
@@ -311,6 +314,7 @@ function AppContent() {
             <Route path="/pacs/remap" element={guardedPage("pacs.remap", <PacsRemapPage />)} />
             <Route path="/worklist-monitor" element={guardedPage("worklist.monitor", <WorklistMonitorPage />)} />
             <Route path="/settings" element={guardedPage("settings", <SettingsPage />)} />
+            <Route path="/workstation/printing" element={canAccessWorkstationPrinting(user.role) ? <WorkstationPrintingPage /> : <Navigate to="/" replace />} />
             <Route path="/legacy-access-viewer" element={guardedPage("legacy", <LegacyAccessViewerPage />)} />
             <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />
             <Route
@@ -335,7 +339,7 @@ function AppContent() {
         onClose={() => setMobileNavOpen(false)}
         onToggleLanguage={toggleLanguage}
         onLogout={logout}
-        accountActions={<><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
+        accountActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
       />
 
       <ToastViewport />

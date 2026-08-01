@@ -48,7 +48,8 @@ describe("printAppointmentSlipById", () => {
     await printAppointmentSlipById(42);
 
     expect(mockGetAppointmentById).toHaveBeenCalledWith(42);
-    expect(mockDirectPrint).toHaveBeenCalledWith({ documentType: "A5_DOCUMENT", appointmentId: 42, accessionNumber: "ACC-42" });
+    expect(mockDirectPrint).toHaveBeenCalledWith({ documentType: "A5_DOCUMENT", appointmentId: 42, accessionNumber: "ACC-42", appointmentSnapshot: expect.objectContaining({ id: 42 }) });
+    expect(mockGetAppointmentById).toHaveBeenCalledTimes(1);
     expect(mockPrintAppointmentSlip).not.toHaveBeenCalled();
     expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "success", message: "Print job sent to RISPRO-A5." }));
   });

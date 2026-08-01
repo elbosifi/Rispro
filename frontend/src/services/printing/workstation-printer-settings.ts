@@ -2,24 +2,27 @@ import type { PrinterDocumentType, PrinterProfile, QzPrinterSettings } from "@/t
 
 export const QZ_PRINTER_SETTINGS_KEY = "rispro.qzPrinterSettings.v1";
 export const RISPRO_WORKSTATION_ID_KEY = "rispro.workstationId.v1";
+export const PRINTER_SETTING_LIMITS = { copies: { min: 1, max: 99 }, widthMm: { min: 10, max: 500 }, heightMm: { min: 10, max: 1000 } } as const;
 
 export const DEFAULT_PRINTER_PROFILES: PrinterProfile[] = [
-  profile("A4_DOCUMENT", 210, 297),
-  profile("A5_DOCUMENT", 148, 210),
-  profile("ACCESSION_LABEL", 50, 30, false),
-  profile("RECEIPT", 80, 200),
+  profile("A4_DOCUMENT", 210, 297, true, false, false),
+  profile("A5_DOCUMENT", 148, 210, true, false, false),
+  profile("ACCESSION_LABEL", 50, 30, false, true, true),
+  profile("RECEIPT", 80, 200, true, true, false),
 ];
 
-function profile(documentType: PrinterDocumentType, width: number, height: number, scaleContent = true): PrinterProfile {
+function profile(documentType: PrinterDocumentType, width: number, height: number, scaleContent: boolean, customPaperSize: boolean, rasterize: boolean): PrinterProfile {
   return {
     id: documentType,
     documentType,
     printerName: "",
     paperWidthMm: width,
     paperHeightMm: height,
-    orientation: "portrait",
+    orientation: width > height ? "landscape" : "portrait",
     copies: 1,
     scaleContent,
+    customPaperSize,
+    rasterize,
     marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
     enabled: true,
   };
@@ -27,7 +30,7 @@ function profile(documentType: PrinterDocumentType, width: number, height: numbe
 
 export function getWorkstationId(storage: Storage = window.localStorage): string {
   const existing = storage.getItem(RISPRO_WORKSTATION_ID_KEY)?.trim();
-  if (existing) return existing;
+  if (existing && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existing)) return existing;
   const id = crypto.randomUUID();
   storage.setItem(RISPRO_WORKSTATION_ID_KEY, id);
   return id;
@@ -43,9 +46,18 @@ export function createDefaultQzPrinterSettings(storage: Storage = window.localSt
   };
 }
 
-function finitePositive(value: unknown, fallback: number): number {
+function finiteBounded(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
+function normalizedMargins(value: PrinterProfile["marginsMm"], fallback: NonNullable<PrinterProfile["marginsMm"]>, width: number, height: number) {
+  if (!value) return fallback;
+  const side = (candidate: unknown, related: number) => finiteBounded(candidate, 0, 0, Math.max(0, related - 0.01));
+  const result = { top: side(value.top, height), right: side(value.right, width), bottom: side(value.bottom, height), left: side(value.left, width) };
+  if (result.left + result.right >= width) { result.left = 0; result.right = 0; }
+  if (result.top + result.bottom >= height) { result.top = 0; result.bottom = 0; }
+  return result;
 }
 
 export function normalizeQzPrinterSettings(value: unknown, storage: Storage = window.localStorage): QzPrinterSettings {
@@ -59,27 +71,32 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
     profiles: defaults.profiles.map((fallback) => {
       const saved = savedProfiles.find((candidate) => candidate?.documentType === fallback.documentType);
       if (!saved) return fallback;
+      const standard = fallback.documentType === "A4_DOCUMENT" || fallback.documentType === "A5_DOCUMENT";
+      const width = standard ? fallback.paperWidthMm : finiteBounded(saved.paperWidthMm, fallback.paperWidthMm, PRINTER_SETTING_LIMITS.widthMm.min, PRINTER_SETTING_LIMITS.widthMm.max);
+      const height = standard ? fallback.paperHeightMm : finiteBounded(saved.paperHeightMm, fallback.paperHeightMm, PRINTER_SETTING_LIMITS.heightMm.min, PRINTER_SETTING_LIMITS.heightMm.max);
       return {
         ...fallback,
         id: String(saved.id || fallback.id),
         printerName: String(saved.printerName || "").trim(),
-        paperWidthMm: finitePositive(saved.paperWidthMm, fallback.paperWidthMm),
-        paperHeightMm: finitePositive(saved.paperHeightMm, fallback.paperHeightMm),
+        paperWidthMm: width,
+        paperHeightMm: height,
         orientation: saved.orientation === "landscape" ? "landscape" : "portrait",
-        copies: Math.max(1, Math.floor(finitePositive(saved.copies, 1))),
+        copies: Math.floor(finiteBounded(saved.copies, 1, PRINTER_SETTING_LIMITS.copies.min, PRINTER_SETTING_LIMITS.copies.max)),
         scaleContent: saved.scaleContent !== false,
-        marginsMm: saved.marginsMm ? {
-          top: Math.max(0, Number(saved.marginsMm.top) || 0),
-          right: Math.max(0, Number(saved.marginsMm.right) || 0),
-          bottom: Math.max(0, Number(saved.marginsMm.bottom) || 0),
-          left: Math.max(0, Number(saved.marginsMm.left) || 0),
-        } : fallback.marginsMm,
+        marginsMm: normalizedMargins(saved.marginsMm, fallback.marginsMm!, width, height),
         printerTray: String(saved.printerTray || "").trim() || undefined,
+        customPaperSize: standard ? false : true,
+        rasterize: saved.rasterize == null ? fallback.rasterize : saved.rasterize === true,
         enabled: saved.enabled !== false,
       };
     }),
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : defaults.updatedAt,
   };
+}
+
+export function clearUnavailablePrinterTrays(settings: QzPrinterSettings, details: Array<{ name: string; trays: string[] }>): QzPrinterSettings {
+  const byName = new Map(details.map((detail) => [detail.name, detail.trays]));
+  return { ...settings, profiles: settings.profiles.map((profile) => profile.printerTray && byName.has(profile.printerName) && !byName.get(profile.printerName)!.includes(profile.printerTray) ? { ...profile, printerTray: undefined } : profile) };
 }
 
 export function loadQzPrinterSettings(storage: Storage = window.localStorage): QzPrinterSettings {
@@ -102,4 +119,3 @@ export function resolvePrinterProfile(documentType: PrinterDocumentType, setting
   const profile = settings.profiles.find((item) => item.documentType === documentType && item.enabled);
   return profile ?? null;
 }
-

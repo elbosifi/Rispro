@@ -95,6 +95,7 @@ export function createApp(): Application {
   const PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/stage-multipart";
   const SCAN_SESSION_UPLOAD_PATH = "/api/scan-sessions/upload";
   const ADMIN_RESTORE_PREFIX = "/api/admin/restore";
+  const QZ_SIGNING_PATH = "/api/printing/qz-sign";
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (
       req.path === LEGACY_UPLOAD_PATH ||
@@ -105,6 +106,7 @@ export function createApp(): Application {
       req.path === PACS_REMAP_STAGE_MULTIPART_UPLOAD_PATH ||
       req.path === SCAN_SESSION_UPLOAD_PATH ||
       req.path.startsWith(ADMIN_RESTORE_PREFIX)
+      || req.path === QZ_SIGNING_PATH
     ) {
       // Let route-specific body parsers handle it.
       return next();

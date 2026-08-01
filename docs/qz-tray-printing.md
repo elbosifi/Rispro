@@ -8,7 +8,7 @@ RISpro uses QZ Tray pixel printing for PDFs and HTML. Normal authenticated appoi
 - `frontend/src/services/printing/direct-print-service.ts` resolves a document type to a workstation profile, verifies the exact queue still exists, generates/fetches content, validates the paper route, submits it, and records the outcome.
 - `frontend/src/services/printing/workstation-printer-settings.ts` stores version 1 settings under `rispro.qzPrinterSettings.v1`. A separate stable UUID is stored under `rispro.workstationId.v1`.
 - Appointment A4/A5 PDFs reuse `createAppointmentSlipPdfBlob`. Accession labels use a 50 x 30 mm PDF by default. Patient PDFs reuse `/api/documents/:documentId/view`.
-- `/api/printing/qz-certificate` and `/api/printing/qz-sign` are authenticated. The private key is used only by the server. `/api/printing/audit` writes metadata to the existing audit log and never stores document content.
+- `/api/printing/qz-certificate` and `/api/printing/qz-sign` are authenticated and limited to printing roles. The signer accepts only QZ Tray 2.2.6 calls `printers.find`, `printers.detail`, and `print`; print calls must contain local named-printer pixel PDF or HTML data. File, socket, serial, USB, HID, raw-print, and unknown calls are rejected. The private key is used only by the server. `/api/printing/audit` stores validated client-reported metadata, never document content.
 
 ## Server configuration
 
@@ -17,18 +17,24 @@ Set these secrets on the RISpro application server and restart it:
 ```env
 QZ_CERTIFICATE="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
 QZ_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+QZ_ALLOW_INSECURE_WEBSOCKET=false
+QZ_SIGNING_REQUEST_LIMIT_MB=25
 ```
 
-Use the QZ-issued `digital-certificate.txt` content for `QZ_CERTIFICATE`. Use its matching RSA private key for `QZ_PRIVATE_KEY`. Do not put either value in frontend source, and never commit the real values. RISpro signs QZ requests with RSA SHA-512.
+Use the QZ-issued `digital-certificate.txt` content for `QZ_CERTIFICATE`, or deploy and trust a self-managed certificate on every workstation. Use its matching RSA private key for `QZ_PRIVATE_KEY`. The private key must remain server-side; never put it in frontend source or commit it. Silent trusted printing is available only after certificate provisioning and workstation trust.
+
+Production RISpro must use HTTPS. CSP always permits secure QZ WebSockets for `localhost`, `localhost.qz.io`, and `127.0.0.1` on ports 8181, 8282, 8383, and 8484. The browser may also require local-network-access permission. Plain-HTTP development can explicitly enable QZ ports 8182, 8283, 8384, and 8485 with `QZ_ALLOW_INSECURE_WEBSOCKET=true`; this is off by default.
+
+`QZ_SIGNING_REQUEST_LIMIT_MB` limits the UTF-8 bytes of the inner signed request without raising RISpro's global parser limit. At 25 MiB, Base64 expansion leaves approximately 18.75 MiB for PDF bytes before small JSON/configuration overhead. QZ Tray 2.2.6 asks the signature callback to sign a SHA-256 digest; RISpro sends the exact request alongside that digest, recomputes SHA-256 server-side, validates the request, then signs the verified digest with RSA SHA-512.
 
 On each workstation:
 
 1. Install and start a QZ Tray 2.2-compatible release.
 2. Open RISpro over its production HTTPS origin and sign in.
-3. Open **Settings -> Printing -> QZ Tray**.
+3. Open **Account -> Workstation printing** (`/workstation/printing`). Receptionist, supervisor, modality staff, doctor, and super administrator roles can access this local-only page without gaining general administrative settings access.
 4. Confirm QZ is connected. At the first trusted connection, approve the RISpro certificate in QZ Tray and remember the decision.
 5. Refresh printers, select the exact OS queue returned by QZ for A4, A5, accession label, and receipt profiles, and select a tray when the driver exposes trays.
-6. Set label dimensions (50 x 30 mm initially) and receipt roll width (80 mm initially), run a test print, then save.
+6. Set label dimensions (50 x 30 mm initially) and receipt roll width (80 mm initially), configure matching custom media in the Windows driver, and enable per-profile rasterization only if that driver requires it. A4 and A5 remain standard vector PDF jobs by default. Run a test print, then save.
 
 Settings are browser/workstation-local. The same user can therefore map different queue names on two workstations. Clearing site storage removes the mapping and workstation identity.
 
@@ -51,7 +57,10 @@ QZ resolving a print promise means the job was submitted to the operating-system
 
 ## Current limitations
 
+QZ acceptance means submitted to the operating-system queue, not physically printed. If the 30-second submission-status wait expires, RISpro reports `status_unknown`, retains the duplicate lock until QZ settles, and tells the user not to retry. Connection waits 15 seconds and document preparation permits 60 seconds.
+
 - Existing day-list, reporting-board, statistics, protocol-sheet, and public appointment preview workflows remain browser printing because they do not yet expose exact reusable PDF generators. They were not removed or silently redirected.
 - Receipt routing and configuration exist, but RISpro has no current receipt document generator or receipt print button.
 - Patient PDFs are routed explicitly as A4 or A5 by the user; RISpro does not guess a printer by inspecting PDF content.
 - QZ tray/status capabilities vary by Windows driver. RISpro records submission acceptance, not physical completion.
+- Physical media output, Arabic glyph quality, certificate trust, driver rasterization needs, tray discovery, and printer status still require testing on each supported workstation and printer model.

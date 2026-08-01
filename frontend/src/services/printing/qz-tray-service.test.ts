@@ -41,7 +41,7 @@ describe("QZ Tray service", () => {
     vi.clearAllMocks();
     qzMocks.connect.mockImplementation(async () => { qzMocks.active = true; });
     qzMocks.disconnect.mockResolvedValue(undefined);
-    qzMocks.create.mockReturnValue({ config: true });
+    qzMocks.create.mockImplementation((printer: string, options: Record<string, unknown>) => ({ config: true, getPrinter: () => ({ name: printer }), getOptions: () => options }));
     qzMocks.print.mockResolvedValue(undefined);
   });
 
@@ -66,8 +66,14 @@ describe("QZ Tray service", () => {
   it("creates a millimetre pixel-PDF job with raw Base64", async () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "RISPRO A4", printerTray: "Tray 1" };
     await printPdf(profile, "data:application/pdf;base64,JVBERi0xLjQ=", { copies: 2, jobName: "RISpro test" });
-    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4", expect.objectContaining({ units: "mm", size: { width: 210, height: 297 }, copies: 2, printerTray: "Tray 1", jobName: "RISpro test" }));
-    expect(qzMocks.print).toHaveBeenCalledWith({ config: true }, [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0xLjQ=" }]);
+    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4", expect.objectContaining({ units: "mm", size: { width: 210, height: 297, custom: false }, copies: 2, printerTray: "Tray 1", jobName: "RISpro test", rasterize: false }));
+    expect(qzMocks.print).toHaveBeenCalledWith(expect.objectContaining({ config: true }), [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0xLjQ=" }]);
+  });
+
+  it("uses custom media and profile-controlled rasterization for a 50 x 30 mm label", async () => {
+    const profile = { ...DEFAULT_PRINTER_PROFILES[2], printerName: "Xprinter" };
+    await printPdf(profile, "JVBERi0xLjQ=", { jobName: "label" });
+    expect(qzMocks.create).toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 50, height: 30, custom: true }, rasterize: true }));
   });
 
   it("removes a PDF data URL prefix and leaves raw Base64", () => {

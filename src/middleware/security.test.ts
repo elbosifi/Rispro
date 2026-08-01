@@ -41,6 +41,29 @@ describe("securityHeaders", () => {
     }
   });
 
+  it("allows every secure QZ localhost endpoint and excludes insecure WebSockets by default", () => {
+    const previous = env.qzAllowInsecureWebsocket;
+    env.qzAllowInsecureWebsocket = false;
+    try {
+      const headers: Record<string, string> = {};
+      securityHeaders({} as any, { setHeader(name: string, value: string) { headers[name] = value; } } as any, () => {});
+      for (const host of ["localhost", "localhost.qz.io", "127.0.0.1"]) for (const port of [8181, 8282, 8383, 8484]) assert.match(headers["Content-Security-Policy"], new RegExp(`wss://${host.replaceAll(".", "\\.")}:${port}`));
+      assert.equal(headers["Content-Security-Policy"].includes(" ws://"), false);
+    } finally { env.qzAllowInsecureWebsocket = previous; }
+  });
+
+  it("adds QZ insecure development endpoints only when explicitly enabled", () => {
+    const previous = env.qzAllowInsecureWebsocket;
+    env.qzAllowInsecureWebsocket = true;
+    try {
+      const headers: Record<string, string> = {};
+      securityHeaders({} as any, { setHeader(name: string, value: string) { headers[name] = value; } } as any, () => {});
+      assert.equal(headers["Content-Security-Policy"].includes("ws://localhost:8182"), true);
+      assert.equal(headers["Content-Security-Policy"].includes("ws://localhost.qz.io:8283"), true);
+      assert.equal(headers["Content-Security-Policy"].includes("ws://127.0.0.1:8485"), true);
+    } finally { env.qzAllowInsecureWebsocket = previous; }
+  });
+
   it("allows local scanner bridge endpoints in connect-src when configured", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;

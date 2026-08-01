@@ -101,6 +101,8 @@ export interface EnvConfig {
   sessionHours: number;
   supervisorReauthMinutes: number;
   requestBodyLimit: string;
+  qzAllowInsecureWebsocket: boolean;
+  qzSigningRequestLimitMb: number;
   trustProxy: boolean | number | string;
   uploadsDir: string;
   dicomRemapStagingDir: string;
@@ -189,6 +191,8 @@ export const env: EnvConfig = {
   sessionHours: readPositiveInteger("SESSION_HOURS", 8),
   supervisorReauthMinutes: readPositiveInteger("SUPERVISOR_REAUTH_MINUTES", 10),
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "75mb",
+  qzAllowInsecureWebsocket: readBoolean("QZ_ALLOW_INSECURE_WEBSOCKET", false),
+  qzSigningRequestLimitMb: readPositiveInteger("QZ_SIGNING_REQUEST_LIMIT_MB", 25),
   trustProxy: readTrustProxy(),
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",
   dicomRemapStagingDir: String(process.env.DICOM_REMAP_STAGING_DIR || "storage/dicom/remap-staging").trim(),
