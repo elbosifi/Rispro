@@ -67,6 +67,7 @@ import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
 import RequestScanAutomationSection from "./request-scan-automation-section";
 import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
+import QzTrayPrintingSection from "./qz-tray-printing-section";
 import ExamTypesSection from "./exam-types-section";
 import { isReAuthRequiredError } from "./settings-page.helpers";
 import type {
@@ -180,6 +181,7 @@ type SettingsSection =
   | "name_dictionary"
   | "not_allowed_name_words"
   | "appointment_slip"
+  | "qz_tray"
   | "patient_qr_self_service"
   | "passkey_configuration"
   | "sonicdicom_reports"
@@ -211,6 +213,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "modalities",
   "not_allowed_name_words",
   "appointment_slip",
+  "qz_tray",
   "patient_qr_self_service",
   "passkey_configuration",
   "sonicdicom_reports",
@@ -234,6 +237,7 @@ const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">>
   name_dictionary: "clinical",
   not_allowed_name_words: "clinical",
   appointment_slip: "clinical",
+  qz_tray: "system",
   patient_qr_self_service: "clinical",
   passkey_configuration: "admin",
   scheduling_and_capacity: "scheduling",
@@ -277,6 +281,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   if (section === "appointment_slip") {
     return "Appointment Slip Settings";
   }
+  if (section === "qz_tray") {
+    return "Printing → QZ Tray";
+  }
   if (section === "sonicdicom_reports") {
     return "SonicDICOM Reports";
   }
@@ -307,7 +314,7 @@ function groupLabel(t: (key: TranslationKey, params?: Record<string, string | nu
 
 export default function SettingsPage() {
   const { t } = useLanguage();
-  const [section, setSection] = useState<SettingsSection>("menu");
+  const [section, setSection] = useState<SettingsSection>(() => new URLSearchParams(window.location.search).get("section") === "qz_tray" ? "qz_tray" : "menu");
   const [settingsQuery, setSettingsQuery] = useState("");
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("all");
   const [showReAuthModal, setShowReAuthModal] = useState(false);
@@ -462,6 +469,7 @@ export default function SettingsPage() {
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
             {section === "not_allowed_name_words" && <NotAllowedNameWordsSection onReAuthRequired={requestReAuth} />}
             {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
+            {section === "qz_tray" && <QzTrayPrintingSection />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "passkey_configuration" && user?.role === "super_admin" && <PasskeyConfigurationSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "patient_duplicate_resolver" && <PatientDuplicateResolverSection onReAuthRequired={requestReAuth} />}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileImage, FileText, MoreVertical, MousePointer2, Pencil, Redo2, Save as SaveIcon, ScanLine, Square, Trash2, Type, Undo2, Upload } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileImage, FileText, Loader2, MoreVertical, MousePointer2, Pencil, Printer, Redo2, Save as SaveIcon, ScanLine, Square, Trash2, Type, Undo2, Upload } from "lucide-react";
 import { useLanguage } from "@/providers/language-provider";
 import {
   deleteAppointmentDocument,
@@ -22,6 +22,9 @@ import type { AnnotationTool } from "./document-annotation-overlay";
 import { scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { pushToast } from "@/lib/toast";
 import { DocumentPreviewWorkspace } from "./document-preview-workspace";
+import { directPrint } from "@/services/printing/direct-print-service";
+import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import type { PrinterDocumentType } from "@/types/printing";
 
 export type DocumentPreviewMode = "link" | "modal" | "inline";
 const EMPTY_ANNOTATIONS: ProtocolDocumentAnnotation[] = [];
@@ -79,8 +82,34 @@ export function RequestDocumentsPanel({
   const [failedScanUploads, setFailedScanUploads] = useState<Array<{ file: File; error: string; documentType: string }>>([]);
   const [documentRailCollapsed, setDocumentRailCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [printingDocumentId, setPrintingDocumentId] = useState<number | null>(null);
   const resolvedTitle = title ?? t("documents.title");
   const documentType = "appointment_request";
+
+  async function printPdfDocument(document: RequestDocument, profile: Extract<PrinterDocumentType, "A4_DOCUMENT" | "A5_DOCUMENT">) {
+    if (printingDocumentId != null) return;
+    setPrintingDocumentId(document.id);
+    try {
+      const result = await directPrint({ documentType: profile, documentId: String(document.id), appointmentId });
+      if (result.success) {
+        pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
+        return;
+      }
+      const settings = loadQzPrinterSettings();
+      const configurationError = ["PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PAGE_SIZE_MISMATCH"].includes(result.errorCode);
+      pushToast({
+        type: "error",
+        title: "Document print failed",
+        message: result.message,
+        action: configurationError || !settings.browserPrintFallbackEnabled
+          ? { label: "Open Printing settings", onClick: () => window.location.assign("/settings?section=qz_tray") }
+          : { label: "Use browser printing", onClick: () => window.open(`/api/documents/${document.id}/view`, "_blank", "noopener,noreferrer") },
+      }, 10_000);
+    } finally {
+      setPrintingDocumentId(null);
+      setFileMenuDocumentId(null);
+    }
+  }
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -628,7 +657,7 @@ export function RequestDocumentsPanel({
                             <button type="button" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50" aria-label={t("requestScans.actions.more")} onClick={() => setFileMenuDocumentId((current) => current === doc.id ? null : doc.id)}><MoreVertical size={14} aria-hidden="true" /></button>
                           </div>
                         </div>
-                        {fileMenuDocumentId === doc.id ? <div className="absolute end-2 top-10 z-20 w-36 rounded-lg border border-border bg-background p-1 shadow-lg"><button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => { setSelectedDocumentId(doc.id); setFileMenuDocumentId(null); }}>{t("documents.view")}</button><a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => setFileMenuDocumentId(null)}>{t("documents.openInNewTab")}</a>{canDelete ? <button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs text-red-700 hover:bg-red-50" onClick={() => { setFileMenuDocumentId(null); deleteDocument(doc.id); }}>{t("documents.delete")}</button> : null}</div> : null}
+                        {fileMenuDocumentId === doc.id ? <div className="absolute end-2 top-10 z-20 w-40 rounded-lg border border-border bg-background p-1 shadow-lg"><button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => { setSelectedDocumentId(doc.id); setFileMenuDocumentId(null); }}>{t("documents.view")}</button><a href={`/api/documents/${doc.id}/view`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted" onClick={() => setFileMenuDocumentId(null)}>{t("documents.openInNewTab")}</a>{isPdf ? <><button type="button" disabled={printingDocumentId != null} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted disabled:opacity-50" onClick={() => void printPdfDocument(doc, "A4_DOCUMENT")}>{printingDocumentId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}Print A4</button><button type="button" disabled={printingDocumentId != null} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-start text-xs hover:bg-muted disabled:opacity-50" onClick={() => void printPdfDocument(doc, "A5_DOCUMENT")}>{printingDocumentId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}Print A5</button></> : null}{canDelete ? <button type="button" className="w-full rounded-md px-2 py-1.5 text-start text-xs text-red-700 hover:bg-red-50" onClick={() => { setFileMenuDocumentId(null); deleteDocument(doc.id); }}>{t("documents.delete")}</button> : null}</div> : null}
                         {isSelected ? <div className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-accent"><CheckCircle2 size={13} aria-hidden="true" />{t("documents.view")}</div> : null}
                       </div>
                     );

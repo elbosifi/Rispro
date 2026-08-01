@@ -16,6 +16,7 @@ import { authoritativeOrthancRouter } from "./routes/authoritative-orthanc.js";
 import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
+import { printingRouter } from "./routes/printing-routes.js";
 import { comparisonsRouter } from "./routes/comparisons.js";
 import { settingsRouter } from "./routes/settings.js";
 import { userNotificationsRouter } from "./routes/user-notifications.js";
@@ -148,6 +149,7 @@ export function createApp(): Application {
   app.use("/api/admin/system-diagnostics", systemDiagnosticsRouter);
   app.use("/api/modality", modalityRouter);
   app.use("/api/audit", auditRouter);
+  app.use("/api/printing", printingRouter);
   app.use("/api/comparisons", comparisonsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/user-notifications", userNotificationsRouter);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Printer, Upload, UserRound, X } from "lucide-react";
+import { CalendarClock, Edit3, ExternalLink, FileText, Loader2, MoreHorizontal, Printer, Tags, Upload, UserRound, X } from "lucide-react";
 import {
   cancelAppointment,
   deleteAppointment,
@@ -22,7 +22,7 @@ import { RequestDocumentsPanel } from "@/components/documents/request-documents-
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { pushToast } from "@/lib/toast";
-import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { printAccessionLabelById, printAppointmentSlipById } from "@/lib/appointment-printing";
 import { AnchoredMenu, Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
 import {
   useCreateSchedulingOverrideRequest,
@@ -202,6 +202,7 @@ export function AppointmentManageModal({
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [printingKind, setPrintingKind] = useState<"document" | "label" | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -225,6 +226,18 @@ export function AppointmentManageModal({
     staleTime: 30_000,
   });
   const appointment = appointmentQuery.data ?? null;
+
+  const printDocument = useCallback(async () => {
+    if (!appointment || printingKind) return;
+    setPrintingKind("document");
+    try { await printAppointmentSlipById(appointment.id, language); } finally { setPrintingKind(null); }
+  }, [appointment, language, printingKind]);
+
+  const printLabel = useCallback(async () => {
+    if (!appointment || printingKind) return;
+    setPrintingKind("label");
+    try { await printAccessionLabelById(appointment.id, language); } finally { setPrintingKind(null); }
+  }, [appointment, language, printingKind]);
 
   useEffect(() => {
     if (!open || !appointment || appointment.id !== normalizedAppointmentId) return;
@@ -609,11 +622,11 @@ export function AppointmentManageModal({
       const tagName = target?.tagName.toLowerCase();
       if (tagName === "input" || tagName === "textarea" || tagName === "select" || target?.isContentEditable) return;
       event.preventDefault();
-      void printAppointmentSlipById(appointment.id, language);
+      void printDocument();
     };
     document.addEventListener("keydown", handlePrintShortcut);
     return () => document.removeEventListener("keydown", handlePrintShortcut);
-  }, [appointment, language, open]);
+  }, [appointment, open, printDocument]);
 
   if (!open) return null;
 
@@ -655,7 +668,7 @@ export function AppointmentManageModal({
             <div className="min-w-0"><DialogTitle className="truncate text-base font-semibold sm:text-lg">{dialogTitle}</DialogTitle><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"><span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">MRN {appointment.mrn || appointment.patientPrimaryIdentifierValue || "—"}</span><span dir="ltr" className="font-mono-data [unicode-bidi:isolate]">{appointment.accessionNumber}</span></div></div>
             <div className="min-w-0 border-s border-border ps-3"><p className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—"}</p><p className="mt-1 truncate text-xs text-muted-foreground">{chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)} · {appointment.modalityCode || "—"}</p></div>
             <div className="min-w-0 border-s border-border ps-3"><AppointmentHeaderBadgeCluster appointment={appointment} language={language} /><p className="mt-2 text-xs text-muted-foreground"><span dir="ltr" className="[unicode-bidi:isolate]">{formatDateLy(appointment.appointmentDate)} · {appointment.bookingTime || chooseLocalized(language, "الوقت غير محدد", "Time not assigned")}</span></p></div>
-            <div className="relative flex flex-wrap items-center justify-start gap-1.5 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => selectTab("details")}><Edit3 size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => void printAppointmentSlipById(appointment.id, language)}><Printer size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><AnchoredMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen} dir={isRtl ? "rtl" : "ltr"} trigger={<Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")}><MoreHorizontal size={16} aria-hidden="true" /></Button>}>{moreMenuItems}</AnchoredMenu></div>
+            <div className="relative flex flex-wrap items-center justify-start gap-1.5 lg:justify-end"><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => selectTab("details")}><Edit3 size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.detailsEdit")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => void printDocument()} disabled={printingKind != null}>{printingKind === "document" ? <Loader2 size={14} className="me-1.5 animate-spin" aria-hidden="true" /> : <Printer size={14} className="me-1.5" aria-hidden="true" />}<span className="hidden sm:inline">{t("registrations.print")}</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => void printLabel()} disabled={printingKind != null}>{printingKind === "label" ? <Loader2 size={14} className="me-1.5 animate-spin" aria-hidden="true" /> : <Tags size={14} className="me-1.5" aria-hidden="true" />}<span className="hidden sm:inline">Print label</span></Button><Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !px-3 text-xs" onClick={() => setSelectedPatientId(appointment.patientId)}><UserRound size={14} className="me-1.5" aria-hidden="true" /><span className="hidden sm:inline">{t("registrations.openPatientProfile")}</span></Button><AnchoredMenu open={actionMenuOpen} onOpenChange={setActionMenuOpen} dir={isRtl ? "rtl" : "ltr"} trigger={<Button type="button" variant="secondary" size="sm" className="!h-9 !min-h-9 !w-9 !p-0" aria-label={t("requestScans.actions.more")}><MoreHorizontal size={16} aria-hidden="true" /></Button>}>{moreMenuItems}</AnchoredMenu></div>
           </div> : <DialogTitle>{t("registrations.manage")}</DialogTitle>}
         </DialogHeader>
         {/*
