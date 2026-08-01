@@ -62,7 +62,7 @@ test("modality protocol assignment returns CT assignment with CT phases", async 
   assert.equal(assignment?.scanner_vendor, "GE");
   assert.equal(assignment?.ct_phases.length, 1);
   assert.equal(assignment?.ct_phases[0].coverage_override, "Liver to symphysis");
-  assert.deepEqual(db.calls.map((call) => call.values), [[101], [31], [31, 41]]);
+  assert.deepEqual(db.calls.map((call) => call.values), [[101], [31]]);
 });
 
 test("modality protocol assignment returns MRI assignment with MRI sequences", async () => {
@@ -84,7 +84,6 @@ test("modality protocol assignment returns MRI assignment with MRI sequences", a
       assigned_at: "2026-06-29T08:05:00Z",
       status: "MODIFIED",
     }],
-    [],
     [{
       order_index: 1,
       scanner_id: 42,
@@ -134,7 +133,6 @@ test("modality protocol assignment prefers scanner-specific MRI sequence alias",
       assigned_at: "2026-06-29T08:05:00Z",
       status: "ASSIGNED",
     }],
-    [],
     [{
       order_index: 1,
       scanner_id: 42,
@@ -160,7 +158,7 @@ test("modality protocol assignment prefers scanner-specific MRI sequence alias",
   const assignment = await getModalityProtocolAssignment(104, db);
 
   assert.equal(assignment?.mri_sequences[0].vendor_sequence_name, "T2W_TSE_ALIAS");
-  assert.match(db.calls[2].sql, /mri_sequence_scanner_aliases/i);
+  assert.match(db.calls[1].sql, /mri_sequence_scanner_aliases/i);
 });
 
 test("modality protocol assignment returns null when no active assignment exists", async () => {
@@ -169,6 +167,39 @@ test("modality protocol assignment returns null when no active assignment exists
   const assignment = await getModalityProtocolAssignment(103, db);
 
   assert.equal(assignment, null);
+  assert.equal(db.calls.length, 1);
+});
+
+test("modality protocol assignment returns free-text CT without querying phase tables", async () => {
+  const db = executor([[{
+    assignment_id: 14, appointment_id: 105, protocol_id: null, protocol_version_id: null,
+    protocol_name: null, version_number: null, free_text_protocol: "Non-contrast CT abdomen",
+    modality: "CT", scanner_id: null, scanner_name: null, scanner_vendor: null,
+    protocol_notes: "Patient specific", contrast_notes: null, assigned_by: "Dr. Protocol",
+    assigned_at: "2026-06-29T08:00:00Z", status: "ASSIGNED",
+  }]]);
+  const assignment = await getModalityProtocolAssignment(105, db);
+  assert.equal(assignment?.protocol_id, null);
+  assert.equal(assignment?.protocol_version_id, null);
+  assert.equal(assignment?.protocol_name, null);
+  assert.equal(assignment?.version_number, null);
+  assert.equal(assignment?.free_text_protocol, "Non-contrast CT abdomen");
+  assert.deepEqual(assignment?.ct_phases, []);
+  assert.deepEqual(assignment?.mri_sequences, []);
+  assert.equal(db.calls.length, 1);
+});
+
+test("modality protocol assignment returns free-text MRI using booking modality", async () => {
+  const db = executor([[{
+    assignment_id: 15, appointment_id: 106, protocol_id: null, protocol_version_id: null,
+    protocol_name: null, version_number: null, free_text_protocol: "MRI brain with contrast",
+    modality: "MRI", scanner_id: null, scanner_name: null, scanner_vendor: null,
+    protocol_notes: null, contrast_notes: "Check eGFR", assigned_by: null,
+    assigned_at: null, status: "MODIFIED",
+  }]]);
+  const assignment = await getModalityProtocolAssignment(106, db);
+  assert.equal(assignment?.modality, "MRI");
+  assert.equal(assignment?.free_text_protocol, "MRI brain with contrast");
   assert.equal(db.calls.length, 1);
 });
 

@@ -1097,10 +1097,11 @@ export interface ModalityMriProtocolSequence {
 export interface ModalityProtocolAssignment {
   assignmentId: number;
   appointmentId: number;
-  protocolId: number;
-  protocolVersionId: number;
-  protocolName: string;
-  versionNumber: string;
+    protocolId: number | null;
+    protocolVersionId: number | null;
+    protocolName: string | null;
+    versionNumber: string | null;
+    freeTextProtocol: string | null;
   modality: "CT" | "MRI";
   scannerId: number | null;
   scannerName: string | null;

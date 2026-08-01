@@ -142,10 +142,11 @@ function mapModalityProtocolAssignment(raw: RawRecord): ModalityProtocolAssignme
   return {
     assignmentId: Number(raw.assignment_id),
     appointmentId: Number(raw.appointment_id),
-    protocolId: Number(raw.protocol_id),
-    protocolVersionId: Number(raw.protocol_version_id),
-    protocolName: String(raw.protocol_name),
-    versionNumber: String(raw.version_number),
+    protocolId: rawNumber(raw.protocol_id),
+    protocolVersionId: rawNumber(raw.protocol_version_id),
+    protocolName: rawString(raw.protocol_name),
+    versionNumber: rawString(raw.version_number),
+    freeTextProtocol: rawString(raw.free_text_protocol),
     modality: String(raw.modality).toUpperCase() as "CT" | "MRI",
     scannerId: rawNumber(raw.scanner_id),
     scannerName: rawString(raw.scanner_name),
@@ -3694,6 +3695,11 @@ export async function fetchModalitiesSettings(includeInactive = false): Promise<
   const query = includeInactive ? "?includeInactive=true" : "";
   const raw = await api<{ modalities: ModalitySettingsRow[] }>(`/settings/modalities${query}`);
   return raw;
+}
+
+export async function fetchRegistrationProtocolAssignment(appointmentId: number): Promise<ModalityProtocolAssignment | null> {
+  const raw = await api<{ assignment: RawRecord | null }>(`/v2/read/registrations/appointments/${appointmentId}/protocol-assignment`);
+  return raw.assignment ? mapModalityProtocolAssignment(raw.assignment) : null;
 }
 
 export async function fetchProtocolingPreviousAppointments(appointmentId: number, limit = 5, offset = 0): Promise<ProtocolingPreviousAppointment[]> {

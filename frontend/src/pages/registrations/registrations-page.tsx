@@ -7,6 +7,7 @@ import {
   fetchAppointmentLookups,
   fetchAppointmentSlipSettings,
   fetchPatientQrSettings,
+  fetchRegistrationProtocolAssignment,
   sendPatientWebPushNotification,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -20,6 +21,7 @@ import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { buildModalityProtocolPrintSheet, openProtocolPrintWindow, writeProtocolPrintSheet } from "@/lib/protocol-printing";
 import { buildAppointmentWhatsappText, normalizeWhatsappPhone } from "@/lib/whatsapp";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
@@ -626,9 +628,27 @@ export default function RegistrationsPage() {
   function protocolVersionText(appointment: AppointmentWithDetails): string | null {
     const summary = appointment.protocolAssignmentSummary;
     if (!summary) return null;
-    return [summary.protocolName, summary.versionNumber ? `v${summary.versionNumber}` : null]
+    return [summary.protocolName || (summary.freeTextProtocol ? "Free-text protocol" : "Protocol assigned"), summary.versionNumber ? `v${summary.versionNumber}` : null]
       .filter(Boolean)
       .join(" ");
+  }
+
+  function handleProtocolPrint(appointment: AppointmentWithDetails) {
+    const printWindow = openProtocolPrintWindow();
+    if (!printWindow) {
+      pushToast({ type: "error", title: "Unable to open the protocol print window." });
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write("<title>Protocol sheet</title><p style=\"font:14px Arial;padding:20px\">Loading assigned protocol…</p>");
+    printWindow.document.close();
+    void fetchRegistrationProtocolAssignment(appointment.id).then((assignment) => {
+      if (!assignment) throw new Error("assignment_unavailable");
+      writeProtocolPrintSheet(printWindow, buildModalityProtocolPrintSheet(appointment, assignment));
+    }).catch(() => {
+      try { printWindow.close(); } catch { /* best effort */ }
+      pushToast({ type: "error", title: "Unable to load the assigned protocol for printing." });
+    });
   }
 
   function usesProtocolWorkflow(appointment: AppointmentWithDetails): boolean {
@@ -651,9 +671,7 @@ export default function RegistrationsPage() {
 
     return (
       <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-snug text-muted-foreground">
-        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
-          Protocol assigned
-        </span>
+        <div className="flex items-center gap-2"><span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">Protocol assigned</span><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" aria-label="Print protocol" title="Print protocol" onClick={(event) => { event.stopPropagation(); handleProtocolPrint(appointment); }}>Print protocol</Button></div>
         <p className="truncate text-foreground">Protocol: {protocolVersionText(appointment)}</p>
         {summary.scannerName ? <p className="truncate">Scanner: {summary.scannerName}</p> : null}
       </div>

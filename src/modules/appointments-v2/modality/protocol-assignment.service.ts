@@ -45,10 +45,11 @@ export interface ModalityMriProtocolSequence {
 export interface ModalityProtocolAssignment {
   assignment_id: number;
   appointment_id: number;
-  protocol_id: number;
-  protocol_version_id: number;
-  protocol_name: string;
-  version_number: string;
+  protocol_id: number | null;
+  protocol_version_id: number | null;
+  protocol_name: string | null;
+  version_number: string | null;
+  free_text_protocol: string | null;
   modality: "CT" | "MRI";
   scanner_id: number | null;
   scanner_name: string | null;
@@ -74,10 +75,11 @@ function mapAssignment(row: RawRecord): Omit<ModalityProtocolAssignment, "ct_pha
   return {
     assignment_id: Number(row.assignment_id),
     appointment_id: Number(row.appointment_id),
-    protocol_id: Number(row.protocol_id),
-    protocol_version_id: Number(row.protocol_version_id),
-    protocol_name: String(row.protocol_name),
-    version_number: String(row.version_number),
+    protocol_id: numberOrNull(row.protocol_id),
+    protocol_version_id: numberOrNull(row.protocol_version_id),
+    protocol_name: textOrNull(row.protocol_name),
+    version_number: textOrNull(row.version_number),
+    free_text_protocol: textOrNull(row.free_text_protocol),
     modality: String(row.modality).toUpperCase() as "CT" | "MRI",
     scanner_id: numberOrNull(row.scanner_id),
     scanner_name: textOrNull(row.scanner_name),
@@ -146,7 +148,8 @@ export async function getModalityProtocolAssignment(
         assignment.protocol_version_id,
         protocol.name as protocol_name,
         version.version_number,
-        protocol.modality,
+        upper(coalesce(protocol.modality, modality.code)) as modality,
+        assignment.free_text_protocol,
         assignment.scanner_id,
         scanner.name as scanner_name,
         scanner.vendor as scanner_vendor,
@@ -156,15 +159,16 @@ export async function getModalityProtocolAssignment(
         assignment.assigned_at::text as assigned_at,
         assignment.status
       from appointments_v2.bookings booking
+      join modalities modality on modality.id = booking.modality_id
       join appointment_protocol_assignments assignment on assignment.appointment_id = booking.id
-      join protocols protocol on protocol.id = assignment.protocol_id
-      join protocol_versions version on version.id = assignment.protocol_version_id
+      left join protocols protocol on protocol.id = assignment.protocol_id
+      left join protocol_versions version on version.id = assignment.protocol_version_id
       left join imaging_scanners scanner on scanner.id = assignment.scanner_id
       left join users assigned_user on assigned_user.id = assignment.assigned_by
       left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
       where booking.id = $1
         and booking.status not in ('cancelled', 'discontinued', 'voided')
-        and upper(protocol.modality) in ('CT', 'MRI')
+        and upper(coalesce(protocol.modality, modality.code)) in ('CT', 'MRI')
         and assignment.status <> 'CANCELLED'
       order by assignment.updated_at desc, assignment.id desc
       limit 1
@@ -175,8 +179,12 @@ export async function getModalityProtocolAssignment(
   if (!assignmentRow) return null;
 
   const assignment = mapAssignment(assignmentRow);
-  const [ctRows, mriRows] = await Promise.all([
-    queryExecutor.query<RawRecord>(
+  if (assignment.protocol_version_id == null) {
+    return { ...assignment, ct_phases: [], mri_sequences: [] };
+  }
+
+  if (assignment.modality === "CT") {
+    const ctRows = await queryExecutor.query<RawRecord>(
       `
         select
           phase.order_index,
@@ -199,8 +207,11 @@ export async function getModalityProtocolAssignment(
         order by phase.order_index asc, phase.id asc
       `,
       [assignment.protocol_version_id]
-    ),
-    queryExecutor.query<RawRecord>(
+    );
+    return { ...assignment, ct_phases: ctRows.rows.map(mapCtPhase), mri_sequences: [] };
+  }
+
+  const mriRows = await queryExecutor.query<RawRecord>(
       `
         select
           sequence.order_index,
@@ -232,12 +243,11 @@ export async function getModalityProtocolAssignment(
         order by sequence.order_index asc, sequence.id asc
       `,
       [assignment.protocol_version_id, assignment.scanner_id]
-    ),
-  ]);
+  );
 
   return {
     ...assignment,
-    ct_phases: ctRows.rows.map(mapCtPhase),
+    ct_phases: [],
     mri_sequences: mriRows.rows.map(mapMriSequence),
   };
 }

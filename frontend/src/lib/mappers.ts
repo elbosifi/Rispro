@@ -113,8 +113,9 @@ export interface AppointmentWithDetails extends Appointment {
     assignmentId: number;
     protocolId?: number | null;
     protocolVersionId?: number | null;
-    protocolName: string;
-    versionNumber: string;
+    protocolName: string | null;
+    versionNumber: string | null;
+    freeTextProtocol: string | null;
     modality?: string | null;
     scannerId?: number | null;
     scannerName: string | null;
@@ -353,14 +354,15 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     createdByUserId: numOrNull(raw, "created_by_user_id") ?? numOrNull(raw, "createdByUserId"),
     createdByName: strOrNull(raw, "created_by_full_name") ?? strOrNull(raw, "createdByName"),
     createdByUsername: strOrNull(raw, "created_by_username") ?? strOrNull(raw, "createdByUsername"),
-    protocolAssignmentSummary: protocolAssignmentId
+    protocolAssignmentSummary: protocolAssignmentId != null
       ? {
           assignmentId: protocolAssignmentId,
           protocolId: numOrNull(raw, "assigned_protocol_id") ?? numOrNull(raw, "protocolId"),
           protocolVersionId:
             numOrNull(raw, "assigned_protocol_version_id") ?? numOrNull(raw, "protocolVersionId"),
-          protocolName: str(raw, "protocol_name") || str(raw, "protocolName"),
-          versionNumber: str(raw, "protocol_version_number") || str(raw, "protocolVersionNumber"),
+          protocolName: strOrNull(raw, "protocol_name") ?? strOrNull(raw, "protocolName"),
+          versionNumber: strOrNull(raw, "protocol_version_number") ?? strOrNull(raw, "protocolVersionNumber"),
+          freeTextProtocol: strOrNull(raw, "assigned_free_text_protocol") ?? strOrNull(raw, "freeTextProtocol"),
           modality: strOrNull(raw, "protocol_assignment_modality") ?? strOrNull(raw, "protocolAssignmentModality"),
           scannerId: numOrNull(raw, "protocol_scanner_id") ?? numOrNull(raw, "protocolScannerId"),
           scannerName: strOrNull(raw, "protocol_scanner_name") ?? strOrNull(raw, "protocolScannerName"),

@@ -80,4 +80,14 @@ describe("printProtocolSheet", () => {
 
     expect(warnSpy).toHaveBeenCalledWith("Unable to open protocol print window. Check popup blocker settings.");
   });
+
+  it("does not add a version suffix to a free-text protocol", () => {
+    const printWindow = mockPrintWindow();
+    vi.spyOn(window, "open").mockReturnValue(printWindow as unknown as Window);
+    printProtocolSheet({ ...sheet, protocolName: "Free-text protocol", versionNumber: null, protocolInstructions: "Complete free text" });
+    const html = String(printWindow.document.write.mock.calls[0]?.[0] ?? "");
+    expect(html).toContain("Free-text protocol");
+    expect(html).toContain("Complete free text");
+    expect(html).not.toContain("Free-text protocol v");
+  });
 });

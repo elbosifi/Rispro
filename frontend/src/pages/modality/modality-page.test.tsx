@@ -43,6 +43,12 @@ vi.mock("@/lib/appointment-printing", () => ({
 
 vi.mock("@/lib/protocol-printing", () => ({
   printProtocolSheet: (...args: unknown[]) => printProtocolSheetMock(...args),
+  buildModalityProtocolPrintSheet: vi.fn((appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment) => ({
+    patientName: appointment.englishFullName || appointment.arabicFullName,
+    accession: appointment.accessionNumber,
+    modality: assignment.modality,
+    protocolName: assignment.protocolName || "Free-text protocol",
+  })),
 }));
 
 vi.mock("@/providers/language-provider", () => ({

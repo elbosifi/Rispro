@@ -31,7 +31,7 @@ import {
 } from "@/components/shared";
 import { fetchAppointmentLookups, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, completeAppointment, updateAppointmentStatus } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
+import { buildModalityProtocolPrintSheet, printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { todayIsoDateLy } from "@/lib/date-format";
@@ -221,8 +221,9 @@ function isProtocolModality(appointment: AppointmentWithDetails | null): boolean
   return code === "CT" || code === "MRI";
 }
 
-function protocolVersionLabel(name: string, version: string): string {
-  return `${name} v${version}`;
+function protocolVersionLabel(name: string | null, version: string | null, freeText?: string | null): string {
+  const label = name?.trim() || (freeText?.trim() ? "Free-text protocol" : "Protocol assigned");
+  return version?.trim() ? `${label} v${version}` : label;
 }
 
 function effectiveValue(override: string | null | undefined, fallback: string | number | null | undefined): string | null {
@@ -499,6 +500,7 @@ export default function ModalityPage() {
     queryKey: ["modality", "protocol-assignment", selectedAppointmentId],
     queryFn: () => fetchModalityProtocolAssignment(selectedAppointmentId as number),
     enabled: selectedAppointmentId != null && isProtocolModality(selectedAppointment),
+    refetchInterval: 15_000,
   });
 
   useEffect(() => {
@@ -992,7 +994,7 @@ export default function ModalityPage() {
                               <td className="px-2 py-1.5 text-[11px] text-slate-700">
                                 {appointment.protocolAssignmentSummary ? (
                                   <span className="block truncate" title={protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}>
-                                    {protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}
+                                    {protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}
                                   </span>
                                 ) : isProtocolModality(appointment) ? (
                                   <span className="text-[10px] text-muted-foreground">No protocol assigned</span>
@@ -1303,11 +1305,11 @@ export default function ModalityPage() {
                     </div>
                     <div className="mt-3 flex w-full flex-wrap items-start gap-x-5 gap-y-2 border-t border-slate-100 pt-2">
                       <ClinicalBannerField
-                        label={chooseLocalized(language, "Ù…Ø¹Ø±Ù Ø§Ù„Ù…Ø±ÙŠØ¶", "MRN / primary ID")}
+                        label={chooseLocalized(language, "معرف المريض", "MRN / primary ID")}
                         value={selectedAppointment.mrn}
                       />
                       <ClinicalBannerField
-                        label={chooseLocalized(language, "Ø§Ù„Ù…Ø¹Ø±Ù Ø§Ù„Ø£Ø³Ø§Ø³ÙŠ", "Primary identifier")}
+                        label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")}
                         value={selectedAppointment.patientPrimaryIdentifierValue
                           ? primaryIdentifierText(language, selectedAppointment)
                           : selectedAppointment.nationalId
@@ -1315,7 +1317,7 @@ export default function ModalityPage() {
                             : null}
                       />
                       <ClinicalBannerField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
-                      <ClinicalBannerField label={chooseLocalized(language, "Ø§Ù„ÙØ­Øµ / Ø§Ù„Ø¬Ù‡Ø§Ø²", "Exam / modality")} value={`${selectedExam} · ${selectedModality}`} />
+                      <ClinicalBannerField label={chooseLocalized(language, "الفحص / الجهاز", "Exam / modality")} value={`${selectedExam} · ${selectedModality}`} />
                       <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
                       <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
                       <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
@@ -1329,15 +1331,18 @@ export default function ModalityPage() {
 
               <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
                 <div data-testid="clinical-workspace" className="grid min-h-full gap-3 lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
-                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "Ø§Ù„Ø¨Ø±ÙˆØªÙˆÙƒÙˆÙ„ Ø§Ù„Ù…Ø¹ÙŠÙ†", "Assigned protocol")} className="order-1 min-w-0 lg:order-2">
+                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-w-0 lg:order-2">
                     <ProtocolAssignmentPanel
                       appointment={selectedAppointment}
                       assignment={selectedProtocolQuery.data ?? null}
                       isLoading={selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching}
+                      isError={selectedProtocolQuery.isError}
+                      summaryExists={selectedAppointment.protocolAssignmentSummary != null}
+                      onRetry={() => void selectedProtocolQuery.refetch()}
                     />
                   </section>
 
-                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "ÙˆØ«Ø§Ø¦Ù‚ Ø§Ù„Ø·Ù„Ø¨", "Request documents")} className="order-2 flex min-h-[560px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-2 shadow-sm lg:order-1 lg:min-h-0">
+                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className="order-2 flex min-h-[560px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-2 shadow-sm lg:order-1 lg:min-h-0">
                     <RequestDocumentsPanel
                       appointmentId={selectedAppointment.id}
                       patientId={selectedAppointment.patientId}
@@ -1345,7 +1350,7 @@ export default function ModalityPage() {
                       previewMode="inline"
                       layout="workspace"
                       readOnly
-                      title={chooseLocalized(language, "ÙˆØ«Ø§Ø¦Ù‚ Ø·Ù„Ø¨ Ø§Ù„ÙØ­Øµ", "Examination request documents")}
+                      title={chooseLocalized(language, "وثائق طلب الفحص", "Examination request documents")}
                     />
                   </section>
                 </div>
@@ -1617,12 +1622,12 @@ function protocolPrintSheetFromModality(appointment: AppointmentWithDetails, ass
     exam: appointment.examNameEn ?? appointment.examNameAr,
     category: appointment.caseCategory ?? null,
     clinicalNotes: appointment.notes?.trim() || appointment.specialReasonNote?.trim() || null,
-    protocolName: assignment.protocolName,
+    protocolName: assignment.protocolName ?? "Free-text protocol",
     versionNumber: assignment.versionNumber,
     scanner,
     assignedBy: assignment.assignedBy,
     assignedAt: assignment.assignedAt,
-    protocolInstructions: assignment.protocolNotes,
+    protocolInstructions: assignment.freeTextProtocol ?? assignment.protocolNotes,
     contrastInstructions: assignment.contrastNotes,
   };
 
@@ -1677,10 +1682,16 @@ function ProtocolAssignmentPanel({
   appointment,
   assignment,
   isLoading,
+  isError,
+  summaryExists,
+  onRetry,
 }: {
   appointment: AppointmentWithDetails;
   assignment: ModalityProtocolAssignment | null;
   isLoading: boolean;
+  isError: boolean;
+  summaryExists: boolean;
+  onRetry: () => void;
 }) {
   const { language: protocolLanguage } = useLanguage();
   const specialInstructions = modalitySpecialInstructions(protocolLanguage, appointment);
@@ -1694,6 +1705,9 @@ function ProtocolAssignmentPanel({
   }
 
   if (!assignment) {
+    if (isError || summaryExists) {
+      return <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-muted-foreground"><p className="font-semibold text-foreground">{summaryExists ? "Protocol assigned — full details unavailable" : "Unable to load the assigned protocol."}</p><Button type="button" variant="secondary" size="sm" className="mt-3" onClick={onRetry}>Retry</Button></section>;
+    }
     return (
       <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-muted-foreground">
         <p className="font-semibold text-foreground">No protocol assigned</p>
@@ -1712,7 +1726,7 @@ function ProtocolAssignmentPanel({
   }
 
   const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ");
-  const printSheet = protocolPrintSheetFromModality(appointment, assignment);
+  const printSheet = buildModalityProtocolPrintSheet(appointment, assignment);
 
   return (
     <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1720,7 +1734,7 @@ function ProtocolAssignmentPanel({
         <div>
           <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Read-only protocol</p>
           <h3 className="mt-1 text-lg font-semibold text-foreground">Assigned protocol</h3>
-          <p className="mt-1 text-base font-semibold text-slate-800">{protocolVersionLabel(assignment.protocolName, assignment.versionNumber)}</p>
+          <p className="mt-1 text-base font-semibold text-slate-800">{protocolVersionLabel(assignment.protocolName, assignment.versionNumber, assignment.freeTextProtocol)}</p>
           {scanner ? <p className="mt-1 text-sm font-medium text-slate-700">{scanner}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1758,6 +1772,8 @@ function ProtocolAssignmentPanel({
           <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{appointment.notes?.trim() || EMPTY_VALUE}</p>
         </div>
       </div>
+
+      {assignment.freeTextProtocol ? <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5"><p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Free-text protocol</p><p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.freeTextProtocol}</p></div> : null}
 
       <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
         This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.

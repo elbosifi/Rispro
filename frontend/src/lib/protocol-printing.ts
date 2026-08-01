@@ -1,3 +1,6 @@
+import type { AppointmentWithDetails } from "@/lib/mappers";
+import type { ModalityProtocolAssignment } from "@/types/api";
+
 export type ProtocolPrintModality = "CT" | "MRI";
 
 export interface ProtocolPrintCtPhase {
@@ -32,7 +35,7 @@ export interface ProtocolPrintSheet {
   category: string | null;
   clinicalNotes: string | null;
   protocolName: string;
-  versionNumber: string;
+  versionNumber: string | null;
   scanner: string | null;
   assignedBy: string | null;
   assignedAt: string | null;
@@ -198,7 +201,7 @@ function html(sheet: ProtocolPrintSheet): string {
   <section>
     <h2>Protocol</h2>
     <dl>
-      ${row("Name", `${sheet.protocolName} v${sheet.versionNumber}`)}
+      ${row("Name", sheet.versionNumber?.trim() ? `${sheet.protocolName} v${sheet.versionNumber}` : sheet.protocolName)}
       ${row("Scanner", sheet.scanner)}
       ${row("Assigned by", sheet.assignedBy)}
       ${row("Assigned at", sheet.assignedAt)}
@@ -216,12 +219,16 @@ function html(sheet: ProtocolPrintSheet): string {
 </html>`;
 }
 
-export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
+export function openProtocolPrintWindow(): Window | null {
   const printWindow = window.open("", "_blank", "width=980,height=900");
   if (!printWindow) {
     console.warn("Unable to open protocol print window. Check popup blocker settings.");
-    return;
+    return null;
   }
+  return printWindow;
+}
+
+export function writeProtocolPrintSheet(printWindow: Window, sheet: ProtocolPrintSheet): void {
   printWindow.document.open();
   printWindow.document.write(html(sheet));
   printWindow.document.close();
@@ -230,4 +237,42 @@ export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
   } catch {
     // Some browsers make opener read-only. The print sheet remains self-contained.
   }
+}
+
+export function printProtocolSheet(sheet: ProtocolPrintSheet): void {
+  const printWindow = openProtocolPrintWindow();
+  if (printWindow) writeProtocolPrintSheet(printWindow, sheet);
+}
+
+function effectiveValue(override: string | null | undefined, fallback: string | number | null | undefined): string | null {
+  return override?.trim() || (fallback == null ? null : String(fallback));
+}
+
+export function buildModalityProtocolPrintSheet(appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment): ProtocolPrintSheet {
+  const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ") || null;
+  const base = {
+    patientName: appointment.englishFullName || appointment.arabicFullName || `Patient ${appointment.patientId}`,
+    mrn: appointment.mrn,
+    accession: appointment.accessionNumber,
+    appointmentDateTime: [appointment.appointmentDate, appointment.bookingTime].filter(Boolean).join(" ") || null,
+    modality: assignment.modality,
+    exam: appointment.examNameEn ?? appointment.examNameAr,
+    category: appointment.caseCategory ?? null,
+    clinicalNotes: appointment.notes?.trim() || appointment.specialReasonNote?.trim() || null,
+    protocolName: assignment.protocolName ?? "Free-text protocol",
+    versionNumber: assignment.versionNumber,
+    scanner,
+    assignedBy: assignment.assignedBy,
+    assignedAt: assignment.assignedAt,
+    protocolInstructions: assignment.freeTextProtocol ?? assignment.protocolNotes,
+    contrastInstructions: assignment.contrastNotes,
+  };
+  if (assignment.modality === "CT") return {
+    ...base, modality: "CT",
+    ctPhases: assignment.ctPhases.map((phase) => ({ orderIndex: phase.orderIndex, phase: effectiveValue(phase.customPhaseName, phase.phasePresetName), timing: effectiveValue(phase.timingOverride, phase.delaySeconds != null ? `${phase.timingType ?? "Delay"} ${phase.delaySeconds}s` : phase.timingType), coverage: effectiveValue(phase.coverageOverride, phase.coverage), reconstruction: effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes), instructions: effectiveValue(phase.instructionsOverride, phase.instructions), isRequired: phase.isRequired })),
+  };
+  return {
+    ...base, modality: "MRI",
+    mriSequences: assignment.mriSequences.map((sequence) => ({ orderIndex: sequence.orderIndex, scanner: sequence.scannerName ?? scanner, sequence: sequence.sequencePresetName ?? sequence.genericFamily ?? sequence.weighting, vendorSequenceName: sequence.vendorSequenceName, plane: effectiveValue(sequence.planeOverride, sequence.defaultPlane), coverage: effectiveValue(sequence.coverageOverride, sequence.defaultCoverage), bValuesTiming: [effectiveValue(sequence.bValuesOverride, sequence.defaultBValues), effectiveValue(sequence.timingOverride, sequence.defaultDynamicTiming)].filter(Boolean).join(" / ") || null, notes: effectiveValue(sequence.notesOverride, sequence.notes), isRequired: sequence.isRequired })),
+  };
 }

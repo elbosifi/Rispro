@@ -48,6 +48,7 @@ const PROTOCOL_ASSIGNMENT_SELECT = `
           protocol_assignment.protocol_version_id as assigned_protocol_version_id,
           protocol_assignment.protocol_name,
           protocol_assignment.version_number as protocol_version_number,
+          protocol_assignment.free_text_protocol as assigned_free_text_protocol,
           protocol_assignment.modality as protocol_assignment_modality,
           protocol_assignment.scanner_id as protocol_scanner_id,
           protocol_assignment.scanner_name as protocol_scanner_name,
@@ -66,7 +67,8 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
             assignment.protocol_version_id,
             protocol.name as protocol_name,
             version.version_number,
-            protocol.modality,
+            assignment.free_text_protocol,
+            upper(coalesce(protocol.modality, (select code from modalities where id = b.modality_id))) as modality,
             assignment.scanner_id,
             scanner.name as scanner_name,
             scanner.vendor as scanner_vendor,
@@ -76,14 +78,14 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
             assignment.contrast_notes,
             assignment.status
           from appointment_protocol_assignments assignment
-          join protocols protocol on protocol.id = assignment.protocol_id
-          join protocol_versions version on version.id = assignment.protocol_version_id
+          left join protocols protocol on protocol.id = assignment.protocol_id
+          left join protocol_versions version on version.id = assignment.protocol_version_id
           left join imaging_scanners scanner on scanner.id = assignment.scanner_id
           left join users assigned_user on assigned_user.id = assignment.assigned_by
           left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
           where assignment.appointment_id = b.id
             and assignment.status <> 'CANCELLED'
-            and upper(protocol.modality) in ('CT', 'MRI')
+            and upper(coalesce(protocol.modality, (select code from modalities where id = b.modality_id))) in ('CT', 'MRI')
           order by assignment.updated_at desc, assignment.id desc
           limit 1
         ) protocol_assignment on true`;
@@ -1195,8 +1197,11 @@ router.get(
         coalesce(rp.name_ar, 'روتيني') as priority_name_ar,
         coalesce(rp.name_en, 'Routine') as priority_name_en,
         protocol_assignment.assignment_id as protocol_assignment_id,
+        protocol_assignment.protocol_id as assigned_protocol_id,
+        protocol_assignment.protocol_version_id as assigned_protocol_version_id,
         protocol_assignment.protocol_name,
         protocol_assignment.version_number as protocol_version_number,
+        protocol_assignment.free_text_protocol as assigned_free_text_protocol,
         protocol_assignment.scanner_name as protocol_scanner_name,
         protocol_assignment.assigned_by as protocol_assigned_by,
         protocol_assignment.assigned_at as protocol_assigned_at,
@@ -1270,23 +1275,26 @@ router.get(
       left join lateral (
         select
           assignment.id as assignment_id,
+          assignment.protocol_id,
+          assignment.protocol_version_id,
           protocol.name as protocol_name,
           version.version_number,
+          assignment.free_text_protocol,
           scanner.name as scanner_name,
           coalesce(doctor.display_name, assigned_user.full_name) as assigned_by,
           assignment.assigned_at::text as assigned_at,
           assignment.protocol_notes,
           assignment.contrast_notes
         from appointment_protocol_assignments assignment
-        join protocols protocol on protocol.id = assignment.protocol_id
-        join protocol_versions version on version.id = assignment.protocol_version_id
+        left join protocols protocol on protocol.id = assignment.protocol_id
+        left join protocol_versions version on version.id = assignment.protocol_version_id
         left join imaging_scanners scanner on scanner.id = assignment.scanner_id
         left join users assigned_user on assigned_user.id = assignment.assigned_by
         left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
         where assignment.appointment_id = b.id
           and assignment.status <> 'CANCELLED'
           and b.status not in ('cancelled', 'discontinued', 'voided')
-          and upper(protocol.modality) in ('CT', 'MRI')
+          and upper(coalesce(protocol.modality, m.code)) in ('CT', 'MRI')
         order by assignment.updated_at desc, assignment.id desc
         limit 1
       ) protocol_assignment on true
@@ -1336,6 +1344,20 @@ router.get(
       return;
     }
 
+    const assignment = await getModalityProtocolAssignment(appointmentId);
+    res.json({ assignment });
+  })
+);
+
+router.get(
+  "/registrations/appointments/:appointmentId/protocol-assignment",
+  requirePageAccess("registrations"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const appointmentId = Number(req.params.appointmentId);
+    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
+      res.status(400).json({ error: "Invalid appointment ID" });
+      return;
+    }
     const assignment = await getModalityProtocolAssignment(appointmentId);
     res.json({ assignment });
   })

@@ -1022,7 +1022,13 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
   const scannersQuery = useQuery({ queryKey: ["doctor", "protocol-library", "scanners"], queryFn: fetchProtocolLibraryScanners, enabled: canAssign });
 
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }),
+      queryClient.invalidateQueries({ queryKey: ["registrations"] }),
+      queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }),
+      queryClient.invalidateQueries({ queryKey: ["modality", "protocol-assignment"] }),
+      queryClient.invalidateQueries({ queryKey: ["appointment-manage-modal"] }),
+    ]);
   };
   const createAssignmentMutation = useMutation({
     mutationFn: ({ appointmentId, payload }: { appointmentId: number; payload: ProtocolAssignmentPayload }) => createDoctorProtocolAssignment(appointmentId, payload),

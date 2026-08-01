@@ -11,6 +11,7 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(routes, /PROTOCOL_ASSIGNMENT_SELECT/);
     assert.match(routes, /protocol_assignment\.assignment_id as protocol_assignment_id/);
     assert.match(routes, /protocol_assignment\.protocol_id as assigned_protocol_id/);
+    assert.match(routes, /free_text_protocol as assigned_free_text_protocol/);
     assert.match(routes, /protocol_assignment\.version_number as protocol_version_number/);
     assert.match(routes, /protocol_assignment\.scanner_name as protocol_scanner_name/);
     assert.match(routes, /protocol_assignment\.protocol_notes as assigned_protocol_notes/);
@@ -25,9 +26,20 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(routes, /from appointment_protocol_assignments assignment/);
     assert.match(routes, /assignment\.appointment_id = b\.id/);
     assert.match(routes, /assignment\.status <> 'CANCELLED'/);
-    assert.match(routes, /upper\(protocol\.modality\) in \('CT', 'MRI'\)/);
+    assert.match(routes, /left join protocols protocol/);
+    assert.match(routes, /left join protocol_versions version/);
+    assert.match(routes, /coalesce\(protocol\.modality/);
     assert.match(routes, /order by assignment\.updated_at desc, assignment\.id desc/);
     assert.match(routes, /limit 1/);
+  });
+
+  it("exposes only a read-only, Registration-guarded full assignment endpoint", () => {
+    const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
+    const routeBlock = routes.match(/router\.get\(\s*"\/registrations\/appointments\/:appointmentId\/protocol-assignment"[\s\S]*?\n\);/)?.[0] ?? "";
+    assert.match(routeBlock, /requirePageAccess\("registrations"\)/);
+    assert.match(routeBlock, /getModalityProtocolAssignment\(appointmentId\)/);
+    assert.match(routeBlock, /Invalid appointment ID/);
+    assert.doesNotMatch(routeBlock, /router\.(post|put|patch|delete)\(/);
   });
 
   it("keeps protocol assignment writes behind Doctor Protocoling access", () => {
