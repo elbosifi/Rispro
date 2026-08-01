@@ -76,6 +76,13 @@ function validationError(payload: object): string {
 }
 
 describe("QZ request signing", () => {
+  it("accepts a currently valid root interval and rejects expired or not-yet-valid roots", () => {
+    const now = Date.parse("2026-08-01T12:00:00Z");
+    assert.doesNotThrow(() => __qzSigningTestables.assertCertificateCurrentlyValid({ validFrom: "2026-07-01T00:00:00Z", validTo: "2027-07-01T00:00:00Z" }, "QZ root certificate is not currently valid.", now));
+    assert.throws(() => __qzSigningTestables.assertCertificateCurrentlyValid({ validFrom: "2025-01-01T00:00:00Z", validTo: "2026-07-31T00:00:00Z" }, "QZ root certificate is not currently valid.", now), /QZ root certificate is not currently valid/);
+    assert.throws(() => __qzSigningTestables.assertCertificateCurrentlyValid({ validFrom: "2026-08-02T00:00:00Z", validTo: "2027-08-02T00:00:00Z" }, "QZ root certificate is not currently valid.", now), /QZ root certificate is not currently valid/);
+  });
+
   it("signs the exact QZ 2.2.6 discovery call and rejects printer details", () => {
     assert.equal(getQzCertificate(), "test-certificate");
     assert.ok(signed({ call: "printers.find", params: {}, timestamp: Date.now() }));

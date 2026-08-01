@@ -42,6 +42,11 @@ services:
     volumes:
       - rispro-storage:/app/storage
       - ./storage/sante-hl7-outbox:/app/storage/sante-hl7-outbox
+      - ./var/qz-bootstrap:/var/lib/rispro/qz-bootstrap:ro
+    secrets:
+      - qz_root_certificate
+      - qz_signing_certificate
+      - qz_signing_private_key
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
@@ -72,11 +77,6 @@ services:
     volumes:
       - rispro-storage:/app/storage
       - ./storage/sante-hl7-outbox:/app/storage/sante-hl7-outbox
-      - ./var/qz-bootstrap:/var/lib/rispro/qz-bootstrap:ro
-    secrets:
-      - qz_root_certificate
-      - qz_signing_certificate
-      - qz_signing_private_key
     healthcheck:
       test: ["CMD", "npm", "run", "healthcheck:request-scan-worker"]
       interval: 30s

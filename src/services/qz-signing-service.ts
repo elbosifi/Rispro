@@ -50,6 +50,10 @@ function publicDer(key: KeyObject): Buffer {
   return publicKey.export({ format: "der", type: "spki" });
 }
 
+function assertCertificateCurrentlyValid(certificate: Pick<X509Certificate, "validFrom" | "validTo">, message: string, now = Date.now()): void {
+  if (now < Date.parse(certificate.validFrom) || now > Date.parse(certificate.validTo)) throw new HttpError(503, message);
+}
+
 export function loadValidatedQzIdentity(): QzIdentity {
   const trustMode = env.qzTrustMode;
   if (!trustMode) throw new HttpError(503, "QZ_TRUST_MODE is not configured.");
@@ -61,8 +65,7 @@ export function loadValidatedQzIdentity(): QzIdentity {
   try { privateKey = createPrivateKey(signingPrivateKey); } catch { throw new HttpError(503, "QZ signing private key is invalid."); }
   assertRsaPkcs8(signingPrivateKey, privateKey);
   if (signing.ca) throw new HttpError(503, "QZ signing certificate must not be a CA certificate.");
-  const now = Date.now();
-  if (now < Date.parse(signing.validFrom) || now > Date.parse(signing.validTo)) throw new HttpError(503, "QZ signing certificate is not currently valid.");
+  assertCertificateCurrentlyValid(signing, "QZ signing certificate is not currently valid.");
   if (!publicDer(signing.publicKey).equals(publicDer(privateKey))) throw new HttpError(503, "QZ signing certificate does not match the private key.");
 
   let rootCertificate: string | null = null;
@@ -70,6 +73,7 @@ export function loadValidatedQzIdentity(): QzIdentity {
   if (trustMode === "internal_ca") {
     rootCertificate = configuredPem("QZ_ROOT_CERTIFICATE_FILE", null, "QZ root certificate");
     try { root = new X509Certificate(rootCertificate); } catch { throw new HttpError(503, "QZ root certificate is invalid."); }
+    assertCertificateCurrentlyValid(root, "QZ root certificate is not currently valid.");
     if (!root.ca) throw new HttpError(503, "QZ root certificate must be a CA certificate.");
     if (root.subject !== root.issuer || !root.verify(root.publicKey)) throw new HttpError(503, "QZ root certificate must be self-issued and self-signed.");
     if (signing.issuer !== root.subject || !signing.verify(root.publicKey)) throw new HttpError(503, "QZ signing certificate does not chain to the configured root.");
@@ -229,5 +233,6 @@ export function signQzRequest(request: unknown, digest: unknown): string {
 }
 
 export const __qzSigningTestables = {
+  assertCertificateCurrentlyValid,
   validateBase64Pdf,
 };

@@ -965,6 +965,8 @@ verify_qz_bootstrap_readiness() {
   local response
   response="$(curl --fail --silent --show-error "$manifest_url")" || { err "QZ bootstrap manifest is unreachable: ${manifest_url}"; return 1; }
   node -e 'const value=JSON.parse(process.argv[1]); if(value.ready!==true) throw new Error(value.reason || "QZ bootstrap is not ready");' "$response" || { err 'QZ bootstrap manifest reported not ready.'; return 1; }
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T app sh -c 'test -r /run/secrets/qz_root_certificate && test -r /run/secrets/qz_signing_certificate && test -r /run/secrets/qz_signing_private_key && test -r /var/lib/rispro/qz-bootstrap/qz-tray-2.2.6-x86_64.exe' || { err 'RISpro app cannot read every mounted QZ runtime file.'; return 1; }
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T request-scan-worker sh -c 'test ! -e /run/secrets/qz_root_certificate && test ! -e /run/secrets/qz_signing_certificate && test ! -e /run/secrets/qz_signing_private_key && test ! -e /var/lib/rispro/qz-bootstrap' || { err 'Request Scan worker unexpectedly has QZ signing or installer access.'; return 1; }
   ok "QZ printing bootstrap is ready: ${manifest_url}"
 }
 
