@@ -15,6 +15,75 @@ interface DialogContextType {
 
 const DialogContext = createContext<DialogContextType | null>(null);
 
+interface BodyScrollLockSnapshot {
+  scrollX: number;
+  scrollY: number;
+  bodyOverflow: string;
+  bodyPosition: string;
+  bodyTop: string;
+  bodyLeft: string;
+  bodyWidth: string;
+  bodyPaddingRight: string;
+  bodyOverscrollBehavior: string;
+  documentOverscrollBehavior: string;
+}
+
+let bodyScrollLockCount = 0;
+let bodyScrollLockSnapshot: BodyScrollLockSnapshot | null = null;
+
+function lockBodyScroll() {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+
+  if (bodyScrollLockCount === 0) {
+    const body = document.body;
+    const documentElement = document.documentElement;
+    const scrollBarWidth = documentElement.clientWidth > 0
+      ? Math.max(0, window.innerWidth - documentElement.clientWidth)
+      : 0;
+    bodyScrollLockSnapshot = {
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyLeft: body.style.left,
+      bodyWidth: body.style.width,
+      bodyPaddingRight: body.style.paddingRight,
+      bodyOverscrollBehavior: body.style.overscrollBehavior,
+      documentOverscrollBehavior: documentElement.style.overscrollBehavior,
+    };
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${bodyScrollLockSnapshot.scrollY}px`;
+    body.style.left = `-${bodyScrollLockSnapshot.scrollX}px`;
+    body.style.width = "100%";
+    if (scrollBarWidth > 0) body.style.paddingRight = `${scrollBarWidth}px`;
+    body.style.overscrollBehavior = "none";
+    documentElement.style.overscrollBehavior = "none";
+  }
+  bodyScrollLockCount += 1;
+}
+
+function unlockBodyScroll() {
+  if (bodyScrollLockCount === 0) return;
+  bodyScrollLockCount -= 1;
+  if (bodyScrollLockCount > 0 || !bodyScrollLockSnapshot || typeof document === "undefined" || typeof window === "undefined") return;
+
+  const body = document.body;
+  const documentElement = document.documentElement;
+  const snapshot = bodyScrollLockSnapshot;
+  body.style.overflow = snapshot.bodyOverflow;
+  body.style.position = snapshot.bodyPosition;
+  body.style.top = snapshot.bodyTop;
+  body.style.left = snapshot.bodyLeft;
+  body.style.width = snapshot.bodyWidth;
+  body.style.paddingRight = snapshot.bodyPaddingRight;
+  body.style.overscrollBehavior = snapshot.bodyOverscrollBehavior;
+  documentElement.style.overscrollBehavior = snapshot.documentOverscrollBehavior;
+  bodyScrollLockSnapshot = null;
+  window.scrollTo(snapshot.scrollX, snapshot.scrollY);
+}
+
 function useDialog() {
   const context = useContext(DialogContext);
   if (!context) {
@@ -30,6 +99,12 @@ interface DialogProps {
 }
 
 function Dialog({ open, onClose, children }: DialogProps) {
+  useEffect(() => {
+    if (!open) return;
+    lockBodyScroll();
+    return unlockBodyScroll;
+  }, [open]);
+
   return (
     <DialogContext.Provider value={{ open, onClose }}>
       {open && children}
@@ -84,6 +159,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        overscrollBehavior: "contain",
       }}
       onClick={handleBackdropClick}
       {...props}
@@ -114,6 +190,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           boxShadow: "var(--shadow-floating)",
           maxHeight: "calc(100vh - 32px)",
           overflow: scrollable ? "auto" : "hidden",
+          overscrollBehavior: "contain",
         }}
         className={className}
       >

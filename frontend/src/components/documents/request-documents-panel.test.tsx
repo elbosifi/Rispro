@@ -402,7 +402,35 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     expect(await screen.findByText("NAPS2.WebScan is not available on this workstation. Upload PDF/image instead.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
+    expect(screen.getByText("Upload request document")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
+  });
+
+  it("hides Attach Request until a file is selected and enables it after selection", async () => {
+    renderPanel({ layout: "workspace" });
+
+    expect(await screen.findByText("Upload request document")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
+
+    await userEvent.upload(screen.getByTestId("document-file-input") as HTMLInputElement, new File(["request"], "request.pdf", { type: "application/pdf" }));
+
+    const attachButton = await screen.findByRole("button", { name: "Attach Request" });
+    expect((attachButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("returns to the file-picker state after upload and supports a second document", async () => {
+    renderPanel({ layout: "workspace" });
+    const input = await screen.findByTestId("document-file-input") as HTMLInputElement;
+
+    await userEvent.upload(input, new File(["first"], "first.pdf", { type: "application/pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Upload request document")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
+
+    await userEvent.upload(input, new File(["second"], "second.pdf", { type: "application/pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(2));
   });
 
   it("passes configured direct NAPS2 endpoint from integration status to scanner adapter", async () => {
@@ -576,7 +604,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await userEvent.upload(await screen.findByTestId("document-file-input") as HTMLInputElement, file);
 
     expect(await screen.findByText("request.pdf · 2 KB")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Attach Request" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByText("Scan Paper")).toBeTruthy();
   });
 
@@ -607,7 +635,8 @@ describe("RequestDocumentsPanel local scan flow", () => {
     renderPanel({ previewMode: "inline" });
 
     expect((await screen.findByRole("alert")).textContent).toContain("not supported");
-    expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
+    expect(screen.getByText("Upload request document")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/api/documents/3/view");
   });

@@ -113,6 +113,7 @@ function renderModal(props: Partial<React.ComponentProps<typeof AppointmentManag
 }
 
 beforeEach(() => {
+  vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
   localStorage.setItem("rispro-language", "en");
   mocks.getAppointmentById.mockReset();
   mocks.getAppointmentById.mockResolvedValue(appointment);
