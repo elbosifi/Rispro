@@ -163,7 +163,7 @@ jobs:
 
       - name: Frontend production build
         working-directory: frontend
-        run: npm run build -- --mode production
+        run: npm run build -- --mode production && npm run verify:qz-bundle
 
   browser-e2e:
     runs-on: ubuntu-latest

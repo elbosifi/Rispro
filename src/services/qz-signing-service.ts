@@ -71,6 +71,21 @@ function validatePrintOptions(options: unknown): void {
   }
 }
 
+function validateBase64Pdf(value: unknown): void {
+  if (typeof value !== "string" || value.length === 0) reject("QZ PDF data is invalid.", 400);
+  if (/^data:/i.test(value)) reject("QZ PDF data must not use a data URL.", 400);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) reject("QZ PDF data is not valid Base64.", 400);
+
+  let decoded: Buffer;
+  try {
+    decoded = Buffer.from(value, "base64");
+  } catch {
+    reject("QZ PDF data is not valid Base64.", 400);
+  }
+  if (decoded.toString("base64") !== value) reject("QZ PDF data is not canonical Base64.", 400);
+  if (decoded.length < 5 || decoded.subarray(0, 5).toString("ascii") !== "%PDF-") reject("QZ print data is not a PDF document.", 400);
+}
+
 function validatePrint(params: unknown): void {
   if (!isRecord(params) || Object.keys(params).some((key) => !["printer", "options", "data"].includes(key))) {
     reject("QZ print parameters are invalid.", 400);
@@ -78,13 +93,13 @@ function validatePrint(params: unknown): void {
   if (!isRecord(params.printer) || typeof params.printer.name !== "string" || params.printer.name !== params.printer.name.trim() || params.printer.name.length < 1 || params.printer.name.length > 255 || CONTROL_CHARACTERS.test(params.printer.name) || Object.keys(params.printer).some((key) => key !== "name")) {
     reject("QZ print requests must target one named local printer.", 403);
   }
-  if (!Array.isArray(params.data) || params.data.length === 0) reject("QZ print parameters are incomplete.", 400);
+  if (!Array.isArray(params.data) || params.data.length !== 1) reject("Exactly one PDF document is required for QZ printing.", 400);
   validatePrintOptions(params.options);
-  for (const item of params.data) {
-    if (!isRecord(item) || Object.keys(item).some((key) => !["type", "format", "flavor", "data"].includes(key)) || item.type !== "pixel" || item.format !== "pdf" || item.flavor !== "base64" || typeof item.data !== "string") {
-      reject("Only Base64 pixel PDF print data may be signed.", 403);
-    }
+  const item = params.data[0];
+  if (!isRecord(item) || Object.keys(item).some((key) => !["type", "format", "flavor", "data"].includes(key)) || item.type !== "pixel" || item.format !== "pdf" || item.flavor !== "base64") {
+    reject("Only Base64 pixel PDF print data may be signed.", 403);
   }
+  validateBase64Pdf(item.data);
 }
 
 export function qzSigningRequestLimitBytes(): number {

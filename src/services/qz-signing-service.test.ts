@@ -8,6 +8,7 @@ const originalCertificate = process.env.QZ_CERTIFICATE;
 const originalPrivateKey = process.env.QZ_PRIVATE_KEY;
 const originalLimit = env.qzSigningRequestLimitMb;
 let publicKey: ReturnType<typeof generateKeyPairSync>["publicKey"];
+const VALID_PDF_BASE64 = Buffer.from("%PDF-1.4\nx").toString("base64");
 
 beforeEach(() => {
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -57,8 +58,21 @@ function printOptions(overrides: Record<string, unknown> = {}): Record<string, u
   };
 }
 
-function printPayload(options: Record<string, unknown>, printer: Record<string, unknown> = { name: "RISPRO A4" }): object {
-  return { call: "print", params: { printer, options, data: [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0=" }] }, timestamp: Date.now() };
+function pdfItem(data: unknown = VALID_PDF_BASE64): Record<string, unknown> {
+  return { type: "pixel", format: "pdf", flavor: "base64", data };
+}
+
+function printPayload(options: Record<string, unknown>, printer: Record<string, unknown> = { name: "RISPRO A4" }, data: unknown = [pdfItem()]): object {
+  return { call: "print", params: { printer, options, data }, timestamp: Date.now() };
+}
+
+function validationError(payload: object): string {
+  try {
+    validateQzSigningRequest(JSON.stringify(payload));
+    assert.fail("Expected QZ signing validation to reject the payload.");
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 describe("QZ request signing", () => {
@@ -71,6 +85,43 @@ describe("QZ request signing", () => {
     assert.ok(signed(printPayload(printOptions())));
     assert.ok(signed(printPayload(printOptions({ size: { width: 148, height: 210, custom: false }, jobName: "RISpro A5" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", scaleContent: false, rasterize: true, printerTray: "Tray 1", jobName: "RISpro label" }))));
+  });
+  it("requires exactly one flat PDF data item", () => {
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [])), /Exactly one PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [pdfItem(), pdfItem()])), /Exactly one PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, "not-an-array")), /Exactly one PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [[pdfItem()]])), /Base64 pixel PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [pdfItem(), { type: "raw", format: "command", flavor: "plain", data: "PRINT" }])), /Exactly one PDF/);
+  });
+  it("accepts only canonical unwrapped Base64 whose decoded bytes begin with a PDF header", () => {
+    assert.ok(signed(printPayload(printOptions())));
+    const invalidCases: Array<[unknown, RegExp]> = [
+      ["", /PDF data is invalid/],
+      ["JVBERi0*", /not valid Base64/],
+      ["JVBERi0===", /not valid Base64/],
+      ["JVBERi0", /not valid Base64/],
+      [` ${VALID_PDF_BASE64}`, /not valid Base64/],
+      [`${VALID_PDF_BASE64}\n`, /not valid Base64/],
+      [`${VALID_PDF_BASE64}\t`, /not valid Base64/],
+      [`data:application/pdf;base64,${VALID_PDF_BASE64}`, /must not use a data URL/],
+      [Buffer.from("plain text").toString("base64"), /not a PDF document/],
+      [Buffer.from("<html>print</html>").toString("base64"), /not a PDF document/],
+      [Buffer.from("\u001b@raw printer command").toString("base64"), /not a PDF document/],
+      [Buffer.from("%PNG-not-a-pdf").toString("base64"), /not a PDF document/],
+      [VALID_PDF_BASE64.replace(/=+$/, ""), /not valid Base64/],
+    ];
+    for (const [data, expected] of invalidCases) assert.match(validationError(printPayload(printOptions(), { name: "P" }, [pdfItem(data)])), expected);
+  });
+  it("rejects unknown print-item fields and wrong QZ PDF metadata", () => {
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [{ ...pdfItem(), extra: true }])), /Base64 pixel PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [{ ...pdfItem(), type: "raw" }])), /Base64 pixel PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [{ ...pdfItem(), format: "html" }])), /Base64 pixel PDF/);
+    assert.match(validationError(printPayload(printOptions(), { name: "P" }, [{ ...pdfItem(), flavor: "plain" }])), /Base64 pixel PDF/);
+  });
+  it("does not include rejected document data in validation errors", () => {
+    const submitted = Buffer.from("patient-secret-not-a-pdf").toString("base64");
+    const message = validationError(printPayload(printOptions(), { name: "P" }, [pdfItem(submitted)]));
+    assert.doesNotMatch(message, new RegExp(submitted));
   });
   it("rejects unknown, file, socket, USB, HID, raw, and HTML print calls", () => {
     for (const call of ["unknown.call", "file.read", "socket.sendData", "usb.listDevices", "hid.listDevices"]) assert.throws(() => validateQzSigningRequest(JSON.stringify({ call, params: {}, timestamp: Date.now() })), /not approved/);
@@ -118,7 +169,9 @@ describe("QZ request signing", () => {
     env.qzSigningRequestLimitMb = 1;
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.find", params: { query: "é".repeat(600_000) }, timestamp: Date.now() })), /size limit/);
     env.qzSigningRequestLimitMb = 4;
-    const data = "A".repeat(2 * 1024 * 1024);
+    const pdfBytes = Buffer.alloc(2 * 1024 * 1024, 0x20);
+    Buffer.from("%PDF-1.4\n").copy(pdfBytes);
+    const data = pdfBytes.toString("base64");
     const payload = printPayload(printOptions(), { name: "P" }) as { params: { data: Array<Record<string, unknown>> } };
     payload.params.data[0].data = data;
     assert.ok(signed(payload));
