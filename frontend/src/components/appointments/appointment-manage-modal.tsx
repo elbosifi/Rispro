@@ -21,6 +21,7 @@ import { AppointmentInformationView } from "@/components/appointments/appointmen
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { pushToast } from "@/lib/toast";
 import { printAccessionLabelById, printAppointmentSlipById } from "@/lib/appointment-printing";
 import { AnchoredMenu, Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
@@ -151,6 +152,7 @@ function AppointmentHeaderBadgeCluster({ appointment, language }: { appointment:
     <Badge variant={priorityVariant(priority)} className="whitespace-nowrap">{priority || chooseLocalized(language, "الأولوية غير محددة", "Priority not assigned")}</Badge>
     <Badge variant={appointment.requiresReport ? "info" : "neutral"} className="whitespace-nowrap">{appointment.requiresReport ? chooseLocalized(language, "التقرير مطلوب", "Report required") : chooseLocalized(language, "التقرير غير مطلوب", "Report not required")}</Badge>
     {isProtocolModality(appointment) ? <Badge variant={protocolAssigned ? "success" : "neutral"} className="whitespace-nowrap">{protocolAssigned ? chooseLocalized(language, "البروتوكول معين", "Protocol assigned") : chooseLocalized(language, "البروتوكول غير معين", "Protocol not assigned")}</Badge> : null}
+    {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} /> : null}
   </div>;
 }
 

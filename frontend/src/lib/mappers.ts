@@ -81,6 +81,15 @@ export interface AppointmentWithDetails extends Appointment {
   modalityNameAr: string;
   modalityNameEn: string;
   modalityCode: string;
+  modalitySafetyWorkflowType?: "standard_acknowledgement" | "mri_primary_implant_screening";
+  mriPrimaryScreening?: {
+    result: "no_known_implant_reported" | "implant_reported_review_required";
+    implantSite: string | null;
+    implantDescription: string | null;
+    previousReviewerNameReported: string | null;
+    screenedByUserId: number;
+    screenedAt: string;
+  } | null;
   modalityGeneralInstructionAr: string | null;
   modalityGeneralInstructionEn: string | null;
   examNameAr: string | null;
@@ -290,6 +299,10 @@ export function mapAppointments(rawArray: RawRecord[]): Appointment[] {
 // -- Extended Appointment (with patient/modality details for lists) --
 export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetails {
   const protocolAssignmentId = numOrNull(raw, "protocol_assignment_id") ?? numOrNull(raw, "protocolAssignmentId");
+  const rawMriScreening = raw.mriPrimaryScreening ?? raw.mri_primary_screening;
+  const mriScreening = rawMriScreening && typeof rawMriScreening === "object" && !Array.isArray(rawMriScreening)
+    ? rawMriScreening as RawRecord
+    : null;
   return {
     ...mapAppointment(raw),
     // Patient fields
@@ -311,6 +324,21 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     modalityNameAr: str(raw, 'modality_name_ar') || str(raw, 'modalityNameAr'),
     modalityNameEn: str(raw, 'modality_name_en') || str(raw, 'modalityNameEn'),
     modalityCode: str(raw, 'modality_code') || str(raw, 'modalityCode'),
+    modalitySafetyWorkflowType: (() => {
+      const value = strOrNull(raw, "modality_safety_workflow_type") ?? strOrNull(raw, "modalitySafetyWorkflowType");
+      return value === "mri_primary_implant_screening" ? value : "standard_acknowledgement";
+    })(),
+    mriPrimaryScreening: mriScreening &&
+      (mriScreening.result === "no_known_implant_reported" || mriScreening.result === "implant_reported_review_required")
+      ? {
+          result: mriScreening.result,
+          implantSite: strOrNull(mriScreening, "implantSite") ?? strOrNull(mriScreening, "implant_site"),
+          implantDescription: strOrNull(mriScreening, "implantDescription") ?? strOrNull(mriScreening, "implant_description"),
+          previousReviewerNameReported: strOrNull(mriScreening, "previousReviewerNameReported") ?? strOrNull(mriScreening, "previous_reviewer_name_reported"),
+          screenedByUserId: num(mriScreening, "screenedByUserId") || num(mriScreening, "screened_by_user_id"),
+          screenedAt: str(mriScreening, "screenedAt") || str(mriScreening, "screened_at"),
+        }
+      : null,
     modalityGeneralInstructionAr: strOrNull(raw, 'modality_general_instruction_ar') ?? strOrNull(raw, 'modalityGeneralInstructionAr'),
     modalityGeneralInstructionEn: strOrNull(raw, 'modality_general_instruction_en') ?? strOrNull(raw, 'modalityGeneralInstructionEn'),
     // Exam type fields

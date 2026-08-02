@@ -1114,6 +1114,7 @@ type ModalityFormState = {
   safety_warning_ar: string;
   safety_warning_en: string;
   safety_warning_enabled: boolean;
+  safety_workflow_type: "standard_acknowledgement" | "mri_primary_implant_screening";
 };
 
 type ModalityMutationSource = Pick<
@@ -1128,6 +1129,7 @@ type ModalityMutationSource = Pick<
   | "safety_warning_ar"
   | "safety_warning_en"
   | "safety_warning_enabled"
+  | "safety_workflow_type"
 >;
 
 const EMPTY_MODALITY_FORM: ModalityFormState = {
@@ -1140,7 +1142,8 @@ const EMPTY_MODALITY_FORM: ModalityFormState = {
   general_instruction_en: "",
   safety_warning_ar: "",
   safety_warning_en: "",
-  safety_warning_enabled: true
+  safety_warning_enabled: true,
+  safety_workflow_type: "standard_acknowledgement"
 };
 
 function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
@@ -1190,7 +1193,8 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       generalInstructionEn: data.general_instruction_en,
       safetyWarningAr: data.safety_warning_ar,
       safetyWarningEn: data.safety_warning_en,
-      safetyWarningEnabled: data.safety_warning_enabled
+      safetyWarningEnabled: data.safety_warning_enabled,
+      safetyWorkflowType: data.safety_workflow_type
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
@@ -1212,7 +1216,8 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       generalInstructionEn: data.general_instruction_en,
       safetyWarningAr: data.safety_warning_ar,
       safetyWarningEn: data.safety_warning_en,
-      safetyWarningEnabled: data.safety_warning_enabled
+      safetyWarningEnabled: data.safety_warning_enabled,
+      safetyWorkflowType: data.safety_workflow_type
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
@@ -1246,7 +1251,8 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       general_instruction_en: modality.general_instruction_en || "",
       safety_warning_ar: modality.safety_warning_ar || "",
       safety_warning_en: modality.safety_warning_en || "",
-      safety_warning_enabled: modality.safety_warning_enabled !== false
+      safety_warning_enabled: modality.safety_warning_enabled !== false,
+      safety_workflow_type: modality.safety_workflow_type ?? "standard_acknowledgement"
     });
   };
 
@@ -1317,6 +1323,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
               <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
             </div>
           )}
+          <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!createForm.safety_warning_enabled} value={createForm.safety_workflow_type} onChange={(e) => setCreateForm({ ...createForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
           <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
         </div>
       )}
@@ -1351,6 +1358,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                     <textarea value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
                   </div>
                 )}
+                <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!editForm.safety_warning_enabled} value={editForm.safety_workflow_type} onChange={(e) => setEditForm({ ...editForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
                 <div className="flex gap-2">
                   <button onClick={() => updateMutation.mutate({ id: modality.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
                   <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">إلغاء</button>

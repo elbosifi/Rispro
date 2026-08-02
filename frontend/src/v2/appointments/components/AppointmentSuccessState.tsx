@@ -2,6 +2,7 @@ import { RequestDocumentsPanel } from "@/components/documents/request-documents-
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { MessageCircle } from "lucide-react";
+import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 
 interface Props {
   appointmentSummary: {
@@ -13,6 +14,7 @@ interface Props {
     examTypeName?: string | null;
     wasOverride: boolean;
     publicAppointmentUrl?: string | null;
+    mriPrimaryScreeningResult?: "no_known_implant_reported" | "implant_reported_review_required" | null;
   };
   onPrintView: () => void;
   onPrintNow: () => void;
@@ -55,6 +57,7 @@ export function AppointmentSuccessState({
           <span className="font-bold">{t(language, "appointments.create.mode")}:</span> {appointmentSummary.wasOverride ? t(language, "appointments.create.supervisorOverride") : t(language, "appointments.create.standard")}
         </div>
       </div>
+      {appointmentSummary.mriPrimaryScreeningResult ? <div className="mb-6"><MriPrimaryScreeningBadges result={appointmentSummary.mriPrimaryScreeningResult} /></div> : null}
       <div className="flex flex-wrap gap-4 mb-6">
         <button type="button" className="btn-secondary" onClick={onPrintView}>{t(language, "appointments.create.printView")}</button>
         <button type="button" className="btn-secondary" onClick={onPrintNow} disabled={printNowDisabled}>{t(language, "appointments.create.printNow")}</button>

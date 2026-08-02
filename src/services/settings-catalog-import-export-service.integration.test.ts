@@ -60,7 +60,7 @@ async function buildWorkbookBase64(input: {
   XLSX.utils.book_append_sheet(
     workbook,
     XLSX.utils.json_to_sheet(input.modalities, {
-      header: ["code", "name_en", "name_ar", "description_en", "description_ar", "daily_capacity", "active", "safety_warning_enabled", "safety_warning_en", "safety_warning_ar"]
+      header: ["code", "name_en", "name_ar", "description_en", "description_ar", "daily_capacity", "active", "safety_warning_enabled", "safety_warning_en", "safety_warning_ar", "safety_workflow_type"]
     }),
     "Modalities"
   );
@@ -87,6 +87,7 @@ function baseModalityRow(code: string, overrides: Record<string, unknown> = {}):
     safety_warning_enabled: true,
     safety_warning_en: `${code} safety en`,
     safety_warning_ar: `${code} safety ar`,
+    safety_workflow_type: "standard_acknowledgement",
     ...overrides
   };
 }
@@ -156,7 +157,9 @@ test("catalog export workbook generation includes both sheets and current rows",
     const modalityRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets["Modalities"], { defval: "" });
     const examRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets["ExamTypes"], { defval: "" });
 
-    assert.ok(modalityRows.some((row) => row.code === modalityCode));
+    const exportedModality = modalityRows.find((row) => row.code === modalityCode);
+    assert.ok(exportedModality);
+    assert.equal(exportedModality?.safety_workflow_type, "standard_acknowledgement");
     const exportedExam = examRows.find((row) => row.code === examCode && row.modality_code === modalityCode);
     assert.ok(exportedExam, "Export should include the active exam type row");
     assert.equal(exportedExam?.description_en, "scan en");
@@ -320,7 +323,7 @@ test("catalog import creates new modality and exam type from workbook", async (t
 
   try {
     const base64 = await buildWorkbookBase64({
-      modalities: [baseModalityRow(`${prefix}_MOD`, { daily_capacity: 11 })],
+      modalities: [baseModalityRow(`${prefix}_MOD`, { daily_capacity: 11, safety_workflow_type: "mri_primary_implant_screening" })],
       examTypes: [baseExamTypeRow(`${prefix}_MOD`, `${prefix}_EXAM`, { duration_minutes: 40 })]
     });
 
@@ -328,12 +331,13 @@ test("catalog import creates new modality and exam type from workbook", async (t
     assert.equal(summary.modalitiesCreated, 1);
     assert.equal(summary.examTypesCreated, 1);
 
-    const modality = await pool.query<{ code: string; daily_capacity: number }>(
-      `select code, daily_capacity from modalities where code = $1 limit 1`,
+    const modality = await pool.query<{ code: string; daily_capacity: number; safety_workflow_type: string }>(
+      `select code, daily_capacity, safety_workflow_type from modalities where code = $1 limit 1`,
       [`${prefix}_MOD`]
     );
     assert.equal(modality.rows[0]?.code, `${prefix}_MOD`);
     assert.equal(Number(modality.rows[0]?.daily_capacity), 11);
+    assert.equal(modality.rows[0]?.safety_workflow_type, "mri_primary_implant_screening");
 
     const exam = await pool.query<{ code: string; duration_minutes: number | null; specific_instruction_ar: string | null; specific_instruction_en: string | null }>(
       `
@@ -360,7 +364,7 @@ test("catalog preview returns progress notes and editable draft rows", async (t)
   await ensureCatalogSchema();
 
   const base64 = await buildWorkbookBase64({
-    modalities: [baseModalityRow("PREVIEW_MOD")],
+    modalities: [baseModalityRow("PREVIEW_MOD", { safety_workflow_type: "" })],
     examTypes: [baseExamTypeRow("PREVIEW_MOD", "PREVIEW_EXAM")]
   });
 
@@ -370,7 +374,18 @@ test("catalog preview returns progress notes and editable draft rows", async (t)
   assert.equal(preview.modalities.length, 1);
   assert.equal(preview.examTypes.length, 1);
   assert.equal(String(preview.modalities[0]?.action), "create");
+  assert.equal(preview.modalities[0]?.safetyWorkflowType, "standard_acknowledgement");
   assert.equal(String(preview.examTypes[0]?.action), "create");
+});
+
+test("catalog preview rejects invalid modality safety workflow values", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const preview = await previewCatalogWorkbook(await buildWorkbookBase64({
+    modalities: [baseModalityRow("PREVIEW_BAD_WORKFLOW", { safety_workflow_type: "unapproved_workflow" })],
+    examTypes: [baseExamTypeRow("PREVIEW_BAD_WORKFLOW", "PREVIEW_BAD_EXAM")],
+  }));
+  assert.equal(preview.canApply, false);
+  assert.ok(preview.modalities[0]?.errors.some((error) => error.column === "safety_workflow_type"));
 });
 
 test("catalog apply imports only selected reviewed rows", async (t) => {

@@ -3,6 +3,7 @@
  */
 
 import type { BookingStatus, CaseCategory, CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
+import type { MriPrimaryScreeningInput } from "../repositories/mri-primary-screening.repo.js";
 
 export interface Booking {
   id: number;
@@ -60,6 +61,8 @@ export interface CreateBookingPayload {
     verifiedAt: string;
     ambiguityRuleVersion: "name_first_three_v1";
   } | null;
+  modalitySafetyAcknowledged?: boolean;
+  mriPrimaryScreening?: MriPrimaryScreeningInput | null;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;

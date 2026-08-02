@@ -32,6 +32,7 @@ import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "./SchedulingOverrideRequestModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
 import { Button, Card } from "@/components/shared";
+import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision } from "../utils/scheduling-override-requests";
@@ -72,6 +73,7 @@ interface SuccessSummary {
   examTypeName?: string | null;
   wasOverride: boolean;
   publicAppointmentUrl?: string | null;
+  mriPrimaryScreeningResult?: "no_known_implant_reported" | "implant_reported_review_required" | null;
 }
 
 const AVAILABILITY_WINDOW_DAYS = 14;
@@ -196,8 +198,11 @@ export function CreateAppointmentTab({
   const [overrideLoading, setOverrideLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
-  const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
+  const [screeningResult, setScreeningResult] = useState<"no_known_implant_reported" | "implant_reported_review_required" | null>(null);
+  const [implantSite, setImplantSite] = useState("");
+  const [implantDescription, setImplantDescription] = useState("");
+  const [previousReviewerNameReported, setPreviousReviewerNameReported] = useState("");
   const [printNowLoading, setPrintNowLoading] = useState(false);
   const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string; status: string }>>([]);
   const [patientNoShowSummary, setPatientNoShowSummary] = useState<Awaited<ReturnType<typeof fetchPatientNoShowHistory>> | null>(null);
@@ -212,7 +217,6 @@ export function CreateAppointmentTab({
     if (stored === "ar" || stored === "en" || stored === "both") return stored;
     return "both";
   });
-  const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
   const initialPatientAppliedRef = useRef(false);
   const isReceptionist = currentUserRole === "receptionist";
   const isSupervisor = currentUserRole === "supervisor";
@@ -252,9 +256,16 @@ export function CreateAppointmentTab({
   }, [actions, form.patientId, initialSelectedPatient]);
 
   const selectedModality = modalityOptions.find((m) => m.id === form.modalityId);
-  const hasSafetyWarning = selectedModality?.safetyWarningEnabled && 
-    !!(selectedModality.safetyWarningEn || selectedModality.safetyWarningAr);
+  const safetyWarningEnabled = selectedModality?.safetyWarningEnabled === true;
+  const hasSafetyWarning = safetyWarningEnabled && Boolean(
+    String(selectedModality?.safetyWarningEn ?? "").trim() || String(selectedModality?.safetyWarningAr ?? "").trim()
+  );
   const safetyMessage = chooseLocalized(language, selectedModality?.safetyWarningAr, selectedModality?.safetyWarningEn) || "";
+  const isMriSafetyWorkflow = safetyWarningEnabled && selectedModality?.safetyWorkflowType === "mri_primary_implant_screening";
+  const safetyConfigurationError = safetyWarningEnabled && !hasSafetyWarning;
+  const safetyComplete = !safetyWarningEnabled || (safetyAcknowledged && (!isMriSafetyWorkflow || screeningResult !== null));
+
+  useEffect(() => { setSafetyAcknowledged(false); setScreeningResult(null); setImplantSite(""); setImplantDescription(""); setPreviousReviewerNameReported(""); }, [form.patientId, form.modalityId]);
 
   const filteredExamTypes = useMemo(
     () => examTypeOptions.filter((et) => form.modalityId != null && et.modalityId === form.modalityId),
@@ -453,6 +464,7 @@ export function CreateAppointmentTab({
         selectedRowCanUseImmediateOverride;
   const canSubmitCreate = Boolean(
     schedulingEngineEnabled &&
+    safetyComplete &&
     !submitLoading &&
     selectedRowCanBookNormally &&
     !(form.capacityResolutionMode === "special_quota_extra" && availability.isLoading)
@@ -549,6 +561,8 @@ export function CreateAppointmentTab({
           : null,
       patientIdentityVerificationProof: form.patient?.patientIdentityVerificationProof ?? null,
       patientIdentitySelectionSource: form.patient?.patientIdentitySelectionSource ?? "search",
+      modalitySafetyAcknowledged: safetyAcknowledged,
+      mriPrimaryScreening: isMriSafetyWorkflow && screeningResult ? { result: screeningResult, implantSite: screeningResult === "implant_reported_review_required" ? implantSite.trim() || null : null, implantDescription: screeningResult === "implant_reported_review_required" ? implantDescription.trim() || null : null, previousReviewerNameReported: screeningResult === "implant_reported_review_required" ? previousReviewerNameReported.trim() || null : null } : null,
     };
     if (showIntendedReportingDoctor && form.intendedReportingDoctorId) {
       request.intendedReportingDoctorId = form.intendedReportingDoctorId;
@@ -573,10 +587,12 @@ export function CreateAppointmentTab({
       }) || null;
     let publicAppointmentUrl: string | null = null;
     let patientPhone1: string | null = null;
+    let persistedMriPrimaryScreeningResult = isMriSafetyWorkflow ? screeningResult : null;
     try {
       const appointmentDetails = await getAppointmentById(response.booking.id);
       publicAppointmentUrl = String(appointmentDetails.publicAppointmentUrl || "").trim() || null;
       patientPhone1 = String(appointmentDetails.phone1 || form.patient?.phone1 || "").trim() || null;
+      persistedMriPrimaryScreeningResult = appointmentDetails.mriPrimaryScreening?.result ?? persistedMriPrimaryScreeningResult;
     } catch {
       publicAppointmentUrl = null;
       patientPhone1 = String(form.patient?.phone1 || "").trim() || null;
@@ -595,6 +611,7 @@ export function CreateAppointmentTab({
       examTypeName,
       wasOverride: response.wasOverride,
       publicAppointmentUrl,
+      mriPrimaryScreeningResult: persistedMriPrimaryScreeningResult,
     });
 
     if (decision.consumedCapacityMode === "special") {
@@ -683,12 +700,6 @@ export function CreateAppointmentTab({
         return;
       }
 
-      if (hasSafetyWarning && !safetyAcknowledged) {
-        pendingDecisionRef.current = decision;
-        setShowSafetyModal(true);
-        return;
-      }
-
       await createWithDecision(decision);
     } catch (error) {
       setPageError(localizeCreateAppointmentError(error, language));
@@ -729,7 +740,7 @@ export function CreateAppointmentTab({
   }
 
   async function submitCreateOverrideRequest(requesterReason: string) {
-    if (!form.patientId || !form.modalityId || !form.appointmentDate) return;
+    if (!safetyComplete || safetyConfigurationError || !form.patientId || !form.modalityId || !form.appointmentDate) return;
     setRequestOverrideError(null);
     try {
       await createOverrideRequestMutation.mutateAsync({
@@ -747,6 +758,8 @@ export function CreateAppointmentTab({
           requiresReport: form.requiresReport,
           notes: form.notes.trim() || null,
           isWalkIn: form.isWalkIn,
+          modalitySafetyAcknowledged: safetyAcknowledged,
+          mriPrimaryScreening: isMriSafetyWorkflow && screeningResult ? { result: screeningResult, implantSite: screeningResult === "implant_reported_review_required" ? implantSite.trim() || null : null, implantDescription: screeningResult === "implant_reported_review_required" ? implantDescription.trim() || null : null, previousReviewerNameReported: screeningResult === "implant_reported_review_required" ? previousReviewerNameReported.trim() || null : null } : null,
           patientIdentityVerificationProof: form.patient?.patientIdentityVerificationProof ?? null,
         },
       });
@@ -808,7 +821,10 @@ export function CreateAppointmentTab({
             setAvailabilitySelectedRow(null);
             setPageError(null);
             setSafetyAcknowledged(false);
-            setShowSafetyModal(false);
+            setScreeningResult(null);
+            setImplantSite("");
+            setImplantDescription("");
+            setPreviousReviewerNameReported("");
           }}
         />
       </div>
@@ -840,14 +856,12 @@ export function CreateAppointmentTab({
                 setAvailabilitySelectedRow(null);
                 setPageError(null);
                 setSafetyAcknowledged(false);
-                setShowSafetyModal(false);
               }}
               onClearPatient={() => {
                 actions.setPatient(null);
                 setAvailabilitySelectedRow(null);
                 setPageError(null);
                 setSafetyAcknowledged(false);
-                setShowSafetyModal(false);
               }}
             />
 
@@ -911,11 +925,30 @@ export function CreateAppointmentTab({
                   actions.setModalityId(value);
                   setAvailabilitySelectedRow(null);
                   setSafetyAcknowledged(false);
-                  setShowSafetyModal(false);
                 }}
                 disabled={!schedulingEngineEnabled || !form.patientId}
               />
 
+              {safetyWarningEnabled && safetyComplete && <div className="xl:col-span-2 flex flex-wrap items-center gap-2 text-sm">{isMriSafetyWorkflow ? <MriPrimaryScreeningBadges result={screeningResult} /> : <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">Modality safety warning acknowledged</span>}<button type="button" className="text-xs underline" onClick={() => setSafetyAcknowledged(false)}>{isMriSafetyWorkflow ? "Change screening response" : "Review warning again"}</button></div>}
+
+              {safetyWarningEnabled && !safetyComplete && (
+                <div className="xl:col-span-2">
+                  <Card className="p-4 border-amber-300">
+                    <h3 className="text-lg font-semibold">{isMriSafetyWorkflow ? "MRI Primary Screening" : "Modality safety warning"}</h3>
+                    {safetyConfigurationError ? <p className="mt-2 text-sm text-red-700">Booking is blocked because this modality's mandatory safety warning has not been configured. Contact an administrator.</p> : <>
+                      <p className="mt-2 text-sm">{safetyMessage}</p>
+                      {isMriSafetyWorkflow ? <div className="mt-4 space-y-3"><p className="text-sm">Complete this initial screening before selecting the examination or appointment date. This does not replace the full MRI safety questionnaire or final MRI staff assessment.</p>
+                        <label className="block border rounded p-3"><input type="radio" name="mri-screening" checked={screeningResult === "no_known_implant_reported"} onChange={() => setScreeningResult("no_known_implant_reported")} /> Patient reports no known implant, implanted device, or metallic foreign body</label>
+                        <label className="block border rounded p-3"><input type="radio" name="mri-screening" checked={screeningResult === "implant_reported_review_required"} onChange={() => setScreeningResult("implant_reported_review_required")} /> Patient reports an implant, implanted device, or metallic foreign body</label>
+                        {screeningResult === "implant_reported_review_required" && <div className="grid gap-2"><input aria-label="Implant/device site" className="input-premium" value={implantSite} onChange={(e) => setImplantSite(e.target.value)} placeholder="Implant/device site" /><input aria-label="Implant/device description" className="input-premium" value={implantDescription} onChange={(e) => setImplantDescription(e.target.value)} placeholder="Implant/device description" /><input aria-label="Previously reviewed by, as reported" className="input-premium" value={previousReviewerNameReported} onChange={(e) => setPreviousReviewerNameReported(e.target.value)} placeholder="Previously reviewed by, as reported" /></div>}
+                        <Button onClick={() => setSafetyAcknowledged(true)} disabled={!screeningResult || (screeningResult === "implant_reported_review_required" && !implantSite.trim())}>Complete primary screening</Button>
+                      </div> : <div className="mt-4"><p className="text-sm mb-3">I have reviewed this warning with the patient and completed the required initial check.</p><Button onClick={() => setSafetyAcknowledged(true)}>Acknowledge and continue</Button></div>}
+                    </>}
+                  </Card>
+                </div>
+              )}
+
+              {safetyComplete && <>
               <ExamTypeSelect
                 options={effectiveExamTypes}
                 value={form.examTypeId}
@@ -924,7 +957,7 @@ export function CreateAppointmentTab({
                   actions.setExamTypeId(value);
                   setAvailabilitySelectedRow(null);
                 }}
-                disabled={!schedulingEngineEnabled || !form.modalityId}
+                disabled={!schedulingEngineEnabled || !form.modalityId || !safetyComplete}
               />
 
               <div>
@@ -1124,7 +1157,6 @@ export function CreateAppointmentTab({
                   onClick={() => {
                     actions.resetAll();
                     setSafetyAcknowledged(false);
-                    setShowSafetyModal(false);
                     setNoShowAuthorizationReason("");
                   }}
                   disabled={submitLoading}
@@ -1154,12 +1186,13 @@ export function CreateAppointmentTab({
                   </Button>
                 ) : null}
               </div>
+            </>}
             </div>
           </Card>
         </div>
 
         {/* Availability Panel */}
-        <div className="space-y-3 sm:space-y-4 order-2 xl:order-1">
+        {safetyComplete && <div className="space-y-3 sm:space-y-4 order-2 xl:order-1">
           <Card className="p-4 sm:p-5">
             <div className="mb-4 sm:mb-5 flex items-start justify-between gap-3">
               <h3 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--foreground)" }}>
@@ -1200,7 +1233,7 @@ export function CreateAppointmentTab({
               }
             />
           </Card>
-        </div>
+        </div>}
 
       </div>
 
@@ -1233,56 +1266,6 @@ export function CreateAppointmentTab({
         }}
         onSubmit={submitCreateOverrideRequest}
       />
-
-      {showSafetyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}>
-          <Card className="w-full max-w-md mx-4 p-4 sm:p-5">
-            <h3 className="text-lg sm:text-xl font-semibold mb-3" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.safetyConfirmation")}</h3>
-            <p className="text-sm sm:text-base mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
-            <p className="text-sm sm:text-base mb-5">
-              {t(language, "appointments.create.confirmNoContraindications", {
-                modality: formatEntityLabel({
-                  mode: entityDisplayMode,
-                  nameAr: selectedModality?.nameAr,
-                  nameEn: selectedModality?.nameEn,
-                  fallback: selectedModality?.name || "—",
-                }),
-              })}
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button
-                variant="secondary"
-                onClick={() => setShowSafetyModal(false)}
-                className="flex-1"
-              >
-                {t(language, "appointments.create.cancel")}
-              </Button>
-              <Button
-                className="flex-1"
-                style={{ background: "var(--amber)" }}
-                onClick={async () => {
-                  setSafetyAcknowledged(true);
-                  setShowSafetyModal(false);
-                  const decision = pendingDecisionRef.current;
-                  if (decision) {
-                    pendingDecisionRef.current = null;
-                    setSubmitLoading(true);
-                    try {
-                      await createWithDecision(decision);
-                    } catch (error) {
-                    setPageError(localizeCreateAppointmentError(error, language));
-                    } finally {
-                      setSubmitLoading(false);
-                    }
-                  }
-                }}
-              >
-                {t(language, "appointments.create.confirm")}
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }

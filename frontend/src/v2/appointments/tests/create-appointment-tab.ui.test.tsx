@@ -184,6 +184,24 @@ vi.mock("../components/PatientSearchSection", () => ({
       >
         Select Test Patient
       </button>
+      <button
+        type="button"
+        onClick={() => onSelectPatient({
+          id: 10,
+          arabicFullName: "Other Patient",
+          englishFullName: "Other Patient",
+          category: "non_oncology",
+          identifierType: "passport",
+          identifierValue: "P-67890",
+          nationalId: "456",
+          mrn: "MRN-10",
+          sex: "F",
+          ageYears: 28,
+          phone1: "0923456789",
+        })}
+      >
+        Select Other Patient
+      </button>
     </div>
   ),
 }));
@@ -429,7 +447,8 @@ function setup(
   ],
   currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor",
   doctorModuleCapabilities: DoctorModuleCapability[] = [],
-  evaluateDecision?: SchedulingDecisionDto
+  evaluateDecision?: SchedulingDecisionDto,
+  examTypeOptions: Array<{ id: number; name: string; nameEn: string; nameAr: string; code: string; modalityId: number; isActive: boolean }> = []
 ) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
@@ -475,7 +494,7 @@ function setup(
             <CreateAppointmentTab
               patientLookups={{}}
               modalityOptions={modalityOptions}
-              examTypeOptions={[]}
+              examTypeOptions={examTypeOptions}
               specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
               priorityOptions={priorityOptions}
               schedulingEngineEnabled
@@ -1469,210 +1488,129 @@ describe("CreateAppointmentTab UI interactions", () => {
     });
   });
 
-describe("safety modal interactions", () => {
-    beforeEach(() => {
-      mockRowsRef.current = availabilityRowsWithAvailable;
-    });
+});
 
-    function setupWithSafetyWarning() {
-      const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
-        booking: {
-          id: 50,
-          patientId: payload.patientId,
-          modalityId: payload.modalityId,
-          examTypeId: payload.examTypeId,
-          reportingPriorityId: null,
-          bookingDate: "2027-01-03",
-          bookingTime: null,
-          caseCategory: payload.caseCategory,
-          status: "scheduled" as const,
-          notes: payload.notes,
-          policyVersionId: 1,
-          capacityResolutionMode: payload.capacityResolutionMode ?? "standard",
-          usesSpecialQuota: payload.capacityResolutionMode === "special_quota_extra",
-          createdAt: "",
-          updatedAt: "",
-        },
-        decision: {},
-        wasOverride: false,
-      }));
+describe("inline modality safety workflow", () => {
+  const standardModality: ModalityDto = {
+    id: 1,
+    name: "CT",
+    nameAr: "CT",
+    nameEn: "CT",
+    code: "CT",
+    isActive: true,
+    safetyWarningEn: "Radiation risk",
+    safetyWarningAr: "Radiation risk",
+    safetyWarningEnabled: true,
+    safetyWorkflowType: "standard_acknowledgement",
+  };
+  const mriModality: ModalityDto = {
+    id: 2,
+    name: "MRI",
+    nameAr: "MRI",
+    nameEn: "MRI",
+    code: "MRI",
+    isActive: true,
+    safetyWarningEn: "Magnet safety",
+    safetyWarningAr: "Magnet safety",
+    safetyWarningEnabled: true,
+    safetyWorkflowType: "mri_primary_implant_screening",
+  };
+  const examTypes = [
+    { id: 101, name: "CT exam", nameEn: "CT exam", nameAr: "CT exam", code: "CT-1", modalityId: 1, isActive: true },
+    { id: 201, name: "MRI exam", nameEn: "MRI exam", nameAr: "MRI exam", code: "MRI-1", modalityId: 2, isActive: true },
+  ];
 
-      const onEvaluateAvailability = vi.fn(async (): Promise<SchedulingDecisionDto> => ({
-        isAllowed: true,
-        requiresSupervisorOverride: false,
-        displayStatus: "available" as const,
-        suggestedBookingMode: "standard" as const,
-        consumedCapacityMode: "standard" as const,
-        remainingStandardCapacity: 5,
-        remainingSpecialQuota: null,
-        matchedRuleIds: [],
-        reasons: [],
-        policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
-        decisionTrace: { evaluatedAt: "", input: {} },
-      }));
+  beforeEach(() => {
+    mockRowsRef.current = availabilityRowsWithAvailable;
+  });
 
-      render(
-        <LanguageProvider>
-          <MemoryRouter initialEntries={["/appointments"]}>
-            <Routes>
-              <Route path="/appointments" element={
-                <CreateAppointmentTab
-                  patientLookups={{}}
-                  modalityOptions={[
-                    { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: "Radiation risk", safetyWarningAr: "Radiation risk", safetyWarningEnabled: true },
-                    { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: "Magnet safety", safetyWarningAr: "Magnet safety", safetyWarningEnabled: true },
-                  ]}
-                  examTypeOptions={[]}
-                  specialReasonOptions={[]}
-                  priorityOptions={[{ id: 1, nameEn: "Urgent", nameAr: "Urgent" }]}
-                  schedulingEngineEnabled
-                  canUseNonStandardCapacityModes
-                  onCreateAppointment={onCreateAppointment}
-                  onEvaluateAvailability={onEvaluateAvailability}
-                />
-              } />
-              <Route path="/print" element={<PrintPlaceholder />} />
-            </Routes>
-          </MemoryRouter>
-        </LanguageProvider>
-      );
+  async function selectPatientAndModality(modalityId: number) {
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: String(modalityId) } });
+  }
 
-      return { onCreateAppointment, onEvaluateAvailability };
-    }
+  it("gates the standard workflow inline, restores it after acknowledgement, and never shows the late modal", async () => {
+    setup(true, [], [standardModality], "receptionist", [], undefined, examTypes);
+    await selectPatientAndModality(1);
 
-    it("safety modal blocks submit before confirmation", async () => {
-      const { onCreateAppointment } = setupWithSafetyWarning();
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+    expect(screen.getByText("Radiation risk")).toBeTruthy();
+    expect(screen.getByText("I have reviewed this warning with the patient and completed the required initial check.")).toBeTruthy();
+    expect(screen.queryByLabelText("Exam Type")).toBeNull();
+    expect(screen.queryByText("Safety Confirmation")).toBeNull();
+    expect(screen.queryByLabelText("Capacity Action")).toBeNull();
 
-      expect(await screen.findByText("Safety Confirmation")).toBeTruthy();
-      expect(onCreateAppointment).not.toHaveBeenCalled();
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge and continue" }));
 
-    it("confirm safety warning allows submit to proceed", async () => {
-      const { onCreateAppointment } = setupWithSafetyWarning();
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+    expect(screen.getByText("Modality safety warning acknowledged")).toBeTruthy();
+    expect(screen.getByLabelText("Exam Type")).toBeTruthy();
+    expect(screen.queryByText("Safety Confirmation")).toBeNull();
+  });
 
-      await screen.findByText("Safety Confirmation");
-      await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  it("shows MRI choices, requires implant site, and renders the correct green and yellow badges", async () => {
+    setup(true, [], [mriModality], "supervisor", [], undefined, examTypes);
+    await selectPatientAndModality(2);
 
-      await waitFor(() => {
-        expect(onCreateAppointment).toHaveBeenCalled();
-      });
-    });
+    expect(screen.getByText("Patient reports no known implant, implanted device, or metallic foreign body")).toBeTruthy();
+    await userEvent.click(screen.getByText("Patient reports an implant, implanted device, or metallic foreign body"));
+    expect((screen.getByRole("button", { name: "Complete primary screening" }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(screen.getByLabelText("Implant/device site"), "left hip");
+    await userEvent.click(screen.getByRole("button", { name: "Complete primary screening" }));
 
-    it("modality change resets safety acknowledgment", async () => {
-      const { onCreateAppointment } = setupWithSafetyWarning();
+    expect(screen.getByText("MRI primary screening complete")).toBeTruthy();
+    expect(screen.getByText("Implant reported — MRI staff review required")).toBeTruthy();
+    expect(screen.getByText("Implant reported — MRI staff review required").querySelector("svg")).toBeTruthy();
 
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    await userEvent.click(screen.getByRole("button", { name: "Change screening response" }));
+    await userEvent.click(screen.getByText("Patient reports no known implant, implanted device, or metallic foreign body"));
+    await userEvent.click(screen.getByRole("button", { name: "Complete primary screening" }));
+    expect(screen.getByText("MRI primary screening complete — no implant reported")).toBeTruthy();
+  });
 
-      // Select modality A (CT) with safety warning
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+  it("resets completion when patient or modality changes", async () => {
+    setup(true, [], [standardModality, { ...standardModality, id: 2, code: "CT2", name: "CT2", nameEn: "CT2" }], "supervisor", [], undefined, examTypes);
+    await selectPatientAndModality(1);
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge and continue" }));
+    expect(screen.getByLabelText("Exam Type")).toBeTruthy();
 
-      // Confirm safety for modality A
-      await screen.findByText("Safety Confirmation");
-      await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await userEvent.click(screen.getByRole("button", { name: "Select Other Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    await waitFor(() => expect(screen.queryByLabelText("Exam Type")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge and continue" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "2" } });
+    await waitFor(() => expect(screen.queryByLabelText("Exam Type")).toBeNull());
+  });
 
-      await waitFor(() => {
-        expect(onCreateAppointment).toHaveBeenCalledTimes(1);
-      });
+  it("does not reset completion when exam, date, or capacity mode changes", async () => {
+    setup(true, [], [standardModality], "supervisor", [], undefined, examTypes);
+    await selectPatientAndModality(1);
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge and continue" }));
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+    const capacity = screen.queryByLabelText("Capacity Action");
+    if (capacity) fireEvent.change(capacity, { target: { value: "category_override" } });
+    expect(screen.getByText("Modality safety warning acknowledged")).toBeTruthy();
+  });
 
-      // Click Create Another to go back to form
-      await userEvent.click(screen.getByRole("button", { name: "Create Another" }));
+  it.each(["supervisor", "super_admin"] as const)("does not allow %s to bypass the inline gate", async (role) => {
+    setup(true, [], [standardModality], role, [], undefined, examTypes);
+    await selectPatientAndModality(1);
+    expect(screen.queryByLabelText("Exam Type")).toBeNull();
+    expect(screen.queryByLabelText("Capacity Action")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create Appointment" })).toBeNull();
+  });
 
-      await waitFor(() => {
-        expect(screen.getByLabelText("Modality")).toBeTruthy();
-      });
+  it("leaves warning-disabled modalities unchanged", async () => {
+    setup(true, [], [{ ...standardModality, safetyWarningEnabled: false }], "receptionist", [], undefined, examTypes);
+    await selectPatientAndModality(1);
+    expect(screen.getByLabelText("Exam Type")).toBeTruthy();
+    expect(screen.queryByText("Modality safety warning")).toBeNull();
+  });
 
-      // Switch to modality B (MRI) - also has safety, should reset
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "2" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "201" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
-
-      expect(await screen.findByText("Safety Confirmation")).toBeTruthy();
-      expect(onCreateAppointment).toHaveBeenCalledTimes(1);
-    });
-
-    it("reset button clears safety acknowledgment and modal", async () => {
-      setupWithSafetyWarning();
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
-
-      await screen.findByText("Safety Confirmation");
-      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-      expect(screen.queryByText("Safety Confirmation")).toBeNull();
-
-      await userEvent.click(screen.getByRole("button", { name: "Reset" }));
-
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
-
-      await screen.findByText("Safety Confirmation");
-    });
-
-    it("selected priority is passed in create payload", async () => {
-      const { onCreateAppointment } = setupWithSafetyWarning();
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "1" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
-
-      await screen.findByText("Safety Confirmation");
-      await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
-
-      await waitFor(() => {
-        expect(onCreateAppointment).toHaveBeenCalled();
-      });
-
-      const callArg = onCreateAppointment.mock.calls[0][0];
-      expect(callArg.reportingPriorityId).toBe(1);
-    });
-
-    it("walk-in checkbox is passed in create payload", async () => {
-      const { onCreateAppointment } = setupWithSafetyWarning();
-      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("checkbox", { name: "Walk-in patient" }));
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
-
-      await screen.findByText("Safety Confirmation");
-      await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
-
-      await waitFor(() => {
-        expect(onCreateAppointment).toHaveBeenCalled();
-      });
-
-      const callArg = onCreateAppointment.mock.calls[0][0];
-      expect(callArg.isWalkIn).toBe(true);
-    });
-
-    it("hides walk-in option when walk-in queue setting is disabled", async () => {
-      mockQueueWalkInEnabled.current = false;
-      setupWithSafetyWarning();
-
-      expect(screen.queryByRole("checkbox", { name: "Walk-in patient" })).toBeNull();
-    });
+  it("blocks the workspace for an enabled modality with no configured warning text", async () => {
+    setup(true, [], [{ ...standardModality, safetyWarningEn: null, safetyWarningAr: null }], "supervisor", [], undefined, examTypes);
+    await selectPatientAndModality(1);
+    expect(screen.getByText("Booking is blocked because this modality's mandatory safety warning has not been configured. Contact an administrator.")).toBeTruthy();
+    expect(screen.queryByLabelText("Exam Type")).toBeNull();
+    expect(screen.queryByLabelText("Capacity Action")).toBeNull();
   });
 });

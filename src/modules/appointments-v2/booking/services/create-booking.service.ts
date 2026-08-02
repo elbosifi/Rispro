@@ -22,7 +22,8 @@ import {
   loadExamMixQuotaRules,
   loadExamMixQuotaRuleItems,
 } from "../../rules/repositories/policy-rules.repo.js";
-import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
+import { findModalityById, type ModalityRow } from "../../catalog/repositories/modality-catalog.repo.js";
+import { insertMriPrimaryScreening } from "../repositories/mri-primary-screening.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import {
   getBookedCountForDate,
@@ -205,6 +206,8 @@ export async function createBookingInternal(
       ["modality_not_found"]
     );
   }
+  validateModalitySafetyForCreate(modality, payload);
+  const screening = payload.mriPrimaryScreening;
 
   // 3. Integrity: check exam type if provided
   let examTypeExists = true;
@@ -460,6 +463,10 @@ export async function createBookingInternal(
     isWalkIn: payload.isWalkIn ?? false,
     userId,
   });
+  if (modality.safetyWarningEnabled && modality.safetyWorkflowType === "mri_primary_implant_screening" && screening) {
+    const implant = screening.result === "implant_reported_review_required";
+    await insertMriPrimaryScreening(client, booking.id, { result: screening.result, implantSite: implant ? String(screening.implantSite).trim() : null, implantDescription: implant ? String(screening.implantDescription ?? "").trim() || null : null, previousReviewerNameReported: implant ? String(screening.previousReviewerNameReported ?? "").trim() || null : null }, userId);
+  }
 
   if (intendedReportingDoctorId != null) {
     await createPendingReportingAssignmentIntent(client, {
@@ -513,4 +520,27 @@ export async function createBookingInternal(
     decisionSnapshot: decision,
     wasOverride,
   };
+}
+export function validateModalitySafetyForCreate(modality: ModalityRow, payload: CreateBookingPayload): void {
+  if (!modality.safetyWarningEnabled) return;
+
+  const warningConfigured = Boolean(
+    String(modality.safetyWarningEn ?? "").trim() || String(modality.safetyWarningAr ?? "").trim()
+  );
+  if (!warningConfigured) {
+    throw new HttpError(400, "Booking is blocked because this modality's mandatory safety warning has not been configured. Contact an administrator.", { code: "MODALITY_SAFETY_WARNING_MISCONFIGURED" });
+  }
+  if (payload.modalitySafetyAcknowledged !== true) {
+    throw new HttpError(400, "Modality safety acknowledgement is required.", { code: "MODALITY_SAFETY_ACKNOWLEDGEMENT_REQUIRED" });
+  }
+  if (modality.safetyWorkflowType !== "mri_primary_implant_screening") return;
+
+  const screening = payload.mriPrimaryScreening;
+  if (!screening) throw new HttpError(400, "MRI primary screening is required.", { code: "MRI_PRIMARY_SCREENING_REQUIRED" });
+  if (screening.result !== "no_known_implant_reported" && screening.result !== "implant_reported_review_required") {
+    throw new HttpError(400, "MRI primary screening is invalid.", { code: "MRI_PRIMARY_SCREENING_INVALID" });
+  }
+  if (screening.result === "implant_reported_review_required" && !String(screening.implantSite ?? "").trim()) {
+    throw new HttpError(400, "Implant/device site is required.", { code: "MRI_IMPLANT_SITE_REQUIRED" });
+  }
 }

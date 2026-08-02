@@ -46,6 +46,7 @@ router.get(
           safetyWarningEn: m.safetyWarningEn,
           safetyWarningAr: m.safetyWarningAr,
           safetyWarningEnabled: m.safetyWarningEnabled,
+          safetyWorkflowType: m.safetyWorkflowType,
         })),
       });
     } finally {

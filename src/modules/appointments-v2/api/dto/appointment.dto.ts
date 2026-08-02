@@ -35,6 +35,8 @@ export interface CreateAppointmentDto {
     verifiedAt: string;
     ambiguityRuleVersion: "name_first_three_v1";
   } | null;
+  modalitySafetyAcknowledged?: boolean;
+  mriPrimaryScreening?: { result: "no_known_implant_reported" | "implant_reported_review_required"; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;
@@ -86,4 +88,12 @@ export interface AppointmentResponseDto {
   isWalkIn: boolean;
   createdAt: string;
   updatedAt: string;
+  mriPrimaryScreening: {
+    result: "no_known_implant_reported" | "implant_reported_review_required";
+    implantSite: string | null;
+    implantDescription: string | null;
+    previousReviewerNameReported: string | null;
+    screenedByUserId: number;
+    screenedAt: string;
+  } | null;
 }

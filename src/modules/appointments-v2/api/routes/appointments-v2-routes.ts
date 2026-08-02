@@ -181,6 +181,8 @@ router.post(
         noShowAuthorizationReason: body.noShowAuthorizationReason ?? null,
         patientIdentityVerificationProof: body.patientIdentityVerificationProof ?? null,
         patientIdentitySelectionSource: body.patientIdentitySelectionSource === "url_preselect" ? "url_preselect" : "search",
+        modalitySafetyAcknowledged: body.modalitySafetyAcknowledged === true,
+        mriPrimaryScreening: body.mriPrimaryScreening ?? null,
         override: body.override,
       },
       userId,

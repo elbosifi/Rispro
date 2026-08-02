@@ -8,7 +8,8 @@ import { evaluateWithDb } from "../../rules/services/evaluate-with-db.js";
 import type { BookingDecision } from "../../rules/models/booking-decision.js";
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import { findBookingById } from "../../booking/repositories/booking.repo.js";
-import { createBookingInternal } from "../../booking/services/create-booking.service.js";
+import { createBookingInternal, validateModalitySafetyForCreate } from "../../booking/services/create-booking.service.js";
+import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { rescheduleBookingInternal } from "../../booking/services/reschedule-booking.service.js";
 import { scheduleBookingWorklistSync, scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
@@ -505,6 +506,8 @@ function normalizeCreatePayload(payload: Record<string, unknown>): CreateAppoint
     throw new SchedulingError(400, "patientId, modalityId, and bookingDate are required.", ["invalid_request_payload"]);
   }
   const caseCategory = payload.caseCategory === "oncology" ? "oncology" : "non_oncology";
+  const rawScreening = isObject(payload.mriPrimaryScreening) ? payload.mriPrimaryScreening : null;
+  const screeningResult = rawScreening?.result;
   return {
     patientId,
     modalityId,
@@ -523,6 +526,15 @@ function normalizeCreatePayload(payload: Record<string, unknown>): CreateAppoint
     isWalkIn: payload.isWalkIn === true,
     policySetKey: normalizePolicySetKey(payload),
     patientIdentityVerificationProof: getString(payload.patientIdentityVerificationProof) || null,
+    modalitySafetyAcknowledged: payload.modalitySafetyAcknowledged === true,
+    mriPrimaryScreening: screeningResult === "no_known_implant_reported" || screeningResult === "implant_reported_review_required"
+      ? {
+          result: screeningResult,
+          implantSite: getString(rawScreening?.implantSite) || null,
+          implantDescription: getString(rawScreening?.implantDescription) || null,
+          previousReviewerNameReported: getString(rawScreening?.previousReviewerNameReported) || null,
+        }
+      : null,
   };
 }
 
@@ -694,6 +706,9 @@ export async function createSchedulingOverrideRequest(
 
     if (requestType === "create_booking") {
       const createPayload = normalizeCreatePayload(payloadRecord);
+      const modality = await findModalityById(client, createPayload.modalityId);
+      if (!modality) throw new SchedulingError(404, "Modality not found.", ["modality_not_found"]);
+      validateModalitySafetyForCreate(modality, createPayload);
       const identityRisk = await resolvePatientIdentityRisk(createPayload.patientId, client);
       if (identityRisk.identityRisk === "ambiguous") {
         const proofAssertion = validatePatientIdentityVerificationProof(

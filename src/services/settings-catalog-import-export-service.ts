@@ -17,6 +17,7 @@ interface ModalityCatalogRow {
   safety_warning_ar: string | null;
   safety_warning_en: string | null;
   safety_warning_enabled: boolean;
+  safety_workflow_type: "standard_acknowledgement" | "mri_primary_implant_screening";
 }
 
 interface ExamTypeCatalogRow {
@@ -67,6 +68,7 @@ export interface ModalityImportDraftRow {
   safetyWarningEnabled: boolean;
   safetyWarningEn: string;
   safetyWarningAr: string;
+  safetyWorkflowType: "standard_acknowledgement" | "mri_primary_implant_screening";
   errors: ImportValidationError[];
 }
 
@@ -118,6 +120,7 @@ interface NormalizedModalityRow {
   safetyWarningEnabled: boolean;
   safetyWarningEn: string;
   safetyWarningAr: string;
+  safetyWorkflowType: "standard_acknowledgement" | "mri_primary_implant_screening";
 }
 
 interface NormalizedExamTypeRow {
@@ -145,7 +148,8 @@ const MODALITY_COLUMNS = [
   "active",
   "safety_warning_enabled",
   "safety_warning_en",
-  "safety_warning_ar"
+  "safety_warning_ar",
+  "safety_workflow_type"
 ] as const;
 
 const EXAM_TYPE_COLUMNS = [
@@ -327,7 +331,8 @@ function normalizeModalityRows(
       active: Boolean(active),
       safetyWarningEnabled,
       safetyWarningEn: asTrimmedString(getCell(row.values, headerMap, "safety_warning_en")),
-      safetyWarningAr: asTrimmedString(getCell(row.values, headerMap, "safety_warning_ar"))
+      safetyWarningAr: asTrimmedString(getCell(row.values, headerMap, "safety_warning_ar")),
+      safetyWorkflowType: (() => { const value = asTrimmedString(getCell(row.values, headerMap, "safety_workflow_type")); if (!value) return "standard_acknowledgement" as const; if (value === "standard_acknowledgement" || value === "mri_primary_implant_screening") return value; errors.push(makeError(MODALITIES_SHEET, row.rowNumber, "safety_workflow_type", "Invalid safety workflow type.", "invalid_value")); return "standard_acknowledgement" as const; })()
     });
   }
 
@@ -378,7 +383,7 @@ async function listModalitiesForCatalog(executor: DbExecutor = pool): Promise<Mo
   const { rows } = await executor.query<ModalityCatalogRow>(`
     select
       id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en,
-      is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+      is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
     from modalities
     order by name_en asc, code asc
   `);
@@ -413,7 +418,8 @@ export async function exportCatalogWorkbook(): Promise<{ buffer: Buffer; filenam
         active: row.is_active,
         safety_warning_enabled: row.safety_warning_enabled,
         safety_warning_en: row.safety_warning_en ?? "",
-        safety_warning_ar: row.safety_warning_ar ?? ""
+        safety_warning_ar: row.safety_warning_ar ?? "",
+        safety_workflow_type: row.safety_workflow_type
       }))
     },
     {
@@ -447,6 +453,7 @@ function modalityHasChanges(existing: ModalityCatalogRow, incoming: NormalizedMo
     existing.safety_warning_enabled !== incoming.safetyWarningEnabled ||
     (existing.safety_warning_en ?? "") !== incoming.safetyWarningEn ||
     (existing.safety_warning_ar ?? "") !== incoming.safetyWarningAr
+    || existing.safety_workflow_type !== incoming.safetyWorkflowType
   );
 }
 
@@ -530,7 +537,8 @@ function buildDraftRows(
       active: row.active,
       safetyWarningEnabled: row.safetyWarningEnabled,
       safetyWarningEn: row.safetyWarningEn,
-      safetyWarningAr: row.safetyWarningAr,
+        safetyWarningAr: row.safetyWarningAr,
+        safetyWorkflowType: row.safetyWorkflowType,
       errors: rowErrors
     };
   });
@@ -652,13 +660,13 @@ async function insertModality(executor: DbExecutor, row: ModalityImportDraftRow,
     `
       insert into modalities (
         code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en,
-        is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+        is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
       )
-      values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, nullif($8, ''), nullif($9, ''), $10)
+      values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, nullif($8, ''), nullif($9, ''), $10, $11)
       returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en,
-        is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+        is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
     `,
-    [row.code, row.nameAr, row.nameEn, row.dailyCapacity, row.descriptionAr, row.descriptionEn, row.active, row.safetyWarningAr, row.safetyWarningEn, row.safetyWarningEnabled]
+    [row.code, row.nameAr, row.nameEn, row.dailyCapacity, row.descriptionAr, row.descriptionEn, row.active, row.safetyWarningAr, row.safetyWarningEn, row.safetyWarningEnabled, row.safetyWorkflowType]
   );
   const created = rows[0];
   if (!created) throw new HttpError(500, "Failed to create modality during import.", { errorType: "create_modality_failed" });
@@ -673,12 +681,12 @@ async function updateModalityRow(executor: DbExecutor, existing: ModalityCatalog
       set code = $2, name_ar = $3, name_en = $4, daily_capacity = $5,
         general_instruction_ar = nullif($6, ''), general_instruction_en = nullif($7, ''),
         is_active = $8, safety_warning_ar = nullif($9, ''), safety_warning_en = nullif($10, ''),
-        safety_warning_enabled = $11, updated_at = now()
+        safety_warning_enabled = $11, safety_workflow_type = $12, updated_at = now()
       where id = $1
       returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en,
-        is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+        is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
     `,
-    [existing.id, row.code, row.nameAr, row.nameEn, row.dailyCapacity, row.descriptionAr, row.descriptionEn, row.active, row.safetyWarningAr, row.safetyWarningEn, row.safetyWarningEnabled]
+    [existing.id, row.code, row.nameAr, row.nameEn, row.dailyCapacity, row.descriptionAr, row.descriptionEn, row.active, row.safetyWarningAr, row.safetyWarningEn, row.safetyWarningEnabled, row.safetyWorkflowType]
   );
   const updated = rows[0];
   if (!updated) throw new HttpError(500, "Failed to update modality during import.", { errorType: "update_modality_failed" });
@@ -742,7 +750,8 @@ export async function applyCatalogImport(
     active: Boolean(row.active),
     safetyWarningEnabled: Boolean(row.safetyWarningEnabled),
     safetyWarningEn: row.safetyWarningEn,
-    safetyWarningAr: row.safetyWarningAr
+    safetyWarningAr: row.safetyWarningAr,
+    safetyWorkflowType: row.safetyWorkflowType
   }));
   const selectedExamTypes = draft.examTypes.filter((row) => row.selected).map<NormalizedExamTypeRow>((row) => ({
     rowNumber: row.rowNumber,

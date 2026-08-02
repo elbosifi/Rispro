@@ -568,6 +568,26 @@ router.get(
       return;
     }
 
+    const safetyResult = await pool.query<{
+      modality_safety_workflow_type: "standard_acknowledgement" | "mri_primary_implant_screening";
+      result: "no_known_implant_reported" | "implant_reported_review_required" | null;
+      implant_site: string | null;
+      implant_description: string | null;
+      previous_reviewer_name_reported: string | null;
+      screened_by_user_id: number | null;
+      screened_at: string | null;
+    }>(`
+      select m.safety_workflow_type as modality_safety_workflow_type,
+             screening.result, screening.implant_site, screening.implant_description,
+             screening.previous_reviewer_name_reported, screening.screened_by_user_id,
+             screening.screened_at
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      left join appointments_v2.mri_primary_screenings screening on screening.booking_id = b.id
+      where b.id = $1
+    `, [bookingId]);
+    const safety = safetyResult.rows[0];
+
     const [appointmentWithNote] = await attachSonicDicomStudyNotesToAppointments([appointment]);
     const publicCancelToken =
       patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
@@ -577,6 +597,15 @@ router.get(
     res.json({
       appointment: {
         ...appointmentWithNote,
+        modality_safety_workflow_type: safety?.modality_safety_workflow_type ?? "standard_acknowledgement",
+        mriPrimaryScreening: safety?.result ? {
+          result: safety.result,
+          implantSite: safety.implant_site,
+          implantDescription: safety.implant_description,
+          previousReviewerNameReported: safety.previous_reviewer_name_reported,
+          screenedByUserId: Number(safety.screened_by_user_id),
+          screenedAt: safety.screened_at,
+        } : null,
         public_cancel_token: publicCancelToken,
         public_appointment_url: publicCancelToken
           ? safeBuildPublicAppointmentUrl(publicCancelToken, patientQrSettings, "read_v2_details")

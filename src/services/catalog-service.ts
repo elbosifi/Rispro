@@ -22,6 +22,7 @@ export interface ModalityRow {
   safety_warning_ar: string | null;
   safety_warning_en: string | null;
   safety_warning_enabled: boolean;
+  safety_workflow_type: "standard_acknowledgement" | "mri_primary_implant_screening";
 }
 
 export interface ExamTypeRow {
@@ -117,7 +118,11 @@ function toModalityRow(row: Record<string, unknown>): ModalityRow {
         ? String(row.safety_warning_en)
         : (undefined as unknown as null),
     safety_warning_enabled:
-      "safety_warning_enabled" in row ? Boolean(row.safety_warning_enabled) : (undefined as unknown as boolean)
+      "safety_warning_enabled" in row ? Boolean(row.safety_warning_enabled) : (undefined as unknown as boolean),
+    safety_workflow_type:
+      row.safety_workflow_type === "mri_primary_implant_screening"
+        ? "mri_primary_implant_screening"
+        : "standard_acknowledgement"
   };
 }
 
@@ -474,7 +479,7 @@ export async function listModalitiesForSettings({
 }: { includeInactive?: boolean } = {}): Promise<{ modalities: ModalityRow[] }> {
   const whereClause = includeInactive ? "" : "where is_active = true";
   const { rows } = await pool.query(`
-    select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+    select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
     from modalities
     ${whereClause}
     order by name_en asc
@@ -497,6 +502,10 @@ export async function createModality(
   const safetyWarningAr = String(payload.safetyWarningAr || "").trim();
   const safetyWarningEn = String(payload.safetyWarningEn || "").trim();
   const safetyWarningEnabled = payload.safetyWarningEnabled !== false;
+  let safetyWorkflowType = payload.safetyWorkflowType;
+  if (safetyWorkflowType !== undefined && safetyWorkflowType !== "standard_acknowledgement" && safetyWorkflowType !== "mri_primary_implant_screening") {
+    throw new HttpError(400, "safetyWorkflowType is invalid.");
+  }
 
   if (!code || !nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr, and nameEn are required.");
@@ -518,12 +527,12 @@ export async function createModality(
           is_active,
           safety_warning_ar,
           safety_warning_en,
-          safety_warning_enabled
+          safety_warning_enabled, safety_workflow_type
         )
-        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, nullif($8, ''), nullif($9, ''), $10)
-        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, nullif($8, ''), nullif($9, ''), $10, $11)
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
       `,
-      [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive, safetyWarningAr, safetyWarningEn, safetyWarningEnabled]
+      [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive, safetyWarningAr, safetyWarningEn, safetyWarningEnabled, safetyWorkflowType ?? "standard_acknowledgement"]
     );
     const createdModality = requireRow<ModalityRow>(
       rows[0] as ModalityRow | undefined,
@@ -572,6 +581,10 @@ export async function updateModality(
   const safetyWarningEn = String(payload.safetyWarningEn || "").trim();
   const safetyWarningEnabled =
     payload.safetyWarningEnabled !== undefined ? Boolean(payload.safetyWarningEnabled) : true;
+  let safetyWorkflowType = payload.safetyWorkflowType;
+  if (safetyWorkflowType !== undefined && safetyWorkflowType !== "standard_acknowledgement" && safetyWorkflowType !== "mri_primary_implant_screening") {
+    throw new HttpError(400, "safetyWorkflowType is invalid.");
+  }
 
   if (!code || !nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr, and nameEn are required.");
@@ -584,7 +597,7 @@ export async function updateModality(
 
     const existingResult = await client.query(
       `
-        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
         from modalities
         where id = $1
         limit 1
@@ -597,6 +610,7 @@ export async function updateModality(
     if (!existing) {
       throw new HttpError(404, "Modality not found.");
     }
+    safetyWorkflowType ??= existing.safety_workflow_type;
 
     const { rows } = await client.query(
       `
@@ -611,12 +625,12 @@ export async function updateModality(
           is_active = $8,
           safety_warning_ar = nullif($9, ''),
           safety_warning_en = nullif($10, ''),
-          safety_warning_enabled = $11,
+          safety_warning_enabled = $11, safety_workflow_type = $12,
           updated_at = now()
         where id = $1
-        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled, safety_workflow_type
       `,
-      [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive, safetyWarningAr, safetyWarningEn, safetyWarningEnabled]
+      [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive, safetyWarningAr, safetyWarningEn, safetyWarningEnabled, safetyWorkflowType]
     );
     const updatedModality = requireRow<ModalityRow>(
       rows[0] as ModalityRow | undefined,

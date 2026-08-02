@@ -181,6 +181,8 @@ export interface CreateBookingRequest {
   noShowAuthorizationReason?: string | null;
   patientIdentityVerificationProof?: string | null;
   patientIdentitySelectionSource?: "search" | "url_preselect";
+  modalitySafetyAcknowledged?: boolean;
+  mriPrimaryScreening?: { result: "no_known_implant_reported" | "implant_reported_review_required"; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;
@@ -230,6 +232,7 @@ export interface ModalityDto {
   safetyWarningEn: string | null;
   safetyWarningAr: string | null;
   safetyWarningEnabled: boolean;
+  safetyWorkflowType?: "standard_acknowledgement" | "mri_primary_implant_screening";
 }
 
 export interface ExamTypeDto {

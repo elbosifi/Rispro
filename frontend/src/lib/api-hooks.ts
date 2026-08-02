@@ -3689,6 +3689,7 @@ export type ModalitySettingsRow = RawRecord & {
   safety_warning_ar: string | null;
   safety_warning_en: string | null;
   safety_warning_enabled: boolean;
+    safety_workflow_type?: "standard_acknowledgement" | "mri_primary_implant_screening";
 };
 
 export async function fetchModalitiesSettings(includeInactive = false): Promise<{ modalities: ModalitySettingsRow[] }> {

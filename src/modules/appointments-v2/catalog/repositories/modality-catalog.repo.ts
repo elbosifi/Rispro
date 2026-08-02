@@ -17,6 +17,7 @@ export interface ModalityRow {
   safetyWarningEn: string | null;
   safetyWarningAr: string | null;
   safetyWarningEnabled: boolean;
+  safetyWorkflowType: "standard_acknowledgement" | "mri_primary_implant_screening";
 }
 
 const FIND_BY_ID_SQL = `
@@ -30,7 +31,8 @@ const FIND_BY_ID_SQL = `
     is_active as "isActive",
     safety_warning_en as "safetyWarningEn",
     safety_warning_ar as "safetyWarningAr",
-    safety_warning_enabled as "safetyWarningEnabled"
+    safety_warning_enabled as "safetyWarningEnabled",
+    safety_workflow_type as "safetyWorkflowType"
   from modalities
   where id = $1
 `;
@@ -46,7 +48,8 @@ const LIST_ACTIVE_SQL = `
     is_active as "isActive",
     safety_warning_en as "safetyWarningEn",
     safety_warning_ar as "safetyWarningAr",
-    safety_warning_enabled as "safetyWarningEnabled"
+    safety_warning_enabled as "safetyWarningEnabled",
+    safety_workflow_type as "safetyWorkflowType"
   from modalities
   where is_active = true
   order by name_en

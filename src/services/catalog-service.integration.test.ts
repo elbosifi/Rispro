@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { createExamType, deleteExamType, listExamTypesForSettings, updateExamType } from "./catalog-service.js";
+import { createExamType, createModality, deleteExamType, listExamTypesForSettings, listModalitiesForSettings, updateExamType } from "./catalog-service.js";
 
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
   try {
@@ -61,6 +61,38 @@ async function createModalityForTest(code: string, isActive = true): Promise<num
   );
   return Number(result.rows[0]?.id);
 }
+
+test("modality safety workflow saves, reloads, defaults legacy input, and rejects invalid values", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const prefix = `SAFEWF_${suffix}`;
+  const userId = await createSupervisorUser(suffix);
+  try {
+    const mri = await createModality({
+      code: `${prefix}_MRI`, nameAr: "MRI AR", nameEn: "MRI EN", dailyCapacity: 5,
+      isActive: "enabled", safetyWarningEnabled: true, safetyWarningEn: "Magnet warning",
+      safetyWorkflowType: "mri_primary_implant_screening",
+    }, userId);
+    const legacy = await createModality({
+      code: `${prefix}_LEGACY`, nameAr: "Legacy AR", nameEn: "Legacy EN", dailyCapacity: 5,
+      isActive: "enabled", safetyWarningEnabled: false,
+    }, userId);
+
+    const reloaded = await listModalitiesForSettings({ includeInactive: true });
+    assert.equal(reloaded.modalities.find((row) => row.id === mri.id)?.safety_workflow_type, "mri_primary_implant_screening");
+    assert.equal(reloaded.modalities.find((row) => row.id === legacy.id)?.safety_workflow_type, "standard_acknowledgement");
+    await assert.rejects(
+      () => createModality({
+        code: `${prefix}_BAD`, nameAr: "Bad AR", nameEn: "Bad EN", dailyCapacity: 5,
+        safetyWorkflowType: "not_approved",
+      }, userId),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 400
+    );
+  } finally {
+    await cleanupCatalog(prefix);
+    await cleanupUser(userId);
+  }
+});
 
 test("listExamTypesForSettings keeps modality labels available for inactive exam rows when requested", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
