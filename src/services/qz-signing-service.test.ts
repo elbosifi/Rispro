@@ -26,7 +26,7 @@ afterEach(() => {
 function signed(payload: object): string {
   const request = JSON.stringify(payload);
   const digest = createHash("sha256").update(request).digest("hex");
-  const signature = signQzRequest(request, digest);
+  const signature = signQzRequest(request, undefined);
   assert.equal(verify("RSA-SHA512", Buffer.from(digest), publicKey, Buffer.from(signature, "base64")), true);
   return signature;
 }
@@ -187,6 +187,12 @@ describe("QZ request signing", () => {
   it("rejects a digest that does not belong to the validated request", () => {
     const request = JSON.stringify({ call: "printers.find", params: {}, timestamp: Date.now() });
     assert.throws(() => signQzRequest(request, "0".repeat(64)), /digest does not match/);
+  });
+  it("accepts a matching supplied digest and signs the same server-computed digest", () => {
+    const request = JSON.stringify({ call: "printers.find", params: {}, timestamp: Date.now() });
+    const digest = createHash("sha256").update(request, "utf8").digest("hex");
+    const signature = signQzRequest(request, digest);
+    assert.equal(verify("RSA-SHA512", Buffer.from(digest), publicKey, Buffer.from(signature, "base64")), true);
   });
   it("enforces UTF-8 byte size and signs a representative multi-megabyte PDF request", () => {
     env.qzSigningRequestLimitMb = 1;

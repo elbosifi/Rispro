@@ -220,12 +220,14 @@ export function getQzRootCertificate(): string {
 
 export function signQzRequest(request: unknown, digest: unknown): string {
   const payload = validateQzSigningRequest(request);
-  const suppliedDigest = typeof digest === "string" && /^[0-9a-f]{64}$/i.test(digest) ? digest.toLowerCase() : "";
   const expectedDigest = createHash("sha256").update(payload, "utf8").digest("hex");
-  if (!suppliedDigest || !timingSafeEqual(Buffer.from(suppliedDigest, "hex"), Buffer.from(expectedDigest, "hex"))) throw new HttpError(400, "QZ signing digest does not match the validated request.");
+  if (digest !== undefined) {
+    const suppliedDigest = typeof digest === "string" && /^[0-9a-f]{64}$/i.test(digest) ? digest.toLowerCase() : "";
+    if (!suppliedDigest || !timingSafeEqual(Buffer.from(suppliedDigest, "hex"), Buffer.from(expectedDigest, "hex"))) throw new HttpError(400, "QZ signing digest does not match the validated request.");
+  }
   try {
     const key = env.qzTrustMode ? loadValidatedQzIdentity().privateKey : createPrivateKey(legacyPem("QZ_PRIVATE_KEY"));
-    return sign("RSA-SHA512", Buffer.from(suppliedDigest, "utf8"), key).toString("base64");
+    return sign("RSA-SHA512", Buffer.from(expectedDigest, "utf8"), key).toString("base64");
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(503, "QZ request signing failed.");

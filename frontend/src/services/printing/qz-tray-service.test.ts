@@ -38,21 +38,20 @@ import {
   getInstalledPrinters,
   printPdf,
   serializeQzRequest,
-  sha256Hex,
   stripPdfDataUrlPrefix,
 } from "./qz-tray-service";
 import { DEFAULT_PRINTER_PROFILES } from "./workstation-printer-settings";
 
-const signingBodies: Array<{ request: string; digest: string }> = [];
+const signingBodies: Array<{ request: string }> = [];
 
 function mockApi(allowInsecureWebsocket = false): void {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/runtime-config")) return new Response(JSON.stringify({ allowInsecureWebsocket }), { status: 200 });
     if (url.endsWith("/qz-sign")) {
-      const body = JSON.parse(String(init?.body)) as { request: string; digest: string };
+      const body = JSON.parse(String(init?.body)) as { request: string };
       signingBodies.push(body);
-      return new Response(JSON.stringify({ signature: `signature:${body.digest}` }), { status: 200 });
+      return new Response(JSON.stringify({ signature: `signature:${body.request}` }), { status: 200 });
     }
     if (url.endsWith("/qz-certificate")) return new Response("certificate", { status: 200 });
     return new Response(null, { status: 404 });
@@ -113,13 +112,14 @@ describe("QZ Tray service", () => {
     expect(qzMocks.connect).toHaveBeenCalledWith({ retries: 3, delay: 1, usingSecure: true });
   });
 
-  it("pre-signs printer discovery with its exact params and timestamp", async () => {
+  it("pre-signs printer discovery without requiring crypto.subtle", async () => {
+    vi.stubGlobal("crypto", {});
     const originalDateNow = Date.now;
     const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_123);
     await expect(getInstalledPrinters()).resolves.toEqual(["RISPRO A4", "RISPRO LABEL"]);
     const expectedRequest = serializeQzRequest("printers.find", {}, 1_725_000_000_123);
-    expect(signingBodies).toEqual([{ request: expectedRequest, digest: await sha256Hex(expectedRequest) }]);
-    expect(qzMocks.find).toHaveBeenCalledWith(undefined, `signature:${await sha256Hex(expectedRequest)}`, 1_725_000_000_123);
+    expect(signingBodies).toEqual([{ request: expectedRequest }]);
+    expect(qzMocks.find).toHaveBeenCalledWith(undefined, `signature:${expectedRequest}`, 1_725_000_000_123);
     expect(Date.now).toBe(dateNowSpy);
     dateNowSpy.mockRestore();
     expect(Date.now).toBe(originalDateNow);
@@ -135,8 +135,8 @@ describe("QZ Tray service", () => {
     const data = [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0xLjQ=" }];
     const request = signingBodies[0].request;
     expect(JSON.parse(request)).toEqual({ call: "print", params: { printer: config.getPrinter(), options: config.getOptions(), data }, timestamp: 1_725_000_000_456 });
-    expect(signingBodies[0].digest).toBe(await sha256Hex(request));
-    expect(qzMocks.print).toHaveBeenCalledWith(config, data, `signature:${signingBodies[0].digest}`, 1_725_000_000_456);
+    expect(signingBodies[0]).toEqual({ request });
+    expect(qzMocks.print).toHaveBeenCalledWith(config, data, `signature:${request}`, 1_725_000_000_456);
     vi.mocked(Date.now).mockRestore();
   });
 
@@ -149,9 +149,8 @@ describe("QZ Tray service", () => {
       printPdf(label, "JVBERi0xLjU=", { jobName: "label" }),
     ]);
     expect(signingBodies).toHaveLength(2);
-    for (const body of signingBodies) expect(body.digest).toBe(await sha256Hex(body.request));
     const calls = qzMocks.print.mock.calls;
-    expect(calls.map((call) => call[2])).toEqual(signingBodies.map((body) => `signature:${body.digest}`));
+    expect(calls.map((call) => call[2])).toEqual(signingBodies.map((body) => `signature:${body.request}`));
     expect(calls.map((call) => call[3])).toEqual([101, 202]);
     vi.mocked(Date.now).mockRestore();
   });

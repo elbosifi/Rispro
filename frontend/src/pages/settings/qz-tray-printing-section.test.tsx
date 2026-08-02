@@ -8,6 +8,7 @@ const mockGetInstalledPrinters = vi.fn();
 const mockIsQzConnected = vi.fn();
 const mockSaveQzPrinterSettings = vi.fn();
 const mockPushToast = vi.fn();
+const mockDirectTestPrint = vi.fn();
 let mockSettings = createDefaultQzPrinterSettings();
 
 vi.mock("@/services/printing/qz-tray-service", () => ({
@@ -17,7 +18,7 @@ vi.mock("@/services/printing/qz-tray-service", () => ({
 }));
 
 vi.mock("@/services/printing/direct-print-service", () => ({
-  directTestPrint: vi.fn(),
+  directTestPrint: (...args: unknown[]) => mockDirectTestPrint(...args),
 }));
 
 vi.mock("@/services/printing/workstation-printer-settings", async (importOriginal) => {
@@ -44,36 +45,40 @@ describe("QzTrayPrintingSection", () => {
     mockIsQzConnected.mockReset().mockReturnValue(false);
     mockSaveQzPrinterSettings.mockReset().mockImplementation((settings) => settings);
     mockPushToast.mockReset();
+    mockDirectTestPrint.mockReset().mockResolvedValue({ success: true, printerName: "RISPRO A4" });
   });
 
   afterEach(() => {
     Object.defineProperty(window, "isSecureContext", { configurable: true, value: undefined });
   });
 
-  it("renders controls without connecting to QZ on an insecure origin", () => {
+  it("connects, enables refresh, and populates printers on an HTTP origin", async () => {
     setSecureContext(false);
-
-    render(<QzTrayPrintingSection />);
-
-    expect(screen.getByRole("alert").textContent).toContain("QZ direct printing requires RISpro to be opened through HTTPS. Browser printing remains available on this address.");
-    expect(mockConnectQzTray).not.toHaveBeenCalled();
-    expect(mockGetInstalledPrinters).not.toHaveBeenCalled();
-    expect((screen.getByRole("button", { name: /Refresh printers/i }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getAllByRole("button", { name: /Test print/i }).every((button) => button.hasAttribute("disabled"))).toBe(true);
-    expect((screen.getByRole("checkbox", { name: /Allow browser-print fallback/i }) as HTMLInputElement).disabled).toBe(false);
-    expect((screen.getByRole("button", { name: "Reset local printer settings" }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("keeps secure-context printer refresh behavior", async () => {
-    setSecureContext(true);
 
     render(<QzTrayPrintingSection />);
 
     await waitFor(() => expect(mockConnectQzTray).toHaveBeenCalledTimes(1));
     expect(mockGetInstalledPrinters).toHaveBeenCalledTimes(1);
     expect((await screen.findAllByRole("option", { name: "RISPRO A4" })).length).toBe(4);
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(mockSaveQzPrinterSettings).toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByRole("button", { name: /Refresh printers/i }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByRole("checkbox", { name: /Allow browser-print fallback/i }) as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Reset local printer settings" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not block test printing solely because the origin is HTTP", async () => {
+    setSecureContext(false);
+    mockSettings = {
+      ...mockSettings,
+      profiles: mockSettings.profiles.map((profile, index) => index === 0 ? { ...profile, printerName: "RISPRO A4" } : profile),
+    };
+
+    render(<QzTrayPrintingSection />);
+
+    const testButtons = screen.getAllByRole("button", { name: /Test print/i }) as HTMLButtonElement[];
+    const enabledTestButton = testButtons.find((button) => !button.disabled);
+    expect(enabledTestButton).toBeTruthy();
+    fireEvent.click(enabledTestButton!);
+    await waitFor(() => expect(mockDirectTestPrint).toHaveBeenCalledWith(expect.objectContaining({ printerName: "RISPRO A4" })));
   });
 });

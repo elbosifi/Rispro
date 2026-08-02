@@ -5,8 +5,6 @@ import QzTrayPrintingSection from "@/pages/settings/qz-tray-printing-section";
 
 const MANIFEST_URL = "/api/public/printing-bootstrap/manifest";
 const SETUP_LOG_PATH = String.raw`%ProgramData%\RISpro\PrintingSetup\setup.log`;
-const INSECURE_ORIGIN_WARNING = "You opened RISpro through an insecure local address. Use the official HTTPS address for QZ direct printing. Setup downloads below use the official RISpro address.";
-
 type BootstrapManifest = {
   ready: boolean;
   reason?: string;
@@ -31,7 +29,6 @@ export default function WorkstationPrintingPage() {
 function WorkstationSetupCard() {
   const [manifest, setManifest] = useState<BootstrapManifest | null>(null);
   const [loading, setLoading] = useState(true);
-  const insecureContext = typeof window !== "undefined" && window.isSecureContext === false;
 
   const loadManifest = useCallback(async () => {
     setLoading(true);
@@ -63,7 +60,6 @@ function WorkstationSetupCard() {
 
   return (
     <div className="space-y-2">
-      {insecureContext ? <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">{INSECURE_ORIGIN_WARNING}</p> : null}
       <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="workstation-setup-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

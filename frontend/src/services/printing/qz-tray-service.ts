@@ -76,15 +76,9 @@ export function serializeQzRequest(call: ApprovedQzCall, params: unknown, timest
   return JSON.stringify({ call, ...(params === undefined ? {} : { params }), timestamp });
 }
 
-export async function sha256Hex(value: string): Promise<string> {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 export async function signQzRequest(call: ApprovedQzCall, params: unknown, timestamp: number): Promise<string> {
   const request = serializeQzRequest(call, params, timestamp);
-  const digest = await sha256Hex(request);
-  const response = await fetch("/api/printing/qz-sign", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request, digest }) });
+  const response = await fetch("/api/printing/qz-sign", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request }) });
   if (response.status === 413) throw new QzTrayError("SIGNING_PAYLOAD_TOO_LARGE", "The PDF is too large for the configured QZ signing limit.");
   if (response.status === 503) {
     const failure = await response.json().catch(() => null) as { error?: { details?: { code?: unknown } } } | null;

@@ -29,20 +29,14 @@ function response(body: unknown) {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
-function setSecureContext(value: boolean) {
-  Object.defineProperty(window, "isSecureContext", { configurable: true, value });
-}
-
 describe("WorkstationPrintingPage", () => {
   beforeEach(() => {
-    setSecureContext(true);
     mockPushToast.mockReset();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(readyManifest)));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    Object.defineProperty(window, "isSecureContext", { configurable: true, value: undefined });
   });
 
   it("renders the ready manifest and uses every returned artifact URL", async () => {
@@ -101,15 +95,5 @@ describe("WorkstationPrintingPage", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("link", { name: "Download and install RISpro Printing" })).toBeTruthy();
-  });
-
-  it("keeps setup downloads and existing printer settings visible on an insecure origin", async () => {
-    setSecureContext(false);
-    render(<WorkstationPrintingPage />);
-
-    expect(await screen.findByText("You opened RISpro through an insecure local address. Use the official HTTPS address for QZ direct printing. Setup downloads below use the official RISpro address.")).toBeTruthy();
-    expect(await screen.findByRole("link", { name: "Download and install RISpro Printing" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "QZ Tray 2.2.6 installer" })).toBeTruthy();
-    expect(screen.getByTestId("qz-printer-settings")).toBeTruthy();
   });
 });
