@@ -1524,6 +1524,10 @@ describe("inline modality safety workflow", () => {
     mockRowsRef.current = availabilityRowsWithAvailable;
   });
 
+  afterEach(() => {
+    localStorage.setItem("rispro-language", "en");
+  });
+
   async function selectPatientAndModality(modalityId: number) {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: String(modalityId) } });
@@ -1533,7 +1537,16 @@ describe("inline modality safety workflow", () => {
     setup(true, [], [standardModality], "receptionist", [], undefined, examTypes);
     await selectPatientAndModality(1);
 
+    const grid = screen.getByTestId("appointment-create-grid");
+    const formRegion = screen.getByTestId("appointment-form-region");
+    const availabilityRegion = screen.getByTestId("appointment-availability-region");
+    expect(formRegion.parentElement).toBe(grid);
+    expect(availabilityRegion.parentElement).toBe(grid);
+    expect(screen.getByText("Complete the required safety screening to view available appointment days.")).toBeTruthy();
+    expect(screen.queryByLabelText("Start date")).toBeNull();
     expect(screen.getByText("Radiation risk")).toBeTruthy();
+    expect(screen.getByText("Modality safety warning")).toBeTruthy();
+    expect(screen.getAllByText("Required before booking").length).toBeGreaterThan(0);
     expect(screen.getByText("I have reviewed this warning with the patient and completed the required initial check.")).toBeTruthy();
     expect(screen.queryByLabelText("Exam Type")).toBeNull();
     expect(screen.queryByText("Safety Confirmation")).toBeNull();
@@ -1543,6 +1556,11 @@ describe("inline modality safety workflow", () => {
 
     expect(screen.getByText("Modality safety warning acknowledged")).toBeTruthy();
     expect(screen.getByLabelText("Exam Type")).toBeTruthy();
+    expect(screen.queryByTestId("safety-locked-availability")).toBeNull();
+    expect(screen.getByLabelText("Start date")).toBeTruthy();
+    expect(screen.getByTestId("appointment-create-grid")).toBe(grid);
+    expect(screen.getByTestId("appointment-form-region")).toBe(formRegion);
+    expect(screen.getByTestId("appointment-availability-region")).toBe(availabilityRegion);
     expect(screen.queryByText("Safety Confirmation")).toBeNull();
   });
 
@@ -1550,10 +1568,19 @@ describe("inline modality safety workflow", () => {
     setup(true, [], [mriModality], "supervisor", [], undefined, examTypes);
     await selectPatientAndModality(2);
 
-    expect(screen.getByText("Patient reports no known implant, implanted device, or metallic foreign body")).toBeTruthy();
-    await userEvent.click(screen.getByText("Patient reports an implant, implanted device, or metallic foreign body"));
+    expect(screen.getByRole("group", { name: "MRI primary screening" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Patient reports no known implant, implanted device, or metallic foreign body" })).toBeTruthy();
+    const implantRadio = screen.getByRole("radio", { name: "Patient reports an implant, implanted device, or metallic foreign body" });
+    await userEvent.click(implantRadio);
+    expect((implantRadio as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByLabelText("Implant/device site")).toBeTruthy();
+    expect(screen.getByLabelText("Implant/device description")).toBeTruthy();
+    expect(screen.getByLabelText("Previously reviewed by, as reported")).toBeTruthy();
+    expect(screen.getByText("Enter the implant/device site to continue.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Complete primary screening" }) as HTMLButtonElement).disabled).toBe(true);
     await userEvent.type(screen.getByLabelText("Implant/device site"), "left hip");
+    expect(screen.queryByText("Enter the implant/device site to continue.")).toBeNull();
+    expect((screen.getByRole("button", { name: "Complete primary screening" }) as HTMLButtonElement).disabled).toBe(false);
     await userEvent.click(screen.getByRole("button", { name: "Complete primary screening" }));
 
     expect(screen.getByText("MRI primary screening complete")).toBeTruthy();
@@ -1564,6 +1591,33 @@ describe("inline modality safety workflow", () => {
     await userEvent.click(screen.getByText("Patient reports no known implant, implanted device, or metallic foreign body"));
     await userEvent.click(screen.getByRole("button", { name: "Complete primary screening" }));
     expect(screen.getByText("MRI primary screening complete — no implant reported")).toBeTruthy();
+  });
+
+  it("shows only localized Arabic MRI workflow text and localized completed badges", async () => {
+    localStorage.setItem("rispro-language", "ar");
+    setup(true, [], [{ ...mriModality, safetyWarningAr: "تحذير المغناطيس" }], "supervisor", [], undefined, examTypes);
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("الجهاز"), { target: { value: "2" } });
+
+    expect(screen.getByRole("heading", { name: "التحقق الأولي من سلامة الرنين المغناطيسي" })).toBeTruthy();
+    expect(screen.getByText("تحذير المغناطيس")).toBeTruthy();
+    expect(screen.getByText("أكمل التحقق المطلوب من السلامة لعرض الأيام المتاحة للحجز.")).toBeTruthy();
+    expect(screen.queryByText("MRI primary screening")).toBeNull();
+    expect(screen.queryByText("Complete the required safety screening to view available appointment days.")).toBeNull();
+
+    const implantRadio = screen.getByRole("radio", { name: "أفاد المريض بوجود جهاز مزروع أو تركيب معدني أو جسم معدني غريب داخل الجسم." });
+    await userEvent.click(implantRadio);
+    expect(screen.getByLabelText("موضع الجهاز المزروع أو التركيب المعدني أو الجسم المعدني")).toBeTruthy();
+    expect(screen.getByText("أدخل موضع الجهاز المزروع أو التركيب المعدني أو الجسم المعدني للمتابعة.")).toBeTruthy();
+    const completeButton = screen.getByRole("button", { name: "حفظ التحقق الأولي والمتابعة" }) as HTMLButtonElement;
+    expect(completeButton.disabled).toBe(true);
+    await userEvent.type(screen.getByLabelText("موضع الجهاز المزروع أو التركيب المعدني أو الجسم المعدني"), "الورك الأيسر");
+    await userEvent.click(completeButton);
+
+    expect(screen.getByText("اكتمل التحقق الأولي لسلامة الرنين")).toBeTruthy();
+    expect(screen.getByText("تم الإبلاغ عن جهاز مزروع أو تركيب معدني أو جسم معدني — يلزم تقييم فريق الرنين المغناطيسي")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "تعديل إجابة التحقق الأولي" })).toBeTruthy();
+    expect(screen.queryByText("MRI primary screening complete")).toBeNull();
   });
 
   it("resets completion when patient or modality changes", async () => {
@@ -1612,5 +1666,16 @@ describe("inline modality safety workflow", () => {
     expect(screen.getByText("Booking is blocked because this modality's mandatory safety warning has not been configured. Contact an administrator.")).toBeTruthy();
     expect(screen.queryByLabelText("Exam Type")).toBeNull();
     expect(screen.queryByLabelText("Capacity Action")).toBeNull();
+  });
+
+  it("localizes the blocking configuration error in Arabic", async () => {
+    localStorage.setItem("rispro-language", "ar");
+    setup(true, [], [{ ...standardModality, safetyWarningEn: null, safetyWarningAr: null }], "supervisor", [], undefined, examTypes);
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("الجهاز"), { target: { value: "1" } });
+
+    expect(screen.getByText("تعذر استكمال الحجز لأن تنبيه السلامة الإلزامي للفحص المحدد غير مُهيّأ. يُرجى التواصل مع مسؤول النظام.")).toBeTruthy();
+    expect(screen.queryByText("Booking is blocked because this modality's mandatory safety warning has not been configured. Contact an administrator.")).toBeNull();
+    expect(screen.queryByLabelText("نوع الفحص")).toBeNull();
   });
 });

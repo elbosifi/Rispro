@@ -31,8 +31,9 @@ import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "./SchedulingOverrideRequestModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
-import { Button, Card } from "@/components/shared";
+import { Alert, AlertDescription, Badge, Button, Card } from "@/components/shared";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
+import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision } from "../utils/scheduling-override-requests";
@@ -844,9 +845,9 @@ export function CreateAppointmentTab({
       </div>
 
       {/* Main Grid Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
+      <div data-testid="appointment-create-grid" className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
         {/* Patient & Form Panel */}
-        <div className="space-y-3 sm:space-y-4 order-1 xl:order-2">
+        <div data-testid="appointment-form-region" className="space-y-3 sm:space-y-4 order-1 xl:order-2">
           <Card className="p-4 sm:p-5 lg:sticky lg:top-4 h-fit">
             <PatientSearchSection
               value={form.patient}
@@ -929,21 +930,160 @@ export function CreateAppointmentTab({
                 disabled={!schedulingEngineEnabled || !form.patientId}
               />
 
-              {safetyWarningEnabled && safetyComplete && <div className="xl:col-span-2 flex flex-wrap items-center gap-2 text-sm">{isMriSafetyWorkflow ? <MriPrimaryScreeningBadges result={screeningResult} /> : <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">Modality safety warning acknowledged</span>}<button type="button" className="text-xs underline" onClick={() => setSafetyAcknowledged(false)}>{isMriSafetyWorkflow ? "Change screening response" : "Review warning again"}</button></div>}
+              {safetyWarningEnabled && safetyComplete && (
+                <div className="xl:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 p-3 text-sm">
+                  {isMriSafetyWorkflow ? (
+                    <MriPrimaryScreeningBadges result={screeningResult} />
+                  ) : (
+                    <Badge variant="success" className="whitespace-normal text-start leading-snug">
+                      {t(language, "appointments.create.safety.acknowledged")}
+                    </Badge>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="shrink-0"
+                    onClick={() => setSafetyAcknowledged(false)}
+                  >
+                    <RefreshCw size={14} className="me-1.5" aria-hidden="true" />
+                    {t(language, isMriSafetyWorkflow ? "appointments.create.safety.changeScreeningResponse" : "appointments.create.safety.reviewWarningAgain")}
+                  </Button>
+                </div>
+              )}
 
               {safetyWarningEnabled && !safetyComplete && (
                 <div className="xl:col-span-2">
-                  <Card className="p-4 border-amber-300">
-                    <h3 className="text-lg font-semibold">{isMriSafetyWorkflow ? "MRI Primary Screening" : "Modality safety warning"}</h3>
-                    {safetyConfigurationError ? <p className="mt-2 text-sm text-red-700">Booking is blocked because this modality's mandatory safety warning has not been configured. Contact an administrator.</p> : <>
-                      <p className="mt-2 text-sm">{safetyMessage}</p>
-                      {isMriSafetyWorkflow ? <div className="mt-4 space-y-3"><p className="text-sm">Complete this initial screening before selecting the examination or appointment date. This does not replace the full MRI safety questionnaire or final MRI staff assessment.</p>
-                        <label className="block border rounded p-3"><input type="radio" name="mri-screening" checked={screeningResult === "no_known_implant_reported"} onChange={() => setScreeningResult("no_known_implant_reported")} /> Patient reports no known implant, implanted device, or metallic foreign body</label>
-                        <label className="block border rounded p-3"><input type="radio" name="mri-screening" checked={screeningResult === "implant_reported_review_required"} onChange={() => setScreeningResult("implant_reported_review_required")} /> Patient reports an implant, implanted device, or metallic foreign body</label>
-                        {screeningResult === "implant_reported_review_required" && <div className="grid gap-2"><input aria-label="Implant/device site" className="input-premium" value={implantSite} onChange={(e) => setImplantSite(e.target.value)} placeholder="Implant/device site" /><input aria-label="Implant/device description" className="input-premium" value={implantDescription} onChange={(e) => setImplantDescription(e.target.value)} placeholder="Implant/device description" /><input aria-label="Previously reviewed by, as reported" className="input-premium" value={previousReviewerNameReported} onChange={(e) => setPreviousReviewerNameReported(e.target.value)} placeholder="Previously reviewed by, as reported" /></div>}
-                        <Button onClick={() => setSafetyAcknowledged(true)} disabled={!screeningResult || (screeningResult === "implant_reported_review_required" && !implantSite.trim())}>Complete primary screening</Button>
-                      </div> : <div className="mt-4"><p className="text-sm mb-3">I have reviewed this warning with the patient and completed the required initial check.</p><Button onClick={() => setSafetyAcknowledged(true)}>Acknowledge and continue</Button></div>}
-                    </>}
+                  <Card className={`border-2 p-4 sm:p-5 ${safetyConfigurationError ? "border-red-300 bg-red-50/60" : "border-amber-300 bg-amber-50/70"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${safetyConfigurationError ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                          <TriangleAlert size={20} aria-hidden="true" />
+                        </span>
+                        <h3 className={`text-lg font-semibold leading-tight ${safetyConfigurationError ? "text-red-950" : "text-amber-950"}`}>
+                          {t(language, isMriSafetyWorkflow ? "appointments.create.safety.mriTitle" : "appointments.create.safety.modalityTitle")}
+                        </h3>
+                      </div>
+                      <Badge variant={safetyConfigurationError ? "error" : "warning"} className="shrink-0 whitespace-normal text-center leading-snug">
+                        {t(language, "appointments.create.safety.requiredBeforeBooking")}
+                      </Badge>
+                    </div>
+
+                    {safetyConfigurationError ? (
+                      <Alert variant="error" className="mt-4" role="alert">
+                        <AlertDescription className="mt-0">
+                          {t(language, "appointments.create.safety.misconfigured")}
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <>
+                        <Alert variant="warning" className="mt-4 border-amber-300 bg-amber-100/70">
+                          <AlertDescription className="mt-0 whitespace-pre-line text-amber-950">
+                            {safetyMessage}
+                          </AlertDescription>
+                        </Alert>
+
+                        {isMriSafetyWorkflow ? (
+                          <fieldset className="mt-5 border-t border-amber-200 pt-5">
+                            <legend className="sr-only">{t(language, "appointments.create.safety.mriTitle")}</legend>
+                            <p className="mb-4 text-sm leading-relaxed text-amber-950">
+                              {t(language, "appointments.create.safety.mriSupportingText")}
+                            </p>
+                            <div className="space-y-3">
+                              <label className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-3.5 transition-colors focus-within:ring-2 focus-within:ring-amber-500 focus-within:ring-offset-2 ${screeningResult === "no_known_implant_reported" ? "border-amber-500 bg-amber-100" : "border-amber-200 bg-background hover:border-amber-300"}`}>
+                                <input
+                                  type="radio"
+                                  name="mri-screening"
+                                  value="no_known_implant_reported"
+                                  checked={screeningResult === "no_known_implant_reported"}
+                                  onChange={() => setScreeningResult("no_known_implant_reported")}
+                                  className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600 focus-visible:outline-none"
+                                />
+                                <span className="text-sm font-medium leading-relaxed text-foreground">
+                                  {t(language, "appointments.create.safety.noImplantOption")}
+                                </span>
+                              </label>
+
+                              <label className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-3.5 transition-colors focus-within:ring-2 focus-within:ring-amber-500 focus-within:ring-offset-2 ${screeningResult === "implant_reported_review_required" ? "border-amber-500 bg-amber-100" : "border-amber-200 bg-background hover:border-amber-300"}`}>
+                                <input
+                                  type="radio"
+                                  name="mri-screening"
+                                  value="implant_reported_review_required"
+                                  checked={screeningResult === "implant_reported_review_required"}
+                                  onChange={() => setScreeningResult("implant_reported_review_required")}
+                                  className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600 focus-visible:outline-none"
+                                />
+                                <TriangleAlert size={16} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+                                <span className="text-sm font-medium leading-relaxed text-foreground">
+                                  {t(language, "appointments.create.safety.implantOption")}
+                                </span>
+                              </label>
+                            </div>
+
+                            {screeningResult === "implant_reported_review_required" && (
+                              <div className="mt-4 grid gap-4 rounded-xl border border-amber-200 bg-background/80 p-4">
+                                <div>
+                                  <label htmlFor="mri-implant-site" className="mb-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                                    {t(language, "appointments.create.safety.implantSite")}
+                                    <span className="text-xs font-medium text-red-700">{t(language, "appointments.create.safety.required")}</span>
+                                  </label>
+                                  <input
+                                    id="mri-implant-site"
+                                    dir="auto"
+                                    className="input-premium w-full"
+                                    value={implantSite}
+                                    onChange={(event) => setImplantSite(event.target.value)}
+                                    aria-label={t(language, "appointments.create.safety.implantSite")}
+                                    aria-describedby="mri-implant-site-help"
+                                    aria-invalid={!implantSite.trim()}
+                                  />
+                                  {!implantSite.trim() && (
+                                    <p id="mri-implant-site-help" className="mt-1.5 text-xs font-medium text-red-700">
+                                      {t(language, "appointments.create.safety.implantSiteRequired")}
+                                    </p>
+                                  )}
+                                </div>
+                                <div>
+                                  <label htmlFor="mri-implant-description" className="mb-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                                    {t(language, "appointments.create.safety.implantDescription")}
+                                    <span className="text-xs font-normal text-muted-foreground">{t(language, "appointments.create.safety.optional")}</span>
+                                  </label>
+                                  <input id="mri-implant-description" dir="auto" className="input-premium w-full" value={implantDescription} onChange={(event) => setImplantDescription(event.target.value)} aria-label={t(language, "appointments.create.safety.implantDescription")} />
+                                </div>
+                                <div>
+                                  <label htmlFor="mri-previous-reviewer" className="mb-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                                    {t(language, "appointments.create.safety.previousReviewer")}
+                                    <span className="text-xs font-normal text-muted-foreground">{t(language, "appointments.create.safety.optional")}</span>
+                                  </label>
+                                  <input id="mri-previous-reviewer" dir="auto" className="input-premium w-full" value={previousReviewerNameReported} onChange={(event) => setPreviousReviewerNameReported(event.target.value)} aria-label={t(language, "appointments.create.safety.previousReviewer")} />
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="mt-5 flex">
+                              <Button
+                                type="button"
+                                size="lg"
+                                className="w-full sm:w-auto"
+                                onClick={() => setSafetyAcknowledged(true)}
+                                disabled={!screeningResult || (screeningResult === "implant_reported_review_required" && !implantSite.trim())}
+                              >
+                                {t(language, "appointments.create.safety.completePrimaryScreening")}
+                              </Button>
+                            </div>
+                          </fieldset>
+                        ) : (
+                          <div className="mt-5 border-t border-amber-200 pt-5">
+                            <p className="mb-4 text-sm leading-relaxed text-amber-950">
+                              {t(language, "appointments.create.safety.acknowledgementStatement")}
+                            </p>
+                            <Button type="button" size="lg" className="w-full sm:w-auto" onClick={() => setSafetyAcknowledged(true)}>
+                              {t(language, "appointments.create.safety.acknowledgeAndContinue")}
+                            </Button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </Card>
                 </div>
               )}
@@ -1192,48 +1332,61 @@ export function CreateAppointmentTab({
         </div>
 
         {/* Availability Panel */}
-        {safetyComplete && <div className="space-y-3 sm:space-y-4 order-2 xl:order-1">
+        <div data-testid="appointment-availability-region" className="space-y-3 sm:space-y-4 order-2 xl:order-1">
           <Card className="p-4 sm:p-5">
             <div className="mb-4 sm:mb-5 flex items-start justify-between gap-3">
               <h3 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--foreground)" }}>
                 {t(language, "appointments.create.evaluatedAvailability")}
               </h3>
-              <span className="inline-flex shrink-0 items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-700">
-                {availabilityStatusLabel}
+              <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${safetyComplete ? "border-blue-200 bg-blue-50 text-blue-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                {safetyComplete ? availabilityStatusLabel : t(language, "appointments.create.safety.requiredBeforeBooking")}
               </span>
             </div>
-            <AvailabilityPanel
-              rows={availability.rows}
-              selectedDate={form.appointmentDate}
-              onSelectDate={handleSelectAvailabilityRow}
-              loading={availability.isLoading}
-              showFullDays={showFullDays}
-              onToggleShowFullDays={() => setShowFullDays((current) => !current)}
-              showPolicyHiddenDays={showPolicyHiddenDays}
-              onToggleShowPolicyHiddenDays={() => setShowPolicyHiddenDays((current) => !current)}
-              startDate={startDateFromOffset(availabilityOffset)}
-              onChangeStartDate={(nextDate) => {
-                setAvailabilityOffset(offsetFromStartDate(nextDate));
-                setAvailabilitySelectedRow(null);
-              }}
-              onPreviousPage={() => {
-                setAvailabilityOffset((current) => Math.max(0, current - AVAILABILITY_WINDOW_DAYS));
-                setAvailabilitySelectedRow(null);
-              }}
-              onNextPage={() => {
-                setAvailabilityOffset((current) => current + AVAILABILITY_WINDOW_DAYS);
-                setAvailabilitySelectedRow(null);
-              }}
-              canGoPrevious={availabilityOffset > 0}
-              allowOverrideRequests={allowReceptionOverrideRequestsFromAvailability || !isReceptionist}
-              emptyMessage={
-                availability.enabled
-                  ? t(language, "appointments.create.noAvailabilityRows")
-                  : ""
-              }
-            />
+            {safetyComplete ? (
+              <AvailabilityPanel
+                rows={availability.rows}
+                selectedDate={form.appointmentDate}
+                onSelectDate={handleSelectAvailabilityRow}
+                loading={availability.isLoading}
+                showFullDays={showFullDays}
+                onToggleShowFullDays={() => setShowFullDays((current) => !current)}
+                showPolicyHiddenDays={showPolicyHiddenDays}
+                onToggleShowPolicyHiddenDays={() => setShowPolicyHiddenDays((current) => !current)}
+                startDate={startDateFromOffset(availabilityOffset)}
+                onChangeStartDate={(nextDate) => {
+                  setAvailabilityOffset(offsetFromStartDate(nextDate));
+                  setAvailabilitySelectedRow(null);
+                }}
+                onPreviousPage={() => {
+                  setAvailabilityOffset((current) => Math.max(0, current - AVAILABILITY_WINDOW_DAYS));
+                  setAvailabilitySelectedRow(null);
+                }}
+                onNextPage={() => {
+                  setAvailabilityOffset((current) => current + AVAILABILITY_WINDOW_DAYS);
+                  setAvailabilitySelectedRow(null);
+                }}
+                canGoPrevious={availabilityOffset > 0}
+                allowOverrideRequests={allowReceptionOverrideRequestsFromAvailability || !isReceptionist}
+                emptyMessage={
+                  availability.enabled
+                    ? t(language, "appointments.create.noAvailabilityRows")
+                    : ""
+                }
+              />
+            ) : (
+              <div data-testid="safety-locked-availability" className="flex min-h-44 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 p-6 text-center">
+                <div className="max-w-sm text-amber-900">
+                  <span className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                    <Lock size={19} aria-hidden="true" />
+                  </span>
+                  <p className="text-sm font-medium leading-relaxed">
+                    {t(language, "appointments.create.safety.availabilityLocked")}
+                  </p>
+                </div>
+              </div>
+            )}
           </Card>
-        </div>}
+        </div>
 
       </div>
 
