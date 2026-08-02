@@ -178,12 +178,23 @@ describe("dicom study scan", () => {
       return mockDataSet({ x0020000d: callIndex > 100 ? "study-b" : "study-a" }) as never;
     });
     const progress: number[] = [];
+    const partialResults: DicomStudyScanResult[] = [];
+    const files = Array.from({ length: 101 }, (_, index) => makeFile(`image-${index}.dcm`));
     const result = await scanDicomStudiesFromFiles(
-      Array.from({ length: 101 }, (_, index) => makeFile(`image-${index}.dcm`)),
-      { batchSize: 20, onProgress: (update) => progress.push(update.processedFileCount) },
+      files,
+      {
+        batchSize: 20,
+        onProgress: (update) => progress.push(update.processedFileCount),
+        onPartialResult: (partial) => partialResults.push(partial),
+      },
     );
     expect(result.studies.map((study) => study.studyInstanceUid).sort()).toEqual(["study-a", "study-b"]);
     expect(progress).toEqual([0, 20, 40, 60, 80, 100, 101]);
+    expect(partialResults).toHaveLength(6);
+    expect(partialResults[0]?.scanIncomplete).toBe(true);
+    expect(partialResults[0]?.studies[0]?.files.map((entry) => entry.file)).toEqual(files.slice(0, 20));
+    expect(partialResults.at(-1)?.studies.map((study) => study.studyInstanceUid).sort()).toEqual(["study-a", "study-b"]);
+    expect(result.scanIncomplete).toBeUndefined();
   });
 
   it("stops scheduling later batches when cancelled", async () => {

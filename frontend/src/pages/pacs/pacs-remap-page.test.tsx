@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PacsRemapPage from "./pacs-remap-page";
@@ -80,13 +80,29 @@ class FakeXHR {
 
 function study(uid = "1.2.3", description = "CT Chest") {
   const file = new File(["dicom"], `${description.replace(/\\s/g, "-")}.dcm`);
-  return { studyInstanceUid: uid, studyDescription: description, studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One^Patient", patientBirthDate: "19900101", patientSex: "M", seriesCount: 1, fileCount: 1, totalBytes: file.size, files: [file] };
+  const entry = {
+    file,
+    fileName: file.name,
+    filePath: file.name,
+    fileSize: file.size,
+    studyInstanceUid: uid,
+    seriesInstanceUid: `${uid}.series`,
+    sopInstanceUid: `${uid}.sop`,
+    studyDescription: description,
+    studyDate: "20260101",
+    modality: "CT",
+    patientId: "P1",
+    patientName: "One^Patient",
+    patientBirthDate: "19900101",
+    patientSex: "M",
+  };
+  return { studyInstanceUid: uid, studyDescription: description, studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One^Patient", patientBirthDate: "19900101", patientSex: "M", seriesCount: 1, fileCount: 1, totalBytes: file.size, files: [entry] };
 }
 
 type TestScanResult = Omit<DicomStudyScanResult, "studies"> & { studies: ReturnType<typeof study>[] };
 
 function result(studies = [study()]): TestScanResult {
-  return { studies, skippedSidecarCount: 0, unparsedCount: 0, totalFileCount: 1, dicomLikeFileCount: 1, parsedDicomFileCount: 1, fallbackUploadFiles: studies.flatMap((item) => item.files), unparsedFiles: [] };
+  return { studies, skippedSidecarCount: 0, unparsedCount: 0, totalFileCount: 1, dicomLikeFileCount: 1, parsedDicomFileCount: 1, fallbackUploadFiles: studies.flatMap((item) => item.files.map((entry) => entry.file)), unparsedFiles: [] };
 }
 
 function deferred<T>() {
@@ -254,6 +270,42 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByText("Complete folder scan complete")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText("Fast preview was unavailable. RISpro is continuing the complete folder scan.")).toBeNull();
+  });
+
+  it("offers selected-study-only secure staging as soon as the local scan finds a study after preview failure", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
+    let scanOptions: { signal: AbortSignal; onPartialResult?: (partial: DicomStudyScanResult) => void } | undefined;
+    const selectedFile = new File(["selected"], "selected.dcm", { type: "application/dicom" });
+    const otherStudyFile = new File(["other"], "other-study.dcm", { type: "application/dicom" });
+    const partialStudy = study("selected-study", "Discovered Study");
+    previewMock.mockRejectedValue(new Error("Preview API unavailable"));
+    scanMock.mockImplementation((_files: File[], options: typeof scanOptions) => {
+      scanOptions = options;
+      return fullScan.promise;
+    });
+    buildPlanMock.mockReturnValue({ files: [selectedFile], selectedStudyInstanceUid: "selected-study", usesFallback: false });
+    renderPage();
+    await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [selectedFile, otherStudyFile] } });
+    await screen.findByText("Fast preview was unavailable. RISpro is continuing the complete folder scan.");
+
+    act(() => scanOptions?.onPartialResult?.({
+      ...result([partialStudy]),
+      totalFileCount: 2,
+      dicomLikeFileCount: 2,
+      scanIncomplete: true,
+    }));
+
+    expect(await screen.findByText("Discovered Study")).toBeTruthy();
+    expect(buildPlanMock).toHaveBeenCalledWith(expect.objectContaining({ scanIncomplete: true }), "selected-study", false);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+
+    expect(scanOptions?.signal.aborted).toBe(true);
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
+    const stagedBody = FakeXHR.instances[0]?.sentBody;
+    expect((stagedBody?.getAll("files") as File[]).map((file) => file.name)).toEqual(["selected.dcm"]);
+    expect(stagedBody?.get("selectedStudyInstanceUID")).toBe("selected-study");
   });
 
   it("continues to the authoritative scan when the preview reports zero studies", async () => {
@@ -479,7 +531,7 @@ describe("PacsRemapPage five-step wizard", () => {
     scanMock.mockReturnValue(pendingScan);
     renderPage();
     await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm"), new File(["y"], "b.dcm")] } });
     await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
@@ -489,6 +541,7 @@ describe("PacsRemapPage five-step wizard", () => {
     await waitFor(() => expect(FakeXHR.instances).toHaveLength(1));
     expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/stage-multipart");
     expect(FakeXHR.instances[0]?.sentBody).toBeInstanceOf(FormData);
+    expect(FakeXHR.instances[0]?.sentBody?.getAll("files")).toHaveLength(2);
     resolveScan(result([study("stale-study", "Stale")]));
     await waitFor(() => expect(screen.queryByText("Stale")).toBeNull());
   });

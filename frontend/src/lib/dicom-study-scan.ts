@@ -89,6 +89,7 @@ export interface DicomStudyScanResult {
   fallbackUploadFiles: File[];
   unparsedFiles: DicomScanUnparsedEntry[];
   previewOnly?: boolean;
+  scanIncomplete?: boolean;
   maxHeaderBytes?: number;
 }
 
@@ -110,6 +111,7 @@ export interface DicomStudyScanOptions {
   batchSize?: number;
   signal?: AbortSignal;
   onProgress?: (progress: DicomStudyScanProgress) => void;
+  onPartialResult?: (result: DicomStudyScanResult) => void;
 }
 
 export class DicomStudyScanCancelledError extends Error {
@@ -378,17 +380,32 @@ export async function scanDicomStudiesFromFiles(
   const parsedEntries: DicomScanFileEntry[] = [];
   const unparsedEntries: DicomScanUnparsedEntry[] = [];
 
+  const buildResult = (scanIncomplete = false): DicomStudyScanResult => ({
+    studies: summarizeStudies(parsedEntries)
+      .sort((a, b) => b.fileCount - a.fileCount || b.totalBytes - a.totalBytes),
+    skippedSidecarCount,
+    unparsedCount: unparsedEntries.length,
+    totalFileCount: allFiles.length,
+    dicomLikeFileCount: candidateFiles.length,
+    parsedDicomFileCount: parsedEntries.length,
+    fallbackUploadFiles: candidateFiles,
+    unparsedFiles: unparsedEntries,
+    ...(scanIncomplete ? { scanIncomplete: true } : {}),
+  });
+
   const assertNotCancelled = () => {
     if (options.signal?.aborted) throw new DicomStudyScanCancelledError();
   };
-  const emitProgress = (processedFileCount: number) => {
+  const emitProgress = (processedFileCount: number, includePartialResult = false) => {
+    const result = buildResult(includePartialResult);
     options.onProgress?.({
       candidateFileCount: candidateFiles.length,
       processedFileCount,
       parsedDicomFileCount: parsedEntries.length,
       unparsedCount: unparsedEntries.length,
-      studyCount: summarizeStudies(parsedEntries).length,
+      studyCount: result.studies.length,
     });
+    if (includePartialResult) options.onPartialResult?.(result);
   };
 
   assertNotCancelled();
@@ -417,7 +434,7 @@ export async function scanDicomStudiesFromFiles(
       }
     }
 
-    emitProgress(index + batch.length);
+    emitProgress(index + batch.length, true);
 
     // Yield to the event loop for large folders.
     await new Promise<void>((resolve) => {
@@ -426,19 +443,7 @@ export async function scanDicomStudiesFromFiles(
     assertNotCancelled();
   }
 
-  const studies = summarizeStudies(parsedEntries)
-    .sort((a, b) => b.fileCount - a.fileCount || b.totalBytes - a.totalBytes);
-
-  return {
-    studies,
-    skippedSidecarCount,
-    unparsedCount: unparsedEntries.length,
-    totalFileCount: allFiles.length,
-    dicomLikeFileCount: candidateFiles.length,
-    parsedDicomFileCount: parsedEntries.length,
-    fallbackUploadFiles: candidateFiles,
-    unparsedFiles: unparsedEntries,
-  };
+  return buildResult();
 }
 
 export function buildDicomUploadSelectionPlan(

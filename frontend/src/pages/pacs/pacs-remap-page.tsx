@@ -333,6 +333,8 @@ export default function PacsRemapPage() {
   const stagingUploadControllerRef = useRef<AbortController | null>(null);
   const scanRunIdRef = useRef(0);
   const completedFullScanRunIdRef = useRef<number | null>(null);
+  const previewUnavailableRunIdRef = useRef<number | null>(null);
+  const latestPartialScanResultRef = useRef<DicomStudyScanResult | null>(null);
 
   const selectedScannedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
   const provisionalIdentityIsConsistent = useMemo(() => {
@@ -521,9 +523,20 @@ export default function PacsRemapPage() {
       onProgress: (progress) => {
         if (runId === scanRunIdRef.current && !controller.signal.aborted) setScanProgress(progress);
       },
+      onPartialResult: (result) => {
+        if (runId !== scanRunIdRef.current || controller.signal.aborted) return;
+        latestPartialScanResultRef.current = result;
+        if (previewUnavailableRunIdRef.current !== runId || result.studies.length === 0) return;
+        setScanResult(result);
+        setSelectedStudyInstanceUid((current) => result.studies.some((study) => study.studyInstanceUid === current)
+          ? current
+          : result.studies.length === 1 ? result.studies[0]!.studyInstanceUid : "");
+      },
     }).then((result) => {
       if (runId !== scanRunIdRef.current || controller.signal.aborted) return;
       completedFullScanRunIdRef.current = runId;
+      previewUnavailableRunIdRef.current = null;
+      latestPartialScanResultRef.current = null;
       fullScanControllerRef.current = null;
       setScanResult(result);
       setCompleteScanStatus("complete");
@@ -546,6 +559,8 @@ export default function PacsRemapPage() {
       cancelActiveFullScan();
       const runId = ++scanRunIdRef.current;
       completedFullScanRunIdRef.current = null;
+      previewUnavailableRunIdRef.current = null;
+      latestPartialScanResultRef.current = null;
       setUiStep("source");
       setErrorMessage("");
       setErrorDetails("");
@@ -560,30 +575,37 @@ export default function PacsRemapPage() {
     },
     onSuccess: (result, _sourceFiles, context) => {
       if (context?.runId !== scanRunIdRef.current || completedFullScanRunIdRef.current === context.runId) return;
+      previewUnavailableRunIdRef.current = null;
       setScanResult(result);
       if (result.studies.length === 1) setSelectedStudyInstanceUid(result.studies[0]!.studyInstanceUid);
       setPreviewWarning("");
     },
     onError: (_error: unknown, _sourceFiles, context) => {
       if (context?.runId !== scanRunIdRef.current || completedFullScanRunIdRef.current === context?.runId) return;
+      previewUnavailableRunIdRef.current = context.runId;
+      const partialResult = latestPartialScanResultRef.current;
+      if (partialResult?.studies.length) {
+        setScanResult(partialResult);
+        setSelectedStudyInstanceUid(partialResult.studies.length === 1 ? partialResult.studies[0]!.studyInstanceUid : "");
+      }
       setPreviewWarning(t(language, "pacs.remap.fastPreviewUnavailable"));
     },
   });
 
   const canStartFastStaging = completeScanStatus === "running"
-    && scanResult?.previewOnly === true
+    && (scanResult?.previewOnly === true || scanResult?.scanIncomplete === true)
     && scanResult.parsedDicomFileCount > 0
     && Boolean(selectedScannedStudy?.studyInstanceUid.trim())
     && provisionalIdentityIsConsistent;
 
   const stageSourceMutation = useMutation({
-    onMutate: () => {
+    onMutate: ({ uploadFiles }) => {
       cancelActiveFullScan();
       focusHeadingAfterNavigationRef.current = true;
       setCompleteScanStatus("skipped");
       setSecureStagingStatus("uploading");
       setUploadLoaded(0);
-      setUploadTotal(files.filter(isLikelyDicomCandidate).reduce((sum, file) => sum + file.size, 0));
+      setUploadTotal(uploadFiles.reduce((sum, file) => sum + file.size, 0));
       setErrorMessage("");
       setErrorDetails("");
       setUiStep("patient");
@@ -912,7 +934,12 @@ export default function PacsRemapPage() {
     && !confirmStagedMutation.isPending;
   const skippedScanMode = fastStagedWorkflow;
   const checkingForActiveJob = activeJobQuery.isPending && effectiveJobId == null;
-  const reviewFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : selectedStudy?.files || [];
+  const reviewFiles = skippedScanMode
+    ? (scanResult?.scanIncomplete ? selectedStudy?.files || [] : files.filter(isLikelyDicomCandidate))
+    : selectedStudy?.files || [];
+  const fastStagingFiles = scanResult?.scanIncomplete
+    ? buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, false).files
+    : files.filter(isLikelyDicomCandidate);
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
   const effectiveProcessingStage: RemapProcessingStage = currentJob?.status === "sent"
@@ -1276,7 +1303,7 @@ export default function PacsRemapPage() {
               {scanResult.studies.length > 1 && (
                 <p className="text-xs text-amber-700">{t(language, "pacs.remap.multipleStudiesWarning")}</p>
               )}
-              {scanResult.previewOnly && completeScanStatus === "running" && (
+              {(scanResult.previewOnly || scanResult.scanIncomplete) && completeScanStatus === "running" && (
                 <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                   <p className="text-sm font-semibold">{language === "ar" ? "تحقق سريع على الخادم" : "Fast server verification"}</p>
                   <p>{t(language, "pacs.remap.preliminaryScanNotice")}</p>
@@ -1308,7 +1335,7 @@ export default function PacsRemapPage() {
                         type="button"
                         onClick={() => stageSourceMutation.mutate({
                           study: selectedScannedStudy,
-                          uploadFiles: files.filter(isLikelyDicomCandidate),
+                          uploadFiles: fastStagingFiles,
                           acknowledged: skipAcknowledged,
                         })}
                         disabled={!skipAcknowledged || stageSourceMutation.isPending}
