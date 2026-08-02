@@ -59,7 +59,11 @@ export async function connectQzTray(): Promise<void> {
   if (qz.websocket.isActive()) return;
   if (!connectionPromise) {
     connectionPromise = getRuntimeConfig()
-      .then((runtime) => qz.websocket.connect({ retries: 3, delay: 1, usingSecure: !runtime.allowInsecureWebsocket }))
+      .then((runtime) => {
+        const risproIsHttps = window.location.protocol === "https:";
+        const usingSecure = risproIsHttps || !runtime.allowInsecureWebsocket;
+        return qz.websocket.connect({ retries: 3, delay: 1, usingSecure });
+      })
       .finally(() => { connectionPromise = null; });
   }
   try { await connectionPromise; } catch (error) { if (certificateFailure) throw certificateFailure; throw connectionError(error); }

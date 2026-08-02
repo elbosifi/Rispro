@@ -59,12 +59,17 @@ function mockApi(allowInsecureWebsocket = false): void {
   }));
 }
 
+function mockOrigin(protocol: "http:" | "https:"): void {
+  vi.stubGlobal("window", { location: { protocol } });
+}
+
 describe("QZ Tray service", () => {
   beforeEach(() => {
     qzMocks.active = false;
     vi.clearAllMocks();
     signingBodies.length = 0;
     __qzTrayTestables.resetRuntimeConfig();
+    mockOrigin("http:");
     mockApi();
     qzMocks.connect.mockImplementation(async () => { qzMocks.active = true; });
     qzMocks.disconnect.mockResolvedValue(undefined);
@@ -84,11 +89,28 @@ describe("QZ Tray service", () => {
     expect(qzMocks.connect).toHaveBeenCalledWith({ retries: 3, delay: 1, usingSecure: true });
   });
 
-  it("uses insecure WebSockets only when the authenticated runtime configuration enables them", async () => {
+  it("uses secure WebSockets on an HTTPS origin when insecure mode is enabled", async () => {
+    mockOrigin("https:");
+    __qzTrayTestables.resetRuntimeConfig();
+    mockApi(true);
+    await connectQzTray();
+    expect(qzMocks.connect).toHaveBeenCalledWith({ retries: 3, delay: 1, usingSecure: true });
+  });
+
+  it("uses insecure WebSockets on an HTTP origin when insecure mode is enabled", async () => {
+    mockOrigin("http:");
     __qzTrayTestables.resetRuntimeConfig();
     mockApi(true);
     await connectQzTray();
     expect(qzMocks.connect).toHaveBeenCalledWith({ retries: 3, delay: 1, usingSecure: false });
+  });
+
+  it("uses secure WebSockets on an HTTP origin when insecure mode is disabled", async () => {
+    mockOrigin("http:");
+    __qzTrayTestables.resetRuntimeConfig();
+    mockApi(false);
+    await connectQzTray();
+    expect(qzMocks.connect).toHaveBeenCalledWith({ retries: 3, delay: 1, usingSecure: true });
   });
 
   it("pre-signs printer discovery with its exact params and timestamp", async () => {
