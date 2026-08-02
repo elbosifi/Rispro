@@ -1605,7 +1605,7 @@ describe("inline modality safety workflow", () => {
     expect(screen.queryByText("MRI primary screening")).toBeNull();
     expect(screen.queryByText("Complete the required safety screening to view available appointment days.")).toBeNull();
 
-    const implantRadio = screen.getByRole("radio", { name: "أفاد المريض بوجود جهاز مزروع أو تركيب معدني أو جسم معدني غريب داخل الجسم." });
+    const implantRadio = screen.getByRole("radio", { name: "تم التحقق من الجسم المزروع من قبل الفريق الطبي مبدئياً" });
     await userEvent.click(implantRadio);
     expect(screen.getByLabelText("موضع الجهاز المزروع أو التركيب المعدني أو الجسم المعدني")).toBeTruthy();
     expect(screen.getByText("أدخل موضع الجهاز المزروع أو التركيب المعدني أو الجسم المعدني للمتابعة.")).toBeTruthy();

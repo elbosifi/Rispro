@@ -2904,9 +2904,10 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "appointments.create.safety.mriTitle": "التحقق الأولي من سلامة الرنين المغناطيسي",
   "appointments.create.safety.modalityTitle": "تنبيه السلامة الخاص بالفحص",
   "appointments.create.safety.requiredBeforeBooking": "إلزامي قبل استكمال الحجز",
-  "appointments.create.safety.mriSupportingText": "يجب استكمال هذا التحقق الأولي قبل اختيار نوع الفحص أو موعده. ولا يُغني عن استكمال قائمة التحقق الكاملة لسلامة الرنين المغناطيسي أو التقييم النهائي من قِبل فريق الرنين المغناطيسي.",
+  "appointments.create.safety.mriSupportingText": "- يجب إبلاغ المريض بأن سيتم اجراء فحص السلامة للرنين المغناطيسي و التقييم النهائي من قِبل فريق الرنين المغناطيسي قبل البدأ في الفحص
+- يجب توفير اي مستندات تثبت نوعية الاجسام المزروعة في حالة وجودها، لن يتم قبول اي معلومية شفهية غير موثقة.",
   "appointments.create.safety.noImplantOption": "حسب إفادة المريض، لا يوجد جهاز مزروع أو تركيب معدني أو جسم معدني غريب معروف داخل الجسم.",
-  "appointments.create.safety.implantOption": "أفاد المريض بوجود جهاز مزروع أو تركيب معدني أو جسم معدني غريب داخل الجسم.",
+  "appointments.create.safety.implantOption": "تم التحقق من الجسم المزروع من قبل الفريق الطبي مبدئياً",
   "appointments.create.safety.implantSite": "موضع الجهاز المزروع أو التركيب المعدني أو الجسم المعدني",
   "appointments.create.safety.implantDescription": "نوع الجهاز أو التركيب المعدني أو الجسم المعدني ووصفه",
   "appointments.create.safety.previousReviewer": "اسم الطبيب أو الجهة التي راجعت الحالة سابقًا (حسب إفادة المريض)",
