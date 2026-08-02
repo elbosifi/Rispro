@@ -34,7 +34,7 @@ describe("QZ signing route limits", () => {
     ]);
   });
 
-  it("returns authenticated runtime configuration and forces secure mode in production", async () => {
+  it("returns explicitly enabled insecure runtime configuration in production", async () => {
     const app = express();
     app.use(cookieParser());
     app.use("/api/printing", printingRouter);
@@ -55,7 +55,7 @@ describe("QZ signing route limits", () => {
       assert.equal(development.headers.get("cache-control"), "private, max-age=60");
       env.isProduction = true;
       const production = await fetch(url, { headers: { Cookie: cookie } });
-      assert.deepEqual(await production.json(), { allowInsecureWebsocket: false });
+      assert.deepEqual(await production.json(), { allowInsecureWebsocket: true });
       assert.equal((await fetch(url)).status, 401);
     } finally {
       env.qzAllowInsecureWebsocket = previousEnabled;

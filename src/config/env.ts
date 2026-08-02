@@ -258,7 +258,7 @@ export const env: EnvConfig = {
 };
 
 export function allowInsecureQzWebsocket(): boolean {
-  return !env.isProduction && env.qzAllowInsecureWebsocket;
+  return env.qzAllowInsecureWebsocket;
 }
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
