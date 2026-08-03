@@ -63,6 +63,8 @@ describe("printProtocolSheet", () => {
     expect(printWindow.document.close).toHaveBeenCalledOnce();
     const html = String(printWindow.document.write.mock.calls[0]?.[0] ?? "");
     expect(html).toContain("NCCB / RISpro Protocol Sheet");
+    expect(html).toContain('<body dir="ltr" lang="en">');
+    expect(html).toContain("html, body { direction: ltr; text-align: left; }");
     expect(html).toContain("window.print()");
     expect(html).toContain("window.close()");
     expect(html).toContain(">Print</button>");
@@ -89,5 +91,31 @@ describe("printProtocolSheet", () => {
     expect(html).toContain("Free-text protocol");
     expect(html).toContain("Complete free text");
     expect(html).not.toContain("Free-text protocol v");
+  });
+
+  it("prints CT columns in the LTR acquisition order", () => {
+    const printWindow = mockPrintWindow();
+    vi.spyOn(window, "open").mockReturnValue(printWindow as unknown as Window);
+    printProtocolSheet({
+      ...sheet,
+      modality: "CT",
+      ctPhases: [{
+        orderIndex: 1,
+        phase: "Portal venous",
+        timing: "Delay 70s",
+        coverage: "Abdomen",
+        reconstruction: "Soft tissue",
+        isRequired: true,
+        instructions: "Breath hold",
+      }],
+      mriSequences: undefined,
+    });
+    const html = String(printWindow.document.write.mock.calls[0]?.[0] ?? "");
+    expect(html.indexOf("<th>Order</th>")).toBeLessThan(html.indexOf("<th>Phase</th>"));
+    expect(html.indexOf("<th>Phase</th>")).toBeLessThan(html.indexOf("<th>Timing</th>"));
+    expect(html.indexOf("<th>Timing</th>")).toBeLessThan(html.indexOf("<th>Coverage</th>"));
+    expect(html.indexOf("<th>Coverage</th>")).toBeLessThan(html.indexOf("<th>Reconstruction</th>"));
+    expect(html.indexOf("<th>Reconstruction</th>")).toBeLessThan(html.indexOf("<th>Required</th>"));
+    expect(html.indexOf("<th>Required</th>")).toBeLessThan(html.indexOf("<th>Instructions</th>"));
   });
 });

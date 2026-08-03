@@ -1139,8 +1139,33 @@ describe("ModalityPage modality board", () => {
 
     const row = screen.getByTestId("modality-board-row-7");
     expect(within(row).getByText("MRI Rectum Primary Staging v1.2")).toBeTruthy();
+    expect(within(row).getByText("Protocol assigned")).toBeTruthy();
     expect(within(row).queryByText("Scanner: Philips Ingenia Elition 3T")).toBeNull();
     expect(within(row).queryByText("Notes available")).toBeNull();
+  });
+
+  it("renders the protocol badge through the Arabic localization", async () => {
+    languageState.language = "ar";
+    await openBoard([
+      appointment({
+        id: 19,
+        accessionNumber: "ACC-PROTOCOL-AR",
+        protocolAssignmentSummary: {
+          assignmentId: 91,
+          protocolName: "CT Abdomen",
+          versionNumber: "1.0",
+          freeTextProtocol: null,
+          scannerName: null,
+          assignedBy: "Dr. Protocol",
+          assignedAt: "2026-06-29T08:00:00Z",
+          protocolNotes: null,
+          contrastNotes: null,
+        },
+      }),
+    ]);
+
+    const row = screen.getByTestId("modality-board-row-19");
+    expect(within(row).getByText(translate("ar", "modality.protocolAssigned"))).toBeTruthy();
   });
 
   it("renders Assigned CT Protocol with CT phase terminology", async () => {
@@ -1155,8 +1180,71 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("Phase")).toBeTruthy();
     expect(within(drawer).queryByText("Sequence")).toBeNull();
     expect(within(drawer).getByText("Liver to symphysis")).toBeTruthy();
-    expect(within(drawer).getByText("This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.")).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: /Patient instructions/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(drawer).queryByText("Renal protocol")).toBeNull();
+    expect(within(drawer).queryByText("This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.")).toBeNull();
     expect(fetchModalityProtocolAssignmentMock).toHaveBeenCalledWith(7);
+  });
+
+  it("keeps the protocol card LTR, collapses Arabic instructions, and hides empty metadata", async () => {
+    const arabicInstructions = "الصيام 6 ساعات\nإحضار التقارير السابقة";
+    const user = await openBoard([
+      appointment({
+        id: 17,
+        accessionNumber: "ACC-LTR",
+        modalityGeneralInstructionAr: arabicInstructions,
+        modalityGeneralInstructionEn: null,
+      }),
+    ]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(ctAssignment({
+      assignmentId: 17,
+      appointmentId: 17,
+      protocolName: null,
+      versionNumber: null,
+      freeTextProtocol: "Upper Abdomen 35s\nCAP 65s",
+      scannerName: null,
+      scannerVendor: null,
+      assignedBy: null,
+      protocolNotes: null,
+      contrastNotes: null,
+      ctPhases: [],
+    }));
+
+    await user.click(screen.getByTestId("modality-board-row-17"));
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    const panel = within(drawer).getByTestId("modality-protocol-section");
+    expect(panel.getAttribute("dir")).toBe("ltr");
+    expect(within(panel).getByTestId("clinical-protocol-content").textContent).toContain("Upper Abdomen 35s\nCAP 65s");
+    expect(within(panel).queryByText("Scanner")).toBeNull();
+    expect(within(panel).queryByText("Contrast/preparation instructions")).toBeNull();
+    expect(within(panel).queryByText("Protocol notes")).toBeNull();
+    expect(within(panel).queryByTestId("clinical-acquisition-table")).toBeNull();
+
+    const disclosure = within(panel).getByRole("button", { name: /Patient instructions/ });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(within(panel).queryByText(arabicInstructions)).toBeNull();
+    await user.click(disclosure);
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    const instruction = within(panel).getByText((text) => text.includes("الصيام 6 ساعات"));
+    expect(instruction.getAttribute("dir")).toBe("auto");
+  });
+
+  it("renders CT acquisition columns in scanner order only when rows exist", async () => {
+    const user = await openBoard([appointment({ id: 18, accessionNumber: "ACC-ORDER" })]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(ctAssignment({ assignmentId: 18, appointmentId: 18 }));
+
+    await user.click(screen.getByTestId("modality-board-row-18"));
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    const table = within(drawer).getByTestId("clinical-acquisition-table");
+    expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Order",
+      "Phase",
+      "Timing",
+      "Coverage",
+      "Reconstruction",
+      "Required",
+      "Instructions",
+    ]);
   });
 
   it("prints assigned protocol separately from the appointment slip", async () => {
@@ -1200,6 +1288,7 @@ describe("ModalityPage modality board", () => {
     const user = await openBoard([appointment({ id: 9, accessionNumber: "ACC-NO-PROTOCOL" })]);
 
     expect(within(screen.getByTestId("modality-board-row-9")).getByText("No protocol assigned")).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-9")).queryByText("Protocol assigned")).toBeNull();
     await user.click(screen.getByTestId("modality-board-row-9"));
 
     const drawer = await screen.findByTestId("selected-appointment-drawer");

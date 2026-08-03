@@ -84,8 +84,8 @@ function ctTable(phases: ProtocolPrintCtPhase[]): string {
           <th>Timing</th>
           <th>Coverage</th>
           <th>Reconstruction</th>
-          <th>Instructions</th>
           <th>Required</th>
+          <th>Instructions</th>
         </tr>
       </thead>
       <tbody>
@@ -96,8 +96,8 @@ function ctTable(phases: ProtocolPrintCtPhase[]): string {
             <td>${text(phase.timing)}</td>
             <td>${text(phase.coverage)}</td>
             <td>${text(phase.reconstruction)}</td>
-            <td>${longText(phase.instructions)}</td>
             <td>${yesNo(phase.isRequired)}</td>
+            <td>${longText(phase.instructions)}</td>
           </tr>
         `).join("")}
       </tbody>
@@ -154,6 +154,7 @@ function html(sheet: ProtocolPrintSheet): string {
   <title>Protocol sheet - ${text(sheet.accession)}</title>
   <style>
     * { box-sizing: border-box; }
+    html, body { direction: ltr; text-align: left; }
     body { margin: 28px; color: #111827; font: 12px/1.45 Arial, sans-serif; }
     header { border-bottom: 2px solid #111827; padding-bottom: 12px; margin-bottom: 16px; }
     h1 { margin: 0; font-size: 20px; }
@@ -177,7 +178,7 @@ function html(sheet: ProtocolPrintSheet): string {
     }
   </style>
 </head>
-<body>
+<body dir="ltr" lang="en">
   <div class="toolbar" aria-label="Protocol print controls">
     <button type="button" onclick="window.print()">Print</button>
     <button type="button" onclick="window.close()">Close</button>

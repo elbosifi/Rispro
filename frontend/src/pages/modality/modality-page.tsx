@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -6,6 +6,7 @@ import {
   Ban,
   CheckCircle2,
   Clock3,
+  ChevronRight,
   MoreHorizontal,
   Printer,
   RefreshCw,
@@ -238,6 +239,13 @@ function defaultText(value: string | number | null | undefined): string | null {
   if (value == null) return null;
   const text = String(value).trim();
   return text || null;
+}
+
+function hasMeaningfulValue(value: string | number | null | undefined): boolean {
+  if (value == null) return false;
+  if (typeof value === "number") return true;
+  const text = value.trim();
+  return Boolean(text) && !/^[-\u2010-\u2015\u2212]+$/.test(text);
 }
 
 function formatDurationMinutes(language: Language, elapsedMinutes: number): string {
@@ -971,6 +979,18 @@ export default function ModalityPage() {
                                     <span className="truncate">{t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}</span>
                                   </div>
                                 ) : null}
+                                {appointment.protocolAssignmentSummary ? (
+                                  <Badge
+                                    variant="success"
+                                    size="sm"
+                                    aria-label={t(language, "modality.protocolAssigned")}
+                                    title={t(language, "modality.protocolAssigned")}
+                                    className="mt-0.5 inline-flex max-w-full items-center gap-1 whitespace-nowrap text-[10px]"
+                                  >
+                                    <BadgeCheck size={12} aria-hidden="true" />
+                                    <span className="truncate">{t(language, "modality.protocolAssigned")}</span>
+                                  </Badge>
+                                ) : null}
                                 {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-[10px] leading-4 text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</p> : null}
                               </td>
                               <td className="px-2 py-1.5 text-xs font-medium text-slate-800">
@@ -1333,6 +1353,7 @@ export default function ModalityPage() {
                 <div data-testid="clinical-workspace" className="grid min-h-full gap-3 lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
                   <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-w-0 lg:order-2">
                     <ProtocolAssignmentPanel
+                      key={selectedAppointment.id}
                       appointment={selectedAppointment}
                       assignment={selectedProtocolQuery.data ?? null}
                       isLoading={selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching}
@@ -1694,94 +1715,102 @@ function ProtocolAssignmentPanel({
   onRetry: () => void;
 }) {
   const { language: protocolLanguage } = useLanguage();
+  const patientInstructionsId = useId();
+  const [patientInstructionsOpen, setPatientInstructionsOpen] = useState(false);
   const specialInstructions = modalitySpecialInstructions(protocolLanguage, appointment);
+  const appointmentNotes = appointment.notes?.trim() || null;
+  const patientInstructionItems = [assignment?.protocolNotes, specialInstructions]
+    .filter((value): value is string => hasMeaningfulValue(value));
+  const scanner = assignment
+    ? [assignment.scannerName?.trim(), assignment.scannerVendor?.trim()].filter(Boolean).join(" - ")
+    : "";
 
   if (isLoading) {
     return (
-      <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
-        Loading assigned protocol...
+      <section data-testid="modality-protocol-section" dir="ltr" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-muted-foreground">
+        {t(protocolLanguage, "modality.loadingAssignedProtocol")}
       </section>
     );
   }
 
   if (!assignment) {
     if (isError || summaryExists) {
-      return <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-muted-foreground"><p className="font-semibold text-foreground">{summaryExists ? "Protocol assigned — full details unavailable" : "Unable to load the assigned protocol."}</p><Button type="button" variant="secondary" size="sm" className="mt-3" onClick={onRetry}>Retry</Button></section>;
+      return <section data-testid="modality-protocol-section" dir="ltr" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left text-sm text-muted-foreground"><p className="font-semibold text-foreground">{summaryExists ? t(protocolLanguage, "modality.assignedProtocolUnavailable") : t(protocolLanguage, "modality.assignedProtocolLoadFailed")}</p><Button type="button" variant="secondary" size="sm" className="mt-3" onClick={onRetry}>{t(protocolLanguage, "common.tryAgain")}</Button></section>;
     }
     return (
-      <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-muted-foreground">
-        <p className="font-semibold text-foreground">No protocol assigned</p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Special instructions</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{specialInstructions || EMPTY_VALUE}</p>
-          </div>
-          <div data-testid="clinical-appointment-notes" className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Appointment notes</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{appointment.notes?.trim() || EMPTY_VALUE}</p>
-          </div>
-        </div>
+      <section data-testid="modality-protocol-section" dir="ltr" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left text-sm text-muted-foreground">
+        <p className="font-semibold text-foreground">{t(protocolLanguage, "modality.noProtocolAssigned")}</p>
+        {appointmentNotes ? <div data-testid="clinical-appointment-notes" className="mt-3"><DetailField label={t(protocolLanguage, "modality.appointmentNotes")} value={appointmentNotes} /></div> : null}
+        {patientInstructionItems.length > 0 ? (
+          <PatientInstructionsDisclosure
+            id={patientInstructionsId}
+            language={protocolLanguage}
+            items={patientInstructionItems}
+            open={patientInstructionsOpen}
+            onToggle={() => setPatientInstructionsOpen((current) => !current)}
+          />
+        ) : null}
       </section>
     );
   }
 
-  const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ");
   const printSheet = buildModalityProtocolPrintSheet(appointment, assignment);
+  const protocolTitle = protocolVersionLabel(assignment.protocolName, assignment.versionNumber, assignment.freeTextProtocol);
+  const hasFreeTextProtocol = hasMeaningfulValue(assignment.freeTextProtocol);
+  const hasContrastNotes = hasMeaningfulValue(assignment.contrastNotes);
+  const hasAppointmentNotes = hasMeaningfulValue(appointmentNotes);
+  const hasStructuredRows = assignment.modality === "CT" ? assignment.ctPhases.length > 0 : assignment.mriSequences.length > 0;
 
   return (
-    <section data-testid="modality-protocol-section" className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <section data-testid="modality-protocol-section" dir="ltr" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Read-only protocol</p>
-          <h3 className="mt-1 text-lg font-semibold text-foreground">Assigned protocol</h3>
-          <p className="mt-1 text-base font-semibold text-slate-800">{protocolVersionLabel(assignment.protocolName, assignment.versionNumber, assignment.freeTextProtocol)}</p>
-          {scanner ? <p className="mt-1 text-sm font-medium text-slate-700">{scanner}</p> : null}
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-foreground">{t(protocolLanguage, "modality.assignedProtocol")}</h3>
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <Badge variant="neutral" size="sm">{t(protocolLanguage, "modality.readOnly")}</Badge>
+            {hasMeaningfulValue(assignment.assignedBy) ? <span>{t(protocolLanguage, "modality.assignedBy")} {assignment.assignedBy}</span> : null}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="info" size="sm">{assignment.status}</Badge>
-          <Button type="button" variant="secondary" size="sm" onClick={() => printProtocolSheet(printSheet)}>
+        <Button type="button" variant="secondary" size="sm" aria-label={t(protocolLanguage, "modality.printProtocol")} onClick={() => printProtocolSheet(printSheet)}>
             <Printer size={16} />
-            <span>Print protocol</span>
-          </Button>
-        </div>
+            <span>{t(protocolLanguage, "common.print")}</span>
+        </Button>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <DetailField label="Scanner" value={scanner || null} />
-        <DetailField label="Assigned by" value={assignment.assignedBy} />
+      <div data-testid="clinical-protocol-content" dir="ltr" className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{t(protocolLanguage, "modality.protocol")}</p>
+        {hasFreeTextProtocol ? (
+          <p className="mt-2 whitespace-pre-wrap text-lg font-semibold leading-7 text-slate-950">{assignment.freeTextProtocol}</p>
+        ) : (
+          <p className="mt-2 text-lg font-semibold leading-7 text-slate-950">{protocolTitle}</p>
+        )}
+        {hasFreeTextProtocol ? <p className="mt-1 text-xs text-muted-foreground">{protocolTitle}</p> : null}
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Protocol notes</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.protocolNotes || EMPTY_VALUE}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Contrast/prep instructions</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.contrastNotes || EMPTY_VALUE}</p>
-        </div>
-      </div>
+      {hasContrastNotes ? <div className="mt-3"><DetailField label={t(protocolLanguage, "modality.contrastPreparation")} value={assignment.contrastNotes} /></div> : null}
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Special instructions</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{specialInstructions || EMPTY_VALUE}</p>
-        </div>
-        <div data-testid="clinical-appointment-notes" className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Appointment notes</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{appointment.notes?.trim() || EMPTY_VALUE}</p>
-        </div>
-      </div>
+      {scanner ? (
+        <section dir="ltr" className="mt-3" aria-label={t(protocolLanguage, "modality.scannerExecution")}>
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t(protocolLanguage, "modality.scannerExecution")}</h4>
+          <DetailField label={t(protocolLanguage, "modality.scanner")} value={scanner} />
+        </section>
+      ) : null}
 
-      {assignment.freeTextProtocol ? <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5"><p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Free-text protocol</p><p className="mt-1 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{assignment.freeTextProtocol}</p></div> : null}
+      {hasAppointmentNotes ? <div data-testid="clinical-appointment-notes" className="mt-3"><DetailField label={t(protocolLanguage, "modality.appointmentNotes")} value={appointmentNotes} /></div> : null}
 
-      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-        This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.
-      </p>
+      {patientInstructionItems.length > 0 ? (
+        <PatientInstructionsDisclosure
+          id={patientInstructionsId}
+          language={protocolLanguage}
+          items={patientInstructionItems}
+          open={patientInstructionsOpen}
+          onToggle={() => setPatientInstructionsOpen((current) => !current)}
+        />
+      ) : null}
 
-      {assignment.modality === "CT" ? (
+      {hasStructuredRows && assignment.modality === "CT" ? (
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full table-fixed text-left text-xs">
+          <table data-testid="clinical-acquisition-table" dir="ltr" className="min-w-full table-fixed text-left text-xs">
             <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               <tr>
                 <th className="w-16 px-2 py-2">Order</th>
@@ -1815,9 +1844,9 @@ function ProtocolAssignmentPanel({
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : hasStructuredRows ? (
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full table-fixed text-left text-xs">
+          <table data-testid="clinical-acquisition-table" dir="ltr" className="min-w-full table-fixed text-left text-xs">
             <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               <tr>
                 <th className="w-16 px-2 py-2">Order</th>
@@ -1859,7 +1888,48 @@ function ProtocolAssignmentPanel({
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
+    </section>
+  );
+}
+
+function PatientInstructionsDisclosure({
+  id,
+  language,
+  items,
+  open,
+  onToggle,
+}: {
+  id: string;
+  language: Language;
+  items: string[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <section data-testid="clinical-patient-instructions" dir="ltr" className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-900 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+      >
+        <span className="min-w-0">
+          <span className="block">{t(language, "modality.patientInstructions")}</span>
+          <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{t(language, items.length === 1 ? "modality.patientInstructionsNote" : "modality.patientInstructionsNotes", { count: items.length })}</span>
+        </span>
+        <ChevronRight size={18} aria-hidden="true" className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open ? (
+        <div id={id} className="border-t border-slate-200 px-4 py-3">
+          {items.map((item, index) => (
+            <p key={`${id}-${index}`} dir="auto" className="whitespace-pre-wrap text-sm font-medium leading-6 text-slate-900">
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

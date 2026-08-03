@@ -34,3 +34,12 @@ test("modality worklist returns Routine display for missing reporting priority",
   assert.match(source, /coalesce\(rp\.name_ar, 'روتيني'\) as priority_name_ar/);
   assert.match(source, /coalesce\(rp\.name_en, 'Routine'\) as priority_name_en/);
 });
+
+test("modality worklist exposes the active protocol assignment in the same query", () => {
+  assert.match(source, /protocol_assignment\.assignment_id as protocol_assignment_id/);
+  assert.match(source, /left join lateral \(/);
+  assert.match(source, /from appointment_protocol_assignments assignment/);
+  assert.match(source, /assignment\.status <> 'CANCELLED'/);
+  assert.match(source, /b\.status not in \('cancelled', 'discontinued', 'voided'\)/);
+  assert.match(source, /limit 1\r?\n\s*\) protocol_assignment on true/);
+});
