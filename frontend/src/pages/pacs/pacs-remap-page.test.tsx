@@ -347,6 +347,270 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/77/cancel", expect.anything());
   });
 
+  it("keeps Recent Job B displayed when secure staging for workflow A resolves, then restores A", async () => {
+    FakeXHR.autoRespond = false;
+    const workflowStudy = { ...study("1.2.workflow-a", "Workflow Study A"), patientName: "Workflow^SourceA" };
+    const workflowJob = {
+      id: 88,
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_confirmation",
+      staged_manifest_version: 2,
+      selected_study_instance_uid: "1.2.workflow-a",
+      staged_file_count: 1,
+      provisional_source_identity: { studyInstanceUid: "1.2.workflow-a", patientId: "A-SOURCE", patientName: "Workflow^SourceA", patientBirthDate: "19900101", patientSex: "M", modality: "CT", studyDate: "20260101" },
+    };
+    const viewedJob = {
+      id: 202,
+      status: "processing",
+      processing_stage: "rewriting",
+      selected_study_instance_uid: "9.9.viewed-b",
+      original_patient_id: "B-SOURCE",
+      original_patient_name: "Viewed^SourceB",
+      replacement_patient_id: "B-TARGET",
+      replacement_patient_name: "Viewed^TargetB",
+      destination_pacs_key: "DEST-B",
+      staged_file_count: 10,
+      processed_file_count: 5,
+      send_attempt_count: 0,
+    };
+    previewMock.mockResolvedValue({ ...result([workflowStudy]), previewOnly: true });
+    scanMock.mockReturnValue(new Promise(() => undefined));
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-B", name: "Viewed Destination B" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [viewedJob] });
+      if (path === "/pacs/remap/jobs/202") return Promise.resolve({ job: viewedJob, comparison: null });
+      if (path === "/pacs/remap/jobs/88") return Promise.resolve({ job: workflowJob, comparison: null });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [new File(["a"], "a.dcm")] } });
+    await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+    await screen.findByRole("heading", { name: "Patient" });
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#202.*Processing/i }));
+    expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Viewed^SourceB");
+
+    FakeXHR.instances[0]!.respond();
+    await act(async () => undefined);
+    const stillViewed = screen.getByLabelText("Persisted job context");
+    expect(stillViewed.textContent).toContain("Viewed^SourceB");
+    expect(stillViewed.textContent).toContain("Viewed^TargetB");
+    expect(stillViewed.textContent).toContain("9.9.viewed-b");
+    expect(stillViewed.textContent).toContain("Viewed Destination B");
+    expect(screen.queryByText("Workflow Study A")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start new upload" }));
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+    expect(screen.getByLabelText("Selection summary").textContent).toContain("Workflow Study A");
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/88"));
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/202/cancel", expect.anything());
+  });
+
+  it("restores processing workflow A and its query after viewing Recent Job B", async () => {
+    const workflowJob = { id: 88, status: "processing", processing_stage: "rewriting", staged_file_count: 6, processed_file_count: 2, send_attempt_count: 0 };
+    const viewedJob = { id: 203, status: "sending", processing_stage: "enqueueing_send", selected_study_instance_uid: "9.9.203", original_patient_name: "Viewed^B", replacement_patient_name: "Target^B", destination_pacs_key: "DEST-B", staged_file_count: 4, processed_file_count: 4, send_attempt_count: 1 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-A", name: "Workflow Destination A", isDefault: true }, { key: "DEST-B", name: "Viewed Destination B" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [viewedJob] });
+      if (path === "/pacs/remap/jobs/88") return Promise.resolve({ job: workflowJob, comparison: null });
+      if (path === "/pacs/remap/jobs/203") return Promise.resolve({ job: viewedJob, comparison: null });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, appointment_date: "2026-01-01", english_full_name: "Workflow Patient A" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "A", patientName: "Workflow^PatientA", patientSex: "M", patientBirthDate: "19900101" } });
+      return Promise.resolve({ items: [] });
+    });
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Workflow Patient A/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/88"));
+
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#203.*Sending/i }));
+    expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Viewed^B");
+    const workflowQueriesBeforeReturn = apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88").length;
+    fireEvent.click(screen.getByRole("button", { name: "Start new upload" }));
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    await waitFor(() => expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88").length).toBeGreaterThan(workflowQueriesBeforeReturn));
+    expect(screen.getByRole("progressbar", { name: "Rewriting DICOM" }).getAttribute("aria-valuenow")).toBe("33");
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/203/cancel", expect.anything());
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/203/reset", expect.anything());
+  });
+
+  it("isolates awaiting-confirmation Job B selections and restores local Draft A after confirmation", async () => {
+    const draftStudy = { ...study("1.2.draft-a", "Draft Study A"), patientName: "Draft^SourceA" };
+    let stagedJob = {
+      id: 302,
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_confirmation",
+      staged_manifest_version: 2,
+      selected_study_instance_uid: "9.9.staged-b",
+      staged_file_count: 3,
+      provisional_source_identity: { studyInstanceUid: "9.9.staged-b", patientId: "B-SOURCE", patientName: "Staged^SourceB", patientBirthDate: "19880202", patientSex: "F", modality: "MR", studyDate: "20260720" },
+      destination_pacs_key: null,
+      rispro_patient_id: null,
+    };
+    let confirmedBody: Record<string, unknown> | null = null;
+    previewMock.mockResolvedValue(result([draftStudy]));
+    scanMock.mockResolvedValue(result([draftStudy]));
+    apiMock.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-A", name: "Draft Destination A" }, { key: "DEST-B", name: "Staged Destination B" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [stagedJob] });
+      if (path === "/pacs/remap/jobs/302") return Promise.resolve({ job: stagedJob, comparison: null });
+      if (path === "/pacs/remap/jobs/302/confirm-staged" && options?.method === "POST") {
+        confirmedBody = JSON.parse(options.body || "{}");
+        stagedJob = { ...stagedJob, status: "uploaded", processing_stage: "queued", rispro_patient_id: 20, destination_pacs_key: "DEST-B" };
+        return Promise.resolve({ job: stagedJob });
+      }
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [
+        { id: 401, patient_id: 10, appointment_date: "2026-01-01", english_full_name: "Draft Patient A" },
+        { id: 402, patient_id: 20, appointment_date: "2026-01-01", english_full_name: "Staged Patient B" },
+      ] });
+      if (path === "/pacs/remap/replacement-preview") {
+        const patientId = JSON.parse(options?.body || "{}").risproPatientId;
+        return Promise.resolve({ replacement: { patientId: patientId === "20" ? "B" : "A", patientName: patientId === "20" ? "Staged^PatientB" : "Draft^PatientA", patientSex: "F", patientBirthDate: "19900101" } });
+      }
+      return Promise.resolve({ items: [] });
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Draft Patient A/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "DEST-A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#302.*Awaiting confirmation/i }));
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+    const stagedSummary = screen.getByLabelText("Selection summary");
+    expect(stagedSummary.textContent).toContain("9.9.staged-b");
+    expect(stagedSummary.textContent).not.toMatch(/Draft Patient A|Draft Destination A|Draft Study A/);
+    expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /Staged Patient B/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "DEST-B" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    const stagedConfirmation = screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }) as HTMLInputElement;
+    expect(stagedConfirmation.checked).toBe(false);
+    fireEvent.click(stagedConfirmation);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }));
+    await waitFor(() => expect(confirmedBody).toEqual({ selectedStudyInstanceUID: "9.9.staged-b", risproPatientId: "20", destinationPacsKey: "DEST-B", confirm: true }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start new upload" }));
+    expect(await screen.findByRole("heading", { name: "Review" })).toBeTruthy();
+    const restoredSummary = screen.getByLabelText("Selection summary");
+    expect(restoredSummary.textContent).toContain("Draft Study A");
+    expect(restoredSummary.textContent).toContain("Draft Patient A");
+    expect(restoredSummary.textContent).toContain("Draft Destination A");
+    expect((screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("keeps awaiting-confirmation selections scoped when switching between Jobs B and C", async () => {
+    const stagedJob = (id: number, uid: string, sourceName: string) => ({ id, status: "awaiting_confirmation", processing_stage: "awaiting_confirmation", staged_manifest_version: 2, selected_study_instance_uid: uid, staged_file_count: 2, provisional_source_identity: { studyInstanceUid: uid, patientId: `SOURCE-${id}`, patientName: sourceName, patientBirthDate: "19900101", patientSex: "M", modality: "CT", studyDate: "20260101" }, destination_pacs_key: null, rispro_patient_id: null });
+    const jobB = stagedJob(401, "9.9.job-b", "Source^B");
+    const jobC = stagedJob(402, "9.9.job-c", "Source^C");
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-B", name: "Destination B" }, { key: "DEST-C", name: "Destination C" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [jobB, jobC] });
+      if (path === "/pacs/remap/jobs/401") return Promise.resolve({ job: jobB, comparison: null });
+      if (path === "/pacs/remap/jobs/402") return Promise.resolve({ job: jobC, comparison: null });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 501, patient_id: 21, appointment_date: "2026-01-01", english_full_name: "Patient B" }, { id: 502, patient_id: 22, appointment_date: "2026-01-01", english_full_name: "Patient C" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "B", patientName: "Patient^B", patientSex: "M", patientBirthDate: "19900101" } });
+      return Promise.resolve({ items: [] });
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#401.*Awaiting confirmation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Patient B/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "DEST-B" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /#402.*Awaiting confirmation/i }));
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+    expect(screen.getByLabelText("Selection summary").textContent).toContain("9.9.job-c");
+    expect(screen.getByLabelText("Selection summary").textContent).not.toMatch(/Patient B|Destination B|9\.9\.job-b/);
+    expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /#401.*Awaiting confirmation/i }));
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("DEST-B");
+  });
+
+  it.each(["success", "failure"] as const)("binds direct Recent Job resend %s to Job B and restores Draft A", async (outcome) => {
+    const draftStudy = study("1.2.resend-draft-a", "Resend Draft A");
+    let recentJob = { id: 502, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source-b", modified_orthanc_study_id: "modified-b", selected_study_instance_uid: "9.9.resend-b", original_patient_name: "Resend^SourceB", replacement_patient_name: "Resend^TargetB", destination_pacs_key: "DEST-B", error_message: "Original Job B failure", staged_file_count: 5, processed_file_count: 5, send_attempt_count: 2 };
+    previewMock.mockResolvedValue(result([draftStudy]));
+    scanMock.mockResolvedValue(result([draftStudy]));
+    apiMock.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-A", name: "Draft Destination A" }, { key: "DEST-B", name: "Resend Destination B" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [recentJob] });
+      if (path === "/pacs/remap/jobs/502") return Promise.resolve({ job: recentJob, comparison: null });
+      if (path === "/pacs/remap/jobs/502/resend" && options?.method === "POST") {
+        if (outcome === "failure") return Promise.reject(new Error("Resend B transport failure"));
+        recentJob = { ...recentJob, status: "sending", processing_stage: "enqueueing_send", orthanc_send_job_id: "orthanc-b" };
+        return Promise.resolve({ job: recentJob });
+      }
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 601, patient_id: 31, appointment_date: "2026-01-01", english_full_name: "Resend Draft Patient A" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "A", patientName: "Resend^DraftA", patientSex: "F", patientBirthDate: "19900101" } });
+      return Promise.resolve({ items: [] });
+    });
+
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Resend Draft Patient A/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "DEST-A" } });
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: "Resend to PACS" }));
+
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    const persistedContext = await screen.findByLabelText("Persisted job context");
+    expect(persistedContext.textContent).toContain("Resend^SourceB");
+    expect(persistedContext.textContent).toContain("Resend^TargetB");
+    expect(persistedContext.textContent).toContain("9.9.resend-b");
+    expect(persistedContext.textContent).toContain("Resend Destination B");
+    expect(screen.getByLabelText("Selection summary").textContent).not.toMatch(/Resend Draft A|Resend Draft Patient A|Draft Destination A/);
+    expect(screen.getAllByText("Original Job B failure").length).toBeGreaterThan(0);
+    if (outcome === "failure") expect((await screen.findByRole("alert")).textContent).toContain("Resend B transport failure");
+    else await waitFor(() => expect(screen.getByText(/Job status: Sending/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Start new upload" }));
+    expect(await screen.findByRole("heading", { name: "Destination" })).toBeTruthy();
+    const restoredSummary = screen.getByLabelText("Selection summary");
+    expect(restoredSummary.textContent).toContain("Resend Draft A");
+    expect(restoredSummary.textContent).toContain("Resend Draft Patient A");
+    expect(restoredSummary.textContent).toContain("Draft Destination A");
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/502/cancel", expect.anything());
+  });
+
   it("polls Recent Jobs only while background work is non-terminal and refreshes progress without opening it", async () => {
     vi.useFakeTimers();
     try {
@@ -955,7 +1219,7 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByText("View recent jobs"));
     fireEvent.click(await screen.findByRole("button", { name: /#91.*Failed/i }));
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
-    expect(screen.getByText(/could not confirm whether PACS received/i)).toBeTruthy();
+    expect(screen.getAllByText(/could not confirm whether PACS received/i).length).toBeGreaterThan(0);
     const resend = await waitFor(() => screen.getByRole("button", { name: "Resend to PACS" }) as HTMLButtonElement);
     expect(resend.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/I checked the destination PACS/i));

@@ -41,6 +41,15 @@ interface StagedConfirmationSnapshot {
   readonly destinationPacsKey: string;
 }
 
+interface ResumedJobSelection {
+  studyInstanceUid: string;
+  patientId: string;
+  destinationKey: string;
+  confirmChecked: boolean;
+  patientLookupMode: PatientLookupMode;
+  patientSearch: string;
+}
+
 interface RemapJob {
   id: number;
   status: JobStatus;
@@ -209,6 +218,17 @@ function oneLineReason(message: string | null | undefined): string {
   return String(message || "").replace(/\s+/g, " ").trim();
 }
 
+function resumedSelectionFromJob(job: RemapJob): ResumedJobSelection {
+  return {
+    studyInstanceUid: job.selected_study_instance_uid || job.provisional_source_identity?.studyInstanceUid || "",
+    patientId: job.rispro_patient_id ? String(job.rispro_patient_id) : "",
+    destinationKey: job.destination_pacs_key || "",
+    confirmChecked: false,
+    patientLookupMode: "filtered_appointments",
+    patientSearch: "",
+  };
+}
+
 function RemapProgressBar({
   label,
   value,
@@ -363,8 +383,12 @@ export default function PacsRemapPage() {
   const [todayModalityFilter, setTodayModalityFilter] = useState("");
   const [studyDateMode, setStudyDateMode] = useState<"today" | "yesterday" | "custom">("today");
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
-  const [jobId, setJobId] = useState<number | null>(null);
+  const [workflowJobId, setWorkflowJobId] = useState<number | null>(null);
   const [viewedRecentJobId, setViewedRecentJobId] = useState<number | null>(null);
+  const viewedRecentJobIdRef = useRef<number | null>(null);
+  const [activeResumedJobId, setActiveResumedJobId] = useState<number | null>(null);
+  const [resumedJobSelections, setResumedJobSelections] = useState<Record<number, ResumedJobSelection>>({});
+  const [viewedProcessingStage, setViewedProcessingStage] = useState<RemapProcessingStage>("idle");
   const [autoResumeDismissed, setAutoResumeDismissed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
@@ -404,7 +428,38 @@ export default function PacsRemapPage() {
     setPendingStagedConfirmation(null);
   }, []);
 
-  const selectedScannedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
+  const resumedJobSelection = activeResumedJobId == null ? null : resumedJobSelections[activeResumedJobId] || null;
+  const scopedStudyInstanceUid = resumedJobSelection?.studyInstanceUid ?? selectedStudyInstanceUid;
+  const scopedPatientId = resumedJobSelection?.patientId ?? selectedPatientId;
+  const scopedDestinationKey = resumedJobSelection?.destinationKey ?? selectedDestinationKey;
+  const scopedConfirmChecked = resumedJobSelection?.confirmChecked ?? confirmChecked;
+  const scopedPatientLookupMode = resumedJobSelection?.patientLookupMode ?? patientLookupMode;
+  const scopedPatientSearch = resumedJobSelection?.patientSearch ?? patientSearch;
+
+  const updateResumedJobSelection = (updates: Partial<ResumedJobSelection>): void => {
+    if (activeResumedJobId == null) return;
+    setResumedJobSelections((current) => ({
+      ...current,
+      [activeResumedJobId]: { ...current[activeResumedJobId]!, ...updates },
+    }));
+  };
+  const selectPatient = (patientId: string): void => activeResumedJobId == null
+    ? setSelectedPatientId(patientId)
+    : updateResumedJobSelection({ patientId });
+  const selectDestination = (destinationKey: string): void => activeResumedJobId == null
+    ? setSelectedDestinationKey(destinationKey)
+    : updateResumedJobSelection({ destinationKey });
+  const setScopedConfirmChecked = (checked: boolean): void => activeResumedJobId == null
+    ? setConfirmChecked(checked)
+    : updateResumedJobSelection({ confirmChecked: checked });
+  const setScopedPatientLookupMode = (mode: PatientLookupMode): void => activeResumedJobId == null
+    ? setPatientLookupMode(mode)
+    : updateResumedJobSelection({ patientLookupMode: mode });
+  const setScopedPatientSearch = (search: string): void => activeResumedJobId == null
+    ? setPatientSearch(search)
+    : updateResumedJobSelection({ patientSearch: search });
+
+  const selectedScannedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === scopedStudyInstanceUid) || null;
   const provisionalIdentityIsConsistent = useMemo(() => {
     const entries = selectedScannedStudy?.files || [];
     const values = (key: "patientId" | "patientName" | "patientBirthDate" | "patientSex") => new Set(entries
@@ -427,7 +482,9 @@ export default function PacsRemapPage() {
     const defaultDestination = destinations.find((destination) => destination.isDefault) || null;
     return defaultDestination?.key ?? (destinations.length === 1 ? destinations[0]!.key : "");
   }, [destinations]);
-  const effectiveSelectedDestinationKey = selectedDestinationKey || defaultDestinationKey;
+  const effectiveSelectedDestinationKey = activeResumedJobId == null
+    ? scopedDestinationKey || defaultDestinationKey
+    : scopedDestinationKey;
 
   const modalityLookupQuery = useQuery({
     queryKey: ["v2", "lookups", "modalities"],
@@ -443,10 +500,10 @@ export default function PacsRemapPage() {
     return toIsoDate(now);
   }, [studyDateMode, customStudyDate]);
 
-  const trimmedPatientSearch = patientSearch.trim();
+  const trimmedPatientSearch = scopedPatientSearch.trim();
 
   const todayStudiesQuery = useQuery({
-    queryKey: ["v2", "appointments", "remap-picker", studyDateForFilter, todayModalityFilter, trimmedPatientSearch, patientLookupMode],
+    queryKey: ["v2", "appointments", "remap-picker", studyDateForFilter, todayModalityFilter, trimmedPatientSearch, scopedPatientLookupMode],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("dateFrom", studyDateForFilter);
@@ -455,24 +512,24 @@ export default function PacsRemapPage() {
       if (trimmedPatientSearch) params.set("q", trimmedPatientSearch);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: uiStep === "patient" && patientLookupMode === "filtered_appointments",
+    enabled: uiStep === "patient" && scopedPatientLookupMode === "filtered_appointments",
     retry: 0,
   });
 
   const allDatesStudiesQuery = useQuery({
-    queryKey: ["v2", "appointments", "remap-picker-all-dates", trimmedPatientSearch, todayModalityFilter, patientLookupMode],
+    queryKey: ["v2", "appointments", "remap-picker-all-dates", trimmedPatientSearch, todayModalityFilter, scopedPatientLookupMode],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("q", trimmedPatientSearch);
       if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: uiStep === "patient" && patientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
+    enabled: uiStep === "patient" && scopedPatientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
   const patientQuery = useQuery({
-    queryKey: ["patients", "remap-search", trimmedPatientSearch, patientLookupMode],
+    queryKey: ["patients", "remap-search", trimmedPatientSearch, scopedPatientLookupMode],
     queryFn: async () => {
       const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(trimmedPatientSearch)}`);
       const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
@@ -480,7 +537,7 @@ export default function PacsRemapPage() {
       const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(trimmedPatientSearch)}&page=1&pageSize=25`);
       return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
     },
-    enabled: uiStep === "patient" && patientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
+    enabled: uiStep === "patient" && scopedPatientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
@@ -499,9 +556,9 @@ export default function PacsRemapPage() {
     retry: 0,
   });
   const refetchActiveJob = activeJobQuery.refetch;
-  const startupActiveJobCandidate = !autoResumeDismissed && jobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
+  const startupActiveJobCandidate = !autoResumeDismissed && workflowJobId == null && viewedRecentJobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
   const startupActiveJob = isAwaitingStagedJob(startupActiveJobCandidate) ? startupActiveJobCandidate : null;
-  const effectiveJobId = jobId ?? startupActiveJob?.id ?? null;
+  const effectiveJobId = viewedRecentJobId ?? workflowJobId ?? startupActiveJob?.id ?? null;
   const effectiveUiStep: RemapWizardUiStep = startupActiveJob
     ? (uiStep === "source" || uiStep === "processing" ? "patient" : uiStep)
     : uiStep;
@@ -510,16 +567,16 @@ export default function PacsRemapPage() {
     : resumedJobMessage;
 
   const replacementPreviewQuery = useQuery({
-    queryKey: ["pacs", "remap", "replacement-preview", selectedPatientId],
+    queryKey: ["pacs", "remap", "replacement-preview", scopedPatientId],
     queryFn: async () => {
-      if (!selectedPatientId) return null;
+      if (!scopedPatientId) return null;
       const response = await api<{ replacement: ReplacementPreview }>("/pacs/remap/replacement-preview", {
         method: "POST",
-        body: JSON.stringify({ risproPatientId: selectedPatientId }),
+        body: JSON.stringify({ risproPatientId: scopedPatientId }),
       });
       return response.replacement;
     },
-    enabled: uiStep === "patient" && !!selectedPatientId,
+    enabled: uiStep === "patient" && !!scopedPatientId,
     retry: 0,
   });
 
@@ -544,17 +601,27 @@ export default function PacsRemapPage() {
     stagingUploadControllerRef.current = null;
   };
 
-  const attachToExistingRemapJob = useCallback((activeJobId: number): void => {
-    if (!Number.isSafeInteger(activeJobId) || activeJobId <= 0) return;
+  const attachToExistingRemapJob = useCallback((job: RemapJob): void => {
+    if (!Number.isSafeInteger(job.id) || job.id <= 0) return;
     focusHeadingAfterNavigationRef.current = true;
-    setViewedRecentJobId(activeJobId);
+    viewedRecentJobIdRef.current = job.id;
+    setViewedRecentJobId(job.id);
     setAutoResumeDismissed(true);
     setRetryActionError("");
     setRetryActionErrorDetails("");
-    setJobId(activeJobId);
-    setUiStep("processing");
-    setResumedJobMessage(t(language, "pacs.remap.existingJobResumed", { jobId: activeJobId }));
-    void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", activeJobId] });
+    if (isAwaitingStagedJob(job)) {
+      setResumedJobSelections((current) => current[job.id] ? current : { ...current, [job.id]: resumedSelectionFromJob(job) });
+      setActiveResumedJobId(job.id);
+      setSecureStagingStatus("awaiting_confirmation");
+      setUiStep("patient");
+    } else {
+      setActiveResumedJobId(null);
+      setViewedProcessingStage("queued");
+      setUiStep("processing");
+    }
+    setResumedJobMessage(t(language, "pacs.remap.existingJobResumed", { jobId: job.id }));
+    queryClient.setQueryData(["pacs", "remap", "job", job.id], (existing: { job: RemapJob; comparison: RemapComparison | null } | undefined) => existing || { job, comparison: null });
+    void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", job.id] });
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
   }, [language, queryClient]);
@@ -702,7 +769,7 @@ export default function PacsRemapPage() {
       }
     },
     onSuccess: (uploadResult) => {
-      setJobId(uploadResult.job.id);
+      setWorkflowJobId(uploadResult.job.id);
       setSecureStagingStatus("awaiting_confirmation");
       setProcessingStage("idle");
       const pendingConfirmation = pendingStagedConfirmationRef.current;
@@ -711,6 +778,7 @@ export default function PacsRemapPage() {
         confirmStagedMutation.mutate({
           targetJobId: uploadResult.job.id,
           confirmation: pendingConfirmation,
+          assignWorkflowJob: true,
         });
       }
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
@@ -723,7 +791,7 @@ export default function PacsRemapPage() {
       if (error instanceof ApiError && error.status === 499) return;
       setSecureStagingStatus("failed");
       if (hadPendingConfirmation) {
-        setUiStep("review");
+        if (viewedRecentJobIdRef.current == null) setUiStep("review");
         setProcessingStage("idle");
       }
       setErrorMessage(error instanceof Error ? error.message : "Secure source staging failed.");
@@ -741,8 +809,8 @@ export default function PacsRemapPage() {
       setSuccessMessage("");
     },
     mutationFn: async () => {
-      if (!selectedPatientId || !effectiveSelectedDestinationKey) throw new Error("Patient and destination are required.");
-      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, false);
+      if (!scopedPatientId || !effectiveSelectedDestinationKey) throw new Error("Patient and destination are required.");
+      const plan = buildDicomUploadSelectionPlan(scanResult, scopedStudyInstanceUid, false);
       const uploadFiles = skippedScanMode ? files.filter(isLikelyDicomCandidate) : plan.files;
       if (uploadFiles.length === 0) throw new Error("No uploadable files were selected.");
 
@@ -752,10 +820,10 @@ export default function PacsRemapPage() {
 
       const formData = new FormData();
       uploadFiles.forEach((file) => formData.append("files", file, file.name));
-      const selectedUidForUpload = skippedScanMode ? selectedStudyInstanceUid : plan.selectedStudyInstanceUid;
+      const selectedUidForUpload = skippedScanMode ? scopedStudyInstanceUid : plan.selectedStudyInstanceUid;
       if (selectedUidForUpload) formData.append("selectedStudyInstanceUID", selectedUidForUpload);
       if (skippedScanMode) formData.append("uploadMode", "single_study_folder_unverified");
-      formData.append("risproPatientId", selectedPatientId);
+      formData.append("risproPatientId", scopedPatientId);
       formData.append("destinationPacsKey", effectiveSelectedDestinationKey);
       formData.append("confirm", "true");
 
@@ -766,11 +834,11 @@ export default function PacsRemapPage() {
         setUploadLoaded((current) => Math.max(current, uploadTotal));
         setProcessingStage("queued");
       });
-      setJobId(uploadResult.job.id);
+      setWorkflowJobId(uploadResult.job.id);
       return { uploadResult };
     },
     onSuccess: ({ uploadResult }) => {
-      setJobId(uploadResult.job.id);
+      setWorkflowJobId(uploadResult.job.id);
       setProcessingStage(uploadResult.job.status === "sending" ? "enqueueing_send" : uploadResult.job.status === "sent" ? "completed" : "queued");
       setSuccessMessage("");
       setErrorMessage("");
@@ -807,6 +875,7 @@ export default function PacsRemapPage() {
     }: {
       targetJobId: number;
       confirmation: StagedConfirmationSnapshot;
+      assignWorkflowJob: boolean;
     }) => api<{ job: RemapJob }>(`/pacs/remap/jobs/${targetJobId}/confirm-staged`, {
       method: "POST",
       body: JSON.stringify({
@@ -814,39 +883,49 @@ export default function PacsRemapPage() {
         confirm: true,
       }),
     }),
-    onMutate: () => {
+    onMutate: (variables) => {
       focusHeadingAfterNavigationRef.current = true;
       setUiStep("processing");
-      setProcessingStage("queued");
+      if (variables.assignWorkflowJob) setProcessingStage("queued");
+      else setViewedProcessingStage("queued");
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
     },
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       clearPendingStagedConfirmation();
-      setJobId(result.job.id);
+      if (variables.assignWorkflowJob) setWorkflowJobId(result.job.id);
       setSecureStagingStatus("awaiting_confirmation");
-      setProcessingStage("queued");
+      if (variables.assignWorkflowJob) setProcessingStage("queued");
+      else setViewedProcessingStage("queued");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", result.job.id] });
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, variables) => {
       clearPendingStagedConfirmation();
-      setUiStep("review");
-      setProcessingStage("idle");
+      if (viewedRecentJobIdRef.current == null || !variables.assignWorkflowJob) setUiStep("review");
+      if (variables.assignWorkflowJob) setProcessingStage("idle");
+      else setViewedProcessingStage("idle");
       setErrorMessage(error instanceof Error ? error.message : "Staged confirmation failed.");
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
     },
   });
 
   const resetJobMutation = useMutation({
-    mutationFn: async () => {
-      if (!jobId) throw new Error("Missing job ID.");
-      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(`/pacs/remap/jobs/${jobId}/reset`, { method: "POST" });
+    mutationFn: async ({ targetJobId }: { targetJobId: number }) => {
+      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(`/pacs/remap/jobs/${targetJobId}/reset`, { method: "POST" });
     },
-    onSuccess: (data) => {
-      resetWorkflow();
+    onSuccess: (data, input) => {
+      if (viewedRecentJobIdRef.current === input.targetJobId) {
+        viewedRecentJobIdRef.current = null;
+        setViewedRecentJobId(null);
+        setActiveResumedJobId(null);
+        setViewedProcessingStage("idle");
+        setUiStep(localWorkflowStepBeforeRecentRef.current);
+      } else {
+        resetWorkflow();
+      }
       setSuccessMessage(
         language === "ar"
           ? `تمت إعادة الضبط. تم حذف ${data.summary.studiesDeleted} دراسة.`
@@ -863,37 +942,49 @@ export default function PacsRemapPage() {
   });
 
   const resendJobMutation = useMutation({
-    mutationFn: async (input: { targetJobId?: number; confirmDestinationChecked?: boolean } = {}) => {
-      const resolvedJobId = input.targetJobId ?? jobId;
-      if (!resolvedJobId) throw new Error("Missing job ID.");
-      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${resolvedJobId}/resend`, {
+    mutationFn: async (input: { targetJobId: number; viewTargetJob?: RemapJob; confirmDestinationChecked?: boolean }) => {
+      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${input.targetJobId}/resend`, {
         method: "POST",
         body: JSON.stringify({ confirmDestinationChecked: input.confirmDestinationChecked === true }),
       });
     },
-    onMutate: () => {
+    onMutate: (input) => {
+      if (input.viewTargetJob) {
+        if (viewedRecentJobId == null) localWorkflowStepBeforeRecentRef.current = uiStep;
+        viewedRecentJobIdRef.current = input.targetJobId;
+        setViewedRecentJobId(input.targetJobId);
+        setActiveResumedJobId(null);
+        setAutoResumeDismissed(true);
+        queryClient.setQueryData(["pacs", "remap", "job", input.targetJobId], (existing: { job: RemapJob; comparison: RemapComparison | null } | undefined) => existing || { job: input.viewTargetJob!, comparison: null });
+      }
       setUiStep("processing");
-      setProcessingStage("enqueueing_send");
+      if (input.viewTargetJob || viewedRecentJobId === input.targetJobId) setViewedProcessingStage("enqueueing_send");
+      else setProcessingStage("enqueueing_send");
       setRetryActionError("");
       setRetryActionErrorDetails("");
       setSuccessMessage("");
     },
-    onSuccess: (data) => {
-      setJobId(data.job.id);
+    onSuccess: (data, input) => {
       setDestinationCheckedForResend(false);
-      setProcessingStage(data.job.status === "sending" ? "enqueueing_send" : data.job.status === "sent" ? "completed" : "failed");
+      if (input.viewTargetJob || viewedRecentJobId === input.targetJobId) {
+        setViewedProcessingStage(data.job.status === "sending" ? "enqueueing_send" : data.job.status === "sent" ? "completed" : "failed");
+      } else {
+        setProcessingStage(data.job.status === "sending" ? "enqueueing_send" : data.job.status === "sent" ? "completed" : "failed");
+      }
       setRetryActionError("");
       setRetryActionErrorDetails("");
       setSuccessMessage("");
-      void currentJobQuery.refetch();
+      queryClient.setQueryData(["pacs", "remap", "job", input.targetJobId], (existing: { comparison: RemapComparison | null } | undefined) => ({ job: data.job, comparison: existing?.comparison || null }));
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", input.targetJobId] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
-    onError: (error: unknown) => {
-      setProcessingStage("failed");
+    onError: (error: unknown, input) => {
+      if (input.viewTargetJob || viewedRecentJobId === input.targetJobId) setViewedProcessingStage("failed");
+      else setProcessingStage("failed");
       setSuccessMessage("");
       setRetryActionError(error instanceof Error ? error.message : t(language, "pacs.remap.failedResend"));
       setRetryActionErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
-      void currentJobQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", input.targetJobId] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
   });
@@ -925,9 +1016,6 @@ export default function PacsRemapPage() {
   const stagedProvisionalIdentity = Number(currentJob?.staged_manifest_version) === 2
     ? currentJob.provisional_source_identity || null
     : null;
-  const stagedAwaitingStudyUid = isAwaitingStagedJob(currentJob)
-    ? stagedProvisionalIdentity?.studyInstanceUid || ""
-    : "";
   const selectedStudy = selectedScannedStudy || (stagedProvisionalIdentity
     ? {
       studyInstanceUid: stagedProvisionalIdentity.studyInstanceUid,
@@ -960,9 +1048,9 @@ export default function PacsRemapPage() {
       return true;
     });
   }, [todayStudiesQuery.data?.appointments, allDatesStudiesQuery.data?.appointments]);
-  const selectedDirectoryPatient = directoryPatients.find((patient) => String(patient.id) === selectedPatientId) || null;
+  const selectedDirectoryPatient = directoryPatients.find((patient) => String(patient.id) === scopedPatientId) || null;
 
-  const selectedAppointmentPatient = appointmentPatientOptions.find((appointment) => String(appointment.patient_id) === selectedPatientId) || null;
+  const selectedAppointmentPatient = appointmentPatientOptions.find((appointment) => String(appointment.patient_id) === scopedPatientId) || null;
   const selectedPatientLabel =
     selectedAppointmentPatient
       ? (selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id))
@@ -989,8 +1077,8 @@ export default function PacsRemapPage() {
     };
   const displayedStudyUid = viewingPersistedJob
     ? currentJob.selected_study_instance_uid || stagedProvisionalIdentity?.studyInstanceUid || ""
-    : selectedStudy?.studyInstanceUid || selectedStudyInstanceUid;
-  const displayedStudySummary = viewingPersistedJob
+    : selectedStudy?.studyInstanceUid || scopedStudyInstanceUid;
+  const displayedStudySummary = viewingPersistedJob || activeResumedJobId != null
     ? displayedStudyUid
     : selectedStudy?.studyDescription || selectedStudy?.modality || "";
   const displayedStudyFileCount = viewingPersistedJob
@@ -1008,7 +1096,7 @@ export default function PacsRemapPage() {
   const canContinueStudy = fastStagedWorkflow
     ? Boolean(selectedStudy)
     : completeScanStatus === "complete" && Boolean(selectedStudy);
-  const canContinuePatient = !!selectedPatientId
+  const canContinuePatient = !!scopedPatientId
     && !replacementPreviewQuery.isLoading
     && !replacementPreviewQuery.isError
     && !!replacementPreviewQuery.data;
@@ -1019,7 +1107,7 @@ export default function PacsRemapPage() {
   const canSubmit = canContinueStudy
     && canContinuePatient
     && canContinueDestination
-    && confirmChecked
+    && scopedConfirmChecked
     && stagingCanAcceptConfirmation
     && !pendingStagedConfirmation
     && !processMutation.isPending
@@ -1028,8 +1116,8 @@ export default function PacsRemapPage() {
   const requestStagedConfirmation = (): void => {
     if (!canSubmit || pendingStagedConfirmationRef.current) return;
     const confirmation = Object.freeze<StagedConfirmationSnapshot>({
-      selectedStudyInstanceUID: selectedStudyInstanceUid,
-      risproPatientId: selectedPatientId,
+      selectedStudyInstanceUID: scopedStudyInstanceUid,
+      risproPatientId: scopedPatientId,
       destinationPacsKey: effectiveSelectedDestinationKey,
     });
     if (stagingCompleted) {
@@ -1038,7 +1126,7 @@ export default function PacsRemapPage() {
         return;
       }
       pendingStagedConfirmationRef.current = confirmation;
-      confirmStagedMutation.mutate({ targetJobId: effectiveJobId, confirmation });
+      confirmStagedMutation.mutate({ targetJobId: effectiveJobId, confirmation, assignWorkflowJob: viewedRecentJobId == null });
       return;
     }
     pendingStagedConfirmationRef.current = confirmation;
@@ -1055,7 +1143,7 @@ export default function PacsRemapPage() {
     ? (scanResult?.scanIncomplete ? selectedStudy?.files || [] : files.filter(isLikelyDicomCandidate))
     : selectedStudy?.files || [];
   const fastStagingFiles = scanResult?.scanIncomplete
-    ? buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, false).files
+    ? buildDicomUploadSelectionPlan(scanResult, scopedStudyInstanceUid, false).files
     : files.filter(isLikelyDicomCandidate);
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
@@ -1070,7 +1158,7 @@ export default function PacsRemapPage() {
           uploading_to_orthanc: true, verifying_orthanc: true, enqueueing_send: true, completed: true, failed: true,
         }
           ? currentJob.processing_stage as RemapProcessingStage
-          : processingStage;
+          : viewedRecentJobId != null ? viewedProcessingStage : processingStage;
   const isTerminalSuccess = effectiveProcessingStage === "completed" || currentJob?.status === "sent";
   const isTerminalFailure = effectiveProcessingStage === "failed" || currentJob?.status === "failed" || currentJob?.status === "cancelled";
 
@@ -1079,35 +1167,44 @@ export default function PacsRemapPage() {
     setUiStep(nextStep);
   };
 
-  const openRecentJob = (id: number): void => {
+  const openRecentJob = (job: RemapJob): void => {
     const hasDraft = files.length > 0 || !!selectedPatientId || !!effectiveSelectedDestinationKey;
     if (effectiveUiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
-    if (!viewingPersistedJob) localWorkflowStepBeforeRecentRef.current = uiStep;
-    attachToExistingRemapJob(id);
+    if (viewedRecentJobId == null) localWorkflowStepBeforeRecentRef.current = uiStep;
+    attachToExistingRemapJob(job);
   };
 
   useEffect(() => {
-    if (!stagedAwaitingStudyUid) return;
-    setSelectedStudyInstanceUid(stagedAwaitingStudyUid);
+    if (!startupActiveJob || activeResumedJobId === startupActiveJob.id) return;
+    setResumedJobSelections((current) => current[startupActiveJob.id]
+      ? current
+      : { ...current, [startupActiveJob.id]: resumedSelectionFromJob(startupActiveJob) });
+    setActiveResumedJobId(startupActiveJob.id);
     setSecureStagingStatus("awaiting_confirmation");
     if (uiStep === "source" || uiStep === "processing") setUiStep("patient");
-  }, [stagedAwaitingStudyUid, uiStep]);
+  }, [activeResumedJobId, startupActiveJob, uiStep]);
 
   useEffect(() => {
-    if (!jobId || !currentJobQuery.isError) return;
+    if (!effectiveJobId || !currentJobQuery.isError) return;
     let active = true;
     void refetchActiveJob().then((result) => {
-      if (!active || result.data?.job || jobId == null) return;
-      setJobId(null);
-      setViewedRecentJobId(null);
-      setProcessingStage("idle");
-      setUiStep("source");
+      if (!active || result.data?.job) return;
+      if (viewedRecentJobId === effectiveJobId) {
+        viewedRecentJobIdRef.current = null;
+        setViewedRecentJobId(null);
+        setActiveResumedJobId(null);
+        setUiStep(localWorkflowStepBeforeRecentRef.current);
+      } else if (workflowJobId === effectiveJobId) {
+        setWorkflowJobId(null);
+        setProcessingStage("idle");
+        setUiStep("source");
+      }
       setResumedJobMessage("");
       setErrorDetails("");
       setErrorMessage(t(language, "pacs.remap.resumedJobUnavailable"));
     });
     return () => { active = false; };
-  }, [currentJobQuery.isError, jobId, language, refetchActiveJob]);
+  }, [currentJobQuery.isError, effectiveJobId, language, refetchActiveJob, viewedRecentJobId, workflowJobId]);
 
   useEffect(() => {
     if (!focusHeadingAfterNavigationRef.current) return;
@@ -1145,6 +1242,14 @@ export default function PacsRemapPage() {
     isTerminalFailure || viewingPersistedJob
       ? ""
       : successMessage;
+  const persistedJobContext = viewingPersistedJob ? (
+    <dl className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2" aria-label={language === "ar" ? "سياق المهمة المحفوظ" : "Persisted job context"}>
+      <div><dt className="font-semibold">Study Instance UID</dt><dd className="break-all font-mono">{displayedStudyUid || "—"}</dd></div>
+      <div><dt className="font-semibold">{language === "ar" ? "مريض المصدر" : "Source patient"}</dt><dd>{displayedSourceIdentity.patientName || displayedSourceIdentity.patientId || "—"}</dd></div>
+      <div><dt className="font-semibold">{t(language, "pacs.remap.selectedRISProPatient")}</dt><dd>{displayedReplacementIdentity.patientName || displayedReplacementIdentity.patientId || "—"}</dd></div>
+      <div><dt className="font-semibold">{t(language, "pacs.remap.destinationLabel")}</dt><dd>{destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || "—"}</dd></div>
+    </dl>
+  ) : null;
 
   const resetWorkflow = (): void => {
     cancelActiveFullScan();
@@ -1164,8 +1269,12 @@ export default function PacsRemapPage() {
     setUploadLoaded(0);
     setUploadTotal(0);
     setSecureStagingStatus("idle");
-    setJobId(null);
+    setWorkflowJobId(null);
+    viewedRecentJobIdRef.current = null;
     setViewedRecentJobId(null);
+    setActiveResumedJobId(null);
+    setResumedJobSelections({});
+    setViewedProcessingStage("idle");
     setAutoResumeDismissed(true);
     setErrorMessage("");
     setErrorDetails("");
@@ -1186,13 +1295,15 @@ export default function PacsRemapPage() {
   };
 
   const startNewUpload = (): void => {
-    if (!viewingPersistedJob) {
+    if (viewedRecentJobId == null) {
       resetWorkflow();
       return;
     }
     focusHeadingAfterNavigationRef.current = true;
-    setJobId(null);
+    viewedRecentJobIdRef.current = null;
     setViewedRecentJobId(null);
+    setActiveResumedJobId(null);
+    setViewedProcessingStage("idle");
     setAutoResumeDismissed(true);
     setRetryActionError("");
     setRetryActionErrorDetails("");
@@ -1206,7 +1317,17 @@ export default function PacsRemapPage() {
       && (!currentJob || isAwaitingStagedJob(currentJob))
       ? effectiveJobId
       : null;
-    resetWorkflow();
+    const cancellingViewedJob = cancellableJobId != null && viewedRecentJobId === cancellableJobId;
+    if (cancellingViewedJob) {
+      viewedRecentJobIdRef.current = null;
+      setViewedRecentJobId(null);
+      setActiveResumedJobId(null);
+      setViewedProcessingStage("idle");
+      setAutoResumeDismissed(true);
+      setUiStep(localWorkflowStepBeforeRecentRef.current);
+    } else {
+      resetWorkflow();
+    }
     if (!cancellableJobId) return;
     void api(`/pacs/remap/jobs/${cancellableJobId}/cancel`, {
       method: "POST",
@@ -1583,8 +1704,8 @@ export default function PacsRemapPage() {
                 <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                   <select
-                    value={patientLookupMode}
-                    onChange={(e) => setPatientLookupMode(e.target.value as PatientLookupMode)}
+                    value={scopedPatientLookupMode}
+                    onChange={(e) => setScopedPatientLookupMode(e.target.value as PatientLookupMode)}
                     className="input-premium w-full px-3 py-2"
                   >
                     <option value="filtered_appointments">{t(language, "pacs.remap.lookupModeFilteredAppointments")}</option>
@@ -1595,7 +1716,7 @@ export default function PacsRemapPage() {
                     value={studyDateMode}
                     onChange={(e) => setStudyDateMode(e.target.value as "today" | "yesterday" | "custom")}
                     className="input-premium w-full px-3 py-2"
-                    disabled={patientLookupMode !== "filtered_appointments"}
+                    disabled={scopedPatientLookupMode !== "filtered_appointments"}
                   >
                     <option value="today">{t(language, "pacs.remap.today")}</option>
                     <option value="yesterday">{t(language, "pacs.remap.yesterday")}</option>
@@ -1605,14 +1726,14 @@ export default function PacsRemapPage() {
                     type="date"
                     value={customStudyDate}
                     onChange={(e) => setCustomStudyDate(e.target.value)}
-                    disabled={patientLookupMode !== "filtered_appointments" || studyDateMode !== "custom"}
+                    disabled={scopedPatientLookupMode !== "filtered_appointments" || studyDateMode !== "custom"}
                     className="input-premium w-full px-3 py-2 disabled:opacity-50"
                   />
                   <select
                     value={todayModalityFilter}
                     onChange={(e) => setTodayModalityFilter(e.target.value)}
                     className="input-premium w-full px-3 py-2"
-                    disabled={patientLookupMode === "all_patients"}
+                    disabled={scopedPatientLookupMode === "all_patients"}
                   >
                     <option value="">{t(language, "pacs.remap.allModalities")}</option>
                     {(modalityLookupQuery.data?.items || []).map((modality) => (
@@ -1623,32 +1744,32 @@ export default function PacsRemapPage() {
                   </select>
                   <input
                     type="text"
-                    value={patientSearch}
-                    onChange={(e) => setPatientSearch(e.target.value)}
+                    value={scopedPatientSearch}
+                    onChange={(e) => setScopedPatientSearch(e.target.value)}
                     placeholder={
-                      patientLookupMode === "all_patients"
+                      scopedPatientLookupMode === "all_patients"
                         ? t(language, "pacs.remap.searchAnyPatientPlaceholder")
-                        : patientLookupMode === "all_appointments"
+                        : scopedPatientLookupMode === "all_appointments"
                           ? t(language, "pacs.remap.searchAllDatesPlaceholder")
                           : t(language, "pacs.remap.optionalPatientSearch")
                     }
                     className="input-premium w-full px-3 py-2"
                   />
                 </div>
-                {patientLookupMode === "filtered_appointments" && todayStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingStudyLinkedPatients")}</p>}
-                {patientLookupMode === "filtered_appointments" && todayStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedStudyLinkedPatients")}</p>}
-                {patientLookupMode === "filtered_appointments" && !todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
+                {scopedPatientLookupMode === "filtered_appointments" && todayStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingStudyLinkedPatients")}</p>}
+                {scopedPatientLookupMode === "filtered_appointments" && todayStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedStudyLinkedPatients")}</p>}
+                {scopedPatientLookupMode === "filtered_appointments" && !todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {(todayStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
                       const displayName = appointment.english_full_name || appointment.arabic_full_name || formatFallbackPatientLabel(language, appointment.patient_id);
                       const modalityName = appointment.modality_name_en || appointment.modality_name_ar || formatFallbackModalityLabel(language, appointment.modality_id);
                       const examName = appointment.exam_name_en || appointment.exam_name_ar || "";
-                      const isSelected = Number(selectedPatientId || 0) === Number(appointment.patient_id);
+                      const isSelected = Number(scopedPatientId || 0) === Number(appointment.patient_id);
                       return (
                         <button
                           key={appointment.id}
                           type="button"
-                          onClick={() => setSelectedPatientId(String(appointment.patient_id))}
+                          onClick={() => selectPatient(String(appointment.patient_id))}
                           className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
                         >
                           <p><strong>{displayName}</strong></p>
@@ -1659,24 +1780,24 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
-                {patientLookupMode === "filtered_appointments" && !todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) === 0 && (
+                {scopedPatientLookupMode === "filtered_appointments" && !todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) === 0 && (
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForFilter")}</p>
                 )}
-                {patientLookupMode === "all_appointments" && <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAllDatesAppointments")}</p>}
-                {patientLookupMode === "all_appointments" && allDatesStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAllDatesAppointments")}</p>}
-                {patientLookupMode === "all_appointments" && allDatesStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAllDatesAppointments")}</p>}
-                {patientLookupMode === "all_appointments" && !allDatesStudiesQuery.isLoading && trimmedPatientSearch.length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) > 0 && (
+                {scopedPatientLookupMode === "all_appointments" && <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAllDatesAppointments")}</p>}
+                {scopedPatientLookupMode === "all_appointments" && allDatesStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAllDatesAppointments")}</p>}
+                {scopedPatientLookupMode === "all_appointments" && allDatesStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAllDatesAppointments")}</p>}
+                {scopedPatientLookupMode === "all_appointments" && !allDatesStudiesQuery.isLoading && trimmedPatientSearch.length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {(allDatesStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
                       const displayName = appointment.english_full_name || appointment.arabic_full_name || formatFallbackPatientLabel(language, appointment.patient_id);
                       const modalityName = appointment.modality_name_en || appointment.modality_name_ar || formatFallbackModalityLabel(language, appointment.modality_id);
                       const examName = appointment.exam_name_en || appointment.exam_name_ar || "";
-                      const isSelected = Number(selectedPatientId || 0) === Number(appointment.patient_id);
+                      const isSelected = Number(scopedPatientId || 0) === Number(appointment.patient_id);
                       return (
                         <button
                           key={`all-dates-${appointment.id}`}
                           type="button"
-                          onClick={() => setSelectedPatientId(String(appointment.patient_id))}
+                          onClick={() => selectPatient(String(appointment.patient_id))}
                           className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
                         >
                           <p><strong>{displayName}</strong></p>
@@ -1687,21 +1808,21 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
-                {patientLookupMode === "all_appointments" && !allDatesStudiesQuery.isLoading && trimmedPatientSearch.length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) === 0 && (
+                {scopedPatientLookupMode === "all_appointments" && !allDatesStudiesQuery.isLoading && trimmedPatientSearch.length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) === 0 && (
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForSearch")}</p>
                 )}
-                {patientLookupMode === "all_patients" && <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAnyPatient")}</p>}
-                {patientLookupMode === "all_patients" && patientQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAnyPatient")}</p>}
-                {patientLookupMode === "all_patients" && patientQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAnyPatient")}</p>}
-                {patientLookupMode === "all_patients" && !patientQuery.isLoading && trimmedPatientSearch.length >= 2 && directoryPatients.length > 0 && (
+                {scopedPatientLookupMode === "all_patients" && <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAnyPatient")}</p>}
+                {scopedPatientLookupMode === "all_patients" && patientQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAnyPatient")}</p>}
+                {scopedPatientLookupMode === "all_patients" && patientQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAnyPatient")}</p>}
+                {scopedPatientLookupMode === "all_patients" && !patientQuery.isLoading && trimmedPatientSearch.length >= 2 && directoryPatients.length > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {directoryPatients.slice(0, 25).map((patient) => {
-                      const isSelected = Number(selectedPatientId || 0) === Number(patient.id);
+                      const isSelected = Number(scopedPatientId || 0) === Number(patient.id);
                       return (
                         <button
                           key={`directory-${patient.id}`}
                           type="button"
-                          onClick={() => setSelectedPatientId(String(patient.id))}
+                          onClick={() => selectPatient(String(patient.id))}
                           className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
                         >
                           <p><strong>{formatDirectoryPatientName(language, patient)}</strong></p>
@@ -1711,7 +1832,7 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
-                {patientLookupMode === "all_patients" && !patientQuery.isLoading && trimmedPatientSearch.length >= 2 && directoryPatients.length === 0 && (
+                {scopedPatientLookupMode === "all_patients" && !patientQuery.isLoading && trimmedPatientSearch.length >= 2 && directoryPatients.length === 0 && (
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAnyPatientMatches")}</p>
                 )}
               </div>
@@ -1729,7 +1850,7 @@ export default function PacsRemapPage() {
                 </div>
               )}
               {replacementPreviewQuery.isError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700" role="alert">{language === "ar" ? "تعذر تحميل معاينة الاستبدال. أصلح الخطأ قبل المتابعة." : "Replacement preview failed. Resolve the error before continuing."}</p>}
-              {replacementPreviewQuery.isLoading && selectedPatientId && <p className="text-xs text-slate-500" aria-live="polite">{language === "ar" ? "جارٍ تحميل معاينة الاستبدال…" : "Loading replacement preview…"}</p>}
+              {replacementPreviewQuery.isLoading && scopedPatientId && <p className="text-xs text-slate-500" aria-live="polite">{language === "ar" ? "جارٍ تحميل معاينة الاستبدال…" : "Loading replacement preview…"}</p>}
               <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <button type="button" onClick={() => navigateTo("source")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
                 <button type="button" onClick={() => navigateTo("destination")} disabled={!canContinuePatient} className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto">{language === "ar" ? "متابعة إلى الوجهة" : "Continue to Destination"}</button>
@@ -1748,7 +1869,7 @@ export default function PacsRemapPage() {
                 )}
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3">
-                <select value={effectiveSelectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
+                <select value={effectiveSelectedDestinationKey} onChange={(e) => selectDestination(e.target.value)} className="input-premium w-full px-3 py-2">
                   <option value="">{t(language, "pacs.remap.selectDestination")}</option>
                   {destinations.map((destination) => (
                     <option key={destination.key} value={destination.key}>
@@ -1804,7 +1925,7 @@ export default function PacsRemapPage() {
                     </tr>
                     <tr className="border-t">
                       <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.studyLabel")}</th>
-                      <td className="px-3 py-2">{skippedScanMode ? selectedStudyInstanceUid : `${selectedStudy?.studyDescription || "—"} • ${selectedStudy?.studyDate || "—"} • ${selectedStudy?.modality || "—"}`}</td>
+                      <td className="px-3 py-2">{skippedScanMode ? scopedStudyInstanceUid : `${selectedStudy?.studyDescription || "—"} • ${selectedStudy?.studyDate || "—"} • ${selectedStudy?.modality || "—"}`}</td>
                       <td className="px-3 py-2">{skippedScanMode ? (language === "ar" ? "سيتحقق الخادم من هذا المعرّف فقط ويستبعد الدراسات الأخرى." : "The server will verify this exact UID and exclude other studies.") : (language === "ar" ? "نفس الدراسة المختارة" : "Selected study only")}</td>
                     </tr>
                     <tr className="border-t">
@@ -1883,7 +2004,7 @@ export default function PacsRemapPage() {
               </details>
               <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 space-y-3">
                 <label className="flex items-start gap-2 text-xs font-medium text-amber-950">
-                  <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} className="mt-0.5" />
+                  <input type="checkbox" checked={scopedConfirmChecked} onChange={(e) => setScopedConfirmChecked(e.target.checked)} className="mt-0.5" />
                   <span>{t(language, "pacs.remap.confirmIdentity")}</span>
                 </label>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1986,17 +2107,15 @@ export default function PacsRemapPage() {
                   />
                 );
               })()}
-              {viewingPersistedJob ? (
-                <dl className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2" aria-label={language === "ar" ? "سياق المهمة المحفوظ" : "Persisted job context"}>
-                  <div><dt className="font-semibold">Study Instance UID</dt><dd className="break-all font-mono">{displayedStudyUid || "—"}</dd></div>
-                  <div><dt className="font-semibold">{language === "ar" ? "مريض المصدر" : "Source patient"}</dt><dd>{displayedSourceIdentity.patientName || displayedSourceIdentity.patientId || "—"}</dd></div>
-                  <div><dt className="font-semibold">{t(language, "pacs.remap.selectedRISProPatient")}</dt><dd>{displayedReplacementIdentity.patientName || displayedReplacementIdentity.patientId || "—"}</dd></div>
-                  <div><dt className="font-semibold">{t(language, "pacs.remap.destinationLabel")}</dt><dd>{destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || "—"}</dd></div>
-                </dl>
-              ) : stagedProvisionalIdentity && (
+              {persistedJobContext || (stagedProvisionalIdentity && (
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                   {language === "ar" ? "المصدر" : "Source"}: <strong>{stagedProvisionalIdentity.patientName || stagedProvisionalIdentity.patientId || "—"}</strong>
                   {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
+                </p>
+              ))}
+              {viewingPersistedJob && currentJob?.error_message && (
+                <p className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+                  <strong>{language === "ar" ? "سبب الفشل المحفوظ" : "Persisted failure"}:</strong> {currentJob.error_message}
                 </p>
               )}
               {currentJob && (
@@ -2062,6 +2181,7 @@ export default function PacsRemapPage() {
                       {retryActionErrorDetails && <pre className="mt-1 whitespace-pre-wrap break-words">{retryActionErrorDetails}</pre>}
                     </div>
                   )}
+                  {persistedJobContext}
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
@@ -2070,7 +2190,7 @@ export default function PacsRemapPage() {
                 ) : (
                   <button type="button" onClick={startNewUpload} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
                 )}
-                {jobId && (
+                {effectiveJobId && (
                   <>
                     {requiresDestinationCheck(currentJob) && (
                       <div className="w-full rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 space-y-2">
@@ -2081,7 +2201,7 @@ export default function PacsRemapPage() {
                         </label>
                         <button
                           type="button"
-                          onClick={() => resendJobMutation.mutate({ targetJobId: jobId, confirmDestinationChecked: true })}
+                          onClick={() => resendJobMutation.mutate({ targetJobId: effectiveJobId, confirmDestinationChecked: true })}
                           disabled={!destinationCheckedForResend || resendJobMutation.isPending}
                           className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                         >
@@ -2092,7 +2212,7 @@ export default function PacsRemapPage() {
                     {canResendJob(currentJob) && (
                       <button
                         type="button"
-                        onClick={() => resendJobMutation.mutate({ targetJobId: jobId })}
+                        onClick={() => resendJobMutation.mutate({ targetJobId: effectiveJobId })}
                         disabled={resendJobMutation.isPending}
                         className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                       >
@@ -2101,7 +2221,7 @@ export default function PacsRemapPage() {
                     )}
                     <button
                       type="button"
-                      onClick={() => resetJobMutation.mutate()}
+                      onClick={() => resetJobMutation.mutate({ targetJobId: effectiveJobId })}
                       disabled={resetJobMutation.isPending}
                       className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                     >
@@ -2122,7 +2242,7 @@ export default function PacsRemapPage() {
                 <div key={job.id} className="rounded border p-2 space-y-2">
                   <button
                     type="button"
-                    onClick={() => openRecentJob(job.id)}
+                    onClick={() => openRecentJob(job)}
                     className="w-full text-left hover:bg-black/5"
                   >
                     <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
@@ -2144,10 +2264,10 @@ export default function PacsRemapPage() {
                       <p className="text-[11px] text-red-700 truncate">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(job.error_message) || t(language, "pacs.remap.failedResend")}</p>
                     )}
                   </button>
-                  {canResendJob(job) && (
+                  {canResendJob(job) && viewedRecentJobId !== job.id && (
                     <button
                       type="button"
-                      onClick={() => resendJobMutation.mutate({ targetJobId: job.id })}
+                      onClick={() => resendJobMutation.mutate({ targetJobId: job.id, viewTargetJob: job })}
                       disabled={resendJobMutation.isPending}
                       className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
                     >
