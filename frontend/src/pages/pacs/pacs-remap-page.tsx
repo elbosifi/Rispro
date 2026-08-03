@@ -587,7 +587,8 @@ export default function PacsRemapPage() {
     enabled: effectiveJobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
-      return status === "uploaded" || status === "processing" || status === "remapped" || status === "sending" ? 1500 : false;
+      if (status === "uploaded" || status === "processing" || status === "remapped" || status === "sending") return 1500;
+      return query.state.status === "error" ? 5_000 : false;
     },
   });
 

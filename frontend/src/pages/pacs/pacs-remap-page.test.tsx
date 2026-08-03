@@ -524,32 +524,45 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(await screen.findByText(/Complete folder scan complete/i)).toBeTruthy();
   });
 
-  it("preserves a viewed job through a transient retrieval error and recovers on retry", async () => {
-    const processingJob = { id: 207, status: "processing", processing_stage: "rewriting", selected_study_instance_uid: "1.2.207", original_patient_name: "Transient^Source", replacement_patient_name: "Transient^Target", destination_pacs_key: "DEST-207", staged_file_count: 6, processed_file_count: 2 };
-    let retrievalFails = true;
-    apiMock.mockImplementation((path: string) => {
-      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-207", name: "Transient Destination" }] });
-      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
-      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [processingJob] });
-      if (path === "/pacs/remap/jobs/207") return retrievalFails
-        ? Promise.reject(new ApiError("Temporary gateway failure", 500))
-        : Promise.resolve({ job: processingJob, comparison: null });
-      return Promise.resolve({ appointments: [], items: [] });
-    });
+  it("automatically retries an uncached resumed job after a transient retrieval error", async () => {
+    vi.useFakeTimers();
+    try {
+      const awaitingJob = { id: 207, status: "awaiting_confirmation", processing_stage: "awaiting_confirmation", staged_manifest_version: 2, staged_file_count: 2, provisional_source_identity: { studyInstanceUid: "1.2.207", patientId: "SOURCE-207", patientName: "Transient^Source", modality: "CT" } };
+      let retrievalFails = true;
+      let jobRequests = 0;
+      apiMock.mockImplementation((path: string) => {
+        if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-207", name: "Transient Destination" }] });
+        if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: awaitingJob, comparison: null });
+        if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+        if (path === "/pacs/remap/jobs/207") {
+          jobRequests += 1;
+          return retrievalFails
+            ? Promise.reject(new ApiError("Temporary gateway failure", 500))
+            : Promise.resolve({ job: awaitingJob, comparison: null });
+        }
+        return Promise.resolve({ appointments: [], items: [] });
+      });
 
-    const { queryClient } = renderPage();
-    fireEvent.click(screen.getByText("View recent jobs"));
-    fireEvent.click(await screen.findByRole("button", { name: /#207.*Processing/i }));
+      renderPage();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
-    const retrievalAlert = await screen.findByRole("alert");
-    expect(retrievalAlert.textContent).toContain("Temporary gateway failure");
-    expect(screen.getByLabelText("Persisted job context").textContent).toContain("Transient^Source");
-    expect(screen.queryByRole("heading", { name: "Source" })).toBeNull();
+      expect(screen.getByRole("alert").textContent).toContain("Temporary gateway failure");
+      expect(screen.getByLabelText("Selection summary").textContent).toContain("1.2.207");
 
-    retrievalFails = false;
-    await queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", 207] });
-    await waitFor(() => expect(screen.queryByText(/Temporary gateway failure/)).toBeNull());
-    expect(screen.getByLabelText("Persisted job context").textContent).toContain("Transient^Source");
+      retrievalFails = false;
+      const failedRequestCount = jobRequests;
+      await act(async () => { await vi.advanceTimersByTimeAsync(4_900); });
+      expect(jobRequests).toBe(failedRequestCount);
+      expect(screen.getByRole("alert").textContent).toContain("Temporary gateway failure");
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(jobRequests).toBeGreaterThan(failedRequestCount);
+      expect(screen.queryByText(/Temporary gateway failure/)).toBeNull();
+      expect(screen.getByRole("heading", { name: "Patient" })).toBeTruthy();
+      expect(screen.getByLabelText("Selection summary").textContent).toContain("1.2.207");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("isolates awaiting-confirmation Job B selections and restores local Draft A after confirmation", async () => {
