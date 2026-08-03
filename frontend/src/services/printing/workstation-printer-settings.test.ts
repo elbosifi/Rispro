@@ -23,6 +23,23 @@ describe("workstation printer settings", () => {
     expect(loadQzPrinterSettings().profiles[0].printerName).toBe("RISPRO A4 Queue");
   });
 
+  it("persists and resolves an accession-label queue without the settings page", () => {
+    const settings = createDefaultQzPrinterSettings();
+    const labelProfile = settings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!;
+    labelProfile.printerName = "RISPRO Label Queue";
+    saveQzPrinterSettings(settings);
+
+    const freshlyLoaded = loadQzPrinterSettings();
+    expect(freshlyLoaded.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")).toMatchObject({
+      enabled: true,
+      printerName: "RISPRO Label Queue",
+    });
+    expect(resolvePrinterProfile("ACCESSION_LABEL")).toMatchObject({
+      documentType: "ACCESSION_LABEL",
+      printerName: "RISPRO Label Queue",
+    });
+  });
+
   it("replaces a corrupted workstation identifier with a stable UUID", () => {
     localStorage.setItem("rispro.workstationId.v1", "user-agent-not-an-id");
     expect(createDefaultQzPrinterSettings().workstationId).toBe("00000000-0000-4000-8000-000000000001");

@@ -5,6 +5,7 @@ import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSet
 const getInstalledPrinters = vi.fn();
 const printPdf = vi.fn();
 const createAppointmentSlipPdfBlob = vi.fn();
+const createAccessionLabelPdfBlob = vi.fn();
 const connectQzTray = vi.fn();
 const auditApi = vi.fn();
 
@@ -20,7 +21,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentSlipSettings: vi.fn().mockResolvedValue({ paperSize: "a4" }),
 }));
 vi.mock("@/lib/print-utils", () => ({ createAppointmentSlipPdfBlob: (...args: unknown[]) => createAppointmentSlipPdfBlob(...args) }));
-vi.mock("@/lib/accession-label-printing", () => ({ createAccessionLabelPdfBlob: vi.fn() }));
+vi.mock("@/lib/accession-label-printing", () => ({ createAccessionLabelPdfBlob: (...args: unknown[]) => createAccessionLabelPdfBlob(...args) }));
 
 const pdf = () => new Blob([new TextEncoder().encode("%PDF-1.4 test")], { type: "application/pdf" });
 
@@ -32,6 +33,8 @@ describe("direct print service", () => {
     printPdf.mockResolvedValue(undefined);
     createAppointmentSlipPdfBlob.mockReset();
     createAppointmentSlipPdfBlob.mockResolvedValue(pdf());
+    createAccessionLabelPdfBlob.mockReset();
+    createAccessionLabelPdfBlob.mockResolvedValue(pdf());
     connectQzTray.mockReset();
     connectQzTray.mockResolvedValue(undefined);
     auditApi.mockReset();
@@ -50,6 +53,21 @@ describe("direct print service", () => {
     getInstalledPrinters.mockResolvedValue(["Other Queue"]);
     await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: false, errorCode: "PRINTER_NOT_FOUND" });
     expect(printPdf).not.toHaveBeenCalled();
+  });
+
+  it("connects and prints a persisted accession label without the settings page mounting", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!.printerName = "RISPRO Label Queue";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["RISPRO Label Queue"]);
+
+    await expect(directPrint({ documentType: "ACCESSION_LABEL", appointmentId: 7, accessionNumber: "ACC-7" })).resolves.toMatchObject({
+      success: true,
+      printerName: "RISPRO Label Queue",
+    });
+    expect(connectQzTray).toHaveBeenCalledTimes(1);
+    expect(connectQzTray).toHaveBeenCalledBefore(getInstalledPrinters);
+    expect(printPdf).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an A4 profile with label-sized paper", async () => {

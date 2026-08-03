@@ -10,6 +10,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
 import { PasskeySettingsButton } from "@/components/auth/passkey-settings-button";
 import { WorkstationPrintingButton } from "@/components/printing/workstation-printing-button";
+import { QzConnectionManager } from "@/components/printing/qz-connection-manager";
 import WorkstationPrintingPage from "@/pages/workstation/workstation-printing-page";
 import { canAccessWorkstationPrinting } from "@/lib/workstation-printing-access";
 import { LoginPage } from "@/pages/auth/login-page";
@@ -73,6 +74,11 @@ function LoadingScreen() {
       <div className="spinner-industrial h-12 w-12" />
     </div>
   );
+}
+
+function AuthenticatedQzConnectionManager() {
+  const { user } = useAuth();
+  return <QzConnectionManager enabled={Boolean(user && canAccessWorkstationPrinting(user.role))} />;
 }
 
 function QueueCheckInAccessRoute() {
@@ -403,6 +409,7 @@ export function App() {
         <QueryProvider>
           <ActionPinProvider>
             <AuthProvider>
+              <AuthenticatedQzConnectionManager />
               <ActionPinIdleLock>
                 <RouterConfig />
               </ActionPinIdleLock>
