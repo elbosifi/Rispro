@@ -157,10 +157,10 @@ describe("StatisticsPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("إجمالي سجل المرضى (كل الوقت)")).toBeTruthy();
+    expect(await screen.findByText("إجمالي سجل المرضى (جميعا)")).toBeTruthy();
     expect(screen.getByText("مواعيد الفترة المحددة")).toBeTruthy();
-    expect(screen.getByText("مرضى الأورام (كل الوقت)")).toBeTruthy();
-    expect(screen.getByText("إجمالي سجل المرضى لكل الوقت. أعداد المواعيد تستخدم الفترة المحددة.")).toBeTruthy();
+    expect(screen.getByText("مرضى الأورام (جميعا)")).toBeTruthy();
+    expect(screen.getByText("إجمالي سجل المرضى لجميعا. أعداد المواعيد تستخدم الفترة المحددة.")).toBeTruthy();
   });
 
   it("shows an error state on initial query failure", async () => {
