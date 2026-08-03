@@ -448,6 +448,31 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/203/reset", expect.anything());
   });
 
+  it("clears an unavailable viewed job even when another awaiting-confirmation job exists", async () => {
+    const missingJob = { id: 204, status: "processing", processing_stage: "rewriting", staged_file_count: 4, processed_file_count: 1 };
+    const unrelatedAwaitingJob = { id: 205, status: "awaiting_confirmation", processing_stage: "awaiting_confirmation", staged_manifest_version: 2, staged_file_count: 2 };
+    let activeJobRequests = 0;
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") {
+        activeJobRequests += 1;
+        return Promise.resolve({ job: activeJobRequests === 1 ? null : unrelatedAwaitingJob, comparison: null });
+      }
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [missingJob] });
+      if (path === "/pacs/remap/jobs/204") return Promise.reject(new Error("Job 204 no longer exists"));
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#204.*Processing/i }));
+
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    expect(screen.getAllByText("The existing remap job is no longer available. You may start a new upload.").length).toBeGreaterThan(0);
+    expect(activeJobRequests).toBeGreaterThan(1);
+    expect(screen.queryByText(/Existing remap job #205 resumed automatically/)).toBeNull();
+  });
+
   it("isolates awaiting-confirmation Job B selections and restores local Draft A after confirmation", async () => {
     const draftStudy = { ...study("1.2.draft-a", "Draft Study A"), patientName: "Draft^SourceA" };
     let stagedJob = {
@@ -523,6 +548,12 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(restoredSummary.textContent).toContain("Draft Patient A");
     expect(restoredSummary.textContent).toContain("Draft Destination A");
     expect((screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }) as HTMLInputElement).checked).toBe(true);
+    const stagedConfirmationCalls = apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/302/confirm-staged").length;
+    const normalProcessButton = screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" });
+    fireEvent.click(normalProcessButton);
+    await waitFor(() => expect(FakeXHR.instances.some((xhr) => xhr.url === "/api/pacs/remap/jobs/process-multipart")).toBe(true));
+    expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/302/confirm-staged")).toHaveLength(stagedConfirmationCalls);
+    expect(screen.queryByText("Secure staging job is not available.")).toBeNull();
   });
 
   it("keeps awaiting-confirmation selections scoped when switching between Jobs B and C", async () => {
@@ -1165,6 +1196,77 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByText("Existing remap job #73 resumed automatically.")).toBeTruthy();
     expect(screen.getByText(/Complete.*awaiting final confirmation/i)).toBeTruthy();
     expect(screen.getAllByText(/Source\^SeventyThree/).length).toBeGreaterThan(0);
+  });
+
+  it("restores an auto-resumed staged workflow after viewing a background job", async () => {
+    const awaitingJob = {
+      id: 73,
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_confirmation",
+      staged_manifest_version: 2,
+      staged_file_count: 4,
+      provisional_source_identity: {
+        studyInstanceUid: "1.2.73",
+        patientId: "SOURCE-73",
+        patientName: "Source^SeventyThree",
+        patientBirthDate: "19850102",
+        patientSex: "F",
+        modality: "MR",
+        studyDate: "20260720",
+      },
+    };
+    const backgroundJob = {
+      id: 74,
+      status: "processing",
+      processing_stage: "rewriting",
+      selected_study_instance_uid: "9.9.74",
+      original_patient_name: "Background^Source",
+      replacement_patient_name: "Background^Target",
+      destination_pacs_key: "BACKGROUND",
+      staged_file_count: 8,
+      processed_file_count: 3,
+    };
+    let confirmationBody: Record<string, unknown> | null = null;
+    apiMock.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "MAIN", name: "Main PACS" }, { key: "BACKGROUND", name: "Background PACS" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: awaitingJob, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [backgroundJob] });
+      if (path === "/pacs/remap/jobs/73") return Promise.resolve({ job: awaitingJob, comparison: null });
+      if (path === "/pacs/remap/jobs/74") return Promise.resolve({ job: backgroundJob, comparison: null });
+      if (path === "/pacs/remap/jobs/73/confirm-staged" && options?.method === "POST") {
+        confirmationBody = JSON.parse(options.body || "{}");
+        return Promise.resolve({ job: { ...awaitingJob, status: "uploaded", processing_stage: "queued", rispro_patient_id: 33, destination_pacs_key: "MAIN" } });
+      }
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 701, patient_id: 33, appointment_date: "2026-01-01", english_full_name: "Resumed Patient A" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "TARGET-33", patientName: "Resumed^PatientA", patientSex: "F", patientBirthDate: "19900101" } });
+      return Promise.resolve({ items: [] });
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /Resumed Patient A/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "MAIN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#74.*Processing/i }));
+    expect((await screen.findByLabelText("Persisted job context")).textContent).toContain("Background^Source");
+    fireEvent.click(screen.getByRole("button", { name: "Start new upload" }));
+
+    expect(await screen.findByRole("heading", { name: "Review" })).toBeTruthy();
+    const restoredSummary = screen.getByLabelText("Selection summary");
+    expect(restoredSummary.textContent).toContain("1.2.73");
+    expect(restoredSummary.textContent).toContain("Resumed Patient A");
+    expect(restoredSummary.textContent).toContain("Main PACS");
+    expect((screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }));
+    await waitFor(() => expect(confirmationBody).toEqual({ selectedStudyInstanceUID: "1.2.73", risproPatientId: "33", destinationPacsKey: "MAIN", confirm: true }));
+    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/73");
   });
 
   it("uses persisted processed and staged counts for backend processing progress", async () => {

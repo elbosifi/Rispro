@@ -422,6 +422,7 @@ export default function PacsRemapPage() {
   const latestPartialScanResultRef = useRef<DicomStudyScanResult | null>(null);
   const pendingStagedConfirmationRef = useRef<StagedConfirmationSnapshot | null>(null);
   const localWorkflowStepBeforeRecentRef = useRef<RemapWizardUiStep>("source");
+  const localResumedJobIdBeforeRecentRef = useRef<number | null>(null);
 
   const clearPendingStagedConfirmation = useCallback((): void => {
     pendingStagedConfirmationRef.current = null;
@@ -612,7 +613,6 @@ export default function PacsRemapPage() {
     if (isAwaitingStagedJob(job)) {
       setResumedJobSelections((current) => current[job.id] ? current : { ...current, [job.id]: resumedSelectionFromJob(job) });
       setActiveResumedJobId(job.id);
-      setSecureStagingStatus("awaiting_confirmation");
       setUiStep("patient");
     } else {
       setActiveResumedJobId(null);
@@ -894,8 +894,10 @@ export default function PacsRemapPage() {
     },
     onSuccess: (result, variables) => {
       clearPendingStagedConfirmation();
-      if (variables.assignWorkflowJob) setWorkflowJobId(result.job.id);
-      setSecureStagingStatus("awaiting_confirmation");
+      if (variables.assignWorkflowJob) {
+        setWorkflowJobId(result.job.id);
+        setSecureStagingStatus("awaiting_confirmation");
+      }
       if (variables.assignWorkflowJob) setProcessingStage("queued");
       else setViewedProcessingStage("queued");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
@@ -920,7 +922,8 @@ export default function PacsRemapPage() {
       if (viewedRecentJobIdRef.current === input.targetJobId) {
         viewedRecentJobIdRef.current = null;
         setViewedRecentJobId(null);
-        setActiveResumedJobId(null);
+        setActiveResumedJobId(localResumedJobIdBeforeRecentRef.current);
+        localResumedJobIdBeforeRecentRef.current = null;
         setViewedProcessingStage("idle");
         setUiStep(localWorkflowStepBeforeRecentRef.current);
       } else {
@@ -950,7 +953,10 @@ export default function PacsRemapPage() {
     },
     onMutate: (input) => {
       if (input.viewTargetJob) {
-        if (viewedRecentJobId == null) localWorkflowStepBeforeRecentRef.current = uiStep;
+        if (viewedRecentJobId == null) {
+          localWorkflowStepBeforeRecentRef.current = uiStep;
+          localResumedJobIdBeforeRecentRef.current = activeResumedJobId;
+        }
         viewedRecentJobIdRef.current = input.targetJobId;
         setViewedRecentJobId(input.targetJobId);
         setActiveResumedJobId(null);
@@ -1170,7 +1176,10 @@ export default function PacsRemapPage() {
   const openRecentJob = (job: RemapJob): void => {
     const hasDraft = files.length > 0 || !!selectedPatientId || !!effectiveSelectedDestinationKey;
     if (effectiveUiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
-    if (viewedRecentJobId == null) localWorkflowStepBeforeRecentRef.current = uiStep;
+    if (viewedRecentJobId == null) {
+      localWorkflowStepBeforeRecentRef.current = uiStep;
+      localResumedJobIdBeforeRecentRef.current = activeResumedJobId;
+    }
     attachToExistingRemapJob(job);
   };
 
@@ -1179,20 +1188,23 @@ export default function PacsRemapPage() {
     setResumedJobSelections((current) => current[startupActiveJob.id]
       ? current
       : { ...current, [startupActiveJob.id]: resumedSelectionFromJob(startupActiveJob) });
+    setWorkflowJobId(startupActiveJob.id);
     setActiveResumedJobId(startupActiveJob.id);
     setSecureStagingStatus("awaiting_confirmation");
+    setResumedJobMessage(t(language, "pacs.remap.existingJobResumed", { jobId: startupActiveJob.id }));
     if (uiStep === "source" || uiStep === "processing") setUiStep("patient");
-  }, [activeResumedJobId, startupActiveJob, uiStep]);
+  }, [activeResumedJobId, language, startupActiveJob, uiStep]);
 
   useEffect(() => {
     if (!effectiveJobId || !currentJobQuery.isError) return;
     let active = true;
     void refetchActiveJob().then((result) => {
-      if (!active || result.data?.job) return;
+      if (!active || result.data?.job?.id === effectiveJobId) return;
       if (viewedRecentJobId === effectiveJobId) {
         viewedRecentJobIdRef.current = null;
         setViewedRecentJobId(null);
-        setActiveResumedJobId(null);
+        setActiveResumedJobId(localResumedJobIdBeforeRecentRef.current);
+        localResumedJobIdBeforeRecentRef.current = null;
         setUiStep(localWorkflowStepBeforeRecentRef.current);
       } else if (workflowJobId === effectiveJobId) {
         setWorkflowJobId(null);
@@ -1273,6 +1285,7 @@ export default function PacsRemapPage() {
     viewedRecentJobIdRef.current = null;
     setViewedRecentJobId(null);
     setActiveResumedJobId(null);
+    localResumedJobIdBeforeRecentRef.current = null;
     setResumedJobSelections({});
     setViewedProcessingStage("idle");
     setAutoResumeDismissed(true);
@@ -1302,7 +1315,8 @@ export default function PacsRemapPage() {
     focusHeadingAfterNavigationRef.current = true;
     viewedRecentJobIdRef.current = null;
     setViewedRecentJobId(null);
-    setActiveResumedJobId(null);
+    setActiveResumedJobId(localResumedJobIdBeforeRecentRef.current);
+    localResumedJobIdBeforeRecentRef.current = null;
     setViewedProcessingStage("idle");
     setAutoResumeDismissed(true);
     setRetryActionError("");
@@ -1312,16 +1326,24 @@ export default function PacsRemapPage() {
   };
 
   const cancelUnconfirmedDraftAndReset = (): void => {
-    const cancellableJobId = effectiveJobId
+    const viewedAwaitingJobId = viewedRecentJobId != null
+      && currentJob?.id === viewedRecentJobId
+      && isAwaitingStagedJob(currentJob)
+      ? viewedRecentJobId
+      : null;
+    const localAwaitingJobId = viewedRecentJobId == null
+      && effectiveJobId
       && secureStagingStatus === "awaiting_confirmation"
       && (!currentJob || isAwaitingStagedJob(currentJob))
       ? effectiveJobId
       : null;
+    const cancellableJobId = viewedAwaitingJobId ?? localAwaitingJobId;
     const cancellingViewedJob = cancellableJobId != null && viewedRecentJobId === cancellableJobId;
     if (cancellingViewedJob) {
       viewedRecentJobIdRef.current = null;
       setViewedRecentJobId(null);
-      setActiveResumedJobId(null);
+      setActiveResumedJobId(localResumedJobIdBeforeRecentRef.current);
+      localResumedJobIdBeforeRecentRef.current = null;
       setViewedProcessingStage("idle");
       setAutoResumeDismissed(true);
       setUiStep(localWorkflowStepBeforeRecentRef.current);
