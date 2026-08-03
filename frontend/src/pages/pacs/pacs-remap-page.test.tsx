@@ -57,7 +57,7 @@ class FakeXHR {
   open(_method: string, url: string) { this.url = url; }
   send(body?: Document | XMLHttpRequestBodyInit | null) {
     this.sentBody = body as FormData;
-    this.upload.onprogress?.({ loaded: 5, total: 10 } as ProgressEvent<EventTarget>);
+    this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 } as ProgressEvent<EventTarget>);
     if (FakeXHR.autoRespond) this.respond();
   }
   respond(responseOverride?: { status: number; body: unknown }) {
@@ -123,6 +123,27 @@ async function scanOne() {
   fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [file] } });
   await screen.findByText(/Complete folder scan complete/i);
   return file;
+}
+
+async function reachReviewDuringUnresolvedSecureStaging() {
+  FakeXHR.autoRespond = false;
+  previewMock.mockResolvedValue({ ...result(), previewOnly: true });
+  scanMock.mockReturnValue(new Promise(() => undefined));
+  renderPage();
+  await waitFor(() => expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+  await screen.findByRole("button", { name: "Confirm this source study and begin secure staging" });
+  fireEvent.click(screen.getByRole("checkbox", { name: /I confirm this preliminary source study/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm this source study and begin secure staging" }));
+  fireEvent.click(await screen.findByRole("button", { name: /John Doe/ }));
+  await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+  return {
+    confirmButton: screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }) as HTMLButtonElement,
+    stagingRequest: FakeXHR.instances[0]!,
+  };
 }
 
 describe("PacsRemapPage five-step wizard", () => {
@@ -565,6 +586,58 @@ describe("PacsRemapPage five-step wizard", () => {
     expect((screen.getByRole("button", { name: "Continue to Review" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("records one immutable confirmation during upload and submits it once after staging returns its job ID", async () => {
+    const { confirmButton, stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
+    expect(confirmButton.disabled).toBe(false);
+    expect(screen.getByText("You can confirm now. Processing will begin automatically when secure staging completes.")).toBeTruthy();
+
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    expect(screen.getByText("Confirmation recorded. Secure staging is continuing; processing will start automatically.")).toBeTruthy();
+    expect(screen.getByText(/50%/)).toBeTruthy();
+    expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")).toHaveLength(0);
+
+    stagingRequest.respond();
+
+    await waitFor(() => expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")).toHaveLength(1));
+    const confirmation = apiMock.mock.calls.find(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")?.[1] as { body: string };
+    expect(JSON.parse(confirmation.body)).toEqual({
+      selectedStudyInstanceUID: "1.2.3",
+      risproPatientId: "10",
+      destinationPacsKey: "1",
+      confirm: true,
+    });
+  });
+
+  it("does not confirm or begin processing when pending secure staging fails", async () => {
+    const { confirmButton, stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
+    fireEvent.click(confirmButton);
+    await screen.findByText("Confirmation recorded. Secure staging is continuing; processing will start automatically.");
+
+    stagingRequest.respond({ status: 500, body: { error: { message: "Secure staging failed for test." } } });
+
+    expect(await screen.findByRole("heading", { name: "Review" })).toBeTruthy();
+    expect(screen.getByText("Secure staging failed for test.")).toBeTruthy();
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Cancel secure staging and reset" })).toBeTruthy();
+  });
+
+  it("reset cancels the upload and clears a pending confirmation", async () => {
+    const { confirmButton, stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
+    fireEvent.click(confirmButton);
+    await screen.findByText("Confirmation recorded. Secure staging is continuing; processing will start automatically.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel secure staging and reset" }));
+
+    expect(stagingRequest.abortCalled).toBe(true);
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    stagingRequest.respond();
+    await act(async () => undefined);
+    expect(apiMock.mock.calls.filter(([path]) => String(path).includes("/confirm-staged"))).toHaveLength(0);
+  });
+
   it("final fast confirmation uses the small confirm-staged API without a second full-file upload", async () => {
     previewMock.mockResolvedValue({ ...result(), previewOnly: true });
     scanMock.mockReturnValue(new Promise(() => undefined));
@@ -580,7 +653,9 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm patient and destination; begin remap" }));
+    const confirmButton = screen.getByRole("button", { name: "Confirm patient and destination; begin remap" });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
 
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith(
       "/pacs/remap/jobs/88/confirm-staged",
@@ -593,6 +668,7 @@ describe("PacsRemapPage five-step wizard", () => {
       destinationPacsKey: "1",
       confirm: true,
     });
+    expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")).toHaveLength(1);
     expect(FakeXHR.instances).toHaveLength(1);
     expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/stage-multipart");
   });

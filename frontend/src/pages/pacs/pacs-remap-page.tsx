@@ -35,6 +35,12 @@ interface ProvisionalSourceIdentity {
   studyDate: string;
 }
 
+interface StagedConfirmationSnapshot {
+  readonly selectedStudyInstanceUID: string;
+  readonly risproPatientId: string;
+  readonly destinationPacsKey: string;
+}
+
 function readActiveRemapJobId(details: unknown): number | null {
   if (!details || typeof details !== "object") return null;
   const activeJobId = (details as { activeJobId?: unknown }).activeJobId;
@@ -322,6 +328,7 @@ export default function PacsRemapPage() {
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [secureStagingStatus, setSecureStagingStatus] = useState<SecureStagingStatus>("idle");
+  const [pendingStagedConfirmation, setPendingStagedConfirmation] = useState<StagedConfirmationSnapshot | null>(null);
   const [uiStep, setUiStep] = useState<RemapWizardUiStep>("source");
   const [processingStage, setProcessingStage] = useState<RemapProcessingStage>("idle");
   const [fileInputVersion, setFileInputVersion] = useState(0);
@@ -335,6 +342,12 @@ export default function PacsRemapPage() {
   const completedFullScanRunIdRef = useRef<number | null>(null);
   const previewUnavailableRunIdRef = useRef<number | null>(null);
   const latestPartialScanResultRef = useRef<DicomStudyScanResult | null>(null);
+  const pendingStagedConfirmationRef = useRef<StagedConfirmationSnapshot | null>(null);
+
+  const clearPendingStagedConfirmation = useCallback((): void => {
+    pendingStagedConfirmationRef.current = null;
+    setPendingStagedConfirmation(null);
+  }, []);
 
   const selectedScannedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
   const provisionalIdentityIsConsistent = useMemo(() => {
@@ -476,6 +489,7 @@ export default function PacsRemapPage() {
   const clearAbandonedDraft = useCallback((): void => {
     cancelActiveFullScan();
     cancelActiveStagingUpload();
+    clearPendingStagedConfirmation();
     setFiles([]);
     setScanResult(null);
     setSelectedStudyInstanceUid("");
@@ -491,7 +505,7 @@ export default function PacsRemapPage() {
     setUploadTotal(0);
     setSecureStagingStatus("idle");
     setFileInputVersion((value) => value + 1);
-  }, []);
+  }, [clearPendingStagedConfirmation]);
 
   const attachToExistingRemapJob = useCallback((activeJobId: number, reason: "startup" | "conflict" | "recent" = "conflict"): void => {
     if (!Number.isSafeInteger(activeJobId) || activeJobId <= 0) return;
@@ -659,11 +673,21 @@ export default function PacsRemapPage() {
       setJobId(uploadResult.job.id);
       setSecureStagingStatus("awaiting_confirmation");
       setProcessingStage("idle");
+      const pendingConfirmation = pendingStagedConfirmationRef.current;
+      if (pendingConfirmation) {
+        pendingStagedConfirmationRef.current = null;
+        confirmStagedMutation.mutate({
+          targetJobId: uploadResult.job.id,
+          confirmation: pendingConfirmation,
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", uploadResult.job.id] });
     },
     onError: (error: unknown) => {
+      const hadPendingConfirmation = pendingStagedConfirmationRef.current !== null;
+      clearPendingStagedConfirmation();
       if (error instanceof ApiError && error.status === 499) return;
       const activeJobId = error instanceof ApiError && error.status === 409 ? readActiveRemapJobId(error.details) : null;
       if (activeJobId) {
@@ -671,6 +695,10 @@ export default function PacsRemapPage() {
         return;
       }
       setSecureStagingStatus("failed");
+      if (hadPendingConfirmation) {
+        setUiStep("review");
+        setProcessingStage("idle");
+      }
       setErrorMessage(error instanceof Error ? error.message : "Secure source staging failed.");
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
     },
@@ -751,19 +779,19 @@ export default function PacsRemapPage() {
   });
 
   const confirmStagedMutation = useMutation({
-    mutationFn: async () => {
-      if (!effectiveJobId) throw new Error("Secure staging job is not available.");
-      if (!selectedPatientId || !effectiveSelectedDestinationKey) throw new Error("Patient and destination are required.");
-      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${effectiveJobId}/confirm-staged`, {
-        method: "POST",
-        body: JSON.stringify({
-          selectedStudyInstanceUID: selectedStudyInstanceUid,
-          risproPatientId: selectedPatientId,
-          destinationPacsKey: effectiveSelectedDestinationKey,
-          confirm: true,
-        }),
-      });
-    },
+    mutationFn: async ({
+      targetJobId,
+      confirmation,
+    }: {
+      targetJobId: number;
+      confirmation: StagedConfirmationSnapshot;
+    }) => api<{ job: RemapJob }>(`/pacs/remap/jobs/${targetJobId}/confirm-staged`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...confirmation,
+        confirm: true,
+      }),
+    }),
     onMutate: () => {
       focusHeadingAfterNavigationRef.current = true;
       setUiStep("processing");
@@ -773,6 +801,7 @@ export default function PacsRemapPage() {
       setSuccessMessage("");
     },
     onSuccess: (result) => {
+      clearPendingStagedConfirmation();
       setJobId(result.job.id);
       setSecureStagingStatus("awaiting_confirmation");
       setProcessingStage("queued");
@@ -781,6 +810,7 @@ export default function PacsRemapPage() {
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", result.job.id] });
     },
     onError: (error: unknown) => {
+      clearPendingStagedConfirmation();
       setUiStep("review");
       setProcessingStage("idle");
       setErrorMessage(error instanceof Error ? error.message : "Staged confirmation failed.");
@@ -925,13 +955,43 @@ export default function PacsRemapPage() {
     && !replacementPreviewQuery.isError
     && !!replacementPreviewQuery.data;
   const canContinueDestination = !!effectiveSelectedDestinationKey;
+  const stagingCanAcceptConfirmation = !fastStagedWorkflow
+    || stagingCompleted
+    || secureStagingStatus === "uploading";
   const canSubmit = canContinueStudy
     && canContinuePatient
     && canContinueDestination
     && confirmChecked
-    && (!fastStagedWorkflow || stagingCompleted)
+    && stagingCanAcceptConfirmation
+    && !pendingStagedConfirmation
     && !processMutation.isPending
     && !confirmStagedMutation.isPending;
+
+  const requestStagedConfirmation = (): void => {
+    if (!canSubmit || pendingStagedConfirmationRef.current) return;
+    const confirmation = Object.freeze<StagedConfirmationSnapshot>({
+      selectedStudyInstanceUID: selectedStudyInstanceUid,
+      risproPatientId: selectedPatientId,
+      destinationPacsKey: effectiveSelectedDestinationKey,
+    });
+    if (stagingCompleted) {
+      if (!effectiveJobId) {
+        setErrorMessage("Secure staging job is not available.");
+        return;
+      }
+      pendingStagedConfirmationRef.current = confirmation;
+      confirmStagedMutation.mutate({ targetJobId: effectiveJobId, confirmation });
+      return;
+    }
+    pendingStagedConfirmationRef.current = confirmation;
+    setPendingStagedConfirmation(confirmation);
+    focusHeadingAfterNavigationRef.current = true;
+    setUiStep("processing");
+    setProcessingStage("uploading");
+    setErrorMessage("");
+    setErrorDetails("");
+    setSuccessMessage("");
+  };
   const skippedScanMode = fastStagedWorkflow;
   const checkingForActiveJob = activeJobQuery.isPending && effectiveJobId == null;
   const reviewFiles = skippedScanMode
@@ -1024,6 +1084,7 @@ export default function PacsRemapPage() {
 
   const resetWorkflow = (): void => {
     cancelActiveFullScan();
+    clearPendingStagedConfirmation();
     cancelActiveStagingUpload();
     const cancellableJobId = currentJob?.status === "uploaded"
       || isAwaitingStagedJob(currentJob)
@@ -1661,7 +1722,7 @@ export default function PacsRemapPage() {
                 {skippedScanMode
                   ? (stagingCompleted
                     ? (language === "ar" ? "اكتمل الرفع الآمن. سيعزل الخادم الدراسة المختارة ويتحقق منها بعد التأكيد النهائي." : "Secure staging is complete. The server will isolate and validate the selected study after final confirmation.")
-                    : (language === "ar" ? "انتظر اكتمال الرفع الآمن قبل التأكيد النهائي." : "Wait for secure source staging to complete before final confirmation."))
+                    : (language === "ar" ? "يمكنك التأكيد الآن. ستبدأ المعالجة تلقائياً عند اكتمال الرفع الآمن." : "You can confirm now. Processing will begin automatically when secure staging completes."))
                   : t(language, "pacs.remap.selectedStudyOnly")}
               </p>
               <details className="rounded-2xl border border-slate-200 bg-white text-xs">
@@ -1732,7 +1793,7 @@ export default function PacsRemapPage() {
                   <button type="button" onClick={() => navigateTo("destination")} className="btn-secondary w-full rounded-lg px-4 py-2 sm:w-auto">{language === "ar" ? "رجوع" : "Back"}</button>
                   <button
                     type="button"
-                    onClick={() => fastStagedWorkflow ? confirmStagedMutation.mutate() : processMutation.mutate()}
+                    onClick={() => fastStagedWorkflow ? requestStagedConfirmation() : processMutation.mutate()}
                     disabled={!canSubmit}
                     className="btn-primary w-full rounded-lg px-4 py-2 disabled:opacity-50 sm:w-auto"
                   >
@@ -1748,6 +1809,16 @@ export default function PacsRemapPage() {
           {effectiveUiStep === "processing" && !isTerminalSuccess && !isTerminalFailure && (
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[4]}</h3>
+              {pendingStagedConfirmation && secureStagingStatus === "uploading" && (
+                <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-950" role="status">
+                  <p>{language === "ar"
+                    ? "تم تسجيل التأكيد. يستمر الرفع الآمن؛ وستبدأ المعالجة تلقائياً."
+                    : "Confirmation recorded. Secure staging is continuing; processing will start automatically."}</p>
+                  <button type="button" onClick={resetWorkflow} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
+                    {language === "ar" ? "إلغاء الرفع الآمن وإعادة البدء" : "Cancel secure staging and reset"}
+                  </button>
+                </div>
+              )}
               <ol className="space-y-2 text-xs" aria-label={language === "ar" ? "مراحل المعالجة" : "Processing stages"}>
                 {[
                   ["uploading", language === "ar" ? "رفع المتصفح إلى RISpro" : "Uploading to RISpro"],
