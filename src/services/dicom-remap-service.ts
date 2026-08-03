@@ -252,7 +252,7 @@ function readDicomRemapPositiveLimit(value: unknown, fallback: number): number {
 const DICOM_REMAP_STAGING_MAX_FILES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_FILES, 5_000);
 const DICOM_REMAP_STAGING_MAX_TOTAL_BYTES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_TOTAL_BYTES, 20 * 1024 * 1024 * 1024);
 const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"];
-const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation"];
+const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
 const REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS = 60;
 let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
@@ -319,10 +319,6 @@ function isDicomRemapTerminalStatus(status: DicomRemapJobStatus): boolean {
 
 function isDicomRemapCancellableStatus(status: DicomRemapJobStatus): boolean {
   return CANCELLABLE_JOB_STATUSES.includes(status);
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (error as { code?: unknown } | null)?.code === "23505";
 }
 
 function decodeBase64(value: unknown): Buffer {
@@ -1318,46 +1314,22 @@ async function orthancFetch(
 
 fetchOrthancForRemap = orthancFetch;
 
-async function assertNoActiveUserJob(userId: UserId): Promise<void> {
-  const activeJob = await readActiveDicomRemapJob(userId);
-  if (!activeJob) {
-    return;
-  }
-
-  if (await markStaleActiveJobFailedIfSourceMissing(activeJob)) {
-    return;
-  }
-
-  throwActiveDicomRemapJobConflict(activeJob.id);
-}
-
-async function readActiveDicomRemapJobId(userId: UserId): Promise<number | null> {
-  const activeJob = await readActiveDicomRemapJob(userId);
-  return activeJob?.id ? Number(activeJob.id) : null;
-}
-
-async function readActiveDicomRemapJob(userId: UserId): Promise<DicomRemapJobRow | null> {
+async function readSingleResumableDicomRemapDraft(userId: UserId): Promise<DicomRemapJobRow | null> {
   const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
     `
       select *
       from dicom_remap_jobs
       where created_by_user_id = $1
-        and status = any($2::text[])
+        and status = 'awaiting_confirmation'
+        and processing_stage = 'awaiting_confirmation'
+        and staged_manifest_version = $2
+        and staged_storage_key is not null
       order by created_at desc
-      limit 1
+      limit 2
     `,
-    [userId, ACTIVE_JOB_STATUSES]
+    [userId, DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION]
   );
-
-  return rows[0] || null;
-}
-
-function throwActiveDicomRemapJobConflict(activeJobId: number | null): never {
-  throw new HttpError(
-    409,
-    "You already have an active DICOM remap job. Resume it from recent jobs.",
-    activeJobId ? { activeJobId } : null
-  );
+  return rows.length === 1 ? rows[0]! : null;
 }
 
 async function readOrthancStudyExists(studyId: string): Promise<boolean> {
@@ -2034,9 +2006,6 @@ async function sendExistingDicomRemapJobToDestination({
           send_completed_at = null,
           send_last_checked_at = null,
           send_last_heartbeat_at = now(),
-          send_error_code = null,
-          send_error_details = null,
-          error_message = null,
           updated_at = now()
       where id = $1
         and created_by_user_id = $2
@@ -2117,19 +2086,18 @@ async function sendExistingDicomRemapJobToDestination({
     }
     const details = error instanceof HttpError ? error.details : undefined;
     const code = String((details as { code?: unknown } | undefined)?.code || "ORTHANC_SEND_ENQUEUE_FAILED");
-    const message = error instanceof Error ? error.message : "Orthanc asynchronous PACS send enqueue failed.";
     await queryDicomRemapDb<DicomRemapJobRow>(
       `
         update dicom_remap_jobs
         set status = 'failed',
-            error_message = $2,
-            send_error_code = $3,
-            send_error_details = $4::jsonb,
-            send_completed_at = now(),
+            orthanc_send_job_id = $2,
+            error_message = $3,
+            send_error_code = $4,
+            send_error_details = $5::jsonb,
             updated_at = now()
         where id = $1 and status = 'sending' and orthanc_send_job_id is null
       `,
-      [job.id, message, code, JSON.stringify({ code, modalityKey, attemptNumber: sendingJob.send_attempt_count })]
+      [job.id, job.orthanc_send_job_id, job.error_message, job.send_error_code, JSON.stringify(job.send_error_details)]
     );
 
     await logDicomRemapAuditEntry({
@@ -2326,11 +2294,7 @@ async function loadOwnedJob(jobId: number | string, userId: UserId): Promise<Dic
 }
 
 async function createEmptyDicomRemapUploadJob(currentUserId: UserId): Promise<DicomRemapJobRow> {
-  await assertNoActiveUserJob(currentUserId);
-
-  let createResult: { rows: DicomRemapJobRow[] };
-  try {
-    createResult = await queryDicomRemapDb<DicomRemapJobRow>(
+  const createResult = await queryDicomRemapDb<DicomRemapJobRow>(
       `
         insert into dicom_remap_jobs (
           created_by_user_id,
@@ -2341,13 +2305,6 @@ async function createEmptyDicomRemapUploadJob(currentUserId: UserId): Promise<Di
       `,
       [currentUserId]
     );
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      const activeJobId = await readActiveDicomRemapJobId(currentUserId);
-      throwActiveDicomRemapJobConflict(activeJobId);
-    }
-    throw error;
-  }
 
   const job = createResult.rows[0];
   if (!job) {
@@ -3952,7 +3909,7 @@ export async function getMyActiveDicomRemapJob({
 }: {
   currentUserId: UserId;
 }): Promise<{ job: DicomRemapJobRow | null; comparison: ConfirmComparison | null }> {
-  const activeJob = await readActiveDicomRemapJob(currentUserId);
+  const activeJob = await readSingleResumableDicomRemapDraft(currentUserId);
   if (!activeJob) return { job: null, comparison: null };
   if (await markStaleActiveJobFailedIfSourceMissing(activeJob)) {
     return { job: null, comparison: null };
@@ -4017,10 +3974,13 @@ export async function cancelDicomRemapJob({
           updated_at = now()
       where id = $1
         and created_by_user_id = $2
-        and status = any($4::text[])
+        and status = 'awaiting_confirmation'
+        and processing_stage = 'awaiting_confirmation'
+        and staged_manifest_version = $4
+        and staged_storage_key is not null
       returning *
     `,
-    [cleanJobId, currentUserId, cleanReason, CANCELLABLE_JOB_STATUSES]
+    [cleanJobId, currentUserId, cleanReason, DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION]
   );
 
   const cancelledJob = result.rows[0];
@@ -4457,6 +4417,9 @@ export async function resendDicomRemapJobToPacs({
   confirmDestinationChecked?: boolean;
 }): Promise<{ job: DicomRemapJobRow }> {
   const job = await loadOwnedJob(jobId, currentUserId);
+  if (job.status === "sending" && job.orthanc_send_job_id) {
+    return { job };
+  }
   if (!["failed", "remapped", "sent"].includes(job.status)) {
     throw new HttpError(409, "Only remapped, failed, or sent jobs can be resent to PACS.", {
       status: job.status,
@@ -4627,7 +4590,6 @@ export const __dicomRemapTestables = {
   isDicomRemapActiveStatus,
   isDicomRemapTerminalStatus,
   isDicomRemapCancellableStatus,
-  isUniqueViolation,
   normalizePatientSex,
   normalizeDicomBirthDate,
   normalizeDicomPatientIdForReplace,

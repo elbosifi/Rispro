@@ -57,6 +57,72 @@ test("processing worker continues after one claimed job fails", async () => {
   assert.deepEqual(processed, [11, 12]);
 });
 
+test("processing concurrency defaults to four and clamps to one through eight", () => {
+  assert.equal(__dicomRemapProcessingWorkerTestables.normalizeProcessingConcurrency(undefined), 4);
+  assert.equal(__dicomRemapProcessingWorkerTestables.normalizeProcessingConcurrency("invalid"), 4);
+  assert.equal(__dicomRemapProcessingWorkerTestables.normalizeProcessingConcurrency(0), 1);
+  assert.equal(__dicomRemapProcessingWorkerTestables.normalizeProcessingConcurrency(99), 8);
+});
+
+test("processing worker keeps at most four heavy jobs in flight and claims the fifth only after a lane is free", async () => {
+  const jobs = [11, 12, 13, 14, 15];
+  const releases = new Map<number, () => void>();
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let claimCount = 0;
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    cleanup: async () => 0,
+    claim: async () => {
+      const id = jobs.shift();
+      if (!id) return null;
+      claimCount += 1;
+      return { job: { id } as never, recovered: false };
+    },
+    process: async ({ job }) => {
+      const id = Number(job.id);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise<void>((resolve) => releases.set(id, resolve));
+      inFlight -= 1;
+      return job as never;
+    },
+  });
+
+  const tick = runDicomRemapProcessingWorkerTick({ owner: "four-lane-worker", batchSize: 5, leaseSeconds: 120 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(inFlight, 4);
+  assert.equal(claimCount, 4);
+
+  releases.get(11)?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(claimCount, 5);
+  assert.equal(inFlight, 4);
+
+  for (const id of [12, 13, 14, 15]) releases.get(id)?.();
+  assert.deepEqual(await tick, { claimed: 5, completed: 5, failed: 0 });
+  assert.equal(maxInFlight, 4);
+});
+
+test("one lane failure does not stop the other processing lanes", async () => {
+  const jobs = [21, 22, 23, 24];
+  const completed: number[] = [];
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    cleanup: async () => 0,
+    claim: async () => {
+      const id = jobs.shift();
+      return id ? { job: { id } as never, recovered: false } : null;
+    },
+    process: async ({ job }) => {
+      if (job.id === 21) throw new Error("simulated lane failure");
+      completed.push(Number(job.id));
+      return job as never;
+    },
+  });
+  const result = await runDicomRemapProcessingWorkerTick({ owner: "isolated-failure-worker", batchSize: 4, concurrency: 4, leaseSeconds: 120 });
+  assert.deepEqual(result, { claimed: 4, completed: 3, failed: 1 });
+  assert.deepEqual(completed.sort((a, b) => a - b), [22, 23, 24]);
+});
+
 test("graceful worker stop prevents interval claims", async () => {
   let claims = 0;
   __dicomRemapProcessingWorkerTestables.setDependencies({
@@ -71,6 +137,32 @@ test("graceful worker stop prevents interval claims", async () => {
   await worker.stop();
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(claims, startupClaims);
+});
+
+test("graceful worker stop waits for in-flight processing to settle", async () => {
+  __dicomRemapProcessingWorkerTestables.setDependencies({ cleanup: async () => 0, claim: async () => null });
+  const worker = await startDicomRemapProcessingWorker({ intervalMs: 10_000, batchSize: 1, concurrency: 1, leaseSeconds: 120 });
+  let release: () => void = () => { throw new Error("processing lane did not start"); };
+  let entered = false;
+  __dicomRemapProcessingWorkerTestables.setDependencies({
+    cleanup: async () => 0,
+    claim: async () => entered ? null : { job: { id: 31 } as never, recovered: false },
+    process: async ({ job }) => {
+      entered = true;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return job as never;
+    },
+  });
+  const tick = runDicomRemapProcessingWorkerTick({ owner: "shutdown-worker", batchSize: 1, concurrency: 1, leaseSeconds: 120 });
+  await new Promise((resolve) => setImmediate(resolve));
+  let stopped = false;
+  const stopping = worker.stop().then(() => { stopped = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(stopped, false);
+  release();
+  await tick;
+  await stopping;
+  assert.equal(stopped, true);
 });
 
 test("cleanup failure does not prevent processing claims", async () => {

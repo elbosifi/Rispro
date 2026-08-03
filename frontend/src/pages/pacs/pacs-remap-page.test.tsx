@@ -184,7 +184,7 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getAllByText(/Source|Patient|Destination|Review|Processing/).length).toBeGreaterThanOrEqual(5);
   });
 
-  it("checks for and automatically attaches to an active job before enabling Source", async () => {
+  it("does not let a background processing job auto-hijack or disable Source", async () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: { id: 32, status: "processing", processing_stage: "rewriting" }, comparison: null });
@@ -193,14 +193,13 @@ describe("PacsRemapPage five-step wizard", () => {
       return Promise.resolve({ items: [] });
     });
     renderPage();
-    expect(screen.getByText("Checking for an active DICOM remap job…")).toBeTruthy();
-    expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(true);
-    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
-    expect(screen.getByText("Existing remap job #32 resumed automatically.")).toBeTruthy();
-    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/32");
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByText("Existing remap job #32 resumed automatically.")).toBeNull();
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/32");
   });
 
-  it("restores queued-job context and safely cancels it before starting again", async () => {
+  it("shows a queued job in Recent Jobs and starting another upload does not cancel it", async () => {
     const uploadedJob = {
       id: 52,
       status: "uploaded",
@@ -220,36 +219,32 @@ describe("PacsRemapPage five-step wizard", () => {
         studyDate: "20260720",
       },
     };
-    let activeJob: typeof uploadedJob | null = uploadedJob;
-    apiMock.mockImplementation((path: string, options?: { method?: string }) => {
+    const sendingJob = { ...uploadedJob, id: 53, status: "sending", processing_stage: "enqueueing_send", orthanc_send_job_id: "orthanc-53" };
+    apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
-      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: activeJob, comparison: null });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: uploadedJob, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [uploadedJob, sendingJob] });
       if (path === "/pacs/remap/jobs/52") return Promise.resolve({ job: uploadedJob, comparison: null });
-      if (path === "/pacs/remap/jobs/52/cancel" && options?.method === "POST") {
-        activeJob = null;
-        return Promise.resolve({ job: { ...uploadedJob, status: "cancelled", processing_stage: "cancelled" } });
-      }
+      if (path === "/pacs/remap/jobs/53") return Promise.resolve({ job: sendingJob, comparison: null });
       if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [] });
       if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
       return Promise.resolve({ items: [] });
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
-
     renderPage();
-
-    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
-    expect(screen.getByText(/Source\^FiftyTwo/)).toBeTruthy();
-    const selectionSummary = screen.getByLabelText("Selection summary");
-    expect(selectionSummary.textContent).toContain("Target^Patient");
-    expect(selectionSummary.textContent).toContain("Main PACS");
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel queued upload and start again" }));
-
-    await waitFor(() => expect(apiMock).toHaveBeenCalledWith(
-      "/pacs/remap/jobs/52/cancel",
-      expect.objectContaining({ method: "POST" }),
-    ));
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    const queuedProgress = await screen.findByRole("progressbar", { name: /Job #52/i });
+    expect(queuedProgress.getAttribute("data-state")).toBe("indeterminate");
+    expect(queuedProgress.hasAttribute("aria-valuenow")).toBe(false);
+    fireEvent.click(await screen.findByRole("button", { name: /#52.*Queued/i }));
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /#53.*Sending/i }));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/53"));
+    fireEvent.click(await screen.findByRole("button", { name: "Start new upload" }));
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/52/cancel", expect.anything());
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/53/cancel", expect.anything());
   });
 
   it("keeps quick preview and complete scan inside Source and gates Continue", async () => {
@@ -291,6 +286,21 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByText("Complete folder scan complete")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Continue to Patient" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText("Fast preview was unavailable. RISpro is continuing the complete folder scan.")).toBeNull();
+  });
+
+  it("shows accessible complete-scan progress from processed and candidate file counts", async () => {
+    const fullScan = deferred<ReturnType<typeof result>>();
+    scanMock.mockImplementation((_files: File[], options: { onProgress?: (progress: unknown) => void }) => {
+      options.onProgress?.({ candidateFileCount: 8, processedFileCount: 2, parsedDicomFileCount: 1, unparsedCount: 1, studyCount: 1 });
+      return fullScan.promise;
+    });
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    const progress = await screen.findByRole("progressbar", { name: "Complete scan progress" });
+    expect(progress.getAttribute("aria-valuemin")).toBe("0");
+    expect(progress.getAttribute("aria-valuemax")).toBe("100");
+    expect(progress.getAttribute("aria-valuenow")).toBe("25");
+    fullScan.resolve(result());
   });
 
   it("offers selected-study-only secure staging as soon as the local scan finds a study after preview failure", async () => {
@@ -465,7 +475,7 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByText(/75%|90%/)).toBeNull();
   });
 
-  it("attaches to the structured active-job conflict without retrying or showing a failed upload", async () => {
+  it("does not reinterpret an upload error as a singular active-job attachment", async () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
@@ -485,11 +495,9 @@ describe("PacsRemapPage five-step wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
     fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
-    expect(await screen.findByText("Existing remap job #32 resumed automatically.")).toBeTruthy();
+    expect(await screen.findByText("You already have an active DICOM remap job.")).toBeTruthy();
     expect(FakeXHR.instances).toHaveLength(1);
-    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/32");
-    expect(screen.queryByText(/You already have an active DICOM remap job/i)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Start new upload" })).toBeNull();
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/32");
   });
 
   it("shows an actionable gateway-limit message for a multipart 413 without retrying or attaching another job", async () => {
@@ -590,13 +598,17 @@ describe("PacsRemapPage five-step wizard", () => {
     const { confirmButton, stagingRequest } = await reachReviewDuringUnresolvedSecureStaging();
     expect(confirmButton.disabled).toBe(false);
     expect(screen.getByText("You can confirm now. Processing will begin automatically when secure staging completes.")).toBeTruthy();
+    const uploadProgress = screen.getByRole("progressbar", { name: "Secure source staging progress" });
+    expect(uploadProgress.getAttribute("aria-valuenow")).toBe("50");
+    expect(uploadProgress.getAttribute("aria-valuemin")).toBe("0");
+    expect(uploadProgress.getAttribute("aria-valuemax")).toBe("100");
 
     fireEvent.click(confirmButton);
     fireEvent.click(confirmButton);
 
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
     expect(screen.getByText("Confirmation recorded. Secure staging is continuing; processing will start automatically.")).toBeTruthy();
-    expect(screen.getByText(/50%/)).toBeTruthy();
+    expect(screen.getAllByText(/50%/).length).toBeGreaterThan(0);
     expect(apiMock.mock.calls.filter(([path]) => path === "/pacs/remap/jobs/88/confirm-staged")).toHaveLength(0);
 
     stagingRequest.respond();
@@ -743,6 +755,45 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getAllByText(/Source\^SeventyThree/).length).toBeGreaterThan(0);
   });
 
+  it("uses persisted processed and staged counts for backend processing progress", async () => {
+    const job = { id: 81, status: "processing", processing_stage: "rewriting", staged_file_count: 8, processed_file_count: 2, send_attempt_count: 0 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/81") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#81.*Processing/i }));
+    const progress = await screen.findByRole("progressbar", { name: "Rewriting DICOM" });
+    expect(progress.getAttribute("aria-valuenow")).toBe("25");
+  });
+
+  it("shows resend-action errors separately without hiding persisted job failure details", async () => {
+    const job = { id: 82, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source", modified_orthanc_study_id: "modified", destination_pacs_key: "1", error_message: "Original persisted failure", processing_error_code: "ORIGINAL_PROCESSING_ERROR", processing_error_details: { original: true }, orthanc_send_job_id: "orthanc-old", send_attempt_count: 3, send_error_code: null, send_error_details: null };
+    apiMock.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/82") return Promise.resolve({ job, comparison: null });
+      if (path === "/pacs/remap/jobs/82/resend" && options?.method === "POST") return Promise.reject(new Error("Retry transport failed"));
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#82.*Failed/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Resend to PACS" }));
+    expect(await screen.findByText("Original persisted failure")).toBeTruthy();
+    const retryAlert = await screen.findByRole("alert");
+    expect(retryAlert.textContent).toContain("Resend action failed");
+    expect(retryAlert.textContent).toContain("Retry transport failed");
+    expect(screen.getByText("ORIGINAL_PROCESSING_ERROR")).toBeTruthy();
+    expect(screen.getByText("orthanc-old")).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy();
+  });
+
   it("keeps Recent Jobs secondary and requires the existing ambiguous-send confirmation", async () => {
     const job = { id: 91, status: "failed", source_orthanc_study_id: "s", modified_orthanc_study_id: "s", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", error_message: "RISpro could not confirm whether PACS received this study." };
     apiMock.mockImplementation((path: string) => {
@@ -754,7 +805,7 @@ describe("PacsRemapPage five-step wizard", () => {
     renderPage();
     expect(screen.queryByText(/#91/)).toBeNull();
     fireEvent.click(screen.getByText("View recent jobs"));
-    fireEvent.click(await screen.findByText(/#91/));
+    fireEvent.click(await screen.findByRole("button", { name: /#91.*Failed/i }));
     expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
     expect(screen.getByText(/could not confirm whether PACS received/i)).toBeTruthy();
     const resend = await waitFor(() => screen.getByRole("button", { name: "Resend to PACS" }) as HTMLButtonElement);

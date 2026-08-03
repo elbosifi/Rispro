@@ -1682,13 +1682,13 @@ test("dicom helper: cancelled status is terminal and not active", () => {
   assert.deepEqual(__dicomRemapTestables.ACTIVE_JOB_STATUSES, ["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"]);
 });
 
-test("cancelDicomRemapJob cancels an active owner job and audits it", async () => {
+test("cancelDicomRemapJob cancels only an unconfirmed staged draft and audits it", async () => {
   const auditEvents: unknown[] = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
     auditEvents.push(entry);
     return {} as never;
   });
-  queueQueryResults([
+  const calls = queueQueryResults([
     { rows: [remapJob({ status: "cancelled", cancellation_reason: "User reset" })] },
   ]);
 
@@ -1701,6 +1701,24 @@ test("cancelDicomRemapJob cancels an active owner job and audits it", async () =
   assert.equal(result.job.status, "cancelled");
   assert.equal(result.job.cancellation_reason, "User reset");
   assert.equal(auditEvents.length, 1);
+  assert.match(calls[0]?.sql || "", /status = 'awaiting_confirmation'/i);
+  assert.match(calls[0]?.sql || "", /processing_stage = 'awaiting_confirmation'/i);
+  assert.match(calls[0]?.sql || "", /staged_manifest_version = \$4/i);
+});
+
+test("cancelDicomRemapJob does not cancel a confirmed uploaded queued job", async () => {
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded", processing_stage: "queued", staged_manifest_version: 2 })] },
+  ]);
+  await assert.rejects(
+    () => cancelDicomRemapJob({ jobId: 1, currentUserId: 42, reason: "start another upload" }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? error.statusCode : 0, 409);
+      assert.match((error as Error).message, /already being processed/i);
+      return true;
+    }
+  );
 });
 
 test("cancelDicomRemapJob returns an already-cancelled job safely", async () => {
@@ -1963,13 +1981,9 @@ test("cancelled jobs do not count as active upload blockers", () => {
   assert.equal(__dicomRemapTestables.ACTIVE_JOB_STATUSES.includes("cancelled"), false);
 });
 
-test("createDicomRemapUploadJob maps upload insert races to activeJobId conflicts", async () => {
+test("createDicomRemapUploadJob does not translate unrelated unique violations into singular active-job conflicts", async () => {
   const uniqueError = Object.assign(new Error("duplicate key"), { code: "23505" });
-  queueQueryResults([
-    { rows: [] },
-    uniqueError,
-    { rows: [{ id: 77 }] },
-  ]);
+  queueQueryResults([uniqueError]);
 
   await assert.rejects(
     () => createDicomRemapUploadJob({
@@ -1977,25 +1991,29 @@ test("createDicomRemapUploadJob maps upload insert races to activeJobId conflict
       currentUserId: 42,
     }),
     (error) => {
-      assert.equal(error instanceof HttpError ? error.statusCode : 0, 409);
-      assert.deepEqual(error instanceof HttpError ? error.details : null, { activeJobId: 77 });
+      assert.equal((error as { code?: string }).code, "23505");
       return true;
     }
   );
 });
 
-test("active remap lookup returns only the caller's canonical active job and ignores terminal rows", async () => {
-  const active = remapJob({ id: 77, created_by_user_id: 42, status: "processing", source_orthanc_study_id: null });
+test("active remap lookup resumes exactly one awaiting-confirmation draft only", async () => {
+  const active = remapJob({ id: 77, created_by_user_id: 42, status: "awaiting_confirmation", processing_stage: "awaiting_confirmation", staged_manifest_version: 2, staged_storage_key: "jobs/77-test", source_orthanc_study_id: null });
   const calls = queueQueryResults([{ rows: [active] }, { rows: [active] }]);
   const result = await getMyActiveDicomRemapJob({ currentUserId: 42 });
   assert.equal(result.job?.id, 77);
-  assert.equal(result.job?.status, "processing");
-  assert.match(calls[0]?.sql || "", /status = any/);
-  assert.deepEqual(calls[0]?.params, [42, __dicomRemapTestables.ACTIVE_JOB_STATUSES]);
+  assert.equal(result.job?.status, "awaiting_confirmation");
+  assert.match(calls[0]?.sql || "", /status = 'awaiting_confirmation'/);
+  assert.match(calls[0]?.sql || "", /limit 2/i);
+  assert.deepEqual(calls[0]?.params, [42, 2]);
 
   queueQueryResults([{ rows: [] }]);
   const noActive = await getMyActiveDicomRemapJob({ currentUserId: 42 });
   assert.deepEqual(noActive, { job: null, comparison: null });
+
+  queueQueryResults([{ rows: [active, remapJob({ ...active, id: 78 })] }]);
+  const ambiguousDrafts = await getMyActiveDicomRemapJob({ currentUserId: 42 });
+  assert.deepEqual(ambiguousDrafts, { job: null, comparison: null });
 });
 
 test("createDicomRemapUploadJob skips DICOMDIR folder index files", async () => {
@@ -2005,7 +2023,6 @@ test("createDicomRemapUploadJob skips DICOMDIR folder index files", async () => 
     return {} as never;
   });
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
   ]);
@@ -2059,7 +2076,6 @@ test("createDicomRemapMultipartUploadJob skips sidecars and uploads accepted fil
     return {} as never;
   });
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
   ]);
@@ -2099,7 +2115,6 @@ test("createDicomRemapMultipartUploadJob rejects selectedStudyInstanceUID mismat
     { fileName: "image-1.dcm", mimeType: "application/dicom" },
   ]);
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [] },
   ]);
@@ -2141,7 +2156,6 @@ test("createDicomRemapMultipartUploadJob skips Orthanc invalid-DICOM rejections 
   ]);
   __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
   ]);
@@ -2185,7 +2199,6 @@ test("createDicomRemapMultipartUploadJob fails when Orthanc accepts zero valid D
     { fileName: "opaque-support-file", mimeType: "application/octet-stream" },
   ]);
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [] },
   ]);
@@ -2213,7 +2226,6 @@ test("createDicomRemapMultipartUploadJob still fails on Orthanc 500 upload error
     { fileName: "image-1.dcm", mimeType: "application/dicom" },
   ]);
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [] },
   ]);
@@ -2241,7 +2253,6 @@ test("createDicomRemapMultipartUploadJob still fails on Orthanc auth-style uploa
     { fileName: "image-1.dcm", mimeType: "application/dicom" },
   ]);
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [] },
   ]);
@@ -2270,7 +2281,6 @@ test("createDicomRemapMultipartUploadJob rejects multiple parent studies clearly
     { fileName: "image-2.dcm" },
   ]);
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [] },
   ]);
@@ -2296,7 +2306,6 @@ test("createDicomRemapMultipartUploadJob handles 1000+ instances for one study",
     Array.from({ length: fileCount }, (_, index) => ({ fileName: `image-${index}.dcm` }))
   );
   queueQueryResults([
-    { rows: [] },
     { rows: [remapJob({ status: "uploaded" })] },
     { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
   ]);
@@ -2350,16 +2359,13 @@ test("prepareDicomRemapConfirmation marks missing source study as stale", async 
   );
 });
 
-test("createDicomRemapUploadJob marks stale active job failed and creates a fresh upload", async () => {
+test("createDicomRemapUploadJob creates a fresh upload without inspecting another active job", async () => {
   __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
-  queueQueryResults([
-    { rows: [remapJob({ id: 9, status: "uploaded", source_orthanc_study_id: "stale-study" })] },
-    { rows: [] },
+  const queryCalls = queueQueryResults([
     { rows: [remapJob({ id: 10, status: "uploaded", source_orthanc_study_id: null })] },
     { rows: [remapJob({ id: 10, status: "uploaded", source_orthanc_study_id: "fresh-study" })] },
   ]);
   queueOrthancResults([
-    orthancResult({ status: 404, ok: false, text: "missing", json: { Error: "missing" } }),
     orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i1", ParentStudy: "fresh-study" } }),
     orthancResult({
       status: 200,
@@ -2384,6 +2390,7 @@ test("createDicomRemapUploadJob marks stale active job failed and creates a fres
 
   assert.equal(result.job.id, 10);
   assert.equal(result.job.source_orthanc_study_id, "fresh-study");
+  assert.match(queryCalls[0]?.sql || "", /insert into dicom_remap_jobs/i);
 });
 
 test("confirmDicomRemapAndSend claim failure returns already-sent job without Orthanc calls", async () => {
@@ -2478,6 +2485,16 @@ test("resendDicomRemapJobToPacs atomically enqueues an asynchronous Orthanc job"
   assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_resend_enqueued"), true);
 });
 
+test("repeated resend returns the persisted sending job without another Orthanc enqueue", async () => {
+  const sending = remapJob({ id: 23, status: "sending", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", orthanc_send_job_id: "orthanc-send-23", send_attempt_count: 2 });
+  queueQueryResults([{ rows: [sending] }]);
+  const orthancCalls = queueOrthancResults([]);
+  const result = await resendDicomRemapJobToPacs({ jobId: 23, currentUserId: 42 });
+  assert.equal(result.job.orthanc_send_job_id, "orthanc-send-23");
+  assert.equal(result.job.send_attempt_count, 2);
+  assert.equal(orthancCalls.length, 0);
+});
+
 test("resendDicomRemapJobToPacs records asynchronous enqueue failures without a fallback send", async () => {
   const auditEntries: Array<Record<string, unknown>> = [];
   __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
@@ -2491,10 +2508,11 @@ test("resendDicomRemapJobToPacs records asynchronous enqueue failures without a 
     port: 104,
     is_active: true,
   } as never));
+  const originalFailure = remapJob({ id: 22, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", orthanc_send_job_id: "previous-orthanc-job", send_attempt_count: 3, error_message: "Original persisted send failure", send_error_code: "ORTHANC_SEND_JOB_FAILED", send_error_details: { original: true } });
   const queryCalls = queueQueryResults([
-    { rows: [remapJob({ id: 22, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
-    { rows: [remapJob({ id: 22, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
-    { rows: [remapJob({ id: 22, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", error_message: "Orthanc could not send the remapped study to PACS. Please verify the destination and try resend." })] },
+    { rows: [originalFailure] },
+    { rows: [remapJob({ ...originalFailure, status: "sending", orthanc_send_job_id: null })] },
+    { rows: [originalFailure] },
   ]);
 
   queueOrthancResults([
@@ -2522,7 +2540,10 @@ test("resendDicomRemapJobToPacs records asynchronous enqueue failures without a 
     call.sql.includes("set status = 'failed'")
   );
   assert.ok(failedUpdateCall, "Resend failure should mark the job as failed");
-  assert.match(String(failedUpdateCall?.params?.[1] ?? ""), /rejected asynchronous PACS send enqueue/i);
+  assert.equal(failedUpdateCall?.params?.[1], "previous-orthanc-job");
+  assert.equal(failedUpdateCall?.params?.[2], "Original persisted send failure");
+  assert.equal(failedUpdateCall?.params?.[3], "ORTHANC_SEND_JOB_FAILED");
+  assert.equal(failedUpdateCall?.params?.[4], JSON.stringify({ original: true }));
   assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_send_failed"), true);
 });
 

@@ -242,8 +242,20 @@ test("durable processing migrations expose staging, selected-study confirmation,
   const constraint = await pool.query<{ definition: string }>(`select pg_get_constraintdef(oid) as definition from pg_constraint where conrelid = 'dicom_remap_jobs'::regclass and conname = 'dicom_remap_jobs_status_check'`);
   assert.match(constraint.rows[0]?.definition || "", /processing/);
   const indexes = await pool.query<{ indexname: string; indexdef: string }>(`select indexname, indexdef from pg_indexes where schemaname = 'public' and tablename = 'dicom_remap_jobs' and indexname = any($1::text[])`, [["dicom_remap_jobs_single_active_per_user_idx", "dicom_remap_jobs_processing_queue_idx", "dicom_remap_jobs_processing_lease_idx"]]);
-  assert.equal(indexes.rows.length, 3);
-  assert.match(indexes.rows.find((row) => row.indexname === "dicom_remap_jobs_single_active_per_user_idx")?.indexdef || "", /processing/);
+  assert.equal(indexes.rows.some((row) => row.indexname === "dicom_remap_jobs_single_active_per_user_idx"), false);
+  assert.equal(indexes.rows.length, 2);
+
+  const suffix = uniqueSuffix();
+  const passwordHash = bcrypt.hashSync("test-pass", 10);
+  const user = await pool.query<{ id: number }>(`insert into users (username, full_name, password_hash, role, is_active) values ($1, $2, $3, 'supervisor', true) returning id`, [`dicom_multi_${suffix}`, `DICOM Multi ${suffix}`, passwordHash]);
+  const userId = Number(user.rows[0]!.id);
+  try {
+    const inserted = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage) values ($1, 'uploaded', 'queued'), ($1, 'processing', 'validating'), ($1, 'remapped', 'enqueueing_send'), ($1, 'sending', 'enqueueing_send') returning id`, [userId]);
+    assert.equal(inserted.rowCount, 4);
+  } finally {
+    await pool.query(`delete from dicom_remap_jobs where created_by_user_id = $1`, [userId]);
+    await pool.query(`delete from users where id = $1`, [userId]);
+  }
 });
 
 test("durable remap processing stages, claims concurrently, recovers partial Orthanc work, and resumes send handoff", async (t) => {

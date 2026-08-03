@@ -1,0 +1,1 @@
+drop index if exists dicom_remap_jobs_single_active_per_user_idx;

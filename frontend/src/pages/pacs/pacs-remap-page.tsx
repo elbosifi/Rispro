@@ -41,14 +41,6 @@ interface StagedConfirmationSnapshot {
   readonly destinationPacsKey: string;
 }
 
-function readActiveRemapJobId(details: unknown): number | null {
-  if (!details || typeof details !== "object") return null;
-  const activeJobId = (details as { activeJobId?: unknown }).activeJobId;
-  return typeof activeJobId === "number" && Number.isSafeInteger(activeJobId) && activeJobId > 0
-    ? activeJobId
-    : null;
-}
-
 interface RemapJob {
   id: number;
   status: JobStatus;
@@ -216,6 +208,63 @@ function oneLineReason(message: string | null | undefined): string {
   return String(message || "").replace(/\s+/g, " ").trim();
 }
 
+function RemapProgressBar({
+  label,
+  value,
+  max,
+  detail,
+  state = "active",
+  compact = false,
+}: {
+  label: string;
+  value?: number | null;
+  max?: number | null;
+  detail?: string;
+  state?: "active" | "success" | "failed";
+  compact?: boolean;
+}) {
+  const determinate = Number.isFinite(value) && Number.isFinite(max) && Number(max) > 0;
+  const percent = determinate ? Math.min(100, Math.max(0, Math.round((Number(value) / Number(max)) * 100))) : null;
+  const shownPercent = state === "success" ? 100 : percent;
+  const ariaValueText = state === "failed" ? `${label}: ${detail || "Failed"}` : detail || (shownPercent != null ? `${shownPercent}%` : label);
+  return (
+    <div className={compact ? "space-y-1" : "space-y-1.5"}>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="min-w-0 truncate font-medium">{label}</span>
+        <span className="shrink-0 tabular-nums">{shownPercent != null ? `${shownPercent}%` : detail}</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={determinate || state === "success" ? 0 : undefined}
+        aria-valuemax={determinate || state === "success" ? 100 : undefined}
+        aria-valuenow={shownPercent ?? undefined}
+        aria-valuetext={ariaValueText}
+        data-state={state === "failed" ? "failed" : shownPercent == null ? "indeterminate" : state}
+        className={`${compact ? "h-1.5" : "h-2.5"} overflow-hidden rounded-full bg-slate-200`}
+        dir="ltr"
+      >
+        <div
+          className={`h-full rounded-full ${state === "failed" ? "bg-red-500" : state === "success" ? "bg-emerald-600" : shownPercent == null ? "w-1/3 animate-pulse bg-teal-500" : "bg-teal-600"}`}
+          style={shownPercent != null ? { width: `${shownPercent}%` } : undefined}
+        />
+      </div>
+      {!compact && detail && shownPercent != null && <p className="text-xs text-slate-600">{detail}</p>}
+    </div>
+  );
+}
+
+function jobProgress(job: RemapJob): { value?: number; max?: number; state?: "active" | "success" | "failed" } {
+  if (job.status === "sent") return { value: 1, max: 1, state: "success" };
+  if (job.status === "failed" || job.status === "cancelled") return { state: "failed" };
+  const stage = String(job.processing_stage || "");
+  if (job.status === "processing" && ["building_uid_plan", "rewriting", "uploading_to_orthanc"].includes(stage)) {
+    const max = Number(job.staged_file_count || 0);
+    if (max > 0) return { value: Number(job.processed_file_count || 0), max };
+  }
+  return {};
+}
+
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -314,8 +363,11 @@ export default function PacsRemapPage() {
   const [studyDateMode, setStudyDateMode] = useState<"today" | "yesterday" | "custom">("today");
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
   const [jobId, setJobId] = useState<number | null>(null);
+  const [autoResumeDismissed, setAutoResumeDismissed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
+  const [retryActionError, setRetryActionError] = useState("");
+  const [retryActionErrorDetails, setRetryActionErrorDetails] = useState("");
   const [previewWarning, setPreviewWarning] = useState("");
   const [gatewayUploadLimitRejected, setGatewayUploadLimitRejected] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -440,12 +492,11 @@ export default function PacsRemapPage() {
     retry: 0,
   });
   const refetchActiveJob = activeJobQuery.refetch;
-  const startupActiveJob = jobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
+  const startupActiveJobCandidate = !autoResumeDismissed && jobId == null && activeJobQuery.isSuccess ? activeJobQuery.data?.job ?? null : null;
+  const startupActiveJob = isAwaitingStagedJob(startupActiveJobCandidate) ? startupActiveJobCandidate : null;
   const effectiveJobId = jobId ?? startupActiveJob?.id ?? null;
   const effectiveUiStep: RemapWizardUiStep = startupActiveJob
-    ? isAwaitingStagedJob(startupActiveJob)
-      ? (uiStep === "source" || uiStep === "processing" ? "patient" : uiStep)
-      : "processing"
+    ? (uiStep === "source" || uiStep === "processing" ? "patient" : uiStep)
     : uiStep;
   const effectiveResumedJobMessage = startupActiveJob
     ? t(language, "pacs.remap.existingJobResumed", { jobId: startupActiveJob.id })
@@ -486,38 +537,12 @@ export default function PacsRemapPage() {
     stagingUploadControllerRef.current = null;
   };
 
-  const clearAbandonedDraft = useCallback((): void => {
-    cancelActiveFullScan();
-    cancelActiveStagingUpload();
-    clearPendingStagedConfirmation();
-    setFiles([]);
-    setScanResult(null);
-    setSelectedStudyInstanceUid("");
-    setSelectedPatientId("");
-    setSelectedDestinationKey("");
-    setPatientSearch("");
-    setCompleteScanStatus("idle");
-    setScanProgress(null);
-    setPreviewWarning("");
-    setSkipAcknowledged(false);
-    setConfirmChecked(false);
-    setUploadLoaded(0);
-    setUploadTotal(0);
-    setSecureStagingStatus("idle");
-    setFileInputVersion((value) => value + 1);
-  }, [clearPendingStagedConfirmation]);
-
-  const attachToExistingRemapJob = useCallback((activeJobId: number, reason: "startup" | "conflict" | "recent" = "conflict"): void => {
+  const attachToExistingRemapJob = useCallback((activeJobId: number): void => {
     if (!Number.isSafeInteger(activeJobId) || activeJobId <= 0) return;
-    if (reason === "conflict") clearAbandonedDraft();
-    cancelActiveFullScan();
-    cancelActiveStagingUpload();
     focusHeadingAfterNavigationRef.current = true;
     setJobId(activeJobId);
     setUiStep("processing");
     setProcessingStage("queued");
-    setUploadLoaded(0);
-    setUploadTotal(0);
     setErrorMessage("");
     setErrorDetails("");
     setSuccessMessage("");
@@ -525,7 +550,7 @@ export default function PacsRemapPage() {
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", activeJobId] });
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
-  }, [clearAbandonedDraft, language, queryClient]);
+  }, [language, queryClient]);
 
   const startCompleteScan = (sourceFiles: File[], runId: number): void => {
     const controller = new AbortController();
@@ -689,11 +714,6 @@ export default function PacsRemapPage() {
       const hadPendingConfirmation = pendingStagedConfirmationRef.current !== null;
       clearPendingStagedConfirmation();
       if (error instanceof ApiError && error.status === 499) return;
-      const activeJobId = error instanceof ApiError && error.status === 409 ? readActiveRemapJobId(error.details) : null;
-      if (activeJobId) {
-        attachToExistingRemapJob(activeJobId, "conflict");
-        return;
-      }
       setSecureStagingStatus("failed");
       if (hadPendingConfirmation) {
         setUiStep("review");
@@ -753,11 +773,6 @@ export default function PacsRemapPage() {
       void currentJobQuery.refetch();
     },
     onError: (error: unknown) => {
-      const activeJobId = error instanceof ApiError && error.status === 409 ? readActiveRemapJobId(error.details) : null;
-      if (activeJobId) {
-        attachToExistingRemapJob(activeJobId, "conflict");
-        return;
-      }
       if (error instanceof ApiError && error.status === 413) {
         setProcessingStage("failed");
         setSuccessMessage("");
@@ -852,14 +867,16 @@ export default function PacsRemapPage() {
     onMutate: () => {
       setUiStep("processing");
       setProcessingStage("enqueueing_send");
-      setErrorMessage("");
-      setErrorDetails("");
+      setRetryActionError("");
+      setRetryActionErrorDetails("");
       setSuccessMessage("");
     },
     onSuccess: (data) => {
       setJobId(data.job.id);
       setDestinationCheckedForResend(false);
       setProcessingStage(data.job.status === "sending" ? "enqueueing_send" : data.job.status === "sent" ? "completed" : "failed");
+      setRetryActionError("");
+      setRetryActionErrorDetails("");
       setSuccessMessage("");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
@@ -867,8 +884,8 @@ export default function PacsRemapPage() {
     onError: (error: unknown) => {
       setProcessingStage("failed");
       setSuccessMessage("");
-      setErrorMessage(error instanceof Error ? error.message : t(language, "pacs.remap.failedResend"));
-      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
+      setRetryActionError(error instanceof Error ? error.message : t(language, "pacs.remap.failedResend"));
+      setRetryActionErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
@@ -993,7 +1010,6 @@ export default function PacsRemapPage() {
     setSuccessMessage("");
   };
   const skippedScanMode = fastStagedWorkflow;
-  const checkingForActiveJob = activeJobQuery.isPending && effectiveJobId == null;
   const reviewFiles = skippedScanMode
     ? (scanResult?.scanIncomplete ? selectedStudy?.files || [] : files.filter(isLikelyDicomCandidate))
     : selectedStudy?.files || [];
@@ -1025,7 +1041,7 @@ export default function PacsRemapPage() {
   const openRecentJob = (id: number): void => {
     const hasDraft = files.length > 0 || !!selectedPatientId || !!effectiveSelectedDestinationKey;
     if (effectiveUiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
-    attachToExistingRemapJob(id, "recent");
+    attachToExistingRemapJob(id);
   };
 
   useEffect(() => {
@@ -1086,27 +1102,6 @@ export default function PacsRemapPage() {
     cancelActiveFullScan();
     clearPendingStagedConfirmation();
     cancelActiveStagingUpload();
-    const cancellableJobId = currentJob?.status === "uploaded"
-      || isAwaitingStagedJob(currentJob)
-      || secureStagingStatus === "awaiting_confirmation"
-      ? effectiveJobId
-      : null;
-    if (cancellableJobId) {
-      void api(`/pacs/remap/jobs/${cancellableJobId}/cancel`, {
-        method: "POST",
-        body: JSON.stringify({
-          reason: currentJob?.status === "uploaded"
-            ? "Operator cancelled queued upload before processing started."
-            : "Operator reset before final confirmation.",
-        }),
-      }).then(() => {
-        queryClient.setQueryData(["pacs", "remap", "active-job"], { job: null, comparison: null });
-        void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
-        void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-      }).catch((error: unknown) => {
-        setErrorMessage(error instanceof Error ? error.message : "Pending secure staging could not be cancelled.");
-      });
-    }
     setFiles([]);
     setScanResult(null);
     setSelectedStudyInstanceUid("");
@@ -1122,8 +1117,11 @@ export default function PacsRemapPage() {
     setUploadTotal(0);
     setSecureStagingStatus("idle");
     setJobId(null);
+    setAutoResumeDismissed(true);
     setErrorMessage("");
     setErrorDetails("");
+    setRetryActionError("");
+    setRetryActionErrorDetails("");
     setPreviewWarning("");
     setGatewayUploadLimitRejected(false);
     setSuccessMessage("");
@@ -1136,6 +1134,26 @@ export default function PacsRemapPage() {
     stageSourceMutation.reset();
     processMutation.reset();
     confirmStagedMutation.reset();
+  };
+
+  const cancelUnconfirmedDraftAndReset = (): void => {
+    const cancellableJobId = effectiveJobId
+      && secureStagingStatus === "awaiting_confirmation"
+      && (!currentJob || isAwaitingStagedJob(currentJob))
+      ? effectiveJobId
+      : null;
+    resetWorkflow();
+    if (!cancellableJobId) return;
+    void api(`/pacs/remap/jobs/${cancellableJobId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "Operator cancelled secure staging before final confirmation." }),
+    }).then(() => {
+      queryClient.setQueryData(["pacs", "remap", "active-job"], { job: null, comparison: null });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "active-job"] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    }).catch((error: unknown) => {
+      setErrorMessage(error instanceof Error ? error.message : "Pending secure staging could not be cancelled.");
+    });
   };
 
   const stepLabels = language === "ar"
@@ -1208,6 +1226,16 @@ export default function PacsRemapPage() {
                     : `${uploadPercent}%`}
               </span>
             </div>
+            {!stagingCompleted && secureStagingStatus !== "failed" && (
+              <div className="mt-2">
+                <RemapProgressBar
+                  label={language === "ar" ? "تقدم رفع المصدر الآمن" : "Secure source staging progress"}
+                  value={uploadTotal > 0 ? uploadLoaded : null}
+                  max={uploadTotal > 0 ? uploadTotal : null}
+                  detail={uploadTotal > 0 ? `${formatBytes(uploadLoaded)} / ${formatBytes(uploadTotal)}` : undefined}
+                />
+              </div>
+            )}
             <p className="mt-1">
               {stagingCompleted
                 ? (language === "ar" ? "لن تبدأ المعالجة أو الإرسال قبل التأكيد النهائي." : "Backend validation, rewriting and PACS sending will not start before final confirmation.")
@@ -1220,7 +1248,7 @@ export default function PacsRemapPage() {
                 {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
               </p>
             )}
-            <button type="button" onClick={resetWorkflow} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
+            <button type="button" onClick={cancelUnconfirmedDraftAndReset} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
               {language === "ar" ? "إلغاء الرفع الآمن وإعادة البدء" : "Cancel secure staging and reset"}
             </button>
           </section>
@@ -1228,11 +1256,6 @@ export default function PacsRemapPage() {
 
         <div {...activeCardProps}>
           {effectiveUiStep === "source" && <>
-            {checkingForActiveJob && (
-              <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900" role="status">
-                {t(language, "pacs.remap.checkingActiveJob")}
-              </div>
-            )}
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <h3 ref={mainHeadingRef} id="remap-active-step" tabIndex={-1} className="text-lg font-semibold" style={{ color: "var(--text)" }}>
                 {stepLabels[0]}
@@ -1259,9 +1282,8 @@ export default function PacsRemapPage() {
                   key={`files-${fileInputVersion}`}
                   type="file"
                   multiple
-                  disabled={checkingForActiveJob}
                   onChange={(event) => {
-                    if (checkingForActiveJob) return;
+                    setAutoResumeDismissed(true);
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     cancelActiveStagingUpload();
@@ -1292,9 +1314,8 @@ export default function PacsRemapPage() {
                   key={`folder-${fileInputVersion}`}
                   type="file"
                   multiple
-                  disabled={checkingForActiveJob}
                   onChange={(event) => {
-                    if (checkingForActiveJob) return;
+                    setAutoResumeDismissed(true);
                     const selectedFiles = Array.from(event.target.files || []);
                     cancelActiveFullScan();
                     cancelActiveStagingUpload();
@@ -1329,14 +1350,26 @@ export default function PacsRemapPage() {
                 <p className="font-semibold" aria-live="polite">
                   {completeScanStatus === "running" ? t(language, "pacs.remap.completeScanRunning") : completeScanStatus === "complete" ? t(language, "pacs.remap.completeScanComplete") : completeScanStatus === "failed" ? t(language, "pacs.remap.completeScanFailed") : completeScanStatus === "skipped" ? t(language, "pacs.remap.completeScanSkipped") : t(language, "pacs.remap.quickPreviewComplete")}
                 </p>
-                {scanProgress && <p>{t(language, "pacs.remap.scanProgress", { processed: scanProgress.processedFileCount, total: scanProgress.candidateFileCount, parsed: scanProgress.parsedDicomFileCount, unparsed: scanProgress.unparsedCount, studies: scanProgress.studyCount })}</p>}
+                {scanProgress && <>
+                  <p>{t(language, "pacs.remap.scanProgress", { processed: scanProgress.processedFileCount, total: scanProgress.candidateFileCount, parsed: scanProgress.parsedDicomFileCount, unparsed: scanProgress.unparsedCount, studies: scanProgress.studyCount })}</p>
+                  {scanProgress.candidateFileCount > 0 && (
+                    <div className="mt-2">
+                      <RemapProgressBar
+                        label={language === "ar" ? "تقدم الفحص الكامل" : "Complete scan progress"}
+                        value={scanProgress.processedFileCount}
+                        max={scanProgress.candidateFileCount}
+                        detail={`${scanProgress.processedFileCount} / ${scanProgress.candidateFileCount}`}
+                      />
+                    </div>
+                  )}
+                </>}
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => scanMutation.mutate(files)}
-                disabled={checkingForActiveJob || files.length === 0 || scanMutation.isPending || processMutation.isPending}
+                disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
                 className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
               >
                 {scanMutation.isPending ? t(language, "pacs.remap.scanningFiles") : t(language, "pacs.remap.scanSelected")}
@@ -1814,7 +1847,15 @@ export default function PacsRemapPage() {
                   <p>{language === "ar"
                     ? "تم تسجيل التأكيد. يستمر الرفع الآمن؛ وستبدأ المعالجة تلقائياً."
                     : "Confirmation recorded. Secure staging is continuing; processing will start automatically."}</p>
-                  <button type="button" onClick={resetWorkflow} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
+                  <div className="mt-2">
+                    <RemapProgressBar
+                      label={language === "ar" ? "تقدم رفع المصدر الآمن" : "Secure source staging progress"}
+                      value={uploadTotal > 0 ? uploadLoaded : null}
+                      max={uploadTotal > 0 ? uploadTotal : null}
+                      detail={uploadTotal > 0 ? `${formatBytes(uploadLoaded)} / ${formatBytes(uploadTotal)}` : undefined}
+                    />
+                  </div>
+                  <button type="button" onClick={cancelUnconfirmedDraftAndReset} className="mt-2 rounded-lg border border-teal-300 bg-white px-3 py-1.5 font-semibold text-teal-900">
                     {language === "ar" ? "إلغاء الرفع الآمن وإعادة البدء" : "Cancel secure staging and reset"}
                   </button>
                 </div>
@@ -1858,6 +1899,29 @@ export default function PacsRemapPage() {
                 {effectiveProcessingStage !== "uploading" && effectiveProcessingStage !== "enqueueing_send" && (currentJob ? processingStageLabel(language, currentJob.processing_stage) : t(language, "pacs.remap.waitingOrthanc"))}
                 {effectiveProcessingStage === "enqueueing_send" && t(language, "pacs.remap.sendingToPacs")}
               </p>
+              {effectiveProcessingStage === "uploading" && !(pendingStagedConfirmation && secureStagingStatus === "uploading") && (
+                <RemapProgressBar
+                  label={language === "ar" ? "تقدم رفع المصدر" : "Source upload progress"}
+                  value={uploadTotal > 0 ? uploadLoaded : null}
+                  max={uploadTotal > 0 ? uploadTotal : null}
+                  detail={uploadTotal > 0 ? `${formatBytes(uploadLoaded)} / ${formatBytes(uploadTotal)}` : undefined}
+                />
+              )}
+              {effectiveProcessingStage !== "uploading" && currentJob && (() => {
+                const progress = jobProgress(currentJob);
+                const detail = progress.max
+                  ? `${Number(currentJob.processed_file_count || 0)} / ${progress.max}`
+                  : processingStageLabel(language, currentJob.processing_stage);
+                return (
+                  <RemapProgressBar
+                    label={processingStageLabel(language, currentJob.processing_stage)}
+                    value={progress.value}
+                    max={progress.max}
+                    state={progress.state}
+                    detail={detail}
+                  />
+                );
+              })()}
               {stagedProvisionalIdentity && (
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                   {language === "ar" ? "المصدر" : "Source"}: <strong>{stagedProvisionalIdentity.patientName || stagedProvisionalIdentity.patientId || "—"}</strong>
@@ -1872,20 +1936,9 @@ export default function PacsRemapPage() {
                   {currentJob.processing_attempt_count ? ` • ${language === "ar" ? "المحاولة" : "Attempt"}: ${currentJob.processing_attempt_count}` : ""}
                 </p>
               )}
-              {currentJob?.status === "uploaded" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const confirmed = window.confirm(
-                      language === "ar"
-                        ? "هل تريد إلغاء هذا الرفع المنتظر وحذف الملفات المرحلية والبدء من جديد؟"
-                        : "Cancel this queued upload, remove its securely staged files, and start again?",
-                    );
-                    if (confirmed) resetWorkflow();
-                  }}
-                  className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm"
-                >
-                  {language === "ar" ? "إلغاء الرفع المنتظر والبدء من جديد" : "Cancel queued upload and start again"}
+              {currentJob && ["uploaded", "processing", "remapped", "sending"].includes(currentJob.status) && (
+                <button type="button" onClick={resetWorkflow} className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm">
+                  {t(language, "pacs.remap.startNewUpload")}
                 </button>
               )}
               {effectiveProcessingStage === "enqueueing_send" && currentJob?.send_error_code && (
@@ -1900,15 +1953,43 @@ export default function PacsRemapPage() {
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-lg font-semibold">{stepLabels[4]}</h3>
               {isTerminalSuccess ? (
-                <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>
+                  <RemapProgressBar label={language === "ar" ? "اكتملت معالجة DICOM" : "DICOM remap completed"} value={1} max={1} state="success" />
+                </div>
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-red-700">{visibleErrorMessage || t(language, "pacs.remap.failure")}</p>
+                  {currentJob?.error_message && currentJob.error_message !== visibleErrorMessage && (
+                    <p className="text-sm text-red-700">{currentJob.error_message}</p>
+                  )}
+                  <RemapProgressBar label={language === "ar" ? "توقفت معالجة DICOM" : "DICOM remap stopped"} state="failed" detail={language === "ar" ? "فشل" : "Failed"} />
+                  {currentJob && (
+                    <dl className="grid grid-cols-1 gap-1 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800 sm:grid-cols-2">
+                      {currentJob.processing_error_code && <div><dt className="font-semibold">Processing error</dt><dd className="font-mono">{currentJob.processing_error_code}</dd></div>}
+                      {currentJob.send_error_code && <div><dt className="font-semibold">Send error</dt><dd className="font-mono">{currentJob.send_error_code}</dd></div>}
+                      {currentJob.orthanc_send_job_id && <div><dt className="font-semibold">Orthanc job ID</dt><dd className="break-all font-mono">{currentJob.orthanc_send_job_id}</dd></div>}
+                      <div><dt className="font-semibold">Send attempts</dt><dd>{currentJob.send_attempt_count || 0}</dd></div>
+                      {currentJob.processing_attempt_count != null && <div><dt className="font-semibold">Processing attempts</dt><dd>{currentJob.processing_attempt_count}</dd></div>}
+                    </dl>
+                  )}
                   {visibleErrorDetails && (
                     <details className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
                       <summary className="cursor-pointer font-medium">Technical details</summary>
                       <pre className="mt-2 whitespace-pre-wrap break-words">{visibleErrorDetails}</pre>
                     </details>
+                  )}
+                  {currentJob?.processing_error_details && currentJob?.send_error_details && (
+                    <details className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                      <summary className="cursor-pointer font-medium">Send error details</summary>
+                      <pre className="mt-2 whitespace-pre-wrap break-words">{formatTechnicalDetails(currentJob.send_error_details)}</pre>
+                    </details>
+                  )}
+                  {retryActionError && (
+                    <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-950" role="alert">
+                      <p><strong>{language === "ar" ? "فشل إجراء إعادة الإرسال" : "Resend action failed"}:</strong> {retryActionError}</p>
+                      {retryActionErrorDetails && <pre className="mt-1 whitespace-pre-wrap break-words">{retryActionErrorDetails}</pre>}
+                    </div>
                   )}
                 </div>
               )}
@@ -1975,6 +2056,17 @@ export default function PacsRemapPage() {
                   >
                     <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
                     {(job.status === "uploaded" || job.status === "processing") && <p className="text-[11px]">{processingStageLabel(language, job.processing_stage)} • {job.processed_file_count || 0}/{job.staged_file_count || "—"}</p>}
+                    {["uploaded", "processing", "remapped", "sending", "sent", "failed"].includes(job.status) && (() => {
+                      const progress = jobProgress(job);
+                      return <RemapProgressBar
+                        compact
+                        label={`${language === "ar" ? "المهمة" : "Job"} #${job.id}: ${processingStageLabel(language, job.processing_stage)}`}
+                        value={progress.value}
+                        max={progress.max}
+                        state={progress.state}
+                        detail={progress.max ? `${Number(job.processed_file_count || 0)} / ${progress.max}` : processingStageLabel(language, job.processing_stage)}
+                      />;
+                    })()}
                     <p className="truncate"><strong>{job.original_patient_name || "—"}</strong></p>
                     <p className="truncate">{job.replacement_patient_name || "—"} • {job.destination_pacs_key || "—"}</p>
                     {isSendFailedJob(job) && (

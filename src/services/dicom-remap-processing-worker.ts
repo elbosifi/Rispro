@@ -19,10 +19,16 @@ let claimJob = claimNextDicomRemapProcessingJob;
 let processJob = processClaimedDicomRemapJob;
 let cleanupStaging = cleanupExpiredDicomRemapStaging;
 
-export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: number; leaseSeconds?: number; owner?: string } = {}): Promise<{ claimed: number; completed: number; failed: number }> {
+function normalizeProcessingConcurrency(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(Math.floor(parsed), 8)) : 4;
+}
+
+export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: number; concurrency?: number; leaseSeconds?: number; owner?: string } = {}): Promise<{ claimed: number; completed: number; failed: number }> {
   if (tickRunning || stopped) return { claimed: 0, completed: 0, failed: 0 };
   tickRunning = true;
   const batchSize = Math.max(1, Math.min(options.batchSize ?? 5, 25));
+  const concurrency = normalizeProcessingConcurrency(options.concurrency);
   const leaseSeconds = Math.max(30, Math.min(options.leaseSeconds ?? 120, 3600));
   const owner = options.owner || workerId;
   let claimed = 0;
@@ -33,22 +39,31 @@ export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: n
       Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72)),
       Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24))
     ).catch(() => 0);
-    for (let index = 0; index < batchSize && !stopped; index += 1) {
-      const claim = await claimJob(owner, leaseSeconds);
-      if (!claim) break;
-      claimed += 1;
-      try {
-        await processJob({ job: claim.job, leaseOwner: owner, leaseSeconds });
-        completed += 1;
-      } catch (error) {
-        failed += 1;
-        console.warn(JSON.stringify({
-          type: "dicom_remap_processing_failed",
-          remapJobId: claim.job.id,
-          errorCode: (error as { details?: { code?: string } })?.details?.code || "DICOM_REMAP_PROCESSING_FAILED",
-        }));
+    let queueExhausted = false;
+    let claimAttempts = 0;
+    const runLane = async (): Promise<void> => {
+      while (!stopped && !queueExhausted && claimAttempts < batchSize) {
+        claimAttempts += 1;
+        const claim = await claimJob(owner, leaseSeconds);
+        if (!claim) {
+          queueExhausted = true;
+          return;
+        }
+        claimed += 1;
+        try {
+          await processJob({ job: claim.job, leaseOwner: owner, leaseSeconds });
+          completed += 1;
+        } catch (error) {
+          failed += 1;
+          console.warn(JSON.stringify({
+            type: "dicom_remap_processing_failed",
+            remapJobId: claim.job.id,
+            errorCode: (error as { details?: { code?: string } })?.details?.code || "DICOM_REMAP_PROCESSING_FAILED",
+          }));
+        }
       }
-    }
+    };
+    await Promise.allSettled(Array.from({ length: Math.min(concurrency, batchSize) }, () => runLane()));
     return { claimed, completed, failed };
   } finally {
     tickRunning = false;
@@ -71,19 +86,21 @@ export const __dicomRemapProcessingWorkerTestables = {
     cleanupStaging = cleanupExpiredDicomRemapStaging;
     stopped = false;
   },
+  normalizeProcessingConcurrency,
 };
 
-export async function startDicomRemapProcessingWorker(options?: { intervalMs?: number; batchSize?: number; leaseSeconds?: number }): Promise<DicomRemapProcessingWorker> {
+export async function startDicomRemapProcessingWorker(options?: { intervalMs?: number; batchSize?: number; concurrency?: number; leaseSeconds?: number }): Promise<DicomRemapProcessingWorker> {
   const intervalMs = Math.max(1_000, options?.intervalMs ?? Number(process.env.DICOM_REMAP_PROCESSING_WORKER_INTERVAL_MS || 5_000));
   const batchSize = Math.max(1, Math.min(options?.batchSize ?? Number(process.env.DICOM_REMAP_PROCESSING_BATCH_SIZE || 5), 25));
+  const concurrency = normalizeProcessingConcurrency(options?.concurrency ?? process.env.DICOM_REMAP_PROCESSING_CONCURRENCY);
   const leaseSeconds = Math.max(30, Math.min(options?.leaseSeconds ?? Number(process.env.DICOM_REMAP_PROCESSING_LEASE_SECONDS || 120), 3600));
   stopped = false;
-  console.info(JSON.stringify({ type: "dicom_remap_processing_worker_started", intervalMs, batchSize, leaseSeconds }));
-  await runDicomRemapProcessingWorkerTick({ batchSize, leaseSeconds }).catch((error) => {
+  console.info(JSON.stringify({ type: "dicom_remap_processing_worker_started", intervalMs, batchSize, concurrency, leaseSeconds }));
+  await runDicomRemapProcessingWorkerTick({ batchSize, concurrency, leaseSeconds }).catch((error) => {
     console.warn(JSON.stringify({ type: "dicom_remap_processing_worker_startup_tick_failed", error: error instanceof Error ? error.message : "unknown" }));
   });
   intervalHandle = setInterval(() => {
-    void runDicomRemapProcessingWorkerTick({ batchSize, leaseSeconds }).catch((error) => {
+    void runDicomRemapProcessingWorkerTick({ batchSize, concurrency, leaseSeconds }).catch((error) => {
       console.warn(JSON.stringify({ type: "dicom_remap_processing_worker_tick_failed", error: error instanceof Error ? error.message : "unknown" }));
     });
   }, intervalMs);
