@@ -98,6 +98,7 @@ interface Destination {
 }
 
 const EMPTY_DESTINATIONS: Destination[] = [];
+const RECENT_JOB_POLL_STATUSES = new Set<JobStatus>(["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"]);
 
 interface PatientOption {
   id: number;
@@ -363,6 +364,7 @@ export default function PacsRemapPage() {
   const [studyDateMode, setStudyDateMode] = useState<"today" | "yesterday" | "custom">("today");
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
   const [jobId, setJobId] = useState<number | null>(null);
+  const [viewedRecentJobId, setViewedRecentJobId] = useState<number | null>(null);
   const [autoResumeDismissed, setAutoResumeDismissed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
@@ -395,6 +397,7 @@ export default function PacsRemapPage() {
   const previewUnavailableRunIdRef = useRef<number | null>(null);
   const latestPartialScanResultRef = useRef<DicomStudyScanResult | null>(null);
   const pendingStagedConfirmationRef = useRef<StagedConfirmationSnapshot | null>(null);
+  const localWorkflowStepBeforeRecentRef = useRef<RemapWizardUiStep>("source");
 
   const clearPendingStagedConfirmation = useCallback((): void => {
     pendingStagedConfirmationRef.current = null;
@@ -484,6 +487,10 @@ export default function PacsRemapPage() {
   const jobsQuery = useQuery({
     queryKey: ["pacs", "remap", "jobs"],
     queryFn: () => api<{ jobs: RemapJob[] }>("/pacs/remap/jobs?limit=20"),
+    refetchInterval: (query) => {
+      const jobs = (query.state.data as { jobs?: RemapJob[] } | undefined)?.jobs || [];
+      return jobs.some((job) => RECENT_JOB_POLL_STATUSES.has(job.status)) ? 2_000 : false;
+    },
   });
 
   const activeJobQuery = useQuery({
@@ -540,12 +547,12 @@ export default function PacsRemapPage() {
   const attachToExistingRemapJob = useCallback((activeJobId: number): void => {
     if (!Number.isSafeInteger(activeJobId) || activeJobId <= 0) return;
     focusHeadingAfterNavigationRef.current = true;
+    setViewedRecentJobId(activeJobId);
+    setAutoResumeDismissed(true);
+    setRetryActionError("");
+    setRetryActionErrorDetails("");
     setJobId(activeJobId);
     setUiStep("processing");
-    setProcessingStage("queued");
-    setErrorMessage("");
-    setErrorDetails("");
-    setSuccessMessage("");
     setResumedJobMessage(t(language, "pacs.remap.existingJobResumed", { jobId: activeJobId }));
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", activeJobId] });
     void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
@@ -912,6 +919,9 @@ export default function PacsRemapPage() {
   });
 
   const currentJob = (currentJobQuery.data?.job || startupActiveJob || null) as RemapJob;
+  const viewingPersistedJob = effectiveUiStep === "processing"
+    && viewedRecentJobId != null
+    && currentJob?.id === viewedRecentJobId;
   const stagedProvisionalIdentity = Number(currentJob?.staged_manifest_version) === 2
     ? currentJob.provisional_source_identity || null
     : null;
@@ -959,10 +969,41 @@ export default function PacsRemapPage() {
       : selectedDirectoryPatient
         ? formatDirectoryPatientName(language, selectedDirectoryPatient)
         : null;
-  const effectiveSelectedPatientLabel = selectedPatientLabel
-    || currentJob?.replacement_patient_name
-    || (currentJob?.rispro_patient_id ? formatFallbackPatientLabel(language, currentJob.rispro_patient_id) : null);
-  const displayedDestinationKey = currentJob?.destination_pacs_key || effectiveSelectedDestinationKey;
+  const displayedSourceIdentity = viewingPersistedJob
+    ? {
+      patientId: currentJob.original_patient_id || stagedProvisionalIdentity?.patientId || "",
+      patientName: currentJob.original_patient_name || stagedProvisionalIdentity?.patientName || "",
+    }
+    : {
+      patientId: selectedStudy?.patientId || stagedProvisionalIdentity?.patientId || "",
+      patientName: selectedStudy?.patientName || stagedProvisionalIdentity?.patientName || "",
+    };
+  const displayedReplacementIdentity = viewingPersistedJob
+    ? {
+      patientId: currentJob.replacement_patient_id || (currentJob.rispro_patient_id ? String(currentJob.rispro_patient_id) : ""),
+      patientName: currentJob.replacement_patient_name || "",
+    }
+    : {
+      patientId: replacementPreviewQuery.data?.patientId || "",
+      patientName: selectedPatientLabel || replacementPreviewQuery.data?.patientName || "",
+    };
+  const displayedStudyUid = viewingPersistedJob
+    ? currentJob.selected_study_instance_uid || stagedProvisionalIdentity?.studyInstanceUid || ""
+    : selectedStudy?.studyInstanceUid || selectedStudyInstanceUid;
+  const displayedStudySummary = viewingPersistedJob
+    ? displayedStudyUid
+    : selectedStudy?.studyDescription || selectedStudy?.modality || "";
+  const displayedStudyFileCount = viewingPersistedJob
+    ? Number(currentJob.staged_file_count || 0)
+    : Number(selectedStudy?.fileCount || 0);
+  const effectiveSelectedPatientLabel = viewingPersistedJob
+    ? displayedReplacementIdentity.patientName || displayedReplacementIdentity.patientId || null
+    : selectedPatientLabel
+      || currentJob?.replacement_patient_name
+      || (currentJob?.rispro_patient_id ? formatFallbackPatientLabel(language, currentJob.rispro_patient_id) : null);
+  const displayedDestinationKey = viewingPersistedJob
+    ? currentJob.destination_pacs_key || ""
+    : currentJob?.destination_pacs_key || effectiveSelectedDestinationKey;
   const stagingCompleted = secureStagingStatus === "awaiting_confirmation" || isAwaitingStagedJob(currentJob);
   const canContinueStudy = fastStagedWorkflow
     ? Boolean(selectedStudy)
@@ -1041,6 +1082,7 @@ export default function PacsRemapPage() {
   const openRecentJob = (id: number): void => {
     const hasDraft = files.length > 0 || !!selectedPatientId || !!effectiveSelectedDestinationKey;
     if (effectiveUiStep !== "processing" && hasDraft && !window.confirm(language === "ar" ? "سيتم فتح المهمة دون حذف المسودة الحالية. هل تريد المتابعة؟" : "Open this job without discarding the current draft?")) return;
+    if (!viewingPersistedJob) localWorkflowStepBeforeRecentRef.current = uiStep;
     attachToExistingRemapJob(id);
   };
 
@@ -1057,6 +1099,7 @@ export default function PacsRemapPage() {
     void refetchActiveJob().then((result) => {
       if (!active || result.data?.job || jobId == null) return;
       setJobId(null);
+      setViewedRecentJobId(null);
       setProcessingStage("idle");
       setUiStep("source");
       setResumedJobMessage("");
@@ -1091,10 +1134,15 @@ export default function PacsRemapPage() {
         "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND",
       ].includes(currentJob?.processing_error_code || "")
         ? t(language, "pacs.remap.serverVerificationFailed")
-        : errorMessage || currentJob?.error_message || "";
-  const visibleErrorDetails = errorDetails || (currentJob?.processing_error_details ? formatTechnicalDetails(currentJob.processing_error_details) : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "");
+        : viewingPersistedJob
+          ? currentJob?.error_message || ""
+          : errorMessage || currentJob?.error_message || "";
+  const persistedJobErrorDetails = currentJob?.processing_error_details
+    ? formatTechnicalDetails(currentJob.processing_error_details)
+    : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "";
+  const visibleErrorDetails = viewingPersistedJob ? persistedJobErrorDetails : errorDetails || persistedJobErrorDetails;
   const visibleSuccessMessage =
-    isTerminalFailure
+    isTerminalFailure || viewingPersistedJob
       ? ""
       : successMessage;
 
@@ -1117,6 +1165,7 @@ export default function PacsRemapPage() {
     setUploadTotal(0);
     setSecureStagingStatus("idle");
     setJobId(null);
+    setViewedRecentJobId(null);
     setAutoResumeDismissed(true);
     setErrorMessage("");
     setErrorDetails("");
@@ -1134,6 +1183,21 @@ export default function PacsRemapPage() {
     stageSourceMutation.reset();
     processMutation.reset();
     confirmStagedMutation.reset();
+  };
+
+  const startNewUpload = (): void => {
+    if (!viewingPersistedJob) {
+      resetWorkflow();
+      return;
+    }
+    focusHeadingAfterNavigationRef.current = true;
+    setJobId(null);
+    setViewedRecentJobId(null);
+    setAutoResumeDismissed(true);
+    setRetryActionError("");
+    setRetryActionErrorDetails("");
+    setResumedJobMessage("");
+    setUiStep(localWorkflowStepBeforeRecentRef.current);
   };
 
   const cancelUnconfirmedDraftAndReset = (): void => {
@@ -1208,10 +1272,10 @@ export default function PacsRemapPage() {
       <div className="mx-auto max-w-5xl space-y-4">
         <section className="card-shell flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-xs" aria-label={language === "ar" ? "ملخص الاختيارات" : "Selection summary"}>
           <strong className="w-full text-sm sm:w-auto">{language === "ar" ? "ملخص الاختيارات" : "Selected context"}</strong>
-          <span className={!selectedStudy ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.studyLabel")}:</b> {selectedStudy?.studyDescription || (selectedStudy ? selectedStudy.modality : "—") || (language === "ar" ? "غير مكتملة" : "Not selected")}{selectedStudy ? ` • ${selectedStudy.fileCount} ${language === "ar" ? "ملف" : "files"}` : ""}</span>
-          <span className={!effectiveSelectedPatientLabel ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.selectedRISProPatient")}:</b> {effectiveSelectedPatientLabel || (language === "ar" ? "غير مكتمل" : "Not selected")}</span>
-          <span className={!displayedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || (language === "ar" ? "غير مكتملة" : "Not selected")}</span>
-          {skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
+          <span className={!displayedStudySummary ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.studyLabel")}:</b> {displayedStudySummary || (viewingPersistedJob ? "—" : language === "ar" ? "غير مكتملة" : "Not selected")}{displayedStudySummary && displayedStudyFileCount > 0 ? ` • ${displayedStudyFileCount} ${language === "ar" ? "ملف" : "files"}` : ""}</span>
+          <span className={!effectiveSelectedPatientLabel ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.selectedRISProPatient")}:</b> {effectiveSelectedPatientLabel || (viewingPersistedJob ? "—" : language === "ar" ? "غير مكتمل" : "Not selected")}</span>
+          <span className={!displayedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || (viewingPersistedJob ? "—" : language === "ar" ? "غير مكتملة" : "Not selected")}</span>
+          {!viewingPersistedJob && skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
         </section>
 
         {fastStagedWorkflow && effectiveUiStep !== "processing" && (
@@ -1922,7 +1986,14 @@ export default function PacsRemapPage() {
                   />
                 );
               })()}
-              {stagedProvisionalIdentity && (
+              {viewingPersistedJob ? (
+                <dl className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2" aria-label={language === "ar" ? "سياق المهمة المحفوظ" : "Persisted job context"}>
+                  <div><dt className="font-semibold">Study Instance UID</dt><dd className="break-all font-mono">{displayedStudyUid || "—"}</dd></div>
+                  <div><dt className="font-semibold">{language === "ar" ? "مريض المصدر" : "Source patient"}</dt><dd>{displayedSourceIdentity.patientName || displayedSourceIdentity.patientId || "—"}</dd></div>
+                  <div><dt className="font-semibold">{t(language, "pacs.remap.selectedRISProPatient")}</dt><dd>{displayedReplacementIdentity.patientName || displayedReplacementIdentity.patientId || "—"}</dd></div>
+                  <div><dt className="font-semibold">{t(language, "pacs.remap.destinationLabel")}</dt><dd>{destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || "—"}</dd></div>
+                </dl>
+              ) : stagedProvisionalIdentity && (
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                   {language === "ar" ? "المصدر" : "Source"}: <strong>{stagedProvisionalIdentity.patientName || stagedProvisionalIdentity.patientId || "—"}</strong>
                   {" · "}Study Instance UID: <span className="font-mono">{stagedProvisionalIdentity.studyInstanceUid}</span>
@@ -1937,7 +2008,7 @@ export default function PacsRemapPage() {
                 </p>
               )}
               {currentJob && ["uploaded", "processing", "remapped", "sending"].includes(currentJob.status) && (
-                <button type="button" onClick={resetWorkflow} className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm">
+                <button type="button" onClick={startNewUpload} className="btn-secondary w-fit rounded-lg px-3 py-2 text-sm">
                   {t(language, "pacs.remap.startNewUpload")}
                 </button>
               )}
@@ -1997,7 +2068,7 @@ export default function PacsRemapPage() {
                 {gatewayUploadLimitRejected ? (
                   <button type="button" onClick={() => navigateTo("review")} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.backToReview")}</button>
                 ) : (
-                  <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
+                  <button type="button" onClick={startNewUpload} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
                 )}
                 {jobId && (
                   <>

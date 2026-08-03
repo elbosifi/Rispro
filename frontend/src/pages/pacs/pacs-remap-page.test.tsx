@@ -199,6 +199,30 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/32");
   });
 
+  it("keeps Source available when multiple awaiting-confirmation drafts require explicit Recent Jobs selection", async () => {
+    const awaitingDrafts = [41, 42].map((id) => ({
+      id,
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_confirmation",
+      staged_manifest_version: 2,
+      staged_file_count: 2,
+      provisional_source_identity: { studyInstanceUid: `1.2.${id}`, patientId: `P-${id}`, patientName: `Draft^${id}` },
+    }));
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: awaitingDrafts });
+      return Promise.resolve({ items: [] });
+    });
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByText(/resumed automatically/i)).toBeNull();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    expect(await screen.findByRole("button", { name: /#41.*Awaiting confirmation/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /#42.*Awaiting confirmation/i })).toBeTruthy();
+  });
+
   it("shows a queued job in Recent Jobs and starting another upload does not cancel it", async () => {
     const uploadedJob = {
       id: 52,
@@ -245,6 +269,130 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
     expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/52/cancel", expect.anything());
     expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/53/cancel", expect.anything());
+  });
+
+  it("isolates an opened persisted job from the preserved local draft", async () => {
+    const draftStudy = {
+      ...study("1.2.draft-a", "Draft Study A"),
+      patientId: "DRAFT-SOURCE-A",
+      patientName: "Draft^SourceA",
+    };
+    const persistedJob = {
+      id: 77,
+      status: "processing",
+      processing_stage: "rewriting",
+      selected_study_instance_uid: "9.9.job-b",
+      original_patient_id: "JOB-SOURCE-B",
+      original_patient_name: "Persisted^SourceB",
+      replacement_patient_id: "JOB-TARGET-B",
+      replacement_patient_name: "Persisted^TargetB",
+      destination_pacs_key: "DEST-B",
+      staged_file_count: 8,
+      processed_file_count: 4,
+      send_attempt_count: 0,
+    };
+    previewMock.mockResolvedValue(result([draftStudy]));
+    scanMock.mockResolvedValue(result([draftStudy]));
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [
+        { key: "DEST-A", name: "Draft Destination A" },
+        { key: "DEST-B", name: "Persisted Destination B" },
+      ] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [persistedJob] });
+      if (path === "/pacs/remap/jobs/77") return Promise.resolve({ job: persistedJob, comparison: null });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 301, patient_id: 31, appointment_date: "2026-01-01", english_full_name: "Draft Patient A", national_id: "DRAFT-A" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "DRAFT-A", patientName: "Draft^PatientA", patientSex: "F", patientBirthDate: "19920202" } });
+      return Promise.resolve({ items: [] });
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Draft Patient A/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "DEST-A" } });
+
+    const draftSummary = screen.getByLabelText("Selection summary");
+    expect(draftSummary.textContent).toContain("Draft Study A");
+    expect(draftSummary.textContent).toContain("Draft Patient A");
+    expect(draftSummary.textContent).toContain("Draft Destination A");
+
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#77.*Processing/i }));
+    expect(await screen.findByRole("heading", { name: "Processing" })).toBeTruthy();
+
+    const persistedContext = await screen.findByLabelText("Persisted job context");
+    const persistedSummary = screen.getByLabelText("Selection summary");
+    expect(persistedContext.textContent).toContain("Persisted^SourceB");
+    expect(persistedContext.textContent).toContain("Persisted^TargetB");
+    expect(persistedContext.textContent).toContain("9.9.job-b");
+    expect(persistedContext.textContent).toContain("Persisted Destination B");
+    expect(persistedSummary.textContent).toContain("9.9.job-b");
+    expect(persistedSummary.textContent).toContain("Persisted^TargetB");
+    expect(persistedSummary.textContent).toContain("Persisted Destination B");
+    expect(`${persistedContext.textContent} ${persistedSummary.textContent}`).not.toMatch(/Draft Study A|Draft Patient A|Draft\^SourceA|Draft Destination A|1\.2\.draft-a/);
+    expect(screen.getByRole("progressbar", { name: "Rewriting DICOM" }).getAttribute("aria-valuenow")).toBe("50");
+    expect(screen.getByText(/Job status: Processing/).textContent).toContain("4/8");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start new upload" }));
+    expect(await screen.findByRole("heading", { name: "Destination" })).toBeTruthy();
+    const restoredSummary = screen.getByLabelText("Selection summary");
+    expect(restoredSummary.textContent).toContain("Draft Study A");
+    expect(restoredSummary.textContent).toContain("Draft Patient A");
+    expect(restoredSummary.textContent).toContain("Draft Destination A");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("DEST-A");
+    expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/77/cancel", expect.anything());
+  });
+
+  it("polls Recent Jobs only while background work is non-terminal and refreshes progress without opening it", async () => {
+    vi.useFakeTimers();
+    try {
+      let jobsRequestCount = 0;
+      apiMock.mockImplementation((path: string) => {
+        if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+        if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+        if (path === "/pacs/remap/jobs?limit=20") {
+          jobsRequestCount += 1;
+          const job = jobsRequestCount === 1
+            ? { id: 78, status: "processing", processing_stage: "rewriting", staged_file_count: 4, processed_file_count: 1 }
+            : jobsRequestCount === 2
+              ? { id: 78, status: "processing", processing_stage: "rewriting", staged_file_count: 4, processed_file_count: 3 }
+              : { id: 78, status: "sent", processing_stage: "completed", staged_file_count: 4, processed_file_count: 4 };
+          return Promise.resolve({ jobs: [job] });
+        }
+        return Promise.resolve({ items: [] });
+      });
+
+      renderPage();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      fireEvent.click(screen.getByText("View recent jobs"));
+      expect(screen.getByRole("progressbar", { name: /Job #78/i }).getAttribute("aria-valuenow")).toBe("25");
+      expect(screen.getByRole("heading", { name: "Source" })).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+        await Promise.resolve();
+      });
+      expect(jobsRequestCount).toBe(2);
+      expect(screen.getByRole("progressbar", { name: /Job #78/i }).getAttribute("aria-valuenow")).toBe("75");
+      expect(screen.getByRole("heading", { name: "Source" })).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+        await Promise.resolve();
+      });
+      expect(screen.getByRole("progressbar", { name: /Job #78/i }).getAttribute("aria-valuenow")).toBe("100");
+      const terminalRequestCount = jobsRequestCount;
+      await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+      expect(jobsRequestCount).toBe(terminalRequestCount);
+      expect(apiMock).not.toHaveBeenCalledWith("/pacs/remap/jobs/78");
+      expect(screen.getByRole("heading", { name: "Source" })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps quick preview and complete scan inside Source and gates Continue", async () => {

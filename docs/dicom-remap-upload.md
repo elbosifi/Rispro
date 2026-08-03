@@ -57,6 +57,8 @@ Migration `146_dicom_remap_staged_confirmation.sql` adds the confirmed selected 
 
 Migration `158_dicom_remap_multi_job_concurrency.sql` removes the obsolete one-active-remap-job-per-user index. Confirmed jobs for one operator may coexist in queued, processing, remapped, and sending states; same-job conditional transitions, leases, and persisted Orthanc send job IDs remain the duplicate-processing and duplicate-send boundaries.
 
+To roll back to an application version that assumes one active remap job per user, first stop or pause creation of new remap jobs. Allow active jobs to finish or explicitly resolve them, then verify that no user has multiple non-terminal remap jobs before rolling back the application. Recreate `dicom_remap_jobs_single_active_per_user_idx` only when permanently returning to the old model and only after every conflicting row has been resolved. Migration 158 intentionally has no destructive automatic down migration because existing jobs must never be discarded to restore the old constraint.
+
 Worker recovery and failed sends:
 
 - On startup, the worker resumes every `sending` remap job that has an Orthanc job ID; browser navigation and refresh do not cancel monitoring.
