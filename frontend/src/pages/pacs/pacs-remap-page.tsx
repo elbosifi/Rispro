@@ -2216,7 +2216,7 @@ export default function PacsRemapPage() {
                       <pre className="mt-2 whitespace-pre-wrap break-words">{visibleErrorDetails}</pre>
                     </details>
                   )}
-                  {currentJob?.processing_error_details && currentJob?.send_error_details && (
+                  {currentJob?.processing_error_details != null && currentJob?.send_error_details != null && (
                     <details className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
                       <summary className="cursor-pointer font-medium">Send error details</summary>
                       <pre className="mt-2 whitespace-pre-wrap break-words">{formatTechnicalDetails(currentJob.send_error_details)}</pre>

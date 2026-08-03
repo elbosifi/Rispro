@@ -562,8 +562,8 @@ describe("PacsRemapPage five-step wizard", () => {
       selected_study_instance_uid: "9.9.staged-b",
       staged_file_count: 3,
       provisional_source_identity: { studyInstanceUid: "9.9.staged-b", patientId: "B-SOURCE", patientName: "Staged^SourceB", patientBirthDate: "19880202", patientSex: "F", modality: "MR", studyDate: "20260720" },
-      destination_pacs_key: null,
-      rispro_patient_id: null,
+      destination_pacs_key: null as string | null,
+      rispro_patient_id: null as number | null,
     };
     let confirmedBody: Record<string, unknown> | null = null;
     previewMock.mockResolvedValue(result([draftStudy]));
@@ -673,7 +673,7 @@ describe("PacsRemapPage five-step wizard", () => {
 
   it.each(["success", "failure"] as const)("binds direct Recent Job resend %s to Job B and restores Draft A", async (outcome) => {
     const draftStudy = study("1.2.resend-draft-a", "Resend Draft A");
-    let recentJob = { id: 502, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source-b", modified_orthanc_study_id: "modified-b", selected_study_instance_uid: "9.9.resend-b", original_patient_name: "Resend^SourceB", replacement_patient_name: "Resend^TargetB", destination_pacs_key: "DEST-B", error_message: "Original Job B failure", staged_file_count: 5, processed_file_count: 5, send_attempt_count: 2 };
+    let recentJob = { id: 502, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source-b", modified_orthanc_study_id: "modified-b", selected_study_instance_uid: "9.9.resend-b", original_patient_name: "Resend^SourceB", replacement_patient_name: "Resend^TargetB", destination_pacs_key: "DEST-B", orthanc_send_job_id: null as string | null, error_message: "Original Job B failure", staged_file_count: 5, processed_file_count: 5, send_attempt_count: 2 };
     previewMock.mockResolvedValue(result([draftStudy]));
     scanMock.mockResolvedValue(result([draftStudy]));
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {
