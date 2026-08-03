@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PacsRemapPage from "./pacs-remap-page";
+import { ApiError } from "@/lib/api-client";
 import type { DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 const apiMock = vi.fn();
@@ -114,7 +115,7 @@ function deferred<T>() {
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}><PacsRemapPage /></QueryClientProvider>);
+  return { ...render(<QueryClientProvider client={qc}><PacsRemapPage /></QueryClientProvider>), queryClient: qc };
 }
 
 async function scanOne() {
@@ -459,7 +460,7 @@ describe("PacsRemapPage five-step wizard", () => {
         return Promise.resolve({ job: activeJobRequests === 1 ? null : unrelatedAwaitingJob, comparison: null });
       }
       if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [missingJob] });
-      if (path === "/pacs/remap/jobs/204") return Promise.reject(new Error("Job 204 no longer exists"));
+      if (path === "/pacs/remap/jobs/204") return Promise.reject(new ApiError("Job 204 no longer exists", 404));
       return Promise.resolve({ appointments: [], items: [] });
     });
 
@@ -471,6 +472,84 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getAllByText("The existing remap job is no longer available. You may start a new upload.").length).toBeGreaterThan(0);
     expect(activeJobRequests).toBeGreaterThan(1);
     expect(screen.queryByText(/Existing remap job #205 resumed automatically/)).toBeNull();
+  });
+
+  it("fully clears a missing auto-resumed staged workflow before a fresh upload", async () => {
+    const awaitingJob = {
+      id: 206,
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_confirmation",
+      staged_manifest_version: 2,
+      staged_file_count: 3,
+      provisional_source_identity: { studyInstanceUid: "1.2.206", patientId: "SOURCE-206", patientName: "Missing^Source", modality: "CT" },
+    };
+    let activeJobRequests = 0;
+    let jobRequests = 0;
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "MISSING-DEST", name: "Missing Destination" }, { key: "OTHER-DEST", name: "Other Destination" }] });
+      if (path === "/pacs/remap/jobs/active") {
+        activeJobRequests += 1;
+        return Promise.resolve({ job: activeJobRequests === 1 ? awaitingJob : null, comparison: null });
+      }
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [] });
+      if (path === "/pacs/remap/jobs/206") {
+        jobRequests += 1;
+        return jobRequests === 1
+          ? Promise.resolve({ job: awaitingJob, comparison: null })
+          : Promise.reject(new ApiError("Job 206 no longer exists", 404));
+      }
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [{ id: 801, patient_id: 44, appointment_date: "2026-01-01", english_full_name: "Missing Job Patient" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "TARGET-44", patientName: "Missing^Target", patientSex: "F", patientBirthDate: "19900101" } });
+      return Promise.resolve({ items: [] });
+    });
+
+    const { queryClient } = renderPage();
+    expect(await screen.findByRole("heading", { name: "Patient" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /Missing Job Patient/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "MISSING-DEST" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+
+    await queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", 206] });
+    expect(await screen.findByRole("heading", { name: "Source" })).toBeTruthy();
+    const clearedSummary = screen.getByLabelText("Selection summary");
+    expect(clearedSummary.textContent).not.toMatch(/1\.2\.206|Missing Job Patient|Missing Destination/);
+    expect(screen.queryByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." })).toBeNull();
+    expect(screen.queryByText("Secure source staging")).toBeNull();
+    expect((screen.getByLabelText("Select DICOM files") as HTMLInputElement).disabled).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["fresh"], "fresh.dcm", { type: "application/dicom" })] } });
+    expect(await screen.findByText(/Complete folder scan complete/i)).toBeTruthy();
+  });
+
+  it("preserves a viewed job through a transient retrieval error and recovers on retry", async () => {
+    const processingJob = { id: 207, status: "processing", processing_stage: "rewriting", selected_study_instance_uid: "1.2.207", original_patient_name: "Transient^Source", replacement_patient_name: "Transient^Target", destination_pacs_key: "DEST-207", staged_file_count: 6, processed_file_count: 2 };
+    let retrievalFails = true;
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "DEST-207", name: "Transient Destination" }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [processingJob] });
+      if (path === "/pacs/remap/jobs/207") return retrievalFails
+        ? Promise.reject(new ApiError("Temporary gateway failure", 500))
+        : Promise.resolve({ job: processingJob, comparison: null });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+
+    const { queryClient } = renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#207.*Processing/i }));
+
+    const retrievalAlert = await screen.findByRole("alert");
+    expect(retrievalAlert.textContent).toContain("Temporary gateway failure");
+    expect(screen.getByLabelText("Persisted job context").textContent).toContain("Transient^Source");
+    expect(screen.queryByRole("heading", { name: "Source" })).toBeNull();
+
+    retrievalFails = false;
+    await queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", 207] });
+    await waitFor(() => expect(screen.queryByText(/Temporary gateway failure/)).toBeNull());
+    expect(screen.getByLabelText("Persisted job context").textContent).toContain("Transient^Source");
   });
 
   it("isolates awaiting-confirmation Job B selections and restores local Draft A after confirmation", async () => {

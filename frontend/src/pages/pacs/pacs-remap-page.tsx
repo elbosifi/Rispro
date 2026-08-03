@@ -867,6 +867,11 @@ export default function PacsRemapPage() {
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
   });
+  const currentJobUnavailable = currentJobQuery.error instanceof ApiError
+    && (currentJobQuery.error.status === 404 || currentJobQuery.error.status === 410);
+  const transientJobRetrievalError = currentJobQuery.isError && !currentJobUnavailable
+    ? (currentJobQuery.error instanceof Error ? currentJobQuery.error.message : "Unable to refresh the selected remap job.")
+    : "";
 
   const confirmStagedMutation = useMutation({
     mutationFn: async ({
@@ -1196,7 +1201,7 @@ export default function PacsRemapPage() {
   }, [activeResumedJobId, language, startupActiveJob, uiStep]);
 
   useEffect(() => {
-    if (!effectiveJobId || !currentJobQuery.isError) return;
+    if (!effectiveJobId || !currentJobUnavailable) return;
     let active = true;
     void refetchActiveJob().then((result) => {
       if (!active || result.data?.job?.id === effectiveJobId) return;
@@ -1208,7 +1213,19 @@ export default function PacsRemapPage() {
         setUiStep(localWorkflowStepBeforeRecentRef.current);
       } else if (workflowJobId === effectiveJobId) {
         setWorkflowJobId(null);
+        if (activeResumedJobId === effectiveJobId) {
+          setActiveResumedJobId(null);
+          setResumedJobSelections((current) => {
+            if (!(effectiveJobId in current)) return current;
+            const next = { ...current };
+            delete next[effectiveJobId];
+            return next;
+          });
+        }
+        setSecureStagingStatus("idle");
+        clearPendingStagedConfirmation();
         setProcessingStage("idle");
+        setAutoResumeDismissed(true);
         setUiStep("source");
       }
       setResumedJobMessage("");
@@ -1216,7 +1233,7 @@ export default function PacsRemapPage() {
       setErrorMessage(t(language, "pacs.remap.resumedJobUnavailable"));
     });
     return () => { active = false; };
-  }, [currentJobQuery.isError, effectiveJobId, language, refetchActiveJob, viewedRecentJobId, workflowJobId]);
+  }, [activeResumedJobId, clearPendingStagedConfirmation, currentJobUnavailable, effectiveJobId, language, refetchActiveJob, viewedRecentJobId, workflowJobId]);
 
   useEffect(() => {
     if (!focusHeadingAfterNavigationRef.current) return;
@@ -1420,6 +1437,14 @@ export default function PacsRemapPage() {
           <span className={!displayedDestinationKey ? "text-slate-400" : ""}><b>{t(language, "pacs.remap.destinationLabel")}:</b> {destinations.find((destination) => destination.key === displayedDestinationKey)?.name || displayedDestinationKey || (viewingPersistedJob ? "—" : language === "ar" ? "غير مكتملة" : "Not selected")}</span>
           {!viewingPersistedJob && skippedScanMode && <span className="font-semibold text-amber-800">{t(language, "pacs.remap.folderNotFullyScanned")}</span>}
         </section>
+
+        {transientJobRetrievalError && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950" role="alert">
+            <strong>{language === "ar" ? "تعذر تحديث المهمة مؤقتًا." : "The selected job could not be refreshed temporarily."}</strong>{" "}
+            {language === "ar" ? "تم الاحتفاظ بالسياق الحالي وستحاول RISpro التحديث مرة أخرى." : "The current context was preserved and RISpro will retry."}{" "}
+            <span>{transientJobRetrievalError}</span>
+          </div>
+        )}
 
         {fastStagedWorkflow && effectiveUiStep !== "processing" && (
           <section className="rounded-2xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-950" aria-live="polite">
