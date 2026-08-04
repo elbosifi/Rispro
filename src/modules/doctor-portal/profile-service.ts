@@ -318,6 +318,150 @@ export async function updateProfileForAdmin(
   return profile;
 }
 
+type DoctorAdminUserRow = {
+  id: number;
+  username: string;
+  full_name: string;
+  role: Role;
+  is_active: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+async function lockLinkedDoctorUser(client: import("pg").PoolClient, userId: number) {
+  const result = await client.query<DoctorAdminUserRow & { profile_id: number; profile_active: boolean }>(
+    `select u.id, u.username, u.full_name, u.role, u.is_active,
+            coalesce(u.must_change_password, false) as must_change_password,
+            u.created_at, u.updated_at, dp.id as profile_id, dp.active as profile_active
+       from users u
+       join doctor_portal.doctor_profiles dp on dp.user_id = u.id
+      where u.id = $1
+      for update of u, dp`,
+    [userId]
+  );
+  const linked = result.rows[0];
+  if (!linked) throw new HttpError(404, "Linked doctor user not found.");
+  return linked;
+}
+
+function assertDoctorAccountRole(role: string): asserts role is "doctor" | "supervisor" {
+  if (role !== "doctor" && role !== "supervisor") {
+    throw new HttpError(400, "coreRole must be doctor or supervisor.");
+  }
+}
+
+export async function updateLinkedDoctorUserForAdmin(
+  actorUserId: UserId,
+  appRole: Role,
+  targetUserId: number,
+  input: { username: string; fullName: string; coreRole: string; active: boolean }
+) {
+  await requireDoctorAdmin(actorUserId, appRole);
+  const username = normalizeUsername(input.username);
+  const fullName = input.fullName.trim();
+  assertDoctorAccountRole(input.coreRole);
+  if (!username) throw new HttpError(400, "Username is required.");
+  if (!fullName) throw new HttpError(400, "Full name is required.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const previous = await lockLinkedDoctorUser(client, targetUserId);
+    if (Number(actorUserId) === targetUserId && !input.active) {
+      throw new HttpError(400, "You cannot deactivate your own account.");
+    }
+    if (previous.role === "super_admin" && appRole !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+    }
+    if (previous.role !== "doctor" && previous.role !== "supervisor") {
+      throw new HttpError(409, "Only doctor or supervisor accounts can be edited through Doctor Directory.");
+    }
+    const result = await client.query<DoctorAdminUserRow>(
+      `update users
+          set username = $2, full_name = $3, role = $4, is_active = $5, updated_at = now()
+        where id = $1
+        returning id, username, full_name, role, is_active,
+                  coalesce(must_change_password, false) as must_change_password,
+                  created_at, updated_at`,
+      [targetUserId, username, fullName, input.coreRole, input.active]
+    );
+    const updatedUser = result.rows[0];
+    await insertDoctorAuditEvent(client, {
+      actorUserId, actorDoctorId: null, eventType: "doctor_linked_user_updated",
+      targetType: "user", targetId: targetUserId,
+      metadata: {
+        oldValues: { username: previous.username, fullName: previous.full_name, coreRole: previous.role, active: previous.is_active },
+        newValues: { username: updatedUser.username, fullName: updatedUser.full_name, coreRole: updatedUser.role, active: updatedUser.is_active },
+      },
+      reason: null,
+    });
+    await client.query("commit");
+    return { user: updatedUser, profile: await findDoctorProfileByUserId(targetUserId) };
+  } catch (error) {
+    await client.query("rollback");
+    if (typeof error === "object" && error !== null && "code" in error && String((error as { code?: unknown }).code) === "23505") {
+      throw new HttpError(409, "A user with that username already exists.");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setDoctorIdentityActiveForAdmin(
+  actorUserId: UserId,
+  appRole: Role,
+  targetUserId: number,
+  active: boolean
+) {
+  await requireDoctorAdmin(actorUserId, appRole);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const previous = await lockLinkedDoctorUser(client, targetUserId);
+    if (Number(actorUserId) === targetUserId && !active) {
+      throw new HttpError(400, "You cannot deactivate your own account.");
+    }
+    if (previous.role === "super_admin" && appRole !== "super_admin") {
+      throw new HttpError(403, "Only super_admin can update a super_admin user.");
+    }
+    if (previous.role === "super_admin" && previous.is_active && !active) {
+      const count = await client.query<{ count: string }>("select count(*)::text as count from users where role = 'super_admin' and is_active = true");
+      if (Number(count.rows[0]?.count ?? "0") <= 1) {
+        throw new HttpError(409, "Cannot deactivate the last active super_admin user.");
+      }
+    }
+    const userResult = await client.query<DoctorAdminUserRow>(
+      `update users set is_active = $2, updated_at = now() where id = $1
+       returning id, username, full_name, role, is_active,
+                 coalesce(must_change_password, false) as must_change_password, created_at, updated_at`,
+      [targetUserId, active]
+    );
+    const profileResult = await client.query<DoctorProfileRow>(
+      `update doctor_portal.doctor_profiles set active = $2, updated_at = now() where id = $1
+       returning id, user_id as "userId", $3::text as username, $4::text as "fullName", $5::text as "coreRole",
+                 $6::boolean as "userActive", display_name as "displayName", doctor_role as "doctorRole", active,
+                 can_finalize_reports as "canFinalizeReports", can_assign_protocols as "canAssignProtocols",
+                 can_supervise as "canSupervise", created_at as "createdAt", updated_at as "updatedAt"`,
+      [previous.profile_id, active, userResult.rows[0].username, userResult.rows[0].full_name, userResult.rows[0].role, userResult.rows[0].is_active]
+    );
+    await insertDoctorAuditEvent(client, {
+      actorUserId, actorDoctorId: null, eventType: active ? "doctor_identity_reactivated" : "doctor_identity_deactivated",
+      targetType: "doctor_profile", targetId: previous.profile_id,
+      metadata: { userId: targetUserId, oldValues: { userActive: previous.is_active, profileActive: previous.profile_active }, newValues: { userActive: active, profileActive: active } },
+      reason: null,
+    });
+    await syncDoctorWorklistLifecycle(previous.profile_id, client);
+    await client.query("commit");
+    return { user: userResult.rows[0], profile: profileResult.rows[0] };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listProfileModalitiesForAdmin(userId: UserId, appRole: Role, profileId: number) {
   await requireDoctorAdmin(userId, appRole);
   return listDoctorModalityPermissions(profileId, true);

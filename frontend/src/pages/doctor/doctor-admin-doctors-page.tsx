@@ -1,4 +1,5 @@
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDoctorWithUserForAdmin,
@@ -12,7 +13,8 @@ import {
   inspectDoctorImport,
   previewDoctorImport,
   resetDoctorUserTemporaryPassword,
-  setDoctorUserActive,
+  setDoctorIdentityActive,
+  updateDoctorLinkedUserForAdmin,
   updateDoctorProfileForAdmin,
   updateDoctorProfileModalities,
   type DoctorImportPreview,
@@ -49,6 +51,9 @@ type ModalityPermissionDraft = {
   canSupervise: boolean;
   active: boolean;
 };
+
+type AccountDraft = { username: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean };
+type DrawerSection = "account" | "profile" | "modalities" | "security";
 
 type ModalityDraftOverride = {
   profileId: number | null;
@@ -93,6 +98,12 @@ function statusLabel(profile?: DoctorProfile): string {
   return profile.active ? "Doctor profile active" : "Doctor profile inactive";
 }
 
+function lockBodyScroll(): () => void {
+  const previousOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
+  return () => { document.body.style.overflow = previousOverflow; };
+}
+
 export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe; advanced?: boolean }) {
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
@@ -113,6 +124,11 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
   const [modalityDraftOverride, setModalityDraftOverride] = useState<ModalityDraftOverride | null>(null);
   const [resetPassword, setResetPassword] = useState("");
+  const [accountDraft, setAccountDraft] = useState<AccountDraft>({ username: "", fullName: "", coreRole: "doctor", active: true });
+  const [drawerSection, setDrawerSection] = useState<DrawerSection>("account");
+  const [confirmLifecycle, setConfirmLifecycle] = useState<DoctorProfile | null>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const drawerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [adminMessage, setAdminMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [draft, setDraft] = useState({
     userId: "",
@@ -173,7 +189,6 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
   const profilesByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.userId, profile])), [profiles]);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const editingProfile = profiles.find((profile) => profile.id === editingProfileId) ?? null;
-  const editingLinkedUserActive = editingProfile ? (editingProfile.userActive ?? usersById.get(editingProfile.userId)?.isActive ?? false) : false;
 
   const invalidateProfiles = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] });
@@ -228,8 +243,6 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       return updateDoctorProfileForAdmin(editingProfile.id, editDraft);
     },
     onSuccess: async () => {
-      setEditingProfileId(null);
-      setResetPassword("");
       setAdminMessage({ tone: "success", text: "Doctor profile saved." });
       await invalidateProfiles();
     },
@@ -260,13 +273,23 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     },
   });
 
-  const userActiveMutation = useMutation({
-    mutationFn: (active: boolean) => {
+  const accountMutation = useMutation({
+    mutationFn: () => {
       if (!editingProfile) throw new Error("Select a doctor profile to edit.");
-      return setDoctorUserActive(editingProfile.userId, active);
+      return updateDoctorLinkedUserForAdmin(editingProfile.userId, accountDraft);
     },
     onSuccess: async () => {
-      setAdminMessage({ tone: "success", text: "Linked user account updated." });
+      setAdminMessage({ tone: "success", text: "Login account saved. Password settings were unchanged." });
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await invalidateProfiles();
+    },
+  });
+
+  const lifecycleMutation = useMutation({
+    mutationFn: (profile: DoctorProfile) => setDoctorIdentityActive(profile.userId, !(profile.userActive ?? profile.active)),
+    onSuccess: async (result) => {
+      setConfirmLifecycle(null);
+      setAdminMessage({ tone: "success", text: result.profile.active ? "Doctor reactivated." : "Doctor deactivated." });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await invalidateProfiles();
     },
@@ -336,9 +359,11 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
     modalityMutation.mutate(permissions);
   };
 
-  const startEditing = (profile: DoctorProfile) => {
+  const openDrawer = (profile: DoctorProfile, section: DrawerSection, trigger: HTMLButtonElement) => {
+    drawerTriggerRef.current = trigger;
     setEditingProfileId(profile.id);
     setSelectedProfileId(profile.id);
+    setDrawerSection(section);
     setAdminMessage(null);
     setEditDraft({
       displayName: profile.displayName,
@@ -348,10 +373,49 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       canAssignProtocols: profile.canAssignProtocols,
       canSupervise: profile.canSupervise,
     });
+    const linkedUser = usersById.get(profile.userId);
+    const role = profile.coreRole ?? linkedUser?.role;
+    setAccountDraft({
+      username: profile.username ?? linkedUser?.username ?? "",
+      fullName: profile.fullName ?? linkedUser?.fullName ?? "",
+      coreRole: role === "supervisor" ? "supervisor" : "doctor",
+      active: profile.userActive ?? linkedUser?.isActive ?? false,
+    });
     setResetPassword("");
   };
 
-  const formError = createDoctorMutation.error || createMutation.error || editMutation.error || resetPasswordMutation.error || forcePasswordMutation.error || userActiveMutation.error;
+  const closeDrawer = () => {
+    setEditingProfileId(null);
+    setSelectedProfileId(null);
+    setConfirmLifecycle(null);
+    window.setTimeout(() => drawerTriggerRef.current?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!editingProfile) return;
+    const unlockBodyScroll = lockBodyScroll();
+    drawerCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setEditingProfileId(null);
+        setSelectedProfileId(null);
+        setConfirmLifecycle(null);
+        window.setTimeout(() => drawerTriggerRef.current?.focus(), 0);
+      }
+      if (event.key !== "Tab") return;
+      const dialog = drawerCloseRef.current?.closest('[role="dialog"]');
+      const focusable = Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') ?? []);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => { unlockBodyScroll(); document.removeEventListener("keydown", onKeyDown); };
+  }, [editingProfile]);
+
+  const formError = createDoctorMutation.error || createMutation.error || updateMutation.error || editMutation.error || accountMutation.error || modalityMutation.error || resetPasswordMutation.error || forcePasswordMutation.error || lifecycleMutation.error;
 
   if (!me.canManageDoctorProfiles) {
     return <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)" }}>Doctor profile management is not available for this user.</div>;
@@ -488,7 +552,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           }} className="rounded-lg border px-3 py-2 text-sm">
             <option value="">Select user</option>
             {(usersQuery.data?.users ?? []).filter((user) => !profilesByUserId.has(user.id)).map((user) => (
-              <option key={user.id} value={user.id}>{user.fullName} (@{user.username}) - {user.role} - {user.isActive ? "user active" : "user inactive"}</option>
+              <option key={user.id} value={user.id}>{user.fullName} ({user.username}) - {user.role} - {user.isActive ? "user active" : "user inactive"}</option>
             ))}
           </select>
           <input value={draft.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
@@ -510,7 +574,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
             {profiles.map((profile) => (
               <tr key={profile.id}>
                 <td className="px-3 py-2 font-medium">{profile.displayName}</td>
-                <td className="px-3 py-2">@{profile.username ?? usersById.get(profile.userId)?.username ?? profile.userId}</td>
+                <td className="px-3 py-2">{profile.username ?? usersById.get(profile.userId)?.username ?? profile.userId}</td>
                 <td className="px-3 py-2">{profile.coreRole ?? usersById.get(profile.userId)?.role ?? "-"}</td>
                 <td className="px-3 py-2">{profile.userActive ?? usersById.get(profile.userId)?.isActive ? "Active" : "Inactive"}</td>
                 <td className="px-3 py-2">{profile.doctorRole.replaceAll("_", " ")}</td>
@@ -520,10 +584,10 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => startEditing(profile)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Edit</button>
-                    <button type="button" onClick={() => setSelectedProfileId(profile.id)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Modalities</button>
-                    <button type="button" onClick={() => updateMutation.mutate({ profileId: profile.id, patch: { active: !profile.active } })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
-                      {profile.active ? "Disable" : "Reactivate"}
+                    <button type="button" onClick={(event) => openDrawer(profile, "account", event.currentTarget)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Edit</button>
+                    <button type="button" onClick={(event) => openDrawer(profile, "modalities", event.currentTarget)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Modalities</button>
+                    <button type="button" disabled={lifecycleMutation.isPending} onClick={() => setConfirmLifecycle(profile)} className="rounded-lg border px-2 py-1 text-xs disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
+                      {(profile.userActive ?? profile.active) ? "Deactivate doctor" : "Reactivate doctor"}
                     </button>
                     <button type="button" onClick={() => updateMutation.mutate({ profileId: profile.id, patch: { canSupervise: !profile.canSupervise } })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
                       {profile.canSupervise ? "Remove supervisor" : "Make supervisor"}
@@ -536,84 +600,40 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         </table>
       </section>
 
-      {editingProfile && (
-        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold">Edit doctor profile: {editingProfile.displayName}</h3>
-            <button type="button" onClick={() => setEditingProfileId(null)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Close</button>
-          </div>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            Profile permissions control Reporting Board eligibility. Use modality permissions below for CT/MR report access.
-          </p>
-          <div className="mt-3 grid gap-2 md:grid-cols-3">
-            <label className="grid gap-1 text-sm">
-              <span className="font-medium">Display name</span>
-              <input value={editDraft.displayName} onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="font-medium">Doctor role</span>
-              <select value={editDraft.doctorRole} onChange={(event) => setEditDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
-                {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-              </select>
-            </label>
-            <button type="button" disabled={!editDraft.displayName || editMutation.isPending} onClick={() => editMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
-              {editMutation.isPending ? "Saving..." : "Save profile"}
-            </button>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-4 text-sm">
-            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.active} onChange={(event) => setEditDraft((current) => ({ ...current, active: event.target.checked }))} /> Profile active</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canFinalizeReports} onChange={(event) => setEditDraft((current) => ({ ...current, canFinalizeReports: event.target.checked }))} /> Can finalize reports</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canAssignProtocols} onChange={(event) => setEditDraft((current) => ({ ...current, canAssignProtocols: event.target.checked }))} /> Can assign protocols</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canSupervise} onChange={(event) => setEditDraft((current) => ({ ...current, canSupervise: event.target.checked }))} /> Can supervise</label>
-          </div>
-          <div className="mt-4 rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
-            <p className="text-sm font-semibold">Linked user account</p>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              Username: @{editingProfile.username ?? usersById.get(editingProfile.userId)?.username ?? editingProfile.userId} - Core role: {editingProfile.coreRole ?? usersById.get(editingProfile.userId)?.role ?? "Unknown"} - User account: {editingLinkedUserActive ? "Active" : "Inactive"} - Doctor profile: {editingProfile.active ? "Active" : "Inactive"}
-              {usersById.get(editingProfile.userId)?.mustChangePassword ? " - must change password" : ""}
-            </p>
-            {editingProfile.active && !editingLinkedUserActive && <p role="alert" className="mt-2 text-sm font-semibold text-red-600">Warning: this doctor profile is active, but the linked RISpro user account is inactive and cannot log in.</p>}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="New temporary password" className="rounded-lg border px-3 py-2 text-sm" />
-              <button type="button" disabled={!resetPassword || resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
-                Reset temporary password
-              </button>
-              <button type="button" disabled={forcePasswordMutation.isPending} onClick={() => forcePasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
-                Require password change
-              </button>
-              <button type="button" disabled={userActiveMutation.isPending} onClick={() => userActiveMutation.mutate(!editingLinkedUserActive)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
-                {editingLinkedUserActive ? "Deactivate linked user" : "Activate linked user"}
-              </button>
+      {editingProfile && selectedProfile ? createPortal(
+        <div className="fixed inset-0 z-[70] flex justify-end bg-black/35" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
+          <aside className="flex h-dvh w-full flex-col bg-background shadow-2xl sm:max-w-[620px] sm:border-s" role="dialog" aria-modal="true" aria-labelledby="doctor-drawer-title">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+              <div><h2 id="doctor-drawer-title" className="font-semibold">Manage doctor: {editingProfile.displayName}</h2><p className="text-xs text-muted-foreground">{accountDraft.username}</p></div>
+              <button ref={drawerCloseRef} type="button" onClick={closeDrawer} className="rounded-lg border px-3 py-2 text-sm font-semibold">Close</button>
+            </header>
+            <nav className="flex shrink-0 overflow-x-auto border-b px-2 py-2" role="tablist" aria-label="Doctor management sections">
+              {([['account','Account'],['profile','Doctor profile'],['modalities','Modalities'],['security','Security']] as const).map(([key,label]) => <button key={key} type="button" role="tab" aria-selected={drawerSection === key} onClick={() => setDrawerSection(key)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${drawerSection === key ? 'bg-teal-50 text-teal-800' : 'text-muted-foreground'}`}>{label}</button>)}
+            </nav>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              {formError ? <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{formError instanceof Error ? formError.message : "Doctor admin action failed."}</div> : null}
+              {adminMessage ? <div role="status" className={`mb-4 rounded-lg border p-3 text-sm ${adminMessage.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{adminMessage.text}</div> : null}
+              {drawerSection === "account" ? <section aria-labelledby="account-section-title" className="space-y-4">
+                <div><h3 id="account-section-title" className="font-semibold">Account</h3><p className="text-sm text-muted-foreground">Login account active is separate from Doctor profile active.</p></div>
+                <label className="grid gap-1 text-sm"><span className="font-medium">Username</span><input value={accountDraft.username} onChange={(event) => setAccountDraft((current) => ({ ...current, username: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
+                <label className="grid gap-1 text-sm"><span className="font-medium">Full name</span><input value={accountDraft.fullName} onChange={(event) => setAccountDraft((current) => ({ ...current, fullName: event.target.value }))} className="rounded-lg border px-3 py-2" /></label>
+                <label className="grid gap-1 text-sm"><span className="font-medium">Core role</span><select value={accountDraft.coreRole} onChange={(event) => setAccountDraft((current) => ({ ...current, coreRole: event.target.value as AccountDraft['coreRole'] }))} className="rounded-lg border px-3 py-2"><option value="doctor">Doctor</option><option value="supervisor">Supervisor</option></select></label>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={accountDraft.active} onChange={(event) => setAccountDraft((current) => ({ ...current, active: event.target.checked }))} /> Login account active</label>
+                <button type="button" disabled={!accountDraft.username.trim() || !accountDraft.fullName.trim() || accountMutation.isPending} onClick={() => accountMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{accountMutation.isPending ? "Saving account..." : "Save account"}</button>
+              </section> : null}
+              {drawerSection === "profile" ? <section aria-labelledby="profile-section-title" className="space-y-4">
+                <div><h3 id="profile-section-title" className="font-semibold">Doctor profile</h3><p className="text-sm text-muted-foreground">Doctor profile active controls assignments separately from login access.</p></div>
+                <label className="grid gap-1 text-sm"><span className="font-medium">Display name</span><input value={editDraft.displayName} onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2" /></label>
+                <label className="grid gap-1 text-sm"><span className="font-medium">Doctor role</span><select value={editDraft.doctorRole} onChange={(event) => setEditDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2">{DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
+                <div className="grid gap-3 text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.active} onChange={(event) => setEditDraft((current) => ({ ...current, active: event.target.checked }))} /> Doctor profile active</label><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canFinalizeReports} onChange={(event) => setEditDraft((current) => ({ ...current, canFinalizeReports: event.target.checked }))} /> Can finalize reports</label><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canAssignProtocols} onChange={(event) => setEditDraft((current) => ({ ...current, canAssignProtocols: event.target.checked }))} /> Can assign protocols</label><label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canSupervise} onChange={(event) => setEditDraft((current) => ({ ...current, canSupervise: event.target.checked }))} /> Can supervise</label></div>
+                <button type="button" disabled={!editDraft.displayName.trim() || editMutation.isPending} onClick={() => editMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{editMutation.isPending ? "Saving profile..." : "Save profile"}</button>
+              </section> : null}
+              {drawerSection === "modalities" ? <section aria-labelledby="modalities-section-title"><h3 id="modalities-section-title" className="font-semibold">Modality permissions</h3><p className="mt-1 text-sm text-muted-foreground">Toggle Report for every modality this doctor can receive on the Reporting Assignment Board.</p><div className="mt-3 overflow-x-auto"><table className="min-w-full text-sm"><thead><tr>{["Modality", "Active", "Protocol", "Report", "Supervise"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs uppercase text-muted-foreground">{header}</th>)}</tr></thead><tbody>{modalityRows.map((row) => <tr key={row.modalityId}><td className="px-3 py-2 font-medium">{row.label}</td>{(["active", "canProtocol", "canReport", "canSupervise"] as const).map((key) => <td key={key} className="px-3 py-2"><input aria-label={`${row.label} ${key}`} type="checkbox" disabled={modalityMutation.isPending} checked={Boolean(row[key])} onChange={(event) => saveModalities({ modalityId: row.modalityId, [key]: event.target.checked })} /></td>)}</tr>)}</tbody></table></div>{modalityMutation.isPending ? <p role="status" className="mt-3 text-sm">Saving modality permissions...</p> : null}</section> : null}
+              {drawerSection === "security" ? <section aria-labelledby="security-section-title" className="space-y-4"><div><h3 id="security-section-title" className="font-semibold">Security</h3><p className="text-sm text-muted-foreground">Require password change only prompts at next login; it does not change the current password.</p></div><label className="grid gap-1 text-sm"><span className="font-medium">New temporary password</span><input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="New temporary password" className="rounded-lg border px-3 py-2" /></label><div className="flex flex-wrap gap-2"><button type="button" disabled={!resetPassword || resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{resetPasswordMutation.isPending ? "Resetting password..." : "Reset temporary password"}</button><button type="button" disabled={forcePasswordMutation.isPending} onClick={() => forcePasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{forcePasswordMutation.isPending ? "Updating requirement..." : "Require password change"}</button></div></section> : null}
             </div>
-          </div>
-        </section>
-      )}
-
-      {selectedProfile && (
-        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-          <h3 className="font-semibold">Modality permissions: {selectedProfile.displayName}</h3>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            Toggle Report for every modality this doctor can receive on the Reporting Assignment Board.
-          </p>
-          <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead><tr>{["Modality", "Active", "Protocol", "Report", "Supervise"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
-              <tbody>
-                {modalityRows.map((row) => (
-                  <tr key={row.modalityId}>
-                    <td className="px-3 py-2 font-medium">{row.label}</td>
-                    {(["active", "canProtocol", "canReport", "canSupervise"] as const).map((key) => (
-                      <td key={key} className="px-3 py-2">
-                        <input type="checkbox" checked={Boolean(row[key])} onChange={(event) => saveModalities({ modalityId: row.modalityId, [key]: event.target.checked })} />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+          </aside>
+        </div>, document.body) : null}
+      {confirmLifecycle ? createPortal(<div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4" role="presentation"><div role="dialog" aria-modal="true" aria-labelledby="doctor-lifecycle-title" className="w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl"><h2 id="doctor-lifecycle-title" className="font-semibold">{(confirmLifecycle.userActive ?? confirmLifecycle.active) ? "Deactivate doctor" : "Reactivate doctor"}</h2><p className="mt-2 text-sm text-muted-foreground">{(confirmLifecycle.userActive ?? confirmLifecycle.active) ? "This will deactivate the login account and doctor profile. The doctor will no longer be able to sign in or receive assignments." : "This will reactivate the login account and doctor profile."}</p>{lifecycleMutation.error ? <p role="alert" className="mt-3 text-sm text-red-700">{lifecycleMutation.error instanceof Error ? lifecycleMutation.error.message : "Doctor lifecycle update failed."}</p> : null}<div className="mt-5 flex justify-end gap-2"><button type="button" disabled={lifecycleMutation.isPending} onClick={() => setConfirmLifecycle(null)} className="rounded-lg border px-3 py-2 text-sm">Cancel</button><button type="button" disabled={lifecycleMutation.isPending} onClick={() => lifecycleMutation.mutate(confirmLifecycle)} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{lifecycleMutation.isPending ? "Updating doctor..." : "Confirm"}</button></div></div></div>, document.body) : null}
     </div>
   );
 }

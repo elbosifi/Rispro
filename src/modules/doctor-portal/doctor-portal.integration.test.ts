@@ -791,12 +791,66 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).user.must_change_password, true);
     assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).profile.active, true);
     const supervisorCreatedUserId = (supervisorCreate.data as { user: { id: number } }).user.id;
+    const originalSecurity = await pool.query<{ password_hash: string; must_change_password: boolean }>("select password_hash, must_change_password from users where id = $1", [supervisorCreatedUserId]);
+    const updatedUsername = `${supervisorUsername}_updated`;
+    const accountUpdated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
+      method: "PATCH",
+      body: { username: `  ${updatedUsername.toUpperCase()}  `, fullName: `${TEST_PREFIX} Updated Identity`, coreRole: "doctor", active: true },
+    });
+    assert.equal(accountUpdated.status, 200, JSON.stringify(accountUpdated.data));
+    assert.equal((accountUpdated.data as { user: { username: string; full_name: string; role: string; must_change_password: boolean } }).user.username, updatedUsername);
+    assert.equal((accountUpdated.data as { user: { full_name: string } }).user.full_name, `${TEST_PREFIX} Updated Identity`);
+    assert.equal((accountUpdated.data as { user: { role: string } }).user.role, "doctor");
+    const preservedSecurity = await pool.query<{ password_hash: string; must_change_password: boolean }>("select password_hash, must_change_password from users where id = $1", [supervisorCreatedUserId]);
+    assert.equal(preservedSecurity.rows[0].password_hash, originalSecurity.rows[0].password_hash);
+    assert.equal(preservedSecurity.rows[0].must_change_password, originalSecurity.rows[0].must_change_password);
+    const accountAudit = await pool.query<{ count: string }>("select count(*)::text as count from doctor_portal.doctor_module_audit_events where target_type = 'user' and target_id = $1 and event_type = 'doctor_linked_user_updated'", [supervisorCreatedUserId]);
+    assert.equal(Number(accountAudit.rows[0].count), 1);
+
+    const duplicateTarget = await pool.query<{ username: string }>("select username from users where id = $1", [normal.id]);
+    const duplicateAccount = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/account`, {
+      method: "PATCH",
+      body: { username: `  ${duplicateTarget.rows[0].username.toUpperCase()}  `, fullName: "Duplicate", coreRole: "doctor", active: true },
+    });
+    assert.equal(duplicateAccount.status, 409);
+
+    const unlinkedResult = await pool.query<{ id: string }>(
+      `insert into users (username, password_hash, full_name, role, is_active) values ($1, 'unused', $2, 'doctor', true) returning id::text as id`,
+      [`${TEST_PREFIX.toLowerCase()}unlinked_${randomUUID().replace(/-/g, "").slice(0, 8)}`, `${TEST_PREFIX} Unlinked`]
+    );
+    const unlinkedUpdate = await api(admin.cookie, `/api/doctor/admin/doctors/${unlinkedResult.rows[0].id}/account`, {
+      method: "PATCH", body: { username: "unlinked.changed", fullName: "Unlinked", coreRole: "doctor", active: true },
+    });
+    assert.equal(unlinkedUpdate.status, 404);
+
+    const selfDeactivation = await api(admin.cookie, `/api/doctor/admin/doctors/${admin.id}/deactivate`, { method: "POST" });
+    assert.equal(selfDeactivation.status, 400);
+
+    const createdProfileId = (supervisorCreate.data as { profile: { id: number } }).profile.id;
+    const rollbackConstraint = `doctor_identity_rollback_${randomUUID().replace(/-/g, "")}`;
+    try {
+      await pool.query(`alter table doctor_portal.doctor_profiles add constraint ${rollbackConstraint} check (id <> ${createdProfileId} or active = true) not valid`);
+      const forcedFailure = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/deactivate`, { method: "POST" });
+      assert.equal(forcedFailure.status, 500);
+      const rolledBack = await pool.query<{ user_active: boolean; profile_active: boolean }>("select u.is_active as user_active, dp.active as profile_active from users u join doctor_portal.doctor_profiles dp on dp.user_id = u.id where u.id = $1", [supervisorCreatedUserId]);
+      assert.deepEqual(rolledBack.rows[0], { user_active: true, profile_active: true });
+    } finally {
+      await pool.query(`alter table doctor_portal.doctor_profiles drop constraint if exists ${rollbackConstraint}`);
+    }
+
     const deactivated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/deactivate`, { method: "POST" });
     assert.equal(deactivated.status, 200, JSON.stringify(deactivated.data));
     assert.equal((deactivated.data as { user: { is_active: boolean } }).user.is_active, false);
+    assert.equal((deactivated.data as { profile: { active: boolean } }).profile.active, false);
+    const deactivatedRows = await pool.query<{ user_active: boolean; profile_active: boolean }>("select u.is_active as user_active, dp.active as profile_active from users u join doctor_portal.doctor_profiles dp on dp.user_id = u.id where u.id = $1", [supervisorCreatedUserId]);
+    assert.deepEqual(deactivatedRows.rows[0], { user_active: false, profile_active: false });
     const activated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/activate`, { method: "POST" });
     assert.equal(activated.status, 200, JSON.stringify(activated.data));
     assert.equal((activated.data as { user: { is_active: boolean } }).user.is_active, true);
+    assert.equal((activated.data as { profile: { active: boolean } }).profile.active, true);
+    const audit = await pool.query<{ event_type: string }>("select event_type from doctor_portal.doctor_module_audit_events where target_id = $1 and event_type in ('doctor_identity_deactivated', 'doctor_identity_reactivated')", [createdProfileId]);
+    assert.equal(audit.rows.some((row) => row.event_type === "doctor_identity_deactivated"), true);
+    assert.equal(audit.rows.some((row) => row.event_type === "doctor_identity_reactivated"), true);
 
     const failingUsername = `${TEST_PREFIX.toLowerCase()}rollback_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const failed = await api(admin.cookie, "/api/doctor/admin/doctors", {

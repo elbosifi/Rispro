@@ -1,0 +1,20 @@
+{
+  "appointmentId": "13",
+  "accessionNumber": "V2-000013",
+  "modalityId": "11",
+  "modalityCode": "DPHARD_3e7037e8CT",
+  "patientId": "13",
+  "patientMrn": "000013",
+  "patientNationalId": "87a23a5e19f3",
+  "patientNameEnglish": "DPHARD_3e7037e8 Patient",
+  "patientNameArabic": "DPHARD_3e7037e8 Patient Arabic",
+  "appointmentDate": "2026-08-04",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

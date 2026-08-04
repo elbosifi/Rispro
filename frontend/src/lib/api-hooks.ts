@@ -444,6 +444,20 @@ export async function setDoctorUserActive(userId: number, active: boolean): Prom
   return mapUser(raw.user);
 }
 
+export async function updateDoctorLinkedUserForAdmin(userId: number, payload: { username: string; fullName: string; coreRole: "doctor" | "supervisor"; active: boolean }): Promise<{ user: User; profile: DoctorProfile }> {
+  const raw = await api<{ user: RawRecord; profile: DoctorProfile }>(`/doctor/admin/doctors/${userId}/account`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return { user: mapUser(raw.user), profile: raw.profile };
+}
+
+export async function setDoctorIdentityActive(userId: number, active: boolean): Promise<{ user: User; profile: DoctorProfile }> {
+  const action = active ? "activate" : "deactivate";
+  const raw = await api<{ user: RawRecord; profile: DoctorProfile }>(`/doctor/admin/doctors/${userId}/${action}`, { method: "POST" });
+  return { user: mapUser(raw.user), profile: raw.profile };
+}
+
 export interface DoctorImportPreview {
   rows: Array<{ rowNumber: number; values: Record<string, string>; action: "create" | "update" | "invalid"; errors: string[] }>;
   canConfirm: boolean;

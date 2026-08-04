@@ -14,9 +14,11 @@ import {
   listProfilesForAdmin,
   updateProfileForAdmin,
   updateProfileModalitiesForAdmin,
+  updateLinkedDoctorUserForAdmin,
+  setDoctorIdentityActiveForAdmin,
 } from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
-import { resetUserTemporaryPassword, setUserMustChangePassword, updateUserActiveState } from "../../services/user-service.js";
+import { resetUserTemporaryPassword, setUserMustChangePassword } from "../../services/user-service.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
 import { doctorReportingBoardRouter } from "./reporting-board-routes.js";
@@ -131,6 +133,21 @@ router.post(
   })
 );
 
+router.patch(
+  "/admin/doctors/:userId/account",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const actor = currentUser(req);
+    const body = asUnknownRecord(req.body);
+    const result = await updateLinkedDoctorUserForAdmin(actor.sub, actor.role, asPositiveInteger(req.params.userId, "user id"), {
+      username: asString(body.username),
+      fullName: asString(body.fullName),
+      coreRole: asString(body.coreRole),
+      active: asOptionalBoolean(body.active) ?? true,
+    });
+    res.json(result);
+  })
+);
+
 router.post(
   "/admin/doctors",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
@@ -209,8 +226,7 @@ router.post(
     if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
-    const updatedUser = await updateUserActiveState(targetUserId, true, { userId: user.sub, role: user.role });
-    res.json({ user: updatedUser });
+    res.json(await setDoctorIdentityActiveForAdmin(user.sub, user.role, targetUserId, true));
   })
 );
 
@@ -223,8 +239,7 @@ router.post(
     if (!hasLinkedDoctorUser(profiles, targetUserId)) {
       throw new HttpError(404, "Linked doctor user not found.");
     }
-    const updatedUser = await updateUserActiveState(targetUserId, false, { userId: user.sub, role: user.role });
-    res.json({ user: updatedUser });
+    res.json(await setDoctorIdentityActiveForAdmin(user.sub, user.role, targetUserId, false));
   })
 );
 

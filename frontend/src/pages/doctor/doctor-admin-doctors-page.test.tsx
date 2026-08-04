@@ -14,7 +14,8 @@ const updateDoctorProfileForAdminMock = vi.fn();
 const updateDoctorProfileModalitiesMock = vi.fn();
 const resetDoctorUserTemporaryPasswordMock = vi.fn();
 const forceDoctorUserPasswordChangeMock = vi.fn();
-const setDoctorUserActiveMock = vi.fn();
+const updateDoctorLinkedUserForAdminMock = vi.fn();
+const setDoctorIdentityActiveMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorProfilesForAdmin: () => fetchDoctorProfilesForAdminMock(),
@@ -27,7 +28,8 @@ vi.mock("@/lib/api-hooks", () => ({
   updateDoctorProfileModalities: (...args: unknown[]) => updateDoctorProfileModalitiesMock(...args),
   resetDoctorUserTemporaryPassword: (...args: unknown[]) => resetDoctorUserTemporaryPasswordMock(...args),
   forceDoctorUserPasswordChange: (...args: unknown[]) => forceDoctorUserPasswordChangeMock(...args),
-  setDoctorUserActive: (...args: unknown[]) => setDoctorUserActiveMock(...args),
+  updateDoctorLinkedUserForAdmin: (...args: unknown[]) => updateDoctorLinkedUserForAdminMock(...args),
+  setDoctorIdentityActive: (...args: unknown[]) => setDoctorIdentityActiveMock(...args),
   inspectDoctorImport: vi.fn(),
   previewDoctorImport: vi.fn(),
   confirmDoctorImport: vi.fn(),
@@ -98,7 +100,8 @@ describe("DoctorAdminDoctorsPage", () => {
     updateDoctorProfileModalitiesMock.mockResolvedValue([]);
     resetDoctorUserTemporaryPasswordMock.mockResolvedValue(users[0]);
     forceDoctorUserPasswordChangeMock.mockResolvedValue(users[0]);
-    setDoctorUserActiveMock.mockResolvedValue(users[0]);
+    updateDoctorLinkedUserForAdminMock.mockResolvedValue({ user: users[0], profile: profiles[0] });
+    setDoctorIdentityActiveMock.mockResolvedValue({ user: users[0], profile: profiles[0] });
     vi.clearAllMocks();
   });
 
@@ -154,11 +157,17 @@ describe("DoctorAdminDoctorsPage", () => {
     expect(screen.getByRole("button", { name: "Confirm import" })).toBeTruthy();
   });
 
-  it("opens the edit form and saves role and capability changes", async () => {
+  it("opens the drawer on Account without automatically opening Modalities and saves profile changes", async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    const form = screen.getByText("Edit doctor profile: Dr Existing").closest("section")!;
+    const drawer = screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    expect(within(drawer).getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(within(drawer).getByRole("tab", { name: "Account" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(drawer).getByRole("tab", { name: "Modalities" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.queryByText("Edit doctor profile: Dr Existing")).toBeNull();
+    fireEvent.click(within(drawer).getByRole("tab", { name: "Doctor profile" }));
+    const form = within(drawer).getByRole("region", { name: "Doctor profile" });
     fireEvent.change(within(form).getByPlaceholderText("Display name"), { target: { value: "Dr Updated" } });
     fireEvent.change(within(form).getByDisplayValue("Specialist"), { target: { value: "consultant" } });
     fireEvent.click(within(form).getByLabelText("Can finalize reports"));
@@ -180,7 +189,8 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Modalities" }));
-    await screen.findByText("Modality permissions: Dr Existing");
+    const drawer = await screen.findByRole("dialog", { name: "Manage doctor: Dr Existing" });
+    expect(within(drawer).getByRole("tab", { name: "Modalities" }).getAttribute("aria-selected")).toBe("true");
     const row = screen.getAllByText("CT").at(-1)!.closest("tr")!;
     await waitFor(() => expect((within(row).getAllByRole("checkbox")[0] as HTMLInputElement).checked).toBe(true));
     expect((within(row).getAllByRole("checkbox")[2] as HTMLInputElement).checked).toBe(true);
@@ -188,7 +198,7 @@ describe("DoctorAdminDoctorsPage", () => {
     expect((within(row).getAllByRole("checkbox")[1] as HTMLInputElement).checked).toBe(true);
     await waitFor(() => expect(updateDoctorProfileModalitiesMock).toHaveBeenCalledWith(1, expect.arrayContaining([expect.objectContaining({ modalityId: 5, canProtocol: true })])));
 
-    await screen.findByRole("option", { name: "New Profile (@new.profile) - doctor - user active" });
+    await screen.findByRole("option", { name: "New Profile (new.profile) - doctor - user active" });
     fireEvent.change(screen.getByDisplayValue("Select user"), { target: { value: "11" } });
     fireEvent.change(screen.getByPlaceholderText("Display name"), { target: { value: "New Profile" } });
     await waitFor(() => expect((screen.getByRole("button", { name: "Create profile" }) as HTMLButtonElement).disabled).toBe(false));
@@ -200,6 +210,7 @@ describe("DoctorAdminDoctorsPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Security" }));
     fireEvent.change(screen.getByPlaceholderText("New temporary password"), { target: { value: "NewTemp123!" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset temporary password" }));
     await waitFor(() => expect(resetDoctorUserTemporaryPasswordMock).toHaveBeenCalledWith(10, "NewTemp123!"));
@@ -207,18 +218,48 @@ describe("DoctorAdminDoctorsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Require password change" }));
     await waitFor(() => expect(forceDoctorUserPasswordChangeMock).toHaveBeenCalledWith(10));
 
-    fireEvent.click(screen.getByRole("button", { name: "Deactivate linked user" }));
-    await waitFor(() => expect(setDoctorUserActiveMock).toHaveBeenCalledWith(10, false));
   });
 
-  it("shows linked username, role, both active states, and warns when only the profile is active", async () => {
-    fetchDoctorProfilesForAdminMock.mockResolvedValueOnce([{ ...profiles[0], userActive: false, active: true }]);
-    fetchUsersMock.mockResolvedValueOnce({ users: users.map((user) => user.id === 10 ? { ...user, isActive: false } : user) });
+  it("displays usernames without an at-sign and submits account identity fields", async () => {
     renderPage();
 
+    expect(await screen.findByText("existing.doc")).toBeTruthy();
+    expect(screen.queryByText("@existing.doc")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    expect(screen.getByText(/Username: @existing\.doc - Core role: doctor - User account: Inactive - Doctor profile: Active/)).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toMatch(/profile is active.*user account is inactive.*cannot log in/i);
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: " Updated.Doc " } });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Updated Doctor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+    await waitFor(() => expect(updateDoctorLinkedUserForAdminMock).toHaveBeenCalledWith(10, { username: " Updated.Doc ", fullName: "Updated Doctor", coreRole: "doctor", active: true }));
+  });
+
+  it("keeps duplicate username errors visible and the drawer open", async () => {
+    updateDoctorLinkedUserForAdminMock.mockRejectedValueOnce(new Error("A user with that username already exists."));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("already exists");
+    expect(screen.getByRole("dialog", { name: "Manage doctor: Dr Existing" })).toBeTruthy();
+  });
+
+  it("confirms complete deactivation and keeps failures visible without changing the row", async () => {
+    setDoctorIdentityActiveMock.mockRejectedValueOnce(new Error("Protected account cannot be deactivated."));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Deactivate doctor" }));
+    expect(screen.getByText(/deactivate the login account and doctor profile/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(setDoctorIdentityActiveMock).toHaveBeenCalledWith(10, false));
+    expect((await screen.findByRole("alert")).textContent).toContain("Protected account");
+    expect(screen.getByRole("button", { name: "Deactivate doctor" })).toBeTruthy();
+  });
+
+  it("reactivates the linked account and profile together", async () => {
+    const inactive = { ...profiles[0], active: false, userActive: false };
+    fetchDoctorProfilesForAdminMock.mockResolvedValue([inactive]);
+    setDoctorIdentityActiveMock.mockResolvedValue({ user: { ...users[0], isActive: true }, profile: profiles[0] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Reactivate doctor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(setDoctorIdentityActiveMock).toHaveBeenCalledWith(10, true));
   });
 
   it("does not render admin create or edit controls for normal doctors", () => {
