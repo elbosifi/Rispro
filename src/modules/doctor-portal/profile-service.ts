@@ -8,6 +8,7 @@ import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { deriveDoctorCapabilities } from "./capabilities.js";
 import { syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
+import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
@@ -143,9 +144,9 @@ export async function createDoctorWithUserForAdmin(
   }
 ) {
   await requireDoctorAdmin(actorUserId, appRole);
-  const username = input.username.trim();
+  const username = normalizeUsername(input.username);
   const fullName = input.fullName.trim();
-  const temporaryPassword = input.temporaryPassword.trim();
+  const temporaryPassword = requireExactPassword(input.temporaryPassword, "temporaryPassword");
   const doctorDisplayName = input.doctorDisplayName.trim() || fullName;
 
   if (!username || !fullName || !temporaryPassword || !doctorDisplayName) {

@@ -6,6 +6,7 @@ import { isRole } from "../constants/roles.js";
 import type { Role } from "../types/domain.js";
 import type { NullableUserId, UserId } from "../types/http.js";
 import { syncDoctorWorklistForUser } from "../modules/doctor-portal/doctor-worklist-provisioning.js";
+import { normalizeUsername, requireExactPassword } from "../utils/credentials.js";
 
 export interface UserRow {
   id: number;
@@ -67,7 +68,8 @@ export async function createUser(
   { username, fullName, password, role, isActive = true, mustChangePassword = false, canRequestSchedulingOverride = false }: UserCreatePayload,
   actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
-  if (!username || !fullName || !password || !role) {
+  const canonicalUsername = normalizeUsername(username);
+  if (!canonicalUsername || !fullName || !password || !role) {
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
 
@@ -91,7 +93,8 @@ export async function createUser(
     throw new HttpError(403, "Only super_admin can create a super_admin user.");
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const exactPassword = requireExactPassword(password);
+  const passwordHash = await bcrypt.hash(exactPassword, 10);
 
   try {
     const { rows } = await pool.query(
@@ -100,7 +103,7 @@ export async function createUser(
         values ($1, $2, $3, $4, $5, $6, $7)
         returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
       `,
-      [username, fullName, passwordHash, role, isActive, mustChangePassword, role === "receptionist" && canRequestSchedulingOverride]
+      [canonicalUsername, fullName, passwordHash, role, isActive, mustChangePassword, role === "receptionist" && canRequestSchedulingOverride]
     );
 
     const createdUser = rows[0] as UserRow | undefined;
@@ -309,13 +312,10 @@ export async function updateUserPassword(
   changedByUserId: NullableUserId = null
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
-  const cleanPassword = String(password ?? "").trim();
+  const cleanPassword = requireExactPassword(password);
 
   if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
     throw new HttpError(400, "userId must be a positive whole number.");
-  }
-  if (!cleanPassword) {
-    throw new HttpError(400, "password is required.");
   }
 
   const currentResult = await pool.query(
@@ -373,13 +373,10 @@ export async function resetUserTemporaryPassword(
   changedByUserId: NullableUserId = null
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
-  const cleanPassword = String(password ?? "").trim();
+  const cleanPassword = requireExactPassword(password, "temporaryPassword");
 
   if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
     throw new HttpError(400, "userId must be a positive whole number.");
-  }
-  if (!cleanPassword) {
-    throw new HttpError(400, "temporaryPassword is required.");
   }
 
   const currentResult = await pool.query(
@@ -574,7 +571,7 @@ export async function updateOwnPassword(
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
   const cleanCurrentPassword = String(currentPassword ?? "");
-  const cleanNewPassword = String(newPassword ?? "").trim();
+  const cleanNewPassword = requireExactPassword(newPassword, "newPassword");
 
   if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
     throw new HttpError(400, "userId must be a positive whole number.");

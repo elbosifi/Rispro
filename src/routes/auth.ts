@@ -1,5 +1,5 @@
 import express, { Request, Response, Router } from "express";
-import { createRateLimiter } from "../middleware/rate-limit.js";
+import { createFailureRateLimiter, createRateLimiter } from "../middleware/rate-limit.js";
 import { asyncRoute } from "../utils/async-route.js";
 import {
   authenticateUser,
@@ -17,6 +17,7 @@ import { asString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import type { Role } from "../types/domain.js";
 import { updateOwnPassword } from "../services/user-service.js";
+import { normalizeUsername } from "../utils/credentials.js";
 import { createPasskeyRouter } from "./passkeys.js";
 
 interface AuthSessionRequest extends Request {
@@ -34,6 +35,11 @@ interface AuthenticatedUser {
 export const authRouter: Router = express.Router();
 authRouter.use("/passkeys", createPasskeyRouter());
 const loginRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 200,
+  message: "Too many login attempts. Please wait a few minutes and try again."
+});
+const usernameFailureLimiter = createFailureRateLimiter({
   windowMs: 15 * 60 * 1000,
   maxRequests: 10,
   message: "Too many login attempts. Please wait a few minutes and try again."
@@ -57,9 +63,19 @@ authRouter.post(
   loginRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const body = req.body as UnknownRecord;
-    const username = asString(body.username);
+    const username = normalizeUsername(asString(body.username));
     const password = asString(body.password);
-    const user = await authenticateUser(username, password);
+    usernameFailureLimiter.check(username || "unknown");
+    let user;
+    try {
+      user = await authenticateUser(username, password);
+    } catch (error) {
+      if (error instanceof HttpError && error.statusCode === 401) {
+        usernameFailureLimiter.recordFailure(username || "unknown");
+      }
+      throw error;
+    }
+    usernameFailureLimiter.reset(username || "unknown");
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
     clearSupervisorReauthCookie(res);

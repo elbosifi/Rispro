@@ -7,6 +7,7 @@ import type { UserId } from "../../types/http.js";
 import { buildWorkbookBuffer, parseWorksheet, readWorkbookFromBase64 } from "../../services/workbook-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type { DoctorRole } from "./profile-repository.js";
+import { normalizeUsername, requireExactPassword } from "../../utils/credentials.js";
 
 const EXPORT_COLUMNS = [
   "username",
@@ -71,13 +72,13 @@ function parseCsvLine(line: string): string[] {
     } else if (char === '"') {
       quoted = !quoted;
     } else if (char === "," && !quoted) {
-      cells.push(current.trim());
+      cells.push(current);
       current = "";
     } else {
       current += char;
     }
   }
-  cells.push(current.trim());
+  cells.push(current);
   return cells;
 }
 
@@ -89,7 +90,8 @@ function parseCsv(content: string): { headers: string[]; rows: ImportRow[] } {
     const cells = parseCsvLine(line);
     const values: Record<string, string> = {};
     headers.forEach((header, cellIndex) => {
-      values[header] = cells[cellIndex] ?? "";
+      const value = cells[cellIndex] ?? "";
+      values[header] = header === "temporary_password" ? value : value.trim();
     });
     return { rowNumber: index + 2, values };
   });
@@ -124,7 +126,7 @@ async function parseImportFile(input: { fileContentBase64: string; format?: stri
     headers: parsed.headers,
     rows: parsed.rows.map((row) => ({
       rowNumber: row.rowNumber,
-      values: Object.fromEntries(Object.entries(row.values).map(([key, value]) => [key.trim(), workbookValue(value)])),
+      values: Object.fromEntries(Object.entries(row.values).map(([key, value]) => [key.trim(), key.trim() === "temporary_password" ? String(value ?? "") : workbookValue(value)])),
     })),
   };
 }
@@ -209,22 +211,34 @@ export async function previewDoctorImport(input: { fileContentBase64: string; fo
   const parsed = await parseImportFile(input);
   const modalityMap = await modalityCodeMap();
   const seen = new Set<string>();
-  const usernames = parsed.rows.map((row) => row.values.username?.trim()).filter(Boolean);
-  const existing = await pool.query<{ username: string }>(`select username from users where username = any($1::text[])`, [usernames]);
-  const existingUsernames = new Set(existing.rows.map((row) => row.username));
+  const usernames = parsed.rows.map((row) => normalizeUsername(row.values.username)).filter(Boolean);
+  const existing = await pool.query<{ username: string }>(`select username from users where lower(btrim(username)) = any($1::text[])`, [usernames]);
+  const existingUsernames = new Set(existing.rows.map((row) => normalizeUsername(row.username)));
 
   const rows = parsed.rows.map((row): PreviewRow => {
     const errors: string[] = [];
-    const username = row.values.username?.trim();
+    const username = normalizeUsername(row.values.username);
     const coreRole = row.values.core_role?.trim();
     const doctorRole = row.values.doctor_role?.trim();
     if (!username) errors.push("username is required");
-    if (username && seen.has(username.toLowerCase())) errors.push(`duplicate username in ${parsed.format.toUpperCase()}`);
-    if (username) seen.add(username.toLowerCase());
+    if (username && seen.has(username)) errors.push(`duplicate username in ${parsed.format.toUpperCase()}`);
+    if (username) seen.add(username);
     if (!row.values.full_name?.trim()) errors.push("full_name is required");
     if (!coreRole || !isRole(coreRole)) errors.push("invalid core_role");
     if (!doctorRole || !DOCTOR_ROLES.has(doctorRole as DoctorRole)) errors.push("invalid doctor_role");
-    if (!existingUsernames.has(username) && !row.values.temporary_password?.trim()) errors.push("temporary_password is required for new users");
+    if (!existingUsernames.has(username)) {
+      try {
+        requireExactPassword(row.values.temporary_password, "temporary_password");
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "invalid temporary_password");
+      }
+    } else if (row.values.temporary_password) {
+      try {
+        requireExactPassword(row.values.temporary_password, "temporary_password");
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "invalid temporary_password");
+      }
+    }
     for (const column of ["modalities_protocol", "modalities_report", "modalities_supervise"]) {
       for (const code of splitCodes(row.values[column])) {
         if (!modalityMap.has(code.toLowerCase())) errors.push(`invalid modality '${code}' in ${column}`);
@@ -267,12 +281,12 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
     await client.query("begin");
     for (const row of preview.rows) {
       const values = row.values;
-      const username = values.username.trim();
-      const existing = await client.query<{ id: number }>(`select id from users where username = $1 limit 1`, [username]);
+      const username = normalizeUsername(values.username);
+      const existing = await client.query<{ id: number }>(`select id from users where lower(btrim(username)) = $1 limit 1`, [username]);
       let userId = existing.rows[0]?.id;
       const resetPassword = boolValue(values.reset_password, false);
       if (!userId) {
-        const passwordHash = await bcrypt.hash(values.temporary_password, 10);
+        const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
         const inserted = await client.query<{ id: number }>(
           `
             insert into users (username, full_name, password_hash, role, is_active, must_change_password)
@@ -285,7 +299,7 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         summary.createdUsers += 1;
       } else {
         if (resetPassword && values.temporary_password) {
-          const passwordHash = await bcrypt.hash(values.temporary_password, 10);
+          const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
           await client.query(
             `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true, updated_at = now() where id = $1`,
             [userId, values.full_name, values.core_role, boolValue(values.user_active, true), passwordHash]

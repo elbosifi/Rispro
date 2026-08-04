@@ -189,9 +189,11 @@ async function createDoctorPortalTestApp() {
   const http = await import("node:http");
   const { createAppointmentsV2Router } = await import("../appointments-v2/index.js");
   const { createDoctorPortalRouter } = await import("./index.js");
+  const { authRouter } = await import("../../routes/auth.js");
   const app = express();
   app.use(express.json({ limit: "10mb" }));
   app.use(cookieParser());
+  app.use("/api/auth", authRouter);
   app.use("/api/doctor", createDoctorPortalRouter());
   app.use("/api/v2", createAppointmentsV2Router());
   app.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
@@ -317,6 +319,19 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
   const api = (cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
     fetchJson(app.baseUrl, path, { cookie, ...options });
 
+  async function authRequest(path: string, body: unknown, cookie = "") {
+    const response = await fetch(`${app.baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+      body: JSON.stringify(body),
+    });
+    return {
+      status: response.status,
+      data: await response.json() as Record<string, unknown>,
+      cookie: response.headers.get("set-cookie")?.split(";")[0] ?? "",
+    };
+  }
+
   it("verifies Doctor Portal migrations 064-072 are applied with core constraints/indexes", async () => {
     guard();
     const tables = await pool.query<{ table_name: string }>(
@@ -345,6 +360,10 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         "doctor_roster_notifications",
       ]]
     );
+    const usernameIndex = await pool.query<{ indexname: string }>(
+      `select indexname from pg_indexes where schemaname = 'public' and indexname = 'users_username_normalized_unique'`
+    );
+    assert.equal(usernameIndex.rows.length, 1);
     assert.equal(tables.rowCount, 16);
     const indexes = await pool.query<{ indexname: string }>(
       `
@@ -656,7 +675,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     guard();
     const username = `${TEST_PREFIX.toLowerCase()}created_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const body = {
-      username,
+      username: `  ${username.toUpperCase()}  `,
       fullName: `${TEST_PREFIX} Created Doctor`,
       temporaryPassword: "TempPass123",
       coreRole: "doctor",
@@ -683,6 +702,36 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(createdData.profile.canSupervise, true);
     assert.equal(createdData.modalities.some((permission) => Number(permission.modalityId) === testData.modalityId && permission.active && permission.canProtocol && permission.canReport), true);
 
+    const initialLogin = await authRequest("/api/auth/login", { username: `  ${username.toUpperCase()} `, password: body.temporaryPassword });
+    assert.equal(initialLogin.status, 200, JSON.stringify(initialLogin.data));
+    assert.equal(((initialLogin.data.user as { mustChangePassword: boolean }).mustChangePassword), true);
+    assert.ok(initialLogin.cookie);
+
+    const changed = await authRequest("/api/auth/change-password", { currentPassword: body.temporaryPassword, newPassword: "ChangedPass456" }, initialLogin.cookie);
+    assert.equal(changed.status, 200, JSON.stringify(changed.data));
+    assert.equal(((changed.data.user as { mustChangePassword: boolean }).mustChangePassword), false);
+    assert.ok(changed.cookie);
+    assert.equal((await authRequest("/api/auth/login", { username, password: body.temporaryPassword })).status, 401);
+    assert.equal((await authRequest("/api/auth/login", { username: username.toUpperCase(), password: "ChangedPass456" })).status, 200);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      assert.equal((await authRequest("/api/auth/login", { username, password: "wrong-password" })).status, 401);
+    }
+    assert.equal((await authRequest("/api/auth/login", { username, password: "ChangedPass456" })).status, 200);
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      assert.equal((await authRequest("/api/auth/login", { username, password: "wrong-password" })).status, 401);
+    }
+    assert.equal((await authRequest("/api/auth/login", { username, password: "ChangedPass456" })).status, 200, "successful login must clear the username failure bucket");
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      assert.equal((await authRequest("/api/auth/login", { username, password: "wrong-password" })).status, 401);
+    }
+    assert.equal((await authRequest("/api/auth/login", { username, password: "ChangedPass456" })).status, 429);
+    const sharedIpDoctor = `${username}_shared`;
+    const sharedCreated = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: sharedIpDoctor, doctorDisplayName: `${TEST_PREFIX} Shared IP Doctor` } });
+    assert.equal(sharedCreated.status, 201, JSON.stringify(sharedCreated.data));
+    assert.equal((await authRequest("/api/auth/login", { username: sharedIpDoctor, password: body.temporaryPassword })).status, 200, "one username's failures must not block another doctor on the same IP");
+
     const userCookie = createTestAuthCookie(createdData.user.id, "doctor");
     assert.equal((await api(userCookie, "/api/doctor/me")).status, 200);
     const updated = await api(admin.cookie, `/api/doctor/profiles/${createdData.profile.id}`, {
@@ -699,8 +748,16 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((inactiveMe.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).hasActiveDoctorProfile, false);
     assert.equal((inactiveMe.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).canAccessClinicalDoctorPortal, false);
 
-    const duplicate = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, doctorDisplayName: `${TEST_PREFIX} Duplicate` } });
+    const duplicate = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: username.toUpperCase(), doctorDisplayName: `${TEST_PREFIX} Duplicate` } });
     assert.equal(duplicate.status, 409);
+
+    const whitespacePassword = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_space`, temporaryPassword: " TempPass123" } });
+    assert.equal(whitespacePassword.status, 400);
+    assert.match(String((whitespacePassword.data as { error?: string }).error), /must not start or end with whitespace/);
+
+    const sharedUserId = Number(((sharedCreated.data as { user: { id: number } }).user.id));
+    await pool.query(`update users set is_active = false where id = $1`, [sharedUserId]);
+    assert.equal((await authRequest("/api/auth/login", { username: sharedIpDoctor, password: body.temporaryPassword })).status, 401);
 
     const missingPassword = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_missing`, temporaryPassword: "" } });
     assert.equal(missingPassword.status, 400);

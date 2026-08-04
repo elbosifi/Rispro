@@ -102,7 +102,7 @@ describe("DoctorAdminDoctorsPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders Create Doctor for admins and submits a new user plus profile", async () => {
+  it("clearly labels account creation and submits a new user plus profile", async () => {
     renderPage();
 
     fireEvent.change(screen.getByPlaceholderText("Username"), { target: { value: "fresh.doc" } });
@@ -110,7 +110,11 @@ describe("DoctorAdminDoctorsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("Temporary password"), { target: { value: "Temp123!" } });
     const createModalityRow = (await screen.findByText("CT")).closest("tr")!;
     fireEvent.click(within(createModalityRow).getAllByRole("checkbox")[0]);
-    fireEvent.click(screen.getByRole("button", { name: "Create doctor" }));
+    expect(screen.getByRole("heading", { name: "Create login account and doctor profile" })).toBeTruthy();
+    expect(screen.getByText(/Creates new RISpro credentials/)).toBeTruthy();
+    expect(screen.getByText("Link existing RISpro user to doctor profile")).toBeTruthy();
+    expect(screen.getByText(/No new login credentials are created/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create login account and doctor profile" }));
 
     await waitFor(() => expect(createDoctorWithUserForAdminMock).toHaveBeenCalled());
     expect(createDoctorWithUserForAdminMock.mock.calls[0][0]).toMatchObject({
@@ -126,7 +130,7 @@ describe("DoctorAdminDoctorsPage", () => {
   it("hides doctor import and export controls in the default directory", async () => {
     renderPage();
 
-    expect(await screen.findByText("Create Doctor")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Create login account and doctor profile" })).toBeTruthy();
     expect(screen.queryByText("Doctor CSV/XLSX import and export")).toBeNull();
     expect(screen.queryByText("Download CSV template")).toBeNull();
     expect(screen.queryByText("Download XLSX template")).toBeNull();
@@ -184,7 +188,7 @@ describe("DoctorAdminDoctorsPage", () => {
     expect((within(row).getAllByRole("checkbox")[1] as HTMLInputElement).checked).toBe(true);
     await waitFor(() => expect(updateDoctorProfileModalitiesMock).toHaveBeenCalledWith(1, expect.arrayContaining([expect.objectContaining({ modalityId: 5, canProtocol: true })])));
 
-    await screen.findByRole("option", { name: "New Profile (@new.profile)" });
+    await screen.findByRole("option", { name: "New Profile (@new.profile) - doctor - user active" });
     fireEvent.change(screen.getByDisplayValue("Select user"), { target: { value: "11" } });
     fireEvent.change(screen.getByPlaceholderText("Display name"), { target: { value: "New Profile" } });
     await waitFor(() => expect((screen.getByRole("button", { name: "Create profile" }) as HTMLButtonElement).disabled).toBe(false));
@@ -207,11 +211,21 @@ describe("DoctorAdminDoctorsPage", () => {
     await waitFor(() => expect(setDoctorUserActiveMock).toHaveBeenCalledWith(10, false));
   });
 
+  it("shows linked username, role, both active states, and warns when only the profile is active", async () => {
+    fetchDoctorProfilesForAdminMock.mockResolvedValueOnce([{ ...profiles[0], userActive: false, active: true }]);
+    fetchUsersMock.mockResolvedValueOnce({ users: users.map((user) => user.id === 10 ? { ...user, isActive: false } : user) });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByText(/Username: @existing\.doc - Core role: doctor - User account: Inactive - Doctor profile: Active/)).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/profile is active.*user account is inactive.*cannot log in/i);
+  });
+
   it("does not render admin create or edit controls for normal doctors", () => {
     renderPage(normalMe);
 
     expect(screen.getByText("Doctor profile management is not available for this user.")).toBeTruthy();
-    expect(screen.queryByText("Create Doctor")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Create login account and doctor profile" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
   });
 });

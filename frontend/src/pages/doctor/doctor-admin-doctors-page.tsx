@@ -376,7 +376,8 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       )}
 
       <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <h3 className="font-semibold">Create Doctor</h3>
+        <h3 className="font-semibold">Create login account and doctor profile</h3>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Creates new RISpro credentials and requires the doctor to change the temporary password at first login.</p>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
           Creates the RISpro login account and Doctor Portal profile together.
         </p>
@@ -432,7 +433,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
         )}
         <div className="mt-4">
           <button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || !createDoctorDraft.doctorDisplayName || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
-            Create doctor
+            Create login account and doctor profile
           </button>
         </div>
       </section>
@@ -478,7 +479,8 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       )}
 
       <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <h3 className="font-semibold">Create doctor profile for existing user</h3>
+        <h3 className="font-semibold">Link existing RISpro user to doctor profile</h3>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>Uses the selected account’s existing username, password, core role, and active state. No new login credentials are created.</p>
         <div className="mt-3 grid gap-2 md:grid-cols-4">
           <select value={draft.userId} onChange={(event) => {
             const user = usersById.get(Number(event.target.value));
@@ -486,7 +488,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           }} className="rounded-lg border px-3 py-2 text-sm">
             <option value="">Select user</option>
             {(usersQuery.data?.users ?? []).filter((user) => !profilesByUserId.has(user.id)).map((user) => (
-              <option key={user.id} value={user.id}>{user.fullName} (@{user.username})</option>
+              <option key={user.id} value={user.id}>{user.fullName} (@{user.username}) - {user.role} - {user.isActive ? "user active" : "user inactive"}</option>
             ))}
           </select>
           <input value={draft.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
@@ -502,7 +504,7 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
       <section className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
         <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
           <thead style={{ backgroundColor: "var(--card)" }}>
-            <tr>{["Name", "User", "Core role", "User", "Doctor role", "Profile", "Permissions", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr>
+            <tr>{["Name", "Username", "Core role", "User account", "Doctor role", "Profile", "Permissions", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr>
           </thead>
           <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
             {profiles.map((profile) => (
@@ -567,9 +569,10 @@ export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe;
           <div className="mt-4 rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
             <p className="text-sm font-semibold">Linked user account</p>
             <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              @{editingProfile.username ?? usersById.get(editingProfile.userId)?.username ?? editingProfile.userId} - {editingLinkedUserActive ? "Active" : "Inactive"}
+              Username: @{editingProfile.username ?? usersById.get(editingProfile.userId)?.username ?? editingProfile.userId} - Core role: {editingProfile.coreRole ?? usersById.get(editingProfile.userId)?.role ?? "Unknown"} - User account: {editingLinkedUserActive ? "Active" : "Inactive"} - Doctor profile: {editingProfile.active ? "Active" : "Inactive"}
               {usersById.get(editingProfile.userId)?.mustChangePassword ? " - must change password" : ""}
             </p>
+            {editingProfile.active && !editingLinkedUserActive && <p role="alert" className="mt-2 text-sm font-semibold text-red-600">Warning: this doctor profile is active, but the linked RISpro user account is inactive and cannot log in.</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="New temporary password" className="rounded-lg border px-3 py-2 text-sm" />
               <button type="button" disabled={!resetPassword || resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>

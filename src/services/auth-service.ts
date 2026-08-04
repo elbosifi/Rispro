@@ -7,6 +7,7 @@ import { requireRow } from "../utils/records.js";
 import type { Role } from "../types/domain.js";
 import type { UserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
+import { normalizeUsername } from "../utils/credentials.js";
 
 interface AuthUserRow {
   id: UserId;
@@ -43,13 +44,14 @@ export async function authenticateUser(
   username: string,
   password: string
 ): Promise<AuthUserRow> {
+  const normalizedUsername = normalizeUsername(username);
   const query = `
     select id, username, full_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password
     from users
-    where username = $1
+    where lower(btrim(username)) = $1
     limit 1
   `;
-  const { rows } = (await pool.query(query, [username])) as DbQueryResult<AuthUserRow>;
+  const { rows } = (await pool.query(query, [normalizedUsername])) as DbQueryResult<AuthUserRow>;
   const user = rows[0];
 
   if (!user || !user.is_active) {

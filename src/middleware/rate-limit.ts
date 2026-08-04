@@ -9,6 +9,40 @@ interface RateLimiterOptions {
   key?: (req: Request) => string;
 }
 
+export interface FailureRateLimiter {
+  check: (key: string) => void;
+  recordFailure: (key: string) => void;
+  reset: (key: string) => void;
+}
+
+export function createFailureRateLimiter({ windowMs, maxRequests, message, errorCode }: Omit<RateLimiterOptions, "key">): FailureRateLimiter {
+  const failures = new Map<string, number[]>();
+  const active = (key: string, now = Date.now()) => {
+    const timestamps = (failures.get(key) ?? []).filter((timestamp) => timestamp > now - windowMs);
+    if (timestamps.length) failures.set(key, timestamps);
+    else failures.delete(key);
+    return timestamps;
+  };
+
+  setInterval(() => {
+    for (const key of failures.keys()) active(key);
+  }, windowMs).unref();
+
+  return {
+    check(key) {
+      if (active(key).length >= maxRequests) {
+        throw new HttpError(429, message, errorCode ? { code: errorCode } : null);
+      }
+    },
+    recordFailure(key) {
+      failures.set(key, [...active(key), Date.now()]);
+    },
+    reset(key) {
+      failures.delete(key);
+    }
+  };
+}
+
 export function createRateLimiter({ windowMs, maxRequests, message, errorCode, key: getKey }: RateLimiterOptions) {
   const requestLog = new Map<string, number[]>();
 
