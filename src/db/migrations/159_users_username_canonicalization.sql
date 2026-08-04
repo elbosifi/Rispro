@@ -3,6 +3,14 @@ begin
   if exists (
     select 1
     from users
+    where btrim(username) = ''
+  ) then
+    raise exception 'Cannot normalize usernames: empty or whitespace-only usernames exist. Resolve them before applying migration 159.';
+  end if;
+
+  if exists (
+    select 1
+    from users
     group by lower(btrim(username))
     having count(*) > 1
   ) then
@@ -16,3 +24,7 @@ where username is distinct from lower(btrim(username));
 
 create unique index if not exists users_username_normalized_unique
   on users (lower(btrim(username)));
+
+alter table users
+  add constraint users_username_canonical_check
+  check (username <> '' and username = lower(btrim(username)));

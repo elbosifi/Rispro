@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { getTripoliToday } from "../../utils/date.js";
 
 if (!process.env.DATABASE_URL && process.env.TEST_DATABASE_URL) {
@@ -845,11 +846,39 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdUsers, 1);
     assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdProfiles, 1);
 
-    const imported = await pool.query<{ must_change_password: boolean }>(
-      `select must_change_password from users where username = $1 limit 1`,
+    const imported = await pool.query<{ password_hash: string; must_change_password: boolean }>(
+      `select password_hash, must_change_password from users where username = $1 limit 1`,
       [username]
     );
     assert.equal(imported.rows[0]?.must_change_password, true);
+
+    const csvRow = (temporaryPassword: string, resetPassword: string) => [
+      "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${username},${TEST_PREFIX} Imported Doctor,${temporaryPassword},doctor,true,consultant,true,true,true,false,${modalityCode},,,${resetPassword}`,
+    ].join("\n");
+    const resetWithoutPassword = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST",
+      body: { fileContentBase64: Buffer.from(csvRow("", "true"), "utf8").toString("base64") },
+    });
+    assert.equal((resetWithoutPassword.data as { preview: { canConfirm: boolean; rows: Array<{ errors: string[] }> } }).preview.canConfirm, false);
+    assert.match((resetWithoutPassword.data as { preview: { rows: Array<{ errors: string[] }> } }).preview.rows[0].errors.join(";"), /temporary_password is required/);
+
+    const resetPassword = "CsvResetPass456";
+    const reset = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST",
+      body: { fileContentBase64: Buffer.from(csvRow(resetPassword, "true"), "utf8").toString("base64") },
+    });
+    assert.equal(reset.status, 200, JSON.stringify(reset.data));
+    const resetUser = await pool.query<{ password_hash: string; must_change_password: boolean }>(`select password_hash, must_change_password from users where username = $1`, [username]);
+    assert.equal(await bcrypt.compare(resetPassword, resetUser.rows[0].password_hash), true);
+    assert.equal(resetUser.rows[0].must_change_password, true);
+
+    const preserve = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST",
+      body: { fileContentBase64: Buffer.from(csvRow("", "false"), "utf8").toString("base64") },
+    });
+    assert.equal(preserve.status, 200, JSON.stringify(preserve.data));
+    assert.equal((await pool.query<{ password_hash: string }>(`select password_hash from users where username = $1`, [username])).rows[0].password_hash, resetUser.rows[0].password_hash);
   });
 
   it("supports XLSX doctor import/export with row errors and password reset guardrails", async () => {
@@ -916,13 +945,30 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((invalidPreview.data as { preview: { canConfirm: boolean; rows: Array<{ errors: string[] }> } }).preview.canConfirm, false);
     assert.match((invalidPreview.data as { preview: { rows: Array<{ errors: string[] }> } }).preview.rows[0].errors.join(";"), /invalid modality/i);
 
+    const resetWithoutPassword = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST",
+      body: { fileContentBase64: await workbookBase64([{ ...rows[0], temporary_password: "", reset_password: "true" }]), format: "xlsx" },
+    });
+    assert.equal((resetWithoutPassword.data as { preview: { canConfirm: boolean; rows: Array<{ errors: string[] }> } }).preview.canConfirm, false);
+    assert.match((resetWithoutPassword.data as { preview: { rows: Array<{ errors: string[] }> } }).preview.rows[0].errors.join(";"), /temporary_password is required/);
+
     const noReset = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
       method: "POST",
-      body: { fileContentBase64: await workbookBase64([{ ...rows[0], temporary_password: "DifferentPass123", reset_password: "false" }]), format: "xlsx" },
+      body: { fileContentBase64: await workbookBase64([{ ...rows[0], temporary_password: "", reset_password: "false" }]), format: "xlsx" },
     });
     assert.equal(noReset.status, 200, JSON.stringify(noReset.data));
     const unchanged = await pool.query<{ password_hash: string }>(`select password_hash from users where username = $1`, [username]);
     assert.equal(unchanged.rows[0].password_hash, originalHash);
+
+    const resetPassword = "XlsxResetPass456";
+    const reset = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST",
+      body: { fileContentBase64: await workbookBase64([{ ...rows[0], temporary_password: resetPassword, reset_password: "true" }]), format: "xlsx" },
+    });
+    assert.equal(reset.status, 200, JSON.stringify(reset.data));
+    const resetUser = await pool.query<{ password_hash: string; must_change_password: boolean }>(`select password_hash, must_change_password from users where username = $1`, [username]);
+    assert.equal(await bcrypt.compare(resetPassword, resetUser.rows[0].password_hash), true);
+    assert.equal(resetUser.rows[0].must_change_password, true);
   });
 
   it("supersedes changed workload values without duplicate active rows", async () => {

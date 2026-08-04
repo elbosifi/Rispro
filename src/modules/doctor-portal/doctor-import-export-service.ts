@@ -226,13 +226,22 @@ export async function previewDoctorImport(input: { fileContentBase64: string; fo
     if (!row.values.full_name?.trim()) errors.push("full_name is required");
     if (!coreRole || !isRole(coreRole)) errors.push("invalid core_role");
     if (!doctorRole || !DOCTOR_ROLES.has(doctorRole as DoctorRole)) errors.push("invalid doctor_role");
+    let resetPassword = false;
+    try {
+      ["user_active", "doctor_profile_active", "can_finalize_reports", "can_assign_protocols", "can_supervise"].forEach((column) => {
+        if (row.values[column]) boolValue(row.values[column], false);
+      });
+      resetPassword = boolValue(row.values.reset_password, false);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "invalid boolean");
+    }
     if (!existingUsernames.has(username)) {
       try {
         requireExactPassword(row.values.temporary_password, "temporary_password");
       } catch (error) {
         errors.push(error instanceof Error ? error.message : "invalid temporary_password");
       }
-    } else if (row.values.temporary_password) {
+    } else if (resetPassword || row.values.temporary_password) {
       try {
         requireExactPassword(row.values.temporary_password, "temporary_password");
       } catch (error) {
@@ -243,13 +252,6 @@ export async function previewDoctorImport(input: { fileContentBase64: string; fo
       for (const code of splitCodes(row.values[column])) {
         if (!modalityMap.has(code.toLowerCase())) errors.push(`invalid modality '${code}' in ${column}`);
       }
-    }
-    try {
-      ["user_active", "doctor_profile_active", "can_finalize_reports", "can_assign_protocols", "can_supervise", "reset_password"].forEach((column) => {
-        if (row.values[column]) boolValue(row.values[column], false);
-      });
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "invalid boolean");
     }
     return { ...row, action: errors.length ? "invalid" : existingUsernames.has(username) ? "update" : "create", errors };
   });
@@ -298,7 +300,7 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         userId = inserted.rows[0].id;
         summary.createdUsers += 1;
       } else {
-        if (resetPassword && values.temporary_password) {
+        if (resetPassword) {
           const passwordHash = await bcrypt.hash(requireExactPassword(values.temporary_password, "temporary_password"), 10);
           await client.query(
             `update users set full_name = $2, role = $3, is_active = $4, password_hash = $5, must_change_password = true, updated_at = now() where id = $1`,
