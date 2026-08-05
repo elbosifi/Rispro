@@ -298,6 +298,10 @@ const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "processing", "a
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
 const REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS = 60;
+const DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS, 90);
+const DICOM_REMAP_ORTHANC_STABILITY_POLL_MS = 1_000;
+const DICOM_REMAP_ORTHANC_LEASE_RENEWAL_INTERVAL_SECONDS = 10;
+const DICOM_REMAP_ORTHANC_SOP_READ_CONCURRENCY = 8;
 let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
@@ -3422,22 +3426,144 @@ async function probeOrthancHealthForRemap(): Promise<boolean> {
   }
 }
 
-async function verifyOrthancStudyAcceptedSopSet(studyId: string, expectedSops: Set<string>): Promise<void> {
-  const study = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
-  const instances = study.ok && study.json && typeof study.json === "object" ? (study.json as Record<string, unknown>).Instances : null;
-  if (!Array.isArray(instances) || instances.length !== expectedSops.size) {
-    throw new HttpError(502, "Orthanc did not verify the expected unique remapped instance count.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
+type OrthancVerificationReason = "STUDY_NOT_FOUND" | "STUDY_RESPONSE_MALFORMED" | "STUDY_INSTANCE_ENUMERATION_UNSUPPORTED" | "STUDY_INSTANCE_LIST_MISSING" | "STUDY_NOT_STABLE" | "ZERO_INSTANCES" | "EXPECTED_ACTUAL_COUNT_MISMATCH" | "INSTANCE_SOP_UID_UNREADABLE" | "SOP_SET_MISMATCH" | "STUDY_UID_MISMATCH" | "MULTIPLE_MODIFIED_STUDIES";
+type OrthancEnumerationMethod = "direct" | "series";
+type OrthancVerificationDetails = {
+  code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED";
+  verificationReason: OrthancVerificationReason;
+  expectedCount?: number;
+  actualCount?: number;
+  seriesCount?: number;
+  enumerationMethod?: OrthancEnumerationMethod;
+  orthancProduct?: string;
+  orthancVersion?: string;
+  studyResponseShape?: string;
+  statisticsResponseShape?: string;
+  instancesResponseShape?: string;
+};
+
+function orthancVerificationError(message: string, details: Omit<OrthancVerificationDetails, "code">): HttpError {
+  return new HttpError(502, message, { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", ...details });
+}
+
+function readOrthancResourceId(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number") return String(value).trim();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const row = value as Record<string, unknown>;
+  return readDicomStringValue(row.ID ?? row.Id ?? row.id);
+}
+
+function readExpandedOrthancSop(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const row = value as Record<string, unknown>;
+  const tags = row.MainDicomTags && typeof row.MainDicomTags === "object" && !Array.isArray(row.MainDicomTags) ? row.MainDicomTags as Record<string, unknown> : {};
+  return readDicomStringValue(row.SOPInstanceUID ?? tags.SOPInstanceUID ?? tags["00080018"]);
+}
+
+function parseOrthancInstanceChildren(payload: unknown): { ids: string[]; sopsById: Map<string, string> } | null {
+  if (!Array.isArray(payload)) return null;
+  const ids: string[] = [];
+  const sopsById = new Map<string, string>();
+  for (const value of payload) {
+    const id = readOrthancResourceId(value);
+    if (!id) return null;
+    ids.push(id);
+    const sop = readExpandedOrthancSop(value);
+    if (sop) sopsById.set(id, sop);
   }
-  const actualSops = new Set<string>();
-  for (const instanceId of instances) {
-    const tags = await fetchOrthancForRemap(`/instances/${encodeURIComponent(String(instanceId))}/simplified-tags`, { method: "GET" });
-    const sop = tags.ok && tags.json && typeof tags.json === "object" ? readDicomStringValue((tags.json as Record<string, unknown>).SOPInstanceUID) : "";
-    if (!sop) throw new HttpError(502, "Orthanc instance identity could not be verified.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
-    actualSops.add(sop);
+  return { ids: Array.from(new Set(ids)), sopsById };
+}
+
+async function listOrthancStudyInstanceIds(studyId: string, studyPayload: Record<string, unknown>, baseDetails: Omit<OrthancVerificationDetails, "code" | "verificationReason">): Promise<{ ids: string[]; sopsById: Map<string, string>; method: OrthancEnumerationMethod; details: Omit<OrthancVerificationDetails, "code" | "verificationReason"> }> {
+  const direct = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}/instances`, { method: "GET" });
+  const directShape = describeOrthancPayloadShape(direct.json);
+  if (direct.ok) {
+    const parsed = parseOrthancInstanceChildren(direct.json);
+    if (!parsed) throw orthancVerificationError("Orthanc returned a malformed study instance list.", { ...baseDetails, enumerationMethod: "direct", instancesResponseShape: directShape, verificationReason: "STUDY_RESPONSE_MALFORMED" });
+    return { ...parsed, method: "direct", details: { ...baseDetails, enumerationMethod: "direct", instancesResponseShape: directShape } };
   }
-  if (actualSops.size !== expectedSops.size || Array.from(expectedSops).some((uid) => !actualSops.has(uid))) {
-    throw new HttpError(502, "Orthanc remapped SOP Instance UID set does not match accepted outcomes.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
+  if (![404, 405].includes(direct.status)) throw orthancVerificationError("Orthanc study instance enumeration failed.", { ...baseDetails, enumerationMethod: "direct", instancesResponseShape: directShape, verificationReason: "STUDY_INSTANCE_ENUMERATION_UNSUPPORTED" });
+
+  const series = studyPayload.Series;
+  if (!Array.isArray(series)) throw orthancVerificationError("Orthanc study response did not include a series list.", { ...baseDetails, enumerationMethod: "series", instancesResponseShape: directShape, verificationReason: "STUDY_INSTANCE_LIST_MISSING" });
+  const seriesIds = series.map(readOrthancResourceId);
+  if (seriesIds.some((id) => !id)) throw orthancVerificationError("Orthanc study response contained a malformed series list.", { ...baseDetails, seriesCount: series.length, enumerationMethod: "series", instancesResponseShape: directShape, verificationReason: "STUDY_RESPONSE_MALFORMED" });
+  const ids = new Set<string>();
+  const sopsById = new Map<string, string>();
+  const shapes: string[] = [];
+  for (const seriesId of seriesIds) {
+    let response = await fetchOrthancForRemap(`/series/${encodeURIComponent(seriesId)}/instances`, { method: "GET" });
+    const useSeriesResource = [404, 405].includes(response.status);
+    if (useSeriesResource) response = await fetchOrthancForRemap(`/series/${encodeURIComponent(seriesId)}`, { method: "GET" });
+    if (useSeriesResource && response.ok && response.json && typeof response.json === "object" && !Array.isArray(response.json) && !Array.isArray((response.json as Record<string, unknown>).Instances)) {
+      shapes.push(describeOrthancPayloadShape(response.json));
+      throw orthancVerificationError("Orthanc series response did not include an instance list.", { ...baseDetails, seriesCount: series.length, enumerationMethod: "series", instancesResponseShape: shapes.join(";"), verificationReason: "STUDY_INSTANCE_LIST_MISSING" });
+    }
+    const payload = response.ok && response.json && typeof response.json === "object" && !Array.isArray(response.json) && !Array.isArray((response.json as Record<string, unknown>).Instances)
+      ? null
+      : response.ok && !Array.isArray(response.json) ? (response.json as Record<string, unknown>).Instances : response.json;
+    shapes.push(describeOrthancPayloadShape(response.json));
+    if (!response.ok) throw orthancVerificationError("Orthanc series instance enumeration is unsupported.", { ...baseDetails, seriesCount: series.length, enumerationMethod: "series", instancesResponseShape: shapes.join(";"), verificationReason: "STUDY_INSTANCE_ENUMERATION_UNSUPPORTED" });
+    const parsed = parseOrthancInstanceChildren(payload);
+    if (!parsed) throw orthancVerificationError("Orthanc returned a malformed series instance list.", { ...baseDetails, seriesCount: series.length, enumerationMethod: "series", instancesResponseShape: shapes.join(";"), verificationReason: "STUDY_RESPONSE_MALFORMED" });
+    for (const id of parsed.ids) ids.add(id);
+    for (const [id, sop] of parsed.sopsById) sopsById.set(id, sop);
   }
+  return { ids: Array.from(ids), sopsById, method: "series", details: { ...baseDetails, seriesCount: series.length, enumerationMethod: "series", instancesResponseShape: shapes.join(";") } };
+}
+
+async function mapWithConcurrency<T, R>(values: T[], concurrency: number, work: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await work(values[index]!);
+    }
+  }));
+  return results;
+}
+
+async function verifyOrthancStudyAcceptedSopSet(studyId: string, expectedSops: Set<string>, options: { renewLease?: () => Promise<void>; stabilityTimeoutSeconds?: number } = {}): Promise<Omit<OrthancVerificationDetails, "code" | "verificationReason">> {
+  const system = await fetchOrthancForRemap("/system", { method: "GET" }).catch(() => null);
+  const systemRow = system?.ok && system.json && typeof system.json === "object" && !Array.isArray(system.json) ? system.json as Record<string, unknown> : {};
+  const systemDetails = { orthancProduct: readDicomStringValue(systemRow.Name ?? systemRow.Product), orthancVersion: readDicomStringValue(systemRow.Version) };
+  const timeoutSeconds = readDicomRemapPositiveLimit(options.stabilityTimeoutSeconds, DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS);
+  let studyPayload: Record<string, unknown> | null = null;
+  let studyShape = "null";
+  let elapsedSeconds = 0;
+  await options.renewLease?.();
+  while (true) {
+    const study = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
+    studyShape = describeOrthancPayloadShape(study.json);
+    if (study.status === 404) throw orthancVerificationError("Orthanc remapped study was not found.", { ...systemDetails, expectedCount: expectedSops.size, studyResponseShape: studyShape, verificationReason: "STUDY_NOT_FOUND" });
+    if (!study.ok || !study.json || typeof study.json !== "object" || Array.isArray(study.json)) throw orthancVerificationError("Orthanc remapped study response was malformed.", { ...systemDetails, expectedCount: expectedSops.size, studyResponseShape: studyShape, verificationReason: "STUDY_RESPONSE_MALFORMED" });
+    studyPayload = study.json as Record<string, unknown>;
+    if (studyPayload.IsStable !== false) break;
+    if (elapsedSeconds >= timeoutSeconds) throw orthancVerificationError("Orthanc remapped study did not become stable in time.", { ...systemDetails, expectedCount: expectedSops.size, seriesCount: Array.isArray(studyPayload.Series) ? studyPayload.Series.length : undefined, studyResponseShape: studyShape, verificationReason: "STUDY_NOT_STABLE" });
+    await sleepForDicomRemap(DICOM_REMAP_ORTHANC_STABILITY_POLL_MS);
+    elapsedSeconds += 1;
+    if (elapsedSeconds % DICOM_REMAP_ORTHANC_LEASE_RENEWAL_INTERVAL_SECONDS === 0) await options.renewLease?.();
+  }
+  await options.renewLease?.();
+  const statistics = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}/statistics`, { method: "GET" }).catch(() => null);
+  const baseDetails = { ...systemDetails, expectedCount: expectedSops.size, seriesCount: Array.isArray(studyPayload.Series) ? studyPayload.Series.length : undefined, studyResponseShape: studyShape, statisticsResponseShape: statistics ? describeOrthancPayloadShape(statistics.json) : "unavailable" };
+  const enumerated = await listOrthancStudyInstanceIds(studyId, studyPayload, baseDetails);
+  const actualCount = enumerated.ids.length;
+  const details = { ...enumerated.details, expectedCount: expectedSops.size, actualCount };
+  if (actualCount === 0) throw orthancVerificationError("Orthanc remapped study contained no instances.", { ...details, verificationReason: "ZERO_INSTANCES" });
+  if (actualCount !== expectedSops.size) throw orthancVerificationError("Orthanc did not verify the expected unique remapped instance count.", { ...details, verificationReason: "EXPECTED_ACTUAL_COUNT_MISMATCH" });
+  const sops = await mapWithConcurrency(enumerated.ids, DICOM_REMAP_ORTHANC_SOP_READ_CONCURRENCY, async (instanceId) => {
+    const expanded = enumerated.sopsById.get(instanceId);
+    if (expanded) return expanded;
+    const tags = await fetchOrthancForRemap(`/instances/${encodeURIComponent(instanceId)}/simplified-tags`, { method: "GET" }).catch(() => null);
+    if (!tags) return "";
+    return tags.ok && tags.json && typeof tags.json === "object" && !Array.isArray(tags.json) ? readDicomStringValue((tags.json as Record<string, unknown>).SOPInstanceUID) : "";
+  });
+  if (sops.some((sop) => !sop)) throw orthancVerificationError("Orthanc instance identity could not be verified.", { ...details, verificationReason: "INSTANCE_SOP_UID_UNREADABLE" });
+  const actualSops = new Set(sops);
+  if (actualSops.size !== expectedSops.size || Array.from(expectedSops).some((uid) => !actualSops.has(uid))) throw orthancVerificationError("Orthanc remapped SOP Instance UID set does not match accepted outcomes.", { ...details, verificationReason: "SOP_SET_MISMATCH" });
+  return details;
 }
 
 export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSeconds }: { job: DicomRemapJobRow; leaseOwner: string; leaseSeconds: number }): Promise<DicomRemapJobRow> {
@@ -3547,17 +3673,17 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
     const finalSelectionCounts = buildDicomRemapOutcomeSummary(planned.plan, planned.selectionCounts);
     if ((finalSelectionCounts.failedMultiframeObjectCount || 0) > 0) throw new HttpError(409, "A selected multiframe DICOM object failed processing; the study cannot be sent.", { code: "DICOM_REMAP_MULTIFRAME_OBJECT_FAILED", ...finalSelectionCounts });
     if ((finalSelectionCounts.acceptedUniqueInstances || 0) === 0) throw new HttpError(400, "No valid selected-study instances remain.", { code: "DICOM_REMAP_DICOM_PARSE_FAILED", ...finalSelectionCounts });
-    if (studyIds.size !== 1) throw new HttpError(502, "Orthanc produced an unexpected remapped study set.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
+    if (studyIds.size !== 1) throw orthancVerificationError("Orthanc produced an unexpected remapped study set.", { verificationReason: "MULTIPLE_MODIFIED_STUDIES", expectedCount: finalSelectionCounts.acceptedUniqueInstances || 0, actualCount: studyIds.size });
     const modifiedStudyId = Array.from(studyIds)[0]!;
 
     await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "verifying_orthanc");
-    const summary = await readStudySummary(modifiedStudyId).catch(() => {
-      throw new HttpError(502, "Orthanc remapped study could not be read for verification.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
-    });
-    if (summary.studyInstanceUid !== planned.plan.studyInstanceUid) throw new HttpError(502, "Orthanc did not preserve the persisted replacement Study UID.", { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" });
-    if (!hasSameReplacementIdentity(summary, replacement)) throw new HttpError(502, "Orthanc did not verify replacement identity.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
     const acceptedSops = new Set(Object.values(planned.plan.fileOutcomes).filter(isAcceptedDicomRemapOutcome).map((outcome) => outcome.replacementSopInstanceUid).filter((uid): uid is string => Boolean(uid)));
-    await verifyOrthancStudyAcceptedSopSet(modifiedStudyId, acceptedSops);
+    const verificationDetails = await verifyOrthancStudyAcceptedSopSet(modifiedStudyId, acceptedSops, { renewLease: async () => { await requireDicomRemapProcessingLease(job.id, leaseOwner, leaseSeconds, "verifying_orthanc"); } });
+    const summary = await readStudySummary(modifiedStudyId).catch(() => {
+      throw orthancVerificationError("Orthanc remapped study could not be read for verification.", { ...verificationDetails, verificationReason: "STUDY_RESPONSE_MALFORMED" });
+    });
+    if (summary.studyInstanceUid !== planned.plan.studyInstanceUid) throw orthancVerificationError("Orthanc did not preserve the persisted replacement Study UID.", { ...verificationDetails, verificationReason: "STUDY_UID_MISMATCH" });
+    if (!hasSameReplacementIdentity(summary, replacement)) throw new HttpError(502, "Orthanc did not verify replacement identity.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
 
     const requiresAcknowledgement = Boolean(finalSelectionCounts.partial || finalSelectionCounts.completenessUncertain);
 
@@ -3592,6 +3718,16 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
         excludedOtherStudyFiles?: unknown;
         excludedStudyCount?: unknown;
         skippedOrUnparsedFiles?: unknown;
+        verificationReason?: unknown;
+        expectedCount?: unknown;
+        actualCount?: unknown;
+        seriesCount?: unknown;
+        enumerationMethod?: unknown;
+        orthancProduct?: unknown;
+        orthancVersion?: unknown;
+        studyResponseShape?: unknown;
+        statisticsResponseShape?: unknown;
+        instancesResponseShape?: unknown;
       }
       : null;
     const numericDiagnostic = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
@@ -3610,6 +3746,16 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       ...(numericDiagnostic(details?.excludedOtherStudyFiles) !== undefined ? { excludedOtherStudyFiles: numericDiagnostic(details?.excludedOtherStudyFiles) } : {}),
       ...(numericDiagnostic(details?.excludedStudyCount) !== undefined ? { excludedStudyCount: numericDiagnostic(details?.excludedStudyCount) } : {}),
       ...(numericDiagnostic(details?.skippedOrUnparsedFiles) !== undefined ? { skippedOrUnparsedFiles: numericDiagnostic(details?.skippedOrUnparsedFiles) } : {}),
+      ...(["STUDY_NOT_FOUND", "STUDY_RESPONSE_MALFORMED", "STUDY_INSTANCE_ENUMERATION_UNSUPPORTED", "STUDY_INSTANCE_LIST_MISSING", "STUDY_NOT_STABLE", "ZERO_INSTANCES", "EXPECTED_ACTUAL_COUNT_MISMATCH", "INSTANCE_SOP_UID_UNREADABLE", "SOP_SET_MISMATCH", "STUDY_UID_MISMATCH", "MULTIPLE_MODIFIED_STUDIES"].includes(String(details?.verificationReason || "")) ? { verificationReason: String(details?.verificationReason) } : {}),
+      ...(numericDiagnostic(details?.expectedCount) !== undefined ? { expectedCount: numericDiagnostic(details?.expectedCount) } : {}),
+      ...(numericDiagnostic(details?.actualCount) !== undefined ? { actualCount: numericDiagnostic(details?.actualCount) } : {}),
+      ...(numericDiagnostic(details?.seriesCount) !== undefined ? { seriesCount: numericDiagnostic(details?.seriesCount) } : {}),
+      ...(["direct", "series"].includes(String(details?.enumerationMethod || "")) ? { enumerationMethod: String(details?.enumerationMethod) } : {}),
+      ...(typeof details?.orthancProduct === "string" ? { orthancProduct: details.orthancProduct.slice(0, 128) } : {}),
+      ...(typeof details?.orthancVersion === "string" ? { orthancVersion: details.orthancVersion.slice(0, 64) } : {}),
+      ...(typeof details?.studyResponseShape === "string" ? { studyResponseShape: details.studyResponseShape.slice(0, 500) } : {}),
+      ...(typeof details?.statisticsResponseShape === "string" ? { statisticsResponseShape: details.statisticsResponseShape.slice(0, 500) } : {}),
+      ...(typeof details?.instancesResponseShape === "string" ? { instancesResponseShape: details.instancesResponseShape.slice(0, 1000) } : {}),
     };
     const updated = await queryDicomRemapDb<DicomRemapJobRow>(
       `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3::text, processing_error_details = $4::jsonb, error_message = $5::text, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
@@ -4887,6 +5033,7 @@ export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId)
 
 export const __dicomRemapTestables = {
   REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+  DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS,
   DICOM_REMAP_UPLOAD_CONCURRENCY,
   DICOM_REMAP_PREVIEW_HEADER_BYTES,
   ACTIVE_JOB_STATUSES,
@@ -4928,6 +5075,7 @@ export const __dicomRemapTestables = {
   buildDicomRemapOutcomeSummary,
   probeOrthancHealthForRemap,
   verifyOrthancStudyAcceptedSopSet,
+  listOrthancStudyInstanceIds,
   sendExistingDicomRemapJobToDestination,
   isDestinationVerificationRequired,
   sanitizeOrthancSendJobResult,

@@ -1754,6 +1754,117 @@ test("Orthanc health probe requires a successful system response", async () => {
   assert.equal(await __dicomRemapTestables.probeOrthancHealthForRemap(), true);
 });
 
+test("Orthanc SOP verification uses the direct study instances endpoint and exact expanded SOP identities", async () => {
+  const calls = queueOrthancResults([
+    orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } }),
+    orthancResult({ json: { ID: "study-1", IsStable: true, Series: ["series-1"] } }),
+    orthancResult({ json: { CountInstances: 2 } }),
+    orthancResult({ json: [
+      { ID: "instance-1", MainDicomTags: { SOPInstanceUID: "1.2.3.1" } },
+      { ID: "instance-2", MainDicomTags: { SOPInstanceUID: "1.2.3.2" } },
+    ] }),
+  ]);
+  await __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["1.2.3.1", "1.2.3.2"]));
+  assert.deepEqual(calls.map((call) => call.path), ["/system", "/studies/study-1", "/studies/study-1/statistics", "/studies/study-1/instances"]);
+});
+
+test("Orthanc SOP verification falls back through multiple series and deduplicates instance IDs", async () => {
+  const calls = queueOrthancResults([
+    orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } }),
+    orthancResult({ json: { ID: "study-1", IsStable: true, Series: ["series-1", "series-2"] } }),
+    orthancResult({ json: { CountInstances: 2 } }),
+    orthancResult({ status: 404, ok: false, json: { HttpStatus: 404 } }),
+    orthancResult({ json: ["instance-1", "instance-2"] }),
+    orthancResult({ status: 404, ok: false, json: { HttpStatus: 404 } }),
+    orthancResult({ json: { ID: "series-2", Instances: ["instance-2"] } }),
+    orthancResult({ json: { SOPInstanceUID: "1.2.3.1" } }),
+    orthancResult({ json: { SOPInstanceUID: "1.2.3.2" } }),
+  ]);
+  await __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["1.2.3.1", "1.2.3.2"]));
+  assert.deepEqual(calls.slice(4, 7).map((call) => call.path), ["/series/series-1/instances", "/series/series-2/instances", "/series/series-2"]);
+  assert.equal(calls.filter((call) => call.path.includes("/simplified-tags")).length, 2);
+});
+
+test("Orthanc SOP verification polls stability and renews its lease at a bounded cadence", async () => {
+  __dicomRemapTestables.setSleepForTests(async () => {});
+  const responses = [orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } })];
+  for (let index = 0; index < 10; index += 1) responses.push(orthancResult({ json: { ID: "study-1", IsStable: false, Series: ["series-1"] } }));
+  responses.push(
+    orthancResult({ json: { ID: "study-1", IsStable: true, Series: ["series-1"] } }),
+    orthancResult({ json: { CountInstances: 1 } }),
+    orthancResult({ json: [{ ID: "instance-1", MainDicomTags: { SOPInstanceUID: "1.2.3.1" } }] }),
+  );
+  queueOrthancResults(responses);
+  let renewals = 0;
+  await __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["1.2.3.1"]), { renewLease: async () => { renewals += 1; }, stabilityTimeoutSeconds: 20 });
+  assert.equal(renewals, 3);
+});
+
+test("Orthanc SOP verification timeout and mismatches expose only safe structured reasons", async () => {
+  __dicomRemapTestables.setSleepForTests(async () => {});
+  queueOrthancResults([
+    orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } }),
+    orthancResult({ json: { ID: "study-1", IsStable: false, Series: ["series-1"] } }),
+    orthancResult({ json: { ID: "study-1", IsStable: false, Series: ["series-1"] } }),
+  ]);
+  await assert.rejects(
+    () => __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["sensitive-sop"]), { stabilityTimeoutSeconds: 1 }),
+    (error: unknown) => {
+      const details = (error as { details?: Record<string, unknown> }).details || {};
+      assert.equal(details.verificationReason, "STUDY_NOT_STABLE");
+      assert.equal(details.expectedCount, 1);
+      assert.doesNotMatch(JSON.stringify(details), /sensitive-sop/i);
+      return true;
+    }
+  );
+
+  queueOrthancResults([
+    orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } }),
+    orthancResult({ json: { ID: "study-1", IsStable: true, Series: ["series-1"] } }),
+    orthancResult({ json: { CountInstances: 1 } }),
+    orthancResult({ json: [{ ID: "instance-1", MainDicomTags: { SOPInstanceUID: "actual-sensitive-sop" } }] }),
+  ]);
+  await assert.rejects(
+    () => __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["expected-sensitive-sop"])),
+    (error: unknown) => {
+      const details = (error as { details?: Record<string, unknown> }).details || {};
+      assert.equal(details.verificationReason, "SOP_SET_MISMATCH");
+      assert.equal(details.expectedCount, 1);
+      assert.equal(details.actualCount, 1);
+      assert.equal(details.enumerationMethod, "direct");
+      assert.doesNotMatch(JSON.stringify(details), /expected-sensitive-sop|actual-sensitive-sop/i);
+      return true;
+    }
+  );
+});
+
+test("Orthanc SOP verification distinguishes missing series lists and unreadable SOP identities", async () => {
+  queueOrthancResults([
+    orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } }),
+    orthancResult({ json: { ID: "study-1", IsStable: true, Series: ["series-1"] } }),
+    orthancResult({ json: { CountInstances: 1 } }),
+    orthancResult({ status: 404, ok: false, json: { HttpStatus: 404 } }),
+    orthancResult({ status: 404, ok: false, json: { HttpStatus: 404 } }),
+    orthancResult({ json: { ID: "series-1" } }),
+  ]);
+  await assert.rejects(
+    () => __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["expected-sop"])),
+    (error: unknown) => (error as { details?: { verificationReason?: string } }).details?.verificationReason === "STUDY_INSTANCE_LIST_MISSING"
+  );
+
+  queueOrthancResults([
+    orthancResult({ json: { Name: "Orthanc", Version: "1.12.11" } }),
+    orthancResult({ json: { ID: "study-1", IsStable: true, Series: ["series-1"] } }),
+    orthancResult({ json: { CountInstances: 1 } }),
+    orthancResult({ json: ["instance-1"] }),
+    orthancResult({ json: {} }),
+  ]);
+  await assert.rejects(
+    () => __dicomRemapTestables.verifyOrthancStudyAcceptedSopSet("study-1", new Set(["expected-sop"])),
+    (error: unknown) => (error as { details?: { verificationReason?: string } }).details?.verificationReason === "INSTANCE_SOP_UID_UNREADABLE"
+  );
+});
+
 test("cancelDicomRemapJob does not cancel a confirmed uploaded queued job", async () => {
   queueQueryResults([
     { rows: [] },

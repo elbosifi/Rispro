@@ -1441,6 +1441,25 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByText("3")).toBeTruthy();
   });
 
+  it("renders persisted safe Orthanc verification diagnostics without UID values", async () => {
+    const job = { id: 83, status: "failed", processing_stage: "failed", error_message: "Orthanc could not verify the remapped study.", processing_error_code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", processing_error_details: { code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", verificationReason: "EXPECTED_ACTUAL_COUNT_MISMATCH", expectedCount: 399, actualCount: 398, seriesCount: 7, enumerationMethod: "series", orthancProduct: "Orthanc", orthancVersion: "1.12.11", studyResponseShape: "object(keys=ID,IsStable,Series)", instancesResponseShape: "array(length=398, first=string)" }, send_attempt_count: 0 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/83") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#83.*Failed/i }));
+    const details = await screen.findByText(/EXPECTED_ACTUAL_COUNT_MISMATCH/);
+    expect(details.textContent).toContain("expectedCount");
+    expect(details.textContent).toContain("399");
+    expect(details.textContent).toContain("enumerationMethod");
+    expect(details.textContent).not.toMatch(/StudyInstanceUID|SOPInstanceUID|PatientID/i);
+  });
+
   it("keeps Recent Jobs secondary and requires the existing ambiguous-send confirmation", async () => {
     const job = { id: 91, status: "failed", source_orthanc_study_id: "s", modified_orthanc_study_id: "s", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", error_message: "RISpro could not confirm whether PACS received this study." };
     apiMock.mockImplementation((path: string) => {

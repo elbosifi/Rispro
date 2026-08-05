@@ -188,6 +188,14 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
         if (state.scenario.malformedStatistics) return jsonResponse(res, 200, { Statistics: { unexpected: true } });
         return jsonResponse(res, 200, { CountInstances: state.scenario.reportedInstanceCount ?? state.uploaded.size });
       }
+      if (req.method === "GET" && requestPath.startsWith("/studies/") && requestPath.endsWith("/instances")) {
+        const requestedStudyId = decodeURIComponent(requestPath.slice("/studies/".length, -"/instances".length));
+        const ids = Array.from(state.uploaded.keys()).filter((sop) => parentStudyForSop(sop) === requestedStudyId).map((sop) => `instance-${sop}`);
+        const reported = state.scenario.reportedInstanceCount;
+        if (reported == null) return jsonResponse(res, 200, ids);
+        if (reported <= ids.length) return jsonResponse(res, 200, ids.slice(0, reported));
+        return jsonResponse(res, 200, [...ids, ...Array.from({ length: reported - ids.length }, (_, index) => `instance-extra-${index}`)]);
+      }
       if (req.method === "GET" && requestPath.startsWith("/studies/")) {
         const requestedStudyId = decodeURIComponent(requestPath.slice("/studies/".length));
         const first = Array.from(state.uploaded.entries()).find(([sop]) => parentStudyForSop(sop) === requestedStudyId)?.[1] || state.uploaded.values().next().value as Buffer | undefined;
@@ -197,12 +205,6 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
           MainDicomTags: { StudyInstanceUID: state.scenario.returnedStudyUid || state.studyUid },
           PatientMainDicomTags: { PatientID: state.scenario.returnedPatientId || parsed.patientId, PatientName: state.scenario.returnedPatientName || parsed.patientName, PatientSex: "M", PatientBirthDate: "" },
           Series: [parsed.series || "fake-series"],
-          Instances: (() => {
-            const ids = Array.from(state.uploaded.keys()).filter((sop) => parentStudyForSop(sop) === requestedStudyId).map((sop) => `instance-${sop}`);
-            if (state.scenario.reportedInstanceCount == null) return ids;
-            if (state.scenario.reportedInstanceCount <= ids.length) return ids.slice(0, state.scenario.reportedInstanceCount);
-            return [...ids, ...Array.from({ length: state.scenario.reportedInstanceCount - ids.length }, (_, index) => `instance-extra-${index}`)];
-          })(),
         });
       }
       if (req.method === "POST" && requestPath === "/modalities/PACS_TEST/store") {
@@ -566,12 +568,12 @@ test("Orthanc verification failure matrix is sanitized, lease-safe, and never en
     const token = jwt.sign({ sub: userId, role: "supervisor", username, fullName: `DICOM Matrix ${suffix}` }, env.jwtSecret);
     const sourceA = syntheticDicom("1.2.840.10008.1.2.3.4.5.11");
     const sourceB = syntheticDicom("1.2.840.10008.1.2.3.4.5.12");
-    const scenarios: Array<{ name: string; scenario: FakeOrthancScenario; code: string }> = [
-      { name: "wrong Study Instance UID", scenario: { returnedStudyUid: "1.2.3.999" }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
+    const scenarios: Array<{ name: string; scenario: FakeOrthancScenario; code: string; verificationReason?: string }> = [
+      { name: "wrong Study Instance UID", scenario: { returnedStudyUid: "1.2.3.999" }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", verificationReason: "STUDY_UID_MISMATCH" },
       { name: "wrong replacement identity", scenario: { returnedPatientId: "WRONG-ID" }, code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" },
-      { name: "missing instance", scenario: { reportedInstanceCount: 1 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
-      { name: "extra instance", scenario: { reportedInstanceCount: 3 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
-      { name: "multiple resulting studies", scenario: { parentStudyBySop: { "1.2.840.10008.1.2.3.4.5.11": "fake-study-a", "1.2.840.10008.1.2.3.4.5.12": "fake-study-b" } }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
+      { name: "missing instance", scenario: { reportedInstanceCount: 1 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", verificationReason: "EXPECTED_ACTUAL_COUNT_MISMATCH" },
+      { name: "extra instance", scenario: { reportedInstanceCount: 3 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", verificationReason: "EXPECTED_ACTUAL_COUNT_MISMATCH" },
+      { name: "multiple resulting studies", scenario: { parentStudyBySop: { "1.2.840.10008.1.2.3.4.5.11": "fake-study-a", "1.2.840.10008.1.2.3.4.5.12": "fake-study-b" } }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED", verificationReason: "MULTIPLE_MODIFIED_STUDIES" },
     ];
     for (const scenarioCase of scenarios) {
       resetFakeOrthancState(fake.state, scenarioCase.scenario);
@@ -599,7 +601,12 @@ test("Orthanc verification failure matrix is sanitized, lease-safe, and never en
       assert.equal(row.rows[0]?.orthanc_send_job_id, null, scenarioCase.name);
       assert.equal(fake.state.sendCount, 0, scenarioCase.name);
       const diagnostics = JSON.stringify(row.rows[0]?.processing_error_details);
+      if (scenarioCase.verificationReason) assert.equal((row.rows[0]?.processing_error_details as { verificationReason?: string })?.verificationReason, scenarioCase.verificationReason, scenarioCase.name);
       assert.doesNotMatch(diagnostics, new RegExp(`${nationalId}|Durable\\^Patient|matrix-[ab]\\.dcm|${stagingRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"), scenarioCase.name);
+      const apiResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}`, { headers: { Cookie: `${env.cookieName}=${token}` } });
+      assert.equal(apiResponse.status, 200, `${scenarioCase.name} API`);
+      const apiJob = await apiResponse.json() as { job: { processing_error_details?: { verificationReason?: string } } };
+      if (scenarioCase.verificationReason) assert.equal(apiJob.job.processing_error_details?.verificationReason, scenarioCase.verificationReason, `${scenarioCase.name} API diagnostics`);
       const audit = await pool.query<{ old_values: unknown; new_values: unknown }>(`select old_values, new_values from audit_log where entity_type = 'dicom_remap_job' and entity_id = $1 and action_type = 'dicom_remap_processing_failed' order by id desc limit 1`, [jobId]);
       assert.doesNotMatch(JSON.stringify(audit.rows[0] || {}), new RegExp(`${nationalId}|Durable\\^Patient|matrix-[ab]\\.dcm|${stagingRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"), scenarioCase.name);
       const resend = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/resend`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ confirmDestinationChecked: true }) });
