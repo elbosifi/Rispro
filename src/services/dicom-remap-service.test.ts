@@ -666,7 +666,7 @@ test("dicom helper: Orthanc invalid-DICOM upload rejection detection is narrow",
   ), false);
 });
 
-test("dicom helper: upload failure message includes sanitized Orthanc response", () => {
+test("dicom helper: upload failure message uses a generated label and omits raw Orthanc response", () => {
   const message = __dicomRemapTestables.formatOrthancUploadFailureMessage(
     "bad.dcm",
     7,
@@ -678,11 +678,10 @@ test("dicom helper: upload failure message includes sanitized Orthanc response",
     })
   );
 
-  assert.match(message, /bad\.dcm/);
-  assert.match(message, /file 7/);
+  assert.doesNotMatch(message, /bad\.dcm/);
+  assert.match(message, /File 7/);
   assert.match(message, /status=400/);
-  assert.match(message, /invalid string length/);
-  assert.match(message, /Basic \[redacted\]/);
+  assert.doesNotMatch(message, /invalid string length/);
   assert.doesNotMatch(message, /secret-token/);
 });
 
@@ -1275,7 +1274,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       orthancVersion: "1.12.11",
       databaseServerIdentifier: "dbid",
       modifyStatus: 404,
-      modifyResponseBody: "Cannot modify study. Authorization: Basic [redacted]",
+      modifyResponseBody: "[redacted]",
       modifyResponseShape: "object(keys=Error)",
       modifyPayloadShape: "object(keys=Replace,KeepSource,Force)",
       stabilityTimedOut: false,
@@ -1704,6 +1703,55 @@ test("cancelDicomRemapJob cancels only an unconfirmed staged draft and audits it
   assert.match(calls[0]?.sql || "", /status = 'awaiting_confirmation'/i);
   assert.match(calls[0]?.sql || "", /processing_stage = 'awaiting_confirmation'/i);
   assert.match(calls[0]?.sql || "", /staged_manifest_version = \$4/i);
+});
+
+test("persisted remap upload accepts AlreadyStored only after replacement study and SOP verification", async () => {
+  const calls = queueOrthancResults([
+    orthancResult({ json: { Status: "AlreadyStored", ID: "instance-1", ParentStudy: "study-1" } }),
+    orthancResult({ json: { ID: "instance-1", ParentStudy: "study-1" } }),
+    orthancResult({ json: { StudyInstanceUID: "1.2.3", SOPInstanceUID: "1.2.3.4" } }),
+  ]);
+  const result = await __dicomRemapTestables.uploadPersistedRemappedInstance(Buffer.from("dicom"), 1, "1.2.3", "1.2.3.4", "study-1");
+  assert.equal(result.category, "already_stored");
+  assert.equal(result.studyId, "study-1");
+  assert.deepEqual(calls.map((call) => call.path), ["/instances", "/instances/instance-1", "/instances/instance-1/simplified-tags"]);
+});
+
+test("persisted remap upload rejects AlreadyStored with unrelated replacement SOP identity", async () => {
+  queueOrthancResults([
+    orthancResult({ json: { Status: "AlreadyStored", ID: "instance-1", ParentStudy: "study-1" } }),
+    orthancResult({ json: { ID: "instance-1", ParentStudy: "study-1" } }),
+    orthancResult({ json: { StudyInstanceUID: "1.2.3", SOPInstanceUID: "9.9.9" } }),
+  ]);
+  await assert.rejects(
+    () => __dicomRemapTestables.uploadPersistedRemappedInstance(Buffer.from("dicom"), 1, "1.2.3", "1.2.3.4", "study-1"),
+    (error: unknown) => (error as { details?: { code?: string } }).details?.code === "DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT"
+  );
+});
+
+test("outcome summary counts unique accepted SOPs and exposes only generated file labels", () => {
+  const summary = __dicomRemapTestables.buildDicomRemapOutcomeSummary({
+    version: 3,
+    studyInstanceUid: "1.2.3",
+    seriesInstanceUidByOriginal: {},
+    sopInstanceUidByFileId: {},
+    fileOutcomes: {
+      a: { fileLabel: "File 1", category: "processed", retryCount: 0, replacementSeriesInstanceUid: "2.1", replacementSopInstanceUid: "3.1" },
+      b: { fileLabel: "File 2", category: "already_stored", retryCount: 0, replacementSeriesInstanceUid: "2.1", replacementSopInstanceUid: "3.1" },
+      c: { fileLabel: "File 3", category: "unassigned_likely_dicom", retryCount: 0 },
+    },
+  }, { totalStagedFiles: 3, validDicomFiles: 2, selectedStudyFiles: 2, excludedOtherStudyFiles: 0, excludedStudyCount: 0, skippedOrUnparsedFiles: 1 });
+  assert.equal(summary.acceptedUniqueInstances, 1);
+  assert.equal(summary.completenessUncertain, true);
+  assert.deepEqual(summary.failureSample, [{ fileLabel: "File 3", category: "unassigned_likely_dicom" }]);
+  assert.doesNotMatch(JSON.stringify(summary), /patient|accession|\.dcm/i);
+});
+
+test("Orthanc health probe requires a successful system response", async () => {
+  queueOrthancResults([orthancResult({ status: 503, ok: false, json: { HttpStatus: 503 } })]);
+  assert.equal(await __dicomRemapTestables.probeOrthancHealthForRemap(), false);
+  queueOrthancResults([orthancResult({ json: { Version: "deployment-version" } })]);
+  assert.equal(await __dicomRemapTestables.probeOrthancHealthForRemap(), true);
 });
 
 test("cancelDicomRemapJob does not cancel a confirmed uploaded queued job", async () => {
@@ -2483,6 +2531,30 @@ test("resendDicomRemapJobToPacs atomically enqueues an asynchronous Orthanc job"
   assert.equal(result.job.status, "sending");
   assert.equal(result.job.orthanc_send_job_id, "orthanc-send-21");
   assert.equal(auditEntries.some((entry) => entry.actionType === "pacs_resend_enqueued"), true);
+});
+
+test("confirmDicomRemapAndSend blocks partial-study send without the dedicated acknowledgement", async () => {
+  const partial = remapJob({
+    status: "awaiting_confirmation",
+    processing_stage: "awaiting_send_confirmation",
+    modified_orthanc_study_id: "partial-study",
+    processing_selection_counts: {
+      totalStagedFiles: 2,
+      validDicomFiles: 2,
+      selectedStudyFiles: 2,
+      excludedOtherStudyFiles: 0,
+      excludedStudyCount: 0,
+      skippedOrUnparsedFiles: 0,
+      acceptedUniqueInstances: 1,
+      failedSelectedStudyFiles: 1,
+      partial: true,
+    },
+  });
+  queueQueryResults([{ rows: [] }, { rows: [partial] }]);
+  await assert.rejects(
+    () => confirmDicomRemapAndSend({ jobId: partial.id, confirm: true, confirmIncompleteStudy: false, currentUserId: 42 }),
+    /incomplete-study acknowledgement is required/i
+  );
 });
 
 test("repeated resend returns the persisted sending job without another Orthanc enqueue", async () => {

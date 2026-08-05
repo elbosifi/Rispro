@@ -18,6 +18,7 @@ type RemapProcessingStage =
   | "rewriting"
   | "uploading_to_orthanc"
   | "verifying_orthanc"
+  | "awaiting_send_confirmation"
   | "enqueueing_send"
   | "completed"
   | "failed";
@@ -84,12 +85,24 @@ interface RemapJob {
   staged_total_bytes?: number | null;
   selected_study_instance_uid?: string | null;
   provisional_source_identity?: ProvisionalSourceIdentity | null;
+  processing_selection_counts?: {
+    acceptedUniqueInstances?: number;
+    failedSelectedStudyFiles?: number;
+    excludedOtherStudyFiles?: number;
+    unassignedLikelyDicomFiles?: number;
+    partial?: boolean;
+    completenessUncertain?: boolean;
+    completeSeriesLossCount?: number;
+    failureSample?: Array<{ fileLabel: string; category: string }>;
+    acknowledgement?: { acknowledgedAt: string; acknowledgedByUserId: number };
+  } | null;
 }
 
 function isAwaitingStagedJob(job: RemapJob | null | undefined): boolean {
   return Boolean(
     job
     && job.status === "awaiting_confirmation"
+    && job.processing_stage === "awaiting_confirmation"
     && Number(job.staged_manifest_version) === 2
     && job.provisional_source_identity
   );
@@ -107,7 +120,7 @@ interface Destination {
 }
 
 const EMPTY_DESTINATIONS: Destination[] = [];
-const RECENT_JOB_POLL_STATUSES = new Set<JobStatus>(["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"]);
+const RECENT_JOB_POLL_STATUSES = new Set<JobStatus>(["uploaded", "processing", "remapped", "sending"]);
 
 interface PatientOption {
   id: number;
@@ -403,6 +416,7 @@ export default function PacsRemapPage() {
   const [skipAcknowledged, setSkipAcknowledged] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
   const [destinationCheckedForResend, setDestinationCheckedForResend] = useState(false);
+  const [incompleteStudyAcknowledged, setIncompleteStudyAcknowledged] = useState(false);
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [secureStagingStatus, setSecureStagingStatus] = useState<SecureStagingStatus>("idle");
@@ -920,6 +934,23 @@ export default function PacsRemapPage() {
     },
   });
 
+  const confirmIncompleteStudyMutation = useMutation({
+    mutationFn: async (targetJobId: number) => api<{ job: RemapJob }>(`/pacs/remap/jobs/${targetJobId}/confirm-send`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true, confirmIncompleteStudy: true }),
+    }),
+    onSuccess: (data) => {
+      setIncompleteStudyAcknowledged(false);
+      queryClient.setQueryData(["pacs", "remap", "job", data.job.id], { job: data.job, comparison: null });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", data.job.id] });
+    },
+    onError: (error: unknown) => {
+      setRetryActionError(error instanceof Error ? error.message : "Incomplete-study acknowledgement failed.");
+      setRetryActionErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
+    },
+  });
+
   const resetJobMutation = useMutation({
     mutationFn: async ({ targetJobId }: { targetJobId: number }) => {
       return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(`/pacs/remap/jobs/${targetJobId}/reset`, { method: "POST" });
@@ -1167,7 +1198,7 @@ export default function PacsRemapPage() {
         ? "failed"
         : currentJob?.processing_stage && currentJob.processing_stage in {
           staging: true, queued: true, validating: true, building_uid_plan: true, rewriting: true,
-          uploading_to_orthanc: true, verifying_orthanc: true, enqueueing_send: true, completed: true, failed: true,
+          uploading_to_orthanc: true, verifying_orthanc: true, awaiting_send_confirmation: true, enqueueing_send: true, completed: true, failed: true,
         }
           ? currentJob.processing_stage as RemapProcessingStage
           : viewedRecentJobId != null ? viewedProcessingStage : processingStage;
@@ -2075,6 +2106,24 @@ export default function PacsRemapPage() {
           {effectiveUiStep === "processing" && !isTerminalSuccess && !isTerminalFailure && (
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[4]}</h3>
+              {currentJob?.status === "awaiting_confirmation" && currentJob.processing_stage === "awaiting_send_confirmation" && (() => {
+                const counts = currentJob.processing_selection_counts || {};
+                const uncertainOnly = !counts.partial && counts.completenessUncertain;
+                return (
+                  <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="alert">
+                    <h4 className="font-semibold">{uncertainOnly ? "Study completeness uncertain" : "Partial study import"}</h4>
+                    <p>RISpro accepted {counts.acceptedUniqueInstances || 0} unique selected-study DICOM instances.{counts.failedSelectedStudyFiles ? ` ${counts.failedSelectedStudyFiles} selected-study files could not be processed.` : ""}{counts.unassignedLikelyDicomFiles ? ` Membership could not be established for ${counts.unassignedLikelyDicomFiles} likely-DICOM files.` : ""}</p>
+                    <p>Excluded other-study files: {counts.excludedOtherStudyFiles || 0}. RISpro cannot confirm diagnostic completeness.</p>
+                    {!!counts.completeSeriesLossCount && <p className="font-semibold">Warning: {counts.completeSeriesLossCount} series have failures and no accepted instances.</p>}
+                    {!!counts.failureSample?.length && <ul className="list-disc ps-5 text-xs">{counts.failureSample.map((failure) => <li key={`${failure.fileLabel}-${failure.category}`}>{failure.fileLabel}: {failure.category}</li>)}</ul>}
+                    <label className="flex items-start gap-2">
+                      <input type="checkbox" checked={incompleteStudyAcknowledged} onChange={(event) => setIncompleteStudyAcknowledged(event.target.checked)} />
+                      <span>{uncertainOnly ? "I understand that RISpro could not determine whether every likely-DICOM file belonged to the selected study, and I reviewed this warning." : "I understand that the remapped study is incomplete and have reviewed the skipped-file warning."}</span>
+                    </label>
+                    <button type="button" className="btn-primary rounded-lg px-3 py-2 disabled:opacity-50" disabled={!incompleteStudyAcknowledged || confirmIncompleteStudyMutation.isPending} onClick={() => effectiveJobId && confirmIncompleteStudyMutation.mutate(effectiveJobId)}>Acknowledge and send to PACS</button>
+                  </div>
+                );
+              })()}
               {pendingStagedConfirmation && secureStagingStatus === "uploading" && (
                 <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-950" role="status">
                   <p>{language === "ar"
@@ -2308,6 +2357,11 @@ export default function PacsRemapPage() {
                     })()}
                     <p className="truncate"><strong>{job.original_patient_name || "—"}</strong></p>
                     <p className="truncate">{job.replacement_patient_name || "—"} • {job.destination_pacs_key || "—"}</p>
+                    {(job.processing_selection_counts?.partial || job.processing_selection_counts?.completenessUncertain) && (
+                      <p className="text-[11px] font-semibold text-amber-800">
+                        {job.processing_selection_counts.partial ? "Partial study" : "Completeness uncertain"}: {job.processing_selection_counts.acceptedUniqueInstances || 0} accepted unique instances
+                      </p>
+                    )}
                     {isSendFailedJob(job) && (
                       <p className="text-[11px] text-red-700 truncate">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(job.error_message) || t(language, "pacs.remap.failedResend")}</p>
                     )}

@@ -1006,6 +1006,7 @@ pacsRouter.post(
     const result = await confirmDicomRemapAndSend({
       jobId,
       confirm,
+      confirmIncompleteStudy: validateExplicitConfirm(body.confirmIncompleteStudy),
       currentUserId,
     });
     res.json(result);

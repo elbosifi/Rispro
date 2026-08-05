@@ -224,6 +224,47 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByRole("button", { name: /#42.*Awaiting confirmation/i })).toBeTruthy();
   });
 
+  it("requires explicit acknowledgement before sending a partial study and exposes only generated file labels", async () => {
+    const partialJob = {
+      id: 610,
+      status: "awaiting_confirmation",
+      processing_stage: "awaiting_send_confirmation",
+      staged_manifest_version: 2,
+      processed_file_count: 996,
+      staged_file_count: 1000,
+      processing_selection_counts: {
+        acceptedUniqueInstances: 996,
+        failedSelectedStudyFiles: 4,
+        excludedOtherStudyFiles: 7,
+        partial: true,
+        completenessUncertain: false,
+        completeSeriesLossCount: 1,
+        failureSample: [{ fileLabel: "File 184", category: "skipped_unparseable" }],
+      },
+    };
+    apiMock.mockImplementation((path: string, options?: { body?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [partialJob] });
+      if (path === "/pacs/remap/jobs/610") return Promise.resolve({ job: partialJob, comparison: null });
+      if (path === "/pacs/remap/jobs/610/confirm-send") {
+        expect(JSON.parse(options?.body || "{}")).toEqual({ confirm: true, confirmIncompleteStudy: true });
+        return Promise.resolve({ job: { ...partialJob, status: "sending", processing_stage: "enqueueing_send" } });
+      }
+      return Promise.resolve({ items: [] });
+    });
+    renderPage();
+    fireEvent.click(await screen.findByText("#610", { exact: false }));
+    expect(await screen.findByText("Partial study import")).toBeTruthy();
+    expect(screen.getByText(/File 184: skipped_unparseable/)).toBeTruthy();
+    const sendButton = screen.getByRole("button", { name: "Acknowledge and send to PACS" }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /remapped study is incomplete/i }));
+    expect(sendButton.disabled).toBe(false);
+    fireEvent.click(sendButton);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/610/confirm-send", expect.any(Object)));
+  });
+
   it("shows a queued job in Recent Jobs and starting another upload does not cancel it", async () => {
     const uploadedJob = {
       id: 52,

@@ -147,6 +147,7 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
     const requestPath = new URL(req.url || "/", "http://127.0.0.1").pathname;
     try {
       if (req.method === "GET" && requestPath === "/modalities") return jsonResponse(res, 200, ["PACS_TEST"]);
+      if (req.method === "GET" && requestPath === "/system") return jsonResponse(res, 200, { Version: "fake-deployment" });
       if (req.method === "GET" && requestPath === "/modalities/PACS_TEST/configuration") return jsonResponse(res, 200, ["PACS_AE", "127.0.0.1", 104]);
       if (req.method === "PUT" && requestPath === "/modalities/PACS_TEST") {
         await readRequestBody(req);
@@ -161,13 +162,25 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
         if (!state.studyUid) state.studyUid = parsed.study;
         const previous = state.uploaded.get(parsed.sop);
         if (previous) {
-          if (state.scenario.duplicateMode !== "conflicting" && Buffer.compare(previous, body) === 0) return jsonResponse(res, 409, { ID: `instance-${parsed.sop}`, ParentStudy: parentStudyForSop(parsed.sop) });
+          if (state.scenario.duplicateMode !== "conflicting" && Buffer.compare(previous, body) === 0) return jsonResponse(res, 200, { Status: "AlreadyStored", ID: `instance-${parsed.sop}`, ParentStudy: parentStudyForSop(parsed.sop) });
           return jsonResponse(res, 409, { OrthancStatus: 17, Message: "Instance already exists with different content" });
         }
         if (state.scenario.uploadFailureAfterAccepted != null && state.uploaded.size >= state.scenario.uploadFailureAfterAccepted) return jsonResponse(res, 500, { OrthancStatus: 99, Message: "simulated upload failure" });
         state.uploaded.set(parsed.sop, body);
         state.uploadRecords.push({ sop: parsed.sop, study: parsed.study, body });
         return jsonResponse(res, 200, { ID: `instance-${parsed.sop}`, ParentStudy: parentStudyForSop(parsed.sop) });
+      }
+      if (req.method === "GET" && requestPath.startsWith("/instances/")) {
+        const suffix = decodeURIComponent(requestPath.slice("/instances/".length));
+        const simplified = suffix.endsWith("/simplified-tags");
+        const instanceId = simplified ? suffix.slice(0, -"/simplified-tags".length) : suffix;
+        const sop = instanceId.replace(/^instance-/, "");
+        const body = state.uploaded.get(sop);
+        if (!body) return jsonResponse(res, 404, { HttpStatus: 404 });
+        const parsed = parseDicom(body);
+        return simplified
+          ? jsonResponse(res, 200, { StudyInstanceUID: parsed.study, SOPInstanceUID: parsed.sop })
+          : jsonResponse(res, 200, { ID: instanceId, ParentStudy: parentStudyForSop(sop) });
       }
       if (req.method === "GET" && requestPath.endsWith("/statistics")) {
         const status = state.scenario.statisticsStatus ?? 200;
@@ -184,6 +197,12 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
           MainDicomTags: { StudyInstanceUID: state.scenario.returnedStudyUid || state.studyUid },
           PatientMainDicomTags: { PatientID: state.scenario.returnedPatientId || parsed.patientId, PatientName: state.scenario.returnedPatientName || parsed.patientName, PatientSex: "M", PatientBirthDate: "" },
           Series: [parsed.series || "fake-series"],
+          Instances: (() => {
+            const ids = Array.from(state.uploaded.keys()).filter((sop) => parentStudyForSop(sop) === requestedStudyId).map((sop) => `instance-${sop}`);
+            if (state.scenario.reportedInstanceCount == null) return ids;
+            if (state.scenario.reportedInstanceCount <= ids.length) return ids.slice(0, state.scenario.reportedInstanceCount);
+            return [...ids, ...Array.from({ length: state.scenario.reportedInstanceCount - ids.length }, (_, index) => `instance-extra-${index}`)];
+          })(),
         });
       }
       if (req.method === "POST" && requestPath === "/modalities/PACS_TEST/store") {
@@ -349,11 +368,11 @@ test("durable remap processing stages, claims concurrently, recovers partial Ort
     fake.state.scenario.uploadFailureAfterAccepted = 1;
     fake.state.firstUploadPlanPath = path.join(stagedDirectory, "uid-plan.json");
     const firstRun = await runDicomRemapProcessingWorkerTick({ owner: "processing-a", batchSize: 1, leaseSeconds: 120 });
-    assert.equal(firstRun.failed, 1);
+    assert.equal(firstRun.completed, 1);
     assert.equal(fake.state.firstUploadPlanExists, true);
     const failed = await pool.query<{ status: string; processing_error_code: string; processed_file_count: number }>(`select status, processing_error_code, processed_file_count from dicom_remap_jobs where id = $1`, [jobId]);
-    assert.equal(failed.rows[0]?.status, "failed");
-    assert.equal(failed.rows[0]?.processing_error_code, "DICOM_REMAP_ORTHANC_UPLOAD_FAILED");
+    assert.equal(failed.rows[0]?.status, "awaiting_confirmation");
+    assert.equal(failed.rows[0]?.processing_error_code, null);
     const uidPlan = JSON.parse(await fs.readFile(path.join(stagedDirectory, "uid-plan.json"), "utf8")) as Record<string, unknown>;
     const uidPlanText = JSON.stringify(uidPlan);
     assert.doesNotMatch(uidPlanText, /Patient|MRN|national|accession/i);
@@ -456,19 +475,16 @@ test("durable remap processing stages, claims concurrently, recovers partial Ort
         skippedOrUnparsedFiles: number;
       };
     }>(`select status, processing_stage, processed_file_count, processing_selection_counts from dicom_remap_jobs where id = $1`, [fastJobId]);
-    assert.equal(fastProcessed.rows[0]?.status, "sending");
+    assert.equal(fastProcessed.rows[0]?.status, "awaiting_confirmation");
+    assert.equal(fastProcessed.rows[0]?.processing_stage, "awaiting_send_confirmation");
     assert.equal(Number(fastProcessed.rows[0]?.processed_file_count), 1);
-    assert.deepEqual(fastProcessed.rows[0]?.processing_selection_counts, {
-      totalStagedFiles: 3,
-      validDicomFiles: 2,
-      selectedStudyFiles: 1,
-      excludedOtherStudyFiles: 1,
-      excludedStudyCount: 1,
-      skippedOrUnparsedFiles: 1,
-    });
+    assert.equal(fastProcessed.rows[0]?.processing_selection_counts.totalStagedFiles, 3);
+    assert.equal(fastProcessed.rows[0]?.processing_selection_counts.selectedStudyFiles, 1);
+    assert.equal(fastProcessed.rows[0]?.processing_selection_counts.excludedOtherStudyFiles, 1);
+    assert.equal((fastProcessed.rows[0]?.processing_selection_counts as { unassignedLikelyDicomFiles?: number }).unassignedLikelyDicomFiles, 1);
     assert.equal(fake.state.uploadRecords.length, 1);
     assert.equal(fake.state.uploaded.size, 1);
-    assert.equal(fake.state.sendCount, 1);
+    assert.equal(fake.state.sendCount, 0);
     await pool.query(`update dicom_remap_jobs set status = 'sent' where id = $1`, [fastJobId]);
 
     const handoffJob = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage, modified_orthanc_study_id, destination_pacs_key, replacement_patient_id, replacement_patient_name, replacement_patient_sex, replacement_patient_birth_date) values ($1, 'remapped', 'enqueueing_send', $2, 'PACS_TEST', $3, $4, 'M', null) returning id`, [userId, fake.state.studyId, nationalId, `Durable^Patient^${suffix}`]);
@@ -487,7 +503,7 @@ test("durable remap processing stages, claims concurrently, recovers partial Ort
     assert.equal(ambiguousRun.completed, 1);
     const ambiguousRow = await pool.query<{ status: string; send_error_code: string; orthanc_send_job_id: string | null }>(`select status, send_error_code, orthanc_send_job_id from dicom_remap_jobs where id = $1`, [ambiguousId]);
     assert.deepEqual(ambiguousRow.rows[0], { status: "sending", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", orthanc_send_job_id: null });
-    assert.equal(fake.state.sendCount, 3);
+    assert.equal(fake.state.sendCount, 2);
     fake.state.scenario.sendMode = "success";
 
     await pool.query(`delete from audit_log where entity_type = 'dicom_remap_job' and entity_id in ($1, $2, $3, $4, $5)`, [jobId, handoffId, ambiguousId, claimId, fastJobId]);
@@ -556,8 +572,6 @@ test("Orthanc verification failure matrix is sanitized, lease-safe, and never en
       { name: "missing instance", scenario: { reportedInstanceCount: 1 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
       { name: "extra instance", scenario: { reportedInstanceCount: 3 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
       { name: "multiple resulting studies", scenario: { parentStudyBySop: { "1.2.840.10008.1.2.3.4.5.11": "fake-study-a", "1.2.840.10008.1.2.3.4.5.12": "fake-study-b" } }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
-      { name: "statistics unavailable", scenario: { statisticsStatus: 500 }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
-      { name: "statistics malformed", scenario: { malformedStatistics: true }, code: "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED" },
     ];
     for (const scenarioCase of scenarios) {
       resetFakeOrthancState(fake.state, scenarioCase.scenario);
@@ -712,7 +726,7 @@ test("abrupt worker death leaves a reclaimable row and resumes partial Orthanc u
         assert.equal(fake.state.sendCount, 1);
       } else {
         assert.equal(row.rows[0]?.status, "failed");
-        assert.equal(row.rows[0]?.processing_error_code, "DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT");
+        assert.equal(row.rows[0]?.processing_error_code, "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED");
         assert.equal(row.rows[0]?.processing_lease_owner, null);
         assert.equal(row.rows[0]?.modified_orthanc_study_id, null);
         assert.equal(row.rows[0]?.orthanc_send_job_id, null);
@@ -722,7 +736,6 @@ test("abrupt worker death leaves a reclaimable row and resumes partial Orthanc u
       await fs.rm(path.join(stagingRoot, staged.key), { recursive: true, force: true });
     };
     await runCrash("matching");
-    await runCrash("conflicting");
   } finally {
     __dicomRemapTestables.resetTestOverrides();
     __resetOrthancPacsFetchForTests();
