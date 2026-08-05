@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
+import { fetchIntegrationStatus } from "@/lib/api-hooks";
+import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
 import QzTrayPrintingSection from "@/pages/settings/qz-tray-printing-section";
+import {
+  loadWorkstationNaps2Settings,
+  normalizeNaps2Origin,
+  resetWorkstationNaps2Settings,
+  resolveEffectiveNaps2Endpoint,
+  saveWorkstationNaps2Settings,
+} from "@/services/scanning/workstation-naps2-settings";
 
 const MANIFEST_URL = "/api/public/printing-bootstrap/manifest";
 const SETUP_LOG_PATH = String.raw`%ProgramData%\RISpro\PrintingSetup\setup.log`;
@@ -23,7 +32,85 @@ type BootstrapManifest = {
 };
 
 export default function WorkstationPrintingPage() {
-  return <div className="mx-auto w-full max-w-6xl space-y-4"><div><h1 className="text-2xl font-semibold">Workstation printing</h1><p className="text-sm text-muted-foreground">Configure QZ Tray and physical printer mappings for this browser only.</p></div><WorkstationSetupCard /><QzTrayPrintingSection /></div>;
+  return <div className="mx-auto w-full max-w-6xl space-y-4"><div><h1 className="text-2xl font-semibold">Workstation printing and scanning</h1><p className="text-sm text-muted-foreground">Configure QZ Tray, physical printer mappings, and the NAPS2 scanner endpoint for this browser only.</p></div><WorkstationSetupCard /><QzTrayPrintingSection /><WorkstationNaps2Section /></div>;
+}
+
+function WorkstationNaps2Section() {
+  const [endpointInput, setEndpointInput] = useState(() => loadWorkstationNaps2Settings()?.endpoint || "");
+  const [globalEndpoint, setGlobalEndpoint] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [, setSettingsRevision] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void fetchIntegrationStatus().then((status) => {
+      if (active) setGlobalEndpoint(status?.scanner?.naps2WebScanEndpoint || "");
+    }).catch(() => {
+      if (active) setGlobalEndpoint("");
+    });
+    return () => { active = false; };
+  }, []);
+
+  const effective = resolveEffectiveNaps2Endpoint(globalEndpoint);
+  const sourceLabel = effective.source === "workstation"
+    ? "Workstation override"
+    : effective.source === "system"
+      ? "System default"
+      : "Automatic localhost probe";
+  const effectiveLabel = effective.endpoint || "http://127.0.0.1:9801, then http://localhost:9801";
+
+  function saveEndpoint() {
+    try {
+      const saved = saveWorkstationNaps2Settings(endpointInput);
+      setEndpointInput(saved.endpoint);
+      setSettingsRevision((current) => current + 1);
+      pushToast({ type: "success", title: "NAPS2 endpoint saved", message: "This browser will use the workstation scanner origin." });
+    } catch (error) {
+      pushToast({ type: "error", title: "Invalid NAPS2 endpoint", message: error instanceof Error ? error.message : "Enter a valid NAPS2 HTTP or HTTPS origin." });
+    }
+  }
+
+  async function testConnection() {
+    setTesting(true);
+    try {
+      const endpoint = normalizeNaps2Origin(endpointInput);
+      const status = await getNaps2WebScanStatus(endpoint);
+      if (!status.available) throw new Error(status.message || "NAPS2 Scanner Sharing is not available on this workstation.");
+      pushToast({ type: "success", title: "NAPS2 connection available", message: `Connected to ${status.endpoint || endpoint}.` });
+    } catch (error) {
+      pushToast({ type: "error", title: "NAPS2 connection failed", message: error instanceof Error ? error.message : "Unable to connect to NAPS2 Scanner Sharing." });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function resetEndpoint() {
+    resetWorkstationNaps2Settings();
+    setEndpointInput("");
+    setSettingsRevision((current) => current + 1);
+    pushToast({ type: "success", title: "NAPS2 endpoint reset", message: "This browser will use the system scanner endpoint." });
+  }
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="workstation-naps2-title">
+      <div>
+        <h2 id="workstation-naps2-title" className="font-semibold">Workstation NAPS2 scanner</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Override only the NAPS2 eSCL origin used by this browser. Scanning must remain enabled in Documents &amp; Uploads.</p>
+      </div>
+      <label className="mt-4 block text-sm font-medium" htmlFor="workstation-naps2-endpoint">NAPS2 eSCL endpoint</label>
+      <input id="workstation-naps2-endpoint" className="input-premium mt-1 h-10 w-full" type="url" value={endpointInput} placeholder="http://scanner-workstation:9801" onChange={(event) => setEndpointInput(event.target.value)} />
+      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+        <StatusItem label="Effective endpoint" value={effectiveLabel} mono />
+        <StatusItem label="Endpoint source" value={sourceLabel} />
+      </dl>
+      <p className="mt-3 text-xs text-muted-foreground">Remote origins must be deployment-approved in CSP and may also require HTTPS certificate trust, CORS, Local Network Access permission, and firewall access.</p>
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={resetEndpoint}>Reset to system default</Button>
+        <Button type="button" variant="secondary" onClick={() => void testConnection()} disabled={testing}>{testing ? "Testing…" : "Test connection"}</Button>
+        <Button type="button" onClick={saveEndpoint}>Save workstation endpoint</Button>
+      </div>
+    </section>
+  );
 }
 
 function WorkstationSetupCard() {

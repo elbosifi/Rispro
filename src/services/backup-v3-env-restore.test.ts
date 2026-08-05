@@ -109,6 +109,7 @@ test("only RISpro-managed keys are restored and unrelated local keys are preserv
   await fs.writeFile(envPath, "DATABASE_URL=old\nLOCAL_ONLY=keep\nUNMANAGED_BACKUP_KEY=local\nNODE_ENV=production\nPORT=3000\n");
   const stagingDir = await writeEnvBundle(tempDir, {
     DATABASE_URL: "new",
+    NAPS2_WEBSCAN_ALLOWED_ORIGINS: "http://scanner-one:9801,https://scanner-two:9801",
     UNMANAGED_BACKUP_KEY: "from-backup",
     NODE_ENV: "development",
     PORT: "9999",
@@ -118,6 +119,7 @@ test("only RISpro-managed keys are restored and unrelated local keys are preserv
   const values = await readEnvValues(envPath);
 
   assert.equal(values.DATABASE_URL, "new");
+  assert.equal(values.NAPS2_WEBSCAN_ALLOWED_ORIGINS, "http://scanner-one:9801,https://scanner-two:9801");
   assert.equal(values.LOCAL_ONLY, "keep");
   assert.equal(values.UNMANAGED_BACKUP_KEY, "local");
   assert.equal(values.NODE_ENV, "production");

@@ -25,6 +25,7 @@ import { DocumentPreviewWorkspace } from "./document-preview-workspace";
 import { directPrint } from "@/services/printing/direct-print-service";
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import { resolveEffectiveNaps2Endpoint } from "@/services/scanning/workstation-naps2-settings";
 import type { PrinterDocumentType } from "@/types/printing";
 
 export type DocumentPreviewMode = "link" | "modal" | "inline";
@@ -429,8 +430,9 @@ export function RequestDocumentsPanel({
       });
 
       const failures: Array<{ file: File; error: string; documentType: string }> = [];
+      const effectiveScanEndpoint = resolveEffectiveNaps2Endpoint(integrationStatus?.scanner?.naps2WebScanEndpoint);
       const scanResult = await scanAppointmentRequest({
-        endpoint: integrationStatus?.scanner?.naps2WebScanEndpoint,
+        endpoint: effectiveScanEndpoint.endpoint,
         dpi: Number.isFinite(scanDpi) && scanDpi > 0 ? scanDpi : 200,
         colorMode: scanColorMode,
         source: scanSource,

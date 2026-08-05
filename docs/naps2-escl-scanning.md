@@ -17,9 +17,17 @@ Windows Firewall only for the required hospital subnet. NCCB's current
 
 RISpro currently runs over HTTP. Managed Edge workstations can require Local
 Network Access policy for browser access to a LAN scanner. The NAPS2 host must
-allow RISpro browser origins, and a configured LAN origin may also need to be
-provided through `NAPS2_WEBSCAN_ENDPOINT` so the server can include that exact
-origin in `connect-src`; RISpro intentionally does not allow every HTTP origin.
+allow RISpro browser origins. The global scanner origin can be provided through
+`NAPS2_WEBSCAN_ENDPOINT`; additional browser-workstation override origins must
+be listed as exact comma-separated HTTP/HTTPS origins in
+`NAPS2_WEBSCAN_ALLOWED_ORIGINS` so the server can include them in `connect-src`.
+RISpro does not accept wildcards, URL paths, or arbitrary dynamic origins.
+
+When RISpro is served over HTTPS, remote scanners must also use HTTPS with a
+certificate trusted by the browser; otherwise mixed-content rules block the
+request. CSP approval does not replace NAPS2 CORS configuration, browser Local
+Network Access permission or policy, certificate trust, DNS/routing, or the
+scanner-host firewall rule.
 
 Manual PDF/image upload remains available if NAPS2, the network, CORS, CSP, or
 browser policy is unavailable.

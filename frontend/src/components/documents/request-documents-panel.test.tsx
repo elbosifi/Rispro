@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { RequestDocumentsPanel } from "./request-documents-panel";
+import { saveWorkstationNaps2Settings, WORKSTATION_NAPS2_SETTINGS_KEY } from "@/services/scanning/workstation-naps2-settings";
 
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(async () => []);
 const mockUploadAppointmentDocument = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({
@@ -216,6 +217,7 @@ function documentFixture(id: number, filename: string, mimeType: string) {
 describe("RequestDocumentsPanel local scan flow", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    localStorage.removeItem(WORKSTATION_NAPS2_SETTINGS_KEY);
     setMobileViewport(false);
     mockListAppointmentDocuments.mockReset();
     mockUploadAppointmentDocument.mockReset();
@@ -318,7 +320,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         dpi: 200,
         colorMode: "grayscale",
         source: "feeder",
-        endpoint: "",
+        endpoint: undefined,
       })
     );
     expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(
@@ -461,12 +463,33 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     await waitFor(() => {
       expect(mockScanAppointmentRequest).toHaveBeenCalledWith(
-        expect.objectContaining({ endpoint: "http://localhost:9810" })
+        expect.objectContaining({ endpoint: "http://localhost:9810", dpi: 200, colorMode: "grayscale", source: "feeder" })
       );
     });
   });
 
+  it("prefers the saved workstation origin over the global scan endpoint", async () => {
+    saveWorkstationNaps2Settings("http://workstation-scanner:9801");
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true, allowedFileTypes: ["pdf", "jpg", "png"], documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "naps2_webscan", scannerProfileName: "default", scannerSource: "duplex", scanDpi: "300",
+        scanColorMode: "color", scanFileFormat: "pdf", bridgeReady: true, naps2WebScanEnabled: true,
+        naps2WebScanEndpoint: "http://global-scanner:9801", scannerAppEnabled: false,
+        scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi", scanSessionExpiryMinutes: "15",
+      },
+    });
+
+    renderPanel();
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
+
+    await waitFor(() => expect(mockScanAppointmentRequest).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: "http://workstation-scanner:9801", dpi: 300, colorMode: "color", source: "duplex",
+    })));
+  });
+
   it("keeps scan action hidden when only an endpoint is configured but scanning is disabled", async () => {
+    saveWorkstationNaps2Settings("http://workstation-scanner:9801");
     mockFetchIntegrationStatus.mockResolvedValue({
       scanner: {
         referralUploadEnabled: true,
@@ -490,8 +513,9 @@ describe("RequestDocumentsPanel local scan flow", () => {
     renderPanel();
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Scan Paper" })).toBeNull();
     });
+    expect(mockScanAppointmentRequest).not.toHaveBeenCalled();
   });
 
   it("keeps failed scanned uploads retryable through the same upload API", async () => {

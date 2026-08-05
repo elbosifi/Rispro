@@ -24,6 +24,8 @@ function buildConnectSources(): string[] {
     }
   }
 
+  sources.push(...env.naps2WebscanAllowedOrigins);
+
   return Array.from(new Set(sources));
 }
 

@@ -79,6 +79,22 @@ function readTrustProxy(): boolean | number | string {
   return rawValue;
 }
 
+export function parseNaps2WebscanAllowedOrigins(rawValue: string | undefined): string[] {
+  const origins: string[] = [];
+  for (const value of String(rawValue || "").split(",")) {
+    const candidate = value.trim();
+    if (!candidate || candidate.includes("*")) continue;
+    try {
+      const url = new URL(candidate);
+      if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || url.pathname !== "/" || url.search || url.hash) continue;
+      origins.push(url.origin);
+    } catch {
+      // Invalid optional entries are ignored without weakening CSP.
+    }
+  }
+  return Array.from(new Set(origins));
+}
+
 const nodeEnv = process.env.NODE_ENV || "development";
 const isProduction = nodeEnv === "production";
 
@@ -112,6 +128,7 @@ export interface EnvConfig {
   scanSessionTokenSecret: string;
   naps2WebscanEnabled: boolean;
   naps2WebscanEndpoint: string;
+  naps2WebscanAllowedOrigins: string[];
   seedSupervisorUsername: string;
   seedSupervisorPassword: string;
   seedSupervisorFullName: string;
@@ -207,6 +224,7 @@ export const env: EnvConfig = {
   scanSessionTokenSecret: process.env.SCAN_SESSION_TOKEN_SECRET || process.env.JWT_SECRET || "",
   naps2WebscanEnabled: readBoolean("NAPS2_WEBSCAN_ENABLED", false),
   naps2WebscanEndpoint: String(process.env.NAPS2_WEBSCAN_ENDPOINT || "").trim(),
+  naps2WebscanAllowedOrigins: parseNaps2WebscanAllowedOrigins(process.env.NAPS2_WEBSCAN_ALLOWED_ORIGINS),
   seedSupervisorUsername: process.env.SEED_SUPERVISOR_USERNAME || "admin",
   seedSupervisorPassword: process.env.SEED_SUPERVISOR_PASSWORD || "ChangeMe123!",
   seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor",

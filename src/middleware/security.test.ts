@@ -109,4 +109,23 @@ describe("securityHeaders", () => {
       env.naps2WebscanEndpoint = previousEndpoint;
     }
   });
+
+  it("adds only the pre-validated NAPS2 workstation origins and deduplicates sources", () => {
+    const previousEndpoint = env.naps2WebscanEndpoint;
+    const previousAllowedOrigins = env.naps2WebscanAllowedOrigins;
+    env.naps2WebscanEndpoint = "http://scanner-one:9801/eSCL";
+    env.naps2WebscanAllowedOrigins = ["http://scanner-one:9801", "https://scanner-two:9801"];
+    try {
+      const headers: Record<string, string> = {};
+      securityHeaders({} as any, { setHeader(name: string, value: string) { headers[name] = value; } } as any, () => {});
+
+      const csp = headers["Content-Security-Policy"];
+      assert.equal(csp.match(/http:\/\/scanner-one:9801/g)?.length, 1);
+      assert.equal(csp.includes("https://scanner-two:9801"), true);
+      assert.equal(csp.includes("*"), false);
+    } finally {
+      env.naps2WebscanEndpoint = previousEndpoint;
+      env.naps2WebscanAllowedOrigins = previousAllowedOrigins;
+    }
+  });
 });
