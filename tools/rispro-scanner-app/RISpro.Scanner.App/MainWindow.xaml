@@ -23,8 +23,14 @@
 
             <CheckBox x:Name="AllowHttpCheckBox" Content="Allow HTTP for local development" Margin="0,0,0,12" />
 
+            <TextBlock Text="Scanner connection" FontWeight="SemiBold" />
+            <ComboBox x:Name="ScannerConnectionComboBox" Margin="0,4,0,12" SelectionChanged="ScannerConnectionComboBox_SelectionChanged">
+              <ComboBoxItem Content="Local scanner" Tag="local" IsSelected="True" />
+              <ComboBoxItem Content="Network/shared scanner" Tag="network" />
+            </ComboBox>
+
             <TextBlock Text="Scanner" FontWeight="SemiBold" />
-            <ComboBox x:Name="ScannerComboBox" Margin="0,4,0,12" />
+            <ComboBox x:Name="ScannerComboBox" Margin="0,4,0,12" SelectionChanged="ScannerComboBox_SelectionChanged" />
 
             <WrapPanel Margin="0,0,0,12">
               <StackPanel Width="120" Margin="0,0,12,0">

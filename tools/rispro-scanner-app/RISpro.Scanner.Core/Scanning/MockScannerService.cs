@@ -4,8 +4,8 @@ namespace RISpro.Scanner.Core.Scanning;
 
 public sealed class MockScannerService : IScannerService
 {
-    public Task<IReadOnlyList<string>> ListScannersAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<string>>(["Mock Scanner"]);
+    public Task<IReadOnlyList<ScannerOption>> ListScannersAsync(string connectionMode, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ScannerOption>>([new ScannerOption("mock-scanner", "Mock Scanner", connectionMode)]);
 
     public async Task<ScanResult> ScanToPdfAsync(ScannerProfile profile, string outputDirectory, CancellationToken cancellationToken = default)
     {

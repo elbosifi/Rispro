@@ -14,12 +14,13 @@ $requiredFiles = @(
   "RISpro.Scanner.App.dll",
   "RISpro.Scanner.Core.dll",
   "NAPS2.Sdk.dll",
+  "NAPS2.Escl.dll",
   "NAPS2.Images.dll",
   "NAPS2.Images.Wpf.dll",
   "NAPS2.Internals.dll",
-  "NAPS2.PdfSharp.dll",
+  "PdfSharpCore.dll",
   "NAPS2.Wia.dll",
-  "NAPS2.NTwain.dll"
+  "NTwain.dll"
 )
 
 $missingFiles = @()

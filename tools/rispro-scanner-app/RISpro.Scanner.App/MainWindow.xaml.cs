@@ -17,6 +17,9 @@ public partial class MainWindow : Window
     private string? _token;
     private ScanSessionContext? _context;
     private ScanResult? _lastScan;
+    private bool _isApplyingScannerUi;
+    private bool _connectionModeChangedByUser;
+    private bool _scannerSelectionChangedByUser;
 
     public MainWindow()
     {
@@ -38,27 +41,50 @@ public partial class MainWindow : Window
 
     private void ApplyConfigToUi()
     {
+        _isApplyingScannerUi = true;
         BaseUrlTextBox.Text = _config.RISproBaseUrl;
         AllowHttpCheckBox.IsChecked = _config.AllowInsecureHttpForDev;
+        SetConnectionMode(_config.ScannerConnectionMode);
         SetComboValue(DpiComboBox, _config.DPI.ToString());
         SetComboValue(ColorModeComboBox, _config.ColorMode);
         SetComboValue(SourceComboBox, _config.Source);
+        _isApplyingScannerUi = false;
     }
 
-    private ScannerAppConfig ReadConfigFromUi() => new()
+    private ScannerAppConfig ReadConfigFromUi(bool saveScannerSetup)
     {
-        RISproBaseUrl = BaseUrlTextBox.Text.Trim().TrimEnd('/'),
-        DefaultScannerName = ScannerComboBox.Text.Trim(),
-        DPI = int.TryParse(GetComboValue(DpiComboBox), out var dpi) ? dpi : 200,
-        ColorMode = GetComboValue(ColorModeComboBox),
-        Source = GetComboValue(SourceComboBox),
-        LastVersion = AppVersion,
-        AllowInsecureHttpForDev = AllowHttpCheckBox.IsChecked == true,
-    };
+        var config = new ScannerAppConfig
+        {
+            RISproBaseUrl = BaseUrlTextBox.Text.Trim().TrimEnd('/'),
+            ScannerConnectionMode = _config.ScannerConnectionMode,
+            DefaultScannerId = _config.DefaultScannerId,
+            DefaultScannerName = _config.DefaultScannerName,
+            DPI = int.TryParse(GetComboValue(DpiComboBox), out var dpi) ? dpi : 200,
+            ColorMode = GetComboValue(ColorModeComboBox),
+            Source = GetComboValue(SourceComboBox),
+            LastVersion = AppVersion,
+            AllowInsecureHttpForDev = AllowHttpCheckBox.IsChecked == true,
+        };
+
+        if (!saveScannerSetup) return config;
+
+        config.ScannerConnectionMode = GetConnectionMode();
+        if (_scannerSelectionChangedByUser && ScannerComboBox.SelectedItem is ScannerOption selectedScanner)
+        {
+            config.DefaultScannerId = selectedScanner.Id;
+            config.DefaultScannerName = selectedScanner.DisplayName;
+        }
+        else if (_connectionModeChangedByUser)
+        {
+            config.DefaultScannerId = "";
+            config.DefaultScannerName = "";
+        }
+        return config;
+    }
 
     private async Task<RisproScannerApiClient> CreateClientAsync()
     {
-        _config = ReadConfigFromUi();
+        _config = ReadConfigFromUi(false);
         if (string.IsNullOrWhiteSpace(_config.RISproBaseUrl)) throw new InvalidOperationException("Configure RISpro server URL first.");
         var baseUri = new Uri(_config.RISproBaseUrl);
         if (baseUri.Scheme != Uri.UriSchemeHttps && !_config.AllowInsecureHttpForDev)
@@ -91,16 +117,42 @@ public partial class MainWindow : Window
 
     private async void RefreshScanners_Click(object sender, RoutedEventArgs e) => await RefreshScannersAsync();
 
+    private void ScannerConnectionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isApplyingScannerUi || !IsLoaded) return;
+        _connectionModeChangedByUser = true;
+        _scannerSelectionChangedByUser = false;
+        _isApplyingScannerUi = true;
+        ScannerComboBox.Items.Clear();
+        ScannerComboBox.SelectedItem = null;
+        _isApplyingScannerUi = false;
+    }
+
+    private void ScannerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isApplyingScannerUi || !IsLoaded) return;
+        _scannerSelectionChangedByUser = ScannerComboBox.SelectedItem is ScannerOption;
+    }
+
     private async Task RefreshScannersAsync()
     {
         try
         {
+            var mode = GetConnectionMode();
+            var scanners = await _scannerService.ListScannersAsync(mode);
+            _isApplyingScannerUi = true;
             ScannerComboBox.Items.Clear();
-            foreach (var scanner in await _scannerService.ListScannersAsync())
+            foreach (var scanner in scanners)
             {
                 ScannerComboBox.Items.Add(scanner);
             }
-            ScannerComboBox.Text = _config.DefaultScannerName;
+            if (string.Equals(mode, _config.ScannerConnectionMode, StringComparison.OrdinalIgnoreCase))
+            {
+                ScannerComboBox.SelectedItem = !string.IsNullOrWhiteSpace(_config.DefaultScannerId)
+                    ? scanners.FirstOrDefault(scanner => string.Equals(scanner.Id, _config.DefaultScannerId, StringComparison.Ordinal))
+                    : scanners.FirstOrDefault(scanner => string.Equals(scanner.DisplayName, _config.DefaultScannerName, StringComparison.OrdinalIgnoreCase));
+            }
+            _isApplyingScannerUi = false;
         }
         catch (Exception ex)
         {
@@ -110,8 +162,10 @@ public partial class MainWindow : Window
 
     private async void SaveSetup_Click(object sender, RoutedEventArgs e)
     {
-        _config = ReadConfigFromUi();
+        _config = ReadConfigFromUi(true);
         await _configStore.SaveAsync(_config);
+        _connectionModeChangedByUser = false;
+        _scannerSelectionChangedByUser = false;
         SetStatus("Setup saved.");
     }
 
@@ -146,11 +200,17 @@ public partial class MainWindow : Window
 
     private async Task<ScanResult> ScanAsync()
     {
-        _config = ReadConfigFromUi();
+        _config = ReadConfigFromUi(false);
         await _configStore.SaveAsync(_config);
+        var selectedScanner = ScannerComboBox.SelectedItem as ScannerOption;
+        var selectedMode = GetConnectionMode();
+        var scannerId = selectedScanner?.Id
+            ?? (string.Equals(selectedMode, _config.ScannerConnectionMode, StringComparison.OrdinalIgnoreCase) ? _config.DefaultScannerId : "");
+        var scannerName = selectedScanner?.DisplayName
+            ?? (string.Equals(selectedMode, _config.ScannerConnectionMode, StringComparison.OrdinalIgnoreCase) ? _config.DefaultScannerName : "");
         var tempDir = Path.Combine(ScannerConfigStore.ProgramDataDir, "temp");
         return await _scannerService.ScanToPdfAsync(
-            new ScannerProfile(_config.DefaultScannerName, _config.DPI, _config.ColorMode, _config.Source),
+            new ScannerProfile(scannerId, scannerName, selectedMode, _config.DPI, _config.ColorMode, _config.Source),
             tempDir);
     }
 
@@ -226,5 +286,16 @@ public partial class MainWindow : Window
             }
         }
         comboBox.Text = value;
+    }
+
+    private string GetConnectionMode() =>
+        (ScannerConnectionComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "network" ? "network" : "local";
+
+    private void SetConnectionMode(string connectionMode)
+    {
+        var normalizedMode = string.Equals(connectionMode, "network", StringComparison.OrdinalIgnoreCase) ? "network" : "local";
+        ScannerConnectionComboBox.SelectedItem = ScannerConnectionComboBox.Items
+            .OfType<ComboBoxItem>()
+            .First(item => string.Equals(item.Tag?.ToString(), normalizedMode, StringComparison.Ordinal));
     }
 }

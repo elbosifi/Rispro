@@ -10,4 +10,9 @@
     <PackageReference Include="NAPS2.Images.Wpf" Version="1.2.1" />
     <PackageReference Include="NAPS2.Sdk.Worker.Win32" Version="1.2.1" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>RISpro.Scanner.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

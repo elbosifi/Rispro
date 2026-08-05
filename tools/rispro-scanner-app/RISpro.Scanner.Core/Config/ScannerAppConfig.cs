@@ -3,6 +3,8 @@ namespace RISpro.Scanner.Core.Config;
 public sealed class ScannerAppConfig
 {
     public string RISproBaseUrl { get; set; } = "";
+    public string ScannerConnectionMode { get; set; } = "local";
+    public string DefaultScannerId { get; set; } = "";
     public string DefaultScannerName { get; set; } = "";
     public int DPI { get; set; } = 200;
     public string ColorMode { get; set; } = "grayscale";
