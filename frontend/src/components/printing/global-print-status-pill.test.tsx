@@ -21,6 +21,7 @@ describe("GlobalPrintStatusPill", () => {
     render(<GlobalPrintStatusPill />);
     act(() => setGlobalPrintStatus({ state }));
     expect(screen.getByRole("status").textContent).toContain(text);
+    if (state === "submitting") expect(screen.getByTestId("submitting-printer-icon")).toBeTruthy();
   });
 
   it("dismisses submitted status after the configured delay", () => {
