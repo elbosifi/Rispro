@@ -9,6 +9,7 @@ const createAccessionLabelPdfBlob = vi.fn();
 const connectQzTray = vi.fn();
 const auditApi = vi.fn();
 const appointmentSlipFetch = vi.fn();
+const fetchAppointmentSlipSettings = vi.fn();
 
 vi.mock("./qz-tray-service", () => ({
   QzTrayError: class QzTrayError extends Error { constructor(public code: string, message: string) { super(message); } },
@@ -19,7 +20,7 @@ vi.mock("./qz-tray-service", () => ({
 vi.mock("@/lib/api-client", () => ({ api: (...args: unknown[]) => auditApi(...args) }));
 vi.mock("@/lib/api-hooks", () => ({
   getAppointmentById: vi.fn().mockResolvedValue({ id: 7, accessionNumber: "ACC-7" }),
-  fetchAppointmentSlipSettings: vi.fn().mockResolvedValue({ paperSize: "a4" }),
+  fetchAppointmentSlipSettings: (...args: unknown[]) => fetchAppointmentSlipSettings(...args),
 }));
 vi.mock("@/lib/accession-label-printing", () => ({ createAccessionLabelPdfBlob: (...args: unknown[]) => createAccessionLabelPdfBlob(...args) }));
 
@@ -34,6 +35,8 @@ describe("direct print service", () => {
     printPdf.mockResolvedValue(undefined);
     appointmentSlipFetch.mockReset();
     appointmentSlipFetch.mockImplementation(() => Promise.resolve(new Response("%PDF-1.4 test", { status: 200, headers: { "content-type": "application/pdf" } })));
+    fetchAppointmentSlipSettings.mockReset();
+    fetchAppointmentSlipSettings.mockResolvedValue({ paperSize: "a4" });
     vi.stubGlobal("fetch", appointmentSlipFetch);
     createAccessionLabelPdfBlob.mockReset();
     createAccessionLabelPdfBlob.mockResolvedValue(pdf());
@@ -94,6 +97,17 @@ describe("direct print service", () => {
     await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true, printerName: "A4" });
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/appointment-slip/7/pdf", expect.objectContaining({ credentials: "include", cache: "no-store" }));
     expect(printPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches the backend Chromium PDF for A5 appointment slips", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[1].printerName = "A5";
+    saveQzPrinterSettings(settings);
+    fetchAppointmentSlipSettings.mockResolvedValue({ paperSize: "a5" });
+    getInstalledPrinters.mockResolvedValue(["A5"]);
+
+    await expect(directPrint({ documentType: "A5_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true, printerName: "A5" });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/appointment-slip/7/pdf", expect.objectContaining({ credentials: "include", cache: "no-store" }));
   });
 
   it("maps a Chromium endpoint failure to the existing clear generation failure and preserves explicit browser fallback", async () => {

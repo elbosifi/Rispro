@@ -10,8 +10,7 @@ import {
   type PatientQrSettings,
 } from "@/lib/api-hooks";
 import QRCode from "qrcode";
-import { jsPDF } from "jspdf";
-import { containsArabic, drawPdfText, ensureArabicPdfFonts, NOTO_NASKH_BOLD_URL, NOTO_NASKH_REGULAR_URL, processPdfText } from "@/lib/pdf-text-utils";
+import { NOTO_NASKH_BOLD_URL, NOTO_NASKH_REGULAR_URL } from "@/lib/pdf-text-utils";
 
 const HIDDEN_APPOINTMENT_STATUSES = new Set(["cancelled", "discontinued", "voided"]);
 
@@ -63,8 +62,6 @@ export interface AppointmentSlipLayoutModel {
   barcodeBlock: { x: number; y: number; w: number; h: number; clipped: boolean } | null;
   mode: AppointmentSlipSettings["paperMode"];
 }
-
-type AppointmentSlipPdfMode = "blank" | "preprinted";
 
 interface SlipRuntimeSettings {
   slipSettings: AppointmentSlipSettings;
@@ -145,22 +142,6 @@ function formatSlipTime(raw: string | null | undefined): string {
   return match ? `${match[1]}:${match[2]}` : trimmed;
 }
 
-function shorten(value: string, maxLength: number): string {
-  const normalized = String(value || "").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
-  const cleaned = processPdfText(doc, String(value || "").trim());
-  if (!cleaned) return ["—"];
-  const lines = doc.splitTextToSize(cleaned, maxWidth) as string[];
-  if (lines.length <= maxLines) return lines;
-  const visible = lines.slice(0, maxLines);
-  visible[maxLines - 1] = shorten(visible[maxLines - 1], Math.max(12, visible[maxLines - 1].length - 1));
-  return visible;
-}
-
 function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
   const next = settings ? { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...settings } : { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS };
   return {
@@ -204,15 +185,6 @@ function localizeText(ar: string, en: string, mode: AppointmentSlipSettings["lan
   if (mode === "ar") return ar;
   if (mode === "en") return en;
   return `${ar} / ${en}`;
-}
-
-function localizeValue(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
-  const cleanAr = String(ar || "").trim();
-  const cleanEn = String(en || "").trim();
-  if (mode === "ar") return cleanAr || cleanEn || "—";
-  if (mode === "en") return cleanEn || cleanAr || "—";
-  if (cleanAr && cleanEn && cleanAr !== cleanEn) return `${cleanAr} / ${cleanEn}`;
-  return cleanAr || cleanEn || "—";
 }
 
 function localizeValueSafe(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
@@ -328,37 +300,6 @@ function buildSpecialReasonField(apt: AppointmentWithDetails): SlipField | null 
   };
 }
 
-function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
-  const fields: SlipField[] = [];
-  if (settings.showPatientCategory && apt.caseCategory) {
-    fields.push({
-      labelAr: "التصنيف",
-      labelEn: "Category",
-      valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
-      valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
-    });
-  }
-  if (settings.showPatientName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
-  if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
-  if (settings.showNationalId) fields.push({ labelAr: "Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
-  if (settings.showPhone) fields.push({ labelAr: "Ø§Ù„Ù‡Ø§ØªÙ", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
-  if (settings.showAgeSex) fields.push({ labelAr: "Ø§Ù„Ø¹Ù…Ø± / Ø§Ù„Ø¬Ù†Ø³", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
-  if (settings.showAppointmentNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¹Ø¯", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
-  if (settings.showAccessionNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ø¯Ø®ÙˆÙ„", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
-  if (settings.showModality) fields.push({ labelAr: "Ù†ÙˆØ¹ Ø§Ù„Ø¬Ù‡Ø§Ø²", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
-  if (settings.showExamName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„ÙØ­Øµ", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
-  if (settings.showDate) fields.push({ labelAr: "Ø§Ù„ØªØ§Ø±ÙŠØ®", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
-  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "Ø§Ù„ÙˆÙ‚Øª", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
-  if (settings.showWalkIn) fields.push({ labelAr: "Ø­Ø§Ù„Ø© Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
-  if (settings.showSpecialReason) {
-    const specialReasonField = buildSpecialReasonField(apt);
-    if (specialReasonField) fields.push(specialReasonField);
-  }
-  if (settings.showLocation && slip.locationText) fields.push({ labelAr: "Ø§Ù„Ù…ÙˆÙ‚Ø¹", labelEn: "Location", valueAr: slip.locationText, valueEn: slip.locationText });
-  if (settings.showArrivalNote) fields.push({ labelAr: "ملاحظة الحضور", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
-  return fields;
-}
-
 function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
   if (settings.showPatientCategory && apt.caseCategory) {
@@ -387,42 +328,6 @@ function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlip
   }
   return fields;
 }
-
-function buildSlipFieldsLocalized(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
-  const fields: SlipField[] = [];
-  if (settings.showPatientCategory && apt.caseCategory) {
-    fields.push({
-      labelAr: "التصنيف",
-      labelEn: "Category",
-      valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
-      valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
-    });
-  }
-  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
-  if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
-  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
-  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
-  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
-  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
-  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
-  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
-  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
-  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
-  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
-  if (settings.showWalkIn) {
-    const walkInValueAr = apt.isWalkIn ? "نعم" : "لا";
-    const walkInValueEn = apt.isWalkIn ? "Yes" : "No";
-    fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: walkInValueAr, valueEn: walkInValueEn });
-  }
-  if (settings.showSpecialReason) {
-    const specialReasonField = buildSpecialReasonField(apt);
-    if (specialReasonField) fields.push(specialReasonField);
-  }
-  return fields;
-}
-
-const _legacyHelpers = [localizeValue, buildSlipFields];
-void _legacyHelpers;
 
 export function buildAppointmentSlipData(
   apt: AppointmentWithDetails,
@@ -469,7 +374,7 @@ export function buildAppointmentSlipLayoutModel(
   apt: AppointmentWithDetails,
   settings: AppointmentSlipSettings,
   patientQrSettings: PatientQrSettings,
-  modeOverride?: AppointmentSlipPdfMode
+  modeOverride?: AppointmentSlipSettings["paperMode"]
 ): AppointmentSlipLayoutModel {
   const mode = modeOverride ?? settings.paperMode;
   const paper = getPaperDimensions(settings);
@@ -527,12 +432,6 @@ export function buildAppointmentSlipLayoutModel(
     barcodeBlock,
     mode,
   };
-}
-
-function drawBox(doc: jsPDF, x: number, y: number, w: number, h: number, fill = "#ffffff", stroke = "#d1d5db") {
-  doc.setFillColor(fill);
-  doc.setDrawColor(stroke);
-  doc.roundedRect(x, y, w, h, 4, 4, "FD");
 }
 
 const CODE39_PATTERNS: Record<string, string> = {
@@ -602,236 +501,6 @@ function buildCode39Bars(value: string): { units: number; bars: Array<{ x: numbe
     cursor += 1;
   }
   return { units: cursor + 10, bars };
-}
-
-function drawCode39Barcode(doc: jsPDF, value: string, x: number, y: number, w: number, h: number) {
-  const spec = buildCode39Bars(value);
-  const scale = w / spec.units;
-  doc.setFillColor("#111111");
-  for (const bar of spec.bars) {
-    doc.rect(x + bar.x * scale, y, Math.max(scale * bar.units, 0.8), h, "F");
-  }
-}
-
-function drawSlipFieldCard(
-  doc: jsPDF,
-  field: SlipField,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  languageMode: AppointmentSlipSettings["languageMode"]
-) {
-  drawBox(doc, x, y, w, h);
-
-  if (languageMode === "ar") {
-    drawPdfText(doc, field.labelAr, x + w - 5, y + 8, { align: "right", bold: true });
-    drawPdfText(doc, field.valueAr, x + w - 5, y + 18, { align: "right", bold: false });
-    return;
-  }
-
-  if (languageMode === "en") {
-    drawPdfText(doc, field.labelEn, x + 5, y + 8, { align: "left", bold: true });
-    drawPdfText(doc, field.valueEn, x + 5, y + 18, { align: "left", bold: false });
-    return;
-  }
-
-  const halfW = Math.max(1, (w - 6) / 2);
-  const leftX = x + 5;
-  const rightX = x + w - 5;
-  drawPdfText(doc, field.labelAr, rightX, y + 8, { align: "right", bold: true });
-  drawPdfText(doc, field.valueAr, rightX, y + 18, { align: "right", bold: false });
-  drawPdfText(doc, field.labelEn, leftX, y + 8, { align: "left", bold: true });
-  drawPdfText(doc, field.valueEn, leftX, y + 18, { align: "left", bold: false });
-
-  // Keep a little breathing room for very long bilingual cards.
-  if (field.valueAr.length > 40 || field.valueEn.length > 40) {
-    doc.setDrawColor("#e5e7eb");
-    doc.line(x + halfW, y + 4, x + halfW, y + h - 4);
-  }
-}
-
-async function toDataUrl(blob: Blob): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-export async function blobToDataUrl(blob: Blob): Promise<string> {
-  return toDataUrl(blob);
-}
-
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return await toDataUrl(await response.blob());
-  } catch {
-    return null;
-  }
-}
-
-export async function createAppointmentSlipPdfBlob(
-  apt: AppointmentWithDetails,
-  mode?: AppointmentSlipPdfMode,
-  options?: BuildSlipOptions
-): Promise<Blob> {
-  const runtime = await resolveSlipRuntimeSettings(options);
-  const slipSettings = runtime.slipSettings;
-  const patientQrSettings = runtime.patientQrSettings;
-  const slip = buildAppointmentSlipData(apt, runtime);
-  const layout = buildAppointmentSlipLayoutModel(apt, slipSettings, patientQrSettings, mode);
-  const paper = getPaperDimensions(slipSettings);
-  const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "pt",
-    format: [paper.widthPt, paper.heightPt],
-    compress: true,
-  });
-  await ensureArabicPdfFonts(doc);
-
-  doc.setFillColor("#ffffff");
-  doc.rect(0, 0, layout.page.w, layout.page.h, "F");
-
-  const fontScale = slipSettings.fontScale || 1;
-  const content = layout.content;
-  const fields = buildSlipFieldsLocalized(apt, slip, slipSettings);
-  const instructions = buildInstructionText(apt, slipSettings);
-
-  let cursorY = content.y;
-  if (mode !== "preprinted") {
-    const logoDataUrl = await loadImageDataUrl(`${window.location.origin}/assets/nccb-logo.png`);
-    if (logoDataUrl) {
-      doc.addImage(logoDataUrl, "PNG", content.x, cursorY, 40, 40);
-    }
-    doc.setTextColor("#b11116");
-    if (slipSettings.languageMode === "ar") {
-      doc.setFontSize(13 * fontScale);
-      drawPdfText(doc, slipSettings.hospitalNameAr, content.x + 46, cursorY + 12, { align: "right", bold: true });
-      doc.setFontSize(9 * fontScale);
-      doc.setTextColor("#1f2937");
-      drawPdfText(doc, slipSettings.departmentNameAr, content.x + 46, cursorY + 25, { align: "right", bold: false });
-      doc.setFontSize(12 * fontScale);
-      doc.setTextColor("#b11116");
-      drawPdfText(doc, "ÙˆØµÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯", content.x + 46, cursorY + 40, { align: "right", bold: true });
-    } else if (slipSettings.languageMode === "en") {
-      doc.setFontSize(13 * fontScale);
-      drawPdfText(doc, slipSettings.hospitalNameEn, content.x + 46, cursorY + 12, { align: "left", bold: true });
-      doc.setFontSize(9 * fontScale);
-      doc.setTextColor("#1f2937");
-      drawPdfText(doc, slipSettings.departmentNameEn, content.x + 46, cursorY + 25, { align: "left", bold: false });
-      doc.setFontSize(12 * fontScale);
-      doc.setTextColor("#b11116");
-      drawPdfText(doc, "Appointment Slip", content.x + 46, cursorY + 40, { align: "left", bold: true });
-    } else {
-      doc.setFontSize(13 * fontScale);
-      drawPdfText(doc, slipSettings.hospitalNameAr, content.x + 46, cursorY + 10, { align: "right", bold: true });
-      drawPdfText(doc, slipSettings.hospitalNameEn, content.x + 46, cursorY + 22, { align: "left", bold: true });
-      doc.setFontSize(9 * fontScale);
-      doc.setTextColor("#1f2937");
-      drawPdfText(doc, slipSettings.departmentNameAr, content.x + 46, cursorY + 34, { align: "right", bold: false });
-      drawPdfText(doc, slipSettings.departmentNameEn, content.x + 46, cursorY + 44, { align: "left", bold: false });
-    }
-  }
-
-  if (layout.qrBlock && slip.queueQrPayload) {
-    const qrDataUrl = await QRCode.toDataURL(slip.queueQrPayload, { margin: 1, width: 220 });
-    const qrSize = Math.min(mm(slipSettings.qrSizeMm), layout.qrBlock.w);
-    const qrX = layout.qrBlock.x + (layout.qrBlock.w - qrSize) / 2;
-    doc.setDrawColor("#e2676d");
-    doc.roundedRect(layout.qrBlock.x, layout.qrBlock.y, layout.qrBlock.w, layout.qrBlock.h, 4, 4, "S");
-    doc.addImage(qrDataUrl, "PNG", qrX, layout.qrBlock.y + 4, qrSize, qrSize);
-    doc.setFontSize(8 * fontScale);
-    doc.setTextColor("#b11116");
-    const qrCaptionLinesAr = wrapLines(doc, slipSettings.qrCaptionAr, layout.qrBlock.w - 8, 2);
-    const qrCaptionLinesEn = wrapLines(doc, slipSettings.qrCaptionEn, layout.qrBlock.w - 8, 2);
-    if (slipSettings.languageMode === "ar") {
-      doc.setFontSize(8 * fontScale);
-      drawPdfText(doc, qrCaptionLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 12, { align: "right", bold: true });
-    } else if (slipSettings.languageMode === "en") {
-      doc.setFontSize(8 * fontScale);
-      drawPdfText(doc, qrCaptionLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 12, { align: "left", bold: true });
-    } else {
-      drawPdfText(doc, qrCaptionLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 12, { align: "right", bold: true });
-      drawPdfText(doc, qrCaptionLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 22, { align: "left", bold: true });
-    }
-    doc.setFontSize(6.8 * fontScale);
-    doc.setTextColor("#374151");
-    const qrHelperLinesAr = wrapLines(doc, slipSettings.qrHelperTextAr, layout.qrBlock.w - 8, 4);
-    const qrHelperLinesEn = wrapLines(doc, slipSettings.qrHelperTextEn, layout.qrBlock.w - 8, 4);
-    if (slipSettings.languageMode === "ar") {
-      drawPdfText(doc, qrHelperLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 28, { align: "right" });
-    } else if (slipSettings.languageMode === "en") {
-      drawPdfText(doc, qrHelperLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 28, { align: "left" });
-    } else {
-      drawPdfText(doc, qrHelperLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 28, { align: "right" });
-      drawPdfText(doc, qrHelperLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 38, { align: "left" });
-    }
-  }
-
-  cursorY += mode !== "preprinted" ? 52 * fontScale : 0;
-  const qrReserve = layout.qrBlock ? layout.qrBlock.w + 8 : 0;
-  const fieldsWidth = content.w - qrReserve;
-  const fieldGap = 6;
-  const columns = fieldsWidth > 210 ? 2 : 1;
-  const fieldWidth = columns === 2 ? (fieldsWidth - fieldGap) / 2 : fieldsWidth;
-  const fieldHeight = 30 * fontScale;
-
-  fields.forEach((field, index) => {
-    const column = columns === 2 ? index % 2 : 0;
-    const row = columns === 2 ? Math.floor(index / 2) : index;
-    const x = content.x + column * (fieldWidth + fieldGap);
-    const y = cursorY + row * (fieldHeight + 4);
-    drawSlipFieldCard(doc, field, x, y, fieldWidth, fieldHeight, slipSettings.languageMode);
-  });
-
-  cursorY += Math.ceil(fields.length / columns) * (fieldHeight + 4) + 6;
-
-  const barcodeTop = layout.barcodeBlock ? layout.barcodeBlock.y - 8 : content.y + content.h;
-  for (const section of instructions) {
-    const sectionHeight = slipSettings.languageMode === "bilingual" ? 42 * fontScale : 30 * fontScale;
-    if (cursorY + sectionHeight > barcodeTop) break;
-    drawBox(doc, content.x, cursorY, content.w, sectionHeight, "#fffaf9", "#f0b4b7");
-    if (slipSettings.languageMode === "ar") {
-      drawPdfText(doc, section.headingAr, content.x + content.w - 5, cursorY + 9, { align: "right", bold: true });
-      drawPdfText(doc, wrapLines(doc, section.bodyAr, content.w - 10, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + content.w - 5, cursorY + 18, { align: "right" });
-    } else if (slipSettings.languageMode === "en") {
-      drawPdfText(doc, section.headingEn, content.x + 5, cursorY + 9, { align: "left", bold: true });
-      drawPdfText(doc, wrapLines(doc, section.bodyEn, content.w - 10, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + 5, cursorY + 18, { align: "left" });
-    } else {
-      drawPdfText(doc, section.headingAr, content.x + content.w - 5, cursorY + 9, { align: "right", bold: true });
-      drawPdfText(doc, section.headingEn, content.x + 5, cursorY + 9, { align: "left", bold: true });
-      drawPdfText(doc, wrapLines(doc, section.bodyAr, content.w / 2 - 8, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + content.w - 5, cursorY + 20, { align: "right" });
-      drawPdfText(doc, wrapLines(doc, section.bodyEn, content.w / 2 - 8, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + 5, cursorY + 20, { align: "left" });
-    }
-    cursorY += sectionHeight + 4;
-  }
-
-  if (layout.barcodeBlock) {
-    doc.setFontSize(8.5 * fontScale);
-    doc.setTextColor("#b11116");
-    if (slipSettings.languageMode === "ar") {
-      drawPdfText(doc, slipSettings.barcodeCaptionAr, layout.barcodeBlock.x + layout.barcodeBlock.w - 4, layout.barcodeBlock.y - 4, { align: "right", bold: true });
-    } else if (slipSettings.languageMode === "en") {
-      drawPdfText(doc, slipSettings.barcodeCaptionEn, layout.barcodeBlock.x + 4, layout.barcodeBlock.y - 4, { align: "left", bold: true });
-    } else {
-      drawPdfText(doc, slipSettings.barcodeCaptionAr, layout.barcodeBlock.x + layout.barcodeBlock.w - 4, layout.barcodeBlock.y - 4, { align: "right", bold: true });
-      drawPdfText(doc, slipSettings.barcodeCaptionEn, layout.barcodeBlock.x + 4, layout.barcodeBlock.y + 7, { align: "left", bold: true });
-    }
-    drawBox(doc, layout.barcodeBlock.x, layout.barcodeBlock.y, layout.barcodeBlock.w, layout.barcodeBlock.h, "#ffffff", "#d8dadd");
-    const barcodeInnerX = layout.barcodeBlock.x + 8;
-    const barcodeInnerY = layout.barcodeBlock.y + 6;
-    const barcodeInnerW = layout.barcodeBlock.w - 16;
-    const barcodeInnerH = mm(slipSettings.barcodeHeightMm);
-    drawCode39Barcode(doc, slip.accessionBarcodePayload, barcodeInnerX, barcodeInnerY, barcodeInnerW, barcodeInnerH);
-    doc.setFontSize(7.5 * fontScale);
-    doc.setTextColor("#111827");
-    drawPdfText(doc, shorten(slip.accessionBarcodePayload, 40), layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y + layout.barcodeBlock.h - 6, { align: "center" });
-  }
-  return doc.output("blob");
 }
 
 function isMeaningfulSlipValue(value: string | null | undefined): boolean {
@@ -1065,15 +734,6 @@ export async function prepareAppointmentSlipHtml(
   `;
 }
 
-function getAppointmentSlipFileName(apt: AppointmentWithDetails): string {
-  const suffix = String(apt.accessionNumber || `appointment-${apt.id}`)
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return `appointment-slip-${suffix || apt.id}.pdf`;
-}
-
 async function waitForPrintableDocument(doc: Document): Promise<void> {
   const fontReady = "fonts" in doc ? (doc as Document & { fonts: FontFaceSet }).fonts.ready.catch(() => undefined) : Promise.resolve();
   const imageReady = Promise.all(
@@ -1114,22 +774,6 @@ async function openAppointmentSlipPrintFrame(html: string): Promise<HTMLIFrameEl
   doc.close();
   await waitForPrintableDocument(doc);
   return frame;
-}
-
-export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails, options?: BuildSlipOptions): Promise<void> {
-  const blob = await createAppointmentSlipPdfBlob(apt, undefined, options);
-  const fileName = getAppointmentSlipFileName(apt);
-  const anchor = document.createElement("a");
-  anchor.href = URL.createObjectURL(blob);
-  anchor.download = fileName;
-  anchor.rel = "noopener";
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(anchor.href);
-    anchor.remove();
-  }, 1000);
 }
 
 export function printAppointmentSlip(apt: AppointmentWithDetails, options?: BuildSlipOptions): void {

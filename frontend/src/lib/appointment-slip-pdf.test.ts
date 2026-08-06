@@ -6,7 +6,6 @@ import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, DEFAULT_PATIENT_QR_SETTINGS, type Ap
 import {
   buildAppointmentSlipData,
   buildAppointmentSlipLayoutModel,
-  createAppointmentSlipPdfBlob,
 } from "./print-utils";
 
 vi.mock("qrcode", () => ({
@@ -216,7 +215,7 @@ function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): Pati
   } as PatientQrSettings;
 }
 
-describe("appointment slip PDF", () => {
+describe("appointment slip render data", () => {
   it("builds a localized render model", () => {
     const slip = buildAppointmentSlipData(makeAppointment(), {
       slipSettings: makeSlipSettings({ languageMode: "ar" }),
@@ -262,20 +261,4 @@ describe("appointment slip PDF", () => {
     expect(layout.barcodeBlock!.y + layout.barcodeBlock!.h).toBeLessThanOrEqual(layout.content.y + layout.content.h);
   });
 
-  it("renders a valid A5 PDF blob in preprinted mode", async () => {
-    const blob = await createAppointmentSlipPdfBlob(
-      makeAppointment(),
-      "preprinted",
-      {
-        slipSettings: makeSlipSettings({ showQrCode: false }),
-        patientQrSettings: makePatientQrSettings(),
-      }
-    );
-
-    expect(blob.type).toBe("application/pdf");
-
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const header = new TextDecoder().decode(bytes.slice(0, 5));
-    expect(header).toBe("%PDF-");
-  });
 });

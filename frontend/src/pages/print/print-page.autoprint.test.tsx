@@ -142,7 +142,6 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("@/lib/print-utils", () => ({
-  downloadAppointmentSlipPdf: vi.fn(),
   prepareAppointmentSlipHtml: vi.fn().mockResolvedValue("<html><body>preview</body></html>"),
   printAppointmentSlip: vi.fn(),
   filterVisibleAppointments: vi.fn((items) => items),
