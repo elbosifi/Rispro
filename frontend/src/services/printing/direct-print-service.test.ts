@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
+import { getGlobalPrintStatus, resetGlobalPrintStatusForTests, subscribeToGlobalPrintStatus } from "./global-print-status";
 
 const getInstalledPrinters = vi.fn();
 const printPdf = vi.fn();
@@ -26,6 +27,7 @@ const pdf = () => new Blob([new TextEncoder().encode("%PDF-1.4 test")], { type: 
 
 describe("direct print service", () => {
   beforeEach(() => {
+    resetGlobalPrintStatusForTests();
     localStorage.clear();
     getInstalledPrinters.mockReset();
     printPdf.mockReset();
@@ -68,6 +70,19 @@ describe("direct print service", () => {
     expect(connectQzTray).toHaveBeenCalledTimes(1);
     expect(connectQzTray).toHaveBeenCalledBefore(getInstalledPrinters);
     expect(printPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes the direct-print lifecycle", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+    const states: string[] = [];
+    const unsubscribe = subscribeToGlobalPrintStatus(() => states.push(getGlobalPrintStatus().state));
+
+    await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true });
+    unsubscribe();
+    expect(states).toEqual(expect.arrayContaining(["preparing", "submitting", "submitted"]));
   });
 
   it("fetches the backend Chromium PDF for appointment slips and never calls the former jsPDF renderer", async () => {
@@ -129,15 +144,20 @@ describe("direct print service", () => {
     let release!: () => void;
     printPdf.mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
     const request = { documentType: "A4_DOCUMENT" as const, appointmentId: 7 };
+    const states: string[] = [];
+    const unsubscribe = subscribeToGlobalPrintStatus(() => states.push(getGlobalPrintStatus().state));
     const first = directPrint(request);
     await vi.advanceTimersByTimeAsync(21);
     await expect(first).resolves.toMatchObject({ success: false, errorCode: "PRINT_STATUS_UNKNOWN" });
     expect(getDirectPrintJobState(request)).toBe("status_unknown");
+    expect(getGlobalPrintStatus()).toMatchObject({ state: "status_unknown", printerName: "A4" });
     await expect(directPrint(request)).resolves.toMatchObject({ errorCode: "DUPLICATE_PRINT" });
     release();
     await vi.runAllTimersAsync();
     await Promise.resolve();
     expect(getDirectPrintJobState(request)).toBeUndefined();
+    expect(states).toContain("submitted");
+    unsubscribe();
     printPdf.mockResolvedValue(undefined);
     await expect(directPrint(request)).resolves.toMatchObject({ success: true, printerName: "A4" });
     DIRECT_PRINT_TIMEOUTS.submissionStatusMs = previous;
@@ -153,6 +173,7 @@ describe("direct print service", () => {
     const request = { documentType: "A4_DOCUMENT" as const, appointmentId: 7 };
     await expect(directPrint(request)).resolves.toMatchObject({ success: false, errorCode: "PRINT_FAILED" });
     expect(getDirectPrintJobState(request)).toBeUndefined();
+    expect(getGlobalPrintStatus()).toMatchObject({ state: "failed", printerName: "A4" });
     await expect(directPrint(request)).resolves.toMatchObject({ success: true, printerName: "A4" });
   });
 

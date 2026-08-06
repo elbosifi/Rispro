@@ -41,6 +41,7 @@ import {
   LogOut
 } from "lucide-react";
 import { GlobalSearch } from "@/components/search/global-search";
+import { GlobalPrintStatusPill } from "@/components/printing/global-print-status-pill";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 
 const NAV_ITEMS = APP_NAV_ITEMS;
@@ -527,6 +528,7 @@ export function TopBar({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <GlobalPrintStatusPill />
           {extraActions}
           {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}
           {showLanguageControl ? <LanguageControl language={language} isRtl={isRtl} onToggle={onToggleLanguage} /> : null}

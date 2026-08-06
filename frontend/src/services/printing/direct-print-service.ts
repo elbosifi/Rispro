@@ -6,6 +6,7 @@ import { expectedOrientation } from "@/lib/printing-orientation";
 import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile } from "@/types/printing";
 import { connectQzTray, getInstalledPrinters, printPdf, QzTrayError } from "./qz-tray-service";
 import { loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile } from "./workstation-printer-settings";
+import { setGlobalPrintStatus } from "./global-print-status";
 
 export const DIRECT_PRINT_TIMEOUTS = { connectionMs: 15_000, discoveryMs: 15_000, preparationMs: 60_000, submissionStatusMs: 30_000 };
 const activeJobs = new Map<string, DirectPrintJobState>();
@@ -102,6 +103,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
   const key = options.key ?? jobKey(request);
   if (activeJobs.has(key)) return errorResult("DUPLICATE_PRINT", "This print job is already being processed.");
   activeJobs.set(key, "preparing");
+  setGlobalPrintStatus({ state: "preparing" }, key);
   let profile: PrinterProfile | null = null;
   let retainLock = false;
   try {
@@ -116,6 +118,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     const base64 = await blobToBase64(blob);
     const name = options.name ?? jobName(request);
     activeJobs.set(key, "submitting");
+    setGlobalPrintStatus({ state: "submitting", printerName: profile.printerName }, key);
     const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name });
     pendingSubmissions.set(key, submission);
     const settled = submission.then(() => ({ ok: true as const })).catch((error: unknown) => ({ ok: false as const, error }));
@@ -123,6 +126,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     if (!status.ok) throw status.error;
     pendingSubmissions.delete(key);
     activeJobs.set(key, "submitted");
+    setGlobalPrintStatus({ state: "submitted", printerName: profile.printerName }, key);
     const result: DirectPrintResult = { success: true, printerName: profile.printerName, jobName: name };
     await audit(request, profile, result, undefined, options.testPrint);
     return result;
@@ -131,12 +135,14 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     if (!result.success && result.errorCode === "PRINT_STATUS_UNKNOWN" && profile) {
       retainLock = true;
       activeJobs.set(key, "status_unknown");
+      setGlobalPrintStatus({ state: "status_unknown", printerName: profile.printerName }, key);
       await audit(request, profile, result, "status_unknown", options.testPrint);
       // The underlying QZ promise owns the lock after the UI stops waiting.
       void printStatusSettlement(key, request, profile, options.testPrint === true, nameForSettlement(options, request));
       return result;
     }
     activeJobs.set(key, "failed");
+    setGlobalPrintStatus({ state: "failed", printerName: profile?.printerName }, key);
     console.error("Direct print failed", { code: result.success ? null : result.errorCode, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, technicalError: error instanceof Error ? { name: error.name, message: error.message.slice(0, 500) } : { name: "UnknownError" } });
     await audit(request, profile, result, undefined, options.testPrint);
     return result;
@@ -165,8 +171,8 @@ const pendingSubmissions = new Map<string, Promise<void>>();
 async function printStatusSettlement(key: string, request: DirectPrintRequest, profile: PrinterProfile, testPrint: boolean, submittedJobName: string): Promise<void> {
   const pending = pendingSubmissions.get(key);
   if (!pending) { activeJobs.delete(key); return; }
-  try { await pending; await audit(request, profile, { success: true, printerName: profile.printerName, jobName: submittedJobName }, "submitted", testPrint); }
-  catch (error) { await audit(request, profile, mapDirectPrintError(error), "failed", testPrint); }
+  try { await pending; setGlobalPrintStatus({ state: "submitted", printerName: profile.printerName }, key); await audit(request, profile, { success: true, printerName: profile.printerName, jobName: submittedJobName }, "submitted", testPrint); }
+  catch (error) { setGlobalPrintStatus({ state: "failed", printerName: profile.printerName }, key); await audit(request, profile, mapDirectPrintError(error), "failed", testPrint); }
   finally { pendingSubmissions.delete(key); activeJobs.delete(key); }
 }
 
