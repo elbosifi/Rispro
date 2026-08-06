@@ -40,6 +40,7 @@ import { systemDiagnosticsRouter } from "./routes/system-diagnostics.js";
 import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer/routes.js";
 import { backupControlRouter } from "./routes/backup-control.js";
 import { requestScansRouter } from "./routes/request-scans.js";
+import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -140,6 +141,9 @@ export function createApp(): Application {
 
   app.use("/api/auth", authRouter);
   app.use("/api/public/printing-bootstrap", publicPrintingBootstrapRouter);
+  // Token-scoped data for the in-container appointment-slip renderer. It must remain
+  // outside the user-session middleware because Chromium never receives that session.
+  app.use("/api/internal/appointment-slip-render", appointmentSlipRenderRouter);
   app.use("/api", blockForcedPasswordChange);
   app.use("/api/action-pin", actionPinRouter);
   app.use("/api/users", usersRouter);

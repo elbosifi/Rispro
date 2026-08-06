@@ -4,10 +4,10 @@ import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSet
 
 const getInstalledPrinters = vi.fn();
 const printPdf = vi.fn();
-const createAppointmentSlipPdfBlob = vi.fn();
 const createAccessionLabelPdfBlob = vi.fn();
 const connectQzTray = vi.fn();
 const auditApi = vi.fn();
+const appointmentSlipFetch = vi.fn();
 
 vi.mock("./qz-tray-service", () => ({
   QzTrayError: class QzTrayError extends Error { constructor(public code: string, message: string) { super(message); } },
@@ -20,7 +20,6 @@ vi.mock("@/lib/api-hooks", () => ({
   getAppointmentById: vi.fn().mockResolvedValue({ id: 7, accessionNumber: "ACC-7" }),
   fetchAppointmentSlipSettings: vi.fn().mockResolvedValue({ paperSize: "a4" }),
 }));
-vi.mock("@/lib/print-utils", () => ({ createAppointmentSlipPdfBlob: (...args: unknown[]) => createAppointmentSlipPdfBlob(...args) }));
 vi.mock("@/lib/accession-label-printing", () => ({ createAccessionLabelPdfBlob: (...args: unknown[]) => createAccessionLabelPdfBlob(...args) }));
 
 const pdf = () => new Blob([new TextEncoder().encode("%PDF-1.4 test")], { type: "application/pdf" });
@@ -31,8 +30,9 @@ describe("direct print service", () => {
     getInstalledPrinters.mockReset();
     printPdf.mockReset();
     printPdf.mockResolvedValue(undefined);
-    createAppointmentSlipPdfBlob.mockReset();
-    createAppointmentSlipPdfBlob.mockResolvedValue(pdf());
+    appointmentSlipFetch.mockReset();
+    appointmentSlipFetch.mockImplementation(() => Promise.resolve(new Response("%PDF-1.4 test", { status: 200, headers: { "content-type": "application/pdf" } })));
+    vi.stubGlobal("fetch", appointmentSlipFetch);
     createAccessionLabelPdfBlob.mockReset();
     createAccessionLabelPdfBlob.mockResolvedValue(pdf());
     connectQzTray.mockReset();
@@ -68,6 +68,28 @@ describe("direct print service", () => {
     expect(connectQzTray).toHaveBeenCalledTimes(1);
     expect(connectQzTray).toHaveBeenCalledBefore(getInstalledPrinters);
     expect(printPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches the backend Chromium PDF for appointment slips and never calls the former jsPDF renderer", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+
+    await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true, printerName: "A4" });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/appointment-slip/7/pdf", expect.objectContaining({ credentials: "include", cache: "no-store" }));
+    expect(printPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a Chromium endpoint failure to the existing clear generation failure and preserves explicit browser fallback", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+    appointmentSlipFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "APPOINTMENT_SLIP_RENDER_FAILED" } }), { status: 502, headers: { "content-type": "application/json" } }));
+
+    await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: false, errorCode: "DOCUMENT_GENERATION_FAILED" });
+    expect(printPdf).not.toHaveBeenCalled();
   });
 
   it("rejects an A4 profile with label-sized paper", async () => {

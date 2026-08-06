@@ -34,6 +34,7 @@ import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-
 import PrintPage from "@/pages/print/print-page";
 import DayListPrintPage from "@/pages/print/day-list-print-page";
 import ReportingBoardPrintPage from "@/pages/print/reporting-board-print-page";
+import InternalAppointmentSlipRenderPage from "@/pages/print/internal-appointment-slip-render-page";
 import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import PacsRemapPage from "@/pages/pacs/pacs-remap-page";
@@ -378,6 +379,7 @@ function RouterConfig() {
       <Route path="/mobile/reporting-view/:token" element={<LegacyReportingWorklistRedirect />} />
       <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route path="/print/reporting-board" element={<ProtectedRoute><ReportingBoardPrintPage /></ProtectedRoute>} />
+      <Route path="/print/internal/appointment-slip" element={<InternalAppointmentSlipRenderPage />} />
       <Route
         path="/queue/check-in"
         element={<QueueCheckInAccessRoute />}

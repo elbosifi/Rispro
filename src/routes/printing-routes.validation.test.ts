@@ -83,3 +83,38 @@ describe("QZ signing route limits", () => {
     } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
   });
 });
+
+describe("appointment-slip PDF route", () => {
+  it("rejects an unauthenticated render request before Chromium can be reached", async () => {
+    const app = express();
+    app.use(cookieParser());
+    app.use("/api/printing", printingRouter);
+    app.use(errorHandler);
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/appointment-slip/7/pdf`;
+    try {
+      assert.equal((await fetch(url)).status, 401);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("rejects an authenticated role outside the printing authority", async () => {
+    const app = express();
+    app.use(cookieParser());
+    app.use("/api/printing", printingRouter);
+    app.use(errorHandler);
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/api/printing/appointment-slip/7/pdf`;
+    const cookie = `${env.cookieName}=${jwt.sign({ sub: 42, role: "administrative" }, env.jwtSecret)}`;
+    try {
+      assert.equal((await fetch(url, { headers: { Cookie: cookie } })).status, 403);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+});

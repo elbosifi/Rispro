@@ -100,6 +100,8 @@ RUN set -eux; \
     smbclient \
     poppler-utils \
     zbar-tools \
+    chromium \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -135,6 +137,7 @@ RUN set -eux; \
     command -v pdftoppm; \
     command -v pdfimages; \
     command -v zbarimg; \
+    command -v chromium; \
     for tool in wlmscpfs dump2dcm dcmdump echoscu findscu; do \
       tool_path="$(command -v "$tool")"; \
       echo "$tool: $tool_path"; \

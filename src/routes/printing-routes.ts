@@ -8,6 +8,10 @@ import { getQzCertificate, qzSigningRequestLimitBytes, signQzRequest } from "../
 import { logAuditEntry } from "../services/audit-service.js";
 import { HttpError } from "../utils/http-error.js";
 import { allowInsecureQzWebsocket } from "../config/env.js";
+import { requirePageAccess } from "../middleware/page-access.js";
+import { issueAppointmentSlipRenderToken } from "../services/appointment-slip-render-token-service.js";
+import { AppointmentSlipRenderError, renderAppointmentSlipPdf } from "../services/appointment-slip-chromium-service.js";
+import { env } from "../config/env.js";
 
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
 const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
@@ -61,6 +65,22 @@ const qzSignHandler = (req: Request, res: Response): void => {
 };
 const qzSignMiddlewares = [signingLimiter, qzSigningConcurrencyLimiter, qzSigningJsonParser, qzSignHandler] as const;
 printingRouter.post("/qz-sign", ...qzSignMiddlewares);
+printingRouter.get("/appointment-slip/:appointmentId/pdf", requirePageAccess("print"), asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Appointment identifier is invalid.");
+  const token = issueAppointmentSlipRenderToken(appointmentId);
+  // Chromium only follows this loopback URL. It receives no user cookie or credentials.
+  const renderUrl = `http://127.0.0.1:${env.port}/print/internal/appointment-slip?token=${encodeURIComponent(token)}`;
+  let pdf: Buffer;
+  try { pdf = await renderAppointmentSlipPdf(renderUrl); }
+  catch (error) {
+    if (error instanceof AppointmentSlipRenderError) throw new HttpError(502, "Appointment-slip PDF rendering failed.", { code: "APPOINTMENT_SLIP_RENDER_FAILED" });
+    throw error;
+  }
+  if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Appointment-slip rendering returned an invalid PDF.", { code: "APPOINTMENT_SLIP_RENDER_FAILED" });
+  res.setHeader("Cache-Control", "no-store, private");
+  res.type("application/pdf").send(pdf);
+}));
 printingRouter.post("/audit", asyncRoute(async (req: Request, res: Response) => {
   const audit = parseAudit(req.body);
   const actionType = audit.outcome === "submitted" ? "print_job_submitted" : audit.outcome === "status_unknown" ? "print_job_status_unknown" : "print_job_failed";

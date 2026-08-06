@@ -1060,6 +1060,7 @@ export async function prepareAppointmentSlipHtml(
             </div>
           </div>
         </div>
+        <script>Promise.all([Promise.resolve(document.fonts ? document.fonts.ready : undefined),Promise.all(Array.from(document.images).map(function(i){return i.complete?Promise.resolve():new Promise(function(r){i.addEventListener("load",r,{once:true});i.addEventListener("error",r,{once:true})})}))]).then(function(){document.documentElement.setAttribute("data-appointment-slip-ready","true")});</script>
       </body>
     </html>
   `;

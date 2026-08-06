@@ -1,7 +1,6 @@
 import { api } from "@/lib/api-client";
 import { getAppointmentById, fetchAppointmentSlipSettings } from "@/lib/api-hooks";
 import { createAccessionLabelPdfBlob } from "@/lib/accession-label-printing";
-import { createAppointmentSlipPdfBlob } from "@/lib/print-utils";
 import { createPrinterTestPdfBlob } from "@/lib/printer-test-pdf";
 import { expectedOrientation } from "@/lib/printing-orientation";
 import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile } from "@/types/printing";
@@ -40,6 +39,14 @@ async function fetchDocumentPdf(documentId: string): Promise<Blob> {
   return blob;
 }
 
+async function fetchAppointmentSlipPdf(appointmentId: string | number): Promise<Blob> {
+  const response = await fetch(`/api/printing/appointment-slip/${encodeURIComponent(String(appointmentId))}/pdf`, { credentials: "include", cache: "no-store" });
+  if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Appointment-slip rendering failed. You can use browser printing if it is enabled for this workstation.");
+  const blob = await response.blob();
+  if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Appointment-slip rendering did not return a PDF.");
+  return blob;
+}
+
 async function generatePdf(request: DirectPrintRequest, profile: PrinterProfile): Promise<Blob> {
   if (request.documentId) return fetchDocumentPdf(request.documentId);
   if (request.appointmentId == null) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "An appointment or PDF document is required for printing.");
@@ -49,7 +56,7 @@ async function generatePdf(request: DirectPrintRequest, profile: PrinterProfile)
     const slipSettings = await fetchAppointmentSlipSettings();
     const expectedType = slipSettings.paperSize === "a4" ? "A4_DOCUMENT" : "A5_DOCUMENT";
     if (request.documentType !== expectedType) throw new DirectPrintError("PAGE_SIZE_MISMATCH", "Appointment PDF page size does not match the selected printer profile.");
-    return createAppointmentSlipPdfBlob(appointment, undefined, { slipSettings });
+    return fetchAppointmentSlipPdf(request.appointmentId);
   }
   throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "No receipt generator is available for this document.");
 }
