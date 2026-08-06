@@ -1027,7 +1027,7 @@ export async function prepareAppointmentSlipHtml(
           .barcode-text { margin-top: 0.45mm; font-size: ${2.25 * slipSettings.fontScale * compactScale}mm; text-align: center; word-break: break-word; line-height: 1.1; }
         </style>
       </head>
-      <body class="${slipSettings.boldAppointmentSlipText ? "appointment-slip-bold" : ""}">
+      <body class="${slipSettings.boldAppointmentSlipText ? "appointment-slip-bold" : ""}" data-appointment-slip-document="true">
         <div class="sheet" data-paper-mode="${slipSettings.paperMode}" data-paper-size="${slipSettings.paperSize}" data-language-mode="${languageMode}" data-page-width-mm="${paper.widthMm}" data-page-height-mm="${paper.heightMm}">
           <div class="safe-area" data-safe-top-mm="${slipSettings.safeTopMm}" data-safe-bottom-mm="${slipSettings.safeBottomMm}" data-safe-left-mm="${slipSettings.safeLeftMm}" data-safe-right-mm="${slipSettings.safeRightMm}" data-content-padding-mm="${slipSettings.contentPaddingMm}" data-font-scale="${slipSettings.fontScale}">
             <div class="content">
@@ -1060,7 +1060,6 @@ export async function prepareAppointmentSlipHtml(
             </div>
           </div>
         </div>
-        <script>Promise.all([Promise.resolve(document.fonts ? document.fonts.ready : undefined),Promise.all(Array.from(document.images).map(function(i){return i.complete?Promise.resolve():new Promise(function(r){i.addEventListener("load",r,{once:true});i.addEventListener("error",r,{once:true})})}))]).then(function(){document.documentElement.setAttribute("data-appointment-slip-ready","true")});</script>
       </body>
     </html>
   `;

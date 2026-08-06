@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AppointmentSlipRenderError, renderAppointmentSlipPdf } from "./appointment-slip-chromium-service.js";
 
-test("Chromium appointment-slip renderer waits for the explicit readiness marker and fonts before producing a PDF", async () => {
+test("Chromium appointment-slip renderer waits for the final document marker and resources before producing a PDF", async () => {
   const calls: string[] = [];
   const page = {
     setDefaultTimeout(value: number) { calls.push(`timeout:${value}`); },
-    async goto(url: string) { calls.push(`goto:${url}`); },
+    async goto(url: string, options: Record<string, unknown>) { calls.push(`goto:${url}:${options.waitUntil}`); },
     async waitForSelector(selector: string) { calls.push(`ready:${selector}`); },
     async evaluate() { calls.push("fonts"); },
     async pdf(options: Record<string, unknown>) { calls.push(`pdf:${JSON.stringify(options)}`); return Buffer.from("%PDF-1.7"); },
@@ -21,8 +21,8 @@ test("Chromium appointment-slip renderer waits for the explicit readiness marker
   assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   assert.deepEqual(calls.slice(1, 5), [
     "timeout:45000",
-    "goto:http://127.0.0.1:3000/print/internal/appointment-slip?token=redacted",
-    'ready:[data-appointment-slip-ready="true"]',
+    "goto:http://127.0.0.1:3000/print/internal/appointment-slip?token=redacted:domcontentloaded",
+    'ready:[data-appointment-slip-document="true"]',
     "fonts",
   ]);
   assert.match(calls.find((value) => value.startsWith("pdf:")) || "", /"printBackground":true/);

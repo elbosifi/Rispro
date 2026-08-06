@@ -155,6 +155,9 @@ describe("appointment slip html renderer", () => {
 
     expect(html).toContain("مريض اختبار");
     expect(html).toContain('dir="rtl"');
+    expect(html).toContain('data-appointment-slip-document="true"');
+    expect(html).not.toContain("data-appointment-slip-ready");
+    expect(html).not.toContain("<script>");
   });
 
   it("uses english headings in english mode", async () => {
