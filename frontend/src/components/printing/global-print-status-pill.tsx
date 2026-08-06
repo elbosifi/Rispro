@@ -41,10 +41,12 @@ export function GlobalPrintStatusPill() {
   const animation = status.state === "preparing" ? "animate-spin motion-reduce:animate-none" : status.state === "submitted" ? "animate-in zoom-in-50 duration-200 motion-reduce:animate-none" : "";
 
   return (
-    <div role="status" aria-live="polite" className={`inline-flex max-w-[13rem] items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold shadow-sm transition-opacity duration-500 motion-reduce:transition-none ${tone} ${isDismissing ? "opacity-0" : "opacity-100"}`}>
+    <div role="status" aria-live="polite" title={status.state === "submitting" ? label.full : undefined} className={`relative inline-flex max-w-[13rem] items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold shadow-sm transition-opacity duration-500 motion-reduce:transition-none ${status.state === "submitting" ? "group" : ""} ${tone} ${isDismissing ? "opacity-0" : "opacity-100"}`}>
       {status.state === "submitting" ? <SubmittingPrinterIcon /> : <Icon className={`h-3.5 w-3.5 shrink-0 ${animation}`} aria-hidden="true" />}
-      <span className="truncate sm:hidden">{label.compact}</span>
-      <span className="hidden truncate sm:inline">{label.full}</span>
+      {status.state === "submitting" ? <span className="pointer-events-none absolute end-0 top-full z-50 mt-2 w-max max-w-[13rem] rounded-md border border-border bg-popover px-2 py-1 text-xs font-semibold text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 motion-reduce:transition-none">{label.full}</span> : <>
+        <span className="truncate sm:hidden">{label.compact}</span>
+        <span className="hidden truncate sm:inline">{label.full}</span>
+      </>}
       <span className="sr-only">{label.full}</span>
       <style>{`
         @keyframes rispro-print-paper-feed {
