@@ -150,7 +150,7 @@ describe("QZ Tray service", () => {
   it.each([
     ["portrait", 0, 210, 297],
     ["landscape", 1, 297, 210],
-  ] as const)("serializes finalized A4 %s PDF options without a second QZ orientation transform", async (orientation, profileIndex, width, height) => {
+  ] as const)("serializes finalized A4 %s PDF options with the approved media/orientation configuration", async (orientation, profileIndex, width, height) => {
     vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_789);
     const profile = { ...DEFAULT_PRINTER_PROFILES[profileIndex], printerName: `Finalized ${width}x${height}`, scaleContent: true, marginsMm: { top: 4, right: 4, bottom: 4, left: 4 } };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "Finalized report", preservePdfPageGeometry: true });
@@ -158,8 +158,8 @@ describe("QZ Tray service", () => {
     expect(qzMocks.create).toHaveBeenCalledTimes(1);
     const config = qzMocks.create.mock.results[0].value;
     expect(config.getOptions()).toEqual(expect.objectContaining({
-      orientation: null,
-      size: orientation === "landscape" ? null : { width: 210, height: 297, custom: false },
+      orientation: orientation === "landscape" ? "landscape" : null,
+      size: { width: 210, height: 297, custom: false },
       margins: { top: 0, right: 0, bottom: 0, left: 0 },
       scaleContent: false,
       rotation: 0,

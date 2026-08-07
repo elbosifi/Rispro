@@ -138,11 +138,13 @@ function validatePrintOptions(options: unknown): void {
     height = parsedHeight;
     canonicalA4 = width === 210 && height === 297;
     const standardMedia = canonicalA4 || (width === 148 && height === 210);
-    if (size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
+    if ((width === 297 && height === 210) || size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
     const expectedOrientation = width > height ? "landscape" : "portrait";
     finalizedPdfGeometry = canonicalA4 && size.custom === false && options.orientation === null;
+    const finalizedA4Landscape = canonicalA4 && size.custom === false && options.orientation === "landscape";
     const canonicalA4Orientation = canonicalA4 && size.custom === false && (options.orientation === "portrait" || options.orientation === "landscape");
     if (!finalizedPdfGeometry && !canonicalA4Orientation && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
+    finalizedPdfGeometry ||= finalizedA4Landscape;
   }
 
   if (!isRecord(options.margins) || !hasExactKeys(options.margins, ["top", "right", "bottom", "left"])) reject("QZ print margins are invalid.", 400);
