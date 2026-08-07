@@ -111,6 +111,12 @@ describe("Chromium PDF route concurrency", () => {
     assert.match(__printingRouteTestables.compactFooterTemplate, /class="pageNumber"/);
     assert.match(__printingRouteTestables.compactFooterTemplate, /class="totalPages"/);
     assert.deepEqual(__printingRouteTestables.finalizedPdfMargins, { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" });
+    const registrationHeader = __printingRouteTestables.registrationListCompactHeaderTemplate("Registration / Appointment List", "<unsafe>");
+    assert.match(registrationHeader, /padding:0 12mm/);
+    assert.match(__printingRouteTestables.registrationListCompactFooterTemplate, /padding:0 12mm/);
+    assert.match(__printingRouteTestables.registrationListCompactFooterTemplate, /class="pageNumber"/);
+    assert.match(__printingRouteTestables.registrationListCompactFooterTemplate, /class="totalPages"/);
+    assert.deepEqual(__printingRouteTestables.registrationListPdfMargins, { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" });
   });
 
   it("uses one shared four-render limiter before every generated-PDF handler", () => {

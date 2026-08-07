@@ -27,7 +27,9 @@ const signingLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60, me
 const qzSigningConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The QZ signing service is busy. Try again shortly.", errorCode: "QZ_SIGN_BUSY" });
 const chromiumRenderConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The Chromium PDF renderer is busy. Try again shortly.", errorCode: "CHROMIUM_RENDER_BUSY" });
 const finalizedPdfMargins = { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" } as const;
+const registrationListPdfMargins = { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" } as const;
 const compactFooterTemplate = `<div style="width:100%;padding:0 8mm;font:6px Arial,sans-serif;color:#6b7280;text-align:right;box-sizing:border-box">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+const registrationListCompactFooterTemplate = `<div style="width:100%;padding:0 12mm;font:6px Arial,sans-serif;color:#6b7280;text-align:right;box-sizing:border-box">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
 
 function escapeTemplateText(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -35,6 +37,9 @@ function escapeTemplateText(value: string): string {
 
 function compactHeaderTemplate(title: string, label: string): string {
   return `<div style="width:100%;padding:0 8mm;font:600 6px Arial,sans-serif;color:#374151;display:flex;justify-content:space-between;box-sizing:border-box"><span>National Cancer Center Benghazi · ${escapeTemplateText(title)}</span><span>${escapeTemplateText(label)}</span></div>`;
+}
+function registrationListCompactHeaderTemplate(title: string, label: string): string {
+  return compactHeaderTemplate(title, label).replace("padding:0 8mm", "padding:0 12mm");
 }
 const qzSigningJsonParser = express.json({ limit: qzSigningRequestLimitBytes() + 64 * 1024 });
 
@@ -134,9 +139,9 @@ printingRouter.post("/registration-list/pdf", chromiumRenderConcurrencyLimiter, 
       documentKind: "registration-list",
       pdfOptions: {
         displayHeaderFooter: true,
-        margin: finalizedPdfMargins,
-        headerTemplate: compactHeaderTemplate("Registration / Appointment List", label),
-        footerTemplate: compactFooterTemplate,
+        margin: registrationListPdfMargins,
+        headerTemplate: registrationListCompactHeaderTemplate("Registration / Appointment List", label),
+        footerTemplate: registrationListCompactFooterTemplate,
       },
     });
     console.info("Chromium PDF generated", { documentKind: "registration-list", rowCount: appointmentIds.length, pdfBytes: pdf.length, stage: "pdf", elapsedMs: Math.round(performance.now() - startedAt) });
@@ -260,5 +265,8 @@ export const __printingRouteTestables = {
   assertValidRenderProfile,
   compactHeaderTemplate,
   compactFooterTemplate,
+  registrationListCompactHeaderTemplate,
+  registrationListCompactFooterTemplate,
   finalizedPdfMargins,
+  registrationListPdfMargins,
 };

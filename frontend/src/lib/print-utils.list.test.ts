@@ -104,7 +104,7 @@ describe("print list helpers", () => {
     expect(html).toContain("V2-scheduled");
     expect(html).toContain("Total: 2");
     expect(html).toContain("size: 297mm 210mm");
-    expect(html).toContain("margin: 8mm");
+    expect(html).toContain("margin: 12mm");
     expect(html).not.toContain('class="slip"');
   });
 
