@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintRegistrationList, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
+import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintRegistrationList, directPrintReportCenter, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 import { getGlobalPrintStatus, resetGlobalPrintStatusForTests, subscribeToGlobalPrintStatus } from "./global-print-status";
 
@@ -100,7 +100,7 @@ describe("direct print service", () => {
     getInstalledPrinters.mockResolvedValue(["A4 Landscape"]);
     await expect(directPrintRegistrationList([7, 9], "Current filters")).resolves.toMatchObject({ success: true, printerName: "A4 Landscape" });
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/registration-list/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify({ appointmentIds: [7, 9], label: "Current filters" }) }));
-    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false }), expect.any(String), { copies: 1, jobName: "RISpro registration list" });
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false }), expect.any(String), expect.objectContaining({ copies: 1, jobName: "RISpro registration list", preservePdfPageGeometry: true }));
   });
 
   it("fetches the backend Chromium PDF for A5 appointment slips", async () => {
@@ -112,6 +112,21 @@ describe("direct print service", () => {
 
     await expect(directPrint({ documentType: "A5_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true, printerName: "A5" });
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/appointment-slip/7/pdf", expect.objectContaining({ credentials: "include", cache: "no-store" }));
+  });
+
+  it.each([
+    ["portrait", "A4_DOCUMENT", "Portrait Queue"],
+    ["landscape", "A4_LANDSCAPE_DOCUMENT", "Landscape Queue"],
+  ] as const)("routes a finalized Report Center %s PDF through the matching A4 profile", async (orientation, documentType, printerName) => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles.find((profile) => profile.documentType === documentType)!.printerName = printerName;
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue([printerName]);
+    const model = { templateId: "daily-appointments", source: "appointments" as const, orientation, title: "Daily appointments", dateLabel: "2026-08-07", columns: [{ key: "patient", label: "Patient" }], rows: [{ patient: "One" }], summaryRows: [] };
+    await expect(directPrintReportCenter(model)).resolves.toMatchObject({ success: true, printerName });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/report-center/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify(model) }));
+    expect(printPdf).toHaveBeenCalledTimes(1);
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType }), expect.any(String), expect.objectContaining({ preservePdfPageGeometry: true }));
   });
 
   it("keeps stored PDFs on their original document endpoint", async () => {

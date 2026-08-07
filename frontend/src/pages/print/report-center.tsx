@@ -5,53 +5,17 @@ import { DateInput } from "@/components/common/date-input";
 import { Button, Card, Badge } from "@/components/shared";
 import { exportReportXlsx, fetchAppointments, fetchAppointmentLookups, fetchAuditEntries, fetchPatientDirectory, recordReportOutput, type PatientDirectoryParams } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { AuditEntry, Role } from "@/types/api";
+import type { AuditEntry } from "@/types/api";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
-import { printAppointmentListV2 } from "@/lib/registration-list-printing";
-
-type ReportSource = "appointments" | "patients" | "audit" | "disabled";
-
-interface ReportTemplate {
-  id: string;
-  title: string;
-  description: string;
-  source: ReportSource;
-  roles: Role[];
-  status?: string;
-  walkIn?: string;
-  specialQuota?: string;
-  supervisorOverride?: string;
-  grouping?: "modality" | "status" | "category";
-  disabledReason?: string;
-}
-
-const REPORT_TEMPLATES: ReportTemplate[] = [
-  { id: "daily-appointments", title: "Daily appointment list", description: "Authoritative day list by time.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"] },
-  { id: "daily-modality", title: "Daily modality list", description: "Daily appointments grouped by modality.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"], grouping: "modality" },
-  { id: "daily-room-station", title: "Daily room/station list", description: "Room/station metadata is not exposed yet.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "Station/room fields are not available in the appointments API." },
-  { id: "appointment-slips", title: "Appointment slips / print list", description: "Print slips from the filtered appointment list.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"] },
-  { id: "patient-directory", title: "Patient directory", description: "Paginated patient directory with safe filters.", source: "patients", roles: ["receptionist", "supervisor", "super_admin"] },
-  { id: "registration-list", title: "Registration list", description: "Uses appointment registrations for the selected window.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"] },
-  { id: "no-show-list", title: "No-show list", description: "Appointments marked no-show.", source: "appointments", roles: ["supervisor", "super_admin"], status: "no-show" },
-  { id: "cancellation-list", title: "Cancellation list", description: "Cancelled appointments.", source: "appointments", roles: ["supervisor", "super_admin"], status: "cancelled" },
-  { id: "walk-in-list", title: "Walk-in list", description: "Walk-in appointments.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"], walkIn: "true" },
-  { id: "priority-urgent", title: "Priority/urgent list", description: "Filter by priority text.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"] },
-  { id: "waiting-list", title: "Waiting list", description: "Patients in waiting status.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"], status: "waiting" },
-  { id: "missing-demographics", title: "Patients with missing demographics", description: "Directory warning details are available per-patient only.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "Bulk missing-demographics fields are not exposed by the directory endpoint." },
-  { id: "missing-phone-id", title: "Patients with missing phone number or identifier", description: "Requires a backend directory warning filter.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "The current directory endpoint has warnings but no server-side warning filter." },
-  { id: "safety-checklist", title: "Patients requiring safety checklist", description: "Safety checklist state is not exposed yet.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "No checklist completion data source was found." },
-  { id: "preparation-instructions", title: "Patients requiring preparation instructions", description: "Preparation instructions exist by modality/exam.", source: "appointments", roles: ["receptionist", "supervisor", "super_admin"] },
-  { id: "capacity-utilization", title: "Capacity utilization report", description: "Daily counts by modality; capacity denominator can be added from policy data.", source: "appointments", roles: ["supervisor", "super_admin"], grouping: "modality" },
-  { id: "special-quota", title: "Special quota report", description: "Appointments using special quota.", source: "appointments", roles: ["supervisor", "super_admin"], specialQuota: "true" },
-  { id: "supervisor-override", title: "Supervisor override report", description: "Override and capacity exception bookings.", source: "appointments", roles: ["supervisor", "super_admin"], supervisorOverride: "true" },
-  { id: "referring-physician-volume", title: "Referring physician volume report", description: "Referring physician is not exposed by the appointment list API.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "No referring physician field is available in the list API." },
-  { id: "exam-type-volume", title: "Exam type volume report", description: "Grouped appointment counts by exam.", source: "appointments", roles: ["supervisor", "super_admin"] },
-  { id: "printed-documents-audit", title: "User activity / printed documents report", description: "Recent report print/export/copy activity.", source: "audit", roles: ["super_admin"] },
-];
+import { directPrintReportCenter, fetchReportCenterPdf } from "@/services/printing/direct-print-service";
+import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
+import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import type { ReportCenterRenderModel } from "@/types/printing";
+import { REPORT_TEMPLATES } from "./report-center-templates";
 
 const APPOINTMENT_COLUMNS = ["time", "patient", "accession", "modality", "exam", "category", "priority", "status", "phone", "identifier"];
 const PRESETS_KEY = "rispro-print-report-presets";
@@ -210,16 +174,73 @@ export function ReportCenter() {
 
   async function printReport() {
     if (!(await auditOutput("print"))) return;
-    if (selectedTemplate.source === "appointments") {
-      printAppointmentListV2(appointmentRows, dateTo ? `${date} to ${dateTo}` : date);
+    const model = buildRenderModel();
+    if (!model) return;
+    const result = await directPrintReportCenter(model);
+    if (result.success) {
+      pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
       return;
     }
-    window.print();
+    const action = resolveDirectPrintFailureAction(result.errorCode, true, loadQzPrinterSettings().browserPrintFallbackEnabled);
+    const toastAction = action === "OPEN_SETTINGS"
+      ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
+      : action === "BROWSER_PRINT"
+        ? { label: "Use browser printing", onClick: () => void browserPrintReport(model) }
+        : null;
+    pushToast({ type: "error", title: "Print failed", message: result.message, ...(toastAction ? { action: toastAction } : {}) }, 10_000);
   }
 
   async function printPdf() {
     if (!(await auditOutput("pdf"))) return;
-    window.print();
+    const model = buildRenderModel();
+    if (!model) return;
+    try {
+      downloadPdf(await fetchReportCenterPdf(model), `${selectedTemplate.id}-${date}.pdf`);
+    } catch (error) {
+      pushToast({ type: "error", title: "PDF generation failed", message: error instanceof Error ? error.message : "The report PDF could not be generated." });
+    }
+  }
+
+  function buildRenderModel(): ReportCenterRenderModel | null {
+    if (selectedTemplate.source === "disabled") return null;
+    const dateLabel = dateTo ? `${date} to ${dateTo}` : date;
+    const summaryRows = includeCharts ? groupedCounts.map((row) => ({ label: row.label, value: String(row.count) })) : [];
+    if (selectedTemplate.source === "appointments") {
+      const outputColumns = columns.filter((column) => (column !== "phone" || effectiveIncludePhones) && (column !== "identifier" || effectiveIncludeIdentifiers));
+      return {
+        templateId: selectedTemplate.id, source: "appointments", orientation, title: selectedTemplate.title, dateLabel,
+        columns: outputColumns.map((key) => ({ key, label: key })),
+        rows: appointmentRows.map((row) => Object.fromEntries(outputColumns.map((key) => [key, String(appointmentCell(row, key, language, effectiveIncludePhones, effectiveIncludeIdentifiers) ?? "")]))),
+        summaryRows,
+      };
+    }
+    if (selectedTemplate.source === "patients") {
+      const reportColumns = [
+        { key: "patient", label: "Patient" },
+        ...(effectiveIncludeIdentifiers ? [{ key: "identifier", label: "MRN" }] : []),
+        { key: "sex", label: "Sex" }, { key: "age", label: "Age" },
+        ...(effectiveIncludePhones ? [{ key: "phone", label: "Phone" }] : []),
+        { key: "category", label: "Category" },
+      ];
+      return {
+        templateId: selectedTemplate.id, source: "patients", orientation, title: selectedTemplate.title, dateLabel,
+        columns: reportColumns,
+        rows: patientRows.map((row) => {
+          const values: Record<string, string> = { patient: row.englishFullName || row.arabicFullName, identifier: row.mrn || "", sex: row.sex || "", age: String(row.ageYears ?? ""), phone: row.phone1 || "", category: row.category || "" };
+          return Object.fromEntries(reportColumns.map(({ key }) => [key, values[key] || ""]));
+        }),
+        summaryRows: [],
+      };
+    }
+    return {
+      templateId: selectedTemplate.id, source: "audit", orientation, title: selectedTemplate.title, dateLabel,
+      columns: [{ key: "time", label: "Time" }, { key: "user", label: "User" }, { key: "action", label: "Output" }, { key: "report", label: "Template" }, { key: "rows", label: "Rows" }, { key: "details", label: "Sensitive fields" }],
+      rows: auditRows.map((row) => {
+        const values = asRecord(row.newValues);
+        return { time: row.createdAt || "", user: String(row.changedByUserId ?? ""), action: String(values.outputType || row.actionType || ""), report: String(values.reportTemplate || ""), rows: String(values.rowCount ?? ""), details: `${values.includePhoneNumbers ? "phones " : ""}${values.includePatientIdentifiers ? "identifiers" : ""}`.trim() || "none" };
+      }),
+      summaryRows: [],
+    };
   }
 
   async function exportExcel() {
@@ -278,7 +299,7 @@ export function ReportCenter() {
     setQuery(preset.query);
     setGroupBy(preset.groupBy);
     setOrientation(preset.orientation);
-    setPaperSize(preset.paperSize);
+    setPaperSize("A4");
     setIncludeCharts(preset.includeCharts);
     setIncludePhones(preset.includePhones);
     setIncludeIdentifiers(preset.includeIdentifiers);
@@ -356,8 +377,8 @@ export function ReportCenter() {
                 <Button type="button" size="sm" onClick={() => void printReport()} disabled={activeRows.length === 0 || selectedTemplate.source === "disabled"}>
                   <Printer size={15} /> Print
                 </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => void printPdf()} disabled={activeRows.length === 0}>
-                  <FileText size={15} /> PDF
+                <Button type="button" size="sm" variant="secondary" onClick={() => void printPdf()} disabled={activeRows.length === 0 || selectedTemplate.source === "disabled"}>
+                  <FileText size={15} /> Download PDF
                 </Button>
                 <Button type="button" size="sm" variant="secondary" onClick={() => void exportExcel()} disabled={activeRows.length === 0}>
                   <FileSpreadsheet size={15} /> Excel
@@ -372,7 +393,7 @@ export function ReportCenter() {
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Select label="Paper" value={paperSize} onChange={setPaperSize} options={[{ value: "A4", label: "A4" }, { value: "A5", label: "A5" }, { value: "Letter", label: "Letter" }]} />
+              <Select label="Paper" value={paperSize} onChange={setPaperSize} options={[{ value: "A4", label: "A4" }]} />
               <Select label="Orientation" value={orientation} onChange={(value) => setOrientation(value as "portrait" | "landscape")} options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]} />
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeCharts} onChange={(event) => setIncludeCharts(event.target.checked)} /> Charts</label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includePhones} disabled={!sensitiveOutputAllowed} onChange={(event) => setIncludePhones(event.target.checked)} /> Patient phones</label>
@@ -587,6 +608,29 @@ function auditExportRow(row: AuditEntry) {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function downloadPdf(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+async function browserPrintReport(model: ReportCenterRenderModel): Promise<void> {
+  try {
+    const blob = await fetchReportCenterPdf(model);
+    const url = URL.createObjectURL(blob);
+    const printWindow = window.open(url, "_blank");
+    if (!printWindow) { URL.revokeObjectURL(url); throw new Error("The browser blocked the print window."); }
+    printWindow.addEventListener("load", () => { printWindow.focus(); printWindow.print(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); }, { once: true });
+  } catch (error) {
+    pushToast({ type: "error", title: "Browser printing failed", message: error instanceof Error ? error.message : "The report could not be opened for browser printing." });
+  }
 }
 
 function buildGroupedCounts(rows: AppointmentWithDetails[], grouping: string, language: "ar" | "en") {

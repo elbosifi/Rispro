@@ -104,5 +104,25 @@ describe("print list helpers", () => {
     expect(html).toContain("V2-scheduled");
     expect(html).toContain("Total: 2");
     expect(html).toContain("size: 297mm 210mm");
+    expect(html).toContain("margin: 8mm");
+    expect(html).not.toContain('class="slip"');
+  });
+
+  it("preserves a long synthetic row set in exact order for direct Chromium pagination", () => {
+    const rows = Array.from({ length: 500 }, (_, index) => ({
+      ...makeAppointment("scheduled"),
+      id: index + 1,
+      accessionNumber: `LONG-${String(index + 1).padStart(4, "0")}`,
+      dailySequence: index + 1,
+    }));
+    const html = prepareAppointmentListHtml(rows, "Long synthetic list", new Date("2026-08-07T12:00:00Z"), true);
+    expect(html).toContain("LONG-0001");
+    expect(html).toContain("LONG-0500");
+    expect(html.match(/LONG-\d{4}/g)).toHaveLength(500);
+    expect(html.indexOf("LONG-0001")).toBeLessThan(html.indexOf("LONG-0500"));
+    expect(html).toContain("@page { size: 297mm 210mm; margin: 0; }");
+    expect(html).toContain('data-direct-pdf="true"');
+    expect(html).toContain("break-inside: avoid");
+    expect(html).not.toContain('class="slip"');
   });
 });

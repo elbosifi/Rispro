@@ -101,28 +101,62 @@ export async function getInstalledPrinters(): Promise<string[]> {
   return Array.isArray(result) ? result.map(String) : [String(result)];
 }
 
-function qzConfig(profile: PrinterProfile, copies: number, jobName: string) {
-  const size = { width: profile.paperWidthMm, height: profile.paperHeightMm, custom: profile.customPaperSize } as qz.Size & { custom: boolean };
-  return qz.configs.create(profile.printerName, { units: "mm", size, orientation: expectedOrientation(profile.paperWidthMm, profile.paperHeightMm), copies, scaleContent: profile.scaleContent, margins: profile.marginsMm ?? 0, printerTray: profile.printerTray || null, jobName, rasterize: profile.rasterize });
+export interface PrintPdfOptions {
+  copies?: number;
+  jobName: string;
+  preservePdfPageGeometry?: boolean;
+  diagnostics?: { documentKind: string; rowCount?: number; pdfBytes?: number };
 }
 
-async function submitApprovedPrint(config: unknown, data: QzPrintData): Promise<void> {
+function qzConfig(profile: PrinterProfile, copies: number, jobName: string, preservePdfPageGeometry = false) {
+  const size = { width: profile.paperWidthMm, height: profile.paperHeightMm, custom: profile.customPaperSize } as qz.Size & { custom: boolean };
+  return qz.configs.create(profile.printerName, {
+    units: "mm",
+    size,
+    orientation: preservePdfPageGeometry ? null : expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
+    copies,
+    scaleContent: preservePdfPageGeometry ? false : profile.scaleContent,
+    margins: preservePdfPageGeometry ? { top: 0, right: 0, bottom: 0, left: 0 } : profile.marginsMm ?? 0,
+    printerTray: profile.printerTray || null,
+    jobName,
+    rasterize: profile.rasterize,
+  });
+}
+
+interface PrintSubmissionDiagnostics {
+  serialized(requestBytes: number): void;
+  signed(): void;
+  submitted(): void;
+}
+
+async function submitApprovedPrint(config: unknown, data: QzPrintData, diagnostics?: PrintSubmissionDiagnostics): Promise<void> {
   const runtime = config as RuntimeQzConfig;
   const params = { printer: runtime.getPrinter(), options: runtime.getOptions(), data };
   const timestamp = Date.now();
+  diagnostics?.serialized(new TextEncoder().encode(serializeQzRequest("print", params, timestamp)).byteLength);
   const signature = await signQzRequest("print", params, timestamp);
+  diagnostics?.signed();
   const deterministicPrint = qz.print as unknown as (config: unknown, data: QzPrintData, signature: string, timestamp: number) => Promise<void>;
   await deterministicPrint(config, data, signature, timestamp);
+  diagnostics?.submitted();
 }
 
 export function stripPdfDataUrlPrefix(value: string): string { return value.replace(/^data:application\/pdf;base64,/i, "").trim(); }
 
-export async function printPdf(profile: PrinterProfile, pdfBase64: string, options: { copies?: number; jobName: string }): Promise<void> {
+export async function printPdf(profile: PrinterProfile, pdfBase64: string, options: PrintPdfOptions): Promise<void> {
   const data = stripPdfDataUrlPrefix(pdfBase64);
   if (!data || !/^[A-Za-z0-9+/=\r\n]+$/.test(data)) throw new QzTrayError("INVALID_PDF", "Invalid PDF Base64 data.");
   await connectQzTray();
   const printData: QzPrintData = [{ type: "pixel", format: "pdf", flavor: "base64", data }];
-  try { await submitApprovedPrint(qzConfig(profile, options.copies ?? profile.copies, options.jobName), printData); }
+  const startedAt = performance.now();
+  try {
+    const config = qzConfig(profile, options.copies ?? profile.copies, options.jobName, options.preservePdfPageGeometry === true);
+    await submitApprovedPrint(config, printData, options.diagnostics ? {
+      serialized: (signingRequestBytes) => console.info("Direct print stage", { ...options.diagnostics, stage: "signing_request", signingRequestBytes, elapsedMs: Math.round(performance.now() - startedAt) }),
+      signed: () => console.info("Direct print stage", { ...options.diagnostics, stage: "signing_complete", elapsedMs: Math.round(performance.now() - startedAt) }),
+      submitted: () => console.info("Direct print stage", { ...options.diagnostics, stage: "qz_submitted", elapsedMs: Math.round(performance.now() - startedAt) }),
+    } : undefined);
+  }
   catch (error) { if (error instanceof QzTrayError) throw error; throw new QzTrayError("PRINT_FAILED", "QZ Tray rejected the print submission.", error); }
 }
 

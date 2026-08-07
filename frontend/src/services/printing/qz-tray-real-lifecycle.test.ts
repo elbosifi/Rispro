@@ -76,6 +76,27 @@ describe("QZ Tray 2.2.6 real request lifecycle", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps finalized A4 null orientation and zero-transform options in the real QZ config", async () => {
+    vi.resetModules();
+    const qz = await import("qz-tray");
+    qz.security.setCertificatePromise((resolve) => resolve("test-certificate"));
+    qz.security.setSignatureAlgorithm("SHA512");
+    qz.security.setSignaturePromise(async () => { throw new Error("callback signing must not run"); });
+    await qz.websocket.connect({ host: ["localhost"], port: { secure: [8181], insecure: [8182] }, usingSecure: true, keepAlive: 0 });
+    for (const size of [{ width: 210, height: 297 }, { width: 297, height: 210 }]) {
+      const config = qz.configs.create("RISPRO A4", {
+        units: "mm",
+        size: { ...size, custom: false } as qz.Size,
+        orientation: null,
+        copies: 1,
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+        scaleContent: false,
+      });
+      const options = (config as unknown as { getOptions(): Record<string, unknown> }).getOptions();
+      expect(options).toEqual(expect.objectContaining({ orientation: null, size: { ...size, custom: false }, margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false, rotation: 0, spool: null }));
+    }
+  });
+
   it("adds SHA512 to pre-signed discovery and print transport while QZ desktop-style verification succeeds", async () => {
     vi.resetModules();
     const qz = await import("qz-tray");

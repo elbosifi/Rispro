@@ -72,7 +72,7 @@ describe("QZ Tray service", () => {
     mockApi();
     qzMocks.connect.mockImplementation(async () => { qzMocks.active = true; });
     qzMocks.disconnect.mockResolvedValue(undefined);
-    qzMocks.create.mockImplementation((printer: string, options: Record<string, unknown>) => ({ config: true, getPrinter: () => ({ name: printer }), getOptions: () => options }));
+    qzMocks.create.mockImplementation((printer: string, options: Record<string, unknown>) => ({ config: true, getPrinter: () => ({ name: printer }), getOptions: () => ({ rotation: 0, spool: null, ...options }) }));
     qzMocks.find.mockResolvedValue(["RISPRO A4", "RISPRO LABEL"]);
     qzMocks.print.mockResolvedValue(undefined);
   });
@@ -144,6 +144,31 @@ describe("QZ Tray service", () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[1], printerName: "RISPRO A4 Landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, marginsMm: { top: 1, right: 2, bottom: 3, left: 4 } };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "RISpro registration list" });
     expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.objectContaining({ size: { width: 297, height: 210, custom: false }, orientation: "landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, margins: { top: 1, right: 2, bottom: 3, left: 4 } }));
+  });
+
+  it.each([
+    ["portrait", 0, 210, 297],
+    ["landscape", 1, 297, 210],
+  ] as const)("serializes finalized A4 %s PDF options without a QZ page transformation", async (_label, profileIndex, width, height) => {
+    vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_789);
+    const profile = { ...DEFAULT_PRINTER_PROFILES[profileIndex], printerName: `Finalized ${width}x${height}`, scaleContent: true, marginsMm: { top: 4, right: 4, bottom: 4, left: 4 } };
+    await printPdf(profile, "JVBERi0xLjQ=", { jobName: "Finalized report", preservePdfPageGeometry: true });
+
+    expect(qzMocks.create).toHaveBeenCalledTimes(1);
+    const config = qzMocks.create.mock.results[0].value;
+    expect(config.getOptions()).toEqual(expect.objectContaining({
+      orientation: null,
+      size: { width, height, custom: false },
+      margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      scaleContent: false,
+      rotation: 0,
+      spool: null,
+    }));
+    const parsed = JSON.parse(signingBodies[0].request);
+    expect(parsed.params.options).toEqual(config.getOptions());
+    expect(parsed.params.data).toEqual([{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0xLjQ=" }]);
+    expect(qzMocks.print).toHaveBeenCalledTimes(1);
+    vi.mocked(Date.now).mockRestore();
   });
 
   it("keeps concurrent print signatures associated with their own request", async () => {

@@ -200,10 +200,10 @@ function formatCaseCategoryValue(
   mode: AppointmentSlipSettings["languageMode"]
 ): string {
   if (category === "oncology") {
-    return mode === "ar" ? "Ø£ÙˆØ±Ø§Ù…" : mode === "en" ? "Oncology" : "Ø£ÙˆØ±Ø§Ù… / Oncology";
+    return mode === "ar" ? "أورام" : mode === "en" ? "Oncology" : "أورام / Oncology";
   }
   if (category === "non_oncology") {
-    return mode === "ar" ? "ØºÙŠØ± Ø£ÙˆØ±Ø§Ù…" : mode === "en" ? "Non-oncology" : "ØºÙŠØ± Ø£ÙˆØ±Ø§Ù… / Non-oncology";
+    return mode === "ar" ? "غير أورام" : mode === "en" ? "Non-oncology" : "غير أورام / Non-oncology";
   }
   return "";
 }
@@ -252,7 +252,7 @@ function buildInstructionText(
   const resolveBody = (value: string, fallback: string) => {
     // Keep the real instruction text when it exists; fallback is only for empty input.
     const cleaned = String(value || "").trim();
-    return cleaned && cleaned !== "â€”" ? cleaned : fallback;
+    return cleaned && cleaned !== "—" ? cleaned : fallback;
   };
 
   if (settings.showModalityInstructions) {
@@ -292,7 +292,7 @@ function buildSpecialReasonField(apt: AppointmentWithDetails): SlipField | null 
   const valueEn = String(apt.specialReasonLabelEn || fallbackCode).trim();
   if (!valueAr && !valueEn) return null;
   return {
-    labelAr: "Ø³Ø¨Ø¨ Ø§Ù„Ø­ØµØ© Ø§Ù„Ø®Ø§ØµØ©",
+    labelAr: "سبب الحصة الخاصة",
     labelEn: "Special Reason",
     valueAr: valueAr || valueEn,
     valueEn: valueEn || valueAr,
@@ -303,24 +303,24 @@ function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlip
   const fields: SlipField[] = [];
   if (settings.showPatientCategory && apt.caseCategory) {
     fields.push({
-      labelAr: "Ø§Ù„ØªØµÙ†ÙŠÙ",
+      labelAr: "التصنيف",
       labelEn: "Category",
       valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
       valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
     });
   }
-  if (settings.showPatientName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
+  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
   if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
-  if (settings.showNationalId) fields.push({ labelAr: "Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
-  if (settings.showPhone) fields.push({ labelAr: "Ø§Ù„Ù‡Ø§ØªÙ", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
-  if (settings.showAgeSex) fields.push({ labelAr: "Ø§Ù„Ø¹Ù…Ø± / Ø§Ù„Ø¬Ù†Ø³", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
-  if (settings.showAppointmentNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¹Ø¯", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
-  if (settings.showAccessionNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ø¯Ø®ÙˆÙ„", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
-  if (settings.showModality) fields.push({ labelAr: "Ù†ÙˆØ¹ Ø§Ù„Ø¬Ù‡Ø§Ø²", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
-  if (settings.showExamName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„ÙØ­Øµ", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
-  if (settings.showDate) fields.push({ labelAr: "Ø§Ù„ØªØ§Ø±ÙŠØ®", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
-  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "Ø§Ù„ÙˆÙ‚Øª", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
-  if (settings.showWalkIn) fields.push({ labelAr: "Ø­Ø§Ù„Ø© Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
+  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
+  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
+  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
+  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
+  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
+  if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
   if (settings.showSpecialReason) {
     const specialReasonField = buildSpecialReasonField(apt);
     if (specialReasonField) fields.push(specialReasonField);
@@ -340,15 +340,15 @@ export function buildAppointmentSlipData(
   const patientName = localizeValueSafe(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
   const modality = localizeValueSafe(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
   const examName = localizeValueSafe(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
-  const ageSex = `${apt.ageYears || "â€”"} / ${apt.sex || "â€”"}`;
+  const ageSex = `${apt.ageYears || "—"} / ${apt.sex || "—"}`;
   const locationText = localizeValueSafe(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
   return {
     hospitalName,
     departmentName,
     patientName,
-    mrn: apt.mrn || "â€”",
-    nationalId: apt.nationalId || "â€”",
-    phone: apt.phone1 || "â€”",
+    mrn: apt.mrn || "—",
+    nationalId: apt.nationalId || "—",
+    phone: apt.phone1 || "—",
     accessionNumber: String(apt.accessionNumber || formatAccessionFromBookingId(apt.id)).trim(),
     appointmentNumber: String(apt.dailySequence || apt.id),
     bookingId: String(apt.id),
@@ -357,11 +357,11 @@ export function buildAppointmentSlipData(
     examName,
     appointmentDate: formatSlipDate(apt.appointmentDate, slipSettings.languageMode),
     ageSex,
-    walkInLabel: apt.isWalkIn ? localizeText("Ù†Ø¹Ù…", "Yes", slipSettings.languageMode) : localizeText("Ù„Ø§", "No", slipSettings.languageMode),
+    walkInLabel: apt.isWalkIn ? localizeText("نعم", "Yes", slipSettings.languageMode) : localizeText("لا", "No", slipSettings.languageMode),
     queueQrPayload,
     accessionBarcodePayload: buildSlipBarcodePayload(apt, slipSettings),
     locationText,
-    arrivalNote: localizeText("ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø­Ø¶ÙˆØ± Ù‚Ø¨Ù„ Ø§Ù„Ù…ÙˆØ¹Ø¯ Ø¨Ù€ 15 Ø¯Ù‚ÙŠÙ‚Ø©", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
+    arrivalNote: localizeText("يرجى الحضور قبل الموعد بـ 15 دقيقة", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
     modalityInstructions: localizeValueSafe(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
     examInstructions: localizeValueSafe(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
     fallbackInstructionText: localizeText(slipSettings.fallbackInstructionTextAr, slipSettings.fallbackInstructionTextEn, slipSettings.languageMode),
@@ -504,7 +504,7 @@ function buildCode39Bars(value: string): { units: number; bars: Array<{ x: numbe
 
 function isMeaningfulSlipValue(value: string | null | undefined): boolean {
   const normalized = String(value || "").trim();
-  return normalized !== "" && normalized !== "â€”";
+  return normalized !== "" && normalized !== "—";
 }
 
 function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSlipSettings["languageMode"]): string {
@@ -515,7 +515,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-ar">
         <div class="label ar">${escapeHtml(field.labelAr)}</div>
-        <div class="value ar">${escapeHtml(valueAr || "â€”")}</div>
+        <div class="value ar">${escapeHtml(valueAr || "—")}</div>
       </div>
     `;
   }
@@ -524,7 +524,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-en">
         <div class="label en">${escapeHtml(field.labelEn)}</div>
-        <div class="value en">${escapeHtml(valueEn || "â€”")}</div>
+        <div class="value en">${escapeHtml(valueEn || "—")}</div>
       </div>
     `;
   }
@@ -532,9 +532,9 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
   return `
     <div class="summary-item bilingual-card">
       <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "â€”")}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
       <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "â€”")}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
     </div>
   `;
 }

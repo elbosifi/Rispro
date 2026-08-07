@@ -67,3 +67,14 @@ export type DirectPrintResult =
   | { success: false; errorCode: DirectPrintErrorCode; message: string };
 
 export type DirectPrintJobState = "preparing" | "submitting" | "submitted" | "failed" | "status_unknown";
+
+export interface ReportCenterRenderModel {
+  templateId: string;
+  source: "appointments" | "patients" | "audit";
+  orientation: "portrait" | "landscape";
+  title: string;
+  dateLabel: string;
+  columns: Array<{ key: string; label: string }>;
+  rows: Array<Record<string, string>>;
+  summaryRows: Array<{ label: string; value: string }>;
+}

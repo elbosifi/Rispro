@@ -116,7 +116,7 @@ function validatePrintOptions(options: unknown): void {
   }
   if (options.units !== "mm") reject("QZ print units must be millimetres.", 400);
   if (!Number.isInteger(options.copies) || Number(options.copies) < 1 || Number(options.copies) > 99) reject("QZ print copies are invalid.", 400);
-  if (options.orientation !== "portrait" && options.orientation !== "landscape") reject("QZ print orientation is invalid.", 400);
+  if (options.orientation !== null && options.orientation !== "portrait" && options.orientation !== "landscape") reject("QZ print orientation is invalid.", 400);
   if (typeof options.scaleContent !== "boolean" || typeof options.rasterize !== "boolean") reject("QZ print boolean options are invalid.", 400);
   if (typeof options.jobName !== "string" || !options.jobName.trim() || options.jobName.length > 200 || CONTROL_CHARACTERS.test(options.jobName)) reject("QZ print job name is invalid.", 400);
 
@@ -127,13 +127,18 @@ function validatePrintOptions(options: unknown): void {
   const standardMedia = (width === 210 && height === 297) || (width === 297 && height === 210) || (width === 148 && height === 210);
   if (options.size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
   const expectedOrientation = width > height ? "landscape" : "portrait";
-  if (options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
+  const finalizedA4 = options.orientation === null && options.size.custom === false
+    && ((width === 210 && height === 297) || (width === 297 && height === 210));
+  if (!finalizedA4 && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
 
   if (!isRecord(options.margins) || !hasExactKeys(options.margins, ["top", "right", "bottom", "left"])) reject("QZ print margins are invalid.", 400);
   const margins = options.margins as Record<"top" | "right" | "bottom" | "left", unknown>;
   if (Object.values(margins).some((margin) => typeof margin !== "number" || !Number.isFinite(margin) || margin < 0)
       || Number(margins.left) >= width || Number(margins.right) >= width || Number(margins.top) >= height || Number(margins.bottom) >= height
       || Number(margins.left) + Number(margins.right) >= width || Number(margins.top) + Number(margins.bottom) >= height) reject("QZ print margins are invalid.", 400);
+  if (finalizedA4 && (Object.values(margins).some((margin) => margin !== 0) || options.scaleContent !== false)) {
+    reject("Finalized A4 PDF options must preserve page geometry.", 400);
+  }
 
   const expectedDefaults: Record<string, unknown> = {
     bounds: null, colorType: "color", density: 0, duplex: false, encoding: null, fallbackDensity: null, forceRaw: false, interpolation: "bicubic",

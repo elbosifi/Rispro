@@ -1,7 +1,7 @@
 import { api } from "@/lib/api-client";
 import { fetchAppointmentSlipSettings } from "@/lib/api-hooks";
 import { expectedOrientation } from "@/lib/printing-orientation";
-import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile } from "@/types/printing";
+import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile, ReportCenterRenderModel } from "@/types/printing";
 import { connectQzTray, getInstalledPrinters, printPdf, QzTrayError } from "./qz-tray-service";
 import { loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile } from "./workstation-printer-settings";
 import { setGlobalPrintStatus } from "./global-print-status";
@@ -64,6 +64,14 @@ async function fetchPrinterTestPdf(profile: PrinterProfile): Promise<Blob> {
   return blob;
 }
 
+export async function fetchReportCenterPdf(model: ReportCenterRenderModel): Promise<Blob> {
+  const response = await fetch("/api/printing/report-center/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(model) });
+  if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Report PDF generation failed.");
+  const blob = await response.blob();
+  if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Report rendering did not return a PDF.");
+  return blob;
+}
+
 async function generatePdf(request: DirectPrintRequest, profile: PrinterProfile): Promise<Blob> {
   if (request.documentId) return fetchDocumentPdf(request.documentId);
   if (request.appointmentId == null) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "An appointment or PDF document is required for printing.");
@@ -112,6 +120,8 @@ interface DirectPrintExecutionOptions {
   key?: string;
   name?: string;
   testPrint?: boolean;
+  preservePdfPageGeometry?: boolean;
+  diagnostics?: { documentKind: string; rowCount?: number };
 }
 
 async function executeDirectPrint(request: DirectPrintRequest, options: DirectPrintExecutionOptions = {}): Promise<DirectPrintResult> {
@@ -129,12 +139,14 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     await withStageTimeout(connectQzTray(), DIRECT_PRINT_TIMEOUTS.connectionMs, new DirectPrintError("QZ_CONNECTION_FAILED", "QZ Tray did not connect within 15 seconds."));
     const printers = await withStageTimeout(getInstalledPrinters(), DIRECT_PRINT_TIMEOUTS.discoveryMs, new DirectPrintError("PRINTER_DISCOVERY_FAILED", "RISpro could not retrieve the installed printers from QZ Tray."));
     if (!printers.includes(profile.printerName)) throw new DirectPrintError("PRINTER_NOT_FOUND", `The configured printer “${profile.printerName}” is not installed on this workstation.`);
+    const preparationStartedAt = performance.now();
     const blob = await withStageTimeout(options.generate ? options.generate(profile) : generatePdf(request, profile), DIRECT_PRINT_TIMEOUTS.preparationMs, new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Document preparation exceeded 60 seconds."));
+    if (options.diagnostics) console.info("Direct print stage", { ...options.diagnostics, stage: "pdf_prepared", pdfBytes: blob.size, elapsedMs: Math.round(performance.now() - preparationStartedAt) });
     const base64 = await blobToBase64(blob);
     const name = options.name ?? jobName(request);
     activeJobs.set(key, "submitting");
     setGlobalPrintStatus({ state: "submitting", printerName: profile.printerName }, key);
-    const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name });
+    const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name, preservePdfPageGeometry: options.preservePdfPageGeometry, diagnostics: options.diagnostics ? { ...options.diagnostics, pdfBytes: blob.size } : undefined });
     pendingSubmissions.set(key, submission);
     const settled = submission.then(() => ({ ok: true as const })).catch((error: unknown) => ({ ok: false as const, error }));
     const status = await withStageTimeout(settled, DIRECT_PRINT_TIMEOUTS.submissionStatusMs, new DirectPrintError("PRINT_STATUS_UNKNOWN", "The original print request is still being processed. Do not retry or use browser printing yet."));
@@ -175,6 +187,8 @@ export async function directPrintRegistrationList(appointmentIds: number[], labe
   return executeDirectPrint(request, {
     key: `registration-list:${appointmentIds.join(",")}`,
     name: "RISpro registration list",
+    preservePdfPageGeometry: true,
+    diagnostics: { documentKind: "registration-list", rowCount: appointmentIds.length },
     generate: async () => {
       const response = await fetch("/api/printing/registration-list/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentIds, label }) });
       if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Registration-list PDF rendering failed.");
@@ -182,6 +196,17 @@ export async function directPrintRegistrationList(appointmentIds: number[], labe
       if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Registration-list rendering did not return a PDF.");
       return blob;
     },
+  });
+}
+
+export async function directPrintReportCenter(model: ReportCenterRenderModel): Promise<DirectPrintResult> {
+  const documentType: Extract<PrinterDocumentType, "A4_DOCUMENT" | "A4_LANDSCAPE_DOCUMENT"> = model.orientation === "portrait" ? "A4_DOCUMENT" : "A4_LANDSCAPE_DOCUMENT";
+  return executeDirectPrint({ documentType }, {
+    key: `report-center:${model.templateId}:${model.orientation}:${model.dateLabel}`,
+    name: `RISpro report - ${model.title}`,
+    generate: () => fetchReportCenterPdf(model),
+    preservePdfPageGeometry: true,
+    diagnostics: { documentKind: "report-center", rowCount: model.rows.length },
   });
 }
 

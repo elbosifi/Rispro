@@ -160,6 +160,21 @@ describe("appointment slip html renderer", () => {
     expect(html).not.toContain("<script>");
   });
 
+  it("renders real UTF-8 Arabic labels without known mojibake and preserves the Arabic font and A5 geometry", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ languageMode: "ar", showPatientCategory: true }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).toContain("اسم المريض");
+    expect(html).toContain("التصنيف");
+    expect(html).toContain("يرجى الحضور قبل الموعد بـ 15 دقيقة");
+    expect(html).toContain("Noto Naskh Arabic");
+    expect(html).not.toMatch(/Ã|Â|Ø|Ù|â€”|ï¿½/);
+    expect(html).toContain('data-page-width-mm="148"');
+    expect(html).toContain('data-page-height-mm="210"');
+  });
+
   it("uses english headings in english mode", async () => {
     const html = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings({ languageMode: "en" }),

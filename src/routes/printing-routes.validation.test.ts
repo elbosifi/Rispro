@@ -103,10 +103,21 @@ describe("QZ signing route limits", () => {
 });
 
 describe("Chromium PDF route concurrency", () => {
+  it("uses compact inline Playwright header/footer templates with native page counters", () => {
+    const header = __printingRouteTestables.compactHeaderTemplate("Registration / Appointment List", "<unsafe>");
+    assert.match(header, /style=/);
+    assert.match(header, /&lt;unsafe&gt;/);
+    assert.doesNotMatch(header, /<unsafe>/);
+    assert.match(__printingRouteTestables.compactFooterTemplate, /class="pageNumber"/);
+    assert.match(__printingRouteTestables.compactFooterTemplate, /class="totalPages"/);
+    assert.deepEqual(__printingRouteTestables.finalizedPdfMargins, { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" });
+  });
+
   it("uses one shared four-render limiter before every generated-PDF handler", () => {
     const stack = (printingRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: unknown }> } }> }).stack;
     for (const path of [
       "/registration-list/pdf",
+      "/report-center/pdf",
       "/accession-label/:appointmentId/pdf",
       "/printer-test/pdf",
       "/appointment-slip/:appointmentId/pdf",

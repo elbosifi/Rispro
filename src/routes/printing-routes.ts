@@ -16,6 +16,7 @@ import { pool } from "../db/pool.js";
 import { renderChromiumPdf, ChromiumPdfRenderError } from "../services/chromium-pdf-service.js";
 import { createRegistrationListRenderContext, deleteRegistrationListRenderContext, issueRegistrationListRenderToken } from "../services/registration-list-render-context-service.js";
 import { buildAccessionLabelHtml, buildPrinterTestHtml } from "../services/generated-print-html-service.js";
+import { buildReportCenterHtml, parseReportCenterRenderModel } from "../services/report-center-pdf-service.js";
 
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
 const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A4_LANDSCAPE_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
@@ -24,6 +25,16 @@ const FAILURE_CODES = new Set(["QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECT
 const signingLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60, message: "Too many QZ signing requests. Try again shortly.", errorCode: "QZ_SIGN_RATE_LIMIT", key: (req) => String(req.user?.sub ?? req.ip) });
 const qzSigningConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The QZ signing service is busy. Try again shortly.", errorCode: "QZ_SIGN_BUSY" });
 const chromiumRenderConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The Chromium PDF renderer is busy. Try again shortly.", errorCode: "CHROMIUM_RENDER_BUSY" });
+const finalizedPdfMargins = { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" } as const;
+const compactFooterTemplate = `<div style="width:100%;padding:0 8mm;font:6px Arial,sans-serif;color:#6b7280;text-align:right;box-sizing:border-box">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+
+function escapeTemplateText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function compactHeaderTemplate(title: string, label: string): string {
+  return `<div style="width:100%;padding:0 8mm;font:600 6px Arial,sans-serif;color:#374151;display:flex;justify-content:space-between;box-sizing:border-box"><span>National Cancer Center Benghazi · ${escapeTemplateText(title)}</span><span>${escapeTemplateText(label)}</span></div>`;
+}
 const qzSigningJsonParser = express.json({ limit: qzSigningRequestLimitBytes() + 64 * 1024 });
 
 function optionalString(value: unknown, max: number, pattern?: RegExp): string | null {
@@ -116,7 +127,18 @@ printingRouter.post("/registration-list/pdf", chromiumRenderConcurrencyLimiter, 
   try {
     const token = issueRegistrationListRenderToken(context.id);
     const renderUrl = `http://127.0.0.1:${env.port}/print/internal/registration-list?token=${encodeURIComponent(token)}`;
-    const pdf = await renderChromiumPdf({ source: { kind: "url", url: renderUrl, readySelector: '[data-registration-list-document="true"]' }, documentKind: "registration-list" });
+    const startedAt = performance.now();
+    const pdf = await renderChromiumPdf({
+      source: { kind: "url", url: renderUrl, readySelector: '[data-registration-list-document="true"]' },
+      documentKind: "registration-list",
+      pdfOptions: {
+        displayHeaderFooter: true,
+        margin: finalizedPdfMargins,
+        headerTemplate: compactHeaderTemplate("Registration / Appointment List", label),
+        footerTemplate: compactFooterTemplate,
+      },
+    });
+    console.info("Chromium PDF generated", { documentKind: "registration-list", rowCount: appointmentIds.length, pdfBytes: pdf.length, stage: "pdf", elapsedMs: Math.round(performance.now() - startedAt) });
     if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Registration-list rendering returned an invalid PDF.", { code: "REGISTRATION_LIST_RENDER_FAILED" });
     res.setHeader("Cache-Control", "no-store, private");
     res.type("application/pdf").send(pdf);
@@ -126,6 +148,34 @@ printingRouter.post("/registration-list/pdf", chromiumRenderConcurrencyLimiter, 
   } finally {
     deleteRegistrationListRenderContext(context.id);
   }
+}));
+printingRouter.post("/report-center/pdf", chromiumRenderConcurrencyLimiter, requirePageAccess("print"), asyncRoute(async (req: Request, res: Response) => {
+  const role = req.user!.role;
+  if (role !== "receptionist" && role !== "supervisor" && role !== "super_admin" && role !== "modality_staff" && role !== "doctor") throw new HttpError(403, "This role cannot render reports.");
+  const model = parseReportCenterRenderModel(req.body, role);
+  const html = buildReportCenterHtml(model);
+  const startedAt = performance.now();
+  let pdf: Buffer;
+  try {
+    pdf = await renderChromiumPdf({
+      source: { kind: "html", html },
+      documentKind: "report-center",
+      pdfOptions: {
+        displayHeaderFooter: true,
+        margin: finalizedPdfMargins,
+        headerTemplate: compactHeaderTemplate("RISpro Report", `${model.title} · ${model.dateLabel}`),
+        footerTemplate: compactFooterTemplate,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ChromiumPdfRenderError) throw new HttpError(502, "Report PDF rendering failed.", { code: "REPORT_RENDER_FAILED" });
+    throw error;
+  }
+  console.info("Chromium PDF generated", { documentKind: "report-center", rowCount: model.rows.length, pdfBytes: pdf.length, stage: "pdf", elapsedMs: Math.round(performance.now() - startedAt) });
+  if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Report rendering returned an invalid PDF.", { code: "REPORT_RENDER_FAILED" });
+  res.setHeader("Cache-Control", "no-store, private");
+  res.setHeader("Content-Disposition", `inline; filename="${model.templateId}.pdf"`);
+  res.type("application/pdf").send(pdf);
 }));
 printingRouter.get("/accession-label/:appointmentId/pdf", chromiumRenderConcurrencyLimiter, asyncRoute(async (req: Request, res: Response) => {
   const appointmentId = Number(req.params.appointmentId);
@@ -192,4 +242,7 @@ export const __printingRouteTestables = {
   qzSigningJsonParser,
   qzSignHandler,
   assertValidRenderProfile,
+  compactHeaderTemplate,
+  compactFooterTemplate,
+  finalizedPdfMargins,
 };
