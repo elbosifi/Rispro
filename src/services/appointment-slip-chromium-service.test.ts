@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AppointmentSlipRenderError, renderAppointmentSlipPdf } from "./appointment-slip-chromium-service.js";
-import { renderChromiumPdf } from "./chromium-pdf-service.js";
+import { ChromiumPdfRenderError, renderChromiumPdf } from "./chromium-pdf-service.js";
 
 test("Chromium appointment-slip renderer waits for the final document marker and resources before producing a PDF", async () => {
   const calls: string[] = [];
@@ -48,4 +48,30 @@ test("shared Chromium renderer accepts trusted HTML and waits for fonts before P
   const pdf = await renderChromiumPdf({ source: { kind: "html", html: "<p>trusted</p>" }, documentKind: "test" }, launch as never);
   assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   assert.deepEqual(calls, ["html:<p>trusted</p>", "fonts", "pdf", "page-close", "browser-close"]);
+});
+
+test("shared Chromium renderer bounds resource settlement and closes page and browser on timeout", async () => {
+  const calls: string[] = [];
+  const page = {
+    setDefaultTimeout() {},
+    async setContent() {},
+    evaluate() { calls.push("resources"); return new Promise<void>(() => undefined); },
+    async pdf() { calls.push("pdf"); return Buffer.from("%PDF-1.7"); },
+    async close() { calls.push("page-close"); },
+  };
+  const launch = async () => ({ newPage: async () => page, close: async () => { calls.push("browser-close"); } }) as never;
+  const logged: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...values: unknown[]) => { logged.push(values); };
+  try {
+    await assert.rejects(
+      () => renderChromiumPdf({ source: { kind: "html", html: "<p>trusted</p>" }, documentKind: "test" }, launch as never, 0),
+      ChromiumPdfRenderError,
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.deepEqual(calls, ["resources", "page-close", "browser-close"]);
+  assert.equal((logged[0]?.[1] as { stage?: string } | undefined)?.stage, "resources");
+  assert.equal(JSON.stringify(logged).includes("<p>trusted</p>"), false);
 });

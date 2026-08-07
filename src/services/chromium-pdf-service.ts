@@ -14,9 +14,33 @@ export class ChromiumPdfRenderError extends Error {
 const RENDER_TIMEOUT_MS = 45_000;
 type BrowserLauncher = (options: Parameters<typeof chromium.launch>[0]) => Promise<Browser>;
 
+async function settleResources(page: Page, timeoutMs: number): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      page.evaluate(async () => {
+        await document.fonts.ready;
+        await Promise.all(Array.from(document.images).map((image) => {
+          if (image.complete) return Promise.resolve();
+          return new Promise<void>((resolve) => {
+            image.addEventListener("load", () => resolve(), { once: true });
+            image.addEventListener("error", () => resolve(), { once: true });
+          });
+        }));
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Chromium resource settlement timed out.")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export async function renderChromiumPdf(
   options: { source: ChromiumPdfSource; pdfOptions?: Parameters<Page["pdf"]>[0]; documentKind: string },
   launch: BrowserLauncher = chromium.launch.bind(chromium),
+  resourceTimeoutMs = RENDER_TIMEOUT_MS,
 ): Promise<Buffer> {
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -37,16 +61,7 @@ export async function renderChromiumPdf(
       await page.setContent(options.source.html, { waitUntil: "domcontentloaded", timeout: RENDER_TIMEOUT_MS });
     }
     stage = "resources";
-    await page.evaluate(async () => {
-      await document.fonts.ready;
-      await Promise.all(Array.from(document.images).map((image) => {
-        if (image.complete) return Promise.resolve();
-        return new Promise<void>((resolve) => {
-          image.addEventListener("load", () => resolve(), { once: true });
-          image.addEventListener("error", () => resolve(), { once: true });
-        });
-      }));
-    });
+    await settleResources(page, resourceTimeoutMs);
     stage = "pdf";
     return await page.pdf({
       printBackground: true,

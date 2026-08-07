@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import http from "node:http";
 import express from "express";
@@ -8,6 +9,8 @@ import { __printingRouteTestables } from "./printing-routes.js";
 import { printingRouter } from "./printing-routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { env } from "../config/env.js";
+import { HttpError } from "../utils/http-error.js";
+import type { NextFunction, Request, Response } from "express";
 
 const valid = { workstationId: "00000000-0000-4000-8000-000000000001", documentType: "ACCESSION_LABEL", appointmentId: 7, accessionNumber: "ACC-7", printerName: "Label Queue", paperWidthMm: 50, paperHeightMm: 30, outcome: "submitted", failureCode: null };
 describe("printing audit validation", () => {
@@ -93,6 +96,55 @@ describe("QZ signing route limits", () => {
       for (let index = 0; index < 61; index += 1) status = (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: JSON.stringify({ request: "not-json", digest: "0".repeat(64) }) })).status;
       assert.equal(status, 429);
     } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+  });
+});
+
+describe("Chromium PDF route concurrency", () => {
+  it("uses one shared four-render limiter before every generated-PDF handler", () => {
+    const stack = (printingRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: unknown }> } }> }).stack;
+    for (const path of [
+      "/registration-list/pdf",
+      "/accession-label/:appointmentId/pdf",
+      "/printer-test/pdf",
+      "/appointment-slip/:appointmentId/pdf",
+    ]) {
+      const route = stack.find((layer) => layer.route?.path === path)?.route;
+      assert.ok(route, `missing route ${path}`);
+      assert.equal(route.stack[0]?.handle, __printingRouteTestables.chromiumRenderConcurrencyLimiter);
+    }
+  });
+
+  it("admits four renders, rejects the next with CHROMIUM_RENDER_BUSY, and does not run downstream work", () => {
+    const limiter = __printingRouteTestables.chromiumRenderConcurrencyLimiter;
+    const active: Array<{ req: EventEmitter; res: EventEmitter }> = [];
+    for (let index = 0; index < 4; index += 1) {
+      const req = new EventEmitter();
+      const res = new EventEmitter();
+      let downstreamReached = false;
+      limiter(req as Request, res as Response, (() => { downstreamReached = true; }) as NextFunction);
+      assert.equal(downstreamReached, true);
+      active.push({ req, res });
+    }
+
+    const req = new EventEmitter();
+    const res = new EventEmitter();
+    let downstreamReached = false;
+    limiter(req as Request, res as Response, ((error?: unknown) => {
+      if (!error) downstreamReached = true;
+      assert.ok(error instanceof HttpError);
+      assert.equal(error.statusCode, 503);
+      assert.deepEqual(error.details, { code: "CHROMIUM_RENDER_BUSY" });
+    }) as NextFunction);
+    assert.equal(downstreamReached, false, "busy rejection must not create a registration context or launch Chromium");
+
+    active[0]?.res.emit("finish");
+    let admittedAfterRelease = false;
+    const admittedRequest = new EventEmitter();
+    const admittedResponse = new EventEmitter();
+    limiter(admittedRequest as Request, admittedResponse as Response, (() => { admittedAfterRelease = true; }) as NextFunction);
+    assert.equal(admittedAfterRelease, true);
+    admittedResponse.emit("finish");
+    for (const entry of active) entry.res.emit("close");
   });
 });
 

@@ -23,6 +23,7 @@ const OUTCOMES = new Set(["submitted", "failed", "status_unknown"]);
 const FAILURE_CODES = new Set(["QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECTION_FAILED", "PRINTER_DISCOVERY_FAILED", "QZ_CSP_BLOCKED", "LOCAL_NETWORK_PERMISSION_DENIED", "PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PRINTER_SETTINGS_INVALID", "DOCUMENT_GENERATION_FAILED", "PAGE_SIZE_MISMATCH", "INVALID_PDF", "DUPLICATE_PRINT", "PRINT_TIMEOUT", "PRINT_STATUS_UNKNOWN", "CERTIFICATE_REJECTED", "SIGNATURE_FAILED", "SIGNING_PAYLOAD_TOO_LARGE", "PRINT_FAILED"]);
 const signingLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60, message: "Too many QZ signing requests. Try again shortly.", errorCode: "QZ_SIGN_RATE_LIMIT", key: (req) => String(req.user?.sub ?? req.ip) });
 const qzSigningConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The QZ signing service is busy. Try again shortly.", errorCode: "QZ_SIGN_BUSY" });
+const chromiumRenderConcurrencyLimiter = createConcurrencyLimiter({ maxConcurrent: 4, message: "The Chromium PDF renderer is busy. Try again shortly.", errorCode: "CHROMIUM_RENDER_BUSY" });
 const qzSigningJsonParser = express.json({ limit: qzSigningRequestLimitBytes() + 64 * 1024 });
 
 function optionalString(value: unknown, max: number, pattern?: RegExp): string | null {
@@ -104,7 +105,7 @@ const qzSignHandler = (req: Request, res: Response): void => {
 };
 const qzSignMiddlewares = [signingLimiter, qzSigningConcurrencyLimiter, qzSigningJsonParser, qzSignHandler] as const;
 printingRouter.post("/qz-sign", ...qzSignMiddlewares);
-printingRouter.post("/registration-list/pdf", requirePageAccess("registrations"), asyncRoute(async (req: Request, res: Response) => {
+printingRouter.post("/registration-list/pdf", chromiumRenderConcurrencyLimiter, requirePageAccess("registrations"), asyncRoute(async (req: Request, res: Response) => {
   const raw = asUnknownRecord(req.body);
   const appointmentIds = Array.isArray(raw.appointmentIds) && raw.appointmentIds.every((value) => typeof value === "number") ? raw.appointmentIds : [];
   const label = typeof raw.label === "string" ? raw.label : "";
@@ -123,7 +124,7 @@ printingRouter.post("/registration-list/pdf", requirePageAccess("registrations")
     deleteRegistrationListRenderContext(context.id);
   }
 }));
-printingRouter.get("/accession-label/:appointmentId/pdf", asyncRoute(async (req: Request, res: Response) => {
+printingRouter.get("/accession-label/:appointmentId/pdf", chromiumRenderConcurrencyLimiter, asyncRoute(async (req: Request, res: Response) => {
   const appointmentId = Number(req.params.appointmentId);
   if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Appointment identifier is invalid.");
   const widthMm = requiredDimension(Number(req.query.widthMm), 500, "Label width");
@@ -149,14 +150,14 @@ printingRouter.get("/accession-label/:appointmentId/pdf", asyncRoute(async (req:
   res.setHeader("Cache-Control", "no-store, private");
   res.type("application/pdf").send(pdf);
 }));
-printingRouter.post("/printer-test/pdf", asyncRoute(async (req: Request, res: Response) => {
+printingRouter.post("/printer-test/pdf", chromiumRenderConcurrencyLimiter, asyncRoute(async (req: Request, res: Response) => {
   const profile = assertValidRenderProfile(asUnknownRecord(req.body));
   const html = buildPrinterTestHtml({ ...profile, generatedAt: new Date().toISOString() });
   const pdf = await renderTrustedHtmlPdf(html, "printer-test");
   res.setHeader("Cache-Control", "no-store, private");
   res.type("application/pdf").send(pdf);
 }));
-printingRouter.get("/appointment-slip/:appointmentId/pdf", requirePageAccess("print"), asyncRoute(async (req: Request, res: Response) => {
+printingRouter.get("/appointment-slip/:appointmentId/pdf", chromiumRenderConcurrencyLimiter, requirePageAccess("print"), asyncRoute(async (req: Request, res: Response) => {
   const appointmentId = Number(req.params.appointmentId);
   if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Appointment identifier is invalid.");
   const token = issueAppointmentSlipRenderToken(appointmentId);
@@ -184,6 +185,7 @@ export const __printingRouteTestables = {
   qzSignMiddlewares,
   signingLimiter,
   qzSigningConcurrencyLimiter,
+  chromiumRenderConcurrencyLimiter,
   qzSigningJsonParser,
   qzSignHandler,
   assertValidRenderProfile,
