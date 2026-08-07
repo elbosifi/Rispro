@@ -16,6 +16,7 @@ const valid = { workstationId: "00000000-0000-4000-8000-000000000001", documentT
 describe("printing audit validation", () => {
   it("accepts a submitted client-reported audit", () => assert.equal(__printingRouteTestables.parseAudit(valid).outcome, "submitted"));
   it("accepts a boolean test-print marker without expanding document types", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, testPrint: true }).testPrint, true));
+  it("accepts the physical A4 landscape document type", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210 }).documentType, "A4_LANDSCAPE_DOCUMENT"));
   it("accepts the typed printer-discovery failure code", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, outcome: "failed", failureCode: "PRINTER_DISCOVERY_FAILED" }).failureCode, "PRINTER_DISCOVERY_FAILED"));
   it("rejects arbitrary document types, failure codes, nested values, and dimensions", () => {
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, documentType: "PATIENT_NAME" }));
@@ -27,12 +28,14 @@ describe("printing audit validation", () => {
 });
 
 describe("generated printer-test profile validation", () => {
-  it("accepts standard A4 landscape without rotating media dimensions", () => {
-    assert.deepEqual(__printingRouteTestables.assertValidRenderProfile({ documentType: "A4_DOCUMENT", printerName: "A4", paperWidthMm: 210, paperHeightMm: 297, orientation: "landscape", customPaperSize: false, rasterize: false }), {
-      documentType: "A4_DOCUMENT", printerName: "A4", widthMm: 210, heightMm: 297, orientation: "landscape", customPaperSize: false, rasterize: false,
+  it("accepts a physical 297 x 210 mm A4 landscape printer test", () => {
+    assert.deepEqual(__printingRouteTestables.assertValidRenderProfile({ documentType: "A4_LANDSCAPE_DOCUMENT", printerName: "A4 Landscape", paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false, rasterize: false }), {
+      documentType: "A4_LANDSCAPE_DOCUMENT", printerName: "A4 Landscape", widthMm: 297, heightMm: 210, orientation: "landscape", customPaperSize: false, rasterize: false,
     });
   });
-  it("keeps custom-media orientation strict and rejects arbitrary non-custom media", () => {
+  it("keeps all media orientation strict and rejects arbitrary non-custom media", () => {
+    assert.throws(() => __printingRouteTestables.assertValidRenderProfile({ documentType: "A4_DOCUMENT", printerName: "A4", paperWidthMm: 210, paperHeightMm: 297, orientation: "landscape", customPaperSize: false, rasterize: false }), /orientation/);
+    assert.throws(() => __printingRouteTestables.assertValidRenderProfile({ documentType: "A4_LANDSCAPE_DOCUMENT", printerName: "A4 Landscape", paperWidthMm: 297, paperHeightMm: 210, orientation: "portrait", customPaperSize: false, rasterize: false }), /orientation/);
     assert.throws(() => __printingRouteTestables.assertValidRenderProfile({ documentType: "ACCESSION_LABEL", printerName: "Label", paperWidthMm: 50, paperHeightMm: 30, orientation: "portrait", customPaperSize: true, rasterize: true }), /orientation/);
     assert.throws(() => __printingRouteTestables.assertValidRenderProfile({ documentType: "A4_DOCUMENT", printerName: "A4", paperWidthMm: 200, paperHeightMm: 300, orientation: "portrait", customPaperSize: false, rasterize: false }), /custom-media/);
   });

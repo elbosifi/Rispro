@@ -88,9 +88,9 @@ describe("QZ request signing", () => {
     assert.ok(signed({ call: "printers.find", params: {}, timestamp: Date.now() }));
     assert.throws(() => validateQzSigningRequest(JSON.stringify({ call: "printers.detail", timestamp: Date.now() })), /not approved/);
   });
-  it("accepts valid A4, A5, and 50 x 30 mm label options", () => {
+  it("accepts physical portrait and landscape A4, A5, and 50 x 30 mm label options", () => {
     assert.ok(signed(printPayload(printOptions())));
-    assert.ok(signed(printPayload(printOptions({ orientation: "landscape", jobName: "RISpro registration list" }))));
+    assert.ok(signed(printPayload(printOptions({ size: { width: 297, height: 210, custom: false }, orientation: "landscape", jobName: "RISpro registration list" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 148, height: 210, custom: false }, jobName: "RISpro A5" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", scaleContent: false, rasterize: true, printerTray: "Tray 1", jobName: "RISpro label" }))));
   });
@@ -163,6 +163,8 @@ describe("QZ request signing", () => {
       assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size })))), /size|custom-media/);
     }
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "portrait" })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ orientation: "landscape" })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 297, height: 210, custom: false }, orientation: "portrait" })))), /orientation/);
   });
   it("rejects invalid margins, job names, trays, and boolean options", () => {
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ margins: { top: -1, right: 0, bottom: 0, left: 0 } })))), /margins/);

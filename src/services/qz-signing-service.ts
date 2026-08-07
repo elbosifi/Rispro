@@ -124,11 +124,10 @@ function validatePrintOptions(options: unknown): void {
   const width = options.size.width;
   const height = options.size.height;
   if (typeof width !== "number" || !Number.isFinite(width) || width < 10 || width > 500 || typeof height !== "number" || !Number.isFinite(height) || height < 10 || height > 1000 || typeof options.size.custom !== "boolean") reject("QZ print size is invalid.", 400);
-  const standardMedia = (width === 210 && height === 297) || (width === 148 && height === 210);
+  const standardMedia = (width === 210 && height === 297) || (width === 297 && height === 210) || (width === 148 && height === 210);
   if (options.size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
-  const standardA4 = width === 210 && height === 297 && options.size.custom === false;
   const expectedOrientation = width > height ? "landscape" : "portrait";
-  if (!standardA4 && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
+  if (options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
 
   if (!isRecord(options.margins) || !hasExactKeys(options.margins, ["top", "right", "bottom", "left"])) reject("QZ print margins are invalid.", 400);
   const margins = options.margins as Record<"top" | "right" | "bottom" | "left", unknown>;

@@ -18,7 +18,7 @@ import { createRegistrationListRenderContext, deleteRegistrationListRenderContex
 import { buildAccessionLabelHtml, buildPrinterTestHtml } from "../services/generated-print-html-service.js";
 
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
-const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
+const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A4_LANDSCAPE_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
 const OUTCOMES = new Set(["submitted", "failed", "status_unknown"]);
 const FAILURE_CODES = new Set(["QZ_NOT_INSTALLED", "QZ_NOT_RUNNING", "QZ_CONNECTION_FAILED", "PRINTER_DISCOVERY_FAILED", "QZ_CSP_BLOCKED", "LOCAL_NETWORK_PERMISSION_DENIED", "PRINTER_NOT_CONFIGURED", "PRINTER_NOT_FOUND", "PRINTER_SETTINGS_INVALID", "DOCUMENT_GENERATION_FAILED", "PAGE_SIZE_MISMATCH", "INVALID_PDF", "DUPLICATE_PRINT", "PRINT_TIMEOUT", "PRINT_STATUS_UNKNOWN", "CERTIFICATE_REJECTED", "SIGNATURE_FAILED", "SIGNING_PAYLOAD_TOO_LARGE", "PRINT_FAILED"]);
 const signingLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60, message: "Too many QZ signing requests. Try again shortly.", errorCode: "QZ_SIGN_RATE_LIMIT", key: (req) => String(req.user?.sub ?? req.ip) });
@@ -54,10 +54,13 @@ function assertValidRenderProfile(raw: Record<string, unknown>) {
   const orientation = raw.orientation;
   if (orientation !== "portrait" && orientation !== "landscape") throw new HttpError(400, "Printer-test orientation is invalid.");
   if (typeof raw.customPaperSize !== "boolean" || typeof raw.rasterize !== "boolean") throw new HttpError(400, "Printer-test media settings are invalid.");
-  const standardA4 = widthMm === 210 && heightMm === 297;
+  const standardA4 = (widthMm === 210 && heightMm === 297) || (widthMm === 297 && heightMm === 210);
   const standardA5 = widthMm === 148 && heightMm === 210;
   if (raw.customPaperSize === (standardA4 || standardA5)) throw new HttpError(400, "Printer-test custom-media setting is inconsistent.");
-  if (!standardA4 && orientation !== (widthMm > heightMm ? "landscape" : "portrait")) throw new HttpError(400, "Printer-test orientation does not match its media.");
+  if (documentType === "A4_DOCUMENT" && (widthMm !== 210 || heightMm !== 297)) throw new HttpError(400, "A4 portrait printer-test media is invalid.");
+  if (documentType === "A4_LANDSCAPE_DOCUMENT" && (widthMm !== 297 || heightMm !== 210)) throw new HttpError(400, "A4 landscape printer-test media is invalid.");
+  if (documentType === "A5_DOCUMENT" && !standardA5) throw new HttpError(400, "A5 printer-test media is invalid.");
+  if (orientation !== (widthMm > heightMm ? "landscape" : "portrait")) throw new HttpError(400, "Printer-test orientation does not match its media.");
   if (standardA5 && orientation !== "portrait") throw new HttpError(400, "A5 printer-test orientation is invalid.");
   const printerName = optionalString(raw.printerName, 255);
   if (!printerName) throw new HttpError(400, "Printer name is required.");

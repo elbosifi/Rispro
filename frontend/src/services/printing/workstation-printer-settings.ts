@@ -7,6 +7,7 @@ export const PRINTER_SETTING_LIMITS = { copies: { min: 1, max: 99 }, widthMm: { 
 
 export const DEFAULT_PRINTER_PROFILES: PrinterProfile[] = [
   profile("A4_DOCUMENT", 210, 297, true, false, false),
+  profile("A4_LANDSCAPE_DOCUMENT", 297, 210, true, false, false),
   profile("A5_DOCUMENT", 148, 210, true, false, false),
   profile("ACCESSION_LABEL", 50, 30, false, true, true),
   profile("RECEIPT", 80, 200, true, true, false),
@@ -88,24 +89,26 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
     browserPrintFallbackEnabled: raw.browserPrintFallbackEnabled !== false,
     profiles: defaults.profiles.map((fallback) => {
       const saved = savedProfiles.find((candidate) => candidate?.documentType === fallback.documentType);
-      if (!saved) return fallback;
-      const standard = fallback.documentType === "A4_DOCUMENT" || fallback.documentType === "A5_DOCUMENT";
-      const width = standard ? fallback.paperWidthMm : finiteBounded(saved.paperWidthMm, fallback.paperWidthMm, PRINTER_SETTING_LIMITS.widthMm.min, PRINTER_SETTING_LIMITS.widthMm.max);
-      const height = standard ? fallback.paperHeightMm : finiteBounded(saved.paperHeightMm, fallback.paperHeightMm, PRINTER_SETTING_LIMITS.heightMm.min, PRINTER_SETTING_LIMITS.heightMm.max);
+      const inherited = !saved && fallback.documentType === "A4_LANDSCAPE_DOCUMENT";
+      const source = saved ?? (inherited ? savedProfiles.find((candidate) => candidate?.documentType === "A4_DOCUMENT") : undefined);
+      if (!source) return fallback;
+      const standard = fallback.documentType === "A4_DOCUMENT" || fallback.documentType === "A4_LANDSCAPE_DOCUMENT" || fallback.documentType === "A5_DOCUMENT";
+      const width = standard ? fallback.paperWidthMm : finiteBounded(source.paperWidthMm, fallback.paperWidthMm, PRINTER_SETTING_LIMITS.widthMm.min, PRINTER_SETTING_LIMITS.widthMm.max);
+      const height = standard ? fallback.paperHeightMm : finiteBounded(source.paperHeightMm, fallback.paperHeightMm, PRINTER_SETTING_LIMITS.heightMm.min, PRINTER_SETTING_LIMITS.heightMm.max);
       return {
         ...fallback,
-        id: String(saved.id || fallback.id),
-        printerName: String(saved.printerName || "").trim(),
+        id: inherited ? fallback.id : String(source.id || fallback.id),
+        printerName: String(source.printerName || "").trim(),
         paperWidthMm: width,
         paperHeightMm: height,
         orientation: expectedOrientation(width, height),
-        copies: Math.floor(finiteBounded(saved.copies, 1, PRINTER_SETTING_LIMITS.copies.min, PRINTER_SETTING_LIMITS.copies.max)),
-        scaleContent: saved.scaleContent == null ? fallback.scaleContent : saved.scaleContent === true,
-        marginsMm: normalizedMargins(saved.marginsMm, fallback.marginsMm!, width, height),
-        printerTray: normalizePrinterTray(saved.printerTray),
+        copies: Math.floor(finiteBounded(source.copies, 1, PRINTER_SETTING_LIMITS.copies.min, PRINTER_SETTING_LIMITS.copies.max)),
+        scaleContent: source.scaleContent == null ? fallback.scaleContent : source.scaleContent === true,
+        marginsMm: normalizedMargins(source.marginsMm, fallback.marginsMm!, width, height),
+        printerTray: normalizePrinterTray(source.printerTray),
         customPaperSize: standard ? false : true,
-        rasterize: saved.rasterize == null ? fallback.rasterize : saved.rasterize === true,
-        enabled: saved.enabled !== false,
+        rasterize: source.rasterize == null ? fallback.rasterize : source.rasterize === true,
+        enabled: source.enabled !== false,
       };
     }),
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : defaults.updatedAt,

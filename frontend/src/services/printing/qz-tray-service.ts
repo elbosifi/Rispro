@@ -101,9 +101,9 @@ export async function getInstalledPrinters(): Promise<string[]> {
   return Array.isArray(result) ? result.map(String) : [String(result)];
 }
 
-function qzConfig(profile: PrinterProfile, copies: number, jobName: string, orientation?: "portrait" | "landscape") {
+function qzConfig(profile: PrinterProfile, copies: number, jobName: string) {
   const size = { width: profile.paperWidthMm, height: profile.paperHeightMm, custom: profile.customPaperSize } as qz.Size & { custom: boolean };
-  return qz.configs.create(profile.printerName, { units: "mm", size, orientation: orientation ?? expectedOrientation(profile.paperWidthMm, profile.paperHeightMm), copies, scaleContent: profile.scaleContent, margins: profile.marginsMm ?? 0, printerTray: profile.printerTray || null, jobName, rasterize: profile.rasterize });
+  return qz.configs.create(profile.printerName, { units: "mm", size, orientation: expectedOrientation(profile.paperWidthMm, profile.paperHeightMm), copies, scaleContent: profile.scaleContent, margins: profile.marginsMm ?? 0, printerTray: profile.printerTray || null, jobName, rasterize: profile.rasterize });
 }
 
 async function submitApprovedPrint(config: unknown, data: QzPrintData): Promise<void> {
@@ -117,12 +117,12 @@ async function submitApprovedPrint(config: unknown, data: QzPrintData): Promise<
 
 export function stripPdfDataUrlPrefix(value: string): string { return value.replace(/^data:application\/pdf;base64,/i, "").trim(); }
 
-export async function printPdf(profile: PrinterProfile, pdfBase64: string, options: { copies?: number; jobName: string; orientation?: "portrait" | "landscape" }): Promise<void> {
+export async function printPdf(profile: PrinterProfile, pdfBase64: string, options: { copies?: number; jobName: string }): Promise<void> {
   const data = stripPdfDataUrlPrefix(pdfBase64);
   if (!data || !/^[A-Za-z0-9+/=\r\n]+$/.test(data)) throw new QzTrayError("INVALID_PDF", "Invalid PDF Base64 data.");
   await connectQzTray();
   const printData: QzPrintData = [{ type: "pixel", format: "pdf", flavor: "base64", data }];
-  try { await submitApprovedPrint(qzConfig(profile, options.copies ?? profile.copies, options.jobName, options.orientation), printData); }
+  try { await submitApprovedPrint(qzConfig(profile, options.copies ?? profile.copies, options.jobName), printData); }
   catch (error) { if (error instanceof QzTrayError) throw error; throw new QzTrayError("PRINT_FAILED", "QZ Tray rejected the print submission.", error); }
 }
 

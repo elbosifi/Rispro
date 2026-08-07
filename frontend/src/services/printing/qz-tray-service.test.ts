@@ -129,7 +129,7 @@ describe("QZ Tray service", () => {
     vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_456);
     const profile = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "RISPRO A4", printerTray: "Tray 1" };
     await printPdf(profile, "data:application/pdf;base64,JVBERi0xLjQ=", { copies: 2, jobName: "RISpro test" });
-    const options = expect.objectContaining({ units: "mm", size: { width: 210, height: 297, custom: false }, copies: 2, printerTray: "Tray 1", jobName: "RISpro test", rasterize: false });
+    const options = expect.objectContaining({ units: "mm", size: { width: 210, height: 297, custom: false }, orientation: "portrait", copies: 2, printerTray: "Tray 1", jobName: "RISpro test", rasterize: false });
     expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4", options);
     const config = qzMocks.create.mock.results[0].value;
     const data = [{ type: "pixel", format: "pdf", flavor: "base64", data: "JVBERi0xLjQ=" }];
@@ -140,16 +140,16 @@ describe("QZ Tray service", () => {
     vi.mocked(Date.now).mockRestore();
   });
 
-  it("keeps standard A4 dimensions while applying an optional landscape job override", async () => {
-    const profile = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "RISPRO A4" };
-    await printPdf(profile, "JVBERi0xLjQ=", { jobName: "RISpro registration list", orientation: "landscape" });
-    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4", expect.objectContaining({ size: { width: 210, height: 297, custom: false }, orientation: "landscape" }));
+  it("uses the physical A4 landscape profile without a job orientation override", async () => {
+    const profile = { ...DEFAULT_PRINTER_PROFILES[1], printerName: "RISPRO A4 Landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, marginsMm: { top: 1, right: 2, bottom: 3, left: 4 } };
+    await printPdf(profile, "JVBERi0xLjQ=", { jobName: "RISpro registration list" });
+    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.objectContaining({ size: { width: 297, height: 210, custom: false }, orientation: "landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, margins: { top: 1, right: 2, bottom: 3, left: 4 } }));
   });
 
   it("keeps concurrent print signatures associated with their own request", async () => {
     vi.spyOn(Date, "now").mockReturnValueOnce(101).mockReturnValueOnce(202);
     const a4 = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "A4" };
-    const label = { ...DEFAULT_PRINTER_PROFILES[2], printerName: "Label" };
+    const label = { ...DEFAULT_PRINTER_PROFILES[3], printerName: "Label" };
     await Promise.all([
       printPdf(a4, "JVBERi0xLjQ=", { jobName: "a4" }),
       printPdf(label, "JVBERi0xLjU=", { jobName: "label" }),
@@ -189,13 +189,19 @@ describe("QZ Tray service", () => {
   });
 
   it("uses custom media and profile-controlled rasterization for a 50 x 30 mm label", async () => {
-    const profile = { ...DEFAULT_PRINTER_PROFILES[2], printerName: "Xprinter" };
+    const profile = { ...DEFAULT_PRINTER_PROFILES[3], printerName: "Xprinter" };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "label" });
     expect(qzMocks.create).toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", rasterize: true }));
   });
 
+  it("keeps the A5 standard profile unchanged", async () => {
+    const profile = { ...DEFAULT_PRINTER_PROFILES[2], printerName: "A5" };
+    await printPdf(profile, "JVBERi0xLjQ=", { jobName: "A5 appointment slip" });
+    expect(qzMocks.create).toHaveBeenCalledWith("A5", expect.objectContaining({ size: { width: 148, height: 210, custom: false }, orientation: "portrait" }));
+  });
+
   it("derives QZ orientation from final physical dimensions", async () => {
-    const receipt = { ...DEFAULT_PRINTER_PROFILES[3], printerName: "Receipt", orientation: "landscape" as const };
+    const receipt = { ...DEFAULT_PRINTER_PROFILES[4], printerName: "Receipt", orientation: "landscape" as const };
     await printPdf(receipt, "JVBERi0xLjQ=", { jobName: "receipt" });
     expect(qzMocks.create).toHaveBeenCalledWith("Receipt", expect.objectContaining({ size: { width: 80, height: 200, custom: true }, orientation: "portrait" }));
   });

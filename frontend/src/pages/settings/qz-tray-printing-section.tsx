@@ -9,8 +9,9 @@ import { expectedOrientation } from "@/lib/printing-orientation";
 import type { PrinterProfile, QzPrinterSettings } from "@/types/printing";
 
 const PROFILE_LABELS: Record<PrinterProfile["documentType"], string> = {
-  A4_DOCUMENT: "A4 document",
-  A5_DOCUMENT: "A5 document",
+  A4_DOCUMENT: "A4 Portrait",
+  A4_LANDSCAPE_DOCUMENT: "A4 Landscape",
+  A5_DOCUMENT: "A5",
   ACCESSION_LABEL: "Accession label",
   RECEIPT: "Receipt",
 };
@@ -83,7 +84,7 @@ export default function QzTrayPrintingSection() {
       </div>
 
       {settings.profiles.map((profile) => {
-        const standardPaper = profile.documentType === "A4_DOCUMENT" || profile.documentType === "A5_DOCUMENT";
+        const standardPaper = profile.documentType === "A4_DOCUMENT" || profile.documentType === "A4_LANDSCAPE_DOCUMENT" || profile.documentType === "A5_DOCUMENT";
         return (
           <section key={profile.documentType} className="rounded-xl border border-border p-4">
             <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">{PROFILE_LABELS[profile.documentType]}</h4><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile.enabled} onChange={(event) => updateProfile(profile.documentType, { enabled: event.target.checked })} />Enabled</label></div>

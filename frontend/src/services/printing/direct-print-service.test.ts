@@ -93,25 +93,36 @@ describe("direct print service", () => {
     expect(printPdf).toHaveBeenCalledTimes(1);
   });
 
-  it("prints a registration list through the A4 profile with a landscape-only job override", async () => {
+  it("prints a registration list through the physical A4 landscape profile without a job override", async () => {
     const settings = createDefaultQzPrinterSettings();
-    settings.profiles[0].printerName = "A4";
+    settings.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")!.printerName = "A4 Landscape";
     saveQzPrinterSettings(settings);
-    getInstalledPrinters.mockResolvedValue(["A4"]);
-    await expect(directPrintRegistrationList([7, 9], "Current filters")).resolves.toMatchObject({ success: true, printerName: "A4" });
+    getInstalledPrinters.mockResolvedValue(["A4 Landscape"]);
+    await expect(directPrintRegistrationList([7, 9], "Current filters")).resolves.toMatchObject({ success: true, printerName: "A4 Landscape" });
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/registration-list/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify({ appointmentIds: [7, 9], label: "Current filters" }) }));
-    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "A4_DOCUMENT", paperWidthMm: 210, paperHeightMm: 297 }), expect.any(String), expect.objectContaining({ orientation: "landscape", jobName: "RISpro registration list" }));
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false }), expect.any(String), { copies: 1, jobName: "RISpro registration list" });
   });
 
   it("fetches the backend Chromium PDF for A5 appointment slips", async () => {
     const settings = createDefaultQzPrinterSettings();
-    settings.profiles[1].printerName = "A5";
+    settings.profiles.find((profile) => profile.documentType === "A5_DOCUMENT")!.printerName = "A5";
     saveQzPrinterSettings(settings);
     fetchAppointmentSlipSettings.mockResolvedValue({ paperSize: "a5" });
     getInstalledPrinters.mockResolvedValue(["A5"]);
 
     await expect(directPrint({ documentType: "A5_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true, printerName: "A5" });
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/appointment-slip/7/pdf", expect.objectContaining({ credentials: "include", cache: "no-store" }));
+  });
+
+  it("keeps stored PDFs on their original document endpoint", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+
+    await expect(directPrint({ documentType: "A4_DOCUMENT", documentId: "55" })).resolves.toMatchObject({ success: true, printerName: "A4" });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/documents/55/view", expect.objectContaining({ credentials: "include", cache: "no-store" }));
+    expect(appointmentSlipFetch).not.toHaveBeenCalledWith(expect.stringContaining("/api/printing/appointment-slip/"), expect.anything());
   });
 
   it("maps a Chromium endpoint failure to the existing clear generation failure and preserves explicit browser fallback", async () => {
@@ -220,7 +231,7 @@ describe("direct print service", () => {
     vi.useFakeTimers();
     const previous = DIRECT_PRINT_TIMEOUTS.discoveryMs;
     DIRECT_PRINT_TIMEOUTS.discoveryMs = 20;
-    const profile = { ...createDefaultQzPrinterSettings().profiles[2], printerName: "Label Queue" };
+    const profile = { ...createDefaultQzPrinterSettings().profiles[3], printerName: "Label Queue" };
     getInstalledPrinters.mockReturnValue(new Promise<string[]>(() => undefined));
 
     const result = directTestPrint(profile);
@@ -233,21 +244,30 @@ describe("direct print service", () => {
   });
 
   it("validates standard page dimensions", () => {
-    const profile = createDefaultQzPrinterSettings().profiles[1];
+    const profile = createDefaultQzPrinterSettings().profiles.find((candidate) => candidate.documentType === "A5_DOCUMENT")!;
     expect(validateProfilePageSize(profile)).toBe(true);
     expect(validateProfilePageSize({ ...profile, paperWidthMm: 210 })).toBe(false);
     expect(validateProfilePageSize({ ...profile, orientation: "landscape" })).toBe(false);
-    const label = createDefaultQzPrinterSettings().profiles[2];
+    const label = createDefaultQzPrinterSettings().profiles[3];
     expect(validateProfilePageSize({ ...label, orientation: "portrait" })).toBe(false);
   });
 
   it("routes a PDF test print through validation, installed-printer checking, and audit", async () => {
-    const profile = { ...createDefaultQzPrinterSettings().profiles[2], printerName: "Label Queue" };
+    const profile = { ...createDefaultQzPrinterSettings().profiles[3], printerName: "Label Queue" };
     getInstalledPrinters.mockResolvedValue(["Label Queue"]);
     await expect(directTestPrint(profile)).resolves.toMatchObject({ success: true, printerName: "Label Queue", jobName: "RISpro printer test - ACCESSION_LABEL" });
     expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ paperWidthMm: 50, paperHeightMm: 30, customPaperSize: true }), expect.any(String), expect.objectContaining({ jobName: "RISpro printer test - ACCESSION_LABEL" }));
     const auditBody = JSON.parse(auditApi.mock.calls[0][1].body);
     expect(auditBody).toMatchObject({ documentType: "ACCESSION_LABEL", outcome: "submitted", testPrint: true, printerName: "Label Queue" });
+  });
+
+  it("routes an A4 landscape printer test with physical dimensions and test-print audit semantics", async () => {
+    const profile = { ...createDefaultQzPrinterSettings().profiles[1], printerName: "Landscape Queue" };
+    getInstalledPrinters.mockResolvedValue(["Landscape Queue"]);
+    await expect(directTestPrint(profile)).resolves.toMatchObject({ success: true, printerName: "Landscape Queue" });
+    const request = appointmentSlipFetch.mock.calls.find(([url]) => url === "/api/printing/printer-test/pdf");
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false });
+    expect(JSON.parse(auditApi.mock.calls[0][1].body)).toMatchObject({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, testPrint: true });
   });
 
   it("rejects a test print when its exact printer queue is not installed", async () => {

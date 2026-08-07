@@ -17,6 +17,7 @@ export function validateProfilePageSize(profile: PrinterProfile): boolean {
   if (profile.orientation !== expectedOrientation(profile.paperWidthMm, profile.paperHeightMm)) return false;
   const matches = (width: number, height: number) => Math.abs(profile.paperWidthMm - width) <= 0.5 && Math.abs(profile.paperHeightMm - height) <= 0.5;
   if (profile.documentType === "A4_DOCUMENT") return matches(210, 297) && !profile.customPaperSize;
+  if (profile.documentType === "A4_LANDSCAPE_DOCUMENT") return matches(297, 210) && !profile.customPaperSize;
   if (profile.documentType === "A5_DOCUMENT") return matches(148, 210) && !profile.customPaperSize;
   if (profile.documentType === "ACCESSION_LABEL") return profile.customPaperSize && profile.paperWidthMm >= 10 && profile.paperWidthMm <= 500 && profile.paperHeightMm >= 10 && profile.paperHeightMm <= 1000;
   return profile.customPaperSize && profile.paperWidthMm >= 10 && profile.paperWidthMm <= 500 && profile.paperHeightMm >= 10 && profile.paperHeightMm <= 1000;
@@ -111,7 +112,6 @@ interface DirectPrintExecutionOptions {
   key?: string;
   name?: string;
   testPrint?: boolean;
-  orientation?: "portrait" | "landscape";
 }
 
 async function executeDirectPrint(request: DirectPrintRequest, options: DirectPrintExecutionOptions = {}): Promise<DirectPrintResult> {
@@ -134,7 +134,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     const name = options.name ?? jobName(request);
     activeJobs.set(key, "submitting");
     setGlobalPrintStatus({ state: "submitting", printerName: profile.printerName }, key);
-    const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name, ...(options.orientation ? { orientation: options.orientation } : {}) });
+    const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name });
     pendingSubmissions.set(key, submission);
     const settled = submission.then(() => ({ ok: true as const })).catch((error: unknown) => ({ ok: false as const, error }));
     const status = await withStageTimeout(settled, DIRECT_PRINT_TIMEOUTS.submissionStatusMs, new DirectPrintError("PRINT_STATUS_UNKNOWN", "The original print request is still being processed. Do not retry or use browser printing yet."));
@@ -171,11 +171,10 @@ function nameForSettlement(options: DirectPrintExecutionOptions, request: Direct
 export async function directPrint(request: DirectPrintRequest): Promise<DirectPrintResult> { return executeDirectPrint(request); }
 
 export async function directPrintRegistrationList(appointmentIds: number[], label: string): Promise<DirectPrintResult> {
-  const request: DirectPrintRequest = { documentType: "A4_DOCUMENT" };
+  const request: DirectPrintRequest = { documentType: "A4_LANDSCAPE_DOCUMENT" };
   return executeDirectPrint(request, {
     key: `registration-list:${appointmentIds.join(",")}`,
     name: "RISpro registration list",
-    orientation: "landscape",
     generate: async () => {
       const response = await fetch("/api/printing/registration-list/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentIds, label }) });
       if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Registration-list PDF rendering failed.");

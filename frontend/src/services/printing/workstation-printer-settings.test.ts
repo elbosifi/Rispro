@@ -7,12 +7,13 @@ describe("workstation printer settings", () => {
 
   it("creates all required document-type profiles with physical defaults", () => {
     const settings = createDefaultQzPrinterSettings();
-    expect(settings.profiles.map((profile) => profile.documentType)).toEqual(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
-    expect(resolvePrinterProfile("A4_DOCUMENT", settings)).toMatchObject({ paperWidthMm: 210, paperHeightMm: 297 });
+    expect(settings.profiles.map((profile) => profile.documentType)).toEqual(["A4_DOCUMENT", "A4_LANDSCAPE_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
+    expect(resolvePrinterProfile("A4_DOCUMENT", settings)).toMatchObject({ paperWidthMm: 210, paperHeightMm: 297, orientation: "portrait", customPaperSize: false });
+    expect(resolvePrinterProfile("A4_LANDSCAPE_DOCUMENT", settings)).toMatchObject({ paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false });
     expect(resolvePrinterProfile("ACCESSION_LABEL", settings)).toMatchObject({ paperWidthMm: 50, paperHeightMm: 30 });
     expect(settings.profiles[0]).toMatchObject({ customPaperSize: false, rasterize: false });
     expect(settings.profiles[1]).toMatchObject({ customPaperSize: false, rasterize: false });
-    expect(settings.profiles[2]).toMatchObject({ customPaperSize: true, rasterize: true, orientation: "landscape" });
+    expect(settings.profiles[3]).toMatchObject({ customPaperSize: true, rasterize: true, orientation: "landscape" });
   });
 
   it("persists exact queue names per browser workstation", () => {
@@ -38,6 +39,21 @@ describe("workstation printer settings", () => {
       documentType: "ACCESSION_LABEL",
       printerName: "RISPRO Label Queue",
     });
+  });
+
+  it("inherits a missing A4 landscape mapping from the saved portrait profile and then persists independently", () => {
+    const portrait = { ...createDefaultQzPrinterSettings().profiles[0], printerName: "Shared A4", printerTray: "Tray 2", copies: 3, scaleContent: false, rasterize: true, marginsMm: { top: 2, right: 3, bottom: 4, left: 5 }, enabled: false };
+    const migrated = normalizeQzPrinterSettings({ profiles: [portrait] });
+    expect(migrated.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")).toMatchObject({
+      id: "A4_LANDSCAPE_DOCUMENT", printerName: "Shared A4", printerTray: "Tray 2", copies: 3, scaleContent: false, rasterize: true,
+      marginsMm: { top: 2, right: 3, bottom: 4, left: 5 }, enabled: false, paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false,
+    });
+
+    const landscape = migrated.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")!;
+    landscape.printerName = "Independent Landscape";
+    const saved = normalizeQzPrinterSettings(migrated);
+    expect(saved.profiles.find((profile) => profile.documentType === "A4_DOCUMENT")?.printerName).toBe("Shared A4");
+    expect(saved.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")?.printerName).toBe("Independent Landscape");
   });
 
   it("replaces a corrupted workstation identifier with a stable UUID", () => {
@@ -74,8 +90,8 @@ describe("workstation printer settings", () => {
     const corrupted = normalizeQzPrinterSettings({ profiles: defaults.profiles.map((profile) => ({ ...profile, copies: 1000, paperWidthMm: Infinity, paperHeightMm: 9999, marginsMm: { top: -1, right: NaN, bottom: Infinity, left: 9999 } })) });
     expect(corrupted.profiles.every((profile) => profile.copies === 1)).toBe(true);
     expect(corrupted.profiles[0]).toMatchObject({ paperWidthMm: 210, paperHeightMm: 297 });
-    expect(corrupted.profiles[2]).toMatchObject({ paperWidthMm: 50, paperHeightMm: 30, customPaperSize: true });
-    expect(Object.values(corrupted.profiles[2].marginsMm!)).toEqual([0, 0, 0, 0]);
+    expect(corrupted.profiles[3]).toMatchObject({ paperWidthMm: 50, paperHeightMm: 30, customPaperSize: true });
+    expect(Object.values(corrupted.profiles[3].marginsMm!)).toEqual([0, 0, 0, 0]);
   });
 
   it("uses each profile fallback when stored scaleContent is missing or corrupt", () => {
@@ -86,13 +102,13 @@ describe("workstation printer settings", () => {
 
     const explicit = normalizeQzPrinterSettings({ profiles: [
       { ...profiles[0], scaleContent: false },
-      { ...profiles[2], scaleContent: true },
+      { ...profiles[3], scaleContent: true },
     ] });
     expect(explicit.profiles[0].scaleContent).toBe(false);
-    expect(explicit.profiles[2].scaleContent).toBe(true);
+    expect(explicit.profiles[3].scaleContent).toBe(true);
 
-    const corrupt = normalizeQzPrinterSettings({ profiles: [{ ...profiles[2], scaleContent: "true" }] });
-    expect(corrupt.profiles[2].scaleContent).toBe(false);
+    const corrupt = normalizeQzPrinterSettings({ profiles: [{ ...profiles[3], scaleContent: "true" }] });
+    expect(corrupt.profiles[3].scaleContent).toBe(false);
   });
 
   it("preserves a normalized manual tray without driver-detail discovery", () => {
@@ -107,29 +123,29 @@ describe("workstation printer settings", () => {
   it("inherits orientation from each physical profile when saved orientation is missing or invalid", () => {
     const profiles = createDefaultQzPrinterSettings().profiles.map(({ orientation: _orientation, ...profile }) => profile);
     const missing = normalizeQzPrinterSettings({ profiles });
-    expect(missing.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "portrait", "landscape", "portrait"]);
+    expect(missing.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "landscape", "portrait", "landscape", "portrait"]);
 
     const invalid = normalizeQzPrinterSettings({ profiles: profiles.map((profile) => ({ ...profile, orientation: "sideways" })) });
-    expect(invalid.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "portrait", "landscape", "portrait"]);
+    expect(invalid.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "landscape", "portrait", "landscape", "portrait"]);
   });
 
   it("preserves explicit portrait and landscape when they agree with physical dimensions", () => {
     const defaults = createDefaultQzPrinterSettings();
     const normalized = normalizeQzPrinterSettings({ profiles: [
       { ...defaults.profiles[0], orientation: "portrait" },
-      { ...defaults.profiles[2], orientation: "landscape" },
+      { ...defaults.profiles[3], orientation: "landscape" },
     ] });
     expect(normalized.profiles[0].orientation).toBe("portrait");
-    expect(normalized.profiles[2].orientation).toBe("landscape");
+    expect(normalized.profiles[3].orientation).toBe("landscape");
   });
 
   it("derives custom-media orientation after dimensions change", () => {
     const defaults = createDefaultQzPrinterSettings();
     const normalized = normalizeQzPrinterSettings({ profiles: [
-      { ...defaults.profiles[2], paperWidthMm: 30, paperHeightMm: 50, orientation: "landscape" },
-      { ...defaults.profiles[3], paperWidthMm: 200, paperHeightMm: 80, orientation: "portrait" },
+      { ...defaults.profiles[3], paperWidthMm: 30, paperHeightMm: 50, orientation: "landscape" },
+      { ...defaults.profiles[4], paperWidthMm: 200, paperHeightMm: 80, orientation: "portrait" },
     ] });
-    expect(normalized.profiles[2].orientation).toBe("portrait");
-    expect(normalized.profiles[3].orientation).toBe("landscape");
+    expect(normalized.profiles[3].orientation).toBe("portrait");
+    expect(normalized.profiles[4].orientation).toBe("landscape");
   });
 });
