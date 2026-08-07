@@ -116,7 +116,7 @@ function validatePrintOptions(options: unknown): void {
   }
   if (options.units !== "mm") reject("QZ print units must be millimetres.", 400);
   if (!Number.isInteger(options.copies) || Number(options.copies) < 1 || Number(options.copies) > 99) reject("QZ print copies are invalid.", 400);
-  if (options.orientation !== "portrait" && options.orientation !== "landscape") reject("QZ print orientation is invalid.", 400);
+  if (options.orientation !== null && options.orientation !== "portrait" && options.orientation !== "landscape") reject("QZ print orientation is invalid.", 400);
   if (typeof options.scaleContent !== "boolean" || typeof options.rasterize !== "boolean") reject("QZ print boolean options are invalid.", 400);
   if (typeof options.jobName !== "string" || !options.jobName.trim() || options.jobName.length > 200 || CONTROL_CHARACTERS.test(options.jobName)) reject("QZ print job name is invalid.", 400);
 
@@ -124,20 +124,25 @@ function validatePrintOptions(options: unknown): void {
   let width = 0;
   let height = 0;
   let canonicalA4 = false;
+  let finalizedPdfGeometry = false;
   if (defaultA4LandscapeMedia) {
-    if (options.orientation !== "landscape" || options.scaleContent !== false) reject("QZ default-media landscape options are invalid.", 400);
+    if (options.orientation !== null || options.scaleContent !== false) reject("QZ default-media landscape options are invalid.", 400);
+    finalizedPdfGeometry = true;
   } else {
-    if (!isRecord(options.size) || !hasExactKeys(options.size, ["width", "height", "custom"])) reject("QZ print size is invalid.", 400);
-    width = options.size.width;
-    height = options.size.height;
-    if (typeof width !== "number" || !Number.isFinite(width) || width < 10 || width > 500 || typeof height !== "number" || !Number.isFinite(height) || height < 10 || height > 1000 || typeof options.size.custom !== "boolean") reject("QZ print size is invalid.", 400);
+    const size = options.size;
+    if (!isRecord(size) || !hasExactKeys(size, ["width", "height", "custom"])) reject("QZ print size is invalid.", 400);
+    const parsedWidth = size.width;
+    const parsedHeight = size.height;
+    if (typeof parsedWidth !== "number" || !Number.isFinite(parsedWidth) || parsedWidth < 10 || parsedWidth > 500 || typeof parsedHeight !== "number" || !Number.isFinite(parsedHeight) || parsedHeight < 10 || parsedHeight > 1000 || typeof size.custom !== "boolean") reject("QZ print size is invalid.", 400);
+    width = parsedWidth;
+    height = parsedHeight;
     canonicalA4 = width === 210 && height === 297;
     const standardMedia = canonicalA4 || (width === 148 && height === 210);
-    if (options.size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
+    if (size.custom === standardMedia) reject("QZ print custom-media setting is inconsistent with its dimensions.", 400);
     const expectedOrientation = width > height ? "landscape" : "portrait";
-    const canonicalA4Orientation = canonicalA4 && options.size.custom === false
-      && (options.orientation === "portrait" || options.orientation === "landscape");
-    if (!canonicalA4Orientation && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
+    finalizedPdfGeometry = canonicalA4 && size.custom === false && options.orientation === null;
+    const canonicalA4Orientation = canonicalA4 && size.custom === false && (options.orientation === "portrait" || options.orientation === "landscape");
+    if (!finalizedPdfGeometry && !canonicalA4Orientation && options.orientation !== expectedOrientation) reject("QZ print orientation does not match its physical dimensions.", 400);
   }
 
   if (!isRecord(options.margins) || !hasExactKeys(options.margins, ["top", "right", "bottom", "left"])) reject("QZ print margins are invalid.", 400);
@@ -145,7 +150,7 @@ function validatePrintOptions(options: unknown): void {
   if (Object.values(margins).some((margin) => typeof margin !== "number" || !Number.isFinite(margin) || margin < 0)
       || (!defaultA4LandscapeMedia && (Number(margins.left) >= width || Number(margins.right) >= width || Number(margins.top) >= height || Number(margins.bottom) >= height
       || Number(margins.left) + Number(margins.right) >= width || Number(margins.top) + Number(margins.bottom) >= height))) reject("QZ print margins are invalid.", 400);
-  if ((defaultA4LandscapeMedia || (canonicalA4 && options.orientation === "landscape")) && (Object.values(margins).some((margin) => margin !== 0) || options.scaleContent !== false)) {
+  if (finalizedPdfGeometry && (Object.values(margins).some((margin) => margin !== 0) || options.scaleContent !== false)) {
     reject("Finalized A4 PDF options must preserve page geometry.", 400);
   }
 

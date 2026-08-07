@@ -121,7 +121,7 @@ function qzConfig(profile: PrinterProfile, copies: number, jobName: string, pres
   return qz.configs.create(profile.printerName, {
     units: "mm",
     ...(standardA4Landscape ? {} : { size }),
-    orientation: expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
+    orientation: preservePdfPageGeometry ? null : expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
     copies,
     scaleContent: preservePdfPageGeometry ? false : profile.scaleContent,
     margins: preservePdfPageGeometry ? { top: 0, right: 0, bottom: 0, left: 0 } : profile.marginsMm ?? 0,
