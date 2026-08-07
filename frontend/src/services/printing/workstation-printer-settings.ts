@@ -89,15 +89,14 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
     browserPrintFallbackEnabled: raw.browserPrintFallbackEnabled !== false,
     profiles: defaults.profiles.map((fallback) => {
       const saved = savedProfiles.find((candidate) => candidate?.documentType === fallback.documentType);
-      const inherited = !saved && fallback.documentType === "A4_LANDSCAPE_DOCUMENT";
-      const source = saved ?? (inherited ? savedProfiles.find((candidate) => candidate?.documentType === "A4_DOCUMENT") : undefined);
-      if (!source) return fallback;
+      if (!saved) return fallback;
+      const source = saved;
       const standard = fallback.documentType === "A4_DOCUMENT" || fallback.documentType === "A4_LANDSCAPE_DOCUMENT" || fallback.documentType === "A5_DOCUMENT";
       const width = standard ? fallback.paperWidthMm : finiteBounded(source.paperWidthMm, fallback.paperWidthMm, PRINTER_SETTING_LIMITS.widthMm.min, PRINTER_SETTING_LIMITS.widthMm.max);
       const height = standard ? fallback.paperHeightMm : finiteBounded(source.paperHeightMm, fallback.paperHeightMm, PRINTER_SETTING_LIMITS.heightMm.min, PRINTER_SETTING_LIMITS.heightMm.max);
       return {
         ...fallback,
-        id: inherited ? fallback.id : String(source.id || fallback.id),
+        id: String(source.id || fallback.id),
         printerName: String(source.printerName || "").trim(),
         paperWidthMm: width,
         paperHeightMm: height,

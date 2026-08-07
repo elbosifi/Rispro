@@ -15,6 +15,10 @@ const PROFILE_LABELS: Record<PrinterProfile["documentType"], string> = {
   ACCESSION_LABEL: "Accession label",
   RECEIPT: "Receipt",
 };
+const PROFILE_QUEUE_GUIDANCE: Partial<Record<PrinterProfile["documentType"], string>> = {
+  A4_DOCUMENT: "Select the normal Windows queue configured for A4 Portrait.",
+  A4_LANDSCAPE_DOCUMENT: "Select a Windows printer queue configured with A4 paper and Landscape as its default orientation. You can create a second Windows queue for the same physical printer.",
+};
 
 export default function QzTrayPrintingSection() {
   const [settings, setSettings] = useState<QzPrinterSettings>(() => loadQzPrinterSettings());
@@ -88,6 +92,7 @@ export default function QzTrayPrintingSection() {
         return (
           <section key={profile.documentType} className="rounded-xl border border-border p-4">
             <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">{PROFILE_LABELS[profile.documentType]}</h4><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile.enabled} onChange={(event) => updateProfile(profile.documentType, { enabled: event.target.checked })} />Enabled</label></div>
+            {PROFILE_QUEUE_GUIDANCE[profile.documentType] ? <p className="mt-1 text-xs text-muted-foreground">{PROFILE_QUEUE_GUIDANCE[profile.documentType]}</p> : null}
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <Field label="Printer" wide><select className="input-premium h-10 w-full" value={profile.printerName} onChange={(event) => updateProfile(profile.documentType, { printerName: event.target.value, printerTray: undefined })}><option value="">Select printer</option>{printers.map((printer) => <option key={printer} value={printer}>{printer}</option>)}</select></Field>
               <Field label="Paper width (mm)"><input className="input-premium h-10 w-full" type="number" min="10" max="500" step="0.1" disabled={standardPaper} value={profile.paperWidthMm} onChange={(event) => { const paperWidthMm = Number(event.target.value); updateProfile(profile.documentType, { paperWidthMm, orientation: expectedOrientation(paperWidthMm, profile.paperHeightMm) }); }} /></Field>

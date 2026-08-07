@@ -62,6 +62,8 @@ describe("QzTrayPrintingSection", () => {
     expect((await screen.findAllByRole("option", { name: "RISPRO A4" })).length).toBe(5);
     expect(screen.getByRole("heading", { name: "A4 Portrait" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "A4 Landscape" })).toBeTruthy();
+    expect(screen.getByText("Select the normal Windows queue configured for A4 Portrait.")).toBeTruthy();
+    expect(screen.getByText("Select a Windows printer queue configured with A4 paper and Landscape as its default orientation. You can create a second Windows queue for the same physical printer.")).toBeTruthy();
     await waitFor(() => expect((screen.getByRole("button", { name: /Refresh printers/i }) as HTMLButtonElement).disabled).toBe(false));
     expect((screen.getByRole("checkbox", { name: /Allow browser-print fallback/i }) as HTMLInputElement).disabled).toBe(false);
     expect((screen.getByRole("button", { name: "Reset local printer settings" }) as HTMLButtonElement).disabled).toBe(false);
