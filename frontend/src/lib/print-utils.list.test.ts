@@ -120,7 +120,8 @@ describe("print list helpers", () => {
     expect(html).toContain("LONG-0500");
     expect(html.match(/LONG-\d{4}/g)).toHaveLength(500);
     expect(html.indexOf("LONG-0001")).toBeLessThan(html.indexOf("LONG-0500"));
-    expect(html).toContain("@page { size: 297mm 210mm; margin: 0; }");
+    expect(html).toContain("@page { size: 297mm 210mm; }");
+    expect(html).not.toContain("@page { size: 297mm 210mm; margin: 0; }");
     expect(html).toContain('data-direct-pdf="true"');
     expect(html).toContain("break-inside: avoid");
     expect(html).not.toContain('class="slip"');

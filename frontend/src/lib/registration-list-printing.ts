@@ -20,7 +20,7 @@ export function prepareAppointmentListHtml(rows: AppointmentWithDetails[], label
       <div><div class="label">Modality</div><div class="value">${escapeHtml(appointment.modalityNameEn || "—")}</div></div><div><div class="label">Exam</div><div class="value">${escapeHtml(appointment.examNameEn || "—")}</div></div>
       <div><div class="label">Priority</div><div class="value">${escapeHtml(appointment.priorityNameEn || "Routine")}</div></div><div><div class="label">Status</div><div class="value">${escapeHtml(appointment.status || "—")}</div></div></div>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>Appointment List</title><style>
-    @page { size: 297mm 210mm; margin: ${directPdf ? "0" : "12mm"}; } * { box-sizing: border-box; }
+    @page { size: 297mm 210mm;${directPdf ? "" : " margin: 12mm;"} } * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
     .registration-list { width: 100%; min-height: 100%; }
     .header { display: flex; align-items: center; justify-content: center; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
