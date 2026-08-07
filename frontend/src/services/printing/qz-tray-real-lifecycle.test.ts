@@ -76,7 +76,7 @@ describe("QZ Tray 2.2.6 real request lifecycle", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps finalized A4 canonical media, explicit orientation, and zero-transform options in the real QZ config", async () => {
+  it("keeps portrait A4 media and serializes omitted landscape media as null with zero-transform options", async () => {
     vi.resetModules();
     const qz = await import("qz-tray");
     qz.security.setCertificatePromise((resolve) => resolve("test-certificate"));
@@ -86,14 +86,14 @@ describe("QZ Tray 2.2.6 real request lifecycle", () => {
     for (const orientation of ["portrait", "landscape"] as const) {
       const config = qz.configs.create("RISPRO A4", {
         units: "mm",
-        size: { width: 210, height: 297, custom: false } as qz.Size,
+        ...(orientation === "landscape" ? {} : { size: { width: 210, height: 297, custom: false } as qz.Size }),
         orientation,
         copies: 1,
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
         scaleContent: false,
       });
       const options = (config as unknown as { getOptions(): Record<string, unknown> }).getOptions();
-      expect(options).toEqual(expect.objectContaining({ orientation, size: { width: 210, height: 297, custom: false }, margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false, rotation: 0, spool: null }));
+      expect(options).toEqual(expect.objectContaining({ orientation, size: orientation === "landscape" ? null : { width: 210, height: 297, custom: false }, margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false, rotation: 0, spool: null }));
     }
   });
 

@@ -72,7 +72,7 @@ describe("QZ Tray service", () => {
     mockApi();
     qzMocks.connect.mockImplementation(async () => { qzMocks.active = true; });
     qzMocks.disconnect.mockResolvedValue(undefined);
-    qzMocks.create.mockImplementation((printer: string, options: Record<string, unknown>) => ({ config: true, getPrinter: () => ({ name: printer }), getOptions: () => ({ rotation: 0, spool: null, ...options }) }));
+    qzMocks.create.mockImplementation((printer: string, options: Record<string, unknown>) => ({ config: true, getPrinter: () => ({ name: printer }), getOptions: () => ({ rotation: 0, spool: null, size: options.size ?? null, ...options }) }));
     qzMocks.find.mockResolvedValue(["RISPRO A4", "RISPRO LABEL"]);
     qzMocks.print.mockResolvedValue(undefined);
   });
@@ -140,16 +140,17 @@ describe("QZ Tray service", () => {
     vi.mocked(Date.now).mockRestore();
   });
 
-  it("translates the logical A4 landscape profile to canonical driver media", async () => {
+  it("omits explicit driver media for the logical A4 landscape profile", async () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[1], printerName: "RISPRO A4 Landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, marginsMm: { top: 1, right: 2, bottom: 3, left: 4 } };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "RISpro registration list" });
-    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.objectContaining({ size: { width: 210, height: 297, custom: false }, orientation: "landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, margins: { top: 1, right: 2, bottom: 3, left: 4 } }));
+    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.not.objectContaining({ size: expect.anything() }));
+    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.objectContaining({ orientation: "landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, margins: { top: 1, right: 2, bottom: 3, left: 4 } }));
   });
 
   it.each([
     ["portrait", 0, 210, 297],
     ["landscape", 1, 297, 210],
-  ] as const)("serializes finalized A4 %s PDF options with canonical driver media", async (orientation, profileIndex, width, height) => {
+  ] as const)("serializes finalized A4 %s PDF options with the intended driver-media behavior", async (orientation, profileIndex, width, height) => {
     vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_789);
     const profile = { ...DEFAULT_PRINTER_PROFILES[profileIndex], printerName: `Finalized ${width}x${height}`, scaleContent: true, marginsMm: { top: 4, right: 4, bottom: 4, left: 4 } };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "Finalized report", preservePdfPageGeometry: true });
@@ -158,7 +159,7 @@ describe("QZ Tray service", () => {
     const config = qzMocks.create.mock.results[0].value;
     expect(config.getOptions()).toEqual(expect.objectContaining({
       orientation,
-      size: { width: 210, height: 297, custom: false },
+      size: orientation === "landscape" ? null : { width: 210, height: 297, custom: false },
       margins: { top: 0, right: 0, bottom: 0, left: 0 },
       scaleContent: false,
       rotation: 0,
