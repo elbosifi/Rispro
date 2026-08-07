@@ -140,16 +140,16 @@ describe("QZ Tray service", () => {
     vi.mocked(Date.now).mockRestore();
   });
 
-  it("uses the physical A4 landscape profile without a job orientation override", async () => {
+  it("translates the logical A4 landscape profile to canonical driver media", async () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[1], printerName: "RISPRO A4 Landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, marginsMm: { top: 1, right: 2, bottom: 3, left: 4 } };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "RISpro registration list" });
-    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.objectContaining({ size: { width: 297, height: 210, custom: false }, orientation: "landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, margins: { top: 1, right: 2, bottom: 3, left: 4 } }));
+    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4 Landscape", expect.objectContaining({ size: { width: 210, height: 297, custom: false }, orientation: "landscape", printerTray: "Landscape Tray", copies: 2, rasterize: true, scaleContent: false, margins: { top: 1, right: 2, bottom: 3, left: 4 } }));
   });
 
   it.each([
     ["portrait", 0, 210, 297],
     ["landscape", 1, 297, 210],
-  ] as const)("serializes finalized A4 %s PDF options without a QZ page transformation", async (_label, profileIndex, width, height) => {
+  ] as const)("serializes finalized A4 %s PDF options with canonical driver media", async (orientation, profileIndex, width, height) => {
     vi.spyOn(Date, "now").mockReturnValue(1_725_000_000_789);
     const profile = { ...DEFAULT_PRINTER_PROFILES[profileIndex], printerName: `Finalized ${width}x${height}`, scaleContent: true, marginsMm: { top: 4, right: 4, bottom: 4, left: 4 } };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "Finalized report", preservePdfPageGeometry: true });
@@ -157,8 +157,8 @@ describe("QZ Tray service", () => {
     expect(qzMocks.create).toHaveBeenCalledTimes(1);
     const config = qzMocks.create.mock.results[0].value;
     expect(config.getOptions()).toEqual(expect.objectContaining({
-      orientation: null,
-      size: { width, height, custom: false },
+      orientation,
+      size: { width: 210, height: 297, custom: false },
       margins: { top: 0, right: 0, bottom: 0, left: 0 },
       scaleContent: false,
       rotation: 0,

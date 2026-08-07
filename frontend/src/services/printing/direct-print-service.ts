@@ -1,7 +1,7 @@
 import { api } from "@/lib/api-client";
 import { fetchAppointmentSlipSettings } from "@/lib/api-hooks";
 import { expectedOrientation } from "@/lib/printing-orientation";
-import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile, ReportCenterRenderModel } from "@/types/printing";
+import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile, ReportCenterRenderModel, StatisticsRenderModel } from "@/types/printing";
 import { connectQzTray, getInstalledPrinters, printPdf, QzTrayError } from "./qz-tray-service";
 import { loadQzPrinterSettings, normalizeQzPrinterSettings, resolvePrinterProfile } from "./workstation-printer-settings";
 import { setGlobalPrintStatus } from "./global-print-status";
@@ -69,6 +69,14 @@ export async function fetchReportCenterPdf(model: ReportCenterRenderModel): Prom
   if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Report PDF generation failed.");
   const blob = await response.blob();
   if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Report rendering did not return a PDF.");
+  return blob;
+}
+
+async function fetchStatisticsPdf(model: StatisticsRenderModel): Promise<Blob> {
+  const response = await fetch("/api/printing/statistics/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(model) });
+  if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Statistics PDF generation failed.");
+  const blob = await response.blob();
+  if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Statistics rendering did not return a PDF.");
   return blob;
 }
 
@@ -210,6 +218,16 @@ export async function directPrintReportCenter(model: ReportCenterRenderModel): P
   });
 }
 
+export async function directPrintStatistics(model: StatisticsRenderModel): Promise<DirectPrintResult> {
+  return executeDirectPrint({ documentType: "A4_LANDSCAPE_DOCUMENT" }, {
+    key: `statistics:${model.dateFrom}:${model.dateTo}:${model.modalityLabel}`,
+    name: `RISpro statistics - ${model.dateFrom} to ${model.dateTo}`,
+    generate: () => fetchStatisticsPdf(model),
+    preservePdfPageGeometry: true,
+    diagnostics: { documentKind: "statistics", rowCount: model.statusBreakdown.length + model.modalityBreakdown.length + model.dailyBreakdown.length },
+  });
+}
+
 export async function directTestPrint(profile: PrinterProfile): Promise<DirectPrintResult> {
   const normalized = normalizeQzPrinterSettings({ profiles: [profile] }).profiles.find((candidate) => candidate.documentType === profile.documentType) ?? null;
   const request: DirectPrintRequest = { documentType: profile.documentType };
@@ -219,6 +237,7 @@ export async function directTestPrint(profile: PrinterProfile): Promise<DirectPr
     key: `printer-test:${profile.documentType}:${profile.printerName}`,
     name: `RISpro printer test - ${profile.documentType}`,
     testPrint: true,
+    preservePdfPageGeometry: profile.documentType === "A4_LANDSCAPE_DOCUMENT",
   });
 }
 

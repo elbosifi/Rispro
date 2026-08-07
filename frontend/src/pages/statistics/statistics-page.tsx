@@ -28,6 +28,11 @@ import type {
   AppointmentStatisticsModalityRow,
   AppointmentStatisticsStatusRow
 } from "@/types/api";
+import type { StatisticsRenderModel } from "@/types/printing";
+import { directPrintStatistics } from "@/services/printing/direct-print-service";
+import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
+import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
+import { pushToast } from "@/lib/toast";
 
 type QuickRange = "today" | "yesterday" | "last7" | "last31" | "month" | "custom";
 
@@ -376,10 +381,42 @@ export default function StatisticsPage() {
     downloadCsv(`rispro-statistics-${dateFrom}-to-${dateTo}.csv`, rows);
   };
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!hasAggregateRows || !hasValidRange) return;
     void auditOutput("print", buildExportRows().length);
-    window.print();
+    if (!stats) return;
+    const rate = (value: number) => totalAppointments ? Math.round((value / totalAppointments) * 1000) / 10 : 0;
+    const selectedModality = (lookupsQuery.data?.modalities ?? []).find((item) => String(item.id) === modalityId);
+    const model: StatisticsRenderModel = {
+      dateFrom, dateTo,
+      modalityLabel: selectedModality ? (language === "ar" ? selectedModality.nameAr : selectedModality.nameEn) : t(language, "statistics.all"),
+      summary: [
+        { label: "Patient registry total", value: stats.summary.totalRegisteredPatients },
+        { label: "Appointments", value: stats.summary.totalAppointments },
+        { label: "Unique patients", value: stats.summary.uniquePatients },
+        { label: "Walk-ins", value: stats.summary.walkInCount },
+      ],
+      operational: [
+        { label: "Completion rate (%)", value: rate(stats.summary.completedCount) },
+        { label: "No-show rate (%)", value: rate(stats.summary.noShowCount) },
+        { label: "Cancellation rate (%)", value: rate(stats.summary.cancelledCount) },
+        { label: "In queue", value: stats.summary.inQueueCount },
+        { label: "Active workload", value: activeWorkloadCount ?? 0 },
+      ],
+      statusBreakdown: statusBreakdown.map((row) => ({ status: statusLabel(language, row.status), count: row.count })),
+      modalityBreakdown: modalityBreakdown.map((row) => ({ modality: language === "ar" ? row.modalityNameAr : row.modalityNameEn, total: row.totalCount, scheduled: row.scheduledCount, inQueue: row.inQueueCount, completed: row.completedCount, noShow: row.noShowCount, cancelled: row.cancelledCount, discontinued: row.discontinuedCount })),
+      dailyBreakdown: dailyBreakdown.map((row) => ({ date: row.appointmentDate, total: row.totalCount, completed: row.completedCount, noShow: row.noShowCount, cancelled: row.cancelledCount, discontinued: row.discontinuedCount })),
+    };
+    const result = await directPrintStatistics(model);
+    if (result.success) {
+      pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
+      return;
+    }
+    const action = resolveDirectPrintFailureAction(result.errorCode, true, loadQzPrinterSettings().browserPrintFallbackEnabled);
+    const toastAction = action === "OPEN_SETTINGS"
+      ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
+      : action === "BROWSER_PRINT" ? { label: "Use browser printing", onClick: () => window.print() } : null;
+    pushToast({ type: "error", title: "Print failed", message: result.message, ...(toastAction ? { action: toastAction } : {}) }, 10_000);
   };
 
   return (

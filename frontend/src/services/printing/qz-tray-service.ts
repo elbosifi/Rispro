@@ -109,11 +109,18 @@ export interface PrintPdfOptions {
 }
 
 function qzConfig(profile: PrinterProfile, copies: number, jobName: string, preservePdfPageGeometry = false) {
-  const size = { width: profile.paperWidthMm, height: profile.paperHeightMm, custom: profile.customPaperSize } as qz.Size & { custom: boolean };
+  const standardA4 = profile.customPaperSize === false
+    && ((profile.paperWidthMm === 210 && profile.paperHeightMm === 297)
+      || (profile.paperWidthMm === 297 && profile.paperHeightMm === 210));
+  const size = {
+    width: standardA4 ? 210 : profile.paperWidthMm,
+    height: standardA4 ? 297 : profile.paperHeightMm,
+    custom: profile.customPaperSize,
+  } as qz.Size & { custom: boolean };
   return qz.configs.create(profile.printerName, {
     units: "mm",
     size,
-    orientation: preservePdfPageGeometry ? null : expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
+    orientation: expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
     copies,
     scaleContent: preservePdfPageGeometry ? false : profile.scaleContent,
     margins: preservePdfPageGeometry ? { top: 0, right: 0, bottom: 0, left: 0 } : profile.marginsMm ?? 0,

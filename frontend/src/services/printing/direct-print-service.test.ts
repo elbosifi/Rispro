@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintRegistrationList, directPrintReportCenter, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
+import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintRegistrationList, directPrintReportCenter, directPrintStatistics, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 import { getGlobalPrintStatus, resetGlobalPrintStatusForTests, subscribeToGlobalPrintStatus } from "./global-print-status";
 
@@ -127,6 +127,18 @@ describe("direct print service", () => {
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/report-center/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify(model) }));
     expect(printPdf).toHaveBeenCalledTimes(1);
     expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType }), expect.any(String), expect.objectContaining({ preservePdfPageGeometry: true }));
+  });
+
+  it("routes one finalized Statistics PDF through the A4 landscape profile", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles.find((profile) => profile.documentType === "A4_LANDSCAPE_DOCUMENT")!.printerName = "Landscape Queue";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["Landscape Queue"]);
+    const model = { dateFrom: "2026-08-01", dateTo: "2026-08-07", modalityLabel: "All", summary: [], operational: [], statusBreakdown: [], modalityBreakdown: [], dailyBreakdown: [] };
+    await expect(directPrintStatistics(model)).resolves.toMatchObject({ success: true, printerName: "Landscape Queue" });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/statistics/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify(model) }));
+    expect(printPdf).toHaveBeenCalledTimes(1);
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "A4_LANDSCAPE_DOCUMENT" }), expect.any(String), expect.objectContaining({ preservePdfPageGeometry: true }));
   });
 
   it("keeps stored PDFs on their original document endpoint", async () => {
@@ -271,7 +283,7 @@ describe("direct print service", () => {
     const profile = { ...createDefaultQzPrinterSettings().profiles[3], printerName: "Label Queue" };
     getInstalledPrinters.mockResolvedValue(["Label Queue"]);
     await expect(directTestPrint(profile)).resolves.toMatchObject({ success: true, printerName: "Label Queue", jobName: "RISpro printer test - ACCESSION_LABEL" });
-    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ paperWidthMm: 50, paperHeightMm: 30, customPaperSize: true }), expect.any(String), expect.objectContaining({ jobName: "RISpro printer test - ACCESSION_LABEL" }));
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ paperWidthMm: 50, paperHeightMm: 30, customPaperSize: true }), expect.any(String), expect.not.objectContaining({ preservePdfPageGeometry: true }));
     const auditBody = JSON.parse(auditApi.mock.calls[0][1].body);
     expect(auditBody).toMatchObject({ documentType: "ACCESSION_LABEL", outcome: "submitted", testPrint: true, printerName: "Label Queue" });
   });
@@ -283,6 +295,7 @@ describe("direct print service", () => {
     const request = appointmentSlipFetch.mock.calls.find(([url]) => url === "/api/printing/printer-test/pdf");
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, orientation: "landscape", customPaperSize: false });
     expect(JSON.parse(auditApi.mock.calls[0][1].body)).toMatchObject({ documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210, testPrint: true });
+    expect(printPdf).toHaveBeenCalledWith(expect.any(Object), expect.any(String), expect.objectContaining({ preservePdfPageGeometry: true }));
   });
 
   it("rejects a test print when its exact printer queue is not installed", async () => {

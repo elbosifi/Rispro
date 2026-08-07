@@ -17,6 +17,7 @@ import { renderChromiumPdf, ChromiumPdfRenderError } from "../services/chromium-
 import { createRegistrationListRenderContext, deleteRegistrationListRenderContext, issueRegistrationListRenderToken } from "../services/registration-list-render-context-service.js";
 import { buildAccessionLabelHtml, buildPrinterTestHtml } from "../services/generated-print-html-service.js";
 import { buildReportCenterHtml, parseReportCenterRenderModel } from "../services/report-center-pdf-service.js";
+import { buildStatisticsHtml, parseStatisticsRenderModel } from "../services/statistics-pdf-service.js";
 
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
 const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A4_LANDSCAPE_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
@@ -175,6 +176,21 @@ printingRouter.post("/report-center/pdf", chromiumRenderConcurrencyLimiter, requ
   if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Report rendering returned an invalid PDF.", { code: "REPORT_RENDER_FAILED" });
   res.setHeader("Cache-Control", "no-store, private");
   res.setHeader("Content-Disposition", `inline; filename="${model.templateId}.pdf"`);
+  res.type("application/pdf").send(pdf);
+}));
+printingRouter.post("/statistics/pdf", chromiumRenderConcurrencyLimiter, requirePageAccess("statistics"), asyncRoute(async (req: Request, res: Response) => {
+  const model = parseStatisticsRenderModel(req.body);
+  const startedAt = performance.now();
+  let pdf: Buffer;
+  try {
+    pdf = await renderChromiumPdf({ source: { kind: "html", html: buildStatisticsHtml(model) }, documentKind: "statistics", pdfOptions: { displayHeaderFooter: true, margin: finalizedPdfMargins, headerTemplate: compactHeaderTemplate("RISpro Statistics", `${model.dateFrom} to ${model.dateTo}`), footerTemplate: compactFooterTemplate } });
+  } catch (error) {
+    if (error instanceof ChromiumPdfRenderError) throw new HttpError(502, "Statistics PDF rendering failed.", { code: "STATISTICS_RENDER_FAILED" });
+    throw error;
+  }
+  console.info("Chromium PDF generated", { documentKind: "statistics", rowCount: model.statusBreakdown.length + model.modalityBreakdown.length + model.dailyBreakdown.length, pdfBytes: pdf.length, stage: "pdf", elapsedMs: Math.round(performance.now() - startedAt) });
+  if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Statistics rendering returned an invalid PDF.", { code: "STATISTICS_RENDER_FAILED" });
+  res.setHeader("Cache-Control", "no-store, private");
   res.type("application/pdf").send(pdf);
 }));
 printingRouter.get("/accession-label/:appointmentId/pdf", chromiumRenderConcurrencyLimiter, asyncRoute(async (req: Request, res: Response) => {

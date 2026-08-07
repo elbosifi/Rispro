@@ -10,6 +10,7 @@ import type { AppointmentStatistics } from "@/types/api";
 const fetchStatisticsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const recordReportOutputMock = vi.fn();
+const directPrintStatisticsMock = vi.fn();
 let mockLanguage: "en" | "ar" = "en";
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -21,6 +22,10 @@ vi.mock("@/lib/api-hooks", () => ({
 vi.mock("@/providers/language-provider", () => ({
   useLanguage: () => ({ language: mockLanguage }),
 }));
+vi.mock("@/services/printing/direct-print-service", () => ({ directPrintStatistics: (...args: unknown[]) => directPrintStatisticsMock(...args) }));
+vi.mock("@/services/printing/direct-print-failure-action", () => ({ resolveDirectPrintFailureAction: (code: string) => code === "PRINT_STATUS_UNKNOWN" ? "NONE" : "BROWSER_PRINT" }));
+vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrinterSettings: () => ({ browserPrintFallbackEnabled: true }) }));
+vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 
 const baseStats: AppointmentStatistics = {
   metadata: {
@@ -127,8 +132,10 @@ describe("StatisticsPage", () => {
     fetchStatisticsMock.mockReset();
     fetchAppointmentLookupsMock.mockReset();
     recordReportOutputMock.mockReset();
+    directPrintStatisticsMock.mockReset();
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 1, nameEn: "CT", nameAr: "CT" }] });
     recordReportOutputMock.mockResolvedValue(undefined);
+    directPrintStatisticsMock.mockResolvedValue({ success: true, printerName: "A4 Landscape", jobName: "statistics" });
     vi.spyOn(window, "print").mockImplementation(() => undefined);
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:statistics");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
@@ -226,6 +233,19 @@ describe("StatisticsPage", () => {
 
     expect((csvButton as HTMLButtonElement).disabled).toBe(true);
     expect((printButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("routes the normal Statistics Print action through Chromium and QZ without browser printing", async () => {
+    fetchStatisticsMock.mockResolvedValue(baseStats);
+    renderPage(["/statistics?date=2026-06-30&modalityId=1"]);
+    await userEvent.click(await screen.findByRole("button", { name: /Print/i }));
+    await waitFor(() => expect(directPrintStatisticsMock).toHaveBeenCalledTimes(1));
+    expect(directPrintStatisticsMock).toHaveBeenCalledWith(expect.objectContaining({
+      dateFrom: "2026-06-30", dateTo: "2026-06-30", modalityLabel: "CT",
+      summary: expect.any(Array), operational: expect.any(Array), statusBreakdown: expect.any(Array), modalityBreakdown: expect.any(Array), dailyBreakdown: expect.any(Array),
+    }));
+    expect(window.print).not.toHaveBeenCalled();
+    expect(recordReportOutputMock).toHaveBeenCalledWith(expect.objectContaining({ reportTemplate: "statistics", outputType: "print" }));
   });
 
   it("initializes range and modality from URL params", async () => {

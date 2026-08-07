@@ -90,18 +90,18 @@ describe("QZ request signing", () => {
   });
   it("accepts physical portrait and landscape A4, A5, and 50 x 30 mm label options", () => {
     assert.ok(signed(printPayload(printOptions())));
-    assert.ok(signed(printPayload(printOptions({ size: { width: 297, height: 210, custom: false }, orientation: "landscape", jobName: "RISpro registration list" }))));
+    assert.ok(signed(printPayload(printOptions({ orientation: "landscape", margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false, jobName: "RISpro registration list" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 148, height: 210, custom: false }, jobName: "RISpro A5" }))));
     assert.ok(signed(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", scaleContent: false, rasterize: true, printerTray: "Tray 1", jobName: "RISpro label" }))));
   });
-  it("accepts only strict finalized portrait and landscape A4 options with null orientation", () => {
-    const finalized = { orientation: null, margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false };
+  it("accepts canonical A4 portrait and strict finalized landscape options", () => {
+    const finalized = { orientation: "landscape", margins: { top: 0, right: 0, bottom: 0, left: 0 }, scaleContent: false };
+    assert.ok(signed(printPayload(printOptions({ orientation: "portrait" }))));
     assert.ok(signed(printPayload(printOptions(finalized))));
-    assert.ok(signed(printPayload(printOptions({ ...finalized, size: { width: 297, height: 210, custom: false } }))));
-    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalized, size: { width: 148, height: 210, custom: false } })))), /orientation/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalized, size: { width: 50, height: 30, custom: true } })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalized, size: { width: 297, height: 210, custom: false } })))), /custom-media/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalized, scaleContent: true })))), /preserve page geometry/);
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalized, margins: { top: 1, right: 0, bottom: 0, left: 0 } })))), /preserve page geometry/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ ...finalized, orientation: null })))), /orientation/);
   });
   it("requires exactly one flat PDF data item", () => {
     assert.match(validationError(printPayload(printOptions(), { name: "P" }, [])), /Exactly one PDF/);
@@ -172,8 +172,8 @@ describe("QZ request signing", () => {
       assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size })))), /size|custom-media/);
     }
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 50, height: 30, custom: true }, orientation: "portrait" })))), /orientation/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ orientation: "landscape" })))), /orientation/);
-    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 297, height: 210, custom: false }, orientation: "portrait" })))), /orientation/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ orientation: "landscape" })))), /preserve page geometry/);
+    assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ size: { width: 297, height: 210, custom: false }, orientation: "landscape" })))), /custom-media/);
   });
   it("rejects invalid margins, job names, trays, and boolean options", () => {
     assert.throws(() => validateQzSigningRequest(JSON.stringify(printPayload(printOptions({ margins: { top: -1, right: 0, bottom: 0, left: 0 } })))), /margins/);

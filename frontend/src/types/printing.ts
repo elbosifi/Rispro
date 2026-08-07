@@ -78,3 +78,14 @@ export interface ReportCenterRenderModel {
   rows: Array<Record<string, string>>;
   summaryRows: Array<{ label: string; value: string }>;
 }
+
+export interface StatisticsRenderModel {
+  dateFrom: string;
+  dateTo: string;
+  modalityLabel: string;
+  summary: Array<{ label: string; value: number }>;
+  operational: Array<{ label: string; value: number }>;
+  statusBreakdown: Array<{ status: string; count: number }>;
+  modalityBreakdown: Array<{ modality: string; total: number; scheduled: number; inQueue: number; completed: number; noShow: number; cancelled: number; discontinued: number }>;
+  dailyBreakdown: Array<{ date: string; total: number; completed: number; noShow: number; cancelled: number; discontinued: number }>;
+}
