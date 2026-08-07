@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { filterVisibleAppointments, printAppointmentListV2 } from "./print-utils";
+import { filterVisibleAppointments } from "./print-utils";
+import { prepareAppointmentListHtml, printAppointmentListV2 } from "./registration-list-printing";
 
 function makeAppointment(status: AppointmentWithDetails["status"]): AppointmentWithDetails {
   return {
@@ -95,5 +96,13 @@ describe("print list helpers", () => {
     expect(html).toContain("Age: 40");
     expect(html).toContain("City: Tripoli");
     expect(html).toContain("المركز الوطني للأورام بنغازي");
+  });
+
+  it("prepares exactly the supplied rows without applying a status filter", () => {
+    const html = prepareAppointmentListHtml([makeAppointment("cancelled"), makeAppointment("scheduled")], "Current filters", new Date("2026-08-07T12:00:00Z"));
+    expect(html).toContain("V2-cancelled");
+    expect(html).toContain("V2-scheduled");
+    expect(html).toContain("Total: 2");
+    expect(html).toContain("size: A4 landscape");
   });
 });

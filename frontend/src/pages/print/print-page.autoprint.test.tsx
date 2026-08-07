@@ -145,6 +145,8 @@ vi.mock("@/lib/print-utils", () => ({
   prepareAppointmentSlipHtml: vi.fn().mockResolvedValue("<html><body>preview</body></html>"),
   printAppointmentSlip: vi.fn(),
   filterVisibleAppointments: vi.fn((items) => items),
+}));
+vi.mock("@/lib/registration-list-printing", () => ({
   printAppointmentListV2: vi.fn(),
 }));
 

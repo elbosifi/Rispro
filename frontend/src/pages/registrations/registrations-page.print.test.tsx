@@ -20,6 +20,7 @@ const useV2AvailabilityMock = vi.fn();
 const rescheduleV2BookingMock = vi.fn();
 const createSchedulingOverrideRequestMock = vi.fn();
 const prepareAppointmentSlipHtmlMock = vi.fn();
+const directPrintRegistrationRowsMock = vi.fn();
 const mockPrintAppointmentSlipById = vi.fn();
 const mockPushToast = vi.fn();
 let mockAuthRole: "receptionist" | "supervisor" | "super_admin" = "super_admin";
@@ -62,8 +63,8 @@ vi.mock("@/v2/appointments/api", () => ({
 
 vi.mock("@/lib/print-utils", () => ({
   prepareAppointmentSlipHtml: (...args: unknown[]) => prepareAppointmentSlipHtmlMock(...args),
-  printAppointmentListV2: vi.fn(),
 }));
+vi.mock("@/lib/registration-list-printing", () => ({ directPrintRegistrationRows: (...args: unknown[]) => directPrintRegistrationRowsMock(...args) }));
 
 vi.mock("@/lib/appointment-printing", () => ({
   printAppointmentSlipById: (...args: unknown[]) => mockPrintAppointmentSlipById(...args),
@@ -323,6 +324,8 @@ describe("RegistrationsPage print actions", () => {
     fetchAppointmentSlipSettingsMock.mockResolvedValue({});
     fetchPatientQrSettingsMock.mockResolvedValue({});
     prepareAppointmentSlipHtmlMock.mockResolvedValue("<html><body>preview</body></html>");
+    directPrintRegistrationRowsMock.mockReset();
+    directPrintRegistrationRowsMock.mockResolvedValue(undefined);
   });
 
   it("defaults to today's single-date registrations when opened normally", async () => {
@@ -545,6 +548,17 @@ describe("RegistrationsPage print actions", () => {
       expect(screen.getByTestId("appointment-document-workspace")).toBeTruthy();
       expect(screen.queryByRole("heading", { name: "Patient details" })).toBeNull();
     });
+  });
+
+  it("uses the same direct-print handler for both list buttons with the exact loaded rows", async () => {
+    renderRegistrationsPage();
+    await screen.findAllByText("ACC-7");
+    const buttons = screen.getAllByRole("button", { name: "Print" });
+    await userEvent.click(buttons[0]!);
+    await userEvent.click(buttons[1]!);
+    await waitFor(() => expect(directPrintRegistrationRowsMock).toHaveBeenCalledTimes(2));
+    expect(directPrintRegistrationRowsMock.mock.calls[0]?.[0]).toEqual(expect.arrayContaining([expect.objectContaining({ id: 7, accessionNumber: "ACC-7" })]));
+    expect(directPrintRegistrationRowsMock.mock.calls[1]?.[0]).toEqual(directPrintRegistrationRowsMock.mock.calls[0]?.[0]);
   });
 
   it("updates the deep-linked tab and closes without removing unrelated query parameters", async () => {

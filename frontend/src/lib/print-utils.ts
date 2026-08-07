@@ -1,6 +1,5 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
-import { LIBYAN_CITIES } from "@/lib/libyan-cities";
 import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   DEFAULT_PATIENT_QR_SETTINGS,
@@ -10,7 +9,7 @@ import {
   type PatientQrSettings,
 } from "@/lib/api-hooks";
 import QRCode from "qrcode";
-import { NOTO_NASKH_BOLD_URL, NOTO_NASKH_REGULAR_URL } from "@/lib/pdf-text-utils";
+import { NOTO_NASKH_BOLD_URL, NOTO_NASKH_REGULAR_URL } from "@/lib/print-fonts";
 
 const HIDDEN_APPOINTMENT_STATUSES = new Set(["cancelled", "discontinued", "voided"]);
 
@@ -201,10 +200,10 @@ function formatCaseCategoryValue(
   mode: AppointmentSlipSettings["languageMode"]
 ): string {
   if (category === "oncology") {
-    return mode === "ar" ? "أورام" : mode === "en" ? "Oncology" : "أورام / Oncology";
+    return mode === "ar" ? "Ø£ÙˆØ±Ø§Ù…" : mode === "en" ? "Oncology" : "Ø£ÙˆØ±Ø§Ù… / Oncology";
   }
   if (category === "non_oncology") {
-    return mode === "ar" ? "غير أورام" : mode === "en" ? "Non-oncology" : "غير أورام / Non-oncology";
+    return mode === "ar" ? "ØºÙŠØ± Ø£ÙˆØ±Ø§Ù…" : mode === "en" ? "Non-oncology" : "ØºÙŠØ± Ø£ÙˆØ±Ø§Ù… / Non-oncology";
   }
   return "";
 }
@@ -253,7 +252,7 @@ function buildInstructionText(
   const resolveBody = (value: string, fallback: string) => {
     // Keep the real instruction text when it exists; fallback is only for empty input.
     const cleaned = String(value || "").trim();
-    return cleaned && cleaned !== "—" ? cleaned : fallback;
+    return cleaned && cleaned !== "â€”" ? cleaned : fallback;
   };
 
   if (settings.showModalityInstructions) {
@@ -293,7 +292,7 @@ function buildSpecialReasonField(apt: AppointmentWithDetails): SlipField | null 
   const valueEn = String(apt.specialReasonLabelEn || fallbackCode).trim();
   if (!valueAr && !valueEn) return null;
   return {
-    labelAr: "سبب الحصة الخاصة",
+    labelAr: "Ø³Ø¨Ø¨ Ø§Ù„Ø­ØµØ© Ø§Ù„Ø®Ø§ØµØ©",
     labelEn: "Special Reason",
     valueAr: valueAr || valueEn,
     valueEn: valueEn || valueAr,
@@ -304,24 +303,24 @@ function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlip
   const fields: SlipField[] = [];
   if (settings.showPatientCategory && apt.caseCategory) {
     fields.push({
-      labelAr: "التصنيف",
+      labelAr: "Ø§Ù„ØªØµÙ†ÙŠÙ",
       labelEn: "Category",
       valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
       valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
     });
   }
-  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
+  if (settings.showPatientName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
   if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
-  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
-  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
-  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
-  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
-  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
-  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
-  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
-  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
-  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
-  if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  if (settings.showNationalId) fields.push({ labelAr: "Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
+  if (settings.showPhone) fields.push({ labelAr: "Ø§Ù„Ù‡Ø§ØªÙ", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
+  if (settings.showAgeSex) fields.push({ labelAr: "Ø§Ù„Ø¹Ù…Ø± / Ø§Ù„Ø¬Ù†Ø³", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¹Ø¯", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ø¯Ø®ÙˆÙ„", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
+  if (settings.showModality) fields.push({ labelAr: "Ù†ÙˆØ¹ Ø§Ù„Ø¬Ù‡Ø§Ø²", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
+  if (settings.showExamName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„ÙØ­Øµ", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
+  if (settings.showDate) fields.push({ labelAr: "Ø§Ù„ØªØ§Ø±ÙŠØ®", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "Ø§Ù„ÙˆÙ‚Øª", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
+  if (settings.showWalkIn) fields.push({ labelAr: "Ø­Ø§Ù„Ø© Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
   if (settings.showSpecialReason) {
     const specialReasonField = buildSpecialReasonField(apt);
     if (specialReasonField) fields.push(specialReasonField);
@@ -341,15 +340,15 @@ export function buildAppointmentSlipData(
   const patientName = localizeValueSafe(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
   const modality = localizeValueSafe(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
   const examName = localizeValueSafe(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
-  const ageSex = `${apt.ageYears || "—"} / ${apt.sex || "—"}`;
+  const ageSex = `${apt.ageYears || "â€”"} / ${apt.sex || "â€”"}`;
   const locationText = localizeValueSafe(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
   return {
     hospitalName,
     departmentName,
     patientName,
-    mrn: apt.mrn || "—",
-    nationalId: apt.nationalId || "—",
-    phone: apt.phone1 || "—",
+    mrn: apt.mrn || "â€”",
+    nationalId: apt.nationalId || "â€”",
+    phone: apt.phone1 || "â€”",
     accessionNumber: String(apt.accessionNumber || formatAccessionFromBookingId(apt.id)).trim(),
     appointmentNumber: String(apt.dailySequence || apt.id),
     bookingId: String(apt.id),
@@ -358,11 +357,11 @@ export function buildAppointmentSlipData(
     examName,
     appointmentDate: formatSlipDate(apt.appointmentDate, slipSettings.languageMode),
     ageSex,
-    walkInLabel: apt.isWalkIn ? localizeText("نعم", "Yes", slipSettings.languageMode) : localizeText("لا", "No", slipSettings.languageMode),
+    walkInLabel: apt.isWalkIn ? localizeText("Ù†Ø¹Ù…", "Yes", slipSettings.languageMode) : localizeText("Ù„Ø§", "No", slipSettings.languageMode),
     queueQrPayload,
     accessionBarcodePayload: buildSlipBarcodePayload(apt, slipSettings),
     locationText,
-    arrivalNote: localizeText("يرجى الحضور قبل الموعد بـ 15 دقيقة", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
+    arrivalNote: localizeText("ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø­Ø¶ÙˆØ± Ù‚Ø¨Ù„ Ø§Ù„Ù…ÙˆØ¹Ø¯ Ø¨Ù€ 15 Ø¯Ù‚ÙŠÙ‚Ø©", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
     modalityInstructions: localizeValueSafe(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
     examInstructions: localizeValueSafe(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
     fallbackInstructionText: localizeText(slipSettings.fallbackInstructionTextAr, slipSettings.fallbackInstructionTextEn, slipSettings.languageMode),
@@ -505,7 +504,7 @@ function buildCode39Bars(value: string): { units: number; bars: Array<{ x: numbe
 
 function isMeaningfulSlipValue(value: string | null | undefined): boolean {
   const normalized = String(value || "").trim();
-  return normalized !== "" && normalized !== "—";
+  return normalized !== "" && normalized !== "â€”";
 }
 
 function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSlipSettings["languageMode"]): string {
@@ -516,7 +515,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-ar">
         <div class="label ar">${escapeHtml(field.labelAr)}</div>
-        <div class="value ar">${escapeHtml(valueAr || "—")}</div>
+        <div class="value ar">${escapeHtml(valueAr || "â€”")}</div>
       </div>
     `;
   }
@@ -525,7 +524,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-en">
         <div class="label en">${escapeHtml(field.labelEn)}</div>
-        <div class="value en">${escapeHtml(valueEn || "—")}</div>
+        <div class="value en">${escapeHtml(valueEn || "â€”")}</div>
       </div>
     `;
   }
@@ -533,9 +532,9 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
   return `
     <div class="summary-item bilingual-card">
       <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "â€”")}</div>
       <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "â€”")}</div>
     </div>
   `;
 }
@@ -794,189 +793,4 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails, options
       frame?.remove();
     }, 1000);
   }
-}
-
-export function printAppointmentList(list: AppointmentWithDetails[], listDate: string): void {
-  const visibleList = filterVisibleAppointments(list);
-  if (visibleList.length === 0) return;
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
-
-  const now = new Date().toLocaleString();
-
-  const rows = visibleList
-    .map(
-      (apt, idx) => `
-      <div class="row">
-        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "—"}</div></div>
-        <div class="arabic">
-          <div class="label">Patient</div>
-          <div class="value">${escapeHtml(apt.arabicFullName)}</div>
-          <div class="meta">Age: ${escapeHtml(apt.ageYears ? String(apt.ageYears) : "â€”")} Â· City: ${escapeHtml(apt.address ? (LIBYAN_CITIES.find((city) => city.code === apt.address)?.nameEn ?? apt.address) : "â€”")}</div>
-        </div>
-        <div><div class="label">Accession</div><div class="value">${escapeHtml(apt.accessionNumber)}</div></div>
-        <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
-        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
-        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "—")}</div></div>
-        <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</div></div>
-        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "—")}</div></div>
-      </div>
-    `
-    )
-    .join("");
-
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>Appointment List</title>
-        <style>
-          @page { size: A4 landscape; margin: 8mm; }
-          * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
-          .slip { width: 100%; min-height: 100%; border: 1.5px solid #0f766e; border-radius: 12px; padding: 10px; }
-          .header { display: flex; align-items: center; justify-content: center; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
-          .logo { width: 20mm; height: 20mm; object-fit: contain; flex: 0 0 auto; }
-          .brand-wrap { text-align: center; }
-          .brand { margin: 0; font-size: 17px; font-weight: 800; color: #0f766e; }
-          .brand-ar { margin: 2px 0 0; font-size: 12px; font-weight: 700; color: #0f766e; direction: rtl; }
-          .title { margin: 3px 0 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.14em; }
-          .summary { margin: 0 0 8px; font-size: 10px; color: #374151; text-align: center; }
-          .row {
-            display: grid;
-            grid-template-columns: 22mm 2fr 22mm 1fr 22mm 1.1fr 22mm 1.5fr;
-            gap: 5px 7px;
-            align-items: center;
-            padding: 10px 12px;
-            border-bottom: 1px solid #e5e7eb;
-            font-size: 11px;
-          }
-          .row:nth-child(odd) { background: #f8fafc; }
-          .row:nth-child(even) { background: #eef6f5; }
-          .label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-          .value { font-size: 11px; font-weight: 700; color: #111827; word-break: break-word; line-height: 1.25; }
-          .meta { margin-top: 2px; font-size: 8.5px; color: #4b5563; line-height: 1.2; }
-          .arabic { direction: rtl; text-align: right; }
-          .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
-        </style>
-      </head>
-      <body>
-        <div class="slip">
-          <div class="header">
-            <img class="logo" src="/assets/nccb-logo.png" alt="Hospital logo" />
-            <div class="brand-wrap">
-              <p class="brand">National Cancer Center Benghazi</p>
-              <p class="brand-ar">Ø§Ù„Ù…Ø±ÙƒØ² Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ù„Ø£ÙˆØ±Ø§Ù… Ø¨Ù†ØºØ§Ø²ÙŠ</p>
-              <p class="title">Appointment List</p>
-            </div>
-          </div>
-          <p class="summary">Date window: ${escapeHtml(listDate)} · Total: ${visibleList.length} · Printed: ${escapeHtml(now)}</p>
-          ${rows}
-          <div class="footer">
-            <span>Generated by RISpro</span>
-            <span>${escapeHtml(now)}</span>
-          </div>
-        </div>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  const printDoc = printWindow.document;
-  const brandAr = printDoc.querySelector(".brand-ar");
-  if (brandAr) {
-    brandAr.textContent = "المركز الوطني للأورام بنغازي";
-  }
-  const summary = printDoc.querySelector(".summary");
-  if (summary && summary.textContent) {
-    summary.textContent = summary.textContent.replace(/Â·/g, "·");
-  }
-  printWindow.focus();
-  printWindow.print();
-}
-
-export function printAppointmentListV2(list: AppointmentWithDetails[], listDate: string): void {
-  const visibleList = filterVisibleAppointments(list);
-  if (visibleList.length === 0) return;
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
-
-  const now = new Date().toLocaleString();
-
-  const rows = visibleList
-    .map(
-      (apt, idx) => `
-      <div class="row">
-        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "—"}</div></div>
-        <div class="arabic">
-          <div class="label">Patient</div>
-          <div class="value">${escapeHtml(apt.arabicFullName)}</div>
-          <div class="meta">Age: ${escapeHtml(apt.ageYears ? String(apt.ageYears) : "N/A")} | City: ${escapeHtml(apt.address ? (LIBYAN_CITIES.find((city) => city.code === apt.address)?.nameEn ?? apt.address) : "N/A")}</div>
-        </div>
-        <div><div class="label">Accession</div><div class="value">${escapeHtml(apt.accessionNumber)}</div></div>
-        <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
-        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
-        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "—")}</div></div>
-        <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</div></div>
-        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "—")}</div></div>
-      </div>
-    `
-    )
-    .join("");
-
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>Appointment List</title>
-        <style>
-          @page { size: A4 landscape; margin: 8mm; }
-          * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
-          .slip { width: 100%; min-height: 100%; border: 1.5px solid #0f766e; border-radius: 12px; padding: 10px; }
-          .header { display: flex; align-items: center; justify-content: center; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
-          .logo { width: 20mm; height: 20mm; object-fit: contain; flex: 0 0 auto; }
-          .brand-wrap { text-align: center; }
-          .brand { margin: 0; font-size: 17px; font-weight: 800; color: #0f766e; }
-          .brand-ar { margin: 2px 0 0; font-size: 12px; font-weight: 700; color: #0f766e; direction: rtl; }
-          .title { margin: 3px 0 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.14em; }
-          .summary { margin: 0 0 8px; font-size: 10px; color: #374151; text-align: center; }
-          .row {
-            display: grid;
-            grid-template-columns: 22mm 2fr 22mm 1fr 22mm 1.1fr 22mm 1.5fr;
-            gap: 5px 7px;
-            align-items: center;
-            padding: 10px 12px;
-            border-bottom: 1px solid #e5e7eb;
-            font-size: 11px;
-          }
-          .row:nth-child(odd) { background: #f8fafc; }
-          .row:nth-child(even) { background: #eef6f5; }
-          .label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-          .value { font-size: 11px; font-weight: 700; color: #111827; word-break: break-word; line-height: 1.25; }
-          .meta { margin-top: 2px; font-size: 8.5px; color: #4b5563; line-height: 1.2; }
-          .arabic { direction: rtl; text-align: right; }
-          .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
-        </style>
-      </head>
-      <body>
-        <div class="slip">
-          <div class="header">
-            <img class="logo" src="/assets/nccb-logo.png" alt="Hospital logo" />
-            <div class="brand-wrap">
-              <p class="brand">National Cancer Center Benghazi</p>
-              <p class="brand-ar">المركز الوطني للأورام بنغازي</p>
-              <p class="title">Appointment List</p>
-            </div>
-          </div>
-          <p class="summary">Date window: ${escapeHtml(listDate)} · Total: ${visibleList.length} · Printed: ${escapeHtml(now)}</p>
-          ${rows}
-          <div class="footer">
-            <span>Generated by RISpro</span>
-            <span>${escapeHtml(now)}</span>
-          </div>
-        </div>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
 }

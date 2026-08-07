@@ -1,7 +1,5 @@
 import { api } from "@/lib/api-client";
-import { getAppointmentById, fetchAppointmentSlipSettings } from "@/lib/api-hooks";
-import { createAccessionLabelPdfBlob } from "@/lib/accession-label-printing";
-import { createPrinterTestPdfBlob } from "@/lib/printer-test-pdf";
+import { fetchAppointmentSlipSettings } from "@/lib/api-hooks";
 import { expectedOrientation } from "@/lib/printing-orientation";
 import type { DirectPrintErrorCode, DirectPrintJobState, DirectPrintRequest, DirectPrintResult, PrinterDocumentType, PrinterProfile } from "@/types/printing";
 import { connectQzTray, getInstalledPrinters, printPdf, QzTrayError } from "./qz-tray-service";
@@ -48,11 +46,27 @@ async function fetchAppointmentSlipPdf(appointmentId: string | number): Promise<
   return blob;
 }
 
+async function fetchAccessionLabelPdf(appointmentId: string | number, profile: PrinterProfile): Promise<Blob> {
+  const params = new URLSearchParams({ widthMm: String(profile.paperWidthMm), heightMm: String(profile.paperHeightMm) });
+  const response = await fetch(`/api/printing/accession-label/${encodeURIComponent(String(appointmentId))}/pdf?${params}`, { credentials: "include", cache: "no-store" });
+  if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Accession-label PDF rendering failed.");
+  const blob = await response.blob();
+  if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Accession-label rendering did not return a PDF.");
+  return blob;
+}
+
+async function fetchPrinterTestPdf(profile: PrinterProfile): Promise<Blob> {
+  const response = await fetch("/api/printing/printer-test/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) });
+  if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Printer-test PDF rendering failed.");
+  const blob = await response.blob();
+  if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Printer-test rendering did not return a PDF.");
+  return blob;
+}
+
 async function generatePdf(request: DirectPrintRequest, profile: PrinterProfile): Promise<Blob> {
   if (request.documentId) return fetchDocumentPdf(request.documentId);
   if (request.appointmentId == null) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "An appointment or PDF document is required for printing.");
-  const appointment = request.appointmentSnapshot ?? await getAppointmentById(Number(request.appointmentId));
-  if (request.documentType === "ACCESSION_LABEL") return createAccessionLabelPdfBlob(appointment, { widthMm: profile.paperWidthMm, heightMm: profile.paperHeightMm });
+  if (request.documentType === "ACCESSION_LABEL") return fetchAccessionLabelPdf(request.appointmentId, profile);
   if (request.documentType === "A4_DOCUMENT" || request.documentType === "A5_DOCUMENT") {
     const slipSettings = await fetchAppointmentSlipSettings();
     const expectedType = slipSettings.paperSize === "a4" ? "A4_DOCUMENT" : "A5_DOCUMENT";
@@ -97,6 +111,7 @@ interface DirectPrintExecutionOptions {
   key?: string;
   name?: string;
   testPrint?: boolean;
+  orientation?: "portrait" | "landscape";
 }
 
 async function executeDirectPrint(request: DirectPrintRequest, options: DirectPrintExecutionOptions = {}): Promise<DirectPrintResult> {
@@ -119,7 +134,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     const name = options.name ?? jobName(request);
     activeJobs.set(key, "submitting");
     setGlobalPrintStatus({ state: "submitting", printerName: profile.printerName }, key);
-    const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name });
+    const submission = printPdf(profile, base64, { copies: request.copies ?? profile.copies, jobName: name, ...(options.orientation ? { orientation: options.orientation } : {}) });
     pendingSubmissions.set(key, submission);
     const settled = submission.then(() => ({ ok: true as const })).catch((error: unknown) => ({ ok: false as const, error }));
     const status = await withStageTimeout(settled, DIRECT_PRINT_TIMEOUTS.submissionStatusMs, new DirectPrintError("PRINT_STATUS_UNKNOWN", "The original print request is still being processed. Do not retry or use browser printing yet."));
@@ -155,12 +170,28 @@ function nameForSettlement(options: DirectPrintExecutionOptions, request: Direct
 
 export async function directPrint(request: DirectPrintRequest): Promise<DirectPrintResult> { return executeDirectPrint(request); }
 
+export async function directPrintRegistrationList(appointmentIds: number[], label: string): Promise<DirectPrintResult> {
+  const request: DirectPrintRequest = { documentType: "A4_DOCUMENT" };
+  return executeDirectPrint(request, {
+    key: `registration-list:${appointmentIds.join(",")}`,
+    name: "RISpro registration list",
+    orientation: "landscape",
+    generate: async () => {
+      const response = await fetch("/api/printing/registration-list/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentIds, label }) });
+      if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Registration-list PDF rendering failed.");
+      const blob = await response.blob();
+      if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "Registration-list rendering did not return a PDF.");
+      return blob;
+    },
+  });
+}
+
 export async function directTestPrint(profile: PrinterProfile): Promise<DirectPrintResult> {
   const normalized = normalizeQzPrinterSettings({ profiles: [profile] }).profiles.find((candidate) => candidate.documentType === profile.documentType) ?? null;
   const request: DirectPrintRequest = { documentType: profile.documentType };
   return executeDirectPrint(request, {
     profile: normalized,
-    generate: async (validatedProfile) => createPrinterTestPdfBlob(validatedProfile),
+    generate: fetchPrinterTestPdf,
     key: `printer-test:${profile.documentType}:${profile.printerName}`,
     name: `RISpro printer test - ${profile.documentType}`,
     testPrint: true,

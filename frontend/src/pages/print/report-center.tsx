@@ -11,7 +11,7 @@ import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
-import { printAppointmentListV2 } from "@/lib/print-utils";
+import { printAppointmentListV2 } from "@/lib/registration-list-printing";
 
 type ReportSource = "appointments" | "patients" | "audit" | "disabled";
 

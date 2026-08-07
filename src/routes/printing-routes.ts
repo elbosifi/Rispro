@@ -12,6 +12,10 @@ import { requirePageAccess } from "../middleware/page-access.js";
 import { issueAppointmentSlipRenderToken } from "../services/appointment-slip-render-token-service.js";
 import { AppointmentSlipRenderError, renderAppointmentSlipPdf } from "../services/appointment-slip-chromium-service.js";
 import { env } from "../config/env.js";
+import { pool } from "../db/pool.js";
+import { renderChromiumPdf, ChromiumPdfRenderError } from "../services/chromium-pdf-service.js";
+import { createRegistrationListRenderContext, deleteRegistrationListRenderContext, issueRegistrationListRenderToken } from "../services/registration-list-render-context-service.js";
+import { buildAccessionLabelHtml, buildPrinterTestHtml } from "../services/generated-print-html-service.js";
 
 const PRINTING_ROLES = ["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"] as const;
 const DOCUMENT_TYPES = new Set(["A4_DOCUMENT", "A5_DOCUMENT", "ACCESSION_LABEL", "RECEIPT"]);
@@ -33,6 +37,41 @@ function dimension(value: unknown, max: number): number | null {
   if (value == null) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 10 || value > max) throw new HttpError(400, "Print audit paper dimensions are invalid.");
   return value;
+}
+
+function requiredDimension(value: unknown, max: number, label: string): number {
+  const parsed = dimension(value, max);
+  if (parsed == null) throw new HttpError(400, `${label} is required.`);
+  return parsed;
+}
+
+function assertValidRenderProfile(raw: Record<string, unknown>) {
+  const documentType = String(raw.documentType || "");
+  if (!DOCUMENT_TYPES.has(documentType)) throw new HttpError(400, "Printer-test document type is invalid.");
+  const widthMm = requiredDimension(raw.paperWidthMm, 500, "Paper width");
+  const heightMm = requiredDimension(raw.paperHeightMm, 1000, "Paper height");
+  const orientation = raw.orientation;
+  if (orientation !== "portrait" && orientation !== "landscape") throw new HttpError(400, "Printer-test orientation is invalid.");
+  if (typeof raw.customPaperSize !== "boolean" || typeof raw.rasterize !== "boolean") throw new HttpError(400, "Printer-test media settings are invalid.");
+  const standardA4 = widthMm === 210 && heightMm === 297;
+  const standardA5 = widthMm === 148 && heightMm === 210;
+  if (raw.customPaperSize === (standardA4 || standardA5)) throw new HttpError(400, "Printer-test custom-media setting is inconsistent.");
+  if (!standardA4 && orientation !== (widthMm > heightMm ? "landscape" : "portrait")) throw new HttpError(400, "Printer-test orientation does not match its media.");
+  if (standardA5 && orientation !== "portrait") throw new HttpError(400, "A5 printer-test orientation is invalid.");
+  const printerName = optionalString(raw.printerName, 255);
+  if (!printerName) throw new HttpError(400, "Printer name is required.");
+  return { documentType, printerName, widthMm, heightMm, orientation, customPaperSize: raw.customPaperSize, rasterize: raw.rasterize } as const;
+}
+
+async function renderTrustedHtmlPdf(html: string, documentKind: string): Promise<Buffer> {
+  let pdf: Buffer;
+  try { pdf = await renderChromiumPdf({ source: { kind: "html", html }, documentKind }); }
+  catch (error) {
+    if (error instanceof ChromiumPdfRenderError) throw new HttpError(502, "PDF rendering failed.", { code: "DOCUMENT_RENDER_FAILED" });
+    throw error;
+  }
+  if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Chromium returned an invalid PDF.", { code: "DOCUMENT_RENDER_FAILED" });
+  return pdf;
 }
 
 function parseAudit(body: unknown) {
@@ -65,6 +104,58 @@ const qzSignHandler = (req: Request, res: Response): void => {
 };
 const qzSignMiddlewares = [signingLimiter, qzSigningConcurrencyLimiter, qzSigningJsonParser, qzSignHandler] as const;
 printingRouter.post("/qz-sign", ...qzSignMiddlewares);
+printingRouter.post("/registration-list/pdf", requirePageAccess("registrations"), asyncRoute(async (req: Request, res: Response) => {
+  const raw = asUnknownRecord(req.body);
+  const appointmentIds = Array.isArray(raw.appointmentIds) && raw.appointmentIds.every((value) => typeof value === "number") ? raw.appointmentIds : [];
+  const label = typeof raw.label === "string" ? raw.label : "";
+  const context = createRegistrationListRenderContext(appointmentIds, label);
+  try {
+    const token = issueRegistrationListRenderToken(context.id);
+    const renderUrl = `http://127.0.0.1:${env.port}/print/internal/registration-list?token=${encodeURIComponent(token)}`;
+    const pdf = await renderChromiumPdf({ source: { kind: "url", url: renderUrl, readySelector: '[data-registration-list-document="true"]' }, documentKind: "registration-list" });
+    if (pdf.length < 5 || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") throw new HttpError(502, "Registration-list rendering returned an invalid PDF.", { code: "REGISTRATION_LIST_RENDER_FAILED" });
+    res.setHeader("Cache-Control", "no-store, private");
+    res.type("application/pdf").send(pdf);
+  } catch (error) {
+    if (error instanceof ChromiumPdfRenderError) throw new HttpError(502, "Registration-list PDF rendering failed.", { code: "REGISTRATION_LIST_RENDER_FAILED" });
+    throw error;
+  } finally {
+    deleteRegistrationListRenderContext(context.id);
+  }
+}));
+printingRouter.get("/accession-label/:appointmentId/pdf", asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Appointment identifier is invalid.");
+  const widthMm = requiredDimension(Number(req.query.widthMm), 500, "Label width");
+  const heightMm = requiredDimension(Number(req.query.heightMm), 1000, "Label height");
+  const result = await pool.query(`
+    select ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
+           b.booking_date::text as appointment_date, p.arabic_full_name, p.english_full_name, p.mrn,
+           m.code as modality_code, m.name_en as modality_name_en
+      from appointments_v2.bookings b
+      join patients p on p.id = b.patient_id
+      join modalities m on m.id = b.modality_id
+     where b.id = $1 limit 1`, [appointmentId]);
+  const appointment = result.rows[0];
+  if (!appointment) throw new HttpError(404, "Appointment not found.");
+  const html = await buildAccessionLabelHtml({
+    patientName: appointment.arabic_full_name || appointment.english_full_name || "Patient",
+    accessionNumber: appointment.accession_number,
+    modality: appointment.modality_code || appointment.modality_name_en || "",
+    appointmentDate: appointment.appointment_date,
+    mrn: appointment.mrn || "",
+  }, widthMm, heightMm);
+  const pdf = await renderTrustedHtmlPdf(html, "accession-label");
+  res.setHeader("Cache-Control", "no-store, private");
+  res.type("application/pdf").send(pdf);
+}));
+printingRouter.post("/printer-test/pdf", asyncRoute(async (req: Request, res: Response) => {
+  const profile = assertValidRenderProfile(asUnknownRecord(req.body));
+  const html = buildPrinterTestHtml({ ...profile, generatedAt: new Date().toISOString() });
+  const pdf = await renderTrustedHtmlPdf(html, "printer-test");
+  res.setHeader("Cache-Control", "no-store, private");
+  res.type("application/pdf").send(pdf);
+}));
 printingRouter.get("/appointment-slip/:appointmentId/pdf", requirePageAccess("print"), asyncRoute(async (req: Request, res: Response) => {
   const appointmentId = Number(req.params.appointmentId);
   if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Appointment identifier is invalid.");
@@ -95,4 +186,5 @@ export const __printingRouteTestables = {
   qzSigningConcurrencyLimiter,
   qzSigningJsonParser,
   qzSignHandler,
+  assertValidRenderProfile,
 };

@@ -23,6 +23,18 @@ describe("printing audit validation", () => {
   });
 });
 
+describe("generated printer-test profile validation", () => {
+  it("accepts standard A4 landscape without rotating media dimensions", () => {
+    assert.deepEqual(__printingRouteTestables.assertValidRenderProfile({ documentType: "A4_DOCUMENT", printerName: "A4", paperWidthMm: 210, paperHeightMm: 297, orientation: "landscape", customPaperSize: false, rasterize: false }), {
+      documentType: "A4_DOCUMENT", printerName: "A4", widthMm: 210, heightMm: 297, orientation: "landscape", customPaperSize: false, rasterize: false,
+    });
+  });
+  it("keeps custom-media orientation strict and rejects arbitrary non-custom media", () => {
+    assert.throws(() => __printingRouteTestables.assertValidRenderProfile({ documentType: "ACCESSION_LABEL", printerName: "Label", paperWidthMm: 50, paperHeightMm: 30, orientation: "portrait", customPaperSize: true, rasterize: true }), /orientation/);
+    assert.throws(() => __printingRouteTestables.assertValidRenderProfile({ documentType: "A4_DOCUMENT", printerName: "A4", paperWidthMm: 200, paperHeightMm: 300, orientation: "portrait", customPaperSize: false, rasterize: false }), /custom-media/);
+  });
+});
+
 describe("QZ signing route limits", () => {
   it("places per-user and global concurrency limiting before the route-specific JSON parser", () => {
     const route = __printingRouteTestables;

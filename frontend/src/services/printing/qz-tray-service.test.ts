@@ -140,6 +140,12 @@ describe("QZ Tray service", () => {
     vi.mocked(Date.now).mockRestore();
   });
 
+  it("keeps standard A4 dimensions while applying an optional landscape job override", async () => {
+    const profile = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "RISPRO A4" };
+    await printPdf(profile, "JVBERi0xLjQ=", { jobName: "RISpro registration list", orientation: "landscape" });
+    expect(qzMocks.create).toHaveBeenCalledWith("RISPRO A4", expect.objectContaining({ size: { width: 210, height: 297, custom: false }, orientation: "landscape" }));
+  });
+
   it("keeps concurrent print signatures associated with their own request", async () => {
     vi.spyOn(Date, "now").mockReturnValueOnce(101).mockReturnValueOnce(202);
     const a4 = { ...DEFAULT_PRINTER_PROFILES[0], printerName: "A4" };

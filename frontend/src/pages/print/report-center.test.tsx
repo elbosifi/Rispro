@@ -28,7 +28,7 @@ vi.mock("@/providers/language-provider", () => ({
   useLanguage: () => ({ language: "en" }),
 }));
 
-vi.mock("@/lib/print-utils", () => ({
+vi.mock("@/lib/registration-list-printing", () => ({
   printAppointmentListV2: vi.fn(),
 }));
 

@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
+import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintRegistrationList, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 import { getGlobalPrintStatus, resetGlobalPrintStatusForTests, subscribeToGlobalPrintStatus } from "./global-print-status";
 
 const getInstalledPrinters = vi.fn();
 const printPdf = vi.fn();
-const createAccessionLabelPdfBlob = vi.fn();
 const connectQzTray = vi.fn();
 const auditApi = vi.fn();
 const appointmentSlipFetch = vi.fn();
@@ -19,12 +18,8 @@ vi.mock("./qz-tray-service", () => ({
 }));
 vi.mock("@/lib/api-client", () => ({ api: (...args: unknown[]) => auditApi(...args) }));
 vi.mock("@/lib/api-hooks", () => ({
-  getAppointmentById: vi.fn().mockResolvedValue({ id: 7, accessionNumber: "ACC-7" }),
   fetchAppointmentSlipSettings: (...args: unknown[]) => fetchAppointmentSlipSettings(...args),
 }));
-vi.mock("@/lib/accession-label-printing", () => ({ createAccessionLabelPdfBlob: (...args: unknown[]) => createAccessionLabelPdfBlob(...args) }));
-
-const pdf = () => new Blob([new TextEncoder().encode("%PDF-1.4 test")], { type: "application/pdf" });
 
 describe("direct print service", () => {
   beforeEach(() => {
@@ -38,8 +33,6 @@ describe("direct print service", () => {
     fetchAppointmentSlipSettings.mockReset();
     fetchAppointmentSlipSettings.mockResolvedValue({ paperSize: "a4" });
     vi.stubGlobal("fetch", appointmentSlipFetch);
-    createAccessionLabelPdfBlob.mockReset();
-    createAccessionLabelPdfBlob.mockResolvedValue(pdf());
     connectQzTray.mockReset();
     connectQzTray.mockResolvedValue(undefined);
     auditApi.mockReset();
@@ -73,6 +66,7 @@ describe("direct print service", () => {
     expect(connectQzTray).toHaveBeenCalledTimes(1);
     expect(connectQzTray).toHaveBeenCalledBefore(getInstalledPrinters);
     expect(printPdf).toHaveBeenCalledTimes(1);
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/accession-label/7/pdf?widthMm=50&heightMm=30", expect.objectContaining({ credentials: "include", cache: "no-store" }));
   });
 
   it("publishes the direct-print lifecycle", async () => {
@@ -97,6 +91,16 @@ describe("direct print service", () => {
     await expect(directPrint({ documentType: "A4_DOCUMENT", appointmentId: 7 })).resolves.toMatchObject({ success: true, printerName: "A4" });
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/appointment-slip/7/pdf", expect.objectContaining({ credentials: "include", cache: "no-store" }));
     expect(printPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("prints a registration list through the A4 profile with a landscape-only job override", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles[0].printerName = "A4";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["A4"]);
+    await expect(directPrintRegistrationList([7, 9], "Current filters")).resolves.toMatchObject({ success: true, printerName: "A4" });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/registration-list/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify({ appointmentIds: [7, 9], label: "Current filters" }) }));
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "A4_DOCUMENT", paperWidthMm: 210, paperHeightMm: 297 }), expect.any(String), expect.objectContaining({ orientation: "landscape", jobName: "RISpro registration list" }));
   });
 
   it("fetches the backend Chromium PDF for A5 appointment slips", async () => {

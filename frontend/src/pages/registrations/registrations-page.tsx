@@ -26,8 +26,8 @@ import { buildAppointmentWhatsappText, normalizeWhatsappPhone } from "@/lib/what
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
   prepareAppointmentSlipHtml,
-  printAppointmentListV2,
 } from "@/lib/print-utils";
+import { directPrintRegistrationRows } from "@/lib/registration-list-printing";
 import { buildRegistrationAppointmentQuery, parseRegistrationFiltersFromSearchParams } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
 import type { WhatsappTemplate } from "@/lib/whatsapp";
@@ -412,7 +412,7 @@ export default function RegistrationsPage() {
   };
 
   const handlePrintVisibleList = () => {
-    printAppointmentListV2(appointments, listWindowLabel);
+    void directPrintRegistrationRows(appointments, listWindowLabel);
   };
 
   const patientScopeName = selectedAppointment

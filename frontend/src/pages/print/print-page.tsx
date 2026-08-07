@@ -16,9 +16,9 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import {
   filterVisibleAppointments,
   prepareAppointmentSlipHtml,
-  printAppointmentListV2,
   printAppointmentSlip,
 } from "@/lib/print-utils";
+import { printAppointmentListV2 } from "@/lib/registration-list-printing";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
