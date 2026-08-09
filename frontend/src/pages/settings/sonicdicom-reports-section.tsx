@@ -19,6 +19,7 @@ const DEFAULTS: SonicSettings = {
   sonicDicomReportsEnabled: false,
   sonicDicomReadinessMode: "sql_server",
   sonicDicomPublicBaseUrl: "https://ris.nccb.com.ly/viewer",
+  sonicDicomLocalBaseUrl: "",
   sonicDicomPublicReportViewerUrlTemplate: "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicPdfUrlTemplate: "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicImageViewerUrlTemplate: "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
@@ -69,8 +70,8 @@ function formatCodeList(value: unknown): string {
 
 function isValidUrl(value: unknown): boolean {
   try {
-    new URL(String(value || ""));
-    return true;
+    const url = new URL(String(value || ""));
+    return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
   }
@@ -180,8 +181,11 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
         SQL Server is the active readiness authority in production mode. Patient redirect still uses the public SonicDICOM browser URL template after final status confirmation.
       </div>
 
-      <FieldCard title="Public Patient-Facing URL">
-        <Input label="Public SonicDICOM base URL" value={String(form.sonicDicomPublicBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomPublicBaseUrl", value)} />
+      <FieldCard title="SonicDICOM Browser URLs">
+        <Input label="Public SonicDICOM browser URL" value={String(form.sonicDicomPublicBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomPublicBaseUrl", value)} />
+        <p className="text-xs text-slate-600">Used when RISpro is accessed through its public/domain address.</p>
+        <Input label="Local SonicDICOM browser URL" value={String(form.sonicDicomLocalBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomLocalBaseUrl", value)} />
+        <p className="text-xs text-slate-600">Used when RISpro is accessed through a local IP address. If empty, the public URL is used.</p>
         <Textarea label="Public report viewer URL template" value={String(form.sonicDicomPublicReportViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicReportViewerUrlTemplate", value)} />
         <Textarea label="Public PDF URL template" value={String(form.sonicDicomPublicPdfUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicPdfUrlTemplate", value)} />
         <Textarea label="Public image viewer URL template" value={String(form.sonicDicomPublicImageViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicImageViewerUrlTemplate", value)} />

@@ -206,7 +206,8 @@ router.get(
     const result = await getReportingBoardSonicDicomStudyRedirect(
       actor(req),
       requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
-      asOptionalString(req.query.scope)
+      asOptionalString(req.query.scope),
+      req.hostname
     );
     res.redirect(302, result.redirectUrl);
   })

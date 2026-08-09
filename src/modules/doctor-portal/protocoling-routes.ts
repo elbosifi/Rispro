@@ -155,7 +155,7 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
     const scope = req.query.scope === "patient" ? "patient" : "study";
-    res.redirect(await getProtocolingSonicDicomRedirect(positiveInteger(req.params.appointmentId, "appointmentId"), scope));
+    res.redirect(await getProtocolingSonicDicomRedirect(positiveInteger(req.params.appointmentId, "appointmentId"), scope, req.hostname));
   })
 );
 
@@ -163,7 +163,7 @@ router.get(
   "/appointments/:appointmentId/open-report",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
-    res.redirect(await getProtocolingReportRedirect(positiveInteger(req.params.appointmentId, "appointmentId")));
+    res.redirect(await getProtocolingReportRedirect(positiveInteger(req.params.appointmentId, "appointmentId"), req.hostname));
   })
 );
 

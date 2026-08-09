@@ -671,7 +671,7 @@ function normalizeSonicDicomOpenScope(scope?: string | null): SonicDicomOpenScop
   throw new HttpError(400, "SonicDICOM open scope must be study or patient.");
 }
 
-export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number, scopeInput?: string | null): Promise<{ redirectUrl: string }> {
+export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, appointmentId: number, scopeInput: string | null | undefined, requestHostname: string): Promise<{ redirectUrl: string }> {
   const { me, row } = await getAuthorizedReportingBoardAppointment(
     actor,
     appointmentId,
@@ -687,6 +687,7 @@ export async function getReportingBoardSonicDicomStudyRedirect(actor: Actor, app
   const sonicSettings = await readSonicDicomReportSettings();
   const redirectUrl = buildSonicDicomStaffViewerUrl({
     settings: sonicSettings,
+    requestHostname,
     target: scope === "study" ? "studyViewer" : "patientList",
     value: scope === "study" ? accessionNumber : patientDicomId,
   });

@@ -70,6 +70,7 @@ import {
   previewCatalogWorkbook
 } from "../services/settings-catalog-import-export-service.js";
 import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-service.js";
+import { validateSonicDicomReportSettings } from "../services/sonicdicom-report-settings.js";
 import { readPageVisibilityMatrix, savePageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
 import { readActionPinPolicy, saveActionPinPolicy } from "../services/action-pin-policy-service.js";
 import { ensurePatientWebPushConfig } from "../services/patient-web-push-service.js";
@@ -797,6 +798,10 @@ settingsRouter.put(
 
     if (category === SANTE_HL7_CATEGORY) {
       validateSanteSettingsEntries(entries);
+    }
+    if (category === "sonicdicom_reports") {
+      const config = entries.find((entry) => entry.key === "config")?.value;
+      if (config !== undefined) validateSonicDicomReportSettings(config);
     }
     if (category === "queue_and_arrival") {
       const existing = await getSettingsByCategory(category);

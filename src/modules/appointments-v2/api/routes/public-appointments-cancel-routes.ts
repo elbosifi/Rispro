@@ -12,8 +12,8 @@ import { isModalityAllowed, readPatientQrSettings } from "../../public/utils/pat
 import { readAppointmentSlipSettings } from "../../public/utils/appointment-slip-settings.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
 import {
-  buildPublicSonicDicomImageUrl,
-  buildPublicSonicDicomReportUrl,
+  buildSonicDicomImageBrowserUrl,
+  buildSonicDicomReportBrowserUrl,
   checkSonicDicomReportStatus,
   checkSonicDicomStudyExists,
   messageForReportState,
@@ -525,7 +525,7 @@ router.get(
       throw new HttpError(409, patientQrSettings.qrImageStudyNotFoundMessage, { code: "study_not_found" });
     }
 
-    const imageUrl = await buildPublicSonicDicomImageUrl(context);
+    const imageUrl = await buildSonicDicomImageBrowserUrl(context, req.hostname);
     res.redirect(imageUrl);
   })
 );
@@ -569,7 +569,7 @@ router.get(
       throw new HttpError(409, messageForReportState(status.state, patientQrSettings), { code: "report_not_final" });
     }
 
-    const reportUrl = await buildPublicSonicDicomReportUrl(context);
+    const reportUrl = await buildSonicDicomReportBrowserUrl(context, req.hostname);
     if (sonicSettings.auditPatientReportAccess) {
       await logAuditEntry({
         entityType: "patient_report",

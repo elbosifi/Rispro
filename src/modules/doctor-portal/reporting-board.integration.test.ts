@@ -419,10 +419,13 @@ async function createDoctorPortalTestApp() {
   const http = await import("node:http");
   const { createDoctorPortalRouter } = await import("./index.js");
   const { reportingBoardPublicRouter } = await import("./reporting-board-public-routes.js");
+  const { sonicDicomRouter } = await import("../../routes/sonicdicom.js");
   const appInstance = express();
+  appInstance.set("trust proxy", 1);
   appInstance.use(express.json({ limit: "10mb" }));
   appInstance.use(cookieParser());
   appInstance.use("/api/reporting", reportingBoardPublicRouter);
+  appInstance.use("/api/sonicdicom", sonicDicomRouter);
   appInstance.use("/api/doctor", createDoctorPortalRouter());
   appInstance.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     res.status((err as { statusCode?: number }).statusCode ?? 500).json({ error: err.message });
@@ -494,9 +497,9 @@ const api = async <T = unknown>(cookie: string, path: string, options: { method?
   return fetchJson<T>(app.baseUrl, path, { cookie, ...options });
 };
 
-const rawApi = (cookie: string, path: string) =>
+const rawApi = (cookie: string, path: string, headers: Record<string, string> = {}) =>
   fetch(`${app.baseUrl}${path}`, {
-    headers: { Cookie: cookie },
+    headers: { Cookie: cookie, ...headers },
     redirect: "manual",
   });
 
@@ -1163,16 +1166,33 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     await withSonicDicomConfig({
       sonicDicomReportsEnabled: true,
       sonicDicomPublicBaseUrl: "https://sonic.example/viewer/",
+      sonicDicomLocalBaseUrl: "http://192.168.1.30/viewer/",
     }, async () => {
-      const supervisorOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=study`);
+      const supervisorOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=study`, { Host: "192.168.1.20" });
       assert.equal(supervisorOpen.status, 302);
       const supervisorLocation = supervisorOpen.headers.get("location") ?? "";
-      assert.match(supervisorLocation, /^https:\/\/sonic\.example\/viewer\/#\/viewer\?accessionnumber=V2-0/);
+      assert.match(supervisorLocation, /^http:\/\/192\.168\.1\.30\/viewer\/#\/viewer\?accessionnumber=V2-0/);
       assert.doesNotMatch(supervisorLocation, /username|password/i);
 
-      const patientOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=patient`);
+      const patientOpen = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom?scope=patient`, { Host: "rispro.example.com" });
       assert.equal(patientOpen.status, 302);
       assert.equal(patientOpen.headers.get("location"), "https://sonic.example/viewer/#/list?patientid=OPEN-SONIC-DICOM-ID");
+
+      const proxiedPublicOpen = await rawApi(supervisor.cookie, `/api/sonicdicom/open?target=study&value=${encodeURIComponent("ACC 1/2")}`, {
+        Host: "rispro-container:3000",
+        "X-Forwarded-Host": "rispro.example.com",
+        "X-Forwarded-Proto": "https",
+      });
+      assert.equal(proxiedPublicOpen.status, 302);
+      assert.equal(proxiedPublicOpen.headers.get("location"), "https://sonic.example/viewer/#/viewer?accessionnumber=ACC%201%2F2");
+
+      const maliciousQuery = await rawApi(supervisor.cookie, "/api/sonicdicom/open?target=patient&value=SAFE&redirect=https://evil.example&host=evil.example", { Host: "192.168.1.20" });
+      assert.equal(maliciousQuery.headers.get("location"), "http://192.168.1.30/viewer/#/list?patientid=SAFE");
+
+      assert.equal((await rawApi(supervisor.cookie, "/api/sonicdicom/open?target=other&value=SAFE")).status, 400);
+      assert.equal((await rawApi(supervisor.cookie, "/api/sonicdicom/open?target=study")).status, 400);
+      assert.equal((await rawApi("", "/api/sonicdicom/open?target=study&value=SAFE")).status, 401);
+      assert.equal((await rawApi(supervisor.cookie, "/api/sonicdicom/unsupported?target=study&value=SAFE")).status, 404);
 
       const ownOpen = await rawApi(targetDoctor.cookie, `/api/doctor/reporting-board/cases/${ownCase}/open-sonicdicom`);
       assert.equal(ownOpen.status, 302);
@@ -1210,7 +1230,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       const response = await rawApi(supervisor.cookie, `/api/doctor/reporting-board/cases/${appointmentId}/open-sonicdicom`);
       assert.equal(response.status, 503);
       const body = await response.text();
-      assert.match(body, /public base URL is malformed/i);
+      assert.match(body, /public SonicDICOM browser URL is malformed/i);
     });
   });
 

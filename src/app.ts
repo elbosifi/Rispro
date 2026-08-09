@@ -41,6 +41,7 @@ import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer
 import { backupControlRouter } from "./routes/backup-control.js";
 import { requestScansRouter } from "./routes/request-scans.js";
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
+import { sonicDicomRouter } from "./routes/sonicdicom.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -162,6 +163,7 @@ export function createApp(): Application {
   app.use("/api/printing", printingRouter);
   app.use("/api/comparisons", comparisonsRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/sonicdicom", sonicDicomRouter);
   app.use("/api/user-notifications", userNotificationsRouter);
   app.use("/api/name-dictionary", nameDictionaryRouter);
   app.use("/api/dicom", dicomRouter);

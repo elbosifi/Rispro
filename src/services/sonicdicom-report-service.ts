@@ -1,6 +1,7 @@
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import { readSonicDicomReportSettings, type SonicDicomReportSettings } from "./sonicdicom-report-settings.js";
+import { resolveSonicDicomBrowserBaseUrl } from "./sonicdicom-browser-url.js";
 
 export type SonicDicomReportState =
   | "final"
@@ -123,13 +124,14 @@ function encodeStaffViewerValue(value: string | null | undefined): string {
 
 export function buildSonicDicomStaffViewerUrl(input: {
   settings: SonicDicomReportSettings;
+  requestHostname: string;
   target: "studyViewer" | "patientList";
   value: string;
 }): string {
   if (!input.settings.sonicDicomReportsEnabled) throw new HttpError(503, "SonicDICOM integration is disabled.");
   const value = String(input.value || "").trim();
   if (!value) throw new HttpError(400, "SonicDICOM viewer identifier is required.");
-  const baseUrl = validatedBaseUrl(input.settings.sonicDicomPublicBaseUrl, "SonicDICOM public base URL");
+  const baseUrl = resolveSonicDicomBrowserBaseUrl(input.requestHostname, input.settings);
   const route = input.target === "studyViewer" ? "viewer" : "list";
   const queryKey = input.target === "studyViewer" ? "accessionnumber" : "patientid";
   const rendered = `${baseUrl}/#/${route}?${queryKey}=${encodeStaffViewerValue(value)}`;
@@ -139,7 +141,7 @@ export function buildSonicDicomStaffViewerUrl(input: {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported protocol");
     return parsed.toString();
   } catch {
-    throw new HttpError(503, "SonicDICOM public base URL produced a malformed viewer URL.");
+    throw new HttpError(503, "SonicDICOM browser URL produced a malformed viewer URL.");
   }
 }
 
@@ -802,15 +804,12 @@ function resolveLookupTargets(settings: SonicDicomReportSettings, context: Repor
   }
 }
 
-export async function buildPublicSonicDicomReportUrl(context: ReportLookupContext): Promise<string> {
-  const settings = await readSonicDicomReportSettings();
-  const publicBaseUrl = settings.sonicDicomPublicBaseUrl.trim();
-  if (!publicBaseUrl) throw new HttpError(503, "Public SonicDICOM URL is not configured.");
-  try {
-    new URL(publicBaseUrl);
-  } catch {
-    throw new HttpError(503, "Public SonicDICOM URL is malformed.");
-  }
+export function buildSonicDicomReportBrowserUrlWithSettings(
+  context: ReportLookupContext,
+  requestHostname: string,
+  settings: SonicDicomReportSettings
+): string {
+  const browserBaseUrl = resolveSonicDicomBrowserBaseUrl(requestHostname, settings);
   const targets = resolveLookupTargets(settings, context);
   const target = targets[0];
   if (!target) throw new HttpError(503, "No valid report lookup key is available.");
@@ -818,18 +817,19 @@ export async function buildPublicSonicDicomReportUrl(context: ReportLookupContex
   if (target === "study_instance_uid") {
     template = template.replace(/accessionnumber=\{\{accessionNumber\}\}/i, "studyinstanceuid={{studyInstanceUid}}");
   }
-  return renderTemplate(template, settings, context, publicBaseUrl, "publicBaseUrl");
+  return renderTemplate(template, settings, context, browserBaseUrl, "publicBaseUrl");
 }
 
-export async function buildPublicSonicDicomImageUrl(context: ReportLookupContext): Promise<string> {
-  const settings = await readSonicDicomReportSettings();
-  const publicBaseUrl = settings.sonicDicomPublicBaseUrl.trim();
-  if (!publicBaseUrl) throw new HttpError(503, "Public SonicDICOM URL is not configured.");
-  try {
-    new URL(publicBaseUrl);
-  } catch {
-    throw new HttpError(503, "Public SonicDICOM URL is malformed.");
-  }
+export async function buildSonicDicomReportBrowserUrl(context: ReportLookupContext, requestHostname: string): Promise<string> {
+  return buildSonicDicomReportBrowserUrlWithSettings(context, requestHostname, await readSonicDicomReportSettings());
+}
+
+export function buildSonicDicomImageBrowserUrlWithSettings(
+  context: ReportLookupContext,
+  requestHostname: string,
+  settings: SonicDicomReportSettings
+): string {
+  const browserBaseUrl = resolveSonicDicomBrowserBaseUrl(requestHostname, settings);
   const targets = resolveLookupTargets(settings, context);
   const target = targets[0];
   if (!target) throw new HttpError(503, "No valid report lookup key is available.");
@@ -840,5 +840,9 @@ export async function buildPublicSonicDicomImageUrl(context: ReportLookupContext
   if (target === "study_instance_uid") {
     template = template.replace(/accessionnumber=\{\{accessionNumber\}\}/i, "studyinstanceuid={{studyInstanceUid}}");
   }
-  return renderTemplate(template, settings, context, publicBaseUrl, "publicBaseUrl");
+  return renderTemplate(template, settings, context, browserBaseUrl, "publicBaseUrl");
+}
+
+export async function buildSonicDicomImageBrowserUrl(context: ReportLookupContext, requestHostname: string): Promise<string> {
+  return buildSonicDicomImageBrowserUrlWithSettings(context, requestHostname, await readSonicDicomReportSettings());
 }

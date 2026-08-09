@@ -1,7 +1,7 @@
 import { pool } from "../../db/pool.js";
 import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
-import { buildPublicSonicDicomReportUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
+import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import type {
   DoctorProtocolingAppointmentDetail,
@@ -613,19 +613,20 @@ export async function deleteProtocolDocumentAnnotation(documentId: number, annot
   await logAuditEntry({ entityType: "document_annotation", entityId: annotationId, actionType: "doctor_protocol_annotation_deleted", oldValues: null, newValues: { documentId }, changedByUserId: deletedByUserId }).catch(() => null);
 }
 
-export async function getProtocolingSonicDicomRedirect(appointmentId: number, scope: "study" | "patient"): Promise<string> {
+export async function getProtocolingSonicDicomRedirect(appointmentId: number, scope: "study" | "patient", requestHostname: string): Promise<string> {
   const appointment = await getProtocolingAppointment(appointmentId);
   if (!appointment) throw new HttpError(404, "Appointment not found.");
   const value = scope === "study" ? appointment.accessionNumber : appointment.patientDicomId;
   if (!value) throw new HttpError(400, scope === "study" ? "Accession number is unavailable." : "DICOM Patient ID is unavailable.");
   return buildSonicDicomStaffViewerUrl({
     settings: await readSonicDicomReportSettings(),
+    requestHostname,
     target: scope === "study" ? "studyViewer" : "patientList",
     value,
   });
 }
 
-export async function getProtocolingReportRedirect(appointmentId: number): Promise<string> {
+export async function getProtocolingReportRedirect(appointmentId: number, requestHostname: string): Promise<string> {
   const appointment = await getProtocolingAppointment(appointmentId);
   if (!appointment) throw new HttpError(404, "Appointment not found.");
   const context = {
@@ -637,5 +638,5 @@ export async function getProtocolingReportRedirect(appointmentId: number): Promi
   };
   const status = await checkSonicDicomReportStatus(context, { useCache: true });
   if (!status.canViewReport) throw new HttpError(409, "The report is not available.");
-  return buildPublicSonicDicomReportUrl(context);
+  return buildSonicDicomReportBrowserUrl(context, requestHostname);
 }

@@ -12,6 +12,7 @@ export type SonicDicomReadinessMode = "sql_server" | "api" | "html_scrape";
 export interface SonicDicomReportSettings {
   sonicDicomReportsEnabled: boolean;
   sonicDicomPublicBaseUrl: string;
+  sonicDicomLocalBaseUrl: string;
   sonicDicomPublicReportViewerUrlTemplate: string;
   sonicDicomPublicPdfUrlTemplate: string;
   sonicDicomPublicImageViewerUrlTemplate: string;
@@ -50,6 +51,7 @@ export interface SonicDicomReportSettings {
 export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
   sonicDicomReportsEnabled: false,
   sonicDicomPublicBaseUrl: "https://ris.nccb.com.ly/viewer",
+  sonicDicomLocalBaseUrl: "",
   sonicDicomPublicReportViewerUrlTemplate:
     "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicPdfUrlTemplate:
@@ -168,6 +170,7 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
   return {
     sonicDicomReportsEnabled: asBoolean(record.sonicDicomReportsEnabled, defaults.sonicDicomReportsEnabled),
     sonicDicomPublicBaseUrl: asString(record.sonicDicomPublicBaseUrl, defaults.sonicDicomPublicBaseUrl),
+    sonicDicomLocalBaseUrl: asString(record.sonicDicomLocalBaseUrl, defaults.sonicDicomLocalBaseUrl),
     sonicDicomPublicReportViewerUrlTemplate: asString(record.sonicDicomPublicReportViewerUrlTemplate, defaults.sonicDicomPublicReportViewerUrlTemplate),
     sonicDicomPublicPdfUrlTemplate: asString(record.sonicDicomPublicPdfUrlTemplate, defaults.sonicDicomPublicPdfUrlTemplate),
     sonicDicomPublicImageViewerUrlTemplate: asString(record.sonicDicomPublicImageViewerUrlTemplate, defaults.sonicDicomPublicImageViewerUrlTemplate),
@@ -202,6 +205,24 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
     sonicDicomSqlFinalStatusCodes: asNumberArray(record.sonicDicomSqlFinalStatusCodes, defaults.sonicDicomSqlFinalStatusCodes),
     sonicDicomSqlDraftStatusCodes: asNumberArray(record.sonicDicomSqlDraftStatusCodes, defaults.sonicDicomSqlDraftStatusCodes),
   };
+}
+
+function validateHttpUrl(value: string, label: string, allowEmpty = false): void {
+  const trimmed = value.trim();
+  if (!trimmed && allowEmpty) return;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported protocol");
+  } catch {
+    throw new Error(`${label} must be a valid HTTP or HTTPS URL.`);
+  }
+}
+
+export function validateSonicDicomReportSettings(raw: unknown): SonicDicomReportSettings {
+  const settings = normalizeSonicDicomReportSettings(raw);
+  validateHttpUrl(settings.sonicDicomPublicBaseUrl, "Public SonicDICOM browser URL");
+  validateHttpUrl(settings.sonicDicomLocalBaseUrl, "Local SonicDICOM browser URL", true);
+  return settings;
 }
 
 export async function readSonicDicomReportSettings(): Promise<SonicDicomReportSettings> {
