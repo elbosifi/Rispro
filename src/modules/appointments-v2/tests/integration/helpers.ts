@@ -100,9 +100,12 @@ export async function seedTestData(
   // Create test modality (unique per prefix)
   const modalityCode = `${dataPrefix}${runSuffix}CT`;
   const modalityResult = await pool.query(
-    `insert into modalities (name_ar, name_en, code, daily_capacity, is_active)
-     values ($1, $2, $3, 10, true)
-     on conflict (code) do update set is_active = true
+    `insert into modalities (name_ar, name_en, code, daily_capacity, is_active, safety_warning_enabled, safety_workflow_type)
+     values ($1, $2, $3, 10, true, false, 'standard_acknowledgement')
+     on conflict (code) do update set
+       is_active = true,
+       safety_warning_enabled = false,
+       safety_workflow_type = 'standard_acknowledgement'
      returning id`,
     [`${dataPrefix}${runSuffix}اشعة مقطعية`, `${dataPrefix}${runSuffix}CT`, modalityCode]
   );
