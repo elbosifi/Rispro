@@ -223,6 +223,33 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     );
   }
 
+  async function withSonicDicomConfig(config: Record<string, unknown>, work: () => Promise<void>): Promise<void> {
+    const stored = await pool.query<{ setting_value: unknown; updated_by_user_id: number | null }>(
+      `select setting_value, updated_by_user_id from system_settings where category = 'sonicdicom_reports' and setting_key = 'config' limit 1`
+    );
+    const original = stored.rows[0] ?? null;
+    await pool.query(
+      `insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+       values ('sonicdicom_reports', 'config', $1::jsonb, $2)
+       on conflict (category, setting_key) do update
+       set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()`,
+      [JSON.stringify({ value: config }), testData.userId]
+    );
+    try {
+      await work();
+    } finally {
+      if (original) {
+        await pool.query(
+          `update system_settings set setting_value = $1::jsonb, updated_by_user_id = $2, updated_at = now()
+           where category = 'sonicdicom_reports' and setting_key = 'config'`,
+          [JSON.stringify(original.setting_value), original.updated_by_user_id]
+        );
+      } else {
+        await pool.query(`delete from system_settings where category = 'sonicdicom_reports' and setting_key = 'config'`);
+      }
+    }
+  }
+
   it("returns preview for a valid token", async () => {
     const bookingId = await createBooking("2026-08-01");
     const token = await issuePublicCancelToken(bookingId);
@@ -563,5 +590,65 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     );
     assert.equal(imageOpen.status, 403);
     assert.equal(imageOpen.data.details?.code, "image_access_modality_blocked");
+  });
+
+  it("selects local and public SonicDICOM URLs for successful report-open and image-open routes", async () => {
+    const bookingId = await createBooking("2026-08-09");
+    const token = await issuePublicCancelToken(bookingId);
+    assert.ok(token);
+    await pool.query(
+      `update appointments_v2.bookings
+       set status = 'completed', completed_at = now(), requires_report = true
+       where id = $1`,
+      [bookingId]
+    );
+    await updatePatientQrConfig({
+      enabled: true,
+      allowReportAccess: true,
+      allowImageAccess: true,
+      reportAccessRequiresCompletedAppointment: true,
+      imageAccessRequiresCompletedAppointment: true,
+      imageAccessRequiresReportRequiredFlag: false,
+      reportAccessModalityMode: "all",
+      imageAccessModalityMode: "all",
+    });
+
+    const routes = await import("../../api/routes/public-appointments-cancel-routes.js");
+    routes.__setPublicSonicDicomChecksForTest({
+      reportStatus: async () => ({ state: "final", canViewReport: true, source: "sonicdicom", reportFinalAt: new Date().toISOString() }),
+      studyExists: async () => ({ foundStudy: true }),
+    });
+    const originalTrustProxy = app.app.get("trust proxy");
+    app.app.set("trust proxy", 1);
+    try {
+      await withSonicDicomConfig({
+        sonicDicomReportsEnabled: true,
+        sonicDicomPublicBaseUrl: "https://public-sonic.example/viewer",
+        sonicDicomLocalBaseUrl: "http://192.168.1.30/viewer",
+      }, async () => {
+        const open = (path: string, publicHost?: string) => fetch(`${app.baseUrl}${path}`, {
+          headers: publicHost ? { Host: "rispro-container:3000", "X-Forwarded-Host": publicHost } : undefined,
+          redirect: "manual",
+        });
+        const reportLocal = await open(`/api/public/appointments/report-open?t=${encodeURIComponent(token)}`);
+        assert.equal(reportLocal.status, 302);
+        assert.match(reportLocal.headers.get("location") ?? "", /^http:\/\/192\.168\.1\.30\/viewer\/#\/report\?/);
+
+        const reportPublic = await open(`/api/public/appointments/report-open?t=${encodeURIComponent(token)}`, "rispro.example.com");
+        assert.equal(reportPublic.status, 302);
+        assert.match(reportPublic.headers.get("location") ?? "", /^https:\/\/public-sonic\.example\/viewer\/#\/report\?/);
+
+        const imageLocal = await open(`/api/public/appointments/image-open?t=${encodeURIComponent(token)}`);
+        assert.equal(imageLocal.status, 302);
+        assert.match(imageLocal.headers.get("location") ?? "", /^http:\/\/192\.168\.1\.30\/viewer\/#\/viewer\?/);
+
+        const imagePublic = await open(`/api/public/appointments/image-open?t=${encodeURIComponent(token)}`, "ris.nccb.com.ly");
+        assert.equal(imagePublic.status, 302);
+        assert.match(imagePublic.headers.get("location") ?? "", /^https:\/\/public-sonic\.example\/viewer\/#\/viewer\?/);
+      });
+    } finally {
+      app.app.set("trust proxy", originalTrustProxy);
+      routes.__setPublicSonicDicomChecksForTest(null);
+    }
   });
 });

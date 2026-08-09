@@ -178,7 +178,7 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        SQL Server is the active readiness authority in production mode. Patient redirect still uses the public SonicDICOM browser URL template after final status confirmation.
+        SQL Server is the active readiness authority in production mode. Patient report and image links use the SonicDICOM browser URL selected according to how RISpro was accessed.
       </div>
 
       <FieldCard title="SonicDICOM Browser URLs">

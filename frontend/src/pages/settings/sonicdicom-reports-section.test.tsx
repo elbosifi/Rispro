@@ -42,6 +42,7 @@ describe("SonicDICOM report settings browser URLs", () => {
     expect(localInput.value).toBe("http://192.168.1.30/viewer");
     expect(screen.getByText("Used when RISpro is accessed through its public/domain address.")).toBeTruthy();
     expect(screen.getByText("Used when RISpro is accessed through a local IP address. If empty, the public URL is used.")).toBeTruthy();
+    expect(screen.getByText("SQL Server is the active readiness authority in production mode. Patient report and image links use the SonicDICOM browser URL selected according to how RISpro was accessed.")).toBeTruthy();
 
     fireEvent.change(localInput, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

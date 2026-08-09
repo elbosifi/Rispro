@@ -34,6 +34,16 @@ import {
 } from "../../../../services/patient-web-push-service.js";
 
 const router = Router();
+let publicReportStatusChecker = checkSonicDicomReportStatus;
+let publicStudyExistenceChecker = checkSonicDicomStudyExists;
+
+export function __setPublicSonicDicomChecksForTest(overrides: {
+  reportStatus?: typeof checkSonicDicomReportStatus;
+  studyExists?: typeof checkSonicDicomStudyExists;
+} | null): void {
+  publicReportStatusChecker = overrides?.reportStatus ?? checkSonicDicomReportStatus;
+  publicStudyExistenceChecker = overrides?.studyExists ?? checkSonicDicomStudyExists;
+}
 const reportRateLimiter = createRateLimiter({
   windowMs: 60_000,
   maxRequests: 20,
@@ -484,7 +494,7 @@ router.get(
       return;
     }
 
-    const status = await checkSonicDicomReportStatus(context);
+    const status = await publicReportStatusChecker(context);
     res.json(makeReportStatusResponse(status.state, patientQrSettings, status.canViewReport));
   })
 );
@@ -517,7 +527,7 @@ router.get(
 
     let study;
     try {
-      study = await checkSonicDicomStudyExists(context);
+      study = await publicStudyExistenceChecker(context);
     } catch {
       throw new HttpError(503, patientQrSettings.qrImageUnavailableMessage, { code: "image_system_unavailable" });
     }
@@ -554,7 +564,7 @@ router.get(
       throw new HttpError(409, messageForReportState("not_completed", patientQrSettings), { code: "report_not_completed" });
     }
 
-    const status = await checkSonicDicomReportStatus(context, { useCache: true });
+    const status = await publicReportStatusChecker(context, { useCache: true });
     if (status.state !== "final") {
       if (sonicSettings.auditPatientReportAccess) {
         await logAuditEntry({

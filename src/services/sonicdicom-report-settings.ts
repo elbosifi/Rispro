@@ -1,4 +1,5 @@
 import { getSettingsByCategory } from "./settings-service.js";
+import { HttpError } from "../utils/http-error.js";
 
 export type SonicDicomLookupKey =
   | "accession_number"
@@ -214,7 +215,7 @@ function validateHttpUrl(value: string, label: string, allowEmpty = false): void
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported protocol");
   } catch {
-    throw new Error(`${label} must be a valid HTTP or HTTPS URL.`);
+    throw new HttpError(400, `${label} must be a valid HTTP or HTTPS URL.`);
   }
 }
 
