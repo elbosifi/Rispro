@@ -326,7 +326,7 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     modalityCode: str(raw, 'modality_code') || str(raw, 'modalityCode'),
     modalitySafetyWorkflowType: (() => {
       const value = strOrNull(raw, "modality_safety_workflow_type") ?? strOrNull(raw, "modalitySafetyWorkflowType");
-      return value === "mri_primary_implant_screening" ? value : "standard_acknowledgement";
+      return value === "mri_primary_implant_screening" || value === "standard_acknowledgement" ? value : undefined;
     })(),
     mriPrimaryScreening: mriScreening &&
       (mriScreening.result === "no_known_implant_reported" || mriScreening.result === "implant_reported_review_required")

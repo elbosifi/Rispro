@@ -420,6 +420,15 @@ router.get(
           m.name_ar as modality_name_ar,
           m.name_en as modality_name_en,
           m.code as modality_code,
+          m.safety_workflow_type as modality_safety_workflow_type,
+          case when screening.result is not null then jsonb_build_object(
+            'result', screening.result,
+            'implantSite', screening.implant_site,
+            'implantDescription', screening.implant_description,
+            'previousReviewerNameReported', screening.previous_reviewer_name_reported,
+            'screenedByUserId', screening.screened_by_user_id,
+            'screenedAt', screening.screened_at
+          ) else null end as mri_primary_screening,
           m.general_instruction_ar as modality_general_instruction_ar,
           m.general_instruction_en as modality_general_instruction_en,
           et.name_ar as exam_name_ar,
@@ -441,6 +450,7 @@ router.get(
         from appointments_v2.bookings b
         join patients p on p.id = b.patient_id
         join modalities m on m.id = b.modality_id
+        left join appointments_v2.mri_primary_screenings screening on screening.booking_id = b.id
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
         left join users created_by_user on created_by_user.id = b.created_by_user_id
@@ -1219,6 +1229,15 @@ router.get(
         m.name_ar as modality_name_ar,
         m.name_en as modality_name_en,
         m.code as modality_code,
+        m.safety_workflow_type as modality_safety_workflow_type,
+        case when screening.result is not null then jsonb_build_object(
+          'result', screening.result,
+          'implantSite', screening.implant_site,
+          'implantDescription', screening.implant_description,
+          'previousReviewerNameReported', screening.previous_reviewer_name_reported,
+          'screenedByUserId', screening.screened_by_user_id,
+          'screenedAt', screening.screened_at
+        ) else null end as mri_primary_screening,
         m.general_instruction_ar as modality_general_instruction_ar,
         m.general_instruction_en as modality_general_instruction_en,
         et.name_ar as exam_name_ar,
@@ -1243,6 +1262,7 @@ router.get(
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
+      left join appointments_v2.mri_primary_screenings screening on screening.booking_id = b.id
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       left join appointments_v2.pacs_auto_completion_settings pacs_settings on pacs_settings.modality_id = b.modality_id

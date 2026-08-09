@@ -940,6 +940,18 @@ describe("ModalityPage modality board", () => {
     expect(within(row).getByTestId("modality-board-status").textContent).not.toContain("Oncology");
   });
 
+  it("renders the MRI primary-screening badge in the patient status area", async () => {
+    await openBoard([
+      appointment({
+        id: 35,
+        modalitySafetyWorkflowType: "mri_primary_implant_screening",
+        mriPrimaryScreening: { result: "no_known_implant_reported", implantSite: null, implantDescription: null, previousReviewerNameReported: null, screenedByUserId: 1, screenedAt: "2026-06-18T08:00:00Z" },
+      }),
+    ]);
+
+    expect(within(screen.getByTestId("modality-board-row-35")).getByText("MRI primary screening complete — no implant reported")).toBeTruthy();
+  });
+
   it("uses language-specific direction spans for Arabic, English, identifiers, and duration", async () => {
     languageState.language = "ar";
     await openBoard([

@@ -74,6 +74,53 @@ describe("workflow timestamp mapping", () => {
     expect(appointment.autoCompletedAt).toBe("2026-06-18T08:28:00Z");
   });
 
+  it("maps MRI safety fields without treating missing workflow data as standard acknowledgement", () => {
+    const mriAppointment = mapAppointmentWithDetails({
+      id: 1,
+      patient_id: 2,
+      modality_id: 3,
+      accession_number: "ACC-MRI",
+      appointment_date: "2026-06-18",
+      daily_sequence: 1,
+      status: "scheduled",
+      arabic_full_name: "Patient",
+      modality_name_ar: "MRI",
+      modality_name_en: "MRI",
+      modality_safety_workflow_type: "mri_primary_implant_screening",
+      mri_primary_screening: {
+        result: "implant_reported_review_required",
+        implantSite: "left hip",
+        implantDescription: "joint replacement",
+        previousReviewerNameReported: "Dr Reported",
+        screenedByUserId: 7,
+        screenedAt: "2026-06-18T08:00:00Z",
+      },
+    });
+    const incompleteAppointment = mapAppointmentWithDetails({
+      id: 2,
+      patient_id: 2,
+      modality_id: 3,
+      accession_number: "ACC-PARTIAL",
+      appointment_date: "2026-06-18",
+      daily_sequence: 2,
+      status: "scheduled",
+      arabic_full_name: "Patient",
+      modality_name_ar: "MRI",
+      modality_name_en: "MRI",
+    });
+
+    expect(mriAppointment.modalitySafetyWorkflowType).toBe("mri_primary_implant_screening");
+    expect(mriAppointment.mriPrimaryScreening).toEqual({
+      result: "implant_reported_review_required",
+      implantSite: "left hip",
+      implantDescription: "joint replacement",
+      previousReviewerNameReported: "Dr Reported",
+      screenedByUserId: 7,
+      screenedAt: "2026-06-18T08:00:00Z",
+    });
+    expect(incompleteAppointment.modalitySafetyWorkflowType).toBeUndefined();
+  });
+
   it("maps queue workflow timestamps while preserving scannedAt", () => {
     const snapshot = mapQueueSnapshot({
       queue_date: "2026-06-18",

@@ -224,7 +224,7 @@ export function AppointmentManageModal({
       return getAppointmentById(normalizedAppointmentId);
     },
     enabled: open && normalizedAppointmentId !== null,
-    initialData: initialAppointment?.id === normalizedAppointmentId ? initialAppointment : undefined,
+    placeholderData: initialAppointment?.id === normalizedAppointmentId ? initialAppointment : undefined,
     staleTime: 30_000,
   });
   const appointment = appointmentQuery.data ?? null;

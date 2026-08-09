@@ -17,6 +17,7 @@ import {
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import {
   Badge,
@@ -978,6 +979,9 @@ export default function ModalityPage() {
                                     <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${appointment.caseCategory === "oncology" ? "bg-rose-600" : "bg-blue-700"}`} />
                                     <span className="truncate">{t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}</span>
                                   </div>
+                                ) : null}
+                                {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
+                                  <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} />
                                 ) : null}
                                 {appointment.protocolAssignmentSummary ? (
                                   <Badge

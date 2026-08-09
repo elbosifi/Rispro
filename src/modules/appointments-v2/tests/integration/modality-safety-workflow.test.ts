@@ -118,6 +118,27 @@ describe("modality safety workflow — integration", { skip }, () => {
       screenedByUserId: testData.userId,
       screenedAt: persisted.rows[0].screened_at.toISOString(),
     });
+
+    const listResponse = await fetch(`${app.baseUrl}/api/v2/read/appointments?date=2027-01-06`, { headers: { Cookie: authCookie } });
+    const list = await listResponse.json() as Record<string, any>;
+    const listAppointment = list.appointments.find((row: Record<string, unknown>) => Number(row.id) === bookingId);
+    assert.equal(listResponse.status, 200);
+    assert.equal(listAppointment?.modality_safety_workflow_type, "mri_primary_implant_screening");
+    assert.deepEqual(listAppointment?.mri_primary_screening, {
+      result: "no_known_implant_reported",
+      implantSite: null,
+      implantDescription: null,
+      previousReviewerNameReported: null,
+      screenedByUserId: testData.userId,
+      screenedAt: persisted.rows[0].screened_at.toISOString(),
+    });
+
+    const worklistResponse = await fetch(`${app.baseUrl}/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`, { headers: { Cookie: authCookie } });
+    const worklist = await worklistResponse.json() as Record<string, any>;
+    const worklistAppointment = worklist.appointments.find((row: Record<string, unknown>) => Number(row.id) === bookingId);
+    assert.equal(worklistResponse.status, 200);
+    assert.equal(worklistAppointment?.modality_safety_workflow_type, "mri_primary_implant_screening");
+    assert.deepEqual(worklistAppointment?.mri_primary_screening, listAppointment?.mri_primary_screening);
   });
 
   it("persists valid implant-reported screening fields", async () => {

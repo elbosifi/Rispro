@@ -156,6 +156,19 @@ describe("AppointmentManageModal", () => {
     expect((await screen.findAllByText("ACC-42")).length).toBeGreaterThan(0);
   });
 
+  it("fetches appointment detail on first open while rendering the list appointment as a placeholder", async () => {
+    let resolveAppointment!: (value: AppointmentWithDetails) => void;
+    const detailAppointment = { ...appointment, englishFullName: "Fetched detail" };
+    mocks.getAppointmentById.mockReturnValue(new Promise((resolve) => { resolveAppointment = resolve; }));
+
+    renderModal({ initialAppointment: { ...appointment, englishFullName: "List placeholder" } });
+
+    expect((await screen.findAllByText("List placeholder")).length).toBeGreaterThan(0);
+    expect(mocks.getAppointmentById).toHaveBeenCalledWith(42);
+    resolveAppointment(detailAppointment);
+    expect((await screen.findAllByText("Fetched detail")).length).toBeGreaterThan(0);
+  });
+
   it("shows a localized load error", async () => {
     mocks.getAppointmentById.mockRejectedValue(new Error("Appointment unavailable"));
     renderModal();
