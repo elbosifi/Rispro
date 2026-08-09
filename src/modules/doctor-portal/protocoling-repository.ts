@@ -70,6 +70,10 @@ function mapAppointment(row: RawRecord): DoctorProtocolingAppointmentRow {
     modalityId: Number(row.modality_id),
     modalityCode: normalizeProtocolingModality(row.modality_code),
     modalityName: stringOrNull(row.modality_name),
+    modalitySafetyWorkflowType: row.modality_safety_workflow_type === "mri_primary_implant_screening" ? "mri_primary_implant_screening" : "standard_acknowledgement",
+    mriPrimaryScreeningResult: row.mri_primary_screening_result === "no_known_implant_reported" || row.mri_primary_screening_result === "implant_reported_review_required"
+      ? row.mri_primary_screening_result
+      : null,
     examTypeId: numberOrNull(row.exam_type_id),
     examTypeName: stringOrNull(row.exam_type_name),
     caseCategory: stringOrNull(row.case_category),
@@ -145,6 +149,8 @@ const APPOINTMENT_SELECT = `
     b.modality_id,
     protocoling_modality.modality_code,
     m.name_en as modality_name,
+    m.safety_workflow_type as modality_safety_workflow_type,
+    screening.result as mri_primary_screening_result,
     b.exam_type_id,
     et.name_en as exam_type_name,
     b.case_category,
@@ -169,6 +175,7 @@ const APPOINTMENT_SELECT = `
   from appointments_v2.bookings b
   join patients p on p.id = b.patient_id
   join modalities m on m.id = b.modality_id
+  left join appointments_v2.mri_primary_screenings screening on screening.booking_id = b.id
   cross join lateral (
     select ${PROTOCOLING_MODALITY_SQL} as modality_code
   ) protocoling_modality

@@ -510,6 +510,9 @@ export async function createModality(
   if (!code || !nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr, and nameEn are required.");
   }
+  if (safetyWarningEnabled && !safetyWarningAr && !safetyWarningEn) {
+    throw new HttpError(400, "Safety warning text is required when modality safety warning is enabled.");
+  }
 
   const client = await pool.connect();
 
@@ -588,6 +591,9 @@ export async function updateModality(
 
   if (!code || !nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr, and nameEn are required.");
+  }
+  if (safetyWarningEnabled && !safetyWarningAr && !safetyWarningEn) {
+    throw new HttpError(400, "Safety warning text is required when modality safety warning is enabled.");
   }
 
   const client = await pool.connect();

@@ -23,6 +23,8 @@ const appointment: DoctorProtocolingAppointment = {
   modalityId: 4,
   modalityCode: "CT",
   modalityName: "CT",
+  modalitySafetyWorkflowType: "standard_acknowledgement",
+  mriPrimaryScreeningResult: null,
   examTypeId: 10,
   examTypeName: "CT Chest",
   caseCategory: "non_oncology",
@@ -54,6 +56,7 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false }) }));
 vi.mock("@/v2/appointments/api", () => ({
   rescheduleV2Booking: mockRescheduleBooking,
   useV2ExamTypes: () => ({ data: [{ id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true }, { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true }, { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true }], isLoading: false, isError: false }),
@@ -117,6 +120,29 @@ describe("Doctor protocoling request documents", () => {
     expect(screen.getByRole("link", { name: "Patient studies" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("00100020");
     expect(screen.getByRole("link", { name: "Patient studies in RadiAnt" }).getAttribute("href")).toContain("002888");
+  });
+
+  it("renders MRI primary-screening badges in the worklist and assignment header only for the MRI workflow", async () => {
+    const mriAppointment = { ...appointment, modalityCode: "MRI" as const, modalityName: "MRI", modalitySafetyWorkflowType: "mri_primary_implant_screening" as const, mriPrimaryScreeningResult: "implant_reported_review_required" as const };
+    mockFetchAppointments.mockResolvedValue([mriAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: mriAppointment, assignmentDetail: null });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    expect(await screen.findByText("MRI primary screening complete")).toBeTruthy();
+    expect(screen.getByText("Implant reported — MRI staff review required")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Assign" }));
+    expect(within(screen.getByRole("dialog", { name: "Assign protocol" })).getAllByText("MRI primary screening complete").length).toBeGreaterThan(0);
+    expect(appointment.modalitySafetyWorkflowType).toBe("standard_acknowledgement");
+  });
+
+  it("does not render an MRI primary-screening badge for standard CT workflow", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+
+    await screen.findByRole("button", { name: "Assign" });
+    expect(screen.queryByText("MRI primary screening complete")).toBeNull();
+    expect(screen.queryByText("MRI primary screening not recorded")).toBeNull();
   });
 
   it("shows and edits No report required through the V2 appointment update", async () => {

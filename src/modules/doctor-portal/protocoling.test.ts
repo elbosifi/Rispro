@@ -22,6 +22,8 @@ function protocolingAppointmentRow(overrides: Record<string, unknown> = {}) {
     modality_id: 2,
     modality_code: "MR",
     modality_name: "MR",
+    modality_safety_workflow_type: "mri_primary_implant_screening",
+    mri_primary_screening_result: "no_known_implant_reported",
     exam_type_id: 3,
     exam_type_name: "MRI Brain",
     case_category: null,
@@ -61,6 +63,7 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /coalesce\(apa\.status, 'NOT_PROTOCOLLED'\)/);
     assert.match(repo, /b\.requires_report/);
     assert.match(repo, /requiresReport: Boolean\(row\.requires_report\)/);
+    assert.match(repo, /appointments_v2\.mri_primary_screenings screening/);
   });
 
   it("normalizes MR modality rows to MRI in the protocoling worklist", async () => {
@@ -75,6 +78,8 @@ describe("Doctor Portal protocoling worklist backend", () => {
 
       assert.equal(rows[0].modalityCode, "MRI");
       assert.equal(rows[0].requiresReport, true);
+      assert.equal(rows[0].modalitySafetyWorkflowType, "mri_primary_implant_screening");
+      assert.equal(rows[0].mriPrimaryScreeningResult, "no_known_implant_reported");
     } finally {
       queryMock.mock.restore();
     }

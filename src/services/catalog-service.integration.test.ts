@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { createExamType, createModality, deleteExamType, listExamTypesForSettings, listModalitiesForSettings, updateExamType } from "./catalog-service.js";
+import { createExamType, createModality, deleteExamType, listExamTypesForSettings, listModalitiesForSettings, updateExamType, updateModality } from "./catalog-service.js";
 
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
   try {
@@ -87,6 +87,32 @@ test("modality safety workflow saves, reloads, defaults legacy input, and reject
         safetyWorkflowType: "not_approved",
       }, userId),
       (error: unknown) => error instanceof HttpError && error.statusCode === 400
+    );
+  } finally {
+    await cleanupCatalog(prefix);
+    await cleanupUser(userId);
+  }
+});
+
+test("modality safety warnings require one text only when enabled", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const prefix = `SAFEWARN_${suffix}`;
+  const userId = await createSupervisorUser(suffix);
+  try {
+    await assert.rejects(
+      () => createModality({ code: `${prefix}_BLANK`, nameAr: "Blank AR", nameEn: "Blank EN", dailyCapacity: 5, safetyWarningEnabled: true, safetyWarningAr: " ", safetyWarningEn: " " }, userId),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 400 && error.message === "Safety warning text is required when modality safety warning is enabled."
+    );
+    const english = await createModality({ code: `${prefix}_EN`, nameAr: "English AR", nameEn: "English EN", dailyCapacity: 5, safetyWarningEnabled: true, safetyWarningEn: "English warning" }, userId);
+    const arabic = await createModality({ code: `${prefix}_AR`, nameAr: "Arabic AR", nameEn: "Arabic EN", dailyCapacity: 5, safetyWarningEnabled: true, safetyWarningAr: "Arabic warning" }, userId);
+    const disabled = await createModality({ code: `${prefix}_DISABLED`, nameAr: "Disabled AR", nameEn: "Disabled EN", dailyCapacity: 5, safetyWarningEnabled: false }, userId);
+    assert.equal(english.safety_warning_en, "English warning");
+    assert.equal(arabic.safety_warning_ar, "Arabic warning");
+    assert.equal(disabled.safety_warning_enabled, false);
+    await assert.rejects(
+      () => updateModality(english.id, { code: english.code, nameAr: english.name_ar, nameEn: english.name_en, dailyCapacity: english.daily_capacity, isActive: "enabled", safetyWarningEnabled: true, safetyWarningAr: "", safetyWarningEn: "" }, userId),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 400 && error.message === "Safety warning text is required when modality safety warning is enabled."
     );
   } finally {
     await cleanupCatalog(prefix);

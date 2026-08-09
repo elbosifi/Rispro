@@ -1238,6 +1238,8 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
 
   const modalities = Array.isArray(data?.modalities) ? data.modalities : [];
+  const createSafetyWarningInvalid = createForm.safety_warning_enabled && !createForm.safety_warning_ar.trim() && !createForm.safety_warning_en.trim();
+  const editSafetyWarningInvalid = editForm.safety_warning_enabled && !editForm.safety_warning_ar.trim() && !editForm.safety_warning_en.trim();
 
   const startEdit = (modality: ModalitySettingsRow) => {
     setEditingId(modality.id);
@@ -1323,8 +1325,9 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
               <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
             </div>
           )}
+          {createSafetyWarningInvalid ? <p className="text-xs text-red-700" role="alert">Safety warning text is required when modality safety warning is enabled.</p> : null}
           <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!createForm.safety_warning_enabled} value={createForm.safety_workflow_type} onChange={(e) => setCreateForm({ ...createForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en || createSafetyWarningInvalid} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
         </div>
       )}
 
@@ -1358,9 +1361,10 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                     <textarea value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
                   </div>
                 )}
+                {editSafetyWarningInvalid ? <p className="text-xs text-red-700" role="alert">Safety warning text is required when modality safety warning is enabled.</p> : null}
                 <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!editForm.safety_warning_enabled} value={editForm.safety_workflow_type} onChange={(e) => setEditForm({ ...editForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
                 <div className="flex gap-2">
-                  <button onClick={() => updateMutation.mutate({ id: modality.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => updateMutation.mutate({ id: modality.id, data: editForm })} disabled={updateMutation.isPending || editSafetyWarningInvalid} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
                   <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">إلغاء</button>
                 </div>
               </div>

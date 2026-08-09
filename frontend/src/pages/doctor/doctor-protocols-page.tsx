@@ -57,6 +57,7 @@ import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-prin
 import { pushToast } from "@/lib/toast";
 import { formatDateLy } from "@/lib/date-format";
 import { Badge } from "@/components/shared";
+import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { ProtocolingAppointmentDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
@@ -1132,7 +1133,7 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
               <Cell>{appointment.examTypeName ?? "-"}</Cell>
               <Cell>{appointment.caseCategory ?? "-"}</Cell>
               <Cell><span className="block max-w-[16rem] truncate" title={appointment.clinicalNotes ?? undefined}>{appointment.clinicalNotes ?? "-"}</span></Cell>
-              <Cell><ProtocolStatusBadge assigned={appointment.assignment !== null} /></Cell>
+              <Cell><div className="flex flex-wrap items-center gap-1"><ProtocolStatusBadge assigned={appointment.assignment !== null} />{appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreeningResult} /> : null}</div></Cell>
               <Cell>{appointment.assignment ? (appointment.assignment.freeTextProtocol ? "Free-text protocol" : `${appointment.assignment.protocolName ?? "Saved protocol"} v${appointment.assignment.versionNumber ?? "-"}`) + (appointment.assignment.scannerName ? ` · ${appointment.assignment.scannerName}` : "") : "-"}</Cell>
               <Cell><button type="button" onClick={(event) => { event.stopPropagation(); openAssignmentModal(appointment.appointmentId); }} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>
             </tr>
@@ -1417,6 +1418,7 @@ function ProtocolAssignmentModal({
                 <span><span className="font-semibold text-muted-foreground">Modality</span> <span className="font-semibold text-foreground">{appointment.modalityName || appointment.modalityCode}</span></span>
                 <span className="inline-flex min-w-0 items-center gap-1"><span className="font-semibold text-muted-foreground">Examination</span> <span className="truncate font-semibold text-foreground">{displayedExamTypeName || "—"}</span><button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={() => { setExamTypeDraftId(String(displayedExamTypeId ?? "")); setExamTypeSearch(""); setExamEditorOpen((current) => !current); }} disabled={examTypesQuery.isLoading || examTypeUpdateMutation.isPending} aria-label="Edit examination type" title="Edit examination type"><Pencil size={13} aria-hidden="true" /></button></span>
                 <span className="inline-flex items-center gap-1"><span className="font-semibold text-muted-foreground">Category</span><ProtocolCategoryBadge category={appointment.caseCategory} /></span>
+              {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreeningResult} /> : null}
               <span className="relative inline-flex items-center gap-1"><button type="button" className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${displayedRequiresReport ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-300 bg-slate-100 text-slate-700"}`} onClick={() => { setReportDraft(displayedRequiresReport); setReportEditorOpen((current) => !current); }} disabled={reportUpdateMutation.isPending} aria-label="Edit report requirement" aria-expanded={reportEditorOpen}>{displayedRequiresReport ? "Report required" : "No report required"}<Pencil size={11} aria-hidden="true" /></button>
                 {reportEditorOpen ? <div className="absolute start-0 top-full z-40 mt-2 w-56 rounded-lg border bg-background p-3 shadow-xl" style={{ borderColor: "var(--border)" }} role="dialog" aria-label="Edit report requirement">
                   <p className="text-xs font-semibold">Report required</p>
