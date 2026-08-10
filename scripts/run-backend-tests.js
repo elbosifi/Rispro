@@ -55,7 +55,9 @@ function sourceHasDbUsage(source) {
     /from\s+["'][^"']*\/db\/pool\.js["']/.test(source) ||
     /import\s+\{\s*pool\s*\}\s+from\s+["'][^"']*pool\.js["']/.test(source) ||
     /\bnew\s+pg\.Pool\b/.test(source) ||
+    /\bnew\s+pg\.Client\b/.test(source) ||
     /\bnew\s+Pool\b/.test(source) ||
+    (/import\s+\{[^}]*\bClient\b[^}]*\}\s+from\s+["']pg["']/.test(source) && /\bnew\s+Client\b/.test(source)) ||
     /\bpool\.query\s*\(/.test(source)
   );
 }

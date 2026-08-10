@@ -14,7 +14,7 @@ test("retrieval stages a streamed copy only after incremental checksum and size 
   const expected = path.join(root, "source.rispro.zip"); await fs.writeFile(expected, "small streamed fixture"); const digest = await sha256File(expected);
   try {
     const result = await stageBackupV3RetrievedStream({ source: Readable.from(["small ", "streamed ", "fixture"]), stagingDir: path.join(root, "stage"), archiveName: "copy.rispro.zip", expectedByteSize: digest.byteSize, expectedSha256: digest.sha256, maximumByteSize: digest.byteSize });
-    assert.equal((await fs.stat(result.stagingPath)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal((await fs.stat(result.stagingPath)).mode & 0o777, 0o600);
     assert.equal(result.byteSize, digest.byteSize);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
