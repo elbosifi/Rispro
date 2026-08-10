@@ -25,6 +25,7 @@ import {
   testOrthancPacsTarget,
   upsertOrthancRemoteModality,
 } from "../services/orthanc-pacs-service.js";
+import { synchronizeAuthoritativeOrthancCdRobots } from "../services/authoritative-orthanc-service.js";
 import {
   listPacsAutoCompletionSettings,
   listPacsAutoCompletionTargets,
@@ -535,6 +536,7 @@ pacsRouter.put(
       payload: asUnknownRecord(request.body ?? {}),
       currentUserId: request.user.sub as UserId,
     });
+    await synchronizeAuthoritativeOrthancCdRobots();
     res.json(result);
   })
 );
@@ -548,7 +550,9 @@ pacsRouter.delete(
     if (!key) {
       throw new HttpError(400, "Orthanc modality key is required.");
     }
-    res.json(await deleteOrthancRemoteModality({ key, currentUserId: request.user.sub as UserId }));
+    const result = await deleteOrthancRemoteModality({ key, currentUserId: request.user.sub as UserId });
+    await synchronizeAuthoritativeOrthancCdRobots();
+    res.json(result);
   })
 );
 

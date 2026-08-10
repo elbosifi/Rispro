@@ -31,7 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/shared";
-import { fetchAppointmentLookups, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, completeAppointment, updateAppointmentStatus } from "@/lib/api-hooks";
+import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
@@ -57,6 +57,7 @@ type MoreMenuState = {
   top: number;
   left: number;
 };
+type CdDialogState = { appointment: AppointmentWithDetails; mode: "choose" | "resend" | "history" };
 type WaitingDurationInfo = {
   value: string;
   displayValue: string;
@@ -472,6 +473,10 @@ export default function ModalityPage() {
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
   const [statusReason, setStatusReason] = useState("");
   const [openMoreMenu, setOpenMoreMenu] = useState<MoreMenuState | null>(null);
+  const [cdDialog, setCdDialog] = useState<CdDialogState | null>(null);
+  const [cdDestinationKey, setCdDestinationKey] = useState("");
+  const [cdReasonCode, setCdReasonCode] = useState("");
+  const [cdReasonText, setCdReasonText] = useState("");
   const [elapsedNow, setElapsedNow] = useState(() => new Date());
 
   const { data: lookups } = useQuery<AppointmentLookups>({
@@ -511,6 +516,8 @@ export default function ModalityPage() {
     enabled: selectedAppointmentId != null && isProtocolModality(selectedAppointment),
     refetchInterval: 15_000,
   });
+  const cdDestinationsQuery = useQuery({ queryKey: ["modality", "cd-robots"], queryFn: fetchCdRobotDestinations, staleTime: 60_000 });
+  const cdHistoryQuery = useQuery({ queryKey: ["modality", "cd-deliveries", cdDialog?.appointment.id], queryFn: () => fetchCdRobotDeliveries(cdDialog!.appointment.id), enabled: cdDialog != null });
 
   useEffect(() => {
     const timer = window.setInterval(() => setElapsedNow(new Date()), 30_000);
@@ -560,6 +567,11 @@ export default function ModalityPage() {
       setOpenMoreMenu(null);
     },
   });
+  const cdCreateMutation = useMutation({
+    mutationFn: ({ bookingId, destinationKey, resendReasonCode, resendReasonText }: { bookingId:number; destinationKey:string; resendReasonCode?:string; resendReasonText?:string }) => createCdRobotDelivery(bookingId, { destinationKey, resendReasonCode, resendReasonText }),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }); await queryClient.invalidateQueries({ queryKey: ["modality", "cd-deliveries"] }); setCdDialog(null); setCdReasonCode(""); setCdReasonText(""); },
+  });
+  const cdRetryMutation = useMutation({ mutationFn: retryCdRobotDelivery, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }); await queryClient.invalidateQueries({ queryKey: ["modality", "cd-deliveries"] }); } });
 
   const boardAppointments = useMemo(
     () => appointments.slice().sort(compareBoardAppointments),
@@ -623,6 +635,26 @@ export default function ModalityPage() {
 
   const handlePrint = (appointmentId: number) => {
     void printAppointmentSlipById(appointmentId, language);
+  };
+  const openCd = (appointment: AppointmentWithDetails) => {
+    const destinations = cdDestinationsQuery.data?.destinations ?? [];
+    if (!destinations.length) return;
+    if (!appointment.cdSuccessfulCount && !appointment.cdLatestFailed && destinations.length === 1) {
+      cdCreateMutation.mutate({ bookingId: appointment.id, destinationKey: destinations[0]!.key });
+      setOpenMoreMenu(null);
+      return;
+    }
+    setCdDestinationKey(destinations[0]!.key);
+    setCdReasonCode(""); setCdReasonText("");
+    setCdDialog({ appointment, mode: appointment.cdSuccessfulCount ? "resend" : "choose" });
+    setOpenMoreMenu(null);
+  };
+  const submitCd = () => {
+    if (!cdDialog || !cdDestinationKey) return;
+    const additional = (cdDialog.appointment.cdSuccessfulCount ?? 0) > 0;
+    if (additional && !cdReasonCode) return;
+    if (cdReasonCode === "other" && cdReasonText.replace(/\s+/g, " ").trim().length < 5) return;
+    cdCreateMutation.mutate({ bookingId: cdDialog.appointment.id, destinationKey: cdDestinationKey, resendReasonCode: additional ? cdReasonCode : undefined, resendReasonText: additional ? cdReasonText : undefined });
   };
 
   const handleRequestCompletion = (appointment: AppointmentWithDetails) => {
@@ -1285,6 +1317,11 @@ export default function ModalityPage() {
             </button>
           ) : null}
           {moreMenuAppointment.status === "completed" ? (
+            <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} disabled={cdCreateMutation.isPending || !(cdDestinationsQuery.data?.destinations.length)} onClick={() => openCd(moreMenuAppointment)}>
+              <span>{moreMenuAppointment.cdActiveStatus === "sending" ? "CD sending" : moreMenuAppointment.cdSuccessfulCount ? `CD ✓ ${moreMenuAppointment.cdSuccessfulCount}` : moreMenuAppointment.cdLatestFailed ? "CD failed" : "CD"}</span>
+            </button>
+          ) : null}
+          {moreMenuAppointment.status === "completed" ? (
             <button
               type="button"
               role="menuitem"
@@ -1301,6 +1338,18 @@ export default function ModalityPage() {
           ) : null}
         </div>
       ) : null}
+
+      <Dialog open={Boolean(cdDialog)} onClose={() => setCdDialog(null)}>
+        <DialogContent maxWidth="md">
+          <DialogHeader><DialogTitle>{cdDialog?.mode === "resend" ? "Send additional CD" : "Send to CD robot"}</DialogTitle><DialogDescription>{cdDialog?.mode === "resend" ? `This study has already been sent. Successful copies: ${cdDialog.appointment.cdSuccessfulCount ?? 0}` : "Authoritative Orthanc will send the complete study to the selected CD robot."}</DialogDescription></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <label className="block">Destination<select className="mt-1 w-full rounded border p-2" value={cdDestinationKey} onChange={(event) => setCdDestinationKey(event.target.value)}>{(cdDestinationsQuery.data?.destinations ?? []).map((destination) => <option key={destination.key} value={destination.key}>{destination.name}</option>)}</select></label>
+            {cdDialog?.mode === "resend" ? <><label className="block">Reason<select className="mt-1 w-full rounded border p-2" value={cdReasonCode} onChange={(event) => setCdReasonCode(event.target.value)}><option value="">Select reason</option><option value="patient_requested_additional_copy">Patient requested additional copy</option><option value="previous_disc_damaged">Previous disc damaged</option><option value="disc_unreadable">Disc unreadable</option><option value="additional_copy_for_referring_physician">Additional copy for referring physician</option><option value="other">Other</option></select></label>{cdReasonCode === "other" ? <label className="block">Other reason<input className="mt-1 w-full rounded border p-2" value={cdReasonText} onChange={(event) => setCdReasonText(event.target.value)} /></label> : null}</> : null}
+            <div className="max-h-36 overflow-auto rounded border p-2 text-xs">{(cdHistoryQuery.data?.deliveries ?? []).map((delivery: CdRobotDelivery) => <div key={delivery.id} className="py-1">{new Date(delivery.requested_at).toLocaleString()} · {delivery.destination_key} · {delivery.requested_by} · {delivery.status}{delivery.resend_reason_code ? ` · ${delivery.resend_reason_code}` : ""}{delivery.last_error ? ` · ${delivery.last_error}` : ""}{delivery.status === "failed" ? <button type="button" className="ml-2 underline" disabled={cdRetryMutation.isPending} onClick={() => cdRetryMutation.mutate(delivery.id)}>Retry</button> : null}</div>)}</div>
+          </div>
+          <DialogFooter><Button type="button" variant="secondary" onClick={() => setCdDialog(null)}>Cancel</Button><Button type="button" disabled={cdCreateMutation.isPending || !cdDestinationKey || (cdDialog?.mode === "resend" && (!cdReasonCode || (cdReasonCode === "other" && cdReasonText.replace(/\s+/g, " ").trim().length < 5)))} onClick={submitCd}>{cdDialog?.mode === "resend" ? "Send additional CD" : "Send"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(selectedAppointment)} onClose={() => setSelectedAppointmentId(null)}>
         <DialogContent

@@ -18,6 +18,7 @@ export interface OrthancRemoteModality {
   host: string;
   port: number | null;
   isDefault: boolean;
+  isCdRobot?: boolean;
   configurationError?: string | null;
 }
 
@@ -333,8 +334,9 @@ function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModali
       aet: firstString(payload[0]),
       host: firstString(payload[1]),
       port,
-      isDefault: false,
-      configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
+    isDefault: false,
+    isCdRobot: false,
+    configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
     };
   }
   const data = record(payload);
@@ -345,6 +347,7 @@ function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModali
     host: firstString(data.Host, data.host),
     port,
     isDefault: false,
+    isCdRobot: false,
     configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
   };
 }
@@ -359,6 +362,7 @@ function normalizeStoredModality(value: unknown): OrthancRemoteModality | null {
     host: firstString(data.host, data.Host),
     port: parseOrthancPort(data.port ?? data.Port),
     isDefault: normalizeBoolean(data.isDefault ?? data.is_default),
+    isCdRobot: normalizeBoolean(data.isCdRobot ?? data.is_cd_robot),
     configurationError: null,
   };
 }
@@ -387,6 +391,7 @@ async function saveStoredOrthancRemoteModalities(modalities: OrthancRemoteModali
       host: modality.host,
       port: modality.port,
       isDefault: Boolean(modality.isDefault),
+      isCdRobot: Boolean(modality.isCdRobot),
     }))
     .sort((a, b) => a.key.localeCompare(b.key));
 
@@ -463,9 +468,9 @@ export async function listOrthancRemoteModalities(): Promise<{ modalities: Ortha
     try {
       const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}/configuration`, { settings });
       if (!response.ok) {
-        return { key, aet: "", host: "", port: null, isDefault: false, configurationError: `Orthanc read failed (status=${response.status}).` };
+        return { key, aet: "", host: "", port: null, isDefault: false, isCdRobot: stored.find((item) => item.key === key)?.isCdRobot || false, configurationError: `Orthanc read failed (status=${response.status}).` };
       }
-      return modalityFromPayload(key, response.json);
+      return { ...modalityFromPayload(key, response.json), isCdRobot: stored.find((item) => item.key === key)?.isCdRobot || false };
     } catch (error) {
       return {
         key,
@@ -473,6 +478,7 @@ export async function listOrthancRemoteModalities(): Promise<{ modalities: Ortha
         host: "",
         port: null,
         isDefault: false,
+        isCdRobot: stored.find((item) => item.key === key)?.isCdRobot || false,
         configurationError: error instanceof Error ? error.message : String(error),
       };
     }
@@ -505,6 +511,7 @@ export async function upsertOrthancRemoteModality({
     host: normalizeHost(payload.host ?? payload.Host),
     port: normalizePort(payload.port ?? payload.Port),
     isDefault: normalizeBoolean(payload.isDefault ?? payload.is_default),
+    isCdRobot: normalizeBoolean(payload.isCdRobot ?? payload.is_cd_robot),
   };
   const settings = await resolveSettings();
   await putOrthancRemoteModality(modality, settings);
@@ -512,6 +519,7 @@ export async function upsertOrthancRemoteModality({
   const stored = await loadStoredOrthancRemoteModalities();
   const previous = stored.find((item) => item.key === cleanKey);
   if (payload.isDefault == null && payload.is_default == null && previous) modality.isDefault = previous.isDefault;
+  if (payload.isCdRobot == null && payload.is_cd_robot == null && previous) modality.isCdRobot = previous.isCdRobot;
   const remaining = stored.filter((item) => item.key !== cleanKey);
   const next = [
     ...(modality.isDefault ? remaining.map((item) => ({ ...item, isDefault: false })) : remaining),

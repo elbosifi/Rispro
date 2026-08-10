@@ -12,6 +12,7 @@ interface OrthancRemoteModality {
   host: string;
   port: number | null;
   isDefault: boolean;
+  isCdRobot?: boolean;
   configurationError?: string | null;
 }
 
@@ -80,6 +81,7 @@ type OrthancModalityFormState = {
   host: string;
   port: number | "";
   isDefault: boolean;
+  isCdRobot: boolean;
 };
 
 type AutoCompletionDraft = {
@@ -142,6 +144,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     host: "",
     port: 104,
     isDefault: false
+    ,isCdRobot: false
   };
 
   const [createForm, setCreateForm] = useState<OrthancModalityFormState>(emptyForm);
@@ -168,6 +171,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     host: form.host,
     port: Number(form.port),
     isDefault: form.isDefault
+    ,isCdRobot: form.isCdRobot
   });
 
   const createMutation = useMutation({
@@ -293,6 +297,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       host: modality.host,
       port: modality.port ?? "",
       isDefault: modality.isDefault
+      ,isCdRobot: Boolean(modality.isCdRobot)
     });
   };
 
@@ -360,6 +365,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                         {t(language, "settings.pacs.default")}
                       </span>
                     )}
+                    {modality.isCdRobot && <span className="px-1.5 py-0.5 text-xs bg-violet-100 text-violet-700 rounded">CD Robot</span>}
                   </div>
                   <div className="text-xs text-stone-600 dark:text-stone-400 mt-1 font-mono">
                     {modality.host || t(language, "settings.pacs.missingHost")}:{modality.port ?? t(language, "settings.pacs.invalidPort")} | {t(language, "settings.pacs.aet")}: {modality.aet || t(language, "settings.pacs.missingAet")}
@@ -702,6 +708,10 @@ function OrthancModalityForm({
           onChange={(e) => onChange({ ...form, isDefault: e.target.checked })}
         />
         {t(language, "settings.pacs.defaultDestination")}
+      </label>
+      <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+        <input type="checkbox" checked={form.isCdRobot} onChange={(e) => onChange({ ...form, isCdRobot: e.target.checked })} />
+        CD robot destination
       </label>
       <div className="flex gap-2">
         <button

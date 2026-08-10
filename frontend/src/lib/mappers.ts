@@ -109,6 +109,9 @@ export interface AppointmentWithDetails extends Appointment {
   pacsFirstSeenAt?: string | null;
   pacsTimingSource?: string | null;
   pacsTimingConfidence?: "high" | "medium" | "low" | null;
+  cdSuccessfulCount?: number;
+  cdActiveStatus?: "sending" | null;
+  cdLatestFailed?: boolean;
   modalitySlotNumber: number | null;
   publicCancelToken?: string | null;
   publicAppointmentUrl?: string | null;
@@ -363,6 +366,9 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
       strOrNull(raw, "patient_primary_identifier_value") ?? strOrNull(raw, "patientPrimaryIdentifierValue"),
     pacsAutoCompletionEnabled:
       bool(raw, "pacs_auto_completion_enabled", bool(raw, "pacsAutoCompletionEnabled", false)),
+    cdSuccessfulCount: num(raw, "cd_successful_count") || num(raw, "cdSuccessfulCount"),
+    cdActiveStatus: (strOrNull(raw, "cd_active_status") ?? strOrNull(raw, "cdActiveStatus")) as "sending" | null,
+    cdLatestFailed: bool(raw, "cd_latest_failed", bool(raw, "cdLatestFailed", false)),
     pacsStudyStartedAt: strOrNull(raw, "pacs_study_started_at") ?? strOrNull(raw, "pacsStudyStartedAt"),
     pacsFirstSeenAt: strOrNull(raw, "pacs_first_seen_at") ?? strOrNull(raw, "pacsFirstSeenAt"),
     pacsTimingSource: strOrNull(raw, "pacs_timing_source") ?? strOrNull(raw, "pacsTimingSource"),

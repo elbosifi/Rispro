@@ -3463,6 +3463,13 @@ export async function completeAppointment(id: number) {
   return api<RawRecord>(`/v2/read/appointments/${id}/complete`, { method: "POST" });
 }
 
+export type CdRobotDestination = { key: string; name: string };
+export type CdRobotDelivery = { id: number; destination_key: string; status: "sending" | "success" | "failed"; attempt_count: number; resend_reason_code: string | null; resend_reason_text: string | null; requested_at: string; completed_at: string | null; last_error: string | null; requested_by: string };
+export async function fetchCdRobotDestinations() { return api<{ destinations: CdRobotDestination[] }>("/v2/read/modality/cd-robots"); }
+export async function fetchCdRobotDeliveries(bookingId: number) { return api<{ deliveries: CdRobotDelivery[] }>(`/v2/read/modality/appointments/${bookingId}/cd-deliveries`); }
+export async function createCdRobotDelivery(bookingId: number, input: { destinationKey: string; resendReasonCode?: string; resendReasonText?: string }) { return api<{ delivery: CdRobotDelivery }>(`/v2/read/modality/appointments/${bookingId}/cd-deliveries`, { method: "POST", body: JSON.stringify(input) }); }
+export async function retryCdRobotDelivery(deliveryId: number) { return api<{ delivery: CdRobotDelivery }>(`/v2/read/modality/cd-deliveries/${deliveryId}/retry`, { method: "POST" }); }
+
 // -- Settings --
 export async function fetchSettings(category: string) {
   const raw = await api<{ settings: RawRecord[] }>(`/settings/${category}`);

@@ -44,7 +44,7 @@ test("upserting a new default clears the old default and later detail edits pres
 
     await service.upsertOrthancRemoteModality({ key: "PAX2", payload: { aet: "PAX2_NEW", host: "10.0.0.21", port: 11113 }, currentUserId: null });
     const updated = await service.listOrthancRemoteModalities();
-    assert.deepEqual(updated.modalities.find((item) => item.key === "PAX2"), { key: "PAX2", aet: "PAX2_NEW", host: "10.0.0.21", port: 11113, isDefault: true, configurationError: null });
+    assert.deepEqual(updated.modalities.find((item) => item.key === "PAX2"), { key: "PAX2", aet: "PAX2_NEW", host: "10.0.0.21", port: 11113, isDefault: true, isCdRobot: false, configurationError: null });
     assert.equal(updated.modalities.filter((item) => item.isDefault).length, 1);
   } finally {
     service.__resetOrthancPacsFetchForTests();

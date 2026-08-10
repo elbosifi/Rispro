@@ -28,6 +28,7 @@ import {
   runManualOldNoShowCleanup,
 } from "../../booking/services/no-show-review.service.js";
 import { getModalityProtocolAssignment } from "../../modality/protocol-assignment.service.js";
+import { listCdRobotDeliveries, listCdRobotDestinations, retryCdRobotDelivery, startCdRobotDelivery } from "../../../../services/cd-robot-delivery-service.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1259,6 +1260,9 @@ router.get(
         coalesce(asd.same_day_appointment_count, case when b.status in ('scheduled', 'arrived', 'waiting') then 1 else 0 end)::int as same_day_appointment_count,
         (coalesce(asd.same_day_appointment_count, 0) > 1) as has_multiple_appointments,
         coalesce(asd.related_appointments, '[]'::jsonb) as related_appointments
+        ,coalesce(cd_summary.successful_count, 0)::int as cd_successful_count
+        ,cd_summary.active_status as cd_active_status
+        ,cd_summary.latest_failed as cd_latest_failed
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
@@ -1359,6 +1363,14 @@ router.get(
           and audit_log.entity_id = b.id
           and audit_log.new_values->>'status' in ('arrived', 'waiting', 'completed')
       ) status_times on true
+      left join lateral (
+        select
+          count(*) filter (where d.status = 'success')::int as successful_count,
+          max(d.status) filter (where d.status = 'sending') as active_status,
+          bool_or(d.status = 'failed') as latest_failed
+        from cd_robot_deliveries d
+        where d.booking_id = b.id
+      ) cd_summary on true
       where b.modality_id = $1
         and b.status in ('scheduled', 'waiting', 'arrived', 'completed', 'no-show', 'cancelled', 'discontinued')
       ${dateClause}
@@ -1381,6 +1393,34 @@ router.get(
     const result = await pool.query(sql, params);
     res.json({ appointments: result.rows });
   })
+);
+
+router.get(
+  "/modality/cd-robots",
+  requirePageAccess("modality"),
+  asyncRoute(async (_req: Request, res: Response) => { res.json({ destinations: await listCdRobotDestinations() }); })
+);
+
+router.get(
+  "/modality/appointments/:appointmentId/cd-deliveries",
+  requirePageAccess("modality"),
+  asyncRoute(async (req: Request, res: Response) => { res.json({ deliveries: await listCdRobotDeliveries(req.params.appointmentId) }); })
+);
+
+router.post(
+  "/modality/appointments/:appointmentId/cd-deliveries",
+  requirePageAccess("modality"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+    const delivery = await startCdRobotDelivery({ bookingId: req.params.appointmentId, destinationKey: body.destinationKey, resendReasonCode: body.resendReasonCode, resendReasonText: body.resendReasonText, userId: Number((req as AuthedRequest).user?.sub ?? 0) });
+    res.status(202).json({ delivery });
+  })
+);
+
+router.post(
+  "/modality/cd-deliveries/:deliveryId/retry",
+  requirePageAccess("modality"),
+  asyncRoute(async (req: Request, res: Response) => { res.status(202).json({ delivery: await retryCdRobotDelivery(req.params.deliveryId, Number((req as AuthedRequest).user?.sub ?? 0)) }); })
 );
 
 router.get(

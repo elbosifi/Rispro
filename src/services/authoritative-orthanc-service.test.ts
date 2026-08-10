@@ -82,6 +82,29 @@ test("builds recognizable descriptive aliases and resolves slug collisions deter
   assert.deepEqual(Object.fromEntries(forward.map((route) => [route.destinationKey, route.alias])), Object.fromEntries(reverse.map((route) => [route.destinationKey, route.alias])));
 });
 
+test("keeps CD robot aliases separate from automatic routing aliases", () => {
+  assert.deepEqual(service.buildAuthoritativeOrthancCdAliases(["Epson Robot 1", "Epson Robot 2"]), [
+    { destinationKey: "Epson Robot 1", alias: "rispro_cd_epson_robot_1" },
+    { destinationKey: "Epson Robot 2", alias: "rispro_cd_epson_robot_2" },
+  ]);
+});
+
+test("uses Authoritative Orthanc for C-ECHO and whole-study asynchronous C-STORE", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    calls.push({ path, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+    return path.endsWith("/store") ? json({ ID: "job-cd-1" }) : new Response(null, { status: 200 });
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  await client.echoRemoteModality("rispro_cd_robot_1");
+  assert.equal(await client.enqueueStudyStore("rispro_cd_robot_1", "study-1"), "job-cd-1");
+  assert.deepEqual(calls, [
+    { path: "/modalities/rispro_cd_robot_1/echo", method: "POST", body: null },
+    { path: "/modalities/rispro_cd_robot_1/store", method: "POST", body: { Resources: ["study-1"], Synchronous: false } },
+  ]);
+});
+
 test("reconciles descriptive aliases, updates details in place, and removes only deselected routes", async () => {
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   let modalities = [

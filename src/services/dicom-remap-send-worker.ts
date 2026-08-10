@@ -3,6 +3,7 @@ import {
   listDicomRemapSendMonitoringJobs,
   monitorDicomRemapSendJob,
 } from "./dicom-remap-service.js";
+import { monitorCdRobotDeliveries } from "./cd-robot-delivery-service.js";
 
 export interface DicomRemapSendWorker {
   stop(): Promise<void>;
@@ -35,6 +36,9 @@ export async function runDicomRemapSendWorkerTick(options: { batchSize?: number;
         }));
       }
     }
+    await monitorCdRobotDeliveries(Math.max(1, Math.min(options.batchSize ?? 25, 100))).catch((error) => {
+      console.warn(JSON.stringify({ type: "cd_robot_delivery_monitor_failed", error: error instanceof Error ? error.message : String(error) }));
+    });
     return { checked: jobs.length, staleFailed };
   } finally {
     tickRunning = false;

@@ -10,6 +10,7 @@ import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 
 export const AUTHORITATIVE_ORTHANC_CATEGORY = "authoritative_orthanc";
 export const AUTHORITATIVE_ORTHANC_ROUTE_PREFIX = "rispro_route_";
+export const AUTHORITATIVE_ORTHANC_CD_PREFIX = "rispro_cd_";
 const LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = /^rispro_autoroute(?:_[2-9][0-9]*)?$/;
 export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; autoRouteDestinationKeys: string[]; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
@@ -21,7 +22,7 @@ export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesI
 export type OrthancUploadedInstance = OrthancInstanceDetails;
 
 type FetchLike = typeof fetch;
-type AutoRouteDestination = { key: string; aet: string; host: string; port: number | null; configurationError?: string | null };
+type AutoRouteDestination = { key: string; aet: string; host: string; port: number | null; isCdRobot?: boolean; configurationError?: string | null };
 type AutoRouteDestinationLoader = () => Promise<{ modalities: AutoRouteDestination[] }>;
 let fetchForTests: FetchLike = fetch;
 let settingsForTests: AuthoritativeOrthancSettings | null = null;
@@ -54,6 +55,16 @@ export function buildAuthoritativeOrthancRouteAliases(destinationKeys: string[])
   });
   if (new Set(aliases.map((route) => route.alias)).size !== aliases.length) throw new HttpError(400, "Selected PACS destinations produce ambiguous Authoritative Orthanc routing aliases.");
   return aliases;
+}
+export function buildAuthoritativeOrthancCdAliases(destinationKeys: string[]): Array<{ destinationKey: string; alias: string }> {
+  const routes = destinationKeys.map((destinationKey) => ({ destinationKey, slug: routeSlug(destinationKey) || `destination_${routeKeyHash(destinationKey)}` }));
+  const slugCounts = new Map<string, number>();
+  for (const route of routes) slugCounts.set(route.slug, (slugCounts.get(route.slug) || 0) + 1);
+  return routes.map(({ destinationKey, slug }) => {
+    const suffix = slugCounts.get(slug)! > 1 ? `_${routeKeyHash(destinationKey)}` : "";
+    const maxSlugLength = 64 - AUTHORITATIVE_ORTHANC_CD_PREFIX.length - suffix.length;
+    return { destinationKey, alias: `${AUTHORITATIVE_ORTHANC_CD_PREFIX}${slug.slice(0, maxSlugLength).replace(/_+$/g, "")}${suffix}` };
+  });
 }
 
 export async function readAuthoritativeOrthancSettings(): Promise<AuthoritativeOrthancSettings> {
@@ -119,6 +130,21 @@ export class AuthoritativeOrthancClient {
   async listRemoteModalityKeys(): Promise<string[]> { const payload = await this.request("/modalities", {}, { allowDisabled: true }); return Array.isArray(payload) ? payload.map(text).filter(Boolean) : Object.keys(record(payload)); }
   async upsertRemoteModality(key: string, modality: { aet: string; host: string; port: number }): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ AET: modality.aet, Host: modality.host, Port: modality.port }) }); }
   async deleteRemoteModality(key: string): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "DELETE" }, { allowDisabled: true, acceptableStatuses: [404] }); }
+  async echoRemoteModality(key: string): Promise<void> { await this.request(`/modalities/${encodeURIComponent(key)}/echo`, { method: "POST" }); }
+  async enqueueStudyStore(key: string, orthancStudyId: string): Promise<string> {
+    const response = record(await this.request(`/modalities/${encodeURIComponent(key)}/store`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Resources: [orthancStudyId], Synchronous: false }) }));
+    const jobId = first(response.ID, response.Id, response.id, response.Path);
+    if (!jobId) throw new HttpError(502, "Authoritative Orthanc accepted the study send without a job ID.", { code: "orthanc_send_job_id_missing" });
+    return jobId.replace(/^\/jobs\//, "");
+  }
+  async getJob(jobId: string): Promise<Record<string, unknown>> { return record(await this.request(`/jobs/${encodeURIComponent(jobId)}`)); }
+  async assertStudyStableAndNonEmpty(orthancStudyId: string): Promise<OrthancStudyDetails> {
+    const detail = await this.getStudy(orthancStudyId);
+    const raw = record(await this.request(`/studies/${encodeURIComponent(orthancStudyId)}`));
+    if (raw.IsStable === false) throw new HttpError(409, "Study is not yet stable in Authoritative Orthanc.", { code: "study_not_stable" });
+    if (detail.instanceCount < 1) throw new HttpError(409, "Study has no instances in Authoritative Orthanc.", { code: "study_empty" });
+    return detail;
+  }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); const row = { ...record(detail), ...record(statistics) }; const dicom = tags(row); return { orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]), patientSex: first(dicom.PatientSex, dicom["00100040"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean), seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"]), instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"]) }; }
   async getInstance(orthancInstanceId: string): Promise<OrthancInstanceDetails> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");
@@ -178,6 +204,18 @@ export async function synchronizeAuthoritativeOrthancAutoRoute(settings: Authori
   const desiredAliases = routes.map((route) => route.alias);
   for (const [index, destination] of destinations.entries()) await client.upsertRemoteModality(routes[index]!.alias, { aet: destination!.aet, host: destination!.host, port: destination!.port! });
   for (const alias of existingAliases.filter((item) => !desiredAliases.includes(item))) await client.deleteRemoteModality(alias);
+}
+export async function synchronizeAuthoritativeOrthancCdRobots(): Promise<void> {
+  const settings = await readAuthoritativeOrthancSettings();
+  if (!settings.enabled || !settings.baseUrl) return;
+  const client = new AuthoritativeOrthancClient(settings);
+  const { modalities } = await autoRouteDestinationLoader();
+  const destinations = modalities.filter((item) => item.isCdRobot);
+  if (destinations.some((item) => !item.aet || !item.host || item.port == null || item.configurationError)) throw new HttpError(400, "A CD robot destination is missing valid PACS connection details.");
+  const routes = buildAuthoritativeOrthancCdAliases(destinations.map((item) => item.key));
+  const existing = (await client.listRemoteModalityKeys()).filter((key) => key.startsWith(AUTHORITATIVE_ORTHANC_CD_PREFIX));
+  for (const [index, destination] of destinations.entries()) await client.upsertRemoteModality(routes[index]!.alias, { aet: destination.aet, host: destination.host, port: destination.port! });
+  for (const alias of existing.filter((alias) => !routes.some((route) => route.alias === alias))) await client.deleteRemoteModality(alias);
 }
 export async function createAuthoritativeOrthancClient() { return new AuthoritativeOrthancClient(await readAuthoritativeOrthancSettings()); }
 function httpErrorCode(error: HttpError): string { const details = record(error.details); return text(details.code) || "request_failed"; }

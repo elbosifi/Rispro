@@ -18,6 +18,10 @@ const listAppointmentDocumentsMock = vi.fn();
 const fetchCurrentSessionMock = vi.fn();
 const fetchIntegrationStatusMock = vi.fn();
 const completeAppointmentMock = vi.fn();
+const fetchCdRobotDestinationsMock = vi.fn();
+const fetchCdRobotDeliveriesMock = vi.fn();
+const createCdRobotDeliveryMock = vi.fn();
+const retryCdRobotDeliveryMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
@@ -34,6 +38,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchCurrentSession: (...args: unknown[]) => fetchCurrentSessionMock(...args),
   fetchIntegrationStatus: (...args: unknown[]) => fetchIntegrationStatusMock(...args),
   completeAppointment: (...args: unknown[]) => completeAppointmentMock(...args),
+  fetchCdRobotDestinations: (...args: unknown[]) => fetchCdRobotDestinationsMock(...args),
+  fetchCdRobotDeliveries: (...args: unknown[]) => fetchCdRobotDeliveriesMock(...args),
+  createCdRobotDelivery: (...args: unknown[]) => createCdRobotDeliveryMock(...args),
+  retryCdRobotDelivery: (...args: unknown[]) => retryCdRobotDeliveryMock(...args),
   updateAppointmentStatus: (...args: unknown[]) => updateAppointmentStatusMock(...args),
 }));
 
@@ -231,6 +239,10 @@ function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality") 
     ],
   });
   completeAppointmentMock.mockResolvedValue({ ok: true });
+  fetchCdRobotDestinationsMock.mockResolvedValue({ destinations: [] });
+  fetchCdRobotDeliveriesMock.mockResolvedValue({ deliveries: [] });
+  createCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
+  retryCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
   updateAppointmentStatusMock.mockResolvedValue({ ok: true });
 
   return render(
