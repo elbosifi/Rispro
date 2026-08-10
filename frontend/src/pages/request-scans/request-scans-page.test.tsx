@@ -25,7 +25,7 @@ function renderPage(modality?: { id: number; code: string; name: string; onBack:
   return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/request-scans"]}><Routes><Route path="/request-scans" element={<RequestScansPage modality={modality} />} /><Route path="/registrations" element={<div>Registration destination</div>} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 
-function mock(jobs = [archiveFailure]) {
+function mock(jobs = [archiveFailure], appointments = [{ id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-07-25", appointment_time: "09:30", appointment_status: "scheduled" }]) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const value = String(input);
     if (value.includes("/api/request-scans/status")) return response(status);
@@ -51,7 +51,7 @@ function mock(jobs = [archiveFailure]) {
       public_appointment_url: "https://rispro.test/public/appointment?t=scan-token",
     } });
     if (/\/api\/request-scans\/\d+\/file(?:\?|$)/.test(value)) return { ok: true, blob: async () => new Blob(["%PDF-1.4"], { type: "application/pdf" }) } as Response;
-    if (value.includes("eligible-appointments")) return response({ appointments: [{ id: 12, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_ar: "المريض المحدد", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_ar: "الرنين", modality_name_en: "MRI", exam_name: "Brain", exam_name_ar: "الدماغ", exam_name_en: "Brain", appointment_date: "2026-07-25" }] });
+    if (value.includes("eligible-appointments")) return response({ appointments });
     if (value.includes("?status=")) return response({ jobs });
     return response({ jobs: [] });
   });
@@ -97,6 +97,57 @@ describe("RequestScansPage", () => {
     expect((search as HTMLInputElement).value).toBe("V2-003838");
     expect(screen.getByText("Filename suggestion — not verified")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("accepts a string bigint modality ID, requires identity confirmation, and keeps another modality disabled", async () => {
+    const fetchMock = mock([unassignedFailure], [
+      { id: 12, modality_id: "7", accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "CT", modality_name_en: "CT", exam_name: "Head", exam_name_en: "Head", appointment_date: "2026-08-10", appointment_time: "09:30", appointment_status: "scheduled" },
+      { id: 13, modality_id: "8", accession_number: "V2-000013", patient_name: "Other Modality", patient_name_en: "Other Modality", patient_mrn: "MRN-13", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-08-10", appointment_time: "10:00", appointment_status: "scheduled" },
+    ]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    const valid = (await screen.findByText("V2-000012")).closest("button")!;
+    expect((valid as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Outside the selected modality; cannot be assigned here.")).toBeTruthy();
+    expect((screen.getByText("V2-000013").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(valid);
+    const attach = screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement;
+    expect(attach.disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
+    expect(attach.disabled).toBe(false);
+    fireEvent.click(attach);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, options]) => String(input).includes("/22/manual-assign") && JSON.parse(String(options?.body)).patientIdentityConfirmed === true)).toBe(true));
+  });
+
+  it("reuses the existing dismiss confirmation and endpoint from the assignment modal", async () => {
+    const fetchMock = mock([unassignedFailure]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss scan" }));
+    expect(screen.queryByLabelText("Selected RIS appointment")).toBeNull();
+    expect(await screen.findByText("Dismiss failed Request Scan")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/22/dismiss?workflowSource=modality&modalityId=7"))).toBe(true));
+    cleanup();
+    authState.role = "supervisor";
+    mock([unassignedFailure]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    expect(screen.getByRole("button", { name: "Dismiss scan" })).toBeTruthy();
+  });
+
+  it("does not expose assignment dismissal to modality staff or receptionists", async () => {
+    authState.role = "modality_staff";
+    mock([unassignedFailure]);
+    renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    expect(screen.queryByRole("button", { name: "Dismiss scan" })).toBeNull();
+    cleanup();
+    authState.role = "receptionist";
+    mock([unassignedFailure]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
+    expect(screen.queryByRole("button", { name: "Dismiss scan" })).toBeNull();
   });
 
   it("uses contextual modality folder wording while keeping the global scan action", async () => {

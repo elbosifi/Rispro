@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { assertRequestScanJobScope, buildInlineContentDisposition, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, requestScanScope, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
+import { assertRequestScanJobScope, buildInlineContentDisposition, buildModalityEligibleAppointmentsQuery, getRequestScanStatus, queueRequestScanRetry, requestRequestScanRunNow, requestScanScope, sendRequestScanFileResponse, setRequestScanFileHeaders } from "./request-scans.js";
 import { parseRequestScanJobFilter, type RequestScanJob } from "../services/request-scan-service.js";
 
 test("Request Scan file response is private and inline for PDF and JPEG previews", () => {
@@ -30,6 +30,30 @@ test("modality staff cannot request Reception ingestion scope", () => {
   const request = { user: { role: "modality_staff" }, query: { workflowSource: "reception" } };
   assert.throws(() => requestScanScope(request as never), /cannot access Reception ingestion jobs/);
   assert.deepEqual(requestScanScope({ user: { role: "modality_staff" }, query: { workflowSource: "modality", modalityId: "7" } } as never), { workflowSource: "modality", modalityId: 7 });
+});
+
+test("modality eligible appointments default to the selected modality's Tripoli-today cases", () => {
+  const query = buildModalityEligibleAppointmentsQuery("", new Date("2026-08-09T22:30:00.000Z"));
+  assert.deepEqual(query.values, ["2026-08-10", "", "%%"]);
+  assert.match(query.text, /b\.modality_id=\$1/);
+  assert.match(query.text, /b\.booking_date=\$2::date/);
+  assert.match(query.text, /b\.status not in \('cancelled','discontinued','voided'\)/);
+  assert.match(query.text, /order by b\.booking_date asc,b\.booking_time asc nulls last,b\.id asc limit 20/);
+});
+
+test("modality eligible appointment searches retain modality restriction while allowing other dates", () => {
+  const query = buildModalityEligibleAppointmentsQuery("V2-000123", new Date("2026-08-09T22:30:00.000Z"));
+  assert.deepEqual(query.values, [null, "V2-000123", "%V2-000123%"]);
+  assert.match(query.text, /b\.modality_id=\$1/);
+  assert.match(query.text, /\(\$2::date is null or b\.booking_date=\$2::date\)/);
+  assert.match(query.text, /accession_number.*p\.english_full_name.*p\.arabic_full_name.*p\.mrn.*p\.national_id/s);
+  assert.match(query.text, /order by b\.booking_date desc,b\.booking_time desc nulls last,b\.id desc limit 20/);
+});
+
+test("reception eligible appointment behavior remains on its existing unscoped route", async () => {
+  const source = await readFile("src/routes/request-scans.ts", "utf8");
+  assert.match(source, /if \(scope\.workflowSource === "reception"\) \{ next\(\); return; \}/);
+  assert.match(source, /requestScansRouter\.get\("\/eligible-appointments", asyncRoute\(async \(req: Request, res: Response\) => \{ const q/);
 });
 
 test("direct Request Scan job access enforces workflow and modality scope", () => {
