@@ -703,6 +703,25 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(screen.queryByLabelText("Intended reporting doctor")).toBeNull();
   });
 
+  it("prevents an ordinary user from enabling Report required for a non-oncology patient", async () => {
+    setup(false, [], undefined, "receptionist", ["doctor_admin"]);
+    await userEvent.click(screen.getByRole("button", { name: "Select Other Patient" }));
+
+    const reportRequired = screen.getByLabelText("Report required") as HTMLInputElement;
+    expect(reportRequired.checked).toBe(false);
+    expect(reportRequired.disabled).toBe(true);
+  });
+
+  it("allows a supervisor to enable Report required for a non-oncology patient", async () => {
+    setup(false, [], undefined, "supervisor");
+    await userEvent.click(screen.getByRole("button", { name: "Select Other Patient" }));
+
+    const reportRequired = screen.getByLabelText("Report required") as HTMLInputElement;
+    expect(reportRequired.disabled).toBe(false);
+    await userEvent.click(reportRequired);
+    expect(reportRequired.checked).toBe(true);
+  });
+
   it("persists entity display mode in localStorage", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));

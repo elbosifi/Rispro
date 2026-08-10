@@ -217,6 +217,68 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   }
 
   describe("Create booking", () => {
+    it("enforces the non-oncology report-required role boundary on create and update", async () => {
+      guard();
+      const receptionistCookie = createTestAuthCookie(testData.userId, "receptionist");
+      const doctorCookie = createTestAuthCookie(testData.userId, "doctor");
+      const bookingDate = "2039-06-12";
+      const basePayload = {
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate,
+        bookingTime: null,
+        caseCategory: "non_oncology",
+      };
+
+      const unauthorizedCreate = await fetch("/api/v2/appointments", {
+        method: "POST",
+        cookie: receptionistCookie,
+        body: {
+          ...basePayload,
+          patientId: await createPatientForStatusTest("ReportCreateDenied"),
+          requiresReport: true,
+        },
+      });
+      assert.equal(unauthorizedCreate.status, 403);
+
+      const supervisorCreate = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          ...basePayload,
+          patientId: await createPatientForStatusTest("ReportCreateAllowed"),
+          requiresReport: true,
+        },
+      });
+      assert.equal(supervisorCreate.status, 201);
+      assert.equal((supervisorCreate.data as any).booking.requiresReport, true);
+
+      const falseReportBooking = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          ...basePayload,
+          patientId: await createPatientForStatusTest("ReportUpdate"),
+          requiresReport: false,
+        },
+      });
+      assert.equal(falseReportBooking.status, 201);
+      const bookingId = Number((falseReportBooking.data as any).booking.id);
+
+      const unauthorizedUpdate = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        cookie: receptionistCookie,
+        body: { requiresReport: true },
+      });
+      assert.equal(unauthorizedUpdate.status, 403);
+
+      const doctorUpdate = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        cookie: doctorCookie,
+        body: { requiresReport: true },
+      });
+      assert.equal(doctorUpdate.status, 200);
+      assert.equal((doctorUpdate.data as any).booking.requiresReport, true);
+    });
+
     it("requires a scoped non-name verification proof for an ambiguous patient and records safe audit metadata", async () => {
       guard();
       const similar = await createSimilarPatientsForIdentityTest();

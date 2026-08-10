@@ -222,6 +222,7 @@ export function CreateAppointmentTab({
   const isReceptionist = currentUserRole === "receptionist";
   const isSupervisor = currentUserRole === "supervisor";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const canEnableNonOncologyReport = isSuperAdmin || isSupervisor;
   const canSelectIntendedReportingDoctor =
     isSuperAdmin ||
     isSupervisor ||
@@ -1174,6 +1175,7 @@ export function CreateAppointmentTab({
                   aria-label={t(language, "appointments.create.reportRequired")}
                   checked={form.requiresReport}
                   onChange={(e) => actions.setRequiresReport(e.target.checked)}
+                  disabled={isSelectedPatientNonOncology && !form.requiresReport && !canEnableNonOncologyReport}
                   className="mt-0.5 w-5 h-5 cursor-pointer accent-[var(--accent)]"
                 />
                 <span className="text-sm sm:text-base text-foreground">

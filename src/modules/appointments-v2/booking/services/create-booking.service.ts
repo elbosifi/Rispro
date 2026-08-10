@@ -170,6 +170,14 @@ export async function createBookingInternal(
     }
   }
   const caseCategory = await resolveBookingCaseCategory(client, payload.patientId, payload.caseCategory);
+  if (
+    caseCategory === "non_oncology" &&
+    payload.requiresReport === true &&
+    userRole !== "super_admin" &&
+    userRole !== "supervisor"
+  ) {
+    throw new HttpError(403, "Only supervisors and super admins can require a report for non-oncology bookings.");
+  }
   const patientQrSettings = await readPatientQrSettings();
   const requiresReport =
     typeof payload.requiresReport === "boolean"

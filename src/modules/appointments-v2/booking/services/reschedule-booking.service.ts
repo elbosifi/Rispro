@@ -249,6 +249,18 @@ export async function rescheduleBookingInternal(
   const effectiveReportingPriorityId = reportingPriorityId ?? booking.reportingPriorityId;
   const effectiveNotes = notes ?? booking.notes;
   const effectiveRequiresReport = requiresReport ?? booking.requiresReport;
+  const isEnablingNonOncologyReport =
+    booking.caseCategory === "non_oncology" &&
+    booking.requiresReport !== true &&
+    requiresReport === true;
+  if (
+    isEnablingNonOncologyReport &&
+    userRole !== "super_admin" &&
+    userRole !== "supervisor" &&
+    userRole !== "doctor"
+  ) {
+    throw new HttpError(403, "Only doctors, supervisors, and super admins can require a report for non-oncology bookings.");
+  }
   const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
