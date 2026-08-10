@@ -69,6 +69,14 @@ export function buildAuthoritativeOrthancCdAliases(destinationKeys: string[]): A
   return aliases;
 }
 
+export async function resolveAuthoritativeOrthancCdAlias(destinationKey: string): Promise<string> {
+  const { modalities } = await autoRouteDestinationLoader();
+  const alias = buildAuthoritativeOrthancCdAliases(modalities.filter((item) => item.isCdRobot).map((item) => item.key))
+    .find((item) => item.destinationKey === destinationKey)?.alias;
+  if (!alias) throw new HttpError(409, "Selected CD robot is not available.");
+  return alias;
+}
+
 export async function readAuthoritativeOrthancSettings(): Promise<AuthoritativeOrthancSettings> {
   if (settingsForTests) return settingsForTests;
   const values = (await loadSettingsMap([AUTHORITATIVE_ORTHANC_CATEGORY]))[AUTHORITATIVE_ORTHANC_CATEGORY] || {};

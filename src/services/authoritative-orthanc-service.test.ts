@@ -87,6 +87,27 @@ test("keeps CD robot aliases separate from automatic routing aliases", () => {
     { destinationKey: "Epson Robot 1", alias: "rispro_cd_epson_robot_1" },
     { destinationKey: "Epson Robot 2", alias: "rispro_cd_epson_robot_2" },
   ]);
+  assert.throws(() => service.buildAuthoritativeOrthancCdAliases(["Epson Robot", "Epson Robot"]), /ambiguous/i);
+  const long = "CD robot ".repeat(20);
+  assert.throws(() => service.buildAuthoritativeOrthancCdAliases([long, long]), /ambiguous/i);
+});
+
+test("resolves the same CD alias that synchronization creates from the complete CD robot set", async () => {
+  const modalities = [
+    { key: "Epson Robot", aet: "EPSON_AE", host: "10.0.0.10", port: 104, isCdRobot: true },
+    { key: "Epson-Robot", aet: "EPSON_2_AE", host: "10.0.0.11", port: 104, isCdRobot: true },
+  ];
+  const calls: Array<{ path: string; body: unknown }> = [];
+  service.__setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(async () => ({ modalities }));
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/modalities") return json([]);
+    calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : null });
+    return new Response(null, { status: 200 });
+  });
+  await service.synchronizeAuthoritativeOrthancCdRobots();
+  const resolved = await service.resolveAuthoritativeOrthancCdAlias("Epson-Robot");
+  assert.equal(resolved, calls.find((call) => (call.body as { AET?: string }).AET === "EPSON_2_AE")!.path.split("/").at(-1));
 });
 
 test("uses Authoritative Orthanc for C-ECHO and whole-study asynchronous C-STORE", async () => {

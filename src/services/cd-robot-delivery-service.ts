@@ -4,12 +4,18 @@ import { HttpError } from "../utils/http-error.js";
 import type { UserId } from "../types/http.js";
 import { normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
-import { AuthoritativeOrthancClient, buildAuthoritativeOrthancCdAliases, createAuthoritativeOrthancClient, synchronizeAuthoritativeOrthancCdRobots } from "./authoritative-orthanc-service.js";
+import { AuthoritativeOrthancClient, createAuthoritativeOrthancClient, resolveAuthoritativeOrthancCdAlias, synchronizeAuthoritativeOrthancCdRobots } from "./authoritative-orthanc-service.js";
 
 const REASONS = new Set(["patient_requested_additional_copy", "previous_disc_damaged", "disc_unreadable", "additional_copy_for_referring_physician", "other"]);
 type DeliveryStatus = "sending" | "success" | "failed";
 type DeliveryRow = { id:number; patient_id:number; booking_id:number; study_instance_uid:string|null; destination_key:string; orthanc_study_id:string|null; orthanc_job_id:string|null; status:DeliveryStatus; attempt_count:number; resend_reason_code:string|null; resend_reason_text:string|null; requested_by_user_id:number; requested_at:string; completed_at:string|null; last_checked_at:string|null; last_error:string|null };
 type BookingRow = { id:number; patient_id:number; status:string; study_instance_uid:string|null; accession_number:string; patient_primary_id:string|null; national_id:string|null; mrn:string|null; modality_code:string|null; booking_date:string };
+const defaultDependencies = { listRemoteModalities: listOrthancRemoteModalities, synchronizeCdRobots: synchronizeAuthoritativeOrthancCdRobots, createClient: createAuthoritativeOrthancClient, resolveAlias: resolveAuthoritativeOrthancCdAlias };
+let dependencies = { ...defaultDependencies };
+export const __cdRobotDeliveryTestables = {
+  setDependenciesForTests(overrides: Partial<typeof defaultDependencies>) { dependencies = { ...dependencies, ...overrides }; },
+  resetTestOverrides() { dependencies = { ...defaultDependencies }; },
+};
 
 function id(value: unknown, field: string): number { const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1) throw new HttpError(400, `${field} must be a positive integer.`); return parsed; }
 function meaningful(value: string): boolean { return value.replace(/\s+/g, " ").trim().length >= 5; }
@@ -23,7 +29,7 @@ async function bookingForDelivery(bookingId: number): Promise<BookingRow> {
   return rows[0];
 }
 async function cdDestination(key: string) {
-  const { modalities } = await listOrthancRemoteModalities();
+  const { modalities } = await dependencies.listRemoteModalities();
   const destination = modalities.find((item) => item.key === key && item.isCdRobot);
   if (!destination || !destination.aet || !destination.host || destination.port == null || destination.configurationError) throw new HttpError(409, "Selected CD robot is not available.");
   return destination;
@@ -66,7 +72,15 @@ export async function startCdRobotDelivery(input: { bookingId: unknown; destinat
   await cdDestination(destinationKey);
   const tx = await pool.connect();
   let delivery: DeliveryRow;
-  try { await tx.query("begin"); await tx.query("select id from patients where id=$1 for update", [booking.patient_id]); const count = await tx.query<{ count:string }>(`select count(*)::text count from cd_robot_deliveries where booking_id=$1 and status='success'`, [booking.id]); delivery = await insertDelivery(booking, destinationKey, validateReason(Number(count.rows[0]?.count || 0), input.resendReasonCode, input.resendReasonText), input.userId, tx); await tx.query("commit"); } catch (error) { await tx.query("rollback"); throw error; } finally { tx.release(); }
+  try {
+    await tx.query("begin");
+    await tx.query("select id from patients where id=$1 for update", [booking.patient_id]);
+    const active = await tx.query(`select 1 from cd_robot_deliveries where patient_id=$1 and status='sending' limit 1`, [booking.patient_id]);
+    if (active.rowCount) throw new HttpError(409, "This patient already has a CD send in progress.");
+    const count = await tx.query<{ count:string }>(`select count(*)::text count from cd_robot_deliveries where booking_id=$1 and status='success'`, [booking.id]);
+    delivery = await insertDelivery(booking, destinationKey, validateReason(Number(count.rows[0]?.count || 0), input.resendReasonCode, input.resendReasonText), input.userId, tx);
+    await tx.query("commit");
+  } catch (error) { await tx.query("rollback"); throw error; } finally { tx.release(); }
   return attemptCdRobotDelivery(delivery.id);
 }
 
@@ -74,25 +88,34 @@ export async function attemptCdRobotDelivery(deliveryId: number): Promise<Delive
   const { rows } = await pool.query<DeliveryRow>(`update cd_robot_deliveries set attempt_count=attempt_count+1,last_error=null,updated_at=now() where id=$1 and status='sending' and orthanc_job_id is null and attempt_count < 2 returning *`, [deliveryId]);
   const delivery = rows[0];
   if (!delivery) return (await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1`, [deliveryId])).rows[0]!;
+  let booking: BookingRow;
+  let client: AuthoritativeOrthancClient;
+  let study: Awaited<ReturnType<typeof matchAndCheck>>;
+  let alias: string;
   try {
-    const booking = await bookingForDelivery(delivery.booking_id);
+    booking = await bookingForDelivery(delivery.booking_id);
     await cdDestination(delivery.destination_key);
-    await synchronizeAuthoritativeOrthancCdRobots();
-    const client = await createAuthoritativeOrthancClient();
-    const study = await matchAndCheck(client, booking);
-    const { modalities } = await listOrthancRemoteModalities();
-    const aliases = buildAuthoritativeOrthancCdAliases(modalities.filter((item) => item.isCdRobot).map((item) => item.key));
-    const alias = aliases.find((item) => item.destinationKey === delivery.destination_key)?.alias;
-    if (!alias) throw new HttpError(409, "Selected CD robot is not available.");
+    await dependencies.synchronizeCdRobots();
+    client = await dependencies.createClient();
+    study = await matchAndCheck(client, booking);
+    alias = await dependencies.resolveAlias(delivery.destination_key);
+  } catch (error) {
+    await terminalFailure(delivery.id, errorMessage(error));
+    return (await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1`, [delivery.id])).rows[0]!;
+  }
+  try {
     await client.echoRemoteModality(alias);
+  } catch (error) {
+    if (delivery.attempt_count < 2) return attemptCdRobotDelivery(delivery.id);
+    await terminalFailure(delivery.id, errorMessage(error));
+    return (await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1`, [delivery.id])).rows[0]!;
+  }
+  try {
     const orthancJobId = await client.enqueueStudyStore(alias, study.orthancStudyId);
     const result = await pool.query<DeliveryRow>(`update cd_robot_deliveries set orthanc_study_id=$2,orthanc_job_id=$3,last_checked_at=now(),updated_at=now() where id=$1 and status='sending' returning *`, [delivery.id, study.orthancStudyId, orthancJobId]);
     return result.rows[0]!;
   } catch (error) {
-    const message = errorMessage(error);
-    const ambiguousStore = error instanceof HttpError && ["orthanc_timeout", "orthanc_unavailable", "orthanc_send_job_id_missing"].includes(String((error.details as { code?: unknown } | undefined)?.code || ""));
-    if (!ambiguousStore && delivery.attempt_count < 2) return attemptCdRobotDelivery(delivery.id);
-    await terminalFailure(delivery.id, ambiguousStore ? "CD send submission was interrupted and may have reached Authoritative Orthanc. Manual retry is required." : message);
+    await terminalFailure(delivery.id, "CD send submission was interrupted and may have reached Authoritative Orthanc. Manual retry is required.");
     return (await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1`, [delivery.id])).rows[0]!;
   }
 }
@@ -100,7 +123,7 @@ export async function attemptCdRobotDelivery(deliveryId: number): Promise<Delive
 export async function monitorCdRobotDeliveries(limit = 25): Promise<{ checked:number }> {
   await pool.query(`update cd_robot_deliveries set status='failed',completed_at=now(),last_checked_at=now(),last_error='CD send was interrupted before an Orthanc job ID was recorded; its outcome may be uncertain. Manual retry is required.',updated_at=now() where status='sending' and orthanc_job_id is null and requested_at < now()-interval '10 minutes'`);
   const { rows } = await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where status='sending' and orthanc_job_id is not null order by last_checked_at asc nulls first,requested_at asc limit $1`, [Math.max(1, Math.min(limit, 100))]);
-  const client = await createAuthoritativeOrthancClient();
+  const client = await dependencies.createClient();
   for (const delivery of rows) {
     try {
       const state = jobState(await client.getJob(delivery.orthanc_job_id!));
@@ -114,6 +137,6 @@ export async function monitorCdRobotDeliveries(limit = 25): Promise<{ checked:nu
   return { checked: rows.length };
 }
 
-export async function listCdRobotDestinations() { const { modalities } = await listOrthancRemoteModalities(); return modalities.filter((item) => item.isCdRobot && item.aet && item.host && item.port != null && !item.configurationError).map((item) => ({ key:item.key, name:item.key })); }
+export async function listCdRobotDestinations() { const { modalities } = await dependencies.listRemoteModalities(); return modalities.filter((item) => item.isCdRobot && item.aet && item.host && item.port != null && !item.configurationError).map((item) => ({ key:item.key, name:item.key })); }
 export async function listCdRobotDeliveries(bookingId: unknown) { const clean = id(bookingId, "bookingId"); const { rows } = await pool.query(`select d.id,d.destination_key,d.status,d.attempt_count,d.resend_reason_code,d.resend_reason_text,d.requested_at,d.completed_at,d.last_error,coalesce(u.full_name,u.username) requested_by from cd_robot_deliveries d join users u on u.id=d.requested_by_user_id where d.booking_id=$1 order by d.requested_at desc`, [clean]); return rows; }
 export async function retryCdRobotDelivery(deliveryId: unknown, userId: UserId) { const clean = id(deliveryId, "deliveryId"); const { rows } = await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1 and status='failed'`, [clean]); if (!rows[0]) throw new HttpError(409, "Only a failed CD delivery can be retried."); const original=rows[0]; const booking=await bookingForDelivery(original.booking_id); const delivery=await insertDelivery(booking, original.destination_key, { code:original.resend_reason_code, text:original.resend_reason_text }, userId); return attemptCdRobotDelivery(delivery.id); }
