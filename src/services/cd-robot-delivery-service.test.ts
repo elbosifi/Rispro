@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { __cdRobotDeliveryTestables, attemptCdRobotDelivery, monitorCdRobotDeliveries, startCdRobotDelivery } from "./cd-robot-delivery-service.js";
+import { __cdRobotDeliveryTestables, attemptCdRobotDelivery, monitorCdRobotDeliveries, retryCdRobotDelivery, startCdRobotDelivery } from "./cd-robot-delivery-service.js";
 
 const originalQuery = pool.query.bind(pool);
 const originalConnect = pool.connect.bind(pool);
@@ -117,6 +117,20 @@ test("a resend validates the freshly counted success after the patient lock is a
     return result();
   }, release() {} }) as never;
   await assert.rejects(() => startCdRobotDelivery({ bookingId: 11, destinationKey: "Robot 1", userId: 7 }), /reason for the additional CD is required/i);
+});
+
+test("a failed first-copy retry is rejected when the study now has a successful CD", async () => {
+  installClient();
+  let inserted = false;
+  (pool as unknown as { query: (sql: string) => Promise<unknown> }).query = async (sql) => {
+    if (sql.includes("where id=$1 and status='failed'")) return result([delivery({ status: "failed" })]);
+    if (sql.includes("from appointments_v2.bookings")) return result([booking]);
+    if (sql.includes("count(*)")) return result([{ count: "1" }]);
+    if (sql.includes("insert into cd_robot_deliveries")) { inserted = true; return result([delivery()]); }
+    return result();
+  };
+  await assert.rejects(() => retryCdRobotDelivery(31, 7), /Use Send additional CD and provide a reason/i);
+  assert.equal(inserted, false);
 });
 
 test("a different patient is not rejected by the active-patient predicate", async () => {

@@ -139,4 +139,16 @@ export async function monitorCdRobotDeliveries(limit = 25): Promise<{ checked:nu
 
 export async function listCdRobotDestinations() { const { modalities } = await dependencies.listRemoteModalities(); return modalities.filter((item) => item.isCdRobot && item.aet && item.host && item.port != null && !item.configurationError).map((item) => ({ key:item.key, name:item.key })); }
 export async function listCdRobotDeliveries(bookingId: unknown) { const clean = id(bookingId, "bookingId"); const { rows } = await pool.query(`select d.id,d.destination_key,d.status,d.attempt_count,d.resend_reason_code,d.resend_reason_text,d.requested_at,d.completed_at,d.last_error,coalesce(u.full_name,u.username) requested_by from cd_robot_deliveries d join users u on u.id=d.requested_by_user_id where d.booking_id=$1 order by d.requested_at desc`, [clean]); return rows; }
-export async function retryCdRobotDelivery(deliveryId: unknown, userId: UserId) { const clean = id(deliveryId, "deliveryId"); const { rows } = await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1 and status='failed'`, [clean]); if (!rows[0]) throw new HttpError(409, "Only a failed CD delivery can be retried."); const original=rows[0]; const booking=await bookingForDelivery(original.booking_id); const delivery=await insertDelivery(booking, original.destination_key, { code:original.resend_reason_code, text:original.resend_reason_text }, userId); return attemptCdRobotDelivery(delivery.id); }
+export async function retryCdRobotDelivery(deliveryId: unknown, userId: UserId) {
+  const clean = id(deliveryId, "deliveryId");
+  const { rows } = await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1 and status='failed'`, [clean]);
+  if (!rows[0]) throw new HttpError(409, "Only a failed CD delivery can be retried.");
+  const original = rows[0];
+  const booking = await bookingForDelivery(original.booking_id);
+  if (!original.resend_reason_code) {
+    const count = await pool.query<{ count: string }>(`select count(*)::text count from cd_robot_deliveries where booking_id=$1 and status='success'`, [booking.id]);
+    if (Number(count.rows[0]?.count || 0) > 0) throw new HttpError(409, "This study now has a successful CD. Use Send additional CD and provide a reason.");
+  }
+  const delivery = await insertDelivery(booking, original.destination_key, { code: original.resend_reason_code, text: original.resend_reason_text }, userId);
+  return attemptCdRobotDelivery(delivery.id);
+}
