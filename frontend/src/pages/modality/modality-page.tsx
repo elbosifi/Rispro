@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   ChevronRight,
+  Disc3,
   MoreHorizontal,
   Printer,
   RefreshCw,
@@ -68,6 +69,31 @@ type WaitingWarningInfo = {
   level: "mild" | "strong";
   title: string;
 };
+
+type CdButtonState = "idle" | "sending" | "sent" | "failed" | "patient-active";
+
+function cdButtonState(appointment: AppointmentWithDetails): CdButtonState {
+  if (appointment.cdActiveStatus === "sending") return "sending";
+  if (appointment.cdPatientActive) return "patient-active";
+  if (appointment.cdLatestFailed) return "failed";
+  if ((appointment.cdSuccessfulCount ?? 0) > 0) return "sent";
+  return "idle";
+}
+
+function cdButtonDetails(state: CdButtonState, successfulCount: number): { label: string; tooltip: string } {
+  switch (state) {
+    case "sending":
+      return { label: "CD sending", tooltip: "CD send in progress" };
+    case "patient-active":
+      return { label: "CD unavailable", tooltip: "Another CD for this patient is currently being sent. Wait until it finishes before sending another." };
+    case "failed":
+      return { label: "CD send failed", tooltip: "CD send failed. Click to view history / retry." };
+    case "sent":
+      return { label: "CD sent successfully", tooltip: `Sent successfully. Successful copies: ${successfulCount}. Click for history or another copy.` };
+    default:
+      return { label: "Send CD", tooltip: "CD not yet sent. Click to send study to CD robot." };
+  }
+}
 
 function isActiveStatus(status: AppointmentStatus): boolean {
   return ACTIVE_STATUSES.has(status);
@@ -641,7 +667,13 @@ export default function ModalityPage() {
   const openCd = (appointment: AppointmentWithDetails) => {
     const destinations = cdDestinationsQuery.data?.destinations ?? [];
     if (!destinations.length) return;
-    if (appointment.cdPatientActive) { setCdError("This patient already has a CD send in progress."); return; }
+    if (appointment.cdActiveStatus === "sending") return;
+    if (appointment.cdPatientActive) { setCdError("Another CD for this patient is currently being sent."); return; }
+    if (appointment.cdLatestFailed) {
+      setCdDialog({ appointment, mode: "history" });
+      setOpenMoreMenu(null);
+      return;
+    }
     if (!appointment.cdSuccessfulCount && !appointment.cdLatestFailed && destinations.length === 1) {
       cdCreateMutation.mutate({ bookingId: appointment.id, destinationKey: destinations[0]!.key });
       setOpenMoreMenu(null);
@@ -947,6 +979,9 @@ export default function ModalityPage() {
                       const canAct = isActiveStatus(appointment.status);
                       const canCompleteRow = canAct && appointment.status !== "scheduled";
                       const canMarkArrived = appointment.status === "scheduled" || appointment.status === "waiting";
+                      const cdState = cdButtonState(appointment);
+                      const cdSuccessfulCount = appointment.cdSuccessfulCount ?? 0;
+                      const cdDetails = cdButtonDetails(cdState, cdSuccessfulCount);
                       const relatedAppointments = (appointment.relatedAppointments ?? []).filter((related) => related.appointmentId !== appointment.id);
                       const waitingInfo = waitingDurationInfo(language, appointment, elapsedNow);
                       const waitingWarning = waitingWarningInfo(language, appointment, elapsedNow);
@@ -1082,21 +1117,40 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1.5">
                                 <div className="relative flex items-center gap-1 whitespace-nowrap">
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    aria-label={t(language, "common.print")}
-                                    title={t(language, "common.print")}
-                                    className="h-10 min-w-[40px] shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handlePrint(appointment.id);
-                                    }}
-                                  >
-                                    <Printer size={14} />
-                                    <span>{t(language, "common.print")}</span>
-                                  </Button>
+                                  {appointment.status === "completed" ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      aria-label={cdDetails.label}
+                                      title={cdDetails.tooltip}
+                                      className={`h-10 min-w-[40px] shrink-0 border px-2 transition-colors duration-300 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${cdState === "sending" ? "border-sky-300 bg-sky-50 text-sky-800" : cdState === "sent" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : cdState === "failed" ? "border-red-300 bg-red-50 text-red-800" : "border-slate-300 bg-white text-slate-800"}`}
+                                      disabled={cdState === "sending" || cdState === "patient-active" || cdCreateMutation.isPending || !cdDestinationsQuery.data?.destinations.length}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openCd(appointment);
+                                      }}
+                                    >
+                                      <Disc3 size={14} aria-hidden="true" className={cdState === "sending" ? "animate-spin motion-reduce:animate-none" : undefined} />
+                                      <span>{cdState === "sending" ? "Sending" : cdState === "sent" ? `Sent${cdSuccessfulCount > 1 ? ` ×${cdSuccessfulCount}` : ""}` : cdState === "failed" ? "Failed" : "CD"}</span>
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      aria-label={t(language, "common.print")}
+                                      title={t(language, "common.print")}
+                                      className="h-10 min-w-[40px] shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handlePrint(appointment.id);
+                                      }}
+                                    >
+                                      <Printer size={14} />
+                                      <span>{t(language, "common.print")}</span>
+                                    </Button>
+                                  )}
                                   {canMarkArrived ? (
                                     <Button
                                       type="button"
@@ -1320,8 +1374,9 @@ export default function ModalityPage() {
             </button>
           ) : null}
           {moreMenuAppointment.status === "completed" ? (
-            <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} disabled={cdCreateMutation.isPending || !(cdDestinationsQuery.data?.destinations.length)} onClick={() => openCd(moreMenuAppointment)}>
-              <span>{moreMenuAppointment.cdActiveStatus === "sending" ? "CD sending" : moreMenuAppointment.cdSuccessfulCount ? `CD ✓ ${moreMenuAppointment.cdSuccessfulCount}` : moreMenuAppointment.cdLatestFailed ? "CD failed" : "CD"}</span>
+            <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} onClick={() => { handlePrint(moreMenuAppointment.id); setOpenMoreMenu(null); }}>
+              <Printer size={14} />
+              <span>{t(language, "common.print")}</span>
             </button>
           ) : null}
           {moreMenuAppointment.status === "completed" ? (
@@ -1345,13 +1400,13 @@ export default function ModalityPage() {
       {cdError ? <div role="alert" className="fixed bottom-4 right-4 z-50 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{cdError}</div> : null}
       <Dialog open={Boolean(cdDialog)} onClose={() => setCdDialog(null)}>
         <DialogContent maxWidth="md">
-          <DialogHeader><DialogTitle>{cdDialog?.mode === "resend" ? "Send additional CD" : "Send to CD robot"}</DialogTitle><DialogDescription>{cdDialog?.mode === "resend" ? `This study has already been sent. Successful copies: ${cdDialog.appointment.cdSuccessfulCount ?? 0}` : "Authoritative Orthanc will send the complete study to the selected CD robot."}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{cdDialog?.mode === "history" ? "CD delivery history" : cdDialog?.mode === "resend" ? "Send additional CD" : "Send to CD robot"}</DialogTitle><DialogDescription>{cdDialog?.mode === "history" ? "Review the failed delivery and retry it if appropriate." : cdDialog?.mode === "resend" ? `This study has already been sent. Successful copies: ${cdDialog.appointment.cdSuccessfulCount ?? 0}` : "Authoritative Orthanc will send the complete study to the selected CD robot."}</DialogDescription></DialogHeader>
           <div className="space-y-3 text-sm">
-            <label className="block">Destination<select className="mt-1 w-full rounded border p-2" value={cdDestinationKey} onChange={(event) => setCdDestinationKey(event.target.value)}>{(cdDestinationsQuery.data?.destinations ?? []).map((destination) => <option key={destination.key} value={destination.key}>{destination.name}</option>)}</select></label>
+            {cdDialog?.mode !== "history" ? <label className="block">Destination<select className="mt-1 w-full rounded border p-2" value={cdDestinationKey} onChange={(event) => setCdDestinationKey(event.target.value)}>{(cdDestinationsQuery.data?.destinations ?? []).map((destination) => <option key={destination.key} value={destination.key}>{destination.name}</option>)}</select></label> : null}
             {cdDialog?.mode === "resend" ? <><label className="block">Reason<select className="mt-1 w-full rounded border p-2" value={cdReasonCode} onChange={(event) => setCdReasonCode(event.target.value)}><option value="">Select reason</option><option value="patient_requested_additional_copy">Patient requested additional copy</option><option value="previous_disc_damaged">Previous disc damaged</option><option value="disc_unreadable">Disc unreadable</option><option value="additional_copy_for_referring_physician">Additional copy for referring physician</option><option value="other">Other</option></select></label>{cdReasonCode === "other" ? <label className="block">Other reason<input className="mt-1 w-full rounded border p-2" value={cdReasonText} onChange={(event) => setCdReasonText(event.target.value)} /></label> : null}</> : null}
             <div className="max-h-36 overflow-auto rounded border p-2 text-xs">{(cdHistoryQuery.data?.deliveries ?? []).map((delivery: CdRobotDelivery) => <div key={delivery.id} className="py-1">{new Date(delivery.requested_at).toLocaleString()} · {delivery.destination_key} · {delivery.requested_by} · {delivery.status}{delivery.resend_reason_code ? ` · ${delivery.resend_reason_code}` : ""}{delivery.last_error ? ` · ${delivery.last_error}` : ""}{delivery.status === "failed" ? <button type="button" className="ml-2 underline" disabled={cdRetryMutation.isPending} onClick={() => cdRetryMutation.mutate(delivery.id)}>Retry</button> : null}</div>)}</div>
           </div>
-          <DialogFooter><Button type="button" variant="secondary" onClick={() => setCdDialog(null)}>Cancel</Button><Button type="button" disabled={cdCreateMutation.isPending || !cdDestinationKey || (cdDialog?.mode === "resend" && (!cdReasonCode || (cdReasonCode === "other" && cdReasonText.replace(/\s+/g, " ").trim().length < 5)))} onClick={submitCd}>{cdDialog?.mode === "resend" ? "Send additional CD" : "Send"}</Button></DialogFooter>
+          <DialogFooter><Button type="button" variant="secondary" onClick={() => setCdDialog(null)}>{cdDialog?.mode === "history" ? "Close" : "Cancel"}</Button>{cdDialog?.mode !== "history" ? <Button type="button" disabled={cdCreateMutation.isPending || !cdDestinationKey || (cdDialog?.mode === "resend" && (!cdReasonCode || (cdReasonCode === "other" && cdReasonText.replace(/\s+/g, " ").trim().length < 5)))} onClick={submitCd}>{cdDialog?.mode === "resend" ? "Send additional CD" : "Send"}</Button> : null}</DialogFooter>
         </DialogContent>
       </Dialog>
 

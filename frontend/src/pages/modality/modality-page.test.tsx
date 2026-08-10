@@ -211,7 +211,7 @@ function mriAssignment(overrides: Partial<ModalityProtocolAssignment> = {}): Mod
   };
 }
 
-function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality") {
+function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality", cdDestinations: Array<{ key: string; name: string }> = []) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -239,7 +239,7 @@ function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality") 
     ],
   });
   completeAppointmentMock.mockResolvedValue({ ok: true });
-  fetchCdRobotDestinationsMock.mockResolvedValue({ destinations: [] });
+  fetchCdRobotDestinationsMock.mockResolvedValue({ destinations: cdDestinations });
   fetchCdRobotDeliveriesMock.mockResolvedValue({ deliveries: [] });
   createCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
   retryCdRobotDeliveryMock.mockResolvedValue({ delivery: { id: 1 } });
@@ -255,9 +255,9 @@ function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality") 
   );
 }
 
-async function openBoard(rows: AppointmentWithDetails[]) {
+async function openBoard(rows: AppointmentWithDetails[], cdDestinations: Array<{ key: string; name: string }> = []) {
   const user = userEvent.setup();
-  renderPage(rows);
+  renderPage(rows, "/modality", cdDestinations);
   await screen.findByRole("option", { name: "CT" });
   await user.selectOptions(screen.getByRole("combobox"), "1");
   await screen.findByRole("button", { name: languageState.language === "ar" ? "نشط" : "Operational" });
@@ -1054,6 +1054,65 @@ describe("ModalityPage modality board", () => {
     await waitFor(() => {
       expect(updateAppointmentStatusMock).toHaveBeenCalledWith(9, "arrived", "Scanner workflow correction");
     });
+  });
+
+  it("uses the CD button on completed rows and keeps Print in More", async () => {
+    const user = await openBoard([
+      appointment({ id: 31, status: "completed", completedAt: "2026-06-18T10:00:00Z" }),
+    ], [{ key: "robot-a", name: "Robot A" }]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-31");
+    expect(within(row).queryByRole("button", { name: "Print" })).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "Send CD" }));
+    await waitFor(() => expect(createCdRobotDeliveryMock).toHaveBeenCalledWith(31, { destinationKey: "robot-a", resendReasonCode: undefined, resendReasonText: undefined }));
+
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Print" }));
+    expect(printAppointmentSlipByIdMock).toHaveBeenCalledWith(31, "en");
+  });
+
+  it("shows CD sending and patient-active states as disabled", async () => {
+    const user = await openBoard([
+      appointment({ id: 32, status: "completed", cdActiveStatus: "sending", cdPatientActive: true }),
+      appointment({ id: 33, status: "completed", cdPatientActive: true }),
+    ], [{ key: "robot-a", name: "Robot A" }]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const sending = within(screen.getByTestId("modality-board-row-32")).getByRole("button", { name: "CD sending" });
+    expect((sending as HTMLButtonElement).disabled).toBe(true);
+    expect(sending.querySelector(".animate-spin")).toBeTruthy();
+    const patientActive = within(screen.getByTestId("modality-board-row-33")).getByRole("button", { name: "CD unavailable" });
+    expect((patientActive as HTMLButtonElement).disabled).toBe(true);
+    expect(patientActive.getAttribute("title")).toContain("Another CD for this patient");
+  });
+
+  it("shows latest CD failure over prior success and opens delivery history for retry", async () => {
+    const user = await openBoard([
+      appointment({ id: 34, status: "completed", cdSuccessfulCount: 2, cdLatestFailed: true }),
+    ], [{ key: "robot-a", name: "Robot A" }]);
+    fetchCdRobotDeliveriesMock.mockResolvedValue({ deliveries: [{ id: 44, destination_key: "robot-a", status: "failed", attempt_count: 1, resend_reason_code: null, resend_reason_text: null, requested_at: "2026-06-18T10:00:00Z", completed_at: "2026-06-18T10:01:00Z", last_error: "C-ECHO failed", requested_by: "modality" }] });
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const row = screen.getByTestId("modality-board-row-34");
+    await user.click(within(row).getByRole("button", { name: "CD send failed" }));
+    await screen.findByRole("heading", { name: "CD delivery history" });
+    await screen.findByText(/C-ECHO failed/);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(retryCdRobotDeliveryMock.mock.calls[0]?.[0]).toBe(44));
+  });
+
+  it("keeps successful CD resend available with the successful-copy count", async () => {
+    const user = await openBoard([
+      appointment({ id: 35, status: "completed", cdSuccessfulCount: 2 }),
+    ], [{ key: "robot-a", name: "Robot A" }]);
+
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const button = within(screen.getByTestId("modality-board-row-35")).getByRole("button", { name: "CD sent successfully" });
+    expect(button.textContent).toContain("×2");
+    await user.click(button);
+    await screen.findByRole("heading", { name: "Send additional CD" });
+    expect(screen.getByRole("combobox", { name: "Reason" })).toBeTruthy();
   });
 
   it("shows full patient and appointment details in the selected row drawer", async () => {
