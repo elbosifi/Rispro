@@ -1,12 +1,14 @@
-local function IsAutorouteModality(modality)
-  return modality == 'rispro_autoroute' or string.match(modality, '^rispro_autoroute_[2-9][0-9]*$') ~= nil
+local ROUTE_PREFIX = 'rispro_route_'
+
+local function IsRisproRouteModality(modality)
+  return string.sub(modality, 1, string.len(ROUTE_PREFIX)) == ROUTE_PREFIX
 end
 
 function OnStableSeries(seriesId, tags, metadata)
   local modalities = ParseJson(RestApiGet('/modalities'))
 
   for _, modality in ipairs(modalities) do
-    if IsAutorouteModality(modality) then
+    if IsRisproRouteModality(modality) then
       RestApiPost(
         '/modalities/' .. modality .. '/store',
         DumpJson({

@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
+import { createHash } from "node:crypto";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import { loadSettingsMap, upsertSettings } from "./settings-service.js";
@@ -8,7 +9,8 @@ import { normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 
 export const AUTHORITATIVE_ORTHANC_CATEGORY = "authoritative_orthanc";
-export const AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = "rispro_autoroute";
+export const AUTHORITATIVE_ORTHANC_ROUTE_PREFIX = "rispro_route_";
+const LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = /^rispro_autoroute(?:_[2-9][0-9]*)?$/;
 export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; autoRouteDestinationKeys: string[]; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
@@ -39,6 +41,20 @@ function record(value: unknown): Record<string, unknown> { return value && typeo
 function first(...values: unknown[]): string | null { for (const value of values) { if (value == null) continue; if (typeof value === "string" || typeof value === "number") { const clean = String(value).trim(); if (clean) return clean; } else if (typeof value === "object") { const row = value as Record<string, unknown>; const nested = first(row.Value, row.value, row.Alphabetic); if (nested) return nested; } } return null; }
 function tags(payload: unknown) { const row = record(payload); return { ...row, ...record(row.MainDicomTags), ...record(row.PatientMainDicomTags), ...record(row.Tags), ...record(row.NormalizedTags) }; }
 function count(value: unknown) { const parsed = Number(first(value) ?? 0); return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0; }
+function routeSlug(value: string): string { return value.trim().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, ""); }
+function routeKeyHash(value: string): string { return createHash("sha256").update(value).digest("hex").slice(0, 10); }
+export function buildAuthoritativeOrthancRouteAliases(destinationKeys: string[]): Array<{ destinationKey: string; alias: string }> {
+  const routes = destinationKeys.map((destinationKey) => ({ destinationKey, slug: routeSlug(destinationKey) || `destination_${routeKeyHash(destinationKey)}` }));
+  const slugCounts = new Map<string, number>();
+  for (const route of routes) slugCounts.set(route.slug, (slugCounts.get(route.slug) || 0) + 1);
+  const aliases = routes.map(({ destinationKey, slug }) => {
+    const suffix = slugCounts.get(slug)! > 1 ? `_${routeKeyHash(destinationKey)}` : "";
+    const maxSlugLength = 64 - AUTHORITATIVE_ORTHANC_ROUTE_PREFIX.length - suffix.length;
+    return { destinationKey, alias: `${AUTHORITATIVE_ORTHANC_ROUTE_PREFIX}${slug.slice(0, maxSlugLength).replace(/_+$/g, "")}${suffix}` };
+  });
+  if (new Set(aliases.map((route) => route.alias)).size !== aliases.length) throw new HttpError(400, "Selected PACS destinations produce ambiguous Authoritative Orthanc routing aliases.");
+  return aliases;
+}
 
 export async function readAuthoritativeOrthancSettings(): Promise<AuthoritativeOrthancSettings> {
   if (settingsForTests) return settingsForTests;
@@ -149,7 +165,7 @@ export class AuthoritativeOrthancClient {
 }
 export async function synchronizeAuthoritativeOrthancAutoRoute(settings: AuthoritativeOrthancSettings): Promise<void> {
   const client = new AuthoritativeOrthancClient(settings);
-  const managedAlias = (key: string) => key === AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS || /^rispro_autoroute_[2-9][0-9]*$/.test(key);
+  const managedAlias = (key: string) => key.startsWith(AUTHORITATIVE_ORTHANC_ROUTE_PREFIX) || LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS.test(key);
   const existingAliases = settings.baseUrl ? (await client.listRemoteModalityKeys()).filter(managedAlias) : [];
   if (!settings.autoRouteEnabled) {
     for (const alias of existingAliases) await client.deleteRemoteModality(alias);
@@ -158,8 +174,9 @@ export async function synchronizeAuthoritativeOrthancAutoRoute(settings: Authori
   const { modalities } = await autoRouteDestinationLoader();
   const destinations = settings.autoRouteDestinationKeys.map((key) => modalities.find((item) => item.key === key));
   if (!destinations.length || destinations.some((destination) => !destination || !destination.aet || !destination.host || destination.port == null || destination.configurationError)) throw new HttpError(400, "Select one or more valid existing PACS destinations for DICOM auto-routing.");
-  const desiredAliases = destinations.map((_destination, index) => index === 0 ? AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS : `${AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS}_${index + 1}`);
-  for (const [index, destination] of destinations.entries()) await client.upsertRemoteModality(desiredAliases[index]!, { aet: destination!.aet, host: destination!.host, port: destination!.port! });
+  const routes = buildAuthoritativeOrthancRouteAliases(settings.autoRouteDestinationKeys);
+  const desiredAliases = routes.map((route) => route.alias);
+  for (const [index, destination] of destinations.entries()) await client.upsertRemoteModality(routes[index]!.alias, { aet: destination!.aet, host: destination!.host, port: destination!.port! });
   for (const alias of existingAliases.filter((item) => !desiredAliases.includes(item))) await client.deleteRemoteModality(alias);
 }
 export async function createAuthoritativeOrthancClient() { return new AuthoritativeOrthancClient(await readAuthoritativeOrthancSettings()); }

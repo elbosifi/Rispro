@@ -54,48 +54,72 @@ test("automatic clinical-document export requires both settings", () => {
   assert.equal(service.isClinicalDocumentAutoExportEnabled({ ...enabled, enabled: false }), false);
 });
 
-test("upserts and deletes the fixed auto-route modality with 404 accepted", async () => {
+test("upserts and deletes a descriptive route modality with 404 accepted", async () => {
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
     calls.push({ path: new URL(String(url)).pathname, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
     return new Response(null, { status: init?.method === "DELETE" ? 404 : 200 });
   });
   const client = new service.AuthoritativeOrthancClient(enabled);
-  await client.upsertRemoteModality(service.AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS, { aet: "PACS_AE", host: "10.0.0.10", port: 104 });
-  await client.deleteRemoteModality(service.AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS);
+  await client.upsertRemoteModality("rispro_route_imac", { aet: "PACS_AE", host: "10.0.0.10", port: 104 });
+  await client.deleteRemoteModality("rispro_route_imac");
   assert.deepEqual(calls, [
-    { path: "/modalities/rispro_autoroute", method: "PUT", body: { AET: "PACS_AE", Host: "10.0.0.10", Port: 104 } },
-    { path: "/modalities/rispro_autoroute", method: "DELETE", body: null },
+    { path: "/modalities/rispro_route_imac", method: "PUT", body: { AET: "PACS_AE", Host: "10.0.0.10", Port: 104 } },
+    { path: "/modalities/rispro_route_imac", method: "DELETE", body: null },
   ]);
 });
 
-test("copies multiple selected destinations and removes an unused managed alias", async () => {
+test("builds recognizable descriptive aliases and resolves slug collisions deterministically", () => {
+  assert.deepEqual(service.buildAuthoritativeOrthancRouteAliases(["iMac", "SonicDICOM", "Backup PACS"]), [
+    { destinationKey: "iMac", alias: "rispro_route_imac" },
+    { destinationKey: "SonicDICOM", alias: "rispro_route_sonicdicom" },
+    { destinationKey: "Backup PACS", alias: "rispro_route_backup_pacs" },
+  ]);
+  const forward = service.buildAuthoritativeOrthancRouteAliases(["A B", "A-B"]);
+  const reverse = service.buildAuthoritativeOrthancRouteAliases(["A-B", "A B"]);
+  assert.equal(new Set(forward.map((route) => route.alias)).size, 2);
+  assert.ok(forward.every((route) => route.alias.startsWith("rispro_route_a_b_")));
+  assert.deepEqual(Object.fromEntries(forward.map((route) => [route.destinationKey, route.alias])), Object.fromEntries(reverse.map((route) => [route.destinationKey, route.alias])));
+});
+
+test("reconciles descriptive aliases, updates details in place, and removes only deselected routes", async () => {
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
-  service.__setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(async () => ({ modalities: [
-    { key: "PACS_A", aet: "PACS_AE", host: "10.0.0.10", port: 104 },
-    { key: "PACS_B", aet: "PACS_B", host: "10.0.0.11", port: 11112 },
-  ] }));
-  let existing = ["rispro_autoroute"];
+  let modalities = [
+    { key: "iMac", aet: "IMAC_AE", host: "10.0.0.10", port: 104 },
+    { key: "Backup PACS", aet: "BACKUP_AE", host: "10.0.0.11", port: 11112 },
+  ];
+  service.__setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(async () => ({ modalities }));
+  let existing = ["rispro_autoroute", "rispro_autoroute_2", "unrelated"];
   service.__setAuthoritativeOrthancFetchForTests(async (url, init) => { const path = new URL(String(url)).pathname; if (path === "/modalities") return json(existing); calls.push({ path, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null }); return new Response(null, { status: 200 }); });
-  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "PACS_A", autoRouteDestinationKeys: ["PACS_A", "PACS_B"] });
-  existing = ["rispro_autoroute", "rispro_autoroute_2"];
-  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "PACS_B", autoRouteDestinationKeys: ["PACS_B"] });
+  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "iMac", autoRouteDestinationKeys: ["iMac", "Backup PACS"] });
   assert.deepEqual(calls, [
-    { path: "/modalities/rispro_autoroute", method: "PUT", body: { AET: "PACS_AE", Host: "10.0.0.10", Port: 104 } },
-    { path: "/modalities/rispro_autoroute_2", method: "PUT", body: { AET: "PACS_B", Host: "10.0.0.11", Port: 11112 } },
-    { path: "/modalities/rispro_autoroute", method: "PUT", body: { AET: "PACS_B", Host: "10.0.0.11", Port: 11112 } },
+    { path: "/modalities/rispro_route_imac", method: "PUT", body: { AET: "IMAC_AE", Host: "10.0.0.10", Port: 104 } },
+    { path: "/modalities/rispro_route_backup_pacs", method: "PUT", body: { AET: "BACKUP_AE", Host: "10.0.0.11", Port: 11112 } },
+    { path: "/modalities/rispro_autoroute", method: "DELETE", body: null },
     { path: "/modalities/rispro_autoroute_2", method: "DELETE", body: null },
   ]);
+  calls.length = 0;
+  existing = ["rispro_route_imac", "rispro_route_backup_pacs", "unrelated"];
+  modalities = [{ ...modalities[0]!, host: "10.0.0.20" }, modalities[1]!];
+  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "iMac", autoRouteDestinationKeys: ["iMac", "Backup PACS"] });
+  assert.deepEqual(calls.map((call) => call.path), ["/modalities/rispro_route_imac", "/modalities/rispro_route_backup_pacs"]);
+  assert.deepEqual(calls[0]!.body, { AET: "IMAC_AE", Host: "10.0.0.20", Port: 104 });
+  calls.length = 0;
+  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "Backup PACS", autoRouteDestinationKeys: ["Backup PACS"] });
+  assert.deepEqual(calls, [
+    { path: "/modalities/rispro_route_backup_pacs", method: "PUT", body: { AET: "BACKUP_AE", Host: "10.0.0.11", Port: 11112 } },
+    { path: "/modalities/rispro_route_imac", method: "DELETE", body: null },
+  ]);
 });
 
-test("disabled auto-routing removes the fixed alias and invalid destinations are rejected", async () => {
+test("disabled auto-routing removes new and legacy owned aliases but preserves unrelated modalities", async () => {
   const calls: string[] = [];
-  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => { const path = new URL(String(url)).pathname; if (path === "/modalities") return json(["rispro_autoroute", "rispro_autoroute_2", "unrelated"]); calls.push(`${init?.method || "GET"} ${path}`); return new Response(null, { status: 200 }); });
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => { const path = new URL(String(url)).pathname; if (path === "/modalities") return json(["rispro_route_imac", "rispro_route_backup_pacs", "rispro_autoroute", "rispro_autoroute_3", "unrelated"]); calls.push(`${init?.method || "GET"} ${path}`); return new Response(null, { status: 200 }); });
   await service.synchronizeAuthoritativeOrthancAutoRoute(enabled);
-  assert.deepEqual(calls, ["DELETE /modalities/rispro_autoroute", "DELETE /modalities/rispro_autoroute_2"]);
+  assert.deepEqual(calls, ["DELETE /modalities/rispro_route_imac", "DELETE /modalities/rispro_route_backup_pacs", "DELETE /modalities/rispro_autoroute", "DELETE /modalities/rispro_autoroute_3"]);
   service.__setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(async () => ({ modalities: [] }));
   await assert.rejects(() => service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "missing", autoRouteDestinationKeys: ["missing"] }), /valid existing PACS destinations/i);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("uses an exact StudyInstanceUID before accession and returns study metadata", async () => {

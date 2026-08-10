@@ -5,7 +5,7 @@ import { __resetAuthoritativeOrthancForTests, __setAuthoritativeOrthancAutoRoute
 
 test.after(async () => { await pool.end(); });
 
-test("persists authoritative settings defaults and synchronizes the selected auto-route destination", async (t) => {
+test("persists authoritative settings defaults and synchronizes selected auto-route destinations", async (t) => {
   try { await pool.query("select 1"); } catch { t.skip("PostgreSQL is not reachable at configured DATABASE_URL."); return; }
   const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   const user = await pool.query<{ id: number }>("insert into users(username,full_name,password_hash,role,is_active) values($1,$1,'test','super_admin',true) returning id", [`orthanc_auto_export_${suffix}`]);
@@ -37,7 +37,7 @@ test("persists authoritative settings defaults and synchronizes the selected aut
     assert.equal(persisted.autoRouteEnabled, true);
     assert.equal(persisted.autoRouteDestinationKey, "PACS_A");
     assert.deepEqual(persisted.autoRouteDestinationKeys, ["PACS_A", "PACS_B"]);
-    assert.deepEqual(calls, [{ path: "/modalities", method: "GET" }, { path: "/modalities/rispro_autoroute", method: "PUT" }, { path: "/modalities/rispro_autoroute_2", method: "PUT" }]);
+    assert.deepEqual(calls, [{ path: "/modalities", method: "GET" }, { path: "/modalities/rispro_route_pacs_a", method: "PUT" }, { path: "/modalities/rispro_route_pacs_b", method: "PUT" }]);
     assert.equal(saved.passwordConfigured, true);
     assert.equal("password" in saved, false);
     assert.equal("password" in await readAuthoritativeOrthancSettingsForDisplay(), false);
