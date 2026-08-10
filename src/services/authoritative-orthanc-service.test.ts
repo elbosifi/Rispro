@@ -4,7 +4,7 @@ process.env.DATABASE_URL ||= "postgres://user:password@localhost:5432/rispro_tes
 process.env.JWT_SECRET ||= "test-secret";
 const service = await import("./authoritative-orthanc-service.js");
 
-const enabled = { enabled: true, autoExportClinicalDocuments: true, baseUrl: "http://orthanc.test:8042", username: "", password: "", timeoutSeconds: 1, verifyTls: true, displayName: "" };
+const enabled = { enabled: true, autoExportClinicalDocuments: true, autoRouteEnabled: false, autoRouteDestinationKey: "", baseUrl: "http://orthanc.test:8042", username: "", password: "", timeoutSeconds: 1, verifyTls: true, displayName: "" };
 const study = (overrides: Record<string, unknown> = {}) => ({ MainDicomTags: { StudyInstanceUID: "1.2.3", AccessionNumber: "V2-000042", StudyDate: "20260727", ModalitiesInStudy: "CT", ...overrides }, PatientMainDicomTags: { PatientID: "MRN42" }, CountSeries: 2, CountInstances: 5 });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 
@@ -52,6 +52,47 @@ test("automatic clinical-document export requires both settings", () => {
   assert.equal(service.isClinicalDocumentAutoExportEnabled(enabled), true);
   assert.equal(service.isClinicalDocumentAutoExportEnabled({ ...enabled, autoExportClinicalDocuments: false }), false);
   assert.equal(service.isClinicalDocumentAutoExportEnabled({ ...enabled, enabled: false }), false);
+});
+
+test("upserts and deletes the fixed auto-route modality with 404 accepted", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    calls.push({ path: new URL(String(url)).pathname, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+    return new Response(null, { status: init?.method === "DELETE" ? 404 : 200 });
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  await client.upsertRemoteModality(service.AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS, { aet: "PACS_AE", host: "10.0.0.10", port: 104 });
+  await client.deleteRemoteModality(service.AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS);
+  assert.deepEqual(calls, [
+    { path: "/modalities/rispro_autoroute", method: "PUT", body: { AET: "PACS_AE", Host: "10.0.0.10", Port: 104 } },
+    { path: "/modalities/rispro_autoroute", method: "DELETE", body: null },
+  ]);
+});
+
+test("copies only the selected existing destination and updates the same alias", async () => {
+  const calls: Array<{ path: string; body: unknown }> = [];
+  service.__setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(async () => ({ modalities: [
+    { key: "PACS_A", aet: "PACS_AE", host: "10.0.0.10", port: 104 },
+    { key: "PACS_B", aet: "PACS_B", host: "10.0.0.11", port: 11112 },
+  ] }));
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => { calls.push({ path: new URL(String(url)).pathname, body: JSON.parse(String(init?.body)) }); return new Response(null, { status: 200 }); });
+  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "PACS_A" });
+  await service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "PACS_B" });
+  assert.deepEqual(calls.map((call) => call.path), ["/modalities/rispro_autoroute", "/modalities/rispro_autoroute"]);
+  assert.deepEqual(calls.map((call) => call.body), [
+    { AET: "PACS_AE", Host: "10.0.0.10", Port: 104 },
+    { AET: "PACS_B", Host: "10.0.0.11", Port: 11112 },
+  ]);
+});
+
+test("disabled auto-routing removes the fixed alias and invalid destinations are rejected", async () => {
+  const calls: string[] = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => { calls.push(`${init?.method || "GET"} ${new URL(String(url)).pathname}`); return new Response(null, { status: 200 }); });
+  await service.synchronizeAuthoritativeOrthancAutoRoute(enabled);
+  assert.deepEqual(calls, ["DELETE /modalities/rispro_autoroute"]);
+  service.__setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(async () => ({ modalities: [] }));
+  await assert.rejects(() => service.synchronizeAuthoritativeOrthancAutoRoute({ ...enabled, autoRouteEnabled: true, autoRouteDestinationKey: "missing" }), /valid existing PACS destination/i);
+  assert.equal(calls.length, 1);
 });
 
 test("uses an exact StudyInstanceUID before accession and returns study metadata", async () => {

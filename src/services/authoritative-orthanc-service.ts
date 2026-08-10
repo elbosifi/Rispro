@@ -5,9 +5,11 @@ import { logAuditEntry } from "./audit-service.js";
 import { loadSettingsMap, upsertSettings } from "./settings-service.js";
 import type { UserId } from "../types/http.js";
 import { normalizeRisproModalityCode } from "./clinical-document-dicom.js";
+import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 
 export const AUTHORITATIVE_ORTHANC_CATEGORY = "authoritative_orthanc";
-export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
+export const AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = "rispro_autoroute";
+export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
@@ -17,11 +19,15 @@ export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesI
 export type OrthancUploadedInstance = OrthancInstanceDetails;
 
 type FetchLike = typeof fetch;
+type AutoRouteDestination = { key: string; aet: string; host: string; port: number | null; configurationError?: string | null };
+type AutoRouteDestinationLoader = () => Promise<{ modalities: AutoRouteDestination[] }>;
 let fetchForTests: FetchLike = fetch;
 let settingsForTests: AuthoritativeOrthancSettings | null = null;
+let autoRouteDestinationLoader: AutoRouteDestinationLoader = listOrthancRemoteModalities;
 export function __setAuthoritativeOrthancFetchForTests(value: FetchLike) { fetchForTests = value; }
 export function __setAuthoritativeOrthancSettingsForTests(value: AuthoritativeOrthancSettings | null) { settingsForTests = value; }
-export function __resetAuthoritativeOrthancForTests() { fetchForTests = fetch; settingsForTests = null; }
+export function __setAuthoritativeOrthancAutoRouteDestinationLoaderForTests(value: AutoRouteDestinationLoader) { autoRouteDestinationLoader = value; }
+export function __resetAuthoritativeOrthancForTests() { fetchForTests = fetch; settingsForTests = null; autoRouteDestinationLoader = listOrthancRemoteModalities; }
 
 function bool(value: unknown, fallback = false) { if (value == null || value === "") return fallback; return [true, 1, "1", "true", "yes", "enabled", "on"].includes(typeof value === "string" ? value.trim().toLowerCase() : value as never); }
 function text(value: unknown) { return String(value ?? "").trim(); }
@@ -37,16 +43,18 @@ export async function readAuthoritativeOrthancSettings(): Promise<AuthoritativeO
   if (settingsForTests) return settingsForTests;
   const values = (await loadSettingsMap([AUTHORITATIVE_ORTHANC_CATEGORY]))[AUTHORITATIVE_ORTHANC_CATEGORY] || {};
   const enabled = bool(values.enabled);
-  return { enabled, autoExportClinicalDocuments: bool(values.auto_export_clinical_documents, enabled), baseUrl: validateBaseUrl(values.base_url), username: text(values.username), password: text(values.password), timeoutSeconds: positive(values.timeout_seconds, 10), verifyTls: bool(values.verify_tls, true), displayName: text(values.display_name) };
+  return { enabled, autoExportClinicalDocuments: bool(values.auto_export_clinical_documents, enabled), autoRouteEnabled: bool(values.auto_route_enabled), autoRouteDestinationKey: text(values.auto_route_destination_key), baseUrl: validateBaseUrl(values.base_url), username: text(values.username), password: text(values.password), timeoutSeconds: positive(values.timeout_seconds, 10), verifyTls: bool(values.verify_tls, true), displayName: text(values.display_name) };
 }
 export function isClinicalDocumentAutoExportEnabled(settings: AuthoritativeOrthancSettings): boolean { return settings.enabled && settings.autoExportClinicalDocuments; }
 export async function readAuthoritativeOrthancSettingsForDisplay() { return display(await readAuthoritativeOrthancSettings()); }
 export async function saveAuthoritativeOrthancSettings(input: Record<string, unknown>, userId: UserId) {
   const current = await readAuthoritativeOrthancSettings();
   const password = text(input.password) || current.password;
-  const settings: AuthoritativeOrthancSettings = { enabled: bool(input.enabled), autoExportClinicalDocuments: bool(input.autoExportClinicalDocuments ?? input.auto_export_clinical_documents, current.autoExportClinicalDocuments), baseUrl: validateBaseUrl(input.baseUrl ?? input.base_url), username: text(input.username), password, timeoutSeconds: positive(input.timeoutSeconds ?? input.timeout_seconds, 10), verifyTls: bool(input.verifyTls ?? input.verify_tls, true), displayName: text(input.displayName ?? input.display_name) };
+  const settings: AuthoritativeOrthancSettings = { enabled: bool(input.enabled), autoExportClinicalDocuments: bool(input.autoExportClinicalDocuments ?? input.auto_export_clinical_documents, current.autoExportClinicalDocuments), autoRouteEnabled: bool(input.autoRouteEnabled ?? input.auto_route_enabled, current.autoRouteEnabled), autoRouteDestinationKey: text(input.autoRouteDestinationKey ?? input.auto_route_destination_key ?? current.autoRouteDestinationKey), baseUrl: validateBaseUrl(input.baseUrl ?? input.base_url), username: text(input.username), password, timeoutSeconds: positive(input.timeoutSeconds ?? input.timeout_seconds, 10), verifyTls: bool(input.verifyTls ?? input.verify_tls, true), displayName: text(input.displayName ?? input.display_name) };
   if (settings.enabled && !settings.baseUrl) throw new HttpError(400, "Authoritative Orthanc base URL is required when enabled.");
-  await upsertSettings(AUTHORITATIVE_ORTHANC_CATEGORY, [{ key: "enabled", value: settings.enabled ? "enabled" : "disabled" }, { key: "auto_export_clinical_documents", value: settings.autoExportClinicalDocuments ? "enabled" : "disabled" }, { key: "base_url", value: settings.baseUrl }, { key: "username", value: settings.username }, { key: "password", value: settings.password }, { key: "timeout_seconds", value: String(settings.timeoutSeconds) }, { key: "verify_tls", value: settings.verifyTls ? "true" : "false" }, { key: "display_name", value: settings.displayName }], userId);
+  if (settings.autoRouteEnabled && !settings.enabled) throw new HttpError(400, "Authoritative Orthanc must be enabled before DICOM auto-routing can be enabled.");
+  await synchronizeAuthoritativeOrthancAutoRoute(settings);
+  await upsertSettings(AUTHORITATIVE_ORTHANC_CATEGORY, [{ key: "enabled", value: settings.enabled ? "enabled" : "disabled" }, { key: "auto_export_clinical_documents", value: settings.autoExportClinicalDocuments ? "enabled" : "disabled" }, { key: "auto_route_enabled", value: settings.autoRouteEnabled ? "enabled" : "disabled" }, { key: "auto_route_destination_key", value: settings.autoRouteDestinationKey }, { key: "base_url", value: settings.baseUrl }, { key: "username", value: settings.username }, { key: "password", value: settings.password }, { key: "timeout_seconds", value: String(settings.timeoutSeconds) }, { key: "verify_tls", value: settings.verifyTls ? "true" : "false" }, { key: "display_name", value: settings.displayName }], userId);
   await logAuditEntry({ entityType: "integration", entityId: null, actionType: "authoritative_orthanc_settings_saved", oldValues: null, newValues: { ...display(settings), passwordChanged: Boolean(text(input.password)) }, changedByUserId: userId });
   return display(settings);
 }
@@ -67,8 +75,8 @@ export class AuthoritativeOrthancClient {
       request.end();
     });
   }
-  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
-    if (!this.settings.enabled) throw new HttpError(503, "Authoritative Orthanc is disabled.", { code: "orthanc_disabled" });
+  private async request(path: string, init: RequestInit = {}, options: { allowDisabled?: boolean; acceptableStatuses?: number[] } = {}): Promise<unknown> {
+    if (!this.settings.enabled && !options.allowDisabled) throw new HttpError(503, "Authoritative Orthanc is disabled.", { code: "orthanc_disabled" });
     if (!this.settings.baseUrl) throw new HttpError(503, "Authoritative Orthanc base URL is not configured.");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), this.settings.timeoutSeconds * 1000);
     try {
@@ -78,11 +86,16 @@ export class AuthoritativeOrthancClient {
       const url = new URL(path.replace(/^\//, ""), `${this.settings.baseUrl}/`).toString();
       const response = !this.settings.verifyTls && this.settings.baseUrl.startsWith("https://") ? await this.insecureTlsRequest(url, request) : await fetchForTests(url, request);
       if (response.status === 401 || response.status === 403) throw new HttpError(502, "Authoritative Orthanc authentication failed.", { code: "orthanc_auth_failed" });
+      if (options.acceptableStatuses?.includes(response.status)) return null;
       if (!response.ok) throw new HttpError(502, `Authoritative Orthanc request failed (status=${response.status}).`);
-      try { return await response.json(); } catch { throw new HttpError(502, "Authoritative Orthanc returned an invalid JSON response.", { code: "orthanc_invalid_response" }); }
+      const body = await response.text();
+      if (!body) return null;
+      try { return JSON.parse(body) as unknown; } catch { throw new HttpError(502, "Authoritative Orthanc returned an invalid JSON response.", { code: "orthanc_invalid_response" }); }
     } catch (error) { if ((error as Error).name === "AbortError") throw new HttpError(502, "Authoritative Orthanc request timed out.", { code: "orthanc_timeout" }); if (error instanceof HttpError) throw error; if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|ENOTFOUND/i.test(String(error))) throw new HttpError(502, "Authoritative Orthanc is unavailable.", { code: "orthanc_unavailable" }); throw error; } finally { clearTimeout(timeout); }
   }
   async getSystem(): Promise<OrthancSystemInfo> { const row = record(await this.request("/system")); const version = first(row.Version, row.version); if (!version && !first(row.Name, row.name)) throw new HttpError(502, "Authoritative Orthanc returned an invalid system response."); return { name: first(row.Name, row.name, this.settings.displayName), version, apiVersion: first(row.ApiVersion, row.API_VERSION, row.apiVersion) }; }
+  async upsertRemoteModality(key: string, modality: { aet: string; host: string; port: number }): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ AET: modality.aet, Host: modality.host, Port: modality.port }) }); }
+  async deleteRemoteModality(key: string): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "DELETE" }, { allowDisabled: true, acceptableStatuses: [404] }); }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); const row = { ...record(detail), ...record(statistics) }; const dicom = tags(row); return { orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]), patientSex: first(dicom.PatientSex, dicom["00100040"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean), seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"]), instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"]) }; }
   async getInstance(orthancInstanceId: string): Promise<OrthancInstanceDetails> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");
@@ -126,6 +139,17 @@ export class AuthoritativeOrthancClient {
     if (!uid) { const expected = (query.expectedPatientIds || []).map((value) => value.trim().toUpperCase()).filter(Boolean); if (expected.length && study.patientId && !expected.includes(study.patientId.toUpperCase())) return { status: "ambiguous", matchKey, study: null, reason: "patient_conflict" }; if (query.expectedModalityCode && study.modalitiesInStudy.length && !study.modalitiesInStudy.map((value) => value.toUpperCase()).includes(query.expectedModalityCode.toUpperCase())) return { status: "ambiguous", matchKey, study: null, reason: "modality_conflict" }; if (query.expectedStudyDate && study.studyDate && study.studyDate.replace(/[^0-9]/g, "").slice(0, 8) !== query.expectedStudyDate.replace(/[^0-9]/g, "").slice(0, 8)) return { status: "ambiguous", matchKey, study: null, reason: "study_date_conflict" }; }
     return { status: "matched", matchKey, study };
   }
+}
+export async function synchronizeAuthoritativeOrthancAutoRoute(settings: AuthoritativeOrthancSettings): Promise<void> {
+  const client = new AuthoritativeOrthancClient(settings);
+  if (!settings.autoRouteEnabled) {
+    if (settings.baseUrl) await client.deleteRemoteModality(AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS);
+    return;
+  }
+  const { modalities } = await autoRouteDestinationLoader();
+  const destination = modalities.find((item) => item.key === settings.autoRouteDestinationKey);
+  if (!destination || !destination.aet || !destination.host || destination.port == null || destination.configurationError) throw new HttpError(400, "Select a valid existing PACS destination for DICOM auto-routing.");
+  await client.upsertRemoteModality(AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS, { aet: destination.aet, host: destination.host, port: destination.port });
 }
 export async function createAuthoritativeOrthancClient() { return new AuthoritativeOrthancClient(await readAuthoritativeOrthancSettings()); }
 function httpErrorCode(error: HttpError): string { const details = record(error.details); return text(details.code) || "request_failed"; }

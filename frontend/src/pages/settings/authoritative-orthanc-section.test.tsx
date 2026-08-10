@@ -6,7 +6,8 @@ import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import { api } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({ api: vi.fn() }));
-const settings = { enabled: true, autoExportClinicalDocuments: true, baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
+const settings = { enabled: true, autoExportClinicalDocuments: true, autoRouteEnabled: false, autoRouteDestinationKey: "", baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
+const modalities = [{ key: "PACS_A", aet: "PACS_AE", host: "10.0.0.10", port: 104, isDefault: true }, { key: "PACS_B", aet: "PACS_B", host: "10.0.0.11", port: 11112, isDefault: false }];
 function renderSection() { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthoritativeOrthancSection onReAuthRequired={vi.fn()} /></QueryClientProvider>); }
 
 describe("AuthoritativeOrthancSection", () => {
@@ -15,6 +16,7 @@ describe("AuthoritativeOrthancSection", () => {
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path.endsWith("/settings") && !options?.method) return { settings };
       if (path.endsWith("/settings") && options?.method === "PUT") return { settings };
+      if (path.endsWith("/pacs/orthanc-modalities")) return { modalities };
       if (path.endsWith("/test")) return { connected: true, system: { name: "Authoritative", version: "1.12.4", apiVersion: "19" }, testedAt: "2026-07-27T10:00:00.000Z" };
       throw new Error(`Unexpected ${path}`);
     });
@@ -44,5 +46,17 @@ describe("AuthoritativeOrthancSection", () => {
     await user.click(screen.getByRole("button", { name: "Test Connection" }));
     expect((await screen.findByRole("status")).textContent).toContain("Authoritative");
     expect(screen.getByRole("status").textContent).toContain("1.12.4");
+  });
+
+  it("enables stable-series routing and selects an existing PACS destination", async () => {
+    const user = userEvent.setup(); renderSection();
+    const destination = await screen.findByRole("combobox", { name: "Auto-routing destination" });
+    expect((destination as HTMLSelectElement).disabled).toBe(true);
+    await user.click(screen.getByRole("checkbox", { name: "Enable stable-series auto-routing" }));
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+    await user.selectOptions(destination, "PACS_B");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const saveCall = await waitFor(() => vi.mocked(api).mock.calls.find(([path, options]) => path.endsWith("/settings") && options?.method === "PUT"));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ autoRouteEnabled: true, autoRouteDestinationKey: "PACS_B" }));
   });
 });

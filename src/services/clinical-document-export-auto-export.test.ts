@@ -7,7 +7,7 @@ const queue = await import("./clinical-document-export-queue-service.js");
 const exports = await import("./clinical-document-export-service.js");
 const { pool } = await import("../db/pool.js");
 
-const settings = { enabled: true, autoExportClinicalDocuments: true, baseUrl: "http://orthanc.test:8042", username: "", password: "", timeoutSeconds: 1, verifyTls: true, displayName: "" };
+const settings = { enabled: true, autoExportClinicalDocuments: true, autoRouteEnabled: false, autoRouteDestinationKey: "", baseUrl: "http://orthanc.test:8042", username: "", password: "", timeoutSeconds: 1, verifyTls: true, displayName: "" };
 afterEach(() => { mock.restoreAll(); orthanc.__resetAuthoritativeOrthancForTests(); });
 
 test("automatic worker does not reconcile or claim when either export gate is off", async () => {
