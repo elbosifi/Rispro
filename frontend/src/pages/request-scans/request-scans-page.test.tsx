@@ -99,10 +99,10 @@ describe("RequestScansPage", () => {
     expect((screen.getByRole("button", { name: "Confirm patient and attach" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("accepts a string bigint modality ID, requires identity confirmation, and keeps another modality disabled", async () => {
+  it("matches the selected numeric modality ID, requires identity confirmation, and keeps another modality disabled", async () => {
     const fetchMock = mock([unassignedFailure], [
-      { id: 12, modality_id: "7", accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "CT", modality_name_en: "CT", exam_name: "Head", exam_name_en: "Head", appointment_date: "2026-08-10", appointment_time: "09:30", appointment_status: "scheduled" },
-      { id: 13, modality_id: "8", accession_number: "V2-000013", patient_name: "Other Modality", patient_name_en: "Other Modality", patient_mrn: "MRN-13", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-08-10", appointment_time: "10:00", appointment_status: "scheduled" },
+      { id: 12, modality_id: 7, accession_number: "V2-000012", patient_name: "Selected Patient", patient_name_en: "Selected Patient", patient_mrn: "MRN-12", patient_date_of_birth: "1981-01-01", modality_name: "CT", modality_name_en: "CT", exam_name: "Head", exam_name_en: "Head", appointment_date: "2026-08-10", appointment_time: "09:30", appointment_status: "scheduled" },
+      { id: 13, modality_id: 8, accession_number: "V2-000013", patient_name: "Other Modality", patient_name_en: "Other Modality", patient_mrn: "MRN-13", patient_date_of_birth: "1981-01-01", modality_name: "MRI", modality_name_en: "MRI", exam_name: "Brain", exam_name_en: "Brain", appointment_date: "2026-08-10", appointment_time: "10:00", appointment_status: "scheduled" },
     ]);
     renderPage({ id: 7, code: "CT", name: "CT", onBack: vi.fn() });
     fireEvent.click(await screen.findByRole("button", { name: "Assign appointment" }));
