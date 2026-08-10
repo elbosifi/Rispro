@@ -364,3 +364,31 @@ Rules:
 
 Reason:
 TanStack Query provides caching, deduplication, and automatic refetching without manual state management. Typed query keys prevent cache collisions when multiple filter combinations are active.
+
+---
+
+## D019 - Special Quota is a versioned shared group with durable consumption
+
+Status: accepted
+
+Decision:
+Special Quota policy is modeled as a named group with one modality, one or more exam types, a shared daily extra-slot count, and one or more explicitly authorized active users. Super admins are authorized implicitly and are not stored as group members. A stable `logical_key` identifies the same quota pool across draft and published policy versions.
+
+Rules:
+- An active exam type may belong to only one active Special Quota group in a policy. This global non-overlap rule keeps both normal-user and implicit-super-admin matching deterministic.
+- All selected exams must belong to the group's modality. Active groups require a positive whole-number capacity, at least one exam, and at least one explicitly authorized non-super-admin user.
+- Group consumption is counted by `logical_key + booking_date`, not by exam type or physical policy row ID. Editing or publishing a new version therefore does not reset an already-consumed pool.
+- Reschedule first locks the booking row, then acquires the ordinary modality/date/category mutexes and all affected Special Quota logical-pool/date mutexes in deterministic order. Create has no existing booking row and acquires the ordinary mutex before the logical-pool mutex. Both re-evaluate in the transaction and write the booking plus consumption atomically.
+- Cancellation and void release the active consumption under the same logical-pool/date mutex. Reschedule releases and recreates consumption when the pool/date/exam changes, while retaining history.
+- `bookings.uses_special_quota` remains a compatibility/reporting projection. `special_quota_consumptions` is the capacity authority and durable audit record.
+- Total modality capacity and the standard category/override model remain unchanged. Special Quota bypasses only its existing eligible standard bucket constraint and never bypasses the total modality ceiling.
+
+Migration and rollback:
+- Migration 161 creates additive group, membership, mutex, and consumption tables; it does not drop the legacy one-exam tables.
+- Each legacy quota becomes exactly one one-exam group. Rows are deliberately not merged. The deterministic logical key is based on policy-set plus exam identity so lineage is stable across historical versions.
+- Legacy `uses_special_quota` bookings are backfilled into durable consumption history; cancelled, discontinued, and voided bookings are backfilled as released.
+- The migration aborts on rule, membership, or consumption count mismatch, or if a flagged historical booking cannot be mapped.
+- Before deployment, take the normal database backup and verify restore according to the release checklist. Code rollback remains possible because the legacy tables are retained, but policy edits made after cutover are not dual-written; rollback after such edits requires an explicit data reconciliation from the generalized tables before re-enabling legacy code.
+
+Reason:
+One physical row per exam multiplied capacity and could not express a genuinely shared pool. Stable logical identity plus a durable consumption ledger preserves policy history, prevents concurrent overbooking, and keeps create, cancel, reschedule, availability, and audit views consistent.

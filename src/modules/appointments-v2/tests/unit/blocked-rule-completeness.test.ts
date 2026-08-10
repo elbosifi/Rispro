@@ -33,7 +33,7 @@ function makeContext(overrides: Partial<RuleEvaluationContext> = {}): RuleEvalua
     currentBookedCountNonOncology: 0,
     specialQuotas: [],
     currentBookedCount: 0,
-    currentSpecialQuotaBookedCount: 0,
+    currentSpecialQuotaConsumptionCount: 0,
     ...overrides,
   };
 }

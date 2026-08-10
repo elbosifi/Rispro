@@ -15,7 +15,7 @@ import {
   loadModalityBlockedRules,
   loadExamTypeRules,
   loadCategoryDailyLimits,
-  loadExamTypeSpecialQuotas,
+  loadSpecialQuotaRules,
   loadAllExamTypeRuleItemExamTypeIds,
   loadAllExamMixQuotaRules,
   loadAllExamMixQuotaRuleItems,
@@ -59,7 +59,7 @@ export async function compilePolicy(
   const blockedRules = await loadModalityBlockedRules(client, policyVersionId, 0); // 0 = all modalities
   const examTypeRules = await loadExamTypeRules(client, policyVersionId, 0); // 0 = all modalities
   const categoryLimits = await loadCategoryDailyLimits(client, policyVersionId, 0); // 0 = all modalities
-  const specialQuotas = await loadExamTypeSpecialQuotas(client, policyVersionId);
+  const specialQuotas = await loadSpecialQuotaRules(client, policyVersionId);
   const examTypeRuleItemExamTypeIds = await loadAllExamTypeRuleItemExamTypeIds(client, policyVersionId);
   const examMixQuotaRules = await loadAllExamMixQuotaRules(client, policyVersionId);
   const examMixQuotaRuleItems = await loadAllExamMixQuotaRuleItems(client, policyVersionId);

@@ -11,7 +11,7 @@ const emptySnapshot: PolicySnapshotDto = {
   categoryDailyLimits: [],
   modalityBlockedRules: [],
   examTypeRules: [],
-  examTypeSpecialQuotas: [],
+  specialQuotaRules: [],
   examMixQuotaRules: [],
   specialReasonCodes: [],
 };
@@ -87,7 +87,7 @@ describe("LivePolicyPanel", () => {
         notes: null,
         isActive: true,
       }],
-      examTypeSpecialQuotas: [{ id: 4, examTypeId: 10, dailyExtraSlots: 2, allowedUserIds: [2], isActive: true }],
+      specialQuotaRules: [{ id: 4, logicalKey: "00000000-0000-0000-0000-000000000004", modalityId: 1, title: "MRI pool", examTypeIds: [10, 11], dailyExtraSlots: 2, allowedUserIds: [2], isActive: true }],
       examMixQuotaRules: [],
       specialReasonCodes: [{ code: "ONC", labelEn: "Oncology exception", labelAr: "استثناء الأورام", isActive: true }],
     };
@@ -97,7 +97,10 @@ describe("LivePolicyPanel", () => {
         snapshot={snapshot}
         displayLookups={{
           modalities: [{ id: 1, name: "MRI", nameAr: "الرنين", nameEn: "MRI", code: "MR", isActive: true }],
-          examTypes: [{ id: 10, name: "Brain MRI", nameAr: "رنين الدماغ", nameEn: "Brain MRI", code: "BMRI", modalityId: 1, isActive: true }],
+          examTypes: [
+            { id: 10, name: "Brain MRI", nameAr: "رنين الدماغ", nameEn: "Brain MRI", code: "BMRI", modalityId: 1, isActive: true },
+            { id: 11, name: "MRCP", nameAr: "MRCP", nameEn: "MRCP", code: "MRCP", modalityId: 1, isActive: true },
+          ],
           users: [{ id: 2, username: "supervisor", fullName: "Supervisor User", role: "supervisor", isActive: true }],
         }}
       />
@@ -110,6 +113,7 @@ describe("LivePolicyPanel", () => {
     expect(screen.getByText(`${displayedDate("2027-02-01")} to ${displayedDate("2027-02-03")}`)).toBeTruthy();
     expect(screen.getByText("Brain MRI restriction")).toBeTruthy();
     expect(screen.getAllByText("Brain MRI (BMRI)").length).toBeGreaterThan(0);
+    expect(screen.getByText("MRCP (MRCP)")).toBeTruthy();
     expect(screen.getByText("Supervisor User (supervisor)")).toBeTruthy();
     expect(screen.getByText("ONC")).toBeTruthy();
     expect(screen.getByText("Oncology exception")).toBeTruthy();
@@ -171,8 +175,17 @@ describe("LivePolicyPanel", () => {
             examTypeIds: [11, 12],
             isActive: true,
           }],
-          examTypeSpecialQuotas: [
-            { id: 4, examTypeId: 13, dailyExtraSlots: 1, allowedUserIds: [20, 21], isActive: true },
+          specialQuotaRules: [
+            {
+              id: 4,
+              logicalKey: "00000000-0000-0000-0000-000000000004",
+              modalityId: 7,
+              title: "MRI overflow",
+              examTypeIds: [13],
+              dailyExtraSlots: 1,
+              allowedUserIds: [20, 21],
+              isActive: true,
+            },
           ],
         }}
         displayLookups={{
@@ -208,8 +221,17 @@ describe("LivePolicyPanel", () => {
           categoryDailyLimits: [
             { id: 1, modalityId: 7, caseCategory: "oncology", dailyLimit: 2, isActive: true },
           ],
-          examTypeSpecialQuotas: [
-            { id: 4, examTypeId: 13, dailyExtraSlots: 1, allowedUserIds: [20], isActive: true },
+          specialQuotaRules: [
+            {
+              id: 4,
+              logicalKey: "00000000-0000-0000-0000-000000000004",
+              modalityId: 7,
+              title: "MRI overflow",
+              examTypeIds: [13],
+              dailyExtraSlots: 1,
+              allowedUserIds: [20],
+              isActive: true,
+            },
           ],
           examMixQuotaRules: [{
             id: 5,

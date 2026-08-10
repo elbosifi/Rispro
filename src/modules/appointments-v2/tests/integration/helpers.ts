@@ -298,6 +298,10 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
     `,
     [patientIds, bookingIds, userIds]
   );
+  await pool.query(
+    `delete from appointments_v2.special_quota_consumptions where booking_id = any($1::bigint[])`,
+    [bookingIds]
+  );
   await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [bookingIds]);
 
   await pool.query(
@@ -318,6 +322,34 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
     `,
     [policyVersionIds]
   );
+  const specialQuotaLogicalKeys = await pool.query<{ logical_key: string }>(
+    `select logical_key::text as logical_key
+       from appointments_v2.special_quota_rules
+      where policy_version_id = any($1::bigint[])`,
+    [policyVersionIds]
+  );
+  const logicalKeys = specialQuotaLogicalKeys.rows.map((row) => row.logical_key);
+  await pool.query(
+    `delete from appointments_v2.special_quota_rule_users
+      where quota_rule_id in (
+        select id from appointments_v2.special_quota_rules where policy_version_id = any($1::bigint[])
+      )`,
+    [policyVersionIds]
+  );
+  await pool.query(
+    `delete from appointments_v2.special_quota_rule_exam_types
+      where quota_rule_id in (
+        select id from appointments_v2.special_quota_rules where policy_version_id = any($1::bigint[])
+      )`,
+    [policyVersionIds]
+  );
+  await pool.query(`delete from appointments_v2.special_quota_rules where policy_version_id = any($1::bigint[])`, [policyVersionIds]);
+  if (logicalKeys.length > 0) {
+    await pool.query(
+      `delete from appointments_v2.special_quota_bucket_mutex where quota_logical_key = any($1::uuid[])`,
+      [logicalKeys]
+    );
+  }
   await pool.query(
     `
       delete from appointments_v2.exam_type_special_quota_users

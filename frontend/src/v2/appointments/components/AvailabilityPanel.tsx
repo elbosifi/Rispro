@@ -111,6 +111,7 @@ export function AvailabilityPanel({
             nonOncologyFilled={row.nonOncologyFilled}
             nonOncologyRemaining={row.nonOncologyRemaining}
             specialQuotaRemaining={row.specialQuotaRemaining}
+            specialQuotaConfigured={row.specialQuotaConfigured}
             specialQuotaPath={Boolean(row.hasSpecialQuotaPath)}
             examMixQuotaSummaries={row.examMixQuotaSummaries}
             primaryExamMixBlocking={row.primaryExamMixBlocking}

@@ -30,6 +30,15 @@ export interface BookingDecision {
   consumedCapacityMode: "standard" | "special" | "override" | null;
   remainingStandardCapacity: number | null;
   remainingSpecialQuota: number | null;
+  matchedSpecialQuota?: {
+    ruleId: number;
+    logicalKey: string;
+    title: string | null;
+    modalityId: number;
+    configured: number;
+    consumed: number;
+    remaining: number;
+  } | null;
   matchedRuleIds: number[];
   matchedExamRuleSummaries?: Array<{
     ruleId: string;

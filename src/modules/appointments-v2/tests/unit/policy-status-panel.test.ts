@@ -32,7 +32,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       "categoryDailyLimits",
       "modalityBlockedRules",
       "examTypeRules",
-      "examTypeSpecialQuotas",
+      "specialQuotaRules",
     ];
     for (const type of versionedTypes) {
       assert.ok(content.includes(`snapshot.${type}.length`), `Should count ${type}`);
@@ -47,7 +47,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       "categoryDailyLimits",
       "modalityBlockedRules",
       "examTypeRules",
-      "examTypeSpecialQuotas",
+      "specialQuotaRules",
     ];
     for (const type of versionedTypes) {
       assert.ok(content.includes(`snapshot.${type}.length ?? 0`), `Should use ?? 0 for ${type}`);
@@ -68,7 +68,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       categoryDailyLimits: s.categoryDailyLimits,
       modalityBlockedRules: s.modalityBlockedRules,
       examTypeRules: s.examTypeRules,
-      examTypeSpecialQuotas: s.examTypeSpecialQuotas,
+      specialQuotaRules: s.specialQuotaRules,
     });
 
     const snapshotsDiffer = (a: any, b: any) =>
@@ -79,14 +79,14 @@ describe("PolicyStatusPanel — countRules logic", () => {
       categoryDailyLimits: [{ id: 1 }],
       modalityBlockedRules: [],
       examTypeRules: [],
-      examTypeSpecialQuotas: [],
+      specialQuotaRules: [],
       specialReasonCodes: [{ code: "urgent" }],
     };
     const draft = {
       categoryDailyLimits: [{ id: 1 }],
       modalityBlockedRules: [],
       examTypeRules: [],
-      examTypeSpecialQuotas: [],
+      specialQuotaRules: [],
       specialReasonCodes: [{ code: "different" }],
     };
 
@@ -107,7 +107,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       categoryDailyLimits: [],
       modalityBlockedRules: [],
       examTypeRules: [],
-      examTypeSpecialQuotas: [],
+      specialQuotaRules: [],
       specialReasonCodes: [
         { code: "urgent", labelAr: "عاجل", labelEn: "Urgent", isActive: true },
         { code: "priority", labelAr: "أولوية", labelEn: "Priority", isActive: true },
@@ -119,7 +119,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       (snapshot.categoryDailyLimits.length ?? 0) +
       (snapshot.modalityBlockedRules.length ?? 0) +
       (snapshot.examTypeRules.length ?? 0) +
-      (snapshot.examTypeSpecialQuotas.length ?? 0);
+      (snapshot.specialQuotaRules.length ?? 0);
 
     assert.strictEqual(count, 0, "Should return 0 — specialReasonCodes are NOT versioned rules");
   });
@@ -129,7 +129,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       categoryDailyLimits: [{ id: 1 }, { id: 2 }],
       modalityBlockedRules: [{ id: 3 }],
       examTypeRules: [],
-      examTypeSpecialQuotas: [{ id: 4 }, { id: 5 }, { id: 6 }],
+      specialQuotaRules: [{ id: 4 }, { id: 5 }, { id: 6 }],
       specialReasonCodes: [{ code: "urgent" }],
     };
 
@@ -138,7 +138,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       (snapshot.categoryDailyLimits.length ?? 0) +
       (snapshot.modalityBlockedRules.length ?? 0) +
       (snapshot.examTypeRules.length ?? 0) +
-      (snapshot.examTypeSpecialQuotas.length ?? 0);
+      (snapshot.specialQuotaRules.length ?? 0);
 
     assert.strictEqual(count, 6, "Should count only versioned rules: 2+1+0+3=6 (excludes specialReasonCodes)");
   });
@@ -148,7 +148,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       categoryDailyLimits: [],
       modalityBlockedRules: [],
       examTypeRules: [],
-      examTypeSpecialQuotas: [],
+      specialQuotaRules: [],
       specialReasonCodes: [],
     };
 
@@ -156,7 +156,7 @@ describe("PolicyStatusPanel — countRules logic", () => {
       (snapshot.categoryDailyLimits.length ?? 0) +
       (snapshot.modalityBlockedRules.length ?? 0) +
       (snapshot.examTypeRules.length ?? 0) +
-      (snapshot.examTypeSpecialQuotas.length ?? 0) +
+      (snapshot.specialQuotaRules.length ?? 0) +
       (snapshot.specialReasonCodes.length ?? 0);
 
     assert.strictEqual(count, 0, "Should return 0 for empty snapshot");

@@ -24,7 +24,7 @@ describe("Admin policy — DTO shapes", () => {
         categoryDailyLimits: [{ id: 1, modalityId: 10, caseCategory: "non_oncology", dailyLimit: 15, isActive: true }],
         modalityBlockedRules: [],
         examTypeRules: [],
-        examTypeSpecialQuotas: [],
+        specialQuotaRules: [],
         specialReasonCodes: [],
       },
       changeNote: "Updated limits",
@@ -127,6 +127,38 @@ describe("Admin policy — hashConfigSnapshot for config integrity", () => {
     const hash1 = hashConfigSnapshot(config1);
     const hash2 = hashConfigSnapshot(config2);
     assert.notEqual(hash1, hash2);
+  });
+
+  it("uses logical quota identity and canonical membership order", async () => {
+    const { hashConfigSnapshot } = await import(
+      "../../shared/utils/hashing.js"
+    );
+    const first = {
+      specialQuotaRules: [{
+        id: 101,
+        logicalKey: "00000000-0000-0000-0000-000000000004",
+        modalityId: 7,
+        title: "MRI overflow",
+        examTypeIds: [13, 11],
+        allowedUserIds: [22, 20],
+        dailyExtraSlots: 2,
+        isActive: true,
+      }],
+    };
+    const equivalent = {
+      specialQuotaRules: [{
+        id: 999,
+        isActive: true,
+        dailyExtraSlots: 2,
+        allowedUserIds: [20, 22],
+        examTypeIds: [11, 13],
+        title: "MRI overflow",
+        modalityId: 7,
+        logicalKey: "00000000-0000-0000-0000-000000000004",
+      }],
+    };
+
+    assert.equal(hashConfigSnapshot(first), hashConfigSnapshot(equivalent));
   });
 });
 

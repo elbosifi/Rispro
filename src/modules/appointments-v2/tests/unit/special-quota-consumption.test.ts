@@ -2,7 +2,7 @@
  * Appointments V2 — Special quota consumption unit tests.
  *
  * Tests the pureEvaluate special quota logic with consumed count:
- * - remainingSpecialQuota = dailyExtraSlots - currentSpecialQuotaBookedCount
+ * - remainingSpecialQuota = dailyExtraSlots - currentSpecialQuotaConsumptionCount
  * - quota becomes unavailable when consumed count reaches dailyExtraSlots
  * - no special quota when examTypeId is null
  * - standard capacity takes precedence over special quota
@@ -33,10 +33,10 @@ function makeContext(overrides: Partial<RuleEvaluationContext> = {}): RuleEvalua
     currentBookedCountOncology: 0,
     currentBookedCountNonOncology: 0,
     specialQuotas: [
-      { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, allowedUserIds: [1], isActive: true },
+      { id: 1, logicalKey: "00000000-0000-0000-0000-000000000001", policyVersionId: 1, modalityId: 1, title: null, examTypeIds: [10], dailyExtraSlots: 3, allowedUserIds: [1], isActive: true },
     ],
     currentBookedCount: 0,
-    currentSpecialQuotaBookedCount: 0,
+    currentSpecialQuotaConsumptionCount: 0,
     requesterUserId: 1,
     ...overrides,
   };
@@ -67,7 +67,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 2,
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
       }),
     });
 
@@ -83,7 +83,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 2,
-        currentSpecialQuotaBookedCount: 1, // 1 already consumed
+        currentSpecialQuotaConsumptionCount: 1, // 1 already consumed
       }),
     });
 
@@ -101,7 +101,7 @@ describe("Special quota consumption — pureEvaluate", () => {
         currentBookedCount: 5, // category exhausted
         currentBookedCountTotal: 5,
         modalityDailyCapacity: 6,
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
       }),
     });
 
@@ -120,7 +120,7 @@ describe("Special quota consumption — pureEvaluate", () => {
         currentBookedCount: 5,
         currentBookedCountTotal: 5,
         modalityDailyCapacity: 5,
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
       }),
     });
 
@@ -137,7 +137,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: false,
       context: makeContext({
         currentBookedCount: 2, // 3 remaining
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
       }),
     });
 
@@ -153,7 +153,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: false,
       context: makeContext({
         currentBookedCount: 2,
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
       }),
     });
 
@@ -169,7 +169,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 2,
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
       }),
     });
 
@@ -185,9 +185,9 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 2,
-        currentSpecialQuotaBookedCount: 0,
+        currentSpecialQuotaConsumptionCount: 0,
         specialQuotas: [
-          { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, allowedUserIds: [1], isActive: true }, // quota for exam type 10, not 99
+          { id: 1, logicalKey: "00000000-0000-0000-0000-000000000001", policyVersionId: 1, modalityId: 1, title: null, examTypeIds: [10], dailyExtraSlots: 3, allowedUserIds: [1], isActive: true }, // quota for exam type 10, not 99
         ],
       }),
     });
@@ -203,7 +203,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 2,
-        currentSpecialQuotaBookedCount: 2, // 3 - 2 = 1 remaining
+        currentSpecialQuotaConsumptionCount: 2, // 3 - 2 = 1 remaining
       }),
     });
 

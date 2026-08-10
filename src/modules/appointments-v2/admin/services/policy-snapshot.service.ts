@@ -10,7 +10,7 @@ import type {
   PolicyCategoryDailyLimitDto,
   PolicyModalityBlockedRuleDto,
   PolicyExamTypeRuleDto,
-  PolicyExamTypeSpecialQuotaDto,
+  PolicySpecialQuotaRuleDto,
   PolicyExamMixQuotaRuleDto,
   PolicySpecialReasonCodeDto,
 } from "../../api/dto/admin-scheduling.dto.js";
@@ -19,7 +19,7 @@ const EMPTY_SNAPSHOT: PolicySnapshotDto = {
   categoryDailyLimits: [],
   modalityBlockedRules: [],
   examTypeRules: [],
-  examTypeSpecialQuotas: [],
+  specialQuotaRules: [],
   examMixQuotaRules: [],
   specialReasonCodes: [],
 };
@@ -40,14 +40,14 @@ export async function loadPolicySnapshot(
     categoryDailyLimits,
     modalityBlockedRules,
     examTypeRules,
-    examTypeSpecialQuotas,
+    specialQuotaRules,
     examMixQuotaRules,
     specialReasonCodes,
   ] = await Promise.all([
     listCategoryDailyLimits(client, versionId),
     listModalityBlockedRules(client, versionId),
     listExamTypeRules(client, versionId),
-    listExamTypeSpecialQuotas(client, versionId),
+    listSpecialQuotaRules(client, versionId),
     listExamMixQuotaRules(client, versionId),
     listSpecialReasonCodes(client),
   ]);
@@ -56,7 +56,7 @@ export async function loadPolicySnapshot(
     categoryDailyLimits,
     modalityBlockedRules,
     examTypeRules,
-    examTypeSpecialQuotas,
+    specialQuotaRules,
     examMixQuotaRules,
     specialReasonCodes,
   };
@@ -143,28 +143,38 @@ async function listExamTypeRules(
   }));
 }
 
-async function listExamTypeSpecialQuotas(
+async function listSpecialQuotaRules(
   client: PoolClient,
   versionId: number
-): Promise<PolicyExamTypeSpecialQuotaDto[]> {
+): Promise<PolicySpecialQuotaRuleDto[]> {
   const SQL = `
     select
       q.id,
-      q.exam_type_id as "examTypeId",
+      q.logical_key::text as "logicalKey",
+      q.modality_id as "modalityId",
+      q.title,
+      coalesce(array_agg(distinct qe.exam_type_id order by qe.exam_type_id)
+        filter (where qe.exam_type_id is not null), '{}') as "examTypeIds",
       q.daily_extra_slots as "dailyExtraSlots",
-      coalesce(array_agg(qu.user_id order by qu.user_id)
-        filter (where qu.user_id is not null), '{}') as "allowedUserIds",
+      coalesce((
+        select array_agg(qu.user_id order by qu.user_id)
+        from appointments_v2.special_quota_rule_users qu
+        where qu.quota_rule_id = q.id
+      ), '{}') as "allowedUserIds",
       q.is_active as "isActive"
-    from appointments_v2.exam_type_special_quotas q
-    left join appointments_v2.exam_type_special_quota_users qu
-      on qu.quota_id = q.id
+    from appointments_v2.special_quota_rules q
+    left join appointments_v2.special_quota_rule_exam_types qe
+      on qe.quota_rule_id = q.id
     where q.policy_version_id = $1
     group by q.id
-    order by q.id asc
+    order by q.logical_key asc
   `;
-  const result = await client.query<PolicyExamTypeSpecialQuotaDto>(SQL, [versionId]);
+  const result = await client.query<PolicySpecialQuotaRuleDto>(SQL, [versionId]);
   return result.rows.map((row) => ({
     ...row,
+    id: Number(row.id),
+    modalityId: Number(row.modalityId),
+    examTypeIds: Array.isArray(row.examTypeIds) ? row.examTypeIds.map(Number) : [],
     allowedUserIds: Array.isArray(row.allowedUserIds) ? row.allowedUserIds.map(Number) : [],
   }));
 }

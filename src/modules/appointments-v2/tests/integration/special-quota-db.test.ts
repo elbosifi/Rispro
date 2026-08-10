@@ -19,6 +19,7 @@ import {
 
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "SQMODE_";
+const QUOTA_LOGICAL_KEY = randomUUID();
 const WEEKEND_APPOINTMENT_SETTING_KEYS = ["allow_friday_appointments", "allow_saturday_appointments"] as const;
 
 type WeekendAppointmentSettingKey = typeof WEEKEND_APPOINTMENT_SETTING_KEYS[number];
@@ -172,6 +173,22 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     return Number(result.rows[0].id);
   }
 
+  async function createSecondExamType(): Promise<number> {
+    const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
+    const result = await pool.query<{ id: number }>(
+      `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+       values ($1, $2, $3, $4, true)
+       returning id`,
+      [
+        testData.modalityId,
+        `${TEST_PREFIX}${suffix} فحص ثان`,
+        `${TEST_PREFIX}${suffix} Second exam`,
+        `${TEST_PREFIX}${suffix}EX2`,
+      ]
+    );
+    return Number(result.rows[0].id);
+  }
+
   async function setModalityCapacity(dailyCapacity: number): Promise<void> {
     const pool = await db();
     await pool.query(`update modalities set daily_capacity = $2 where id = $1`, [testData.modalityId, dailyCapacity]);
@@ -203,27 +220,43 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     }
   }
 
-  async function setSpecialQuota(dailyExtraSlots: number): Promise<void> {
+  async function setSpecialQuota(
+    dailyExtraSlots: number,
+    examTypeIds: number[] = [testData.examTypeId],
+    allowedUserIds: number[] = [testData.userId]
+  ): Promise<number> {
     const pool = await db();
     const result = await pool.query<{ id: number }>(
-      `insert into appointments_v2.exam_type_special_quotas
-        (policy_version_id, exam_type_id, daily_extra_slots, is_active)
-      values ($1, $2, $3, true)
-      on conflict (policy_version_id, exam_type_id) do update set daily_extra_slots = $3, is_active = true
+      `insert into appointments_v2.special_quota_rules
+        (logical_key, policy_version_id, modality_id, title, daily_extra_slots, is_active)
+      values ($1::uuid, $2, $3, 'Shared overflow pool', $4, true)
+      on conflict (policy_version_id, logical_key) do update set
+        modality_id = excluded.modality_id,
+        title = excluded.title,
+        daily_extra_slots = excluded.daily_extra_slots,
+        is_active = true
       returning id`,
-      [testData.policyVersionId, testData.examTypeId, dailyExtraSlots]
+      [QUOTA_LOGICAL_KEY, testData.policyVersionId, testData.modalityId, dailyExtraSlots]
     );
-    const quotaId = Number(result.rows[0]?.id);
+    const ruleId = Number(result.rows[0]?.id);
     await pool.query(
-      `delete from appointments_v2.exam_type_special_quota_users where quota_id = $1`,
-      [quotaId]
+      `delete from appointments_v2.special_quota_rule_exam_types where quota_rule_id = $1`,
+      [ruleId]
     );
     await pool.query(
-      `insert into appointments_v2.exam_type_special_quota_users (quota_id, user_id)
-       values ($1, $2)
-       on conflict do nothing`,
-      [quotaId, testData.userId]
+      `insert into appointments_v2.special_quota_rule_exam_types (quota_rule_id, exam_type_id)
+       select $1, unnest($2::bigint[])`,
+      [ruleId, examTypeIds]
     );
+    await pool.query(`delete from appointments_v2.special_quota_rule_users where quota_rule_id = $1`, [ruleId]);
+    if (allowedUserIds.length > 0) {
+      await pool.query(
+        `insert into appointments_v2.special_quota_rule_users (quota_rule_id, user_id)
+         select $1, unnest($2::bigint[])`,
+        [ruleId, allowedUserIds]
+      );
+    }
+    return ruleId;
   }
 
   async function supervisorOverride(reason = "approved") {
@@ -243,6 +276,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     patientId: number;
     bookingDate: string;
     caseCategory: "oncology" | "non_oncology";
+    examTypeId?: number;
     capacityResolutionMode?: "standard" | "category_override" | "special_quota_extra";
     specialReasonCode?: string | null;
     specialReasonNote?: string | null;
@@ -257,7 +291,7 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       body: {
         patientId: params.patientId,
         modalityId: testData.modalityId,
-        examTypeId: testData.examTypeId,
+        examTypeId: params.examTypeId ?? testData.examTypeId,
         bookingDate: params.bookingDate,
         caseCategory: params.caseCategory,
         capacityResolutionMode: params.capacityResolutionMode,
@@ -341,14 +375,65 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(specialBooking.usesSpecialQuota, true);
 
     const pool = await db();
-    const row = await pool.query<{ uses_special_quota: boolean; capacity_resolution_mode: string }>(
-      `select uses_special_quota, capacity_resolution_mode
-       from appointments_v2.bookings
-       where id = $1`,
+    const row = await pool.query<{
+      uses_special_quota: boolean;
+      capacity_resolution_mode: string;
+      logical_key: string;
+      released_at: Date | null;
+    }>(
+      `select booking.uses_special_quota,
+              booking.capacity_resolution_mode,
+              consumption.quota_logical_key::text as logical_key,
+              consumption.released_at
+       from appointments_v2.bookings booking
+       join appointments_v2.special_quota_consumptions consumption
+         on consumption.booking_id = booking.id
+       where booking.id = $1`,
       [Number(specialBooking.id)]
     );
     assert.equal(row.rows[0]?.uses_special_quota, true);
     assert.equal(row.rows[0]?.capacity_resolution_mode, "special_quota_extra");
+    assert.equal(row.rows[0]?.logical_key, QUOTA_LOGICAL_KEY);
+    assert.equal(row.rows[0]?.released_at, null);
+  });
+
+  it("two exams in one pool share one slot under concurrent booking", async () => {
+    guard();
+    const date = uniqueDate();
+    const secondExamTypeId = await createSecondExamType();
+    await setModalityCapacity(3);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(1, [testData.examTypeId, secondExamTypeId]);
+
+    const [first, second] = await Promise.all([
+      createBooking({
+        patientId: await createPatient(),
+        bookingDate: date,
+        examTypeId: testData.examTypeId,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+      }),
+      createBooking({
+        patientId: await createPatient(),
+        bookingDate: date,
+        examTypeId: secondExamTypeId,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+      }),
+    ]);
+
+    assert.deepEqual([first.status, second.status].sort(), [201, 409]);
+    const consumptions = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from appointments_v2.special_quota_consumptions
+        where quota_logical_key = $1::uuid
+          and booking_date = $2::date
+          and released_at is null`,
+      [QUOTA_LOGICAL_KEY, date]
+    );
+    assert.equal(Number(consumptions.rows[0]?.count), 1);
   });
 
   it("category full + no special quota -> special_quota_extra blocked", async () => {
@@ -497,6 +582,121 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(result.status, 403);
   });
 
+  it("same-slot standard to special to standard transitions consume and release exactly once", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(1);
+
+    const created = await createBooking({
+      patientId: await createPatient(),
+      bookingDate: date,
+      caseCategory: "non_oncology",
+      capacityResolutionMode: "standard",
+    });
+    assert.equal(created.status, 201);
+    const bookingId = Number(((created.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+
+    const toSpecial = await fetch(`/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+      },
+    });
+    assert.equal(toSpecial.status, 200);
+
+    const active = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from appointments_v2.special_quota_consumptions
+        where booking_id = $1 and released_at is null`,
+      [bookingId]
+    );
+    assert.equal(Number(active.rows[0]?.count), 1);
+
+    const toStandard = await fetch(`/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: { capacityResolutionMode: "standard" },
+    });
+    assert.equal(toStandard.status, 200);
+
+    const history = await pool.query<{ active: string; total: string }>(
+      `select count(*) filter (where released_at is null)::text as active,
+              count(*)::text as total
+         from appointments_v2.special_quota_consumptions
+        where booking_id = $1`,
+      [bookingId]
+    );
+    assert.equal(Number(history.rows[0]?.active), 0);
+    assert.equal(Number(history.rows[0]?.total), 1);
+  });
+
+  it("failed target reschedule and ineligible exam change leave booking and source consumption unchanged", async () => {
+    guard();
+    const sourceDate = uniqueDate();
+    const fullTargetDate = uniqueDate();
+    const ineligibleExamTypeId = await createSecondExamType();
+    await setModalityCapacity(3);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(1, [testData.examTypeId]);
+
+    const source = await createBooking({
+      patientId: await createPatient(),
+      bookingDate: sourceDate,
+      caseCategory: "non_oncology",
+      capacityResolutionMode: "special_quota_extra",
+      specialReasonCode: "urgent_oncology",
+    });
+    const target = await createBooking({
+      patientId: await createPatient(),
+      bookingDate: fullTargetDate,
+      caseCategory: "non_oncology",
+      capacityResolutionMode: "special_quota_extra",
+      specialReasonCode: "urgent_oncology",
+    });
+    assert.equal(source.status, 201);
+    assert.equal(target.status, 201);
+    const bookingId = Number(((source.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+
+    const exhaustedMove = await fetch(`/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        bookingDate: fullTargetDate,
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+      },
+    });
+    assert.equal(exhaustedMove.status, 409);
+
+    const ineligibleExamChange = await fetch(`/api/v2/appointments/${bookingId}`, {
+      method: "PUT",
+      body: {
+        examTypeId: ineligibleExamTypeId,
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+        override: await supervisorOverride("exam change"),
+      },
+    });
+    assert.equal(ineligibleExamChange.status, 409);
+
+    const unchanged = await pool.query<{ booking_date: string; exam_type_id: string; consumption_date: string; active_count: string }>(
+      `select booking.booking_date::text,
+              booking.exam_type_id::text,
+              min(consumption.booking_date)::text as consumption_date,
+              count(*) filter (where consumption.released_at is null)::text as active_count
+         from appointments_v2.bookings booking
+         join appointments_v2.special_quota_consumptions consumption on consumption.booking_id = booking.id
+        where booking.id = $1
+        group by booking.id`,
+      [bookingId]
+    );
+    assert.equal(unchanged.rows[0]?.booking_date, sourceDate);
+    assert.equal(Number(unchanged.rows[0]?.exam_type_id), testData.examTypeId);
+    assert.equal(unchanged.rows[0]?.consumption_date, sourceDate);
+    assert.equal(Number(unchanged.rows[0]?.active_count), 1);
+  });
+
   it("cancel and reschedule release/preserve quota according to selected mode", async () => {
     guard();
     const sourceDate = uniqueDate();
@@ -553,6 +753,24 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       method: "POST",
     });
     assert.equal(cancelResult.status, 200);
+    const repeatedCancel = await fetch(`/api/v2/appointments/${Number(targetBooking.id)}/cancel`, {
+      method: "POST",
+    });
+    assert.equal(repeatedCancel.status, 409);
+
+    const releasedHistory = await pool.query<{ booking_date: string; released_at: Date | null }>(
+      `select booking_date::text, released_at
+         from appointments_v2.special_quota_consumptions
+        where booking_id = $1
+        order by booking_date`,
+      [bookingId]
+    );
+    assert.equal(releasedHistory.rowCount, 2);
+    assert.deepEqual(
+      releasedHistory.rows.map((row) => row.booking_date),
+      [sourceDate, targetDate]
+    );
+    assert.ok(releasedHistory.rows.every((row) => row.released_at != null));
 
     const sourceSecondTry = await createBooking({
       patientId: await createPatient(),

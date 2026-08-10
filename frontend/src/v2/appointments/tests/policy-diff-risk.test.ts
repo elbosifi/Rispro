@@ -7,7 +7,7 @@ function emptySnapshot(): PolicySnapshotDto {
     categoryDailyLimits: [],
     modalityBlockedRules: [],
     examTypeRules: [],
-    examTypeSpecialQuotas: [],
+    specialQuotaRules: [],
     examMixQuotaRules: [],
     specialReasonCodes: [],
   };
@@ -89,12 +89,12 @@ describe("getPolicyDiffRiskSummary", () => {
       examTypeIds: [11],
       isActive: true,
     }];
-    published.examTypeSpecialQuotas.push({ id: 3, examTypeId: 11, dailyExtraSlots: 3, allowedUserIds: [], isActive: true });
+    published.specialQuotaRules.push({ id: 3, logicalKey: "00000000-0000-0000-0000-000000000003", modalityId: 1, title: "MRI pool", examTypeIds: [11], dailyExtraSlots: 3, allowedUserIds: [], isActive: true });
 
     const draft = emptySnapshot();
     draft.categoryDailyLimits.push({ ...published.categoryDailyLimits[0]!, dailyLimit: 8 });
     draft.examMixQuotaRules = [{ ...published.examMixQuotaRules[0]!, dailyLimit: 4 }];
-    draft.examTypeSpecialQuotas.push({ ...published.examTypeSpecialQuotas[0]!, dailyExtraSlots: 1 });
+    draft.specialQuotaRules.push({ ...published.specialQuotaRules[0]!, dailyExtraSlots: 1 });
 
     const result = getPolicyDiffRiskSummary(published, draft);
 

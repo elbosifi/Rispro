@@ -33,6 +33,16 @@ const SPECIAL_QUOTA_ALLOWLIST_MIGRATION_FILE = join(
   "migrations",
   "061_v2_special_quota_user_allowlist.sql"
 );
+const SPECIAL_QUOTA_GROUPS_MIGRATION_FILE = join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "db",
+  "migrations",
+  "161_v2_special_quota_groups.sql"
+);
 
 describe("V2 DB migration file (023_appointments_v2_schema)", () => {
   let sql: string;
@@ -151,5 +161,39 @@ describe("V2 DB migration file (061_v2_special_quota_user_allowlist)", () => {
     assert.match(sql, /quota_id\s+bigint\s+not\s+null\s+references\s+appointments_v2\.exam_type_special_quotas/i);
     assert.match(sql, /user_id\s+bigint\s+not\s+null\s+references\s+users/i);
     assert.match(sql, /primary\s+key\s*\(\s*quota_id\s*,\s*user_id\s*\)/i);
+  });
+});
+
+describe("V2 DB migration file (161_v2_special_quota_groups)", () => {
+  const sql = readFileSync(SPECIAL_QUOTA_GROUPS_MIGRATION_FILE, "utf8");
+
+  it("creates generalized rules with exam and user memberships", () => {
+    assert.match(sql, /create table if not exists appointments_v2\.special_quota_rules/i);
+    assert.match(sql, /logical_key uuid not null/i);
+    assert.match(sql, /unique \(policy_version_id, logical_key\)/i);
+    assert.match(sql, /create table if not exists appointments_v2\.special_quota_rule_exam_types/i);
+    assert.match(sql, /primary key \(quota_rule_id, exam_type_id\)/i);
+    assert.match(sql, /create table if not exists appointments_v2\.special_quota_rule_users/i);
+    assert.match(sql, /primary key \(quota_rule_id, user_id\)/i);
+  });
+
+  it("creates a logical pool/date mutex and durable consumption history", () => {
+    assert.match(sql, /create table if not exists appointments_v2\.special_quota_bucket_mutex/i);
+    assert.match(sql, /primary key \(quota_logical_key, booking_date\)/i);
+    assert.match(sql, /create table if not exists appointments_v2\.special_quota_consumptions/i);
+    assert.match(sql, /v2_special_quota_one_active_consumption_per_booking/i);
+    assert.match(sql, /where released_at is null/i);
+  });
+
+  it("backfills one stable lineage per legacy exam without merging rows", () => {
+    assert.match(sql, /rispro-special-quota:/i);
+    assert.match(sql, /:exam:/i);
+    assert.match(sql, /from appointments_v2\.exam_type_special_quotas legacy_quota/i);
+    assert.match(sql, /Special Quota rule backfill mismatch/i);
+    assert.match(sql, /Special Quota booking consumption backfill mismatch/i);
+  });
+
+  it("retains legacy tables for rollback verification", () => {
+    assert.doesNotMatch(sql, /drop table/i);
   });
 });

@@ -1280,3 +1280,13 @@ All 10 stages are complete. Remaining work:
 - Run `npm run migrate` to apply the V2 schema migration
 - Enable `SHADOW_MODE_ENABLED=true` and monitor diff logs
 - Follow `docs/appointments-v2/CUTOVER_CHECKLIST.md` for deployment
+
+## 2026-08-10 focused follow-up - generalized Special Quota groups
+
+Status: implemented locally; deployment pending manual review and release validation.
+
+- Replaced active one-exam quota reads/writes with versioned named groups and many-to-many exam/user membership.
+- Added stable logical pool identity, durable consumption/release history, and deterministic logical-pool/date locking.
+- Preserved total modality capacity and standard booking/override behavior.
+- Added grouped policy editor/live display, searchable multi-select checklists, validation, availability remaining/configured copy, migration assertions, shared-pool concurrency tests, and create/reschedule/cancel persistence tests.
+- Legacy quota tables remain available only for migration verification and rollback reconciliation; application runtime no longer uses them.

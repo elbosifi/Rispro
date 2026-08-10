@@ -7,7 +7,7 @@ function countRules(snapshot: PolicySnapshotDto): number {
     (snapshot.categoryDailyLimits.length ?? 0) +
     (snapshot.modalityBlockedRules.length ?? 0) +
     (snapshot.examTypeRules.length ?? 0) +
-    (snapshot.examTypeSpecialQuotas.length ?? 0) +
+    (snapshot.specialQuotaRules.length ?? 0) +
     ((snapshot.examMixQuotaRules ?? []).length ?? 0)
   );
 }
@@ -17,7 +17,7 @@ function versionedRulesOnly(snapshot: PolicySnapshotDto): Omit<PolicySnapshotDto
     categoryDailyLimits: snapshot.categoryDailyLimits,
     modalityBlockedRules: snapshot.modalityBlockedRules,
     examTypeRules: snapshot.examTypeRules,
-    examTypeSpecialQuotas: snapshot.examTypeSpecialQuotas,
+    specialQuotaRules: snapshot.specialQuotaRules,
     examMixQuotaRules: snapshot.examMixQuotaRules ?? [],
   };
 }

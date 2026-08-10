@@ -81,6 +81,15 @@ export interface SchedulingDecisionDto {
   consumedCapacityMode: "standard" | "special" | "override" | null;
   remainingStandardCapacity: number | null;
   remainingSpecialQuota: number | null;
+  matchedSpecialQuota?: {
+    ruleId: number;
+    logicalKey: string;
+    title: string | null;
+    modalityId: number;
+    configured: number;
+    consumed: number;
+    remaining: number;
+  } | null;
   matchedRuleIds: number[];
   matchedExamRuleSummaries?: Array<{
     ruleId: string;
@@ -118,7 +127,9 @@ export interface AvailabilityDayDto {
     remaining: number | null;
   };
   specialQuotaSummary: {
-    examTypeId: number;
+    ruleId: number;
+    logicalKey: string;
+    title: string | null;
     configured: number;
     consumed: number;
     remaining: number;
@@ -477,9 +488,12 @@ export interface PolicyExamTypeRuleDto {
   isActive: boolean;
 }
 
-export interface PolicyExamTypeSpecialQuotaDto {
+export interface PolicySpecialQuotaRuleDto {
   id: number;
-  examTypeId: number;
+  logicalKey: string;
+  modalityId: number;
+  title: string | null;
+  examTypeIds: number[];
   dailyExtraSlots: number;
   allowedUserIds: number[];
   isActive: boolean;
@@ -520,7 +534,7 @@ export interface PolicySnapshotDto {
   categoryDailyLimits: PolicyCategoryDailyLimitDto[];
   modalityBlockedRules: PolicyModalityBlockedRuleDto[];
   examTypeRules: PolicyExamTypeRuleDto[];
-  examTypeSpecialQuotas: PolicyExamTypeSpecialQuotaDto[];
+  specialQuotaRules: PolicySpecialQuotaRuleDto[];
   examMixQuotaRules?: PolicyExamMixQuotaRuleDto[];
   specialReasonCodes: PolicySpecialReasonCodeDto[];
 }

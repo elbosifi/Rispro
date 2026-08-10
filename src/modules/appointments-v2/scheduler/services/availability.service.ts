@@ -21,7 +21,7 @@ import {
   loadModalityBlockedRules,
   loadExamTypeRules,
   loadCategoryDailyLimits,
-  loadExamTypeSpecialQuotas,
+  loadSpecialQuotaRules,
   loadExamTypeRuleItemExamTypeIds,
   loadExamTypeRuleItems,
   loadExamMixQuotaRules,
@@ -31,7 +31,7 @@ import { findModalityById } from "../../catalog/repositories/modality-catalog.re
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import {
   getBookedCountsByCategoryForDate,
-  getSpecialQuotaBookedCount,
+  getSpecialQuotaConsumptionCount,
   getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../../shared/utils/dates.js";
@@ -39,6 +39,7 @@ import { pool } from "../../../../db/pool.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "./closed-weekday-settings.js";
+import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
 
 export interface AvailabilityDayDto {
   date: string;
@@ -56,7 +57,9 @@ export interface AvailabilityDayDto {
     remaining: number | null;
   };
   specialQuotaSummary: {
-    examTypeId: number;
+    ruleId: number;
+    logicalKey: string;
+    title: string | null;
     configured: number;
     consumed: number;
     remaining: number;
@@ -160,7 +163,7 @@ async function getAvailabilityInternal(
     publishedVersion.id,
     params.modalityId
   );
-  const specialQuotas = await loadExamTypeSpecialQuotas(
+  const specialQuotas = await loadSpecialQuotaRules(
     client,
     publishedVersion.id
   );
@@ -213,27 +216,28 @@ async function getAvailabilityInternal(
       params.caseCategory === "oncology" ? bookedCounts.oncology : bookedCounts.nonOncology;
 
     // 7. Load special quota booked count (only when examTypeId is provided)
-    let currentSpecialQuotaBookedCount = 0;
+    let currentSpecialQuotaConsumptionCount = 0;
     let specialQuotaSummary: AvailabilityDayDto["specialQuotaSummary"] = null;
     if (params.examTypeId != null) {
-      currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
+      const applicableQuotas = findApplicableSpecialQuotaRules(specialQuotas, {
         modalityId: params.modalityId,
-        bookingDate: date,
         examTypeId: params.examTypeId,
+        requesterRole: params.requesterRole,
+        requesterUserId,
       });
-      const quota = specialQuotas.find(
-        (q) => q.isActive && Number(q.examTypeId) === Number(params.examTypeId)
-      );
-      const specialQuotaAllowed =
-        quota != null &&
-        (params.requesterRole === "super_admin" ||
-          (requesterUserId != null && (quota.allowedUserIds ?? []).map(Number).includes(requesterUserId)));
-      if (quota && specialQuotaAllowed) {
+      const quota = applicableQuotas.length === 1 ? applicableQuotas[0] : null;
+      if (quota) {
+        currentSpecialQuotaConsumptionCount = await getSpecialQuotaConsumptionCount(client, {
+          logicalKey: quota.logicalKey,
+          bookingDate: date,
+        });
         specialQuotaSummary = {
-          examTypeId: Number(quota.examTypeId),
+          ruleId: Number(quota.id),
+          logicalKey: quota.logicalKey,
+          title: quota.title,
           configured: quota.dailyExtraSlots,
-          consumed: currentSpecialQuotaBookedCount,
-          remaining: Math.max(0, quota.dailyExtraSlots - currentSpecialQuotaBookedCount),
+          consumed: currentSpecialQuotaConsumptionCount,
+          remaining: Math.max(0, quota.dailyExtraSlots - currentSpecialQuotaConsumptionCount),
         };
       }
     }
@@ -282,7 +286,7 @@ async function getAvailabilityInternal(
       currentBookedCountNonOncology: bookedCounts.nonOncology,
       specialQuotas,
       currentBookedCount: bookedCountForCategory,
-      currentSpecialQuotaBookedCount,
+      currentSpecialQuotaConsumptionCount,
       examMixQuotaRules,
       examMixQuotaRuleItems,
       currentExamMixConsumedByRuleId,

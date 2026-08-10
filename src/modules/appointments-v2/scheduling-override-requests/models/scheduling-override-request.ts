@@ -74,6 +74,9 @@ export interface SchedulingOverrideDecisionContext {
     remaining: number | null;
   }> | null;
   specialQuotaBreakdown: {
+    quotaRuleId: number;
+    quotaLogicalKey: string;
+    quotaTitle: string | null;
     examTypeId: number;
     configured: number;
     consumed: number;

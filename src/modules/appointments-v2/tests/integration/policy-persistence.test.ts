@@ -13,6 +13,7 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { pool } from "../../../../db/pool.js";
 import {
   isDatabaseAvailable,
   canReachDatabase,
@@ -110,9 +111,9 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
         "Draft should have same number of examTypeRules as published"
       );
       assert.strictEqual(
-        draftSnapshot.examTypeSpecialQuotas.length,
-        publishedSnapshot.examTypeSpecialQuotas.length,
-        "Draft should have same number of examTypeSpecialQuotas as published"
+        draftSnapshot.specialQuotaRules.length,
+        publishedSnapshot.specialQuotaRules.length,
+        "Draft should have same number of specialQuotaRules as published"
       );
       assert.deepStrictEqual(
         draftSnapshot.specialReasonCodes.map((c: any) => c.code).sort(),
@@ -172,8 +173,17 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
             isActive: true,
           },
         ],
-        examTypeSpecialQuotas: [
-          { id: 4, examTypeId, dailyExtraSlots: 5, allowedUserIds: [testData.userId], isActive: true },
+        specialQuotaRules: [
+          {
+            id: 4,
+            logicalKey: "00000000-0000-0000-0000-000000000004",
+            modalityId,
+            title: "Shared CT overflow",
+            examTypeIds: [examTypeId],
+            dailyExtraSlots: 5,
+            allowedUserIds: [testData.userId],
+            isActive: true,
+          },
         ],
         specialReasonCodes,
       };
@@ -206,9 +216,9 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
         "Should have same number of examTypeRules"
       );
       assert.strictEqual(
-        savedDraft.examTypeSpecialQuotas.length,
-        testSnapshot.examTypeSpecialQuotas.length,
-        "Should have same number of examTypeSpecialQuotas"
+        savedDraft.specialQuotaRules.length,
+        testSnapshot.specialQuotaRules.length,
+        "Should have same number of specialQuotaRules"
       );
       assert.strictEqual(
         savedDraft.categoryDailyLimits[0].dailyLimit,
@@ -221,14 +231,21 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
         "Blocked date should be persisted"
       );
       assert.strictEqual(
-        savedDraft.examTypeSpecialQuotas[0].dailyExtraSlots,
+        savedDraft.specialQuotaRules[0].dailyExtraSlots,
         5,
         "Special quota should be persisted"
       );
       assert.deepStrictEqual(
-        savedDraft.examTypeSpecialQuotas[0].allowedUserIds,
+        savedDraft.specialQuotaRules[0].allowedUserIds,
         [testData.userId],
         "Special quota allowed users should be persisted"
+      );
+      assert.deepStrictEqual(savedDraft.specialQuotaRules[0].examTypeIds, [examTypeId]);
+      assert.strictEqual(savedDraft.specialQuotaRules[0].modalityId, modalityId);
+      assert.strictEqual(savedDraft.specialQuotaRules[0].title, "Shared CT overflow");
+      assert.strictEqual(
+        savedDraft.specialQuotaRules[0].logicalKey,
+        "00000000-0000-0000-0000-000000000004"
       );
       assert.deepStrictEqual(
         savedDraft.specialReasonCodes.map((c: any) => c.code).sort(),
@@ -270,7 +287,7 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
             isActive: true,
           },
         ],
-        examTypeSpecialQuotas: [],
+        specialQuotaRules: [],
         specialReasonCodes,
       };
 
@@ -336,7 +353,7 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
         ],
         modalityBlockedRules: [],
         examTypeRules: [],
-        examTypeSpecialQuotas: [],
+        specialQuotaRules: [],
         specialReasonCodes,
       };
 
@@ -390,7 +407,7 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
             isActive: true,
           },
         ],
-        examTypeSpecialQuotas: [],
+        specialQuotaRules: [],
         specialReasonCodes,
       };
 
@@ -462,7 +479,7 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
             ],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             specialReasonCodes,
           },
           changeNote: "Test omitted global codes",
@@ -513,6 +530,69 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
         customNote,
         "Draft changeNote should be preserved after hash recalculation"
       );
+    });
+  });
+
+  describe("Generalized Special Quota validation", () => {
+    it("rejects ambiguous exam overlap, invalid capacity, and a newly assigned inactive user", async () => {
+      guard();
+      const draftVersionId = await getOrCreateDraft();
+      const inactiveUser = await pool.query<{ id: number }>(
+        `insert into users (username, password_hash, full_name, role, is_active)
+         values ($1, 'unused', $2, 'receptionist', false)
+         returning id`,
+        [`${TEST_PREFIX.toLowerCase()}inactive_${testData.policyVersionId}`, `${TEST_PREFIX}Inactive user`]
+      );
+      const inactiveUserId = Number(inactiveUser.rows[0].id);
+      const sharedRule = {
+        modalityId: testData.modalityId,
+        title: "Overlap",
+        examTypeIds: [testData.examTypeId],
+        dailyExtraSlots: 1,
+        allowedUserIds: [testData.userId],
+        isActive: true,
+      };
+
+      const overlapResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+        method: "PUT",
+        body: {
+          policySnapshot: {
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            specialQuotaRules: [
+              { id: 1, logicalKey: "00000000-0000-0000-0000-000000000011", ...sharedRule },
+              { id: 2, logicalKey: "00000000-0000-0000-0000-000000000012", ...sharedRule },
+            ],
+            examMixQuotaRules: [],
+            specialReasonCodes: await getGlobalSpecialReasonCodes(),
+          },
+          changeNote: "Invalid overlap",
+        },
+      });
+      assert.strictEqual(overlapResult.status, 400);
+
+      const invalidMemberResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+        method: "PUT",
+        body: {
+          policySnapshot: {
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            specialQuotaRules: [{
+              id: 3,
+              logicalKey: "00000000-0000-0000-0000-000000000013",
+              ...sharedRule,
+              dailyExtraSlots: 0,
+              allowedUserIds: [inactiveUserId],
+            }],
+            examMixQuotaRules: [],
+            specialReasonCodes: await getGlobalSpecialReasonCodes(),
+          },
+          changeNote: "Invalid member and capacity",
+        },
+      });
+      assert.strictEqual(invalidMemberResult.status, 400);
     });
   });
 });

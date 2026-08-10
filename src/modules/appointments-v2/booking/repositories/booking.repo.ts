@@ -108,6 +108,14 @@ export async function findBookingById(
   return result.rows[0] ?? null;
 }
 
+export async function findBookingByIdForUpdate(
+  client: PoolClient,
+  bookingId: number
+): Promise<Booking | null> {
+  const result = await client.query<Booking>(`${FIND_BY_ID_SQL}\nfor update`, [bookingId]);
+  return result.rows[0] ?? null;
+}
+
 const UPDATE_STATUS_SQL = `
   update appointments_v2.bookings
   set status = $1, updated_at = now(), updated_by_user_id = $2

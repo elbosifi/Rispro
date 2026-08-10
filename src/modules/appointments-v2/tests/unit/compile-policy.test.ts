@@ -110,7 +110,7 @@ describe("compilePolicy — source verification", () => {
   });
 
   it("loads exam type special quotas", () => {
-    assert.ok(source.includes("loadExamTypeSpecialQuotas"), "Should call loadExamTypeSpecialQuotas");
+    assert.ok(source.includes("loadSpecialQuotaRules"), "Should call loadSpecialQuotaRules");
   });
 
   it("loads exam type rule item exam type IDs", () => {
@@ -177,7 +177,7 @@ describe("compilePolicy — import wiring", () => {
     assert.ok(source.includes("loadModalityBlockedRules,"), "Should import loadModalityBlockedRules");
     assert.ok(source.includes("loadExamTypeRules,"), "Should import loadExamTypeRules");
     assert.ok(source.includes("loadCategoryDailyLimits,"), "Should import loadCategoryDailyLimits");
-    assert.ok(source.includes("loadExamTypeSpecialQuotas,"), "Should import loadExamTypeSpecialQuotas");
+    assert.ok(source.includes("loadSpecialQuotaRules,"), "Should import loadSpecialQuotaRules");
     assert.ok(source.includes("loadAllExamTypeRuleItemExamTypeIds,"), "Should import loadAllExamTypeRuleItemExamTypeIds");
   });
 });

@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { pureEvaluate } from "../../rules/services/pure-evaluate.js";
 import type { PureEvaluateInput } from "../../rules/models/rule-evaluation-context.js";
-import type { ModalityBlockedRuleRow, ExamTypeRuleRow, CategoryDailyLimitRow, ExamTypeSpecialQuotaRow } from "../../rules/models/rule-types.js";
+import type { ModalityBlockedRuleRow, ExamTypeRuleRow, CategoryDailyLimitRow, SpecialQuotaRuleRow } from "../../rules/models/rule-types.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -35,7 +35,7 @@ function makeContext(
     currentBookedCountNonOncology: 0,
     specialQuotas: [],
     currentBookedCount: 0,
-    currentSpecialQuotaBookedCount: 0,
+    currentSpecialQuotaConsumptionCount: 0,
     requesterUserId: 1,
     ...overrides,
   };
@@ -523,11 +523,14 @@ describe("pureEvaluate — special quota (D008 step 5)", () => {
   function makeQuota(
     examTypeId: number,
     dailyExtraSlots: number
-  ): ExamTypeSpecialQuotaRow {
+  ): SpecialQuotaRuleRow {
     return {
       id: 400,
+      logicalKey: "00000000-0000-0000-0000-000000000400",
       policyVersionId: 1,
-      examTypeId,
+      modalityId: 10,
+      title: null,
+      examTypeIds: [examTypeId],
       dailyExtraSlots,
       allowedUserIds: [1],
       isActive: true,
@@ -734,7 +737,7 @@ describe("pureEvaluate — exam mix quota", () => {
         useSpecialQuota: true,
         context: makeContext({
           specialQuotas: [
-            { id: 1, policyVersionId: 1, examTypeId: 50, dailyExtraSlots: 1, allowedUserIds: [1], isActive: true },
+            { id: 1, logicalKey: "00000000-0000-0000-0000-000000000001", policyVersionId: 1, modalityId: 10, title: null, examTypeIds: [50], dailyExtraSlots: 1, allowedUserIds: [1], isActive: true },
           ],
           examMixQuotaRules: [
             {
@@ -755,7 +758,7 @@ describe("pureEvaluate — exam mix quota", () => {
           ],
           examMixQuotaRuleItems: [{ ruleId: 901, examTypeId: 50 }],
           currentExamMixConsumedByRuleId: { 901: 1 },
-          currentSpecialQuotaBookedCount: 0,
+          currentSpecialQuotaConsumptionCount: 0,
         }),
       })
     );

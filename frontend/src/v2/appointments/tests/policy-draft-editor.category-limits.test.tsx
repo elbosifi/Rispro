@@ -39,7 +39,7 @@ describe("PolicyDraftEditor category daily limits", () => {
           ],
           modalityBlockedRules: [],
           examTypeRules: [],
-          examTypeSpecialQuotas: [],
+          specialQuotaRules: [],
           examMixQuotaRules: [],
           specialReasonCodes: [],
         }}
@@ -67,7 +67,7 @@ describe("PolicyDraftEditor category daily limits", () => {
           ],
           modalityBlockedRules: [],
           examTypeRules: [],
-          examTypeSpecialQuotas: [],
+          specialQuotaRules: [],
           examMixQuotaRules: [],
           specialReasonCodes: [],
         }}

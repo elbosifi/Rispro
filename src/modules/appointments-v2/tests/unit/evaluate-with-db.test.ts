@@ -142,8 +142,8 @@ describe("evaluateWithDb — source verification", () => {
 
   it("loads exam type special quotas from DB", () => {
     assert.ok(
-      source.includes("loadExamTypeSpecialQuotas"),
-      "Should call loadExamTypeSpecialQuotas"
+      source.includes("loadSpecialQuotaRules"),
+      "Should call loadSpecialQuotaRules"
     );
   });
 

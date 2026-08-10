@@ -16,6 +16,7 @@ interface Props {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
+  specialQuotaConfigured?: number | null;
   specialQuotaPath?: boolean;
   examMixQuotaSummaries?: Array<{
     ruleId: number;
@@ -157,6 +158,7 @@ export function AvailabilityDateRow({
   nonOncologyFilled,
   nonOncologyRemaining,
   specialQuotaRemaining,
+  specialQuotaConfigured = null,
   specialQuotaPath = false,
   examMixQuotaSummaries,
   primaryExamMixBlocking,
@@ -287,7 +289,9 @@ export function AvailabilityDateRow({
             </>
           )}
           {specialQuotaRemaining != null && (
-            <div>{language === "ar" ? "الحصة الخاصة المتبقية" : "Special quota remaining"}: {specialQuotaRemaining}</div>
+            <div>
+              {language === "ar" ? "الحصة الخاصة" : "Special quota"}: {specialQuotaRemaining}{specialQuotaConfigured != null ? ` of ${specialQuotaConfigured}` : ""} {language === "ar" ? "متبقية" : "remaining"}
+            </div>
           )}
            {primaryExamMixBlocking && (
              <div style={{ color: "var(--accent)", fontWeight: 600 }}>

@@ -50,6 +50,11 @@ function examTypeLabel(examTypeId: number, lookups?: PolicyDisplayLookupsDto): s
   return examType.code ? `${examType.nameEn || examType.name} (${examType.code})` : examType.nameEn || examType.name;
 }
 
+function userLabel(userId: number, lookups?: PolicyDisplayLookupsDto): string {
+  const user = lookups?.users.find((row) => Number(row.id) === Number(userId));
+  return user ? user.fullName || user.username : `User ${userId}`;
+}
+
 function ruleTypeLabel(ruleType: string): string {
   if (ruleType === "date_range") return "Date range";
   if (ruleType === "weekly_recurrence") return "Weekly recurrence";
@@ -281,10 +286,10 @@ export function getPolicyDiffRiskSummary(
   }
 
   const quotas = diffRows(
-    publishedSnapshot.examTypeSpecialQuotas,
-    draftSnapshot.examTypeSpecialQuotas,
+    publishedSnapshot.specialQuotaRules,
+    draftSnapshot.specialQuotaRules,
     "Special quotas",
-    (row) => String(row.examTypeId)
+    (row) => String(row.logicalKey)
   );
   if (quotas.added.length || quotas.removed.length || quotas.matched.length) affected.add("Special quotas");
   for (const { published, draft } of quotas.matched) {
@@ -292,9 +297,18 @@ export function getPolicyDiffRiskSummary(
       highRiskWarnings.push({
         section: "Special quotas",
         ruleId: draft.id,
-        message: `Special quota reduced: ${examTypeLabel(draft.examTypeId, displayLookups)} - extra slots ${published.dailyExtraSlots} -> ${draft.dailyExtraSlots}.`,
+        message: `Special Quota reduced: ${draft.title || draft.logicalKey} - extra slots ${published.dailyExtraSlots} -> ${draft.dailyExtraSlots}.`,
       });
     }
+    const removedExams = sortedNumbers(published.examTypeIds).filter((id) => !draft.examTypeIds.map(Number).includes(id));
+    const addedExams = sortedNumbers(draft.examTypeIds).filter((id) => !published.examTypeIds.map(Number).includes(id));
+    const removedUsers = sortedNumbers(published.allowedUserIds).filter((id) => !draft.allowedUserIds.map(Number).includes(id));
+    const addedUsers = sortedNumbers(draft.allowedUserIds).filter((id) => !published.allowedUserIds.map(Number).includes(id));
+    if (removedExams.length > 0) highRiskWarnings.push({ section: "Special quotas", ruleId: draft.id, message: `Exams removed from ${draft.title || draft.logicalKey}: ${removedExams.map((id) => examTypeLabel(id, displayLookups)).join(", ")}.` });
+    if (addedExams.length > 0) highRiskWarnings.push({ section: "Special quotas", ruleId: draft.id, message: `Exams added to ${draft.title || draft.logicalKey}: ${addedExams.map((id) => examTypeLabel(id, displayLookups)).join(", ")}.` });
+    if (removedUsers.length > 0) highRiskWarnings.push({ section: "Special quotas", ruleId: draft.id, message: `Users removed from ${draft.title || draft.logicalKey}: ${removedUsers.map((id) => userLabel(id, displayLookups)).join(", ")}.` });
+    if (addedUsers.length > 0) highRiskWarnings.push({ section: "Special quotas", ruleId: draft.id, message: `Users added to ${draft.title || draft.logicalKey}: ${addedUsers.map((id) => userLabel(id, displayLookups)).join(", ")}.` });
+    if (published.isActive && !draft.isActive) highRiskWarnings.push({ section: "Special quotas", ruleId: draft.id, message: `Special Quota disabled: ${draft.title || draft.logicalKey}.` });
   }
 
   const ambiguous = [...categories.ambiguousKeys, ...blocked.ambiguousKeys, ...examRules.ambiguousKeys, ...mixes.ambiguousKeys, ...quotas.ambiguousKeys];

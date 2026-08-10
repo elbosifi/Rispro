@@ -11,7 +11,7 @@ import type {
   ExamTypeRuleRow,
   ExamTypeRuleItemRow,
   CategoryDailyLimitRow,
-  ExamTypeSpecialQuotaRow,
+  SpecialQuotaRuleRow,
   ExamMixQuotaRuleRow,
   ExamMixQuotaRuleItemRow,
 } from "../models/rule-types.js";
@@ -110,29 +110,42 @@ export async function loadCategoryDailyLimits(
 
 const LOAD_SPECIAL_QUOTAS_SQL = `
   select q.id,
+         q.logical_key::text as "logicalKey",
          q.policy_version_id as "policyVersionId",
-         q.exam_type_id as "examTypeId",
+         q.modality_id as "modalityId",
+         q.title,
+         coalesce(array_agg(distinct qe.exam_type_id order by qe.exam_type_id)
+           filter (where qe.exam_type_id is not null), '{}') as "examTypeIds",
          q.daily_extra_slots as "dailyExtraSlots",
-         coalesce(array_agg(qu.user_id order by qu.user_id)
-           filter (where qu.user_id is not null), '{}') as "allowedUserIds",
+         coalesce((
+           select array_agg(qu.user_id order by qu.user_id)
+           from appointments_v2.special_quota_rule_users qu
+           where qu.quota_rule_id = q.id
+         ), '{}') as "allowedUserIds",
          q.is_active as "isActive"
-  from appointments_v2.exam_type_special_quotas q
-  left join appointments_v2.exam_type_special_quota_users qu
-    on qu.quota_id = q.id
+  from appointments_v2.special_quota_rules q
+  left join appointments_v2.special_quota_rule_exam_types qe
+    on qe.quota_rule_id = q.id
   where q.policy_version_id = $1
     and q.is_active = true
   group by q.id
+  order by q.logical_key
 `;
 
-export async function loadExamTypeSpecialQuotas(
+export async function loadSpecialQuotaRules(
   client: PoolClient,
   policyVersionId: number
-): Promise<ExamTypeSpecialQuotaRow[]> {
-  const result = await client.query<ExamTypeSpecialQuotaRow>(LOAD_SPECIAL_QUOTAS_SQL, [
+): Promise<SpecialQuotaRuleRow[]> {
+  const result = await client.query<SpecialQuotaRuleRow>(LOAD_SPECIAL_QUOTAS_SQL, [
     policyVersionId,
   ]);
   return result.rows.map((row) => ({
     ...row,
+    id: Number(row.id),
+    policyVersionId: Number(row.policyVersionId),
+    modalityId: Number(row.modalityId),
+    dailyExtraSlots: Number(row.dailyExtraSlots),
+    examTypeIds: Array.isArray(row.examTypeIds) ? row.examTypeIds.map(Number) : [],
     allowedUserIds: Array.isArray(row.allowedUserIds) ? row.allowedUserIds.map(Number) : [],
   }));
 }

@@ -7,7 +7,7 @@ import type {
   PolicyCategoryDailyLimitDto,
   PolicyExamMixQuotaRuleDto,
   PolicyExamTypeRuleDto,
-  PolicyExamTypeSpecialQuotaDto,
+  PolicySpecialQuotaRuleDto,
   PolicyDisplayLookupsDto,
   PolicyModalityBlockedRuleDto,
   PolicySnapshotDto,
@@ -18,7 +18,7 @@ function emptySnapshot(): PolicySnapshotDto {
     categoryDailyLimits: [],
     modalityBlockedRules: [],
     examTypeRules: [],
-    examTypeSpecialQuotas: [],
+    specialQuotaRules: [],
     examMixQuotaRules: [],
     specialReasonCodes: [],
   };
@@ -65,6 +65,90 @@ interface ModalityOption {
 interface ExamTypeOption {
   value: number;
   label: string;
+  disabled?: boolean;
+}
+
+function createLogicalKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (token) => {
+    const value = Math.floor(Math.random() * 16);
+    return (token === "x" ? value : (value & 0x3) | 0x8).toString(16);
+  });
+}
+
+function SearchableChecklist({
+  label,
+  options,
+  selectedIds,
+  onChange,
+}: {
+  label: string;
+  options: ExamTypeOption[];
+  selectedIds: number[];
+  onChange: (nextIds: number[]) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const selected = new Set(selectedIds.map(Number));
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleOptions = normalizedSearch
+    ? options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedSearch))
+    : options;
+  const selectableIds = options.filter((option) => !option.disabled).map((option) => option.value);
+
+  return (
+    <div className="rounded border border-stone-200 p-2 dark:border-stone-700">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-stone-700 dark:text-stone-200">
+          {label} ({selected.size} selected)
+        </span>
+        <div className="flex gap-2">
+          <button type="button" className="text-xs underline" onClick={() => onChange([...new Set([...selectedIds, ...selectableIds])].sort((a, b) => a - b))}>
+            Select all
+          </button>
+          <button type="button" className="text-xs underline" onClick={() => onChange([])}>
+            Clear all
+          </button>
+        </div>
+      </div>
+      <input
+        className="input-premium mb-2"
+        aria-label={`Search ${label}`}
+        placeholder={`Search ${label.toLowerCase()}...`}
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      {selected.size > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1" aria-label={`Selected ${label}`}>
+          {selectedIds.map((id) => {
+            const option = options.find((item) => item.value === id);
+            return <span key={id} className="rounded-full bg-stone-100 px-2 py-1 text-[11px] dark:bg-stone-800">{option?.label ?? `ID ${id}`}</span>;
+          })}
+        </div>
+      )}
+      <div className="max-h-44 space-y-1 overflow-y-auto">
+        {visibleOptions.map((option) => {
+          const checked = selected.has(option.value);
+          const disabled = Boolean(option.disabled && !checked);
+          return (
+            <label key={option.value} className={`flex items-center gap-2 rounded px-1 py-1 text-xs ${disabled ? "opacity-50" : "cursor-pointer"}`}>
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) => onChange(
+                  event.target.checked
+                    ? [...new Set([...selectedIds, option.value])].sort((a, b) => a - b)
+                    : selectedIds.filter((id) => id !== option.value)
+                )}
+              />
+              {option.label}{option.disabled ? " (inactive)" : ""}
+            </label>
+          );
+        })}
+        {visibleOptions.length === 0 && <p className="text-xs text-stone-500">No matching options.</p>}
+      </div>
+    </div>
+  );
 }
 
 type SnapshotScopedValue<T> = {
@@ -292,14 +376,25 @@ export function PolicyDraftEditor({
   }, [displayLookups?.examTypes, examTypeCatalog]);
 
   const policyUserOptions = useMemo(() => {
-    return (policyUsers.data ?? [])
-      .map((user) => ({
+    const byId = new Map<number, ExamTypeOption>();
+    for (const user of policyUsers.data ?? []) {
+      byId.set(Number(user.id), {
         value: Number(user.id),
         label: `${user.fullName || user.username} (${user.username})`,
-      }))
+        disabled: false,
+      });
+    }
+    for (const user of displayLookups?.users ?? []) {
+      byId.set(Number(user.id), {
+        value: Number(user.id),
+        label: `${user.fullName || user.username} (${user.username})`,
+        disabled: user.isActive === false,
+      });
+    }
+    return [...byId.values()]
       .filter((user) => Number.isInteger(user.value) && user.value > 0)
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [policyUsers.data]);
+  }, [displayLookups?.users, policyUsers.data]);
 
   const lookupStatusMessage = useMemo(() => {
     if (lookups.isLoading || examTypeCatalog.isLoading || policyUsers.isLoading) {
@@ -1643,133 +1738,118 @@ export function PolicyDraftEditor({
         <details>
           <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Special quotas</summary>
           <div style={{ display: "grid", gap: 8 }}>
-            {draft.examTypeSpecialQuotas.map((row, index) => {
-              const rowExamType = examTypeById.get(Number(row.examTypeId));
-              const rowModalityId = rowExamType?.modalityId == null ? 0 : Number(rowExamType.modalityId);
-              const filteredExamTypeOptions = rowModalityId > 0 ? examTypeOptionsByModality.get(rowModalityId) ?? [] : [];
+            {draft.specialQuotaRules.map((row, index) => {
+              const filteredExamTypeOptions = row.modalityId > 0 ? examTypeOptionsByModality.get(Number(row.modalityId)) ?? [] : [];
               return (
-              <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-6">
-                <select
-                  className={inputBase}
-                  value={rowModalityId}
-                  onChange={(event) => {
-                    const modalityId = Number(event.target.value);
-                    const firstExamTypeId = examTypeOptionsByModality.get(modalityId)?.[0]?.value ?? 0;
-                    setDraft((prev) => ({
+                <Card key={row.logicalKey || `${row.id}-${index}`} className="space-y-3 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <strong>{row.title?.trim() || `Special Quota #${index + 1}`}</strong>
+                    <label className="inline-flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={row.isActive}
+                        onChange={(event) => setDraft((prev) => ({
+                          ...prev,
+                          specialQuotaRules: prev.specialQuotaRules.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, isActive: event.target.checked } : item
+                          ),
+                        }))}
+                      />
+                      Active
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <label className="text-xs font-semibold text-stone-600 dark:text-stone-300">
+                      Name/title
+                      <input
+                        className={`${inputBase} mt-1`}
+                        value={row.title ?? ""}
+                        placeholder="e.g. Dr X MRI quota"
+                        onChange={(event) => setDraft((prev) => ({
+                          ...prev,
+                          specialQuotaRules: prev.specialQuotaRules.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, title: event.target.value || null } : item
+                          ),
+                        }))}
+                      />
+                    </label>
+                    <label className="text-xs font-semibold text-stone-600 dark:text-stone-300">
+                      Modality
+                      <select
+                        className={`${inputBase} mt-1`}
+                        aria-label={`Special Quota ${index + 1} modality`}
+                        value={row.modalityId}
+                        onChange={(event) => {
+                          const modalityId = Number(event.target.value);
+                          setDraft((prev) => ({
+                            ...prev,
+                            specialQuotaRules: prev.specialQuotaRules.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, modalityId, examTypeIds: [] } : item
+                            ),
+                          }));
+                        }}
+                      >
+                        <option value={0}>Select modality...</option>
+                        {modalityOptions.map((modality) => <option key={modality.value} value={modality.value}>{modality.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs font-semibold text-stone-600 dark:text-stone-300">
+                      Daily extra slots
+                      <input
+                        className={`${inputBase} mt-1`}
+                        aria-label={`Special Quota ${index + 1} daily extra slots`}
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={row.dailyExtraSlots}
+                        onChange={(event) => setDraft((prev) => ({
+                          ...prev,
+                          specialQuotaRules: prev.specialQuotaRules.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, dailyExtraSlots: Number(event.target.value) } : item
+                          ),
+                        }))}
+                      />
+                    </label>
+                  </div>
+
+                  <SearchableChecklist
+                    label="Exams"
+                    options={filteredExamTypeOptions}
+                    selectedIds={row.examTypeIds}
+                    onChange={(examTypeIds) => setDraft((prev) => ({
                       ...prev,
-                      examTypeSpecialQuotas: prev.examTypeSpecialQuotas.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, examTypeId: firstExamTypeId } : item
+                      specialQuotaRules: prev.specialQuotaRules.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, examTypeIds } : item
                       ),
-                    }));
-                  }}
-                >
-                  <option value={0}>Select modality...</option>
-                  {modalityOptions.map((modality) => (
-                    <option key={modality.value} value={modality.value}>
-                      {modality.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className={inputBase}
-                  multiple
-                  value={row.examTypeId ? [String(row.examTypeId)] : []}
-                  onChange={(event) => {
-                    const selectedExamTypeIds = Array.from(event.currentTarget.selectedOptions)
-                      .map((option) => Number(option.value))
-                      .filter((examTypeId) => Number.isInteger(examTypeId) && examTypeId > 0);
-                    setDraft((prev) => {
-                      const replacement =
-                        selectedExamTypeIds.length === 0
-                          ? [{ ...row, examTypeId: 0 }]
-                          : selectedExamTypeIds.map((examTypeId, selectedIndex) => ({
-                              ...row,
-                              id: selectedIndex === 0 ? row.id : createNextId(prev.examTypeSpecialQuotas) + selectedIndex,
-                              examTypeId,
-                              allowedUserIds: row.allowedUserIds ?? [],
-                            }));
-                      return {
-                        ...prev,
-                        examTypeSpecialQuotas: [
-                          ...prev.examTypeSpecialQuotas.slice(0, index),
-                          ...replacement,
-                          ...prev.examTypeSpecialQuotas.slice(index + 1),
-                        ],
-                      };
-                    });
-                  }}
-                >
-                  {filteredExamTypeOptions.map((examType) => (
-                    <option key={examType.value} value={examType.value}>
-                      {examType.label}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className={inputBase}
-                  type="number"
-                  min={0}
-                  value={row.dailyExtraSlots}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
+                    }))}
+                  />
+                  <SearchableChecklist
+                    label="Authorized users"
+                    options={policyUserOptions}
+                    selectedIds={row.allowedUserIds ?? []}
+                    onChange={(allowedUserIds) => setDraft((prev) => ({
                       ...prev,
-                      examTypeSpecialQuotas: prev.examTypeSpecialQuotas.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, dailyExtraSlots: Number(event.target.value) } : item
-                      ),
-                    }))
-                  }
-                />
-                <select
-                  className={inputBase}
-                  multiple
-                  value={(row.allowedUserIds ?? []).map(String)}
-                  onChange={(event) => {
-                    const allowedUserIds = Array.from(event.currentTarget.selectedOptions)
-                      .map((option) => Number(option.value))
-                      .filter((userId) => Number.isInteger(userId) && userId > 0);
-                    setDraft((prev) => ({
-                      ...prev,
-                      examTypeSpecialQuotas: prev.examTypeSpecialQuotas.map((item, itemIndex) =>
+                      specialQuotaRules: prev.specialQuotaRules.map((item, itemIndex) =>
                         itemIndex === index ? { ...item, allowedUserIds } : item
                       ),
-                    }));
-                  }}
-                >
-                  {policyUserOptions.map((user) => (
-                    <option key={user.value} value={user.value}>
-                      {user.label}
-                    </option>
-                  ))}
-                </select>
-                <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
-                  <input
-                    type="checkbox"
-                    checked={row.isActive}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        examTypeSpecialQuotas: prev.examTypeSpecialQuotas.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, isActive: event.target.checked } : item
-                        ),
-                      }))
-                    }
+                    }))}
                   />
-                  Active
-                </label>
-                <button
-                  type="button"
-                  className="rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
-                  onClick={() =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      examTypeSpecialQuotas: prev.examTypeSpecialQuotas.filter((_, itemIndex) => itemIndex !== index),
-                    }))
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            );
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      className="rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
+                      onClick={() => setDraft((prev) => ({
+                        ...prev,
+                        specialQuotaRules: prev.specialQuotaRules.filter((_, itemIndex) => itemIndex !== index),
+                      }))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </Card>
+              );
             })}
             <button
               type="button"
@@ -1777,15 +1857,18 @@ export function PolicyDraftEditor({
               onClick={() =>
                 setDraft((prev) => ({
                   ...prev,
-                  examTypeSpecialQuotas: [
-                    ...prev.examTypeSpecialQuotas,
+                  specialQuotaRules: [
+                    ...prev.specialQuotaRules,
                     {
-                      id: createNextId(prev.examTypeSpecialQuotas),
-                      examTypeId: allExamTypeOptions[0]?.value ?? 0,
-                      dailyExtraSlots: 0,
+                      id: createNextId(prev.specialQuotaRules),
+                      logicalKey: createLogicalKey(),
+                      modalityId: 0,
+                      title: null,
+                      examTypeIds: [],
+                      dailyExtraSlots: 1,
                       allowedUserIds: [],
                       isActive: true,
-                    } satisfies PolicyExamTypeSpecialQuotaDto,
+                    } satisfies PolicySpecialQuotaRuleDto,
                   ],
                 }))
               }

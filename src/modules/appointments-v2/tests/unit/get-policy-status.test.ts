@@ -42,8 +42,8 @@ describe("PolicyStatusResult — shape", () => {
       policySet: null,
       published: null,
       draft: null,
-      publishedSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
-      draftSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
+      publishedSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], specialQuotaRules: [], specialReasonCodes: [] },
+      draftSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], specialQuotaRules: [], specialReasonCodes: [] },
     };
 
     assert.strictEqual(result.policySet, null);
@@ -70,8 +70,8 @@ describe("PolicyStatusResult — shape", () => {
         changeNote: "Draft changes",
         createdAt: "2026-04-10T00:00:00Z",
       },
-      publishedSnapshot: { categoryDailyLimits: [{ id: 1, modalityId: 1, caseCategory: "non_oncology", dailyLimit: 20, isActive: true }], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
-      draftSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
+      publishedSnapshot: { categoryDailyLimits: [{ id: 1, modalityId: 1, caseCategory: "non_oncology", dailyLimit: 20, isActive: true }], modalityBlockedRules: [], examTypeRules: [], specialQuotaRules: [], specialReasonCodes: [] },
+      draftSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], specialQuotaRules: [], specialReasonCodes: [] },
     };
 
     assert.strictEqual(result.policySet?.id, 1);

@@ -212,8 +212,10 @@ function collectWarnings(
     if (row.isActive && row.examTypeIds.length === 0) warnings.push({ kind: "empty", message: `Exam mix group ${row.id}: active group has no selected exams.` });
     row.examTypeIds.forEach((examTypeId) => addExamType("Exam mix quota groups", examTypeId));
   });
-  snapshot.examTypeSpecialQuotas.forEach((row) => {
-    addExamType("Special quotas", row.examTypeId);
+  snapshot.specialQuotaRules.forEach((row) => {
+    addModality("Special quotas", row.modalityId);
+    if (row.isActive && row.examTypeIds.length === 0) warnings.push({ kind: "empty", message: `Special Quota ${row.title || row.logicalKey}: active rule has no selected exams.` });
+    row.examTypeIds.forEach((examTypeId) => addExamType("Special quotas", examTypeId));
     (row.allowedUserIds ?? []).forEach((userId) => addUser("Special quotas", userId));
   });
   return warnings;
@@ -338,15 +340,20 @@ export function LivePolicyPanel({
           ))}
         </Section>
 
-        <Section title="Special quotas" count={snapshot.examTypeSpecialQuotas.length}>
-          {snapshot.examTypeSpecialQuotas.length === 0 ? <EmptyMessage message="No special quotas configured." /> : snapshot.examTypeSpecialQuotas.map((row, index) => (
-            <Card key={`${row.id}-${index}`}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
-                <Field label="Exam type" value={formatExamType(row.examTypeId, resolvedExamTypes)} />
-                <Field label="Extra slots/day" value={row.dailyExtraSlots} />
-                <Field label="Allowed users" value={formatAllowedUsers(row.allowedUserIds ?? [], resolvedPolicyUsers)} />
-                <Field label="Status" value={<Badge active={row.isActive} />} />
+        <Section title="Special quotas" count={snapshot.specialQuotaRules.length}>
+          {snapshot.specialQuotaRules.length === 0 ? <EmptyMessage message="No special quotas configured." /> : snapshot.specialQuotaRules.map((row, index) => (
+            <Card key={row.logicalKey || `${row.id}-${index}`}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <strong>{row.title || `Special Quota #${index + 1}`}</strong>
+                <Badge active={row.isActive} />
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                <Field label="Modality" value={formatModality(row.modalityId, resolvedModalities)} />
+                <Field label="Extra slots/day" value={row.dailyExtraSlots} />
+                <Field label="Exam count" value={row.examTypeIds.length} />
+                <Field label="Allowed users" value={formatAllowedUsers(row.allowedUserIds ?? [], resolvedPolicyUsers)} />
+              </div>
+              <ExamChips examTypeIds={row.examTypeIds} examTypes={resolvedExamTypes} />
             </Card>
           ))}
         </Section>

@@ -23,6 +23,7 @@ import {
   examRuleMatchesDate,
   examMixQuotaRuleMatchesDate,
 } from "../utils/date-rule-matching.js";
+import { findApplicableSpecialQuotaRules } from "./resolve-special-quota.js";
 
 /** Helper to build a reason code */
 function reason(
@@ -269,12 +270,12 @@ function checkCapacity(
   status: DecisionStatus;
   remainingStandardCapacity: number | null;
   remainingSpecialQuota: number | null;
+  matchedSpecialQuota?: BookingDecision["matchedSpecialQuota"];
   reasons: ReasonCode[];
 } {
   const ctx = input.context;
-  const requesterRole = ctx.requesterRole;
-  const requesterUserId = ctx.requesterUserId == null ? null : Number(ctx.requesterUserId);
   const reasons: ReasonCode[] = [];
+  const requesterRole = ctx.requesterRole;
   const mode = input.capacityResolutionMode;
   const modalityDailyCapacity = ctx.modalityDailyCapacity;
   if (modalityDailyCapacity == null || modalityDailyCapacity <= 0) {
@@ -338,35 +339,64 @@ function checkCapacity(
   const remainingStandardCapacity = Math.min(totalRemaining, bucketRemaining);
 
   let remainingSpecialQuota: number | null = null;
+  let matchedSpecialQuota: BookingDecision["matchedSpecialQuota"] = null;
   if (mode === "special_quota_extra" && input.examTypeId != null) {
     const examTypeIdNum = Number(input.examTypeId);
-    const quota = ctx.specialQuotas.find(
-      (q) => Number(q.examTypeId) === examTypeIdNum && q.isActive
+    const matchingMemberships = ctx.specialQuotas.filter(
+      (quota) =>
+        quota.isActive &&
+        Number(quota.modalityId) === Number(input.modalityId) &&
+        (quota.examTypeIds ?? []).map(Number).includes(examTypeIdNum)
     );
+    const applicableQuotas = findApplicableSpecialQuotaRules(ctx.specialQuotas, {
+      modalityId: input.modalityId,
+      examTypeId: input.examTypeId,
+      requesterRole: ctx.requesterRole,
+      requesterUserId: ctx.requesterUserId,
+    });
+    if (applicableQuotas.length > 1) {
+      reasons.push(reason(
+        "special_quota_configuration_ambiguous",
+        "error",
+        "Multiple active Special Quota pools match this user and exam type."
+      ));
+      return {
+        status: "blocked",
+        remainingStandardCapacity: Math.max(0, totalRemaining),
+        remainingSpecialQuota: 0,
+        matchedSpecialQuota: null,
+        reasons,
+      };
+    }
+    if (matchingMemberships.length > 0 && applicableQuotas.length === 0) {
+      reasons.push(reason(
+        "special_quota_forbidden",
+        "error",
+        "This user is not allowed to use the Special Quota for this exam type."
+      ));
+      return {
+        status: "blocked",
+        remainingStandardCapacity: Math.max(0, totalRemaining),
+        remainingSpecialQuota: 0,
+        matchedSpecialQuota: null,
+        reasons,
+      };
+    }
+    const quota = applicableQuotas[0];
     if (quota && quota.dailyExtraSlots > 0) {
-      const allowedUserIds = new Set((quota.allowedUserIds ?? []).map(Number));
-      const specialQuotaAllowed =
-        requesterRole === "super_admin" ||
-        (requesterUserId != null && allowedUserIds.has(requesterUserId));
-      if (!specialQuotaAllowed) {
-        reasons.push(
-          reason(
-            "special_quota_forbidden",
-            "error",
-            "This user is not allowed to use the special quota for this exam type."
-          )
-        );
-        return {
-          status: "blocked",
-          remainingStandardCapacity: Math.max(0, totalRemaining),
-          remainingSpecialQuota: 0,
-          reasons,
-        };
-      }
       remainingSpecialQuota = Math.max(
         0,
-        quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount
+        quota.dailyExtraSlots - ctx.currentSpecialQuotaConsumptionCount
       );
+      matchedSpecialQuota = {
+        ruleId: Number(quota.id),
+        logicalKey: quota.logicalKey,
+        title: quota.title,
+        modalityId: Number(quota.modalityId),
+        configured: Number(quota.dailyExtraSlots),
+        consumed: Number(ctx.currentSpecialQuotaConsumptionCount),
+        remaining: remainingSpecialQuota,
+      };
     }
   }
 
@@ -383,6 +413,7 @@ function checkCapacity(
         status: "blocked",
         remainingStandardCapacity: 0,
         remainingSpecialQuota: remainingSpecialQuota ?? 0,
+        matchedSpecialQuota,
         reasons,
       };
     }
@@ -391,6 +422,7 @@ function checkCapacity(
         status: "available",
         remainingStandardCapacity: Math.max(0, totalRemaining),
         remainingSpecialQuota,
+        matchedSpecialQuota,
         reasons: [],
       };
     }
@@ -405,6 +437,7 @@ function checkCapacity(
       status: "blocked",
       remainingStandardCapacity: Math.max(0, totalRemaining),
       remainingSpecialQuota: 0,
+      matchedSpecialQuota,
       reasons,
     };
   }
@@ -753,7 +786,8 @@ export async function pureEvaluate(
     allReasons,
     consumedCapacityMode,
     suggestedMode,
-    examCheck.matchedSummaries
+    examCheck.matchedSummaries,
+    capCheck.matchedSpecialQuota
   );
 }
 
@@ -777,7 +811,8 @@ function buildDecision(
     ruleType: string;
     effectMode: string;
     isBlocking: boolean;
-  }>
+  }>,
+  matchedSpecialQuota?: BookingDecision["matchedSpecialQuota"]
 ): BookingDecision {
   const ctx = input.context;
 
@@ -797,6 +832,7 @@ function buildDecision(
     consumedCapacityMode,
     remainingStandardCapacity,
     remainingSpecialQuota,
+    matchedSpecialQuota: matchedSpecialQuota ?? null,
     matchedRuleIds: [...new Set(matchedRuleIds)], // deduplicate
     matchedExamRuleSummaries:
       matchedExamRuleSummaries && matchedExamRuleSummaries.length > 0

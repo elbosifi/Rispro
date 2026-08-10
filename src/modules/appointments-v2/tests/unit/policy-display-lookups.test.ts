@@ -12,7 +12,7 @@ function emptySnapshot(): PolicySnapshotDto {
     categoryDailyLimits: [],
     modalityBlockedRules: [],
     examTypeRules: [],
-    examTypeSpecialQuotas: [],
+    specialQuotaRules: [],
     examMixQuotaRules: [],
     specialReasonCodes: [],
   };
@@ -55,7 +55,7 @@ describe("policy display lookups", () => {
       examTypeIds: [102],
       isActive: true,
     }];
-    draft.examTypeSpecialQuotas.push({ id: 4, examTypeId: 103, dailyExtraSlots: 1, allowedUserIds: [201], isActive: true });
+    draft.specialQuotaRules.push({ id: 4, logicalKey: "00000000-0000-0000-0000-000000000004", modalityId: 12, title: null, examTypeIds: [103], dailyExtraSlots: 1, allowedUserIds: [201], isActive: true });
 
     const ids = collectPolicyDisplayLookupIds(published, draft);
 

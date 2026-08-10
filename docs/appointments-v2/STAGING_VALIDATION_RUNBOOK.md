@@ -126,23 +126,23 @@ Execute each scenario, record evidence, verify outcome.
 ### 3.6 Scenario: Special Quota Create
 
 **Steps**:
-1. Admin config: set special quota for exam type (via policy in Settings)
-2. Verify quota available: check `appointments_v2.exam_type_special_quotas`
-3. Create booking for exam type with special quota
+1. Admin config: create one named Special Quota group with a modality, two exam types, a daily capacity, and an authorized user.
+2. Verify the published group and memberships in `appointments_v2.special_quota_rules`, `special_quota_rule_exam_types`, and `special_quota_rule_users`.
+3. Create a Special Quota booking for either member exam as the authorized user.
 
-**Expected**: Booking consumes special quota (quota remaining decremented)
+**Expected**: Booking consumes one slot from the shared logical pool for that date.
 
-**Evidence**: `quota_remaining` decreased by 1
+**Evidence**: One unreleased row exists in `appointments_v2.special_quota_consumptions` for the group's `logical_key` and booking date; availability shows configured and remaining group capacity.
 
 ### 3.7 Scenario: Special Quota Exhaust
 
 **Steps**:
 1. Create bookings until special quota reaches 0
-2. Attempt another booking for same exam type
+2. Attempt another booking for either exam in the same group
 
 **Expected**: Quota exhausted, date shows `restricted` or capacity exhausted, booking rejected
 
-**Evidence**: Quota shows 0, booking returns 409 with "quota exhausted"
+**Evidence**: Unreleased consumption count equals `daily_extra_slots`; booking returns 409 with `special_quota_exhausted`.
 
 ### 3.8 Scenario: Cancel Release
 
@@ -310,8 +310,9 @@ psql -c "SELECT id, patient_national_id, booking_date, status FROM appointments_
 # Check override audit
 psql -c "SELECT id, booking_id, supervisor_user_id, outcome, reason FROM appointments_v2.override_audit_events ORDER BY created_at DESC LIMIT 10;"
 
-# Check special quota
-psql -c "SELECT exam_type_id, quota_remaining, quota_total FROM appointments_v2.exam_type_special_quotas;"
+# Check generalized Special Quota groups and active shared-pool consumption
+psql -c "SELECT q.logical_key, q.title, q.modality_id, q.daily_extra_slots, array_agg(DISTINCT qe.exam_type_id) AS exam_type_ids, array_agg(DISTINCT qu.user_id) AS user_ids FROM appointments_v2.special_quota_rules q LEFT JOIN appointments_v2.special_quota_rule_exam_types qe ON qe.quota_rule_id = q.id LEFT JOIN appointments_v2.special_quota_rule_users qu ON qu.quota_rule_id = q.id GROUP BY q.id ORDER BY q.logical_key;"
+psql -c "SELECT quota_logical_key, booking_date, count(*) AS consumed FROM appointments_v2.special_quota_consumptions WHERE released_at IS NULL GROUP BY quota_logical_key, booking_date ORDER BY booking_date, quota_logical_key;"
 
 # Enable shadow mode (DB)
 psql -c "INSERT INTO system_settings (category, setting_key, setting_value, updated_by_user_id) VALUES ('scheduling_and_capacity', 'appointments_v2_shadow_mode_enabled', '{\"value\":\"true\"}', (SELECT id FROM users WHERE role = 'supervisor' LIMIT 1)) ON CONFLICT (category, setting_key) DO UPDATE SET setting_value = '{\"value\":\"true\"}';"

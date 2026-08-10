@@ -161,22 +161,29 @@ const LOAD_ALL_RULES_FOR_VERSION_SQL = `
   union all
   select
     'special_quota' as rule_type,
-    etsq.id, null as "modalityId", null as "caseCategory",
-    etsq.daily_extra_slots as "dailyLimit", etsq.is_active as "isActive",
-    concat_ws('|', 'special_quota', etsq.exam_type_id) as "identityKey",
+    quota.id, quota.modality_id as "modalityId", null as "caseCategory",
+    quota.daily_extra_slots as "dailyLimit", quota.is_active as "isActive",
+    concat_ws('|', 'special_quota', quota.logical_key) as "identityKey",
     jsonb_build_object(
       'ruleType', 'special_quota',
-      'examTypeId', etsq.exam_type_id,
-      'dailyExtraSlots', etsq.daily_extra_slots,
-      'isActive', etsq.is_active,
+      'logicalKey', quota.logical_key,
+      'modalityId', quota.modality_id,
+      'title', coalesce(quota.title, ''),
+      'dailyExtraSlots', quota.daily_extra_slots,
+      'isActive', quota.is_active,
+      'examTypeIds', coalesce((
+        select jsonb_agg(membership.exam_type_id order by membership.exam_type_id)
+        from appointments_v2.special_quota_rule_exam_types membership
+        where membership.quota_rule_id = quota.id
+      ), '[]'::jsonb),
       'allowedUserIds', coalesce((
-        select jsonb_agg(etsqu.user_id order by etsqu.user_id)
-        from appointments_v2.exam_type_special_quota_users etsqu
-        where etsqu.quota_id = etsq.id
+        select jsonb_agg(quota_user.user_id order by quota_user.user_id)
+        from appointments_v2.special_quota_rule_users quota_user
+        where quota_user.quota_rule_id = quota.id
       ), '[]'::jsonb)
     )::text as "contentKey"
-  from appointments_v2.exam_type_special_quotas etsq
-  where etsq.policy_version_id = $1
+  from appointments_v2.special_quota_rules quota
+  where quota.policy_version_id = $1
   union all
   select
     'exam_mix_quota' as rule_type,
@@ -380,8 +387,8 @@ const DELETE_EXAM_MIX_QUOTA_RULES_SQL = `
   where policy_version_id = $1
 `;
 
-const DELETE_EXAM_TYPE_SPECIAL_QUOTAS_SQL = `
-  delete from appointments_v2.exam_type_special_quotas
+const DELETE_SPECIAL_QUOTA_RULES_SQL = `
+  delete from appointments_v2.special_quota_rules
   where policy_version_id = $1
 `;
 
@@ -436,16 +443,22 @@ const INSERT_EXAM_TYPE_RULE_ITEM_SQL = `
   values ($1, $2)
 `;
 
-const INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL = `
-  insert into appointments_v2.exam_type_special_quotas (
-    policy_version_id, exam_type_id, daily_extra_slots, is_active
-  ) values ($1, $2, $3, $4)
-  returning id, exam_type_id as "examTypeId", daily_extra_slots as "dailyExtraSlots",
-    is_active as "isActive"
+const INSERT_SPECIAL_QUOTA_RULE_SQL = `
+  insert into appointments_v2.special_quota_rules (
+    policy_version_id, logical_key, modality_id, title, daily_extra_slots, is_active
+  ) values ($1, $2::uuid, $3, $4, $5, $6)
+  returning id, logical_key::text as "logicalKey", modality_id as "modalityId", title,
+    daily_extra_slots as "dailyExtraSlots", is_active as "isActive"
 `;
 
-const INSERT_EXAM_TYPE_SPECIAL_QUOTA_USER_SQL = `
-  insert into appointments_v2.exam_type_special_quota_users (quota_id, user_id)
+const INSERT_SPECIAL_QUOTA_RULE_EXAM_TYPE_SQL = `
+  insert into appointments_v2.special_quota_rule_exam_types (quota_rule_id, exam_type_id)
+  values ($1, $2)
+  on conflict do nothing
+`;
+
+const INSERT_SPECIAL_QUOTA_RULE_USER_SQL = `
+  insert into appointments_v2.special_quota_rule_users (quota_rule_id, user_id)
   values ($1, $2)
   on conflict do nothing
 `;
@@ -502,7 +515,7 @@ export async function deleteAllRulesForVersion(
   await client.query(DELETE_EXAM_MIX_QUOTA_RULE_ITEMS_SQL, [policyVersionId]);
   await client.query(DELETE_EXAM_TYPE_RULES_SQL, [policyVersionId]);
   await client.query(DELETE_EXAM_MIX_QUOTA_RULES_SQL, [policyVersionId]);
-  await client.query(DELETE_EXAM_TYPE_SPECIAL_QUOTAS_SQL, [policyVersionId]);
+  await client.query(DELETE_SPECIAL_QUOTA_RULES_SQL, [policyVersionId]);
   await client.query(DELETE_MODALITY_BLOCKED_RULES_SQL, [policyVersionId]);
   await client.query(DELETE_CATEGORY_DAILY_LIMITS_SQL, [policyVersionId]);
 }
@@ -645,31 +658,48 @@ export async function insertExamTypeRule(
   return insertedRule;
 }
 
-export interface InsertedExamTypeSpecialQuota {
+export interface InsertedSpecialQuotaRule {
   id: number;
-  examTypeId: number;
+  logicalKey: string;
+  modalityId: number;
+  title: string | null;
+  examTypeIds: number[];
   dailyExtraSlots: number;
   allowedUserIds: number[];
   isActive: boolean;
 }
 
-export async function insertExamTypeSpecialQuota(
+export async function insertSpecialQuotaRule(
   client: PoolClient,
   policyVersionId: number,
-  rule: { examTypeId: number; dailyExtraSlots: number; allowedUserIds?: number[]; isActive: boolean }
-): Promise<InsertedExamTypeSpecialQuota> {
-  const result = await client.query<InsertedExamTypeSpecialQuota>(INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL, [
+  rule: {
+    logicalKey: string;
+    modalityId: number;
+    title: string | null;
+    examTypeIds: number[];
+    dailyExtraSlots: number;
+    allowedUserIds?: number[];
+    isActive: boolean;
+  }
+): Promise<InsertedSpecialQuotaRule> {
+  const result = await client.query<InsertedSpecialQuotaRule>(INSERT_SPECIAL_QUOTA_RULE_SQL, [
     policyVersionId,
-    rule.examTypeId,
+    rule.logicalKey,
+    rule.modalityId,
+    rule.title || null,
     rule.dailyExtraSlots,
     rule.isActive,
   ]);
   const inserted = result.rows[0];
-  const allowedUserIds = [...new Set((rule.allowedUserIds ?? []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
-  for (const userId of allowedUserIds) {
-    await client.query(INSERT_EXAM_TYPE_SPECIAL_QUOTA_USER_SQL, [inserted.id, userId]);
+  const examTypeIds = [...new Set(rule.examTypeIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b);
+  for (const examTypeId of examTypeIds) {
+    await client.query(INSERT_SPECIAL_QUOTA_RULE_EXAM_TYPE_SQL, [inserted.id, examTypeId]);
   }
-  return { ...inserted, allowedUserIds };
+  const allowedUserIds = [...new Set((rule.allowedUserIds ?? []).map(Number).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b);
+  for (const userId of allowedUserIds) {
+    await client.query(INSERT_SPECIAL_QUOTA_RULE_USER_SQL, [inserted.id, userId]);
+  }
+  return { ...inserted, examTypeIds, allowedUserIds };
 }
 
 export interface InsertedExamMixQuotaRule {

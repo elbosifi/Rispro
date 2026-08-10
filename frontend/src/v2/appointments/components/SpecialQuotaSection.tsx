@@ -7,6 +7,8 @@ interface Props {
   capacityResolutionMode: CapacityResolutionMode;
   onChangeCapacityResolutionMode: (mode: CapacityResolutionMode) => void;
   specialQuotaAvailable: boolean;
+  specialQuotaRemaining?: number | null;
+  specialQuotaConfigured?: number | null;
   showCapacityActions: boolean;
   canUseSpecialQuota: boolean;
   canUseCategoryOverride: boolean;
@@ -24,6 +26,8 @@ export function SpecialQuotaSection({
   capacityResolutionMode,
   onChangeCapacityResolutionMode,
   specialQuotaAvailable,
+  specialQuotaRemaining = null,
+  specialQuotaConfigured = null,
   showCapacityActions,
   canUseSpecialQuota,
   canUseCategoryOverride,
@@ -81,6 +85,11 @@ export function SpecialQuotaSection({
       {canUseSpecialQuota && (
         <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
           {t(language, "appointments.create.specialReasonAudit")}
+        </div>
+      )}
+      {canUseSpecialQuota && specialQuotaAvailable && specialQuotaRemaining != null && (
+        <div className="mt-2 text-xs sm:text-sm font-medium" style={{ color: "var(--text-muted)" }}>
+          {language === "ar" ? "الحصة الخاصة" : "Special quota"}: {specialQuotaRemaining}{specialQuotaConfigured != null ? ` of ${specialQuotaConfigured}` : ""} {language === "ar" ? "متبقية" : "remaining"}
         </div>
       )}
 

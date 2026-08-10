@@ -201,21 +201,42 @@ export function validatePolicyDraftForAdmin(
     }
   }
 
-  for (const row of snapshot.examTypeSpecialQuotas) {
+  const activeQuotaExamMemberships = new Map<number, number>();
+  const seenQuotaLogicalKeys = new Set<string>();
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const row of snapshot.specialQuotaRules) {
+    const logicalKey = String(row.logicalKey ?? "").trim().toLowerCase();
+    if (!uuidPattern.test(logicalKey)) {
+      errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: "Special Quota logical key must be a valid UUID." });
+    } else if (seenQuotaLogicalKeys.has(logicalKey)) {
+      errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: "Special Quota logical key must be unique." });
+    }
+    seenQuotaLogicalKeys.add(logicalKey);
     if (!row.isActive) continue;
-    const examType = examTypeById.get(Number(row.examTypeId));
-    if (!examType) {
-      errors.push({
-        section: SECTION.specialQuotas,
-        ruleId: row.id,
-        message: `Special quota references unknown exam type ID ${row.examTypeId}.`,
-      });
-    } else if (examType.isActive === false) {
-      warnings.push({
-        section: SECTION.specialQuotas,
-        ruleId: row.id,
-        message: `${examTypeLabel(row.examTypeId, lookups)} is inactive.`,
-      });
+    const modality = modalityById.get(Number(row.modalityId));
+    if (!modality) {
+      errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `Special Quota references unknown modality ID ${row.modalityId}.` });
+    } else if (modality.isActive === false) {
+      warnings.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `${modality.nameEn || modality.name || modality.code} is inactive.` });
+    }
+    if (!Array.isArray(row.examTypeIds) || row.examTypeIds.length === 0) {
+      errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: "Active Special Quota must select at least one exam." });
+    }
+    for (const examTypeId of row.examTypeIds ?? []) {
+      const examType = examTypeById.get(Number(examTypeId));
+      if (!examType) {
+        errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `Special Quota references unknown exam type ID ${examTypeId}.` });
+      } else if (Number(examType.modalityId) !== Number(row.modalityId)) {
+        errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `${examTypeLabel(examTypeId, lookups)} does not belong to the selected modality.` });
+      } else if (examType.isActive === false) {
+        warnings.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `${examTypeLabel(examTypeId, lookups)} is inactive.` });
+      }
+      const priorRuleId = activeQuotaExamMemberships.get(Number(examTypeId));
+      if (priorRuleId != null) {
+        errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `${examTypeLabel(examTypeId, lookups)} also belongs to active Special Quota ${priorRuleId}; overlapping pools are not allowed.` });
+      } else {
+        activeQuotaExamMemberships.set(Number(examTypeId), row.id);
+      }
     }
     if (!Number.isInteger(row.dailyExtraSlots) || row.dailyExtraSlots <= 0) {
       errors.push({
@@ -223,6 +244,9 @@ export function validatePolicyDraftForAdmin(
         ruleId: row.id,
         message: "Special quota must have a positive number of extra slots.",
       });
+    }
+    if (!Array.isArray(row.allowedUserIds) || row.allowedUserIds.length === 0) {
+      errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: "Active Special Quota must authorize at least one user." });
     }
     for (const userId of row.allowedUserIds ?? []) {
       const user = userById.get(Number(userId));
@@ -232,11 +256,13 @@ export function validatePolicyDraftForAdmin(
           ruleId: row.id,
           message: `Unknown user ID ${userId}.`,
         });
+      } else if (user.role === "super_admin") {
+        errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: "Super admins are authorized implicitly and must not be selected." });
       } else if (user.isActive === false) {
-        errors.push({
+        warnings.push({
           section: SECTION.specialQuotas,
           ruleId: row.id,
-          message: `${userLabel(userId, lookups)} is inactive.`,
+          message: `${userLabel(userId, lookups)} is inactive and retained for existing policy history.`,
         });
       }
     }

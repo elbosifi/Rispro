@@ -28,7 +28,7 @@ import {
   insertCategoryDailyLimit,
   insertModalityBlockedRule,
   insertExamTypeRule,
-  insertExamTypeSpecialQuota,
+  insertSpecialQuotaRule,
   insertExamMixQuotaRule,
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
@@ -205,9 +205,12 @@ async function copySnapshotIntoVersion(
     });
   }
 
-  for (const rule of snapshot.examTypeSpecialQuotas) {
-    await insertExamTypeSpecialQuota(client, policyVersionId, {
-      examTypeId: rule.examTypeId,
+  for (const rule of snapshot.specialQuotaRules) {
+    await insertSpecialQuotaRule(client, policyVersionId, {
+      logicalKey: rule.logicalKey,
+      modalityId: rule.modalityId,
+      title: rule.title,
+      examTypeIds: rule.examTypeIds,
       dailyExtraSlots: rule.dailyExtraSlots,
       allowedUserIds: rule.allowedUserIds,
       isActive: rule.isActive,

@@ -38,7 +38,7 @@ describe("PolicyDraftEditor raw json", () => {
           categoryDailyLimits: [],
           modalityBlockedRules: [],
           examTypeRules: [],
-          examTypeSpecialQuotas: [],
+          specialQuotaRules: [],
           examMixQuotaRules: [],
           specialReasonCodes: [],
         }}
@@ -61,7 +61,7 @@ describe("PolicyDraftEditor raw json", () => {
           categoryDailyLimits: [],
           modalityBlockedRules: [],
           examTypeRules: [],
-          examTypeSpecialQuotas: [],
+          specialQuotaRules: [],
           examMixQuotaRules: [],
           specialReasonCodes: [],
         }}

@@ -17,6 +17,7 @@ export interface AvailabilityRowViewModel {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
+  specialQuotaConfigured?: number | null;
   hasSpecialQuotaPath?: boolean;
   examMixQuotaSummaries?: Array<{
     ruleId: number;
@@ -123,6 +124,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
     nonOncologyFilled: day.nonOncology?.filled ?? 0,
     nonOncologyRemaining: day.nonOncology?.remaining ?? null,
     specialQuotaRemaining: day.specialQuotaSummary?.remaining ?? null,
+    specialQuotaConfigured: day.specialQuotaSummary?.configured ?? null,
     hasSpecialQuotaPath,
     examMixQuotaSummaries: day.examMixQuotaSummaries ?? [],
     primaryExamMixBlocking:

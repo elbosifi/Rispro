@@ -55,9 +55,12 @@ export interface PolicyExamTypeRuleDto {
   isActive: boolean;
 }
 
-export interface PolicyExamTypeSpecialQuotaDto {
+export interface PolicySpecialQuotaRuleDto {
   id: number;
-  examTypeId: number;
+  logicalKey: string;
+  modalityId: number;
+  title: string | null;
+  examTypeIds: number[];
   dailyExtraSlots: number;
   allowedUserIds: number[];
   isActive: boolean;
@@ -90,7 +93,7 @@ export interface PolicySnapshotDto {
   categoryDailyLimits: PolicyCategoryDailyLimitDto[];
   modalityBlockedRules: PolicyModalityBlockedRuleDto[];
   examTypeRules: PolicyExamTypeRuleDto[];
-  examTypeSpecialQuotas: PolicyExamTypeSpecialQuotaDto[];
+  specialQuotaRules: PolicySpecialQuotaRuleDto[];
   examMixQuotaRules?: PolicyExamMixQuotaRuleDto[];
   specialReasonCodes: PolicySpecialReasonCodeDto[];
 }

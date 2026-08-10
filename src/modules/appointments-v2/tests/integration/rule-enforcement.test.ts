@@ -273,7 +273,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       examTypeRules: (rules.examTypeRules ?? []).map((r, i) => ({
         id: i + 20, ...r,
       })),
-      examTypeSpecialQuotas: [],
+      specialQuotaRules: [],
       specialReasonCodes: [],
     };
 

@@ -319,6 +319,9 @@ export function CreateAppointmentTab({
       item.date === form.appointmentDate &&
       (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
+  const selectedSpecialQuotaSummary = (availability.rawItems ?? []).find(
+    (item) => item.date === form.appointmentDate
+  )?.specialQuotaSummary ?? null;
   const hasAnySpecialQuotaAvailable = (availability.rawItems ?? []).some(
     (item) => (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
@@ -1234,6 +1237,8 @@ export function CreateAppointmentTab({
                     setOverrideError(null);
                   }}
                   specialQuotaAvailable={hasSpecialQuotaAvailable}
+                  specialQuotaRemaining={selectedSpecialQuotaSummary?.remaining ?? null}
+                  specialQuotaConfigured={selectedSpecialQuotaSummary?.configured ?? null}
                   showCapacityActions={canUseNonStandardCapacityModes || canUseSpecialQuotaMode}
                   canUseSpecialQuota={canUseSpecialQuotaMode}
                   canUseCategoryOverride={canUseNonStandardCapacityModes}

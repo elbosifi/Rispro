@@ -34,8 +34,9 @@ export function collectPolicyDisplayLookupIds(
       addNumber(modalityIds, row.modalityId);
       for (const examTypeId of row.examTypeIds) addNumber(examTypeIds, examTypeId);
     }
-    for (const row of snapshot.examTypeSpecialQuotas) {
-      addNumber(examTypeIds, row.examTypeId);
+    for (const row of snapshot.specialQuotaRules) {
+      addNumber(modalityIds, row.modalityId);
+      for (const examTypeId of row.examTypeIds) addNumber(examTypeIds, examTypeId);
       for (const userId of row.allowedUserIds ?? []) addNumber(userIds, userId);
     }
   }

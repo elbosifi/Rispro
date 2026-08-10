@@ -34,7 +34,9 @@ vi.mock("../api", () => ({
     isError: false,
   }),
   useV2PolicyUsers: () => ({
-    data: [],
+    data: [
+      { id: 201, username: "active_user", fullName: "Active Reception", role: "receptionist", isActive: true },
+    ],
     isLoading: false,
     isError: false,
   }),
@@ -83,7 +85,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -134,7 +136,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -173,7 +175,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -214,7 +216,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -250,7 +252,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -287,7 +289,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -324,7 +326,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -362,7 +364,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -409,7 +411,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -458,7 +460,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
                 isActive: true,
               },
             ],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [],
             specialReasonCodes: [],
           }}
@@ -489,7 +491,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -528,7 +530,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -563,7 +565,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -599,7 +601,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -635,7 +637,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -671,7 +673,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -710,7 +712,7 @@ describe("PolicyDraftEditor exam type helper text", () => {
             categoryDailyLimits: [],
             modalityBlockedRules: [],
             examTypeRules: [],
-            examTypeSpecialQuotas: [],
+            specialQuotaRules: [],
             examMixQuotaRules: [
               {
                 id: 1,
@@ -743,5 +745,102 @@ describe("PolicyDraftEditor exam type helper text", () => {
       expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(false);
       expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(false);
     });
+  });
+});
+
+describe("PolicyDraftEditor generalized Special Quota groups", () => {
+  it("edits multiple exams and users in one quota and retains removable inactive users", async () => {
+    let savedSnapshot: PolicySnapshotDto | null = null;
+    const onSave = vi.fn(async (nextSnapshot: PolicySnapshotDto) => {
+      savedSnapshot = nextSnapshot;
+    });
+    render(
+      <PolicyDraftEditor
+        isSaving={false}
+        onSave={onSave}
+        displayLookups={{
+          modalities: [],
+          examTypes: [],
+          users: [{ id: 202, username: "inactive_user", fullName: "Inactive Reception", role: "receptionist", isActive: false }],
+        }}
+        snapshot={{
+          categoryDailyLimits: [],
+          modalityBlockedRules: [],
+          examTypeRules: [],
+          specialQuotaRules: [{
+            id: 1,
+            logicalKey: "00000000-0000-0000-0000-000000000001",
+            modalityId: 1,
+            title: "Shared CT overflow",
+            examTypeIds: [101],
+            dailyExtraSlots: 2,
+            allowedUserIds: [202],
+            isActive: true,
+          }],
+          examMixQuotaRules: [],
+          specialReasonCodes: [],
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Special quotas"));
+    expect(screen.getByText("Shared CT overflow")).toBeTruthy();
+    expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Inactive Reception (inactive_user) (inactive)") as HTMLInputElement).disabled).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("Search Exams"), { target: { value: "Chest" } });
+    expect(screen.queryByLabelText("CT Head")).toBeNull();
+    expect(screen.getByLabelText("CT Chest")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search Exams"), { target: { value: "" } });
+
+    const selectAllButtons = screen.getAllByRole("button", { name: "Select all" });
+    const clearAllButtons = screen.getAllByRole("button", { name: "Clear all" });
+    fireEvent.click(selectAllButtons[0]);
+    expect((screen.getByLabelText("CT Cardiac") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(clearAllButtons[0]);
+    expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByLabelText("CT Head"));
+    fireEvent.click(screen.getByLabelText("CT Chest"));
+
+    fireEvent.click(selectAllButtons[1]);
+    fireEvent.click(clearAllButtons[1]);
+    fireEvent.click(screen.getByLabelText("Inactive Reception (inactive_user) (inactive)"));
+    fireEvent.click(screen.getByLabelText("Active Reception (active_user)"));
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((savedSnapshot as PolicySnapshotDto | null)?.specialQuotaRules[0].examTypeIds).toEqual([101, 102]);
+    expect((savedSnapshot as PolicySnapshotDto | null)?.specialQuotaRules[0].allowedUserIds).toEqual([201, 202]);
+  });
+
+  it("clears selected exams when the quota modality changes", () => {
+    render(
+      <PolicyDraftEditor
+        isSaving={false}
+        onSave={vi.fn(async () => undefined)}
+        snapshot={{
+          categoryDailyLimits: [],
+          modalityBlockedRules: [],
+          examTypeRules: [],
+          specialQuotaRules: [{
+            id: 1,
+            logicalKey: "00000000-0000-0000-0000-000000000001",
+            modalityId: 1,
+            title: null,
+            examTypeIds: [101],
+            dailyExtraSlots: 1,
+            allowedUserIds: [201],
+            isActive: true,
+          }],
+          examMixQuotaRules: [],
+          specialReasonCodes: [],
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Special quotas"));
+    fireEvent.change(screen.getByLabelText("Special Quota 1 modality"), { target: { value: "2" } });
+    expect(screen.getByText("Exams (0 selected)")).toBeTruthy();
+    expect(screen.queryByLabelText("CT Head")).toBeNull();
   });
 });

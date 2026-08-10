@@ -84,14 +84,94 @@ async function validatePolicyDraftInternal(
     );
   }
 
-  // 7. Check for special quota rules with zero extra slots
+  // 7. Active Special Quota groups must be usable and unambiguous.
   const zeroQuotas = rules.filter(
-    (r: PolicyRuleRow) => r.ruleType === "special_quota" && r.dailyLimit === 0
+    (r: PolicyRuleRow) => r.ruleType === "special_quota" && r.isActive && Number(r.dailyLimit) <= 0
   );
   if (zeroQuotas.length > 0) {
-    warnings.push(
-      `${zeroQuotas.length} special quota rule(s) have daily_extra_slots=0. These quotas have no effect.`
+    errors.push(
+      `${zeroQuotas.length} active Special Quota rule(s) do not have positive daily extra slots.`
     );
+  }
+
+  const specialQuotaRules = await client.query<{
+    id: number;
+    modalityId: number;
+    examTypeIds: number[];
+    allowedUserIds: number[];
+  }>(
+    `
+      select
+        quota.id,
+        quota.modality_id as "modalityId",
+        coalesce((
+          select array_agg(membership.exam_type_id order by membership.exam_type_id)
+          from appointments_v2.special_quota_rule_exam_types membership
+          where membership.quota_rule_id = quota.id
+        ), '{}') as "examTypeIds",
+        coalesce((
+          select array_agg(quota_user.user_id order by quota_user.user_id)
+          from appointments_v2.special_quota_rule_users quota_user
+          where quota_user.quota_rule_id = quota.id
+        ), '{}') as "allowedUserIds"
+      from appointments_v2.special_quota_rules quota
+      where quota.policy_version_id = $1 and quota.is_active = true
+      order by quota.logical_key
+    `,
+    [policyVersionId]
+  );
+  for (const quota of specialQuotaRules.rows) {
+    if (!Array.isArray(quota.examTypeIds) || quota.examTypeIds.length === 0) {
+      errors.push(`Special Quota rule ${quota.id}: at least one exam type is required.`);
+    }
+    if (!Array.isArray(quota.allowedUserIds) || quota.allowedUserIds.length === 0) {
+      errors.push(`Special Quota rule ${quota.id}: at least one authorized user is required.`);
+    }
+  }
+
+  const mismatchedExamMemberships = await client.query<{ quotaRuleId: number; examTypeId: number }>(
+    `
+      select quota.id as "quotaRuleId", membership.exam_type_id as "examTypeId"
+      from appointments_v2.special_quota_rules quota
+      join appointments_v2.special_quota_rule_exam_types membership on membership.quota_rule_id = quota.id
+      join exam_types exam_type on exam_type.id = membership.exam_type_id
+      where quota.policy_version_id = $1
+        and quota.is_active = true
+        and exam_type.modality_id is distinct from quota.modality_id
+    `,
+    [policyVersionId]
+  );
+  for (const row of mismatchedExamMemberships.rows) {
+    errors.push(`Special Quota rule ${row.quotaRuleId}: exam type ${row.examTypeId} belongs to another modality.`);
+  }
+
+  const ambiguousExamMemberships = await client.query<{ examTypeId: number; quotaCount: number }>(
+    `
+      select membership.exam_type_id as "examTypeId", count(*)::int as "quotaCount"
+      from appointments_v2.special_quota_rules quota
+      join appointments_v2.special_quota_rule_exam_types membership on membership.quota_rule_id = quota.id
+      where quota.policy_version_id = $1 and quota.is_active = true
+      group by membership.exam_type_id
+      having count(*) > 1
+    `,
+    [policyVersionId]
+  );
+  for (const row of ambiguousExamMemberships.rows) {
+    errors.push(`Exam type ${row.examTypeId} belongs to ${row.quotaCount} active Special Quota pools.`);
+  }
+
+  const explicitSuperAdmins = await client.query<{ quotaRuleId: number; userId: number }>(
+    `
+      select quota.id as "quotaRuleId", quota_user.user_id as "userId"
+      from appointments_v2.special_quota_rules quota
+      join appointments_v2.special_quota_rule_users quota_user on quota_user.quota_rule_id = quota.id
+      join users app_user on app_user.id = quota_user.user_id
+      where quota.policy_version_id = $1 and app_user.role = 'super_admin'
+    `,
+    [policyVersionId]
+  );
+  for (const row of explicitSuperAdmins.rows) {
+    errors.push(`Special Quota rule ${row.quotaRuleId}: super admin ${row.userId} must not be stored explicitly.`);
   }
 
   // 8. Check that there's at least one active rule or an empty config is intentional

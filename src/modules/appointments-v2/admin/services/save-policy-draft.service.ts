@@ -22,7 +22,7 @@ import {
   insertCategoryDailyLimit,
   insertModalityBlockedRule,
   insertExamTypeRule,
-  insertExamTypeSpecialQuota,
+  insertSpecialQuotaRule,
   insertExamMixQuotaRule,
   upsertSpecialReasonCodes,
   type PolicyVersionRow,
@@ -73,7 +73,7 @@ async function savePolicyDraftInternal(
   }
 
   await validateCategoryCapacityPolicy(client, policySnapshot);
-  await validateSpecialQuotaPolicy(client, policySnapshot);
+  await validateSpecialQuotaPolicy(client, versionId, policySnapshot);
   validateSpecialReasonCodes(policySnapshot);
   validateExamRestrictionPolicy(policySnapshot);
   validateExamMixPolicy(policySnapshot);
@@ -127,9 +127,12 @@ async function savePolicyDraftInternal(
     });
   }
 
-  for (const rule of policySnapshot.examTypeSpecialQuotas) {
-    await insertExamTypeSpecialQuota(client, versionId, {
-      examTypeId: rule.examTypeId,
+  for (const rule of policySnapshot.specialQuotaRules) {
+    await insertSpecialQuotaRule(client, versionId, {
+      logicalKey: rule.logicalKey,
+      modalityId: rule.modalityId,
+      title: rule.title,
+      examTypeIds: rule.examTypeIds,
       dailyExtraSlots: rule.dailyExtraSlots,
       allowedUserIds: rule.allowedUserIds,
       isActive: rule.isActive,
@@ -235,72 +238,128 @@ function validateSpecialReasonCodes(policySnapshot: PolicySnapshotDto): void {
 
 async function validateSpecialQuotaPolicy(
   client: PoolClient,
+  policyVersionId: number,
   policySnapshot: PolicySnapshotDto
 ): Promise<void> {
   const fieldErrors: FieldValidationErrorDto[] = [];
-  const quotas = policySnapshot.examTypeSpecialQuotas;
+  const quotas = policySnapshot.specialQuotaRules;
   const activeQuotas = quotas.filter((row) => row.isActive);
-  const examTypeIds = [...new Set(activeQuotas.map((row) => Number(row.examTypeId)).filter((id) => Number.isInteger(id) && id > 0))];
+  const modalityIds = [...new Set(activeQuotas.map((row) => Number(row.modalityId)).filter((id) => Number.isInteger(id) && id > 0))];
+  const examTypeIds = [...new Set(activeQuotas.flatMap((row) => row.examTypeIds ?? []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
   const allowedUserIds = [
     ...new Set(
       quotas.flatMap((row) => row.allowedUserIds ?? []).map(Number).filter((id) => Number.isInteger(id) && id > 0)
     ),
   ];
 
-  const existingExamTypeIds = new Set<number>();
+  const existingModalities = new Set<number>();
+  if (modalityIds.length > 0) {
+    const result = await client.query<{ id: number }>(`select id from modalities where id = any($1::bigint[])`, [modalityIds]);
+    for (const row of result.rows) existingModalities.add(Number(row.id));
+  }
+
+  const examTypeModalityById = new Map<number, number | null>();
   if (examTypeIds.length > 0) {
-    const result = await client.query<{ id: number }>(
-      `select id from exam_types where id = any($1::bigint[])`,
+    const result = await client.query<{ id: number; modalityId: number | null }>(
+      `select id, modality_id as "modalityId" from exam_types where id = any($1::bigint[])`,
       [examTypeIds]
     );
-    for (const row of result.rows) existingExamTypeIds.add(Number(row.id));
+    for (const row of result.rows) examTypeModalityById.set(Number(row.id), row.modalityId == null ? null : Number(row.modalityId));
   }
 
   const activeUserIds = new Set<number>();
+  const existingUserIds = new Set<number>();
   const superAdminUserIds = new Set<number>();
   if (allowedUserIds.length > 0) {
-    const result = await client.query<{ id: number; role: string }>(
-      `select id, role from users where id = any($1::bigint[]) and is_active = true`,
+    const result = await client.query<{ id: number; role: string; isActive: boolean }>(
+      `select id, role, is_active as "isActive" from users where id = any($1::bigint[])`,
       [allowedUserIds]
     );
     for (const row of result.rows) {
-      activeUserIds.add(Number(row.id));
+      existingUserIds.add(Number(row.id));
+      if (row.isActive) activeUserIds.add(Number(row.id));
       if (row.role === "super_admin") superAdminUserIds.add(Number(row.id));
     }
   }
 
+  const existingInactiveMemberships = new Set<string>();
+  const existingMembershipResult = await client.query<{ logicalKey: string; userId: number }>(
+    `
+      select quota.logical_key::text as "logicalKey", quota_user.user_id as "userId"
+      from appointments_v2.special_quota_rules quota
+      join appointments_v2.special_quota_rule_users quota_user on quota_user.quota_rule_id = quota.id
+      join users app_user on app_user.id = quota_user.user_id
+      where quota.policy_version_id = $1 and app_user.is_active = false
+    `,
+    [policyVersionId]
+  );
+  for (const row of existingMembershipResult.rows) {
+    existingInactiveMemberships.add(`${row.logicalKey}:${Number(row.userId)}`);
+  }
+
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const seenLogicalKeys = new Set<string>();
   const seenActiveExamTypes = new Set<number>();
   for (const [index, row] of quotas.entries()) {
-    const examTypeId = Number(row.examTypeId);
-    if (row.isActive) {
-      if (!Number.isInteger(examTypeId) || examTypeId <= 0 || !existingExamTypeIds.has(examTypeId)) {
-        fieldErrors.push({
-          field: `policySnapshot.examTypeSpecialQuotas[${index}].examTypeId`,
-          code: "special_quota_exam_type_invalid",
-          message: "Active special quota must select an existing exam type.",
-        });
-      }
-      if (seenActiveExamTypes.has(examTypeId)) {
-        fieldErrors.push({
-          field: `policySnapshot.examTypeSpecialQuotas[${index}].examTypeId`,
-          code: "special_quota_duplicate_exam_type",
-          message: "Only one active special quota is allowed per exam type.",
-        });
-      }
-      seenActiveExamTypes.add(examTypeId);
+    const fieldBase = `policySnapshot.specialQuotaRules[${index}]`;
+    const logicalKey = String(row.logicalKey ?? "").trim().toLowerCase();
+    const modalityId = Number(row.modalityId);
+    const selectedExamTypeIds = (row.examTypeIds ?? []).map(Number);
+    const selectedUserIds = (row.allowedUserIds ?? []).map(Number);
+
+    if (!uuidPattern.test(logicalKey)) {
+      fieldErrors.push({ field: `${fieldBase}.logicalKey`, code: "special_quota_logical_key_invalid", message: "Special Quota logicalKey must be a valid UUID." });
+    } else if (seenLogicalKeys.has(logicalKey)) {
+      fieldErrors.push({ field: `${fieldBase}.logicalKey`, code: "special_quota_logical_key_duplicate", message: "Special Quota logicalKey must be unique in the policy." });
+    }
+    seenLogicalKeys.add(logicalKey);
+
+    if (new Set(selectedExamTypeIds).size !== selectedExamTypeIds.length) {
+      fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_exam_type_duplicate", message: "Special Quota exam memberships must be unique." });
+    }
+    if (new Set(selectedUserIds).size !== selectedUserIds.length) {
+      fieldErrors.push({ field: `${fieldBase}.allowedUserIds`, code: "special_quota_user_duplicate", message: "Special Quota user memberships must be unique." });
     }
 
-    for (const userId of row.allowedUserIds ?? []) {
-      if (!activeUserIds.has(Number(userId))) {
-        fieldErrors.push({
-          field: `policySnapshot.examTypeSpecialQuotas[${index}].allowedUserIds`,
-          code: "special_quota_user_invalid",
-          message: `Allowed user ${userId} does not exist or is inactive.`,
-        });
+    if (row.isActive) {
+      if (!Number.isInteger(modalityId) || modalityId <= 0 || !existingModalities.has(modalityId)) {
+        fieldErrors.push({ field: `${fieldBase}.modalityId`, code: "special_quota_modality_invalid", message: "Active Special Quota must select an existing modality." });
       }
-      if (superAdminUserIds.has(Number(userId))) {
+      if (!Number.isInteger(row.dailyExtraSlots) || Number(row.dailyExtraSlots) <= 0) {
+        fieldErrors.push({ field: `${fieldBase}.dailyExtraSlots`, code: "special_quota_daily_slots_invalid", message: "Active Special Quota dailyExtraSlots must be a positive integer." });
+      }
+      if (selectedExamTypeIds.length === 0) {
+        fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_exam_types_required", message: "Active Special Quota must include at least one exam type." });
+      }
+      if (selectedUserIds.length === 0) {
+        fieldErrors.push({ field: `${fieldBase}.allowedUserIds`, code: "special_quota_users_required", message: "Active Special Quota must authorize at least one user." });
+      }
+      for (const examTypeId of selectedExamTypeIds) {
+        if (!Number.isInteger(examTypeId) || examTypeId <= 0 || !examTypeModalityById.has(examTypeId)) {
+          fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_exam_type_invalid", message: `Exam type ${examTypeId} does not exist.` });
+        } else if (examTypeModalityById.get(examTypeId) !== modalityId) {
+          fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_exam_type_modality_mismatch", message: `Exam type ${examTypeId} does not belong to modality ${modalityId}.` });
+        }
+        if (seenActiveExamTypes.has(examTypeId)) {
+          fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_ambiguous_overlap", message: `Exam type ${examTypeId} belongs to more than one active Special Quota pool.` });
+        }
+        seenActiveExamTypes.add(examTypeId);
+      }
+    }
+
+    for (const userId of selectedUserIds) {
+      if (!existingUserIds.has(userId)) {
         fieldErrors.push({
-          field: `policySnapshot.examTypeSpecialQuotas[${index}].allowedUserIds`,
+          field: `${fieldBase}.allowedUserIds`,
+          code: "special_quota_user_invalid",
+          message: `Authorized user ${userId} does not exist.`,
+        });
+      } else if (!activeUserIds.has(userId) && !existingInactiveMemberships.has(`${logicalKey}:${userId}`)) {
+        fieldErrors.push({ field: `${fieldBase}.allowedUserIds`, code: "special_quota_inactive_user_new", message: `Inactive user ${userId} cannot be newly authorized.` });
+      }
+      if (superAdminUserIds.has(userId)) {
+        fieldErrors.push({
+          field: `${fieldBase}.allowedUserIds`,
           code: "special_quota_super_admin_implicit",
           message: "Super admins are allowed implicitly and should not be stored in special quota allow-lists.",
         });

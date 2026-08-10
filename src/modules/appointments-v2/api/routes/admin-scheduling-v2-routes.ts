@@ -196,7 +196,7 @@ function validatePolicySnapshotBody(policySnapshot: unknown): void {
     "categoryDailyLimits",
     "modalityBlockedRules",
     "examTypeRules",
-    "examTypeSpecialQuotas",
+    "specialQuotaRules",
     "specialReasonCodes",
   ];
 

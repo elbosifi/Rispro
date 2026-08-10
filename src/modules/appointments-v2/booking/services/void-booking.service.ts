@@ -1,10 +1,15 @@
 import type { PoolClient } from "pg";
 import { withTransaction } from "../../shared/utils/transactions.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
-import { findBookingById, voidBooking } from "../repositories/booking.repo.js";
+import { findBookingByIdForUpdate, voidBooking } from "../repositories/booking.repo.js";
 import type { Booking } from "../models/booking.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import { cancelPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
+import { acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
+import {
+  findActiveSpecialQuotaConsumption,
+  releaseActiveSpecialQuotaConsumption,
+} from "../repositories/special-quota-consumption.repo.js";
 
 export interface VoidBookingResult {
   booking: Booking;
@@ -32,7 +37,7 @@ async function voidBookingInternal(
   userRole: string | undefined,
   voidReason: string
 ): Promise<VoidBookingResult> {
-  const booking = await findBookingById(client, bookingId);
+  const booking = await findBookingByIdForUpdate(client, bookingId);
   if (!booking) {
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
   }
@@ -42,8 +47,25 @@ async function voidBookingInternal(
     throw new SchedulingError(400, "Void reason is required.", ["void_reason_required"]);
   }
 
-  if (userRole === "super_admin") {
+  const voidAndRelease = async (): Promise<void> => {
+    const consumption = await findActiveSpecialQuotaConsumption(client, bookingId);
+    if (consumption) {
+      await acquireSpecialQuotaBucketLocks(client, [{
+        logicalKey: consumption.quotaLogicalKey,
+        date: consumption.bookingDate,
+      }]);
+      await findActiveSpecialQuotaConsumption(client, bookingId, { forUpdate: true });
+    }
     await voidBooking(client, bookingId, reason, userId);
+    await releaseActiveSpecialQuotaConsumption(client, {
+      bookingId,
+      releasedByUserId: userId,
+      releaseReason: "voided",
+    });
+  };
+
+  if (userRole === "super_admin") {
+    await voidAndRelease();
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: 'status", "voided"',
       actorUserId: userId,
@@ -71,7 +93,7 @@ async function voidBookingInternal(
   }
 
   if (booking.status === "scheduled") {
-    await voidBooking(client, bookingId, reason, userId);
+    await voidAndRelease();
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: 'status", "voided"',
       actorUserId: userId,
@@ -95,7 +117,7 @@ async function voidBookingInternal(
       );
     }
 
-    await voidBooking(client, bookingId, reason, userId);
+    await voidAndRelease();
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: 'status", "voided"',
       actorUserId: userId,

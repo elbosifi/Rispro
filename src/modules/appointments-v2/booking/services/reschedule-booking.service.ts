@@ -16,7 +16,7 @@ import {
   loadModalityBlockedRules,
   loadExamTypeRules,
   loadCategoryDailyLimits,
-  loadExamTypeSpecialQuotas,
+  loadSpecialQuotaRules,
   loadExamTypeRuleItemExamTypeIds,
   loadExamTypeRuleItems,
   loadExamMixQuotaRules,
@@ -25,11 +25,11 @@ import {
 import {
   getBookedCountForDate,
   getBookedCountsByCategoryForDate,
-  getSpecialQuotaBookedCount,
+  getSpecialQuotaConsumptionCount,
   getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
-import { findBookingById, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
-import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
+import { findBookingById, findBookingByIdForUpdate, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
+import { acquireBucketLocks, acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
 import { recordRescheduleAudit } from "../repositories/reschedule-audit.repo.js";
@@ -53,6 +53,12 @@ import {
 } from "../../../../services/patient-no-show-restriction-service.js";
 import { HttpError } from "../../../../utils/http-error.js";
 import { cancelPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
+import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
+import {
+  findActiveSpecialQuotaConsumption,
+  insertSpecialQuotaConsumption,
+  releaseActiveSpecialQuotaConsumption,
+} from "../repositories/special-quota-consumption.repo.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -214,7 +220,7 @@ export async function rescheduleBookingInternal(
   doctorProtocolReportUpdateAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
-  const booking = await findBookingById(client, bookingId);
+  const booking = await findBookingByIdForUpdate(client, bookingId);
   if (!booking) {
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
   }
@@ -267,6 +273,7 @@ export async function rescheduleBookingInternal(
   const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
+  const capacityModeUnchanged = effectiveCapacityResolutionMode === booking.capacityResolutionMode;
   const examTypeChangePolicy = await getExamTypeChangePolicy(client);
   validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode);
 
@@ -295,7 +302,7 @@ export async function rescheduleBookingInternal(
     hasPrivilegedOrigin;
   const examTypeChangeRequiresSupervisorAuth =
     examTypeChanged && examTypeChangePolicy === "supervisor_required" && !examTypeChangeBypassesSupervisorAuth;
-  const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged;
+  const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged && capacityModeUnchanged;
 
   if (examTypeChanged && examTypeChangePolicy === "disabled") {
     throw new SchedulingError(
@@ -400,7 +407,7 @@ export async function rescheduleBookingInternal(
     publishedVersion.id,
     bookingModalityId
   );
-  const specialQuotas = await loadExamTypeSpecialQuotas(
+  const specialQuotas = await loadSpecialQuotaRules(
     client,
     publishedVersion.id
   );
@@ -443,14 +450,33 @@ export async function rescheduleBookingInternal(
     excludeBookingIdFromTargetCounts
   );
 
-  // 6. Load special quota booked count for the NEW date (only when examTypeId is provided)
-  let currentSpecialQuotaBookedCount = 0;
-  if (effectiveExamTypeId != null) {
-    currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
-      modalityId: bookingModalityId,
+  // 6. Lock source/target quota pools and load target shared-pool consumption.
+  const sourceConsumptionBeforeLock = await findActiveSpecialQuotaConsumption(client, bookingId);
+  const applicableTargetQuotas = findApplicableSpecialQuotaRules(specialQuotas, {
+    modalityId: bookingModalityId,
+    examTypeId: effectiveExamTypeId,
+    requesterRole: userRole,
+    requesterUserId: userId,
+  });
+  const quotaLockKeys = [] as Array<{ logicalKey: string; date: string }>;
+  if (sourceConsumptionBeforeLock) {
+    quotaLockKeys.push({
+      logicalKey: sourceConsumptionBeforeLock.quotaLogicalKey,
+      date: sourceConsumptionBeforeLock.bookingDate,
+    });
+  }
+  if (effectiveCapacityResolutionMode === "special_quota_extra" && applicableTargetQuotas.length === 1) {
+    quotaLockKeys.push({ logicalKey: applicableTargetQuotas[0].logicalKey, date: effectiveDate });
+  }
+  await acquireSpecialQuotaBucketLocks(client, quotaLockKeys);
+  const sourceConsumption = await findActiveSpecialQuotaConsumption(client, bookingId, { forUpdate: true });
+
+  let currentSpecialQuotaConsumptionCount = 0;
+  if (effectiveCapacityResolutionMode === "special_quota_extra" && applicableTargetQuotas.length === 1) {
+    currentSpecialQuotaConsumptionCount = await getSpecialQuotaConsumptionCount(client, {
+      logicalKey: applicableTargetQuotas[0].logicalKey,
       bookingDate: effectiveDate,
-      examTypeId: effectiveExamTypeId,
-      excludeBookingId: excludeBookingIdFromTargetCounts,
+      excludeBookingId: bookingId,
     });
   }
   const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
@@ -482,7 +508,7 @@ export async function rescheduleBookingInternal(
     currentBookedCountNonOncology: bookedCounts.nonOncology,
     specialQuotas,
     currentBookedCount, // Includes this booking if newDate === oldDate
-    currentSpecialQuotaBookedCount,
+    currentSpecialQuotaConsumptionCount,
     examMixQuotaRules,
     examMixQuotaRuleItems,
     currentExamMixConsumedByRuleId,
@@ -607,6 +633,22 @@ export async function rescheduleBookingInternal(
     await authorizeNoShowBookingRestriction(client, booking.patientId, noShowAuthorization.userId, noShowAuthorization.reason, bookingId, noShowAuthorization.role);
   }
 
+  const targetQuota = decision.consumedCapacityMode === "special" ? decision.matchedSpecialQuota ?? null : null;
+  const keepExistingConsumption =
+    sourceConsumption != null &&
+    targetQuota != null &&
+    sourceConsumption.quotaLogicalKey === targetQuota.logicalKey &&
+    sourceConsumption.bookingDate === effectiveDate &&
+    Number(sourceConsumption.examTypeId) === Number(effectiveExamTypeId);
+
+  if (sourceConsumption && !keepExistingConsumption) {
+    await releaseActiveSpecialQuotaConsumption(client, {
+      bookingId,
+      releasedByUserId: userId,
+      releaseReason: "rescheduled",
+    });
+  }
+
   await updateBookingForReschedule(
     client,
     bookingId,
@@ -625,6 +667,20 @@ export async function rescheduleBookingInternal(
     effectiveRequiresReport,
     effectiveStudyInstanceUid
   );
+  if (targetQuota && !keepExistingConsumption) {
+    if (effectiveExamTypeId == null) {
+      throw new SchedulingError(500, "Special Quota decision did not identify an exam type.", ["special_quota_exam_missing"]);
+    }
+    await insertSpecialQuotaConsumption(client, {
+      bookingId,
+      quotaRuleId: targetQuota.ruleId,
+      quotaLogicalKey: targetQuota.logicalKey,
+      policyVersionId: publishedVersion.id,
+      bookingDate: effectiveDate,
+      examTypeId: effectiveExamTypeId,
+      consumedByUserId: userId,
+    });
+  }
   if (effectiveRequiresReport === false) {
     await cancelPendingReportingAssignmentIntent(client, bookingId, {
       reason: "requires_report=false",

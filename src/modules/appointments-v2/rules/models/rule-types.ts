@@ -72,10 +72,13 @@ export interface CategoryDailyLimitRow {
   isActive: boolean;
 }
 
-export interface ExamTypeSpecialQuotaRow {
+export interface SpecialQuotaRuleRow {
   id: number;
+  logicalKey: string;
   policyVersionId: number;
-  examTypeId: number;
+  modalityId: number;
+  title: string | null;
+  examTypeIds: number[];
   dailyExtraSlots: number;
   allowedUserIds: number[];
   isActive: boolean;

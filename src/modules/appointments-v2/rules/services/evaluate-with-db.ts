@@ -21,7 +21,7 @@ import {
   loadModalityBlockedRules,
   loadExamTypeRules,
   loadCategoryDailyLimits,
-  loadExamTypeSpecialQuotas,
+  loadSpecialQuotaRules,
   loadExamTypeRuleItemExamTypeIds,
   loadExamTypeRuleItems,
   loadExamMixQuotaRules,
@@ -32,11 +32,12 @@ import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.r
 import {
   getBookedCountForDate,
   getBookedCountsByCategoryForDate,
-  getSpecialQuotaBookedCount,
+  getSpecialQuotaConsumptionCount,
   getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import type { Role } from "../../../../types/domain.js";
+import { findApplicableSpecialQuotaRules } from "./resolve-special-quota.js";
 
 export interface EvaluateWithDbParams extends BookingDecisionInput {
   requesterRole?: Role;
@@ -124,7 +125,7 @@ export async function evaluateWithDb(
     params.modalityId
   );
 
-  const specialQuotas = await loadExamTypeSpecialQuotas(
+  const specialQuotas = await loadSpecialQuotaRules(
     client,
     publishedVersion.id
   );
@@ -164,12 +165,17 @@ export async function evaluateWithDb(
   );
 
   // 5. Load special quota booked count (only when examTypeId is provided)
-  let currentSpecialQuotaBookedCount = 0;
-  if (params.examTypeId != null) {
-    currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
-      modalityId: params.modalityId,
+  let currentSpecialQuotaConsumptionCount = 0;
+  const applicableSpecialQuotas = findApplicableSpecialQuotaRules(specialQuotas, {
+    modalityId: params.modalityId,
+    examTypeId: params.examTypeId ?? null,
+    requesterRole: params.requesterRole,
+    requesterUserId: params.requesterUserId ?? null,
+  });
+  if (applicableSpecialQuotas.length === 1) {
+    currentSpecialQuotaConsumptionCount = await getSpecialQuotaConsumptionCount(client, {
+      logicalKey: applicableSpecialQuotas[0].logicalKey,
       bookingDate: params.scheduledDate,
-      examTypeId: params.examTypeId,
     });
   }
   const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
@@ -200,7 +206,7 @@ export async function evaluateWithDb(
     currentBookedCountNonOncology: bookedCounts.nonOncology,
     specialQuotas,
     currentBookedCount,
-    currentSpecialQuotaBookedCount,
+    currentSpecialQuotaConsumptionCount,
     examMixQuotaRules,
     examMixQuotaRuleItems,
     currentExamMixConsumedByRuleId,

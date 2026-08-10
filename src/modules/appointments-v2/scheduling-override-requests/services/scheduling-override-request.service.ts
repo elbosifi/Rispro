@@ -39,9 +39,9 @@ import {
 } from "../repositories/scheduling-override-request.repo.js";
 import {
   getBookedCountsByCategoryForDate,
-  getSpecialQuotaBookedCount,
+  getSpecialQuotaConsumptionCount,
 } from "../../scheduler/repositories/capacity.repo.js";
-import { loadCategoryDailyLimits, loadExamTypeSpecialQuotas } from "../../rules/repositories/policy-rules.repo.js";
+import { loadCategoryDailyLimits, loadSpecialQuotaRules } from "../../rules/repositories/policy-rules.repo.js";
 import type {
   ApproveSchedulingOverrideRequestInput,
   CreateSchedulingOverrideRequestInput,
@@ -311,16 +311,24 @@ async function buildDecisionContext(
 
   let specialQuotaBreakdown: SchedulingOverrideDecisionContext["specialQuotaBreakdown"] = null;
   if (policyVersionId && request.examTypeId != null) {
-    const specialQuotas = await loadExamTypeSpecialQuotas(client, policyVersionId);
-    const quota = specialQuotas.find((row) => Number(row.examTypeId) === Number(request.examTypeId) && row.isActive);
+    const specialQuotas = await loadSpecialQuotaRules(client, policyVersionId);
+    const matches = specialQuotas.filter(
+      (row) =>
+        row.isActive &&
+        Number(row.modalityId) === Number(request.modalityId) &&
+        row.examTypeIds.map(Number).includes(Number(request.examTypeId))
+    );
+    const quota = matches.length === 1 ? matches[0] : null;
     if (quota) {
-      const consumed = await getSpecialQuotaBookedCount(client, {
-        modalityId: Number(request.modalityId),
+      const consumed = await getSpecialQuotaConsumptionCount(client, {
+        logicalKey: quota.logicalKey,
         bookingDate: request.requestedBookingDate,
-        examTypeId: Number(request.examTypeId),
         excludeBookingId,
       });
       specialQuotaBreakdown = {
+        quotaRuleId: Number(quota.id),
+        quotaLogicalKey: quota.logicalKey,
+        quotaTitle: quota.title,
         examTypeId: Number(request.examTypeId),
         configured: Number(quota.dailyExtraSlots),
         consumed,

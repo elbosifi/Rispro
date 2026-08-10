@@ -13,7 +13,7 @@ import type {
   ExamTypeRuleRow,
   ExamTypeRuleItemRow,
   CategoryDailyLimitRow,
-  ExamTypeSpecialQuotaRow,
+  SpecialQuotaRuleRow,
   ExamMixQuotaRuleRow,
   ExamMixQuotaRuleItemRow,
 } from "../models/rule-types.js";
@@ -66,17 +66,16 @@ export interface RuleEvaluationContext {
   /** Current non-oncology booked count for modality/date. */
   currentBookedCountNonOncology: number;
 
-  /** Special quotas for exam types */
-  specialQuotas: ExamTypeSpecialQuotaRow[];
+  /** Generalized Special Quota rules for the policy version. */
+  specialQuotas: SpecialQuotaRuleRow[];
 
   /** Current booked count for selected input category (compat shim). */
   currentBookedCount: number;
 
   /**
-   * Current special quota booked count for this date/exam type.
-   * Only non-zero when examTypeId is provided and special quota rules apply.
+   * Current active consumption count for the resolved quota pool/date.
    */
-  currentSpecialQuotaBookedCount: number;
+  currentSpecialQuotaConsumptionCount: number;
 
   /** Exam-mix quota rules for this modality/policy version. */
   examMixQuotaRules?: ExamMixQuotaRuleRow[];

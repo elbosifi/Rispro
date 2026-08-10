@@ -17,7 +17,7 @@ import {
   loadModalityBlockedRules,
   loadExamTypeRules,
   loadCategoryDailyLimits,
-  loadExamTypeSpecialQuotas,
+  loadSpecialQuotaRules,
   loadExamTypeRuleItemExamTypeIds,
   loadExamTypeRuleItems,
 } from "../rules/repositories/policy-rules.repo.js";
@@ -25,7 +25,7 @@ import { findModalityById } from "../catalog/repositories/modality-catalog.repo.
 import { findExamTypeById } from "../catalog/repositories/exam-type-catalog.repo.js";
 import {
   getBookedCountsByCategoryForDate,
-  getSpecialQuotaBookedCount,
+  getSpecialQuotaConsumptionCount,
 } from "../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../shared/utils/dates.js";
 import { pool } from "../../../db/pool.js";
@@ -36,6 +36,7 @@ import {
   logShadowDiffs,
   type ShadowDiffEntry,
 } from "./shadow-diff.js";
+import { findApplicableSpecialQuotaRules } from "../rules/services/resolve-special-quota.js";
 
 /**
  * Check if shadow mode is enabled.
@@ -182,7 +183,7 @@ async function computeShadowDiffsInternal(
     publishedVersion.id,
     params.modalityId
   );
-  const specialQuotas = await loadExamTypeSpecialQuotas(
+  const specialQuotas = await loadSpecialQuotaRules(
     client,
     publishedVersion.id
   );
@@ -213,12 +214,17 @@ async function computeShadowDiffsInternal(
         : bookedCounts.nonOncology;
 
     // Load special quota booked count (only when examTypeId is provided)
-    let currentSpecialQuotaBookedCount = 0;
-    if (params.examTypeId != null) {
-      currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
-        modalityId: params.modalityId,
+    let currentSpecialQuotaConsumptionCount = 0;
+    const applicableSpecialQuotas = findApplicableSpecialQuotaRules(specialQuotas, {
+      modalityId: params.modalityId,
+      examTypeId: params.examTypeId ?? null,
+      requesterRole: params.requesterRole,
+      requesterUserId: params.requesterUserId ?? null,
+    });
+    if (applicableSpecialQuotas.length === 1) {
+      currentSpecialQuotaConsumptionCount = await getSpecialQuotaConsumptionCount(client, {
+        logicalKey: applicableSpecialQuotas[0].logicalKey,
         bookingDate: legacyDay.date,
-        examTypeId: params.examTypeId,
       });
     }
 
@@ -242,7 +248,7 @@ async function computeShadowDiffsInternal(
       currentBookedCountNonOncology: bookedCounts.nonOncology,
       specialQuotas,
       currentBookedCount,
-      currentSpecialQuotaBookedCount,
+      currentSpecialQuotaConsumptionCount,
     };
 
     // Build pure evaluate input

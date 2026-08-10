@@ -70,30 +70,26 @@ export async function getBookedCountsByCategoryForDate(
   };
 }
 
-const GET_SPECIAL_QUOTA_BOOKED_COUNT_SQL = `
+const GET_SPECIAL_QUOTA_CONSUMPTION_COUNT_SQL = `
   select count(*)::int as count
-  from appointments_v2.bookings
-  where modality_id = $1
+  from appointments_v2.special_quota_consumptions
+  where quota_logical_key = $1::uuid
     and booking_date = $2
-    and exam_type_id = $3
-    and status not in ('cancelled', 'discontinued', 'voided')
-    and uses_special_quota = true
-    and ($4::bigint is null or id <> $4::bigint)
+    and released_at is null
+    and ($3::bigint is null or booking_id <> $3::bigint)
 `;
 
-export async function getSpecialQuotaBookedCount(
+export async function getSpecialQuotaConsumptionCount(
   client: PoolClient,
   params: {
-    modalityId: number;
+    logicalKey: string;
     bookingDate: string;
-    examTypeId: number;
     excludeBookingId?: number | null;
   }
 ): Promise<number> {
-  const result = await client.query<{ count: number }>(GET_SPECIAL_QUOTA_BOOKED_COUNT_SQL, [
-    params.modalityId,
+  const result = await client.query<{ count: number }>(GET_SPECIAL_QUOTA_CONSUMPTION_COUNT_SQL, [
+    params.logicalKey,
     params.bookingDate,
-    params.examTypeId,
     params.excludeBookingId ?? null,
   ]);
   return result.rows[0]?.count ?? 0;

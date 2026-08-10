@@ -7,7 +7,7 @@ function emptySnapshot(): PolicySnapshotDto {
     categoryDailyLimits: [],
     modalityBlockedRules: [],
     examTypeRules: [],
-    examTypeSpecialQuotas: [],
+    specialQuotaRules: [],
     examMixQuotaRules: [],
     specialReasonCodes: [],
   };
@@ -18,6 +18,7 @@ const displayLookups: PolicyDisplayLookupsDto = {
   examTypes: [
     { id: 10, name: "CT Head", nameAr: "CT Head", nameEn: "CT Head", code: "CTH", modalityId: 1, isActive: true },
     { id: 11, name: "Old CT", nameAr: "Old CT", nameEn: "Old CT", code: "OLD", modalityId: 1, isActive: false },
+    { id: 12, name: "MRI Brain", nameAr: "MRI Brain", nameEn: "MRI Brain", code: "MRB", modalityId: 2, isActive: true },
   ],
   users: [
     { id: 20, username: "active", fullName: "Active User", role: "supervisor", isActive: true },
@@ -97,16 +98,57 @@ describe("validatePolicyDraftForAdmin", () => {
     expect(result.warnings.some((item) => item.message.includes("Old CT") && item.message.includes("inactive"))).toBe(true);
   });
 
-  it("reports inactive and unknown special-quota allowed users as blocking errors", () => {
+  it("warns for retained inactive special-quota users and rejects unknown users", () => {
     const snapshot = emptySnapshot();
-    snapshot.examTypeSpecialQuotas = [
-      { id: 6, examTypeId: 10, dailyExtraSlots: 1, allowedUserIds: [21, 999], isActive: true },
+    snapshot.specialQuotaRules = [
+      {
+        id: 6,
+        logicalKey: "00000000-0000-0000-0000-000000000006",
+        modalityId: 1,
+        title: "CT overflow",
+        examTypeIds: [10],
+        dailyExtraSlots: 1,
+        allowedUserIds: [21, 999],
+        isActive: true,
+      },
     ];
 
     const result = validatePolicyDraftForAdmin(snapshot, displayLookups);
 
-    expect(result.errors.some((item) => item.message.includes("Inactive User") && item.message.includes("inactive"))).toBe(true);
+    expect(result.warnings.some((item) => item.message.includes("Inactive User") && item.message.includes("inactive"))).toBe(true);
     expect(result.errors.some((item) => item.message.includes("Unknown user ID 999"))).toBe(true);
+  });
+
+  it("rejects invalid group capacity, missing users, modality mismatch, and overlapping exam pools", () => {
+    const snapshot = emptySnapshot();
+    snapshot.specialQuotaRules = [
+      {
+        id: 6,
+        logicalKey: "00000000-0000-0000-0000-000000000006",
+        modalityId: 1,
+        title: "First",
+        examTypeIds: [10, 12],
+        dailyExtraSlots: 0,
+        allowedUserIds: [],
+        isActive: true,
+      },
+      {
+        id: 7,
+        logicalKey: "00000000-0000-0000-0000-000000000007",
+        modalityId: 1,
+        title: "Second",
+        examTypeIds: [10],
+        dailyExtraSlots: 1,
+        allowedUserIds: [20],
+        isActive: true,
+      },
+    ];
+
+    const messages = validatePolicyDraftForAdmin(snapshot, displayLookups).errors.map((item) => item.message);
+    expect(messages.some((message) => message.includes("positive number of extra slots"))).toBe(true);
+    expect(messages.some((message) => message.includes("authorize at least one user"))).toBe(true);
+    expect(messages.some((message) => message.includes("does not belong to the selected modality"))).toBe(true);
+    expect(messages.some((message) => message.includes("overlapping pools are not allowed"))).toBe(true);
   });
 
   it("reports invalid date ranges and recurrence fields", () => {

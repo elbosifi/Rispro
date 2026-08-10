@@ -174,58 +174,61 @@ describe("loadCategoryDailyLimits", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. loadExamTypeSpecialQuotas
+// 4. loadSpecialQuotaRules
 // ---------------------------------------------------------------------------
 
-describe("loadExamTypeSpecialQuotas", () => {
-  it("exports loadExamTypeSpecialQuotas function", async () => {
-    const { loadExamTypeSpecialQuotas } = await import(
+describe("loadSpecialQuotaRules", () => {
+  it("exports loadSpecialQuotaRules function", async () => {
+    const { loadSpecialQuotaRules } = await import(
       "../../rules/repositories/policy-rules.repo.js"
     );
-    assert.strictEqual(typeof loadExamTypeSpecialQuotas, "function");
+    assert.strictEqual(typeof loadSpecialQuotaRules, "function");
   });
 
-  it("queries exam_type_special_quotas table", () => {
+  it("queries generalized rule and membership tables", () => {
     assert.ok(
-      source.includes("appointments_v2.exam_type_special_quotas"),
-      "Should query exam_type_special_quotas table"
+      source.includes("appointments_v2.special_quota_rules"),
+      "Should query special_quota_rules table"
     );
+    assert.ok(source.includes("appointments_v2.special_quota_rule_exam_types"));
+    assert.ok(source.includes("appointments_v2.special_quota_rule_users"));
   });
 
   it("selects expected columns", () => {
-    assert.ok(source.includes("exam_type_id"), "Should select exam_type_id");
+    assert.ok(source.includes('q.logical_key::text as "logicalKey"'));
+    assert.ok(source.includes('q.modality_id as "modalityId"'));
+    assert.ok(source.includes('"examTypeIds"'));
+    assert.ok(source.includes('"allowedUserIds"'));
     assert.ok(source.includes("daily_extra_slots"), "Should select daily_extra_slots");
     assert.ok(source.includes("is_active"), "Should select is_active");
   });
 
-  it("filters by policy_version_id and is_active only (no modality filter)", () => {
+  it("filters by policy version and active state while returning modality identity", () => {
     assert.ok(
-      source.includes("where policy_version_id = $1"),
+      source.includes("where q.policy_version_id = $1"),
       "Should filter by policy_version_id"
     );
     assert.ok(
-      source.includes("and is_active = true"),
+      source.includes("and q.is_active = true"),
       "Should filter by is_active = true"
     );
     // This function does NOT filter by modality_id — quotas are exam-type specific, not modality-specific
     const funcStart = source.indexOf("const LOAD_SPECIAL_QUOTAS_SQL");
-    const funcEnd = source.indexOf("export async function loadExamTypeSpecialQuotas");
+    const funcEnd = source.indexOf("export async function loadSpecialQuotaRules");
     const sqlSource = source.slice(funcStart, funcEnd);
-    assert.ok(
-      !sqlSource.toLowerCase().includes("modality_id"),
-      "SQL should NOT filter by modality_id"
-    );
+    assert.ok(sqlSource.includes("q.modality_id"));
   });
 
   it("passes only policyVersionId parameter", () => {
-    const funcStart = source.indexOf("export async function loadExamTypeSpecialQuotas");
+    const funcStart = source.indexOf("export async function loadSpecialQuotaRules");
     const nextFunc = source.indexOf("\nexport async function", funcStart + 1);
     const funcEnd = nextFunc === -1 ? source.length : nextFunc;
     const funcSource = source.slice(funcStart, funcEnd);
 
-    assert.ok(
-      funcSource.includes("policyVersionId") && !funcSource.includes("modalityId"),
-      "Should pass only policyVersionId"
+    assert.match(
+      funcSource,
+      /client\.query<SpecialQuotaRuleRow>\(LOAD_SPECIAL_QUOTAS_SQL,\s*\[\s*policyVersionId,?\s*\]\s*\)/,
+      "Should pass only policyVersionId to the SQL query"
     );
   });
 });

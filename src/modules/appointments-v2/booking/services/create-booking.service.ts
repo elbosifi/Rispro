@@ -16,7 +16,7 @@ import {
   loadModalityBlockedRules,
   loadExamTypeRules,
   loadCategoryDailyLimits,
-  loadExamTypeSpecialQuotas,
+  loadSpecialQuotaRules,
   loadExamTypeRuleItemExamTypeIds,
   loadExamTypeRuleItems,
   loadExamMixQuotaRules,
@@ -28,10 +28,10 @@ import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.r
 import {
   getBookedCountForDate,
   getBookedCountsByCategoryForDate,
-  getSpecialQuotaBookedCount,
+  getSpecialQuotaConsumptionCount,
   getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
-import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
+import { acquireBucketLocks, acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { insertBooking } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
@@ -52,6 +52,8 @@ import { HttpError } from "../../../../utils/http-error.js";
 import { createPendingReportingAssignmentIntent } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
 import { resolvePatientIdentityRisk, revalidateStoredPatientIdentityAssertion, validatePatientIdentityVerificationProof, type PatientIdentityVerificationAssertion, type PatientIdentityVerificationStoredAssertion } from "../../../../services/patient-selection-safety-service.js";
+import { findApplicableSpecialQuotaRules } from "../../rules/services/resolve-special-quota.js";
+import { insertSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -264,7 +266,7 @@ export async function createBookingInternal(
     publishedVersion.id,
     payload.modalityId
   );
-  const specialQuotas = await loadExamTypeSpecialQuotas(
+  const specialQuotas = await loadSpecialQuotaRules(
     client,
     publishedVersion.id
   );
@@ -304,12 +306,21 @@ export async function createBookingInternal(
   );
 
   // 7. Load special quota booked count (only when examTypeId is provided)
-  let currentSpecialQuotaBookedCount = 0;
-  if (payload.examTypeId != null) {
-    currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
-      modalityId: payload.modalityId,
+  let currentSpecialQuotaConsumptionCount = 0;
+  const applicableSpecialQuotas = findApplicableSpecialQuotaRules(specialQuotas, {
+    modalityId: payload.modalityId,
+    examTypeId: payload.examTypeId ?? null,
+    requesterRole: userRole,
+    requesterUserId: userId,
+  });
+  if (capacityResolutionMode === "special_quota_extra" && applicableSpecialQuotas.length === 1) {
+    await acquireSpecialQuotaBucketLocks(client, [{
+      logicalKey: applicableSpecialQuotas[0].logicalKey,
+      date: payload.bookingDate,
+    }]);
+    currentSpecialQuotaConsumptionCount = await getSpecialQuotaConsumptionCount(client, {
+      logicalKey: applicableSpecialQuotas[0].logicalKey,
       bookingDate: payload.bookingDate,
-      examTypeId: payload.examTypeId,
     });
   }
   const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
@@ -340,7 +351,7 @@ export async function createBookingInternal(
     currentBookedCountNonOncology: bookedCounts.nonOncology,
     specialQuotas,
     currentBookedCount,
-    currentSpecialQuotaBookedCount,
+    currentSpecialQuotaConsumptionCount,
     examMixQuotaRules,
     examMixQuotaRuleItems,
     currentExamMixConsumedByRuleId,
@@ -466,6 +477,21 @@ export async function createBookingInternal(
     isWalkIn: payload.isWalkIn ?? false,
     userId,
   });
+  if (consumedSpecialQuota) {
+    const matchedQuota = decision.matchedSpecialQuota;
+    if (!matchedQuota || payload.examTypeId == null) {
+      throw new SchedulingError(500, "Special Quota decision did not identify its pool.", ["special_quota_identity_missing"]);
+    }
+    await insertSpecialQuotaConsumption(client, {
+      bookingId: booking.id,
+      quotaRuleId: matchedQuota.ruleId,
+      quotaLogicalKey: matchedQuota.logicalKey,
+      policyVersionId: publishedVersion.id,
+      bookingDate: payload.bookingDate,
+      examTypeId: payload.examTypeId,
+      consumedByUserId: userId,
+    });
+  }
   if (modality.safetyWarningEnabled && modality.safetyWorkflowType === "mri_primary_implant_screening" && screening) {
     const implant = screening.result === "implant_reported_review_required";
     await insertMriPrimaryScreening(client, booking.id, { result: screening.result, implantSite: implant ? String(screening.implantSite).trim() : null, implantDescription: implant ? String(screening.implantDescription ?? "").trim() || null : null, previousReviewerNameReported: implant ? String(screening.previousReviewerNameReported ?? "").trim() || null : null }, userId);

@@ -233,6 +233,10 @@ create table if not exists appointments_v2.exam_type_special_quotas (
   unique (policy_version_id, exam_type_id)
 );
 
+-- Historical design note: migration 161 supersedes this one-exam table with
+-- special_quota_rules plus exam/user memberships and durable consumptions.
+-- The legacy table remains only for migration verification and rollback data.
+
 create table if not exists appointments_v2.special_reason_codes (
   code text primary key,
   label_ar text not null,

@@ -102,7 +102,7 @@ describe("createBooking — source verification", () => {
     assert.ok(source.includes("loadModalityBlockedRules"), "Should load blocked rules");
     assert.ok(source.includes("loadExamTypeRules"), "Should load exam type rules");
     assert.ok(source.includes("loadCategoryDailyLimits"), "Should load category limits");
-    assert.ok(source.includes("loadExamTypeSpecialQuotas"), "Should load special quotas");
+    assert.ok(source.includes("loadSpecialQuotaRules"), "Should load special quotas");
     assert.ok(source.includes("loadExamTypeRuleItemExamTypeIds"), "Should load exam type rule item IDs");
   });
 
