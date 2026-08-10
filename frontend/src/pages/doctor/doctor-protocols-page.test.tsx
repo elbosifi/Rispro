@@ -34,7 +34,7 @@ const appointment: DoctorProtocolingAppointment = {
   assignment: null,
 };
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -52,6 +52,7 @@ vi.mock("@/lib/api-hooks", () => ({
   reorderProtocolLibraryMriSequenceRows: vi.fn(), updateProtocolLibraryCtPhaseRow: vi.fn(), updateProtocolLibraryAnatomyRegion: vi.fn(),
   updateProtocolLibraryCtPhasePreset: vi.fn(), updateProtocolLibraryMriSequenceRow: vi.fn(), updateProtocolLibraryMriSequencePreset: vi.fn(),
   updateProtocolLibraryProtocol: vi.fn(), updateProtocolLibraryScanner: vi.fn(), updateProtocolLibraryVersion: vi.fn(),
+  updateDoctorProtocolReportRequirement: mockUpdateReportRequirement,
 }));
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
@@ -97,6 +98,8 @@ describe("Doctor protocoling request documents", () => {
     mockCreateAssignment.mockReset();
     mockRescheduleBooking.mockReset();
     mockRescheduleBooking.mockResolvedValue({ booking: { id: 42, examTypeId: 11 } });
+    mockUpdateReportRequirement.mockReset();
+    mockUpdateReportRequirement.mockResolvedValue({ booking: { id: 42, requiresReport: true } });
   });
 
   it("shows the Arabic-first clinical header and prior-study actions", async () => {
@@ -162,14 +165,14 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Yes" }));
     await userEvent.click(screen.getByRole("button", { name: "Update" }));
 
-    await waitFor(() => expect(mockRescheduleBooking).toHaveBeenCalledWith(42, { bookingDate: "2026-07-22", bookingTime: "09:00:00", examTypeId: 10, requiresReport: true }));
+    await waitFor(() => expect(mockUpdateReportRequirement).toHaveBeenCalledWith(42, true));
     expect((await within(screen.getByRole("dialog", { name: "Assign protocol" })).findByRole("button", { name: "Edit report requirement" })).textContent).toContain("Report required");
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["appointment-manage-modal", 42] }));
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["modality-worklist"] });
   });
 
   it("keeps the report editor and protocol form state open when the report update fails", async () => {
-    mockRescheduleBooking.mockRejectedValue(new Error("Report update denied"));
+    mockUpdateReportRequirement.mockRejectedValue(new Error("Report update denied"));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
 

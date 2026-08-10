@@ -1392,6 +1392,16 @@ export async function updateDoctorProtocolAssignment(appointmentId: number, payl
   return raw.detail;
 }
 
+export async function updateDoctorProtocolReportRequirement(
+  appointmentId: number,
+  requiresReport: boolean
+): Promise<{ booking: { requiresReport: boolean } }> {
+  return api<{ booking: { requiresReport: boolean } }>(`/doctor/protocoling/appointments/${appointmentId}/report-requirement`, {
+    method: "PATCH",
+    body: JSON.stringify({ requiresReport }),
+  });
+}
+
 export async function cancelDoctorProtocolAssignment(appointmentId: number): Promise<DoctorProtocolingAppointmentDetail> {
   const raw = await api<{ detail: DoctorProtocolingAppointmentDetail }>(`/doctor/protocoling/appointments/${appointmentId}/assignment`, {
     method: "DELETE",

@@ -143,7 +143,8 @@ export async function rescheduleBooking(
   requiresReport?: boolean,
   studyInstanceUid?: string | null,
   policySetKey: string = "default",
-  approvedOverrideContext?: ApprovedOverrideContext
+  approvedOverrideContext?: ApprovedOverrideContext,
+  doctorProtocolReportUpdateAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
     return rescheduleBookingInternal(
@@ -165,7 +166,8 @@ export async function rescheduleBooking(
       requiresReport,
       studyInstanceUid,
       policySetKey,
-      approvedOverrideContext
+      approvedOverrideContext,
+      doctorProtocolReportUpdateAuthorized
     );
   }, {
     isolationLevel: "serializable",
@@ -208,7 +210,8 @@ export async function rescheduleBookingInternal(
   requiresReport: boolean | undefined,
   studyInstanceUid: string | null | undefined,
   policySetKey: string,
-  approvedOverrideContext?: ApprovedOverrideContext
+  approvedOverrideContext?: ApprovedOverrideContext,
+  doctorProtocolReportUpdateAuthorized: boolean = false
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
   const booking = await findBookingById(client, bookingId);
@@ -255,11 +258,11 @@ export async function rescheduleBookingInternal(
     requiresReport === true;
   if (
     isEnablingNonOncologyReport &&
+    !doctorProtocolReportUpdateAuthorized &&
     userRole !== "super_admin" &&
-    userRole !== "supervisor" &&
-    userRole !== "doctor"
+    userRole !== "supervisor"
   ) {
-    throw new HttpError(403, "Only doctors, supervisors, and super admins can require a report for non-oncology bookings.");
+    throw new HttpError(403, "Only supervisors and super admins can require a report for non-oncology bookings.");
   }
   const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =

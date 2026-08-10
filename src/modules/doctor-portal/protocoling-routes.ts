@@ -5,6 +5,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { getDoctorMe } from "./profile-service.js";
+import { rescheduleBooking } from "../appointments-v2/booking/services/reschedule-booking.service.js";
 import {
   cancelProtocolAssignment,
   getProtocolingAppointmentDetail,
@@ -164,6 +165,40 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
     res.redirect(await getProtocolingReportRedirect(positiveInteger(req.params.appointmentId, "appointmentId"), req.hostname));
+  })
+);
+
+router.patch(
+  "/appointments/:appointmentId/report-requirement",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const userId = await requireProtocolingAccess(req);
+    if (userId == null || !req.user) throw new HttpError(401, "Authentication required.");
+    const body = asUnknownRecord(req.body);
+    if (typeof body.requiresReport !== "boolean") {
+      throw new HttpError(400, "requiresReport must be a boolean.");
+    }
+    const result = await rescheduleBooking(
+      positiveInteger(req.params.appointmentId, "appointmentId"),
+      null,
+      undefined,
+      null,
+      null,
+      null,
+      userId,
+      req.user.role,
+      undefined,
+      undefined,
+      null,
+      null,
+      null,
+      null,
+      body.requiresReport,
+      undefined,
+      optionalText(body.policySetKey) ?? "default",
+      undefined,
+      true
+    );
+    res.json({ booking: result.booking });
   })
 );
 

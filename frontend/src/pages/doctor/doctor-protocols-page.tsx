@@ -41,6 +41,7 @@ import {
   updateProtocolLibraryScanner,
   updateProtocolLibraryVersion,
   updateDoctorProtocolAssignment,
+  updateDoctorProtocolReportRequirement,
   type CtPhasePresetPayload,
   type ImagingScannerPayload,
   type MriSequencePresetPayload,
@@ -1296,12 +1297,7 @@ function ProtocolAssignmentModal({
     },
   });
   const reportUpdateMutation = useMutation({
-    mutationFn: () => rescheduleV2Booking(appointment.appointmentId, {
-      bookingDate: appointment.appointmentDate,
-      bookingTime: appointment.appointmentTime,
-      examTypeId: appointment.examTypeId,
-      requiresReport: reportDraft,
-    }),
+    mutationFn: () => updateDoctorProtocolReportRequirement(appointment.appointmentId, reportDraft),
     onSuccess: async (result) => {
       const updatedRequiresReport = result.booking.requiresReport ?? reportDraft;
       setReportOverride({ appointmentId: appointment.appointmentId, value: updatedRequiresReport });

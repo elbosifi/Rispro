@@ -275,8 +275,14 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         cookie: doctorCookie,
         body: { requiresReport: true },
       });
-      assert.equal(doctorUpdate.status, 200);
-      assert.equal((doctorUpdate.data as any).booking.requiresReport, true);
+      assert.equal(doctorUpdate.status, 403);
+
+      const supervisorUpdate = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: { requiresReport: true },
+      });
+      assert.equal(supervisorUpdate.status, 200);
+      assert.equal((supervisorUpdate.data as any).booking.requiresReport, true);
     });
 
     it("requires a scoped non-name verification proof for an ambiguous patient and records safe audit metadata", async () => {

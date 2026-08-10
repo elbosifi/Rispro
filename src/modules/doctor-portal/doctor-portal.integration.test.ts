@@ -72,7 +72,12 @@ async function createDoctorUser(suffix: string, role: string, options: { canAssi
   return { id: userId, doctorId: Number(profile.rows[0].id), cookie: createTestAuthCookie(userId, role) };
 }
 
-async function createBooking(testData: TestData, date: string, patientId = testData.patientId): Promise<number> {
+async function createBooking(
+  testData: TestData,
+  date: string,
+  patientId = testData.patientId,
+  options: { caseCategory?: "oncology" | "non_oncology"; requiresReport?: boolean } = {}
+): Promise<number> {
   const booking = await pool.query<{ id: string }>(
     `
       insert into appointments_v2.bookings (
@@ -81,11 +86,20 @@ async function createBooking(testData: TestData, date: string, patientId = testD
         policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code, special_reason_note,
         is_walk_in, created_by_user_id, updated_by_user_id
       )
-      values ($1, $2, $3, null, $4::date, '09:00', 'oncology', true, null, 'scheduled', 'integration indication',
-        $5, 'standard', false, null, null, false, $6, $6)
+      values ($1, $2, $3, null, $4::date, '09:00', $5, $6, null, 'scheduled', 'integration indication',
+        $7, 'standard', false, null, null, false, $8, $8)
       returning id::text as id
     `,
-    [patientId, testData.modalityId, testData.examTypeId, date, testData.policyVersionId, testData.userId]
+    [
+      patientId,
+      testData.modalityId,
+      testData.examTypeId,
+      date,
+      options.caseCategory ?? "oncology",
+      options.requiresReport ?? true,
+      testData.policyVersionId,
+      testData.userId,
+    ]
   );
   return Number(booking.rows[0].id);
 }
@@ -166,7 +180,9 @@ async function seedDoctorPortalTestData(): Promise<TestData> {
       insert into appointments_v2.category_daily_limits (
         policy_version_id, modality_id, case_category, daily_limit, is_active
       )
-      values ($1, $2, 'oncology', 10, true)
+      values
+        ($1, $2, 'oncology', 10, true),
+        ($1, $2, 'non_oncology', 10, true)
     `,
     [policyVersionId, modalityId]
   );
@@ -522,6 +538,30 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       [appointmentId]
     );
     assert.equal(Number(activeRows.rows[0].count), 1);
+  });
+
+  it("allows an authorized Doctor Protocol user to enable a non-oncology report requirement", async () => {
+    guard();
+    const patientId = await createPatient("Protocol Report Requirement");
+    const reportAppointmentId = await createBooking(testData, today, patientId, {
+      caseCategory: "non_oncology",
+      requiresReport: false,
+    });
+    const path = `/api/doctor/protocoling/appointments/${reportAppointmentId}/report-requirement`;
+
+    const unauthorized = await api(nonDoctorCookie, path, {
+      method: "PATCH",
+      body: { requiresReport: true, policySetKey: testData.policySetKey },
+    });
+    assert.equal(unauthorized.status, 403);
+
+    const response = await api(normal.cookie, path, {
+      method: "PATCH",
+      body: { requiresReport: true, policySetKey: testData.policySetKey },
+    });
+
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.equal((response.data as { booking: { requiresReport: boolean } }).booking.requiresReport, true);
   });
 
   it("runs availability, leave, conflict-blocked publish, templates, and draft generation", async () => {
