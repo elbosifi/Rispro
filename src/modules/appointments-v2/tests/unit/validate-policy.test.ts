@@ -46,7 +46,10 @@ async function runValidateWithMocks(
   rules: Record<string, unknown>[],
   modalityCapacities: Record<number, number | null> = {},
   examRestrictionRules: Record<string, unknown>[] = [],
-  examMixRules: Record<string, unknown>[] = []
+  examMixRules: Record<string, unknown>[] = [],
+  specialQuotaRules: Record<string, unknown>[] = [],
+  mismatchedSpecialQuotaExams: Record<string, unknown>[] = [],
+  explicitSuperAdmins: Record<string, unknown>[] = []
 ): Promise<{ isValid: boolean; errors: string[]; warnings: string[] }> {
   const mockClient = new MockPoolClient();
 
@@ -54,6 +57,9 @@ async function runValidateWithMocks(
   mockClient.queueResults(versionRow ? [versionRow] : []);
   // Second query: loadAllRulesForVersion
   mockClient.queueResults(rules);
+  mockClient.queueResults(specialQuotaRules);
+  mockClient.queueResults(mismatchedSpecialQuotaExams);
+  mockClient.queueResults(explicitSuperAdmins);
   const modalityIds = [...new Set(
     rules
       .filter((rule) => rule.ruleType === "category_daily_limit" && rule.modalityId != null)
@@ -235,12 +241,13 @@ describe("validatePolicy — zero special quota warning", () => {
     publishedAt: null,
   };
 
-  it("warns when special quota has zero extra slots", async () => {
+  it("rejects active special quota with zero extra slots", async () => {
     const rules = [
       { ruleType: "special_quota", id: 1, modalityId: null, caseCategory: null, dailyLimit: 0, isActive: true },
     ];
     const result = await runValidateWithMocks(1, version, rules);
-    assert.ok(result.warnings.some((w) => w.includes("daily_extra_slots=0")));
+    assert.equal(result.isValid, false);
+    assert.ok(result.errors.some((error) => error.includes("positive daily extra slots")));
   });
 
   it("does not warn when special quota has positive slots", async () => {
@@ -249,6 +256,49 @@ describe("validatePolicy — zero special quota warning", () => {
     ];
     const result = await runValidateWithMocks(1, version, rules);
     assert.ok(!result.warnings.some((w) => w.includes("daily_extra_slots=0")));
+  });
+});
+
+describe("validatePolicy — Special Quota overlap", () => {
+  afterEach(() => mock.restoreAll());
+
+  const version = {
+    id: 1,
+    policySetId: 1,
+    versionNo: 1,
+    status: "draft",
+    configHash: "abc123",
+    changeNote: null,
+    publishedAt: null,
+  };
+  const ruleRows = [
+    { ruleType: "special_quota", id: 10, modalityId: 7, dailyLimit: 1, isActive: true },
+    { ruleType: "special_quota", id: 11, modalityId: 7, dailyLimit: 1, isActive: true },
+  ];
+
+  it("accepts a shared exam for disjoint stored users", async () => {
+    const result = await runValidateWithMocks(1, version, ruleRows, {}, [], [], [
+      { id: 10, modalityId: 7, examTypeIds: [50], allowedUserIds: [100] },
+      { id: 11, modalityId: 7, examTypeIds: [50], allowedUserIds: [101] },
+    ]);
+    assert.equal(result.isValid, true);
+  });
+
+  it("rejects a shared exam for the same stored user, including a retained inactive membership", async () => {
+    const result = await runValidateWithMocks(1, version, ruleRows, {}, [], [], [
+      { id: 10, modalityId: 7, examTypeIds: [50], allowedUserIds: [100] },
+      { id: 11, modalityId: 7, examTypeIds: [50], allowedUserIds: [100] },
+    ]);
+    assert.equal(result.isValid, false);
+    assert.ok(result.errors.some((error) => error.includes("both authorize user 100 for exam type 50")));
+  });
+
+  it("accepts disjoint exams for the same stored user", async () => {
+    const result = await runValidateWithMocks(1, version, ruleRows, {}, [], [], [
+      { id: 10, modalityId: 7, examTypeIds: [50], allowedUserIds: [100] },
+      { id: 11, modalityId: 7, examTypeIds: [51], allowedUserIds: [100] },
+    ]);
+    assert.equal(result.isValid, true);
   });
 });
 

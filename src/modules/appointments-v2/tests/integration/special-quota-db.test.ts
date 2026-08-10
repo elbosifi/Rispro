@@ -781,4 +781,77 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     });
     assert.equal(sourceSecondTry.status, 201);
   });
+
+  it("discontinue releases special quota exactly once and is terminal", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(1);
+
+    const created = await createBooking({
+      patientId: await createPatient(),
+      bookingDate: date,
+      caseCategory: "non_oncology",
+      capacityResolutionMode: "special_quota_extra",
+      specialReasonCode: "urgent_oncology",
+    });
+    assert.equal(created.status, 201);
+    const bookingId = Number(((created.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+
+    const discontinued = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST",
+      body: { status: "discontinued", reason: "Clinical workflow stopped" },
+    });
+    assert.equal(discontinued.status, 200);
+
+    const repeated = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST",
+      body: { status: "discontinued", reason: "Repeated request" },
+    });
+    assert.equal(repeated.status, 200);
+
+    const lifecycle = await pool.query<{
+      status: string;
+      activeNormalCount: string;
+      activeConsumptionCount: string;
+      totalConsumptionCount: string;
+      releaseReason: string | null;
+    }>(
+      `select booking.status,
+              (select count(*)::text
+                 from appointments_v2.bookings active_booking
+                where active_booking.modality_id = booking.modality_id
+                  and active_booking.booking_date = booking.booking_date
+                  and active_booking.status not in ('cancelled', 'discontinued', 'voided')) as "activeNormalCount",
+              count(consumption.id) filter (where consumption.released_at is null)::text as "activeConsumptionCount",
+              count(consumption.id)::text as "totalConsumptionCount",
+              max(consumption.release_reason) as "releaseReason"
+         from appointments_v2.bookings booking
+         left join appointments_v2.special_quota_consumptions consumption on consumption.booking_id = booking.id
+        where booking.id = $1
+        group by booking.id`,
+      [bookingId]
+    );
+    assert.equal(lifecycle.rows[0]?.status, "discontinued");
+    assert.equal(Number(lifecycle.rows[0]?.activeNormalCount), 0);
+    assert.equal(Number(lifecycle.rows[0]?.activeConsumptionCount), 0);
+    assert.equal(Number(lifecycle.rows[0]?.totalConsumptionCount), 1);
+    assert.equal(lifecycle.rows[0]?.releaseReason, "discontinued");
+
+    const reactivate = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST",
+      body: { status: "scheduled" },
+    });
+    assert.equal(reactivate.status, 409);
+
+    const replacement = await createBooking({
+      patientId: await createPatient(),
+      bookingDate: date,
+      caseCategory: "non_oncology",
+      capacityResolutionMode: "special_quota_extra",
+      specialReasonCode: "urgent_oncology",
+    });
+    assert.equal(replacement.status, 201);
+  });
 });

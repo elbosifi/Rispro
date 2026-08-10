@@ -14,6 +14,11 @@ import {
 } from "../../../doctor-portal/reporting-assignment-intents-service.js";
 import { createAssignedToMeNotifications } from "../../../doctor-portal/reporting-board-repository.js";
 import { queueClinicalDocumentExportForCompletedAppointment } from "../../../../services/clinical-document-export-service.js";
+import { acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
+import {
+  findActiveSpecialQuotaConsumption,
+  releaseActiveSpecialQuotaConsumption,
+} from "../repositories/special-quota-consumption.repo.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -438,6 +443,9 @@ export async function updateBookingStatusManual(
     if (booking.status === "voided" || targetStatus === "voided") {
       throw new SchedulingError(409, "Voided bookings cannot be changed from manual status management.", ["manual_status_voided_rejected"]);
     }
+    if (booking.status === "discontinued" && targetStatus !== "discontinued") {
+      throw new SchedulingError(409, "Discontinued bookings cannot be reactivated through manual status management.", ["booking_discontinued_terminal"]);
+    }
     if (booking.status === "completed" && targetStatus === "arrived" && !cleanReason) {
       throw new SchedulingError(400, "A reason is required to reopen a completed booking.", ["completed_reopen_reason_required"]);
     }
@@ -458,6 +466,17 @@ export async function updateBookingStatusManual(
       autoCompletionDisabledMessage = autoCompletionDisabled
         ? "PACS auto-completion has been disabled for this booking because staff manually changed the status after Orthanc completed it."
         : undefined;
+
+      if (targetStatus === "discontinued") {
+        const consumption = await findActiveSpecialQuotaConsumption(client, bookingId);
+        if (consumption) {
+          await acquireSpecialQuotaBucketLocks(client, [{
+            logicalKey: consumption.quotaLogicalKey,
+            date: consumption.bookingDate,
+          }]);
+          await findActiveSpecialQuotaConsumption(client, bookingId, { forUpdate: true });
+        }
+      }
 
       await client.query(
         `
@@ -487,6 +506,13 @@ export async function updateBookingStatusManual(
         `,
         [bookingId, targetStatus, userId, autoCompletionDisabled, autoCompletionDisabledMessage ?? null]
       );
+      if (targetStatus === "discontinued") {
+        await releaseActiveSpecialQuotaConsumption(client, {
+          bookingId,
+          releasedByUserId: userId,
+          releaseReason: "discontinued",
+        });
+      }
       await auditStatusChange(client, booking, targetStatus, cleanReason || null, userId, "manual_status_change");
       if (autoCompletionDisabled) {
         await logAuditEntry(

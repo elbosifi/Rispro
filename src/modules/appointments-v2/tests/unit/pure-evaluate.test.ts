@@ -7,6 +7,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { pureEvaluate } from "../../rules/services/pure-evaluate.js";
+import { findSpecialQuotaMembershipConflicts } from "../../rules/services/resolve-special-quota.js";
 import type { PureEvaluateInput } from "../../rules/models/rule-evaluation-context.js";
 import type { ModalityBlockedRuleRow, ExamTypeRuleRow, CategoryDailyLimitRow, SpecialQuotaRuleRow } from "../../rules/models/rule-types.js";
 
@@ -522,7 +523,8 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
 describe("pureEvaluate — special quota (D008 step 5)", () => {
   function makeQuota(
     examTypeId: number,
-    dailyExtraSlots: number
+    dailyExtraSlots: number,
+    overrides: Partial<SpecialQuotaRuleRow> = {}
   ): SpecialQuotaRuleRow {
     return {
       id: 400,
@@ -534,8 +536,73 @@ describe("pureEvaluate — special quota (D008 step 5)", () => {
       dailyExtraSlots,
       allowedUserIds: [1],
       isActive: true,
+      ...overrides,
     };
   }
+
+  it("resolves shared-exam pools independently for disjoint ordinary users", async () => {
+    const pools = [
+      makeQuota(50, 1, {
+        id: 401,
+        logicalKey: "00000000-0000-0000-0000-000000000401",
+        allowedUserIds: [1],
+      }),
+      makeQuota(50, 2, {
+        id: 402,
+        logicalKey: "00000000-0000-0000-0000-000000000402",
+        allowedUserIds: [2],
+      }),
+    ];
+
+    for (const [userId, expectedRuleId] of [[1, 401], [2, 402]] as const) {
+      const decision = await pureEvaluate(makeInput({
+        examTypeId: 50,
+        capacityResolutionMode: "special_quota_extra",
+        useSpecialQuota: true,
+        context: makeContext({
+          requesterUserId: userId,
+          requesterRole: "supervisor",
+          specialQuotas: pools,
+        }),
+      }));
+      assert.equal(decision.displayStatus, "available");
+      assert.equal(decision.matchedSpecialQuota?.ruleId, expectedRuleId);
+    }
+  });
+
+  it("returns explicit ambiguity when super_admin matches multiple shared-exam pools", async () => {
+    const decision = await pureEvaluate(makeInput({
+      examTypeId: 50,
+      capacityResolutionMode: "special_quota_extra",
+      useSpecialQuota: true,
+      context: makeContext({
+        requesterUserId: 99,
+        requesterRole: "super_admin",
+        specialQuotas: [
+          makeQuota(50, 1, { id: 401, allowedUserIds: [1] }),
+          makeQuota(50, 2, { id: 402, allowedUserIds: [2] }),
+        ],
+      }),
+    }));
+
+    assert.equal(decision.displayStatus, "blocked");
+    assert.ok(decision.reasons.some((reason) => reason.code === "special_quota_configuration_ambiguous"));
+    assert.equal(decision.matchedSpecialQuota, null);
+  });
+
+  it("detects conflicts only when active pools share both an exam and stored user", () => {
+    const base = makeQuota(50, 1, { id: 401, examTypeIds: [50, 51], allowedUserIds: [1] });
+    assert.deepEqual(findSpecialQuotaMembershipConflicts([
+      base,
+      makeQuota(50, 1, { id: 402, examTypeIds: [50, 52], allowedUserIds: [2] }),
+      makeQuota(53, 1, { id: 403, examTypeIds: [53], allowedUserIds: [1] }),
+    ]), []);
+
+    assert.deepEqual(findSpecialQuotaMembershipConflicts([
+      base,
+      makeQuota(50, 1, { id: 404, examTypeIds: [50, 52], allowedUserIds: [1] }),
+    ]), [{ firstRuleId: 401, secondRuleId: 404, examTypeId: 50, userId: 1 }]);
+  });
 
   it("special_quota_extra can bypass exhausted standard bucket when quota exists", async () => {
     const decision = await pureEvaluate(

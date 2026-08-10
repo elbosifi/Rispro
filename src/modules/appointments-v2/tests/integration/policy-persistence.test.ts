@@ -534,9 +534,28 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
   });
 
   describe("Generalized Special Quota validation", () => {
-    it("rejects ambiguous exam overlap, invalid capacity, and a newly assigned inactive user", async () => {
+    it("allows only overlap with disjoint stored users and rejects invalid membership/capacity", async () => {
       guard();
       const draftVersionId = await getOrCreateDraft();
+      const secondUser = await pool.query<{ id: number }>(
+        `insert into users (username, password_hash, full_name, role, is_active)
+         values ($1, 'unused', $2, 'doctor', true)
+         returning id`,
+        [`${TEST_PREFIX.toLowerCase()}doctor_b_${testData.policyVersionId}`, `${TEST_PREFIX}Doctor B`]
+      );
+      const secondUserId = Number(secondUser.rows[0].id);
+      const secondExam = await pool.query<{ id: number }>(
+        `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+         values ($1, $2, $3, $4, true)
+         returning id`,
+        [
+          testData.modalityId,
+          `${TEST_PREFIX}فحص ثان`,
+          `${TEST_PREFIX}Second exam`,
+          `${TEST_PREFIX}EX2_${testData.policyVersionId}`,
+        ]
+      );
+      const secondExamTypeId = Number(secondExam.rows[0].id);
       const inactiveUser = await pool.query<{ id: number }>(
         `insert into users (username, password_hash, full_name, role, is_active)
          values ($1, 'unused', $2, 'receptionist', false)
@@ -553,7 +572,26 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
         isActive: true,
       };
 
-      const overlapResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+      const disjointUsersResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+        method: "PUT",
+        body: {
+          policySnapshot: {
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            specialQuotaRules: [
+              { id: 1, logicalKey: "00000000-0000-0000-0000-000000000011", ...sharedRule },
+              { id: 2, logicalKey: "00000000-0000-0000-0000-000000000012", ...sharedRule, allowedUserIds: [secondUserId] },
+            ],
+            examMixQuotaRules: [],
+            specialReasonCodes: await getGlobalSpecialReasonCodes(),
+          },
+          changeNote: "Valid user-disjoint overlap",
+        },
+      });
+      assert.strictEqual(disjointUsersResult.status, 200);
+
+      const sameUserOverlapResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
         body: {
           policySnapshot: {
@@ -567,10 +605,29 @@ describe("Policy draft persistence - integration tests", { skip: skipEnv, concur
             examMixQuotaRules: [],
             specialReasonCodes: await getGlobalSpecialReasonCodes(),
           },
-          changeNote: "Invalid overlap",
+          changeNote: "Invalid user overlap",
         },
       });
-      assert.strictEqual(overlapResult.status, 400);
+      assert.strictEqual(sameUserOverlapResult.status, 400);
+
+      const disjointExamResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+        method: "PUT",
+        body: {
+          policySnapshot: {
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            specialQuotaRules: [
+              { id: 1, logicalKey: "00000000-0000-0000-0000-000000000011", ...sharedRule },
+              { id: 2, logicalKey: "00000000-0000-0000-0000-000000000012", ...sharedRule, examTypeIds: [secondExamTypeId] },
+            ],
+            examMixQuotaRules: [],
+            specialReasonCodes: await getGlobalSpecialReasonCodes(),
+          },
+          changeNote: "Valid exam-disjoint groups",
+        },
+      });
+      assert.strictEqual(disjointExamResult.status, 200);
 
       const invalidMemberResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",

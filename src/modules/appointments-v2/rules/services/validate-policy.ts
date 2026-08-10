@@ -12,6 +12,7 @@ import {
   type PolicyRuleRow,
 } from "../../admin/repositories/admin-policy.repo.js";
 import { pool } from "../../../../db/pool.js";
+import { findSpecialQuotaMembershipConflicts } from "./resolve-special-quota.js";
 
 export interface PolicyValidationResult {
   isValid: boolean;
@@ -145,19 +146,12 @@ async function validatePolicyDraftInternal(
     errors.push(`Special Quota rule ${row.quotaRuleId}: exam type ${row.examTypeId} belongs to another modality.`);
   }
 
-  const ambiguousExamMemberships = await client.query<{ examTypeId: number; quotaCount: number }>(
-    `
-      select membership.exam_type_id as "examTypeId", count(*)::int as "quotaCount"
-      from appointments_v2.special_quota_rules quota
-      join appointments_v2.special_quota_rule_exam_types membership on membership.quota_rule_id = quota.id
-      where quota.policy_version_id = $1 and quota.is_active = true
-      group by membership.exam_type_id
-      having count(*) > 1
-    `,
-    [policyVersionId]
-  );
-  for (const row of ambiguousExamMemberships.rows) {
-    errors.push(`Exam type ${row.examTypeId} belongs to ${row.quotaCount} active Special Quota pools.`);
+  for (const conflict of findSpecialQuotaMembershipConflicts(
+    specialQuotaRules.rows.map((row) => ({ ...row, isActive: true }))
+  )) {
+    errors.push(
+      `Special Quota rules ${conflict.firstRuleId} and ${conflict.secondRuleId} both authorize user ${conflict.userId} for exam type ${conflict.examTypeId}.`
+    );
   }
 
   const explicitSuperAdmins = await client.query<{ quotaRuleId: number; userId: number }>(

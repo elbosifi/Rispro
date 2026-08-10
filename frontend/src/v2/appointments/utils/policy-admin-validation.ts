@@ -201,7 +201,6 @@ export function validatePolicyDraftForAdmin(
     }
   }
 
-  const activeQuotaExamMemberships = new Map<number, number>();
   const seenQuotaLogicalKeys = new Set<string>();
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   for (const row of snapshot.specialQuotaRules) {
@@ -231,12 +230,6 @@ export function validatePolicyDraftForAdmin(
       } else if (examType.isActive === false) {
         warnings.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `${examTypeLabel(examTypeId, lookups)} is inactive.` });
       }
-      const priorRuleId = activeQuotaExamMemberships.get(Number(examTypeId));
-      if (priorRuleId != null) {
-        errors.push({ section: SECTION.specialQuotas, ruleId: row.id, message: `${examTypeLabel(examTypeId, lookups)} also belongs to active Special Quota ${priorRuleId}; overlapping pools are not allowed.` });
-      } else {
-        activeQuotaExamMemberships.set(Number(examTypeId), row.id);
-      }
     }
     if (!Number.isInteger(row.dailyExtraSlots) || row.dailyExtraSlots <= 0) {
       errors.push({
@@ -265,6 +258,29 @@ export function validatePolicyDraftForAdmin(
           message: `${userLabel(userId, lookups)} is inactive and retained for existing policy history.`,
         });
       }
+    }
+  }
+
+  const activeQuotas = snapshot.specialQuotaRules.filter((row) => row.isActive);
+  for (let firstIndex = 0; firstIndex < activeQuotas.length; firstIndex += 1) {
+    const first = activeQuotas[firstIndex];
+    const firstExamIds = new Set(first.examTypeIds.map(Number));
+    const firstStoredUserIds = new Set(first.allowedUserIds.map(Number));
+
+    for (let secondIndex = firstIndex + 1; secondIndex < activeQuotas.length; secondIndex += 1) {
+      const second = activeQuotas[secondIndex];
+      const examTypeId = second.examTypeIds.map(Number).find((id) => firstExamIds.has(id));
+      if (examTypeId == null) continue;
+      const userId = second.allowedUserIds
+        .map(Number)
+        .find((id) => firstStoredUserIds.has(id));
+      if (userId == null) continue;
+
+      errors.push({
+        section: SECTION.specialQuotas,
+        ruleId: second.id,
+        message: `${examTypeLabel(examTypeId, lookups)} is authorized for ${userLabel(userId, lookups)} in both Special Quota ${first.id} and ${second.id}.`,
+      });
     }
   }
 

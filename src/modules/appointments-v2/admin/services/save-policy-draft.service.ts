@@ -29,6 +29,7 @@ import {
 } from "../repositories/admin-policy.repo.js";
 import type { PolicySnapshotDto } from "../../api/dto/admin-scheduling.dto.js";
 import type { FieldValidationErrorDto } from "../../api/dto/admin-scheduling.dto.js";
+import { findSpecialQuotaMembershipConflicts } from "../../rules/services/resolve-special-quota.js";
 
 export interface SavePolicyDraftResult {
   version: PolicyVersionRow;
@@ -299,7 +300,6 @@ async function validateSpecialQuotaPolicy(
 
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const seenLogicalKeys = new Set<string>();
-  const seenActiveExamTypes = new Set<number>();
   for (const [index, row] of quotas.entries()) {
     const fieldBase = `policySnapshot.specialQuotaRules[${index}]`;
     const logicalKey = String(row.logicalKey ?? "").trim().toLowerCase();
@@ -340,10 +340,6 @@ async function validateSpecialQuotaPolicy(
         } else if (examTypeModalityById.get(examTypeId) !== modalityId) {
           fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_exam_type_modality_mismatch", message: `Exam type ${examTypeId} does not belong to modality ${modalityId}.` });
         }
-        if (seenActiveExamTypes.has(examTypeId)) {
-          fieldErrors.push({ field: `${fieldBase}.examTypeIds`, code: "special_quota_ambiguous_overlap", message: `Exam type ${examTypeId} belongs to more than one active Special Quota pool.` });
-        }
-        seenActiveExamTypes.add(examTypeId);
       }
     }
 
@@ -365,6 +361,15 @@ async function validateSpecialQuotaPolicy(
         });
       }
     }
+  }
+
+  for (const conflict of findSpecialQuotaMembershipConflicts(quotas)) {
+    const conflictingIndex = quotas.findIndex((row) => Number(row.id) === conflict.secondRuleId);
+    fieldErrors.push({
+      field: `policySnapshot.specialQuotaRules[${Math.max(0, conflictingIndex)}].examTypeIds`,
+      code: "special_quota_ambiguous_overlap",
+      message: `Special Quota rules ${conflict.firstRuleId} and ${conflict.secondRuleId} both authorize user ${conflict.userId} for exam type ${conflict.examTypeId}.`,
+    });
   }
 
   if (fieldErrors.length > 0) {

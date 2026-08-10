@@ -38,6 +38,18 @@ describe("status booking service source guards", () => {
     assert.match(source, /status_reason_required/);
   });
 
+  it("treats discontinued as terminal in generic manual status management", () => {
+    assert.match(source, /booking\.status === "discontinued" && targetStatus !== "discontinued"/);
+    assert.match(source, /booking_discontinued_terminal/);
+  });
+
+  it("locks and releases active special quota consumption when discontinuing", () => {
+    assert.match(source, /targetStatus === "discontinued"[\s\S]*findActiveSpecialQuotaConsumption/);
+    assert.match(source, /acquireSpecialQuotaBucketLocks/);
+    assert.match(source, /findActiveSpecialQuotaConsumption\(client, bookingId, \{ forUpdate: true \}\)/);
+    assert.match(source, /releaseActiveSpecialQuotaConsumption\(client, \{[\s\S]*releaseReason: "discontinued"/);
+  });
+
   it("rejects cancellation through the generic manual status path", () => {
     assert.match(source, /targetStatus === "cancelled"/);
     assert.match(source, /Appointment cancellation must use the dedicated cancellation workflow\./);

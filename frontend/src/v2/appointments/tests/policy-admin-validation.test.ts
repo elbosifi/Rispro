@@ -23,6 +23,8 @@ const displayLookups: PolicyDisplayLookupsDto = {
   users: [
     { id: 20, username: "active", fullName: "Active User", role: "supervisor", isActive: true },
     { id: 21, username: "inactive", fullName: "Inactive User", role: "supervisor", isActive: false },
+    { id: 22, username: "doctor_b", fullName: "Doctor B", role: "doctor", isActive: true },
+    { id: 23, username: "root", fullName: "Super Admin", role: "super_admin", isActive: true },
   ],
 };
 
@@ -119,7 +121,7 @@ describe("validatePolicyDraftForAdmin", () => {
     expect(result.errors.some((item) => item.message.includes("Unknown user ID 999"))).toBe(true);
   });
 
-  it("rejects invalid group capacity, missing users, modality mismatch, and overlapping exam pools", () => {
+  it("rejects invalid group capacity, modality mismatch, and ambiguous overlapping pools", () => {
     const snapshot = emptySnapshot();
     snapshot.specialQuotaRules = [
       {
@@ -129,7 +131,7 @@ describe("validatePolicyDraftForAdmin", () => {
         title: "First",
         examTypeIds: [10, 12],
         dailyExtraSlots: 0,
-        allowedUserIds: [],
+        allowedUserIds: [20],
         isActive: true,
       },
       {
@@ -146,9 +148,76 @@ describe("validatePolicyDraftForAdmin", () => {
 
     const messages = validatePolicyDraftForAdmin(snapshot, displayLookups).errors.map((item) => item.message);
     expect(messages.some((message) => message.includes("positive number of extra slots"))).toBe(true);
-    expect(messages.some((message) => message.includes("authorize at least one user"))).toBe(true);
     expect(messages.some((message) => message.includes("does not belong to the selected modality"))).toBe(true);
-    expect(messages.some((message) => message.includes("overlapping pools are not allowed"))).toBe(true);
+    expect(messages.some((message) => message.includes("in both Special Quota"))).toBe(true);
+  });
+
+  it("accepts shared exams for disjoint stored users and accepts disjoint exams for the same user", () => {
+    const snapshot = emptySnapshot();
+    snapshot.specialQuotaRules = [
+      {
+        id: 30,
+        logicalKey: "00000000-0000-0000-0000-000000000030",
+        modalityId: 1,
+        title: "Doctor A",
+        examTypeIds: [10],
+        dailyExtraSlots: 1,
+        allowedUserIds: [20],
+        isActive: true,
+      },
+      {
+        id: 31,
+        logicalKey: "00000000-0000-0000-0000-000000000031",
+        modalityId: 1,
+        title: "Doctor B",
+        examTypeIds: [10],
+        dailyExtraSlots: 1,
+        allowedUserIds: [22],
+        isActive: true,
+      },
+      {
+        id: 32,
+        logicalKey: "00000000-0000-0000-0000-000000000032",
+        modalityId: 1,
+        title: "Doctor A second exam",
+        examTypeIds: [11],
+        dailyExtraSlots: 1,
+        allowedUserIds: [20],
+        isActive: true,
+      },
+    ];
+
+    const result = validatePolicyDraftForAdmin(snapshot, displayLookups);
+    expect(result.errors.some((item) => item.message.includes("in both Special Quota"))).toBe(false);
+  });
+
+  it("rejects shared exams for the same retained inactive user", () => {
+    const snapshot = emptySnapshot();
+    snapshot.specialQuotaRules = [
+      {
+        id: 40,
+        logicalKey: "00000000-0000-0000-0000-000000000040",
+        modalityId: 1,
+        title: "Retained A",
+        examTypeIds: [10],
+        dailyExtraSlots: 1,
+        allowedUserIds: [21],
+        isActive: true,
+      },
+      {
+        id: 41,
+        logicalKey: "00000000-0000-0000-0000-000000000041",
+        modalityId: 1,
+        title: "Retained B",
+        examTypeIds: [10],
+        dailyExtraSlots: 1,
+        allowedUserIds: [21],
+        isActive: true,
+      },
+    ];
+
+    const result = validatePolicyDraftForAdmin(snapshot, displayLookups);
+    expect(result.errors.some((item) => item.message.includes("Inactive User") && item.message.includes("in both Special Quota"))).toBe(true);
   });
 
   it("reports invalid date ranges and recurrence fields", () => {
