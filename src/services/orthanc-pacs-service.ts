@@ -510,8 +510,11 @@ export async function upsertOrthancRemoteModality({
   await putOrthancRemoteModality(modality, settings);
 
   const stored = await loadStoredOrthancRemoteModalities();
+  const previous = stored.find((item) => item.key === cleanKey);
+  if (payload.isDefault == null && payload.is_default == null && previous) modality.isDefault = previous.isDefault;
+  const remaining = stored.filter((item) => item.key !== cleanKey);
   const next = [
-    ...stored.filter((item) => item.key !== cleanKey),
+    ...(modality.isDefault ? remaining.map((item) => ({ ...item, isDefault: false })) : remaining),
     modality,
   ];
   await saveStoredOrthancRemoteModalities(next, currentUserId);
