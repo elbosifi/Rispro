@@ -1457,9 +1457,9 @@ export default function ModalityPage() {
 
       <Dialog open={Boolean(selectedAppointment)} onClose={() => setSelectedAppointmentId(null)}>
         <DialogContent
-          maxWidth="100vw"
+          maxWidth="min(98vw, 1560px)"
           scrollable={false}
-          className="!m-0 !max-h-screen !max-w-none !rounded-none !p-0 h-screen w-screen overflow-hidden"
+          className="!p-0 h-[94dvh] !max-h-[94dvh] w-full overflow-hidden rounded-2xl"
         >
           {selectedAppointment ? (
             <div data-testid="selected-appointment-drawer" className="flex h-full min-h-0 flex-col">
@@ -1494,7 +1494,6 @@ export default function ModalityPage() {
                             : null}
                       />
                       <ClinicalBannerField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
-                      <ClinicalBannerField label={chooseLocalized(language, "الفحص / الجهاز", "Exam / modality")} value={`${selectedExam} · ${selectedModality}`} />
                       <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
                       <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
                       <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
@@ -1506,9 +1505,9 @@ export default function ModalityPage() {
                 </div>
               </DialogHeader>
 
-              <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
-                <div data-testid="clinical-workspace" className="grid min-h-full gap-3 lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
-                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-w-0 lg:order-2">
+              <main data-testid="clinical-workspace-region" className="min-h-0 flex-1 overflow-hidden bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4">
+                <div data-testid="clinical-workspace" className={`grid h-full min-h-0 gap-3 ${selectedAppointment.protocolAssignmentSummary || selectedProtocolQuery.data || selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching || selectedProtocolQuery.isError ? "grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)] lg:grid-rows-1" : "grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-1 lg:grid-rows-1"}`}>
+                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:order-2">
                     <ProtocolAssignmentPanel
                       key={selectedAppointment.id}
                       appointment={selectedAppointment}
@@ -1520,7 +1519,7 @@ export default function ModalityPage() {
                     />
                   </section>
 
-                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className="order-2 flex min-h-[560px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-2 shadow-sm lg:order-1 lg:min-h-0">
+                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className="order-2 flex h-full min-h-0 min-w-0 flex-col lg:order-1">
                     <RequestDocumentsPanel
                       appointmentId={selectedAppointment.id}
                       patientId={selectedAppointment.patientId}
@@ -1534,7 +1533,7 @@ export default function ModalityPage() {
                 </div>
               </main>
 
-              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-wrap border-t border-slate-200 bg-white px-3 py-3 sm:px-5 !justify-start sm:!justify-end">
+              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-wrap border-t border-slate-200 bg-white px-3 py-3 !justify-start sm:px-5 sm:!justify-end">
                 <Button
                   type="button"
                   variant="secondary"
@@ -1542,6 +1541,7 @@ export default function ModalityPage() {
                 >
                   <span>{chooseLocalized(language, "إغلاق", "Close")}</span>
                 </Button>
+                <div className="flex flex-wrap gap-2">
                 {selectedAppointment.status === "scheduled" || selectedAppointment.status === "waiting" ? (
                   <Button
                     type="button"
@@ -1584,6 +1584,8 @@ export default function ModalityPage() {
                   {completeMutation.isPending ? <RefreshCw size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                   <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
                 </Button>
+                </div>
+                <div className="border-s border-slate-200 ps-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -1597,6 +1599,7 @@ export default function ModalityPage() {
                   <Ban size={16} />
                   <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
                 </Button>
+                </div>
               </DialogFooter>
             </div>
           ) : null}
