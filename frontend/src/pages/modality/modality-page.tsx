@@ -1160,6 +1160,7 @@ export default function ModalityPage() {
                                       aria-label={cdDetails.label}
                                       title={cdDetails.tooltip}
                                       className={`h-10 min-w-[40px] shrink-0 border px-2 transition-colors duration-300 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${cdState === "sending" ? "border-sky-300 bg-sky-50 text-sky-800" : cdState === "sent" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : cdState === "failed" ? "border-red-300 bg-red-50 text-red-800" : "border-slate-300 bg-white text-slate-800"}`}
+                                      style={cdState === "sending" ? { backgroundColor: "#f0f9ff", borderColor: "#7dd3fc", color: "#0369a1" } : cdState === "sent" ? { backgroundColor: "#ecfdf5", borderColor: "#86efac", color: "#047857" } : cdState === "failed" ? { backgroundColor: "#fef2f2", borderColor: "#fca5a5", color: "#b91c1c" } : undefined}
                                       disabled={cdState === "sending" || cdState === "patient-active" || cdCreateMutation.isPending || !cdDestinationsQuery.data?.destinations.length}
                                       onClick={(event) => {
                                         event.stopPropagation();

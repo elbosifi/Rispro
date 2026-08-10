@@ -1097,6 +1097,7 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-34");
     const failedButton = within(row).getByRole("button", { name: "Failed" });
     expect(failedButton.className).toContain("bg-red-50");
+    expect((failedButton as HTMLButtonElement).style.backgroundColor).toBe("rgb(254, 242, 242)");
     await user.click(failedButton);
     await screen.findByRole("heading", { name: "CD delivery history" });
     await screen.findByText(/C-ECHO failed/);
@@ -1113,6 +1114,7 @@ describe("ModalityPage modality board", () => {
     const button = within(screen.getByTestId("modality-board-row-35")).getByRole("button", { name: "Sent" });
     expect(button.textContent).toContain("×2");
     expect(button.className).toContain("bg-emerald-50");
+    expect((button as HTMLButtonElement).style.backgroundColor).toBe("rgb(236, 253, 245)");
     await user.click(button);
     await screen.findByRole("heading", { name: "Send additional CD" });
     expect(screen.getByRole("combobox", { name: "Reason" })).toBeTruthy();
