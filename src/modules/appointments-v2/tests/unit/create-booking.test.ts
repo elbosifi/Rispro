@@ -79,6 +79,12 @@ describe("createBooking — source verification", () => {
     assert.ok(source.includes("modality_not_found"), "Should have modality_not_found error code");
   });
 
+  it("resolves the booking category from the patient record, not the request payload", () => {
+    assert.match(source, /select category\s+from patients/, "Should load the patient category");
+    assert.ok(source.includes("resolveBookingCaseCategory(client, payload.patientId)"), "Should not pass payload.caseCategory to the resolver");
+    assert.ok(!source.includes("incomingCategory"), "Should not trust an incoming category");
+  });
+
   it("checks exam type existence", () => {
     assert.ok(source.includes("findExamTypeById"), "Should call findExamTypeById");
     assert.ok(source.includes("exam_type_not_found"), "Should have exam_type_not_found error code");

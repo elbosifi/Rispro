@@ -227,7 +227,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         examTypeId: testData.examTypeId,
         bookingDate,
         bookingTime: null,
-        caseCategory: "non_oncology",
+        caseCategory: "oncology",
       };
 
       const unauthorizedCreate = await fetch("/api/v2/appointments", {
@@ -250,6 +250,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         },
       });
       assert.equal(supervisorCreate.status, 201);
+      assert.equal((supervisorCreate.data as any).booking.caseCategory, "non_oncology");
       assert.equal((supervisorCreate.data as any).booking.requiresReport, true);
 
       const falseReportBooking = await fetch("/api/v2/appointments", {

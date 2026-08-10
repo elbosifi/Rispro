@@ -1119,27 +1119,6 @@ export function CreateAppointmentTab({
 
               <div>
                 <label className="block text-sm font-semibold mb-2 text-foreground">
-                  {t(language, "appointments.create.caseCategory")}
-                </label>
-                <select
-                  aria-label={t(language, "appointments.create.caseCategory")}
-                  value={form.caseCategory}
-                  onChange={(e) => {
-                    actions.setCaseCategory(e.target.value as "oncology" | "non_oncology");
-                    setAvailabilitySelectedRow(null);
-                    setPendingDecision(null);
-                    setShowOverrideModal(false);
-                    setOverrideError(null);
-                  }}
-                  className="input-premium"
-                >
-                  <option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option>
-                  <option value="oncology">{t(language, "appointments.create.oncology")}</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.priority")}
                 </label>
                 <select

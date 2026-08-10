@@ -98,13 +98,8 @@ function normalizeCapacityResolutionMode(payload: CreateBookingPayload): Capacit
 
 async function resolveBookingCaseCategory(
   client: PoolClient,
-  patientId: number,
-  incomingCategory: CreateBookingPayload["caseCategory"]
+  patientId: number
 ): Promise<"oncology" | "non_oncology"> {
-  if (incomingCategory === "oncology" || incomingCategory === "non_oncology") {
-    return incomingCategory;
-  }
-
   const result = await client.query<{ category: string | null }>(
     `
       select category
@@ -169,7 +164,7 @@ export async function createBookingInternal(
       throw error;
     }
   }
-  const caseCategory = await resolveBookingCaseCategory(client, payload.patientId, payload.caseCategory);
+  const caseCategory = await resolveBookingCaseCategory(client, payload.patientId);
   if (
     caseCategory === "non_oncology" &&
     payload.requiresReport === true &&

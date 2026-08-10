@@ -124,34 +124,6 @@ export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonO
         overrideReason: "",
       }));
     },
-    setCaseCategory(caseCategory: "oncology" | "non_oncology") {
-      setForm((prev) => ({
-        ...prev,
-        caseCategory,
-        requiresReport: prev.reportRequiredManuallyOverridden
-          ? prev.requiresReport
-          : caseCategory === "oncology"
-            ? reportDefaults.oncology
-            : reportDefaults.nonOncology,
-        intendedReportingDoctorId: (
-          prev.reportRequiredManuallyOverridden
-            ? prev.requiresReport
-            : caseCategory === "oncology"
-              ? reportDefaults.oncology
-              : reportDefaults.nonOncology
-        ) ? prev.intendedReportingDoctorId : null,
-        intendedReportingDoctorReason: (
-          prev.reportRequiredManuallyOverridden
-            ? prev.requiresReport
-            : caseCategory === "oncology"
-              ? reportDefaults.oncology
-              : reportDefaults.nonOncology
-        ) ? prev.intendedReportingDoctorReason : "",
-        appointmentDate: "",
-        overrideRequired: false,
-        overrideReason: "",
-      }));
-    },
     setRequiresReport(requiresReport: boolean) {
       setForm((prev) => ({
         ...prev,

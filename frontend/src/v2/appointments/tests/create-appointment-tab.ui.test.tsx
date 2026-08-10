@@ -833,22 +833,11 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(screen.getByText("Primary ID: P-12345")).toBeTruthy();
   });
 
-  it("defaults case category from selected patient category and preserves manual override", async () => {
+  it("uses the selected patient's category without rendering an editable selector", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
 
-    const categorySelect = screen.getByLabelText("Case Category") as HTMLSelectElement;
-    expect(categorySelect.value).toBe("oncology");
-
-    fireEvent.change(categorySelect, { target: { value: "non_oncology" } });
-    expect(categorySelect.value).toBe("non_oncology");
-
-    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
-    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
-
-    expect((screen.getByLabelText("Case Category") as HTMLSelectElement).value).toBe("non_oncology");
+    expect(screen.queryByLabelText("Case Category")).toBeNull();
   });
 
   it("shows previous no-shows list with date and exam type", async () => {
@@ -1100,7 +1089,7 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     expect(screen.queryByRole("button", { name: /2027-01-01 blocked/i })).toBeNull();
     expect((screen.queryByRole("button", { name: "Request override approval" }))).toBeNull();
-    expect((screen.getByLabelText("Case Category") as HTMLSelectElement).value).toBe("oncology");
+    expect(screen.queryByLabelText("Case Category")).toBeNull();
   });
 
   it("requires special reason when special quota mode is selected", async () => {
@@ -1264,7 +1253,7 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     mockRawItemsRef.current = [];
     mockAvailabilityLoading.current = true;
-    fireEvent.change(screen.getByLabelText("Case Category"), { target: { value: "non_oncology" } });
+    fireEvent.change(document.querySelector("textarea") as HTMLTextAreaElement, { target: { value: "keep selection" } });
 
     expect((screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement).value).toBe("special_quota_extra");
   });

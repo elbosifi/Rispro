@@ -17,7 +17,7 @@ describe("useCreateAppointmentForm", () => {
     expect(result.current.form.caseCategory).toBe("oncology");
   });
 
-  it("preserves manual case-category override after other form changes", () => {
+  it("keeps the selected patient's category after other form changes", () => {
     const { result } = renderHook(() => useCreateAppointmentForm());
 
     act(() => {
@@ -29,16 +29,12 @@ describe("useCreateAppointmentForm", () => {
     });
 
     act(() => {
-      result.current.actions.setCaseCategory("non_oncology");
-    });
-
-    act(() => {
       result.current.actions.setModalityId(2);
       result.current.actions.setExamTypeId(11);
       result.current.actions.setNotes("manual note");
     });
 
-    expect(result.current.form.caseCategory).toBe("non_oncology");
+    expect(result.current.form.caseCategory).toBe("oncology");
   });
 
   it("falls back to non-oncology when patient category is missing", () => {
@@ -77,7 +73,7 @@ describe("useCreateAppointmentForm", () => {
     expect(result.current.form.requiresReport).toBe(false);
   });
 
-  it("updates report-required default on category change until manual override", () => {
+  it("updates report-required default when the selected patient changes", () => {
     const { result } = renderHook(() => useCreateAppointmentForm());
 
     act(() => {
@@ -90,7 +86,11 @@ describe("useCreateAppointmentForm", () => {
     expect(result.current.form.requiresReport).toBe(false);
 
     act(() => {
-      result.current.actions.setCaseCategory("oncology");
+      result.current.actions.setPatient({
+        id: 6,
+        arabicFullName: "Oncology Patient",
+        category: "oncology",
+      });
     });
     expect(result.current.form.requiresReport).toBe(true);
 
@@ -98,12 +98,13 @@ describe("useCreateAppointmentForm", () => {
       result.current.actions.setRequiresReport(false);
     });
     act(() => {
-      result.current.actions.setCaseCategory("non_oncology");
+      result.current.actions.setPatient({
+        id: 7,
+        arabicFullName: "Another Oncology Patient",
+        category: "oncology",
+      });
     });
-    act(() => {
-      result.current.actions.setCaseCategory("oncology");
-    });
-    expect(result.current.form.requiresReport).toBe(false);
+    expect(result.current.form.requiresReport).toBe(true);
   });
 
   it("clears intended reporting doctor when modality changes or report is no longer required", () => {
