@@ -1079,7 +1079,7 @@ describe("ModalityPage modality board", () => {
     ], [{ key: "robot-a", name: "Robot A" }]);
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
-    const sending = within(screen.getByTestId("modality-board-row-32")).getByRole("button", { name: "CD sending" });
+    const sending = within(screen.getByTestId("modality-board-row-32")).getByRole("button", { name: "Sending" });
     expect((sending as HTMLButtonElement).disabled).toBe(true);
     expect(sending.querySelector(".animate-spin")).toBeTruthy();
     const patientActive = within(screen.getByTestId("modality-board-row-33")).getByRole("button", { name: "CD unavailable" });
@@ -1095,7 +1095,9 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
     const row = screen.getByTestId("modality-board-row-34");
-    await user.click(within(row).getByRole("button", { name: "CD send failed" }));
+    const failedButton = within(row).getByRole("button", { name: "Failed" });
+    expect(failedButton.className).toContain("bg-red-50");
+    await user.click(failedButton);
     await screen.findByRole("heading", { name: "CD delivery history" });
     await screen.findByText(/C-ECHO failed/);
     await user.click(screen.getByRole("button", { name: "Retry" }));
@@ -1108,11 +1110,46 @@ describe("ModalityPage modality board", () => {
     ], [{ key: "robot-a", name: "Robot A" }]);
 
     await user.click(screen.getByRole("button", { name: "Completed" }));
-    const button = within(screen.getByTestId("modality-board-row-35")).getByRole("button", { name: "CD sent successfully" });
+    const button = within(screen.getByTestId("modality-board-row-35")).getByRole("button", { name: "Sent" });
     expect(button.textContent).toContain("×2");
+    expect(button.className).toContain("bg-emerald-50");
     await user.click(button);
     await screen.findByRole("heading", { name: "Send additional CD" });
     expect(screen.getByRole("combobox", { name: "Reason" })).toBeTruthy();
+  });
+
+  it("localizes the CD resend modal for Arabic and uses RTL content", async () => {
+    languageState.language = "ar";
+    const user = await openBoard([
+      appointment({ id: 36, status: "completed", cdSuccessfulCount: 1 }),
+      appointment({ id: 38, status: "completed", cdPatientActive: true }),
+    ], [{ key: "robot-a", name: "RIS" }]);
+
+    await user.click(screen.getByRole("button", { name: translate("ar", "modality.completed") }));
+    const patientActive = within(screen.getByTestId("modality-board-row-38")).getByRole("button", { name: translate("ar", "modality.cd.unavailable") });
+    expect((patientActive as HTMLButtonElement).disabled).toBe(true);
+    expect(patientActive.getAttribute("title")).toContain(translate("ar", "modality.cd.patientActiveTooltip"));
+    await user.click(within(screen.getByTestId("modality-board-row-36")).getByRole("button", { name: translate("ar", "modality.cd.sent") }));
+    await screen.findByRole("heading", { name: translate("ar", "modality.cd.sendAdditional") });
+    expect(screen.getByRole("combobox", { name: translate("ar", "modality.cd.reason") })).toBeTruthy();
+    expect(screen.getByRole("dialog").querySelector('[dir="rtl"]')).toBeTruthy();
+  });
+
+  it("localizes known CD errors in Arabic and retains unknown backend details", async () => {
+    languageState.language = "ar";
+    const user = await openBoard([
+      appointment({ id: 37, status: "completed" }),
+    ], [{ key: "robot-a", name: "RIS" }]);
+    createCdRobotDeliveryMock.mockRejectedValueOnce(new Error("Study not found in Authoritative Orthanc."));
+
+    await user.click(screen.getByRole("button", { name: translate("ar", "modality.completed") }));
+    const row = screen.getByTestId("modality-board-row-37");
+    await user.click(within(row).getByRole("button", { name: translate("ar", "modality.cd.send") }));
+    expect((await screen.findByRole("alert")).textContent).toContain(translate("ar", "modality.cd.error.studyNotFound"));
+
+    createCdRobotDeliveryMock.mockRejectedValueOnce(new Error("Transport diagnostic 97"));
+    await user.click(within(row).getByRole("button", { name: translate("ar", "modality.cd.send") }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Transport diagnostic 97"));
   });
 
   it("shows full patient and appointment details in the selected row drawer", async () => {
