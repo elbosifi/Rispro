@@ -1,4 +1,5 @@
 import { pool } from "../db/pool.js";
+import type { PoolClient } from "pg";
 import { HttpError } from "../utils/http-error.js";
 import type { UserId } from "../types/http.js";
 import { normalizeRisproModalityCode } from "./clinical-document-dicom.js";
@@ -35,9 +36,9 @@ function validateReason(successfulCount: number, code: unknown, text: unknown): 
   if (cleanCode === "other" && !meaningful(cleanText)) throw new HttpError(400, "Other reason must contain at least 5 meaningful characters.");
   return { code: cleanCode, text: cleanCode === "other" ? cleanText : null };
 }
-async function insertDelivery(booking: BookingRow, destinationKey: string, reason: { code:string|null; text:string|null }, userId: UserId): Promise<DeliveryRow> {
+async function insertDelivery(booking: BookingRow, destinationKey: string, reason: { code:string|null; text:string|null }, userId: UserId, db: PoolClient | typeof pool = pool): Promise<DeliveryRow> {
   try {
-    const { rows } = await pool.query<DeliveryRow>(`insert into cd_robot_deliveries(patient_id,booking_id,study_instance_uid,destination_key,status,resend_reason_code,resend_reason_text,requested_by_user_id) values($1,$2,$3,$4,'sending',$5,$6,$7) returning *`, [booking.patient_id, booking.id, booking.study_instance_uid, destinationKey, reason.code, reason.text, userId]);
+    const { rows } = await db.query<DeliveryRow>(`insert into cd_robot_deliveries(patient_id,booking_id,study_instance_uid,destination_key,status,resend_reason_code,resend_reason_text,requested_by_user_id) values($1,$2,$3,$4,'sending',$5,$6,$7) returning *`, [booking.patient_id, booking.id, booking.study_instance_uid, destinationKey, reason.code, reason.text, userId]);
     return rows[0]!;
   } catch (error: unknown) {
     if ((error as { code?: string }).code === "23505") throw new HttpError(409, "This patient already has a CD send in progress.");
@@ -63,9 +64,9 @@ export async function startCdRobotDelivery(input: { bookingId: unknown; destinat
   const booking = await bookingForDelivery(id(input.bookingId, "bookingId"));
   const destinationKey = String(input.destinationKey ?? "").trim();
   await cdDestination(destinationKey);
-  await matchAndCheck(await createAuthoritativeOrthancClient(), booking);
-  const count = await pool.query<{ count:string }>(`select count(*)::text count from cd_robot_deliveries where booking_id=$1 and status='success'`, [booking.id]);
-  const delivery = await insertDelivery(booking, destinationKey, validateReason(Number(count.rows[0]?.count || 0), input.resendReasonCode, input.resendReasonText), input.userId);
+  const tx = await pool.connect();
+  let delivery: DeliveryRow;
+  try { await tx.query("begin"); await tx.query("select id from patients where id=$1 for update", [booking.patient_id]); const count = await tx.query<{ count:string }>(`select count(*)::text count from cd_robot_deliveries where booking_id=$1 and status='success'`, [booking.id]); delivery = await insertDelivery(booking, destinationKey, validateReason(Number(count.rows[0]?.count || 0), input.resendReasonCode, input.resendReasonText), input.userId, tx); await tx.query("commit"); } catch (error) { await tx.query("rollback"); throw error; } finally { tx.release(); }
   return attemptCdRobotDelivery(delivery.id);
 }
 
@@ -79,20 +80,25 @@ export async function attemptCdRobotDelivery(deliveryId: number): Promise<Delive
     await synchronizeAuthoritativeOrthancCdRobots();
     const client = await createAuthoritativeOrthancClient();
     const study = await matchAndCheck(client, booking);
-    const alias = buildAuthoritativeOrthancCdAliases([delivery.destination_key])[0]!.alias;
+    const { modalities } = await listOrthancRemoteModalities();
+    const aliases = buildAuthoritativeOrthancCdAliases(modalities.filter((item) => item.isCdRobot).map((item) => item.key));
+    const alias = aliases.find((item) => item.destinationKey === delivery.destination_key)?.alias;
+    if (!alias) throw new HttpError(409, "Selected CD robot is not available.");
     await client.echoRemoteModality(alias);
     const orthancJobId = await client.enqueueStudyStore(alias, study.orthancStudyId);
     const result = await pool.query<DeliveryRow>(`update cd_robot_deliveries set orthanc_study_id=$2,orthanc_job_id=$3,last_checked_at=now(),updated_at=now() where id=$1 and status='sending' returning *`, [delivery.id, study.orthancStudyId, orthancJobId]);
     return result.rows[0]!;
   } catch (error) {
     const message = errorMessage(error);
-    if (delivery.attempt_count < 2) return attemptCdRobotDelivery(delivery.id);
-    await terminalFailure(delivery.id, message);
+    const ambiguousStore = error instanceof HttpError && ["orthanc_timeout", "orthanc_unavailable", "orthanc_send_job_id_missing"].includes(String((error.details as { code?: unknown } | undefined)?.code || ""));
+    if (!ambiguousStore && delivery.attempt_count < 2) return attemptCdRobotDelivery(delivery.id);
+    await terminalFailure(delivery.id, ambiguousStore ? "CD send submission was interrupted and may have reached Authoritative Orthanc. Manual retry is required." : message);
     return (await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where id=$1`, [delivery.id])).rows[0]!;
   }
 }
 
 export async function monitorCdRobotDeliveries(limit = 25): Promise<{ checked:number }> {
+  await pool.query(`update cd_robot_deliveries set status='failed',completed_at=now(),last_checked_at=now(),last_error='CD send was interrupted before an Orthanc job ID was recorded; its outcome may be uncertain. Manual retry is required.',updated_at=now() where status='sending' and orthanc_job_id is null and requested_at < now()-interval '10 minutes'`);
   const { rows } = await pool.query<DeliveryRow>(`select * from cd_robot_deliveries where status='sending' and orthanc_job_id is not null order by last_checked_at asc nulls first,requested_at asc limit $1`, [Math.max(1, Math.min(limit, 100))]);
   const client = await createAuthoritativeOrthancClient();
   for (const delivery of rows) {

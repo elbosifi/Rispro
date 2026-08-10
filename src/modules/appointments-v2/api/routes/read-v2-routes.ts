@@ -1263,6 +1263,7 @@ router.get(
         ,coalesce(cd_summary.successful_count, 0)::int as cd_successful_count
         ,cd_summary.active_status as cd_active_status
         ,cd_summary.latest_failed as cd_latest_failed
+        ,exists(select 1 from cd_robot_deliveries active_cd where active_cd.patient_id=b.patient_id and active_cd.status='sending') as cd_patient_active
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id

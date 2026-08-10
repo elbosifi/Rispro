@@ -60,11 +60,13 @@ export function buildAuthoritativeOrthancCdAliases(destinationKeys: string[]): A
   const routes = destinationKeys.map((destinationKey) => ({ destinationKey, slug: routeSlug(destinationKey) || `destination_${routeKeyHash(destinationKey)}` }));
   const slugCounts = new Map<string, number>();
   for (const route of routes) slugCounts.set(route.slug, (slugCounts.get(route.slug) || 0) + 1);
-  return routes.map(({ destinationKey, slug }) => {
+  const aliases = routes.map(({ destinationKey, slug }) => {
     const suffix = slugCounts.get(slug)! > 1 ? `_${routeKeyHash(destinationKey)}` : "";
     const maxSlugLength = 64 - AUTHORITATIVE_ORTHANC_CD_PREFIX.length - suffix.length;
     return { destinationKey, alias: `${AUTHORITATIVE_ORTHANC_CD_PREFIX}${slug.slice(0, maxSlugLength).replace(/_+$/g, "")}${suffix}` };
   });
+  if (new Set(aliases.map((item) => item.alias)).size !== aliases.length) throw new HttpError(400, "CD robot destinations produce ambiguous Authoritative Orthanc aliases.");
+  return aliases;
 }
 
 export async function readAuthoritativeOrthancSettings(): Promise<AuthoritativeOrthancSettings> {

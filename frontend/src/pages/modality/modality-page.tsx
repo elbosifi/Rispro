@@ -477,6 +477,7 @@ export default function ModalityPage() {
   const [cdDestinationKey, setCdDestinationKey] = useState("");
   const [cdReasonCode, setCdReasonCode] = useState("");
   const [cdReasonText, setCdReasonText] = useState("");
+  const [cdError, setCdError] = useState<string | null>(null);
   const [elapsedNow, setElapsedNow] = useState(() => new Date());
 
   const { data: lookups } = useQuery<AppointmentLookups>({
@@ -569,9 +570,10 @@ export default function ModalityPage() {
   });
   const cdCreateMutation = useMutation({
     mutationFn: ({ bookingId, destinationKey, resendReasonCode, resendReasonText }: { bookingId:number; destinationKey:string; resendReasonCode?:string; resendReasonText?:string }) => createCdRobotDelivery(bookingId, { destinationKey, resendReasonCode, resendReasonText }),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }); await queryClient.invalidateQueries({ queryKey: ["modality", "cd-deliveries"] }); setCdDialog(null); setCdReasonCode(""); setCdReasonText(""); },
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }); await queryClient.invalidateQueries({ queryKey: ["modality", "cd-deliveries"] }); setCdDialog(null); setCdReasonCode(""); setCdReasonText(""); setCdError(null); },
+    onError: (error: Error) => setCdError(error.message),
   });
-  const cdRetryMutation = useMutation({ mutationFn: retryCdRobotDelivery, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }); await queryClient.invalidateQueries({ queryKey: ["modality", "cd-deliveries"] }); } });
+  const cdRetryMutation = useMutation({ mutationFn: retryCdRobotDelivery, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] }); await queryClient.invalidateQueries({ queryKey: ["modality", "cd-deliveries"] }); }, onError: (error: Error) => setCdError(error.message) });
 
   const boardAppointments = useMemo(
     () => appointments.slice().sort(compareBoardAppointments),
@@ -639,6 +641,7 @@ export default function ModalityPage() {
   const openCd = (appointment: AppointmentWithDetails) => {
     const destinations = cdDestinationsQuery.data?.destinations ?? [];
     if (!destinations.length) return;
+    if (appointment.cdPatientActive) { setCdError("This patient already has a CD send in progress."); return; }
     if (!appointment.cdSuccessfulCount && !appointment.cdLatestFailed && destinations.length === 1) {
       cdCreateMutation.mutate({ bookingId: appointment.id, destinationKey: destinations[0]!.key });
       setOpenMoreMenu(null);
@@ -1339,6 +1342,7 @@ export default function ModalityPage() {
         </div>
       ) : null}
 
+      {cdError ? <div role="alert" className="fixed bottom-4 right-4 z-50 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{cdError}</div> : null}
       <Dialog open={Boolean(cdDialog)} onClose={() => setCdDialog(null)}>
         <DialogContent maxWidth="md">
           <DialogHeader><DialogTitle>{cdDialog?.mode === "resend" ? "Send additional CD" : "Send to CD robot"}</DialogTitle><DialogDescription>{cdDialog?.mode === "resend" ? `This study has already been sent. Successful copies: ${cdDialog.appointment.cdSuccessfulCount ?? 0}` : "Authoritative Orthanc will send the complete study to the selected CD robot."}</DialogDescription></DialogHeader>
