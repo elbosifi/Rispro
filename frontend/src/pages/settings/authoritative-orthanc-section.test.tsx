@@ -6,7 +6,7 @@ import AuthoritativeOrthancSection from "./authoritative-orthanc-section";
 import { api } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({ api: vi.fn() }));
-const settings = { enabled: true, autoExportClinicalDocuments: true, autoRouteEnabled: false, autoRouteDestinationKey: "", baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
+const settings = { enabled: true, autoExportClinicalDocuments: true, autoRouteEnabled: false, autoRouteDestinationKey: "", autoRouteDestinationKeys: [] as string[], baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
 const modalities = [{ key: "PACS_A", aet: "PACS_AE", host: "10.0.0.10", port: 104, isDefault: true }, { key: "PACS_B", aet: "PACS_B", host: "10.0.0.11", port: 11112, isDefault: false }];
 function renderSection(onReAuthRequired = vi.fn()) { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthoritativeOrthancSection onReAuthRequired={onReAuthRequired} /></QueryClientProvider>); }
 
@@ -48,16 +48,21 @@ describe("AuthoritativeOrthancSection", () => {
     expect(screen.getByRole("status").textContent).toContain("1.12.4");
   });
 
-  it("enables stable-series routing and selects an existing PACS destination", async () => {
+  it("enables stable-series routing and adds multiple existing PACS destinations", async () => {
     const user = userEvent.setup(); renderSection();
-    const destination = await screen.findByRole("combobox", { name: "Auto-routing destination" });
+    const destination = await screen.findByRole("combobox", { name: "Add auto-routing destination" });
     expect((destination as HTMLSelectElement).disabled).toBe(true);
     await user.click(screen.getByRole("checkbox", { name: "Enable stable-series auto-routing" }));
     expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+    await user.selectOptions(destination, "PACS_A");
+    await user.click(screen.getByRole("button", { name: "Add destination" }));
     await user.selectOptions(destination, "PACS_B");
+    await user.click(screen.getByRole("button", { name: "Add destination" }));
+    expect(screen.getByRole("list", { name: "Selected auto-routing destinations" }).textContent).toContain("PACS_A");
+    expect(screen.getByRole("list", { name: "Selected auto-routing destinations" }).textContent).toContain("PACS_B");
     await user.click(screen.getByRole("button", { name: "Save" }));
     const saveCall = await waitFor(() => vi.mocked(api).mock.calls.find(([path, options]) => path.endsWith("/settings") && options?.method === "PUT"));
-    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ autoRouteEnabled: true, autoRouteDestinationKey: "PACS_B" }));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ autoRouteEnabled: true, autoRouteDestinationKey: "PACS_A", autoRouteDestinationKeys: ["PACS_A", "PACS_B"] }));
   });
 
   it("offers the existing supervisor re-authentication flow when PACS destinations are protected", async () => {
