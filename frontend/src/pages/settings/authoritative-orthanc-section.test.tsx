@@ -8,7 +8,7 @@ import { api } from "@/lib/api-client";
 vi.mock("@/lib/api-client", () => ({ api: vi.fn() }));
 const settings = { enabled: true, autoExportClinicalDocuments: true, autoRouteEnabled: false, autoRouteDestinationKey: "", baseUrl: "http://orthanc:8042", username: "rispro", timeoutSeconds: 10, verifyTls: true, displayName: "Primary", passwordConfigured: true };
 const modalities = [{ key: "PACS_A", aet: "PACS_AE", host: "10.0.0.10", port: 104, isDefault: true }, { key: "PACS_B", aet: "PACS_B", host: "10.0.0.11", port: 11112, isDefault: false }];
-function renderSection() { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthoritativeOrthancSection onReAuthRequired={vi.fn()} /></QueryClientProvider>); }
+function renderSection(onReAuthRequired = vi.fn()) { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthoritativeOrthancSection onReAuthRequired={onReAuthRequired} /></QueryClientProvider>); }
 
 describe("AuthoritativeOrthancSection", () => {
   beforeEach(() => {
@@ -58,5 +58,17 @@ describe("AuthoritativeOrthancSection", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     const saveCall = await waitFor(() => vi.mocked(api).mock.calls.find(([path, options]) => path.endsWith("/settings") && options?.method === "PUT"));
     expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual(expect.objectContaining({ autoRouteEnabled: true, autoRouteDestinationKey: "PACS_B" }));
+  });
+
+  it("offers the existing supervisor re-authentication flow when PACS destinations are protected", async () => {
+    const onReAuthRequired = vi.fn();
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path.endsWith("/settings") && !options?.method) return { settings };
+      if (path.endsWith("/pacs/orthanc-modalities")) throw new Error("Recent supervisor re-authentication is required.");
+      throw new Error(`Unexpected ${path}`);
+    });
+    const user = userEvent.setup(); renderSection(onReAuthRequired);
+    await user.click(await screen.findByRole("button", { name: "Re-authenticate" }));
+    expect(onReAuthRequired).toHaveBeenCalledWith(["pacs", "orthanc-modalities"]);
   });
 });

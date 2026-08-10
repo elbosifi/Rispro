@@ -5,6 +5,7 @@ import { api } from "@/lib/api-client";
 
 type Settings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; baseUrl: string; username: string; timeoutSeconds: number; verifyTls: boolean; displayName: string; passwordConfigured: boolean };
 type PacsDestination = { key: string; aet: string; host: string; port: number | null; configurationError?: string | null };
+const isReauthError = (error: unknown) => /re-?authentication|reauth|403/i.test(error instanceof Error ? error.message : String(error || ""));
 
 export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const queryClient = useQueryClient();
@@ -17,7 +18,7 @@ export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onRe
   const save = useMutation({
     mutationFn: () => api<{ settings: Settings }>("/integrations/authoritative-orthanc/settings", { method: "PUT", body: JSON.stringify({ ...settings, password }) }),
     onSuccess: ({ settings: next }) => { setDraft(next); setPassword(""); setMessage("Authoritative Orthanc settings saved."); void queryClient.invalidateQueries({ queryKey: ["authoritative-orthanc"] }); },
-    onError: (error: Error) => { if (/reauth/i.test(error.message)) onReAuthRequired(["authoritative_orthanc"]); setMessage(error.message); }
+    onError: (error: Error) => { if (isReauthError(error)) onReAuthRequired(["authoritative_orthanc"]); setMessage(error.message); }
   });
   const test = useMutation({
     mutationFn: () => api<{ system: { name: string | null; version: string | null; apiVersion: string | null }; testedAt: string }>("/integrations/authoritative-orthanc/test", { method: "POST" }),
@@ -27,6 +28,7 @@ export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onRe
   if (!settings) return <Card className="p-4">Loading Authoritative Orthanc settings...</Card>;
   const change = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft({ ...settings, [key]: value });
   const validDestination = destinationsQuery.data?.modalities.some((item) => item.key === settings.autoRouteDestinationKey && item.aet && item.host && item.port != null && !item.configurationError) ?? false;
+  const destinationReauthRequired = isReauthError(destinationsQuery.error);
   return <Card className="space-y-4 p-4" data-testid="authoritative-orthanc-settings">
     <div><h2 className="text-lg font-semibold">Authoritative Orthanc</h2><p className="text-sm text-muted-foreground">Connection used to verify RISpro-linked studies and export approved scanned clinical documents as DICOM Secondary Capture series. RISpro does not upload original modality images or create a replacement study; it adds only the approved scanned-document series to the matched study.</p></div>
     <div className="grid gap-3 md:grid-cols-2">
@@ -35,7 +37,7 @@ export default function AuthoritativeOrthancSection({ onReAuthRequired }: { onRe
       <fieldset className="space-y-2 rounded-lg border p-3 md:col-span-2"><legend className="px-1 font-medium">DICOM Auto-routing</legend>
         <label className="flex items-center gap-2"><input aria-label="Enable stable-series auto-routing" type="checkbox" checked={settings.autoRouteEnabled} disabled={!settings.enabled} onChange={(event) => change("autoRouteEnabled", event.target.checked)} /> Enable stable-series auto-routing</label>
         <label className="block">Destination<select aria-label="Auto-routing destination" className="input w-full" value={settings.autoRouteDestinationKey} disabled={!settings.autoRouteEnabled} required={settings.autoRouteEnabled} onChange={(event) => change("autoRouteDestinationKey", event.target.value)}><option value="">Select an existing PACS connection</option>{destinationsQuery.data?.modalities.map((destination) => <option key={destination.key} value={destination.key} disabled={!destination.aet || !destination.host || destination.port == null || Boolean(destination.configurationError)}>{destination.key} — {destination.aet || "missing AET"} — {destination.host || "missing host"}:{destination.port ?? "missing port"}</option>)}</select></label>
-        {destinationsQuery.error ? <p className="text-xs text-red-600">Could not load existing PACS destinations: {(destinationsQuery.error as Error).message}</p> : <p className="text-xs text-muted-foreground">The selected existing PACS connection is copied to Authoritative Orthanc as the fixed <code>rispro_autoroute</code> modality.</p>}
+        {destinationReauthRequired ? <div className="flex flex-wrap items-center gap-2 text-xs text-amber-700"><span>Recent supervisor re-authentication is required to load PACS destinations.</span><button type="button" className="btn-secondary text-xs" onClick={() => onReAuthRequired(["pacs", "orthanc-modalities"])}>Re-authenticate</button></div> : destinationsQuery.error ? <p className="text-xs text-red-600">Could not load existing PACS destinations: {(destinationsQuery.error as Error).message}</p> : <p className="text-xs text-muted-foreground">The selected existing PACS connection is copied to Authoritative Orthanc as the fixed <code>rispro_autoroute</code> modality.</p>}
       </fieldset>
       <label>Display name<input className="input w-full" value={settings.displayName} onChange={(event) => change("displayName", event.target.value)} /></label>
       <label className="md:col-span-2">Base URL<input className="input w-full" placeholder="http://orthanc-host:8042" value={settings.baseUrl} onChange={(event) => change("baseUrl", event.target.value)} /></label>
