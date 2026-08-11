@@ -20,5 +20,5 @@ function run(command, args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-run("node", ["--env-file=e2e/.env", "./node_modules/.bin/tsx", "src/db/migrate.ts"]);
-run("node", ["--env-file=e2e/.env", "./node_modules/.bin/tsx", "e2e/seed.ts"]);
+run("node", ["--env-file=e2e/.env", "--import", "tsx", "src/db/migrate.ts"]);
+run("node", ["--env-file=e2e/.env", "--import", "tsx", "e2e/seed.ts"]);

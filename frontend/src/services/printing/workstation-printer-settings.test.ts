@@ -96,7 +96,7 @@ describe("workstation printer settings", () => {
   });
 
   it("uses each profile fallback when stored scaleContent is missing or corrupt", () => {
-    const profiles = createDefaultQzPrinterSettings().profiles.map(({ scaleContent: _scaleContent, ...profile }) => profile);
+    const profiles = createDefaultQzPrinterSettings().profiles.map((profile) => ({ ...profile, scaleContent: undefined }));
     const missing = normalizeQzPrinterSettings({ profiles });
     expect(missing.profiles.find((profile) => profile.documentType === "A4_DOCUMENT")?.scaleContent).toBe(true);
     expect(missing.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")?.scaleContent).toBe(false);
@@ -122,7 +122,7 @@ describe("workstation printer settings", () => {
   });
 
   it("inherits orientation from each physical profile when saved orientation is missing or invalid", () => {
-    const profiles = createDefaultQzPrinterSettings().profiles.map(({ orientation: _orientation, ...profile }) => profile);
+    const profiles = createDefaultQzPrinterSettings().profiles.map((profile) => ({ ...profile, orientation: undefined }));
     const missing = normalizeQzPrinterSettings({ profiles });
     expect(missing.profiles.map((profile) => profile.orientation)).toEqual(["portrait", "landscape", "portrait", "landscape", "portrait"]);
 

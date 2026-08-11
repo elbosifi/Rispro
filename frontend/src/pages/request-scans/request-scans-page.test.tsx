@@ -8,7 +8,8 @@ const authState = vi.hoisted(() => ({ role: "super_admin" as string }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.language, isArabic: languageState.language === "ar", t: (key: string) => key }) }));
 vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { id: 1, role: authState.role } }) }));
 
-import RequestScansPage, { sanitizeClinicalDocumentExportError } from "./request-scans-page";
+import RequestScansPage from "./request-scans-page";
+import { sanitizeClinicalDocumentExportError } from "./request-scans-utils";
 
 const response = (value: unknown) => ({ ok: true, json: async () => value }) as Response;
 const health = { name: "archive-share", state: "unavailable", affectedCount: 31, lastConnectionCheck: "2026-07-24T10:00:00Z", lastSuccessfulArchive: "2026-07-24T09:00:00Z", nextRetryAt: "2026-07-24T10:02:00Z", lastError: "Connection unavailable" };

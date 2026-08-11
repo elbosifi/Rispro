@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,10 +14,16 @@ const pageDimensions: Record<number, { width: number; height: number }> = {
 
 function MockDocument({ children, file, onLoadSuccess, onLoadError }: { children: ReactNode; file: { url: string }; onLoadSuccess?: (pdf: { numPages: number; getPage: (pageNumber: number) => Promise<{ getViewport: () => { width: number; height: number } }> }) => void; onLoadError?: (error: Error) => void }) {
   const isMalformed = file.url.includes("/999/");
+  const onLoadSuccessRef = useRef(onLoadSuccess);
+  const onLoadErrorRef = useRef(onLoadError);
+  useEffect(() => {
+    onLoadSuccessRef.current = onLoadSuccess;
+    onLoadErrorRef.current = onLoadError;
+  }, [onLoadError, onLoadSuccess]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (isMalformed) onLoadError?.(new Error("Failed to load PDF from https://internal.example/documents/999/view"));
-      else onLoadSuccess?.({
+      if (isMalformed) onLoadErrorRef.current?.(new Error("Failed to load PDF from https://internal.example/documents/999/view"));
+      else onLoadSuccessRef.current?.({
         numPages: file.url.includes("/43/") ? 2 : 3,
         getPage: async (pageNumber) => ({
           getViewport: () => pageDimensions[pageNumber] ?? pageDimensions[1],
@@ -32,14 +38,14 @@ function MockDocument({ children, file, onLoadSuccess, onLoadError }: { children
   return <>{children}</>;
 }
 
-function MockPage({ pageNumber, width, scale, loading }: { pageNumber: number; width?: number; scale?: number; loading?: ReactNode }) {
-  const isLargePage = Boolean((width && width > 200) || (scale && scale > 0.5));
+function MockPage({ pageNumber, width, scale, loading, rotate }: { pageNumber: number; width?: number; scale?: number; loading?: ReactNode; rotate?: number }) {
   return (
     <div
-      data-testid={isLargePage ? "mock-pdf-large-page" : `mock-pdf-page-${pageNumber}`}
+      data-testid={`mock-pdf-page-${pageNumber}`}
       data-page-number={pageNumber}
       data-width={width ?? ""}
       data-scale={scale ?? ""}
+      data-rotation={rotate ?? 0}
     >
       {loading || `Rendered page ${pageNumber}`}
     </div>
@@ -87,119 +93,51 @@ afterEach(() => {
 });
 
 describe("DocumentPreviewWorkspace", () => {
-  it("opens PDFs in overview mode with the page count and one button per page", async () => {
+  it("renders every PDF page in one continuous preview", async () => {
     renderWorkspace(pdfDocument());
 
-    expect(await screen.findByText("3 pages")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open page 1" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open page 2" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open page 3" })).toBeTruthy();
-    expect(screen.queryByTestId("mock-pdf-large-page")).toBeNull();
+    expect(await screen.findByTestId("mock-pdf-page-1")).toBeTruthy();
+    expect(screen.getByTestId("mock-pdf-page-2")).toBeTruthy();
+    expect(screen.getByTestId("mock-pdf-page-3")).toBeTruthy();
+    expect(screen.getByRole("toolbar", { name: "Document utilities" })).toBeTruthy();
   });
 
-  it("fits a portrait page inside both overview viewport dimensions", async () => {
+  it("contains mixed page sizes in fit-page mode", async () => {
     renderWorkspace(pdfDocument());
 
+    await waitFor(() => {
+      const portraitScale = Number(screen.getByTestId("mock-pdf-page-1").getAttribute("data-scale"));
+      const landscapeScale = Number(screen.getByTestId("mock-pdf-page-2").getAttribute("data-scale"));
+      const tallPageScale = Number(screen.getByTestId("mock-pdf-page-3").getAttribute("data-scale"));
+      expect(600 * portraitScale).toBeLessThanOrEqual(240);
+      expect(800 * portraitScale).toBeLessThanOrEqual(240);
+      expect(800 * landscapeScale).toBeLessThanOrEqual(240);
+      expect(600 * landscapeScale).toBeLessThanOrEqual(240);
+      expect(500 * tallPageScale).toBeLessThanOrEqual(240);
+      expect(1000 * tallPageScale).toBeLessThanOrEqual(240);
+      expect(tallPageScale).not.toBe(portraitScale);
+    });
+  });
+
+  it("supports fit-width, zoom, and rotation controls", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(pdfDocument());
     const page = await screen.findByTestId("mock-pdf-page-1");
-    const card = screen.getByRole("button", { name: "Open page 1" });
-    const scale = Number(page.getAttribute("data-scale"));
-    const viewportWidth = Number(card.getAttribute("data-page-viewport-width"));
-    const viewportHeight = Number(card.getAttribute("data-page-viewport-height"));
+    await waitFor(() => expect(Number(page.getAttribute("data-scale"))).toBeLessThan(1));
+    const initialScale = Number(page.getAttribute("data-scale"));
 
-    expect(600 * scale).toBeLessThanOrEqual(viewportWidth);
-    expect(800 * scale).toBeLessThanOrEqual(viewportHeight);
+    await user.click(screen.getByRole("button", { name: "Fit width" }));
+    expect(Number(page.getAttribute("data-width"))).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Fit page" }));
+    await user.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(Number(page.getAttribute("data-scale"))).toBeGreaterThan(initialScale);
+    await user.click(screen.getByRole("button", { name: "Rotate clockwise" }));
+    expect(page.getAttribute("data-rotation")).toBe("90");
   });
 
-  it("fits a landscape page inside the same overview card", async () => {
-    renderWorkspace(pdfDocument());
-
-    const page = await screen.findByTestId("mock-pdf-page-2");
-    const card = screen.getByRole("button", { name: "Open page 2" });
-    const scale = Number(page.getAttribute("data-scale"));
-    const viewportWidth = Number(card.getAttribute("data-page-viewport-width"));
-    const viewportHeight = Number(card.getAttribute("data-page-viewport-height"));
-
-    expect(800 * scale).toBeLessThanOrEqual(viewportWidth);
-    expect(600 * scale).toBeLessThanOrEqual(viewportHeight);
-  });
-
-  it("uses page-specific contain scales for mixed orientations", async () => {
-    renderWorkspace(pdfDocument());
-
-    const portraitScale = Number((await screen.findByTestId("mock-pdf-page-1")).getAttribute("data-scale"));
-    const landscapeScale = Number((await screen.findByTestId("mock-pdf-page-2")).getAttribute("data-scale"));
-    const tallPageScale = Number((await screen.findByTestId("mock-pdf-page-3")).getAttribute("data-scale"));
-
-    expect(portraitScale).not.toBe(landscapeScale);
-    expect(tallPageScale).not.toBe(portraitScale);
-  });
-
-  it("opens a selected overview page in single-page mode", async () => {
-    const user = userEvent.setup();
-    renderWorkspace(pdfDocument());
-    await screen.findByText("3 pages");
-
-    await user.click(screen.getByRole("button", { name: "Open page 2" }));
-
-    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Back to all pages" })).toBeTruthy();
-    expect(screen.getByTestId("mock-pdf-large-page").getAttribute("data-page-number")).toBe("2");
-  });
-
-  it("supports previous and next controls at their single-page boundaries", async () => {
-    const user = userEvent.setup();
-    renderWorkspace(pdfDocument());
-    await screen.findByText("3 pages");
-    await user.click(screen.getByRole("button", { name: "Open page 1" }));
-
-    const previous = screen.getByRole("button", { name: "Previous page" });
-    const next = screen.getByRole("button", { name: "Next page" });
-    expect((previous as HTMLButtonElement).disabled).toBe(true);
-    expect((next as HTMLButtonElement).disabled).toBe(false);
-
-    await user.click(next);
-    await user.click(next);
-    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
-    expect((next as HTMLButtonElement).disabled).toBe(true);
-
-    await user.click(previous);
-    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
-  });
-
-  it("uses compact top and bottom PDF toolbars and collapses the thumbnail rail", async () => {
-    const user = userEvent.setup();
-    renderWorkspace(pdfDocument());
-    await screen.findByText("3 pages");
-    await user.click(screen.getByRole("button", { name: "Open page 1" }));
-
-    expect(screen.getAllByRole("toolbar")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Hide pages" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Hide pages" }));
-    expect(screen.getByRole("button", { name: "Show pages" })).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "All pages" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Show pages" }));
-    expect(await screen.findByRole("list", { name: "All pages" })).toBeTruthy();
-  });
-
-  it("returns to overview while preserving the selected page", async () => {
-    const user = userEvent.setup();
-    renderWorkspace(pdfDocument());
-    await screen.findByText("3 pages");
-    await user.click(screen.getByRole("button", { name: "Open page 2" }));
-    await user.click(screen.getByRole("button", { name: "Back to all pages" }));
-
-    expect(screen.getByText("3 pages")).toBeTruthy();
-    expect(screen.queryByTestId("mock-pdf-large-page")).toBeNull();
-    expect(screen.getByRole("button", { name: "Open page 2" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("button", { name: "Open page 1" }).getAttribute("aria-current")).toBeNull();
-  });
-
-  it("resets to overview mode and page one when the selected PDF changes", async () => {
-    const user = userEvent.setup();
+  it("updates the continuous page set when the selected PDF changes", async () => {
     const { rerender } = renderWorkspace(pdfDocument());
-    await screen.findByText("3 pages");
-    await user.click(screen.getByRole("button", { name: "Open page 3" }));
-    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+    await screen.findByTestId("mock-pdf-page-3");
 
     rerender(
       <LanguageProvider>
@@ -207,9 +145,9 @@ describe("DocumentPreviewWorkspace", () => {
       </LanguageProvider>
     );
 
-    await waitFor(() => expect(screen.getByText("2 pages")).toBeTruthy());
-    expect(screen.queryByTestId("mock-pdf-large-page")).toBeNull();
-    expect(screen.getByRole("button", { name: "Open page 1" }).getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(screen.queryByTestId("mock-pdf-page-3")).toBeNull());
+    expect(screen.getByTestId("mock-pdf-page-1")).toBeTruthy();
+    expect(screen.getByTestId("mock-pdf-page-2")).toBeTruthy();
   });
 
   it("renders an image preview with one selected thumbnail", () => {
@@ -250,16 +188,15 @@ describe("DocumentPreviewWorkspace", () => {
       </LanguageProvider>
     );
 
-    expect(await screen.findByText("3 pages")).toBeTruthy();
+    expect(await screen.findByTestId("mock-pdf-page-1")).toBeTruthy();
     expect(error).toHaveBeenCalled();
   });
 
-  it("preserves the selected PDF page when expanded review changes", async () => {
+  it("preserves the continuous PDF preview when expanded review changes", async () => {
     const onExpandedChange = vi.fn();
     const user = userEvent.setup();
     const { rerender } = renderWorkspace(pdfDocument(), { onExpandedChange });
-    await screen.findByText("3 pages");
-    await user.click(screen.getByRole("button", { name: "Open page 2" }));
+    await screen.findByTestId("mock-pdf-page-3");
 
     rerender(
       <LanguageProvider>
@@ -269,7 +206,7 @@ describe("DocumentPreviewWorkspace", () => {
       </LanguageProvider>
     );
 
-    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+    expect(screen.getByTestId("mock-pdf-page-2")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Exit expanded review" }));
     expect(onExpandedChange).toHaveBeenCalledWith(false);
   });

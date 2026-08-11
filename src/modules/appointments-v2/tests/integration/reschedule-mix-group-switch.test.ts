@@ -137,24 +137,24 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
   const fetch = (path: string, opts: Record<string, unknown> = {}) =>
     fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
 
-  async function createPatient() {
+  async function createPatient(category: "oncology" | "non_oncology" = "non_oncology") {
     const { pool } = await import("../../../../db/pool.js");
     const nationalId = `8${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
     const nameSuffix = Math.random().toString().slice(2, 10);
     const arabicName = `${TEST_PREFIX}مريض ${nameSuffix}`;
     const englishName = `${TEST_PREFIX} Patient ${nameSuffix}`;
     const row = await pool.query<{ id: number }>(
-      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value)
-       values ($1, $2, $3, $4, 'M', 40, $5, 'national_id', $6)
+      `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, phone_1, identifier_type, identifier_value, category)
+       values ($1, $2, $3, $4, 'M', 40, $5, 'national_id', $6, $7)
        returning id`,
-      [arabicName, englishName, nationalId, arabicName, "0912345678", nationalId]
+      [arabicName, englishName, nationalId, arabicName, "0912345678", nationalId, category]
     );
     return Number(row.rows[0].id);
   }
 
   async function fillModalityDailyCapacity(bookingDate: string): Promise<void> {
     for (let index = 0; index < 10; index += 1) {
-      const patient = await createPatient();
+      const patient = await createPatient("oncology");
       const standardBooking = await fetch("/api/v2/appointments", {
         method: "POST",
         body: {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -33,6 +33,7 @@ import {
 import { claimRequestScanJob, recoverExpiredRequestScanJobs, updateRequestScanCheckpoint } from "./request-scan-processing-service.js";
 import type { RequestScanSettings } from "./request-scan-settings-service.js";
 import { acquireRequestScanWorkerLeadership, releaseRequestScanWorkerLeadership } from "./request-scan-worker-control-service.js";
+import { __resetAuthoritativeOrthancForTests, __setAuthoritativeOrthancSettingsForTests } from "./authoritative-orthanc-service.js";
 
 const created = { jobs: [] as number[], bookings: [] as number[], patients: [] as number[], policyVersions: [] as number[], policySets: [] as number[], modalities: [] as number[], examTypes: [] as number[], users: [] as number[] };
 let sequence = 0;
@@ -50,6 +51,22 @@ const settings: RequestScanSettings = {
   pollingIntervalSeconds: 15,
   fileReadyDelaySeconds: 1,
 };
+
+before(() => {
+  __setAuthoritativeOrthancSettingsForTests({
+    enabled: true,
+    autoExportClinicalDocuments: true,
+    autoRouteEnabled: false,
+    autoRouteDestinationKey: "",
+    autoRouteDestinationKeys: [],
+    baseUrl: "http://orthanc.test",
+    username: "",
+    password: "",
+    timeoutSeconds: 10,
+    verifyTls: true,
+    displayName: "Test Orthanc",
+  });
+});
 
 function suffix() {
   sequence += 1;
@@ -393,9 +410,10 @@ test("modality fingerprint reuse requires the matching SHA-256 and byte size", a
 test("concurrent identical modality jobs create one document and an archive retry stays archive-only", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const booking = await createBooking(); const code = `DC${suffix().slice(-6)}`;
+  const filename = `concurrent-${suffix()}.pdf`;
   await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
-  const firstId = await createModalityJob(booking.modalityId, code, "concurrent.pdf");
-  const secondId = await createModalityJob(booking.modalityId, code, "concurrent.pdf", `ModalityDocuments\\${code}\\Incoming\\parallel\\concurrent.pdf`);
+  const firstId = await createModalityJob(booking.modalityId, code, filename);
+  const secondId = await createModalityJob(booking.modalityId, code, filename, `ModalityDocuments\\${code}\\Incoming\\parallel\\${filename}`);
   const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
   const recognitionCalls: string[] = [];
   const [first, second] = await Promise.all([
@@ -407,10 +425,10 @@ test("concurrent identical modality jobs create one document and an archive retr
   const stored = await pool.query<DocumentRow>("select * from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId]);
   const storedPath = resolveStoredPath(stored.rows[0].stored_path);
   assert.equal((await fs.stat(storedPath)).isFile(), true);
-  assert.equal((await fs.readdir(path.dirname(storedPath))).filter((name) => name.endsWith("-concurrent.pdf")).length, 1);
+  assert.equal((await fs.readdir(path.dirname(storedPath))).filter((name) => name.endsWith(`-${filename}`)).length, 1);
   assert.equal((await pool.query("select id from clinical_document_exports where appointment_id=$1", [booking.id])).rowCount, 1);
 
-  const failedId = await createModalityJob(booking.modalityId, code, "concurrent.pdf");
+  const failedId = await createModalityJob(booking.modalityId, code, filename);
   const failed = await processRequestScanJob(failedId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "concurrent-content", { failAllMoves: true, recognitionCalls }));
   assert.equal(failed.status, "failed"); assert.equal(failed.attachment_created, false);
   await retryRequestScanJob(failedId, { readSettings: async () => settingsWithRoot, moveFile: async () => { throw new Error("duplicate archive retry must not return to Incoming"); } });
@@ -1461,6 +1479,7 @@ test("archive-only retry queues the attached checkpoint once and reports per-ite
 });
 
 after(async () => {
+  __resetAuthoritativeOrthancForTests();
   if (created.users.length) await pool.query("delete from audit_log where changed_by_user_id=any($1::bigint[])", [created.users]);
   if (created.jobs.length) await pool.query("delete from audit_log where entity_type='request_scan_job' and entity_id=any($1::bigint[])", [created.jobs]);
   if (created.patients.length) await pool.query("delete from documents where patient_id=any($1::bigint[]) and source in ('request_scan_automation','modality_scan_automation')", [created.patients]);

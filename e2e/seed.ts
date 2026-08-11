@@ -37,6 +37,10 @@ try {
   );
   const modalityId = Number(modality.rows[0].id);
   await pool.query(
+    "update modalities set safety_warning_ar = $2, safety_warning_en = $3, safety_warning_enabled = true where id = $1",
+    [modalityId, "E2E synthetic CT safety warning", "E2E synthetic CT safety warning"],
+  );
+  await pool.query(
     `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
      values ($1, 'رأس E2E', 'E2E CT Head', 'E2E_CT_HEAD', true)`,
     [modalityId],

@@ -35,6 +35,12 @@ describe("forced password-change guardrail", () => {
     assert.ok(authMiddleware.includes("blockForcedPasswordChange"));
     assert.ok(authMiddleware.includes("mustChangePassword"));
     assert.ok(authMiddleware.includes("Password change is required before accessing this area."));
-    assert.match(app, /app\.use\("\/api\/auth", authRouter\);\s+app\.use\("\/api", blockForcedPasswordChange\);/);
+    const authRouterIndex = app.indexOf('app.use("/api/auth", authRouter);');
+    const forcedPasswordGuardIndex = app.indexOf('app.use("/api", blockForcedPasswordChange);');
+    const protectedApiIndex = app.indexOf('app.use("/api/action-pin", actionPinRouter);');
+
+    assert.ok(authRouterIndex >= 0);
+    assert.ok(forcedPasswordGuardIndex > authRouterIndex);
+    assert.ok(protectedApiIndex > forcedPasswordGuardIndex);
   });
 });

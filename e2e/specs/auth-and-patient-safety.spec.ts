@@ -6,11 +6,11 @@ test("reception login, direct-route protection, and logout use the real session 
   await page.goto("/login");
   await page.locator('input[autocomplete="username"]').fill("e2e_reception");
   await page.locator('input[autocomplete="current-password"]').fill("wrong password");
-  await page.getByRole("button", { name: /sign in|login/i }).click();
+  await page.getByRole("button", { name: /^sign in$/i }).click();
   await expect(page.getByText(/invalid|failed/i)).toBeVisible();
 
   await page.locator('input[autocomplete="current-password"]').fill(E2E_PASSWORD);
-  await page.getByRole("button", { name: /sign in|login/i }).click();
+  await page.getByRole("button", { name: /^sign in$/i }).click();
   await expect(page).toHaveURL(/\/(dashboard|patients|appointments|registrations|queue)/);
   await page.goto("/patients");
   await expect(page.getByRole("button", { name: /register patient/i })).toBeVisible();

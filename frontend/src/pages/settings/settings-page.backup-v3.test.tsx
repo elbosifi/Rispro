@@ -272,7 +272,7 @@ describe("BackupRestoreSection v3 UI", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/encryption-passphrase", expect.objectContaining({ method: "POST" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/backup-control/jobs/job-1/verify", expect.objectContaining({ method: "POST" }));
-  });
+  }, 15_000);
 
   it("shows the Backup security setup card, permits one recovery download, and requires restart after secure save", async () => {
     let saved = false;

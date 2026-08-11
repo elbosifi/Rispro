@@ -35,7 +35,7 @@ import {
 } from "@/components/shared";
 import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import { buildModalityProtocolPrintSheet, printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
+import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { todayIsoDateLy } from "@/lib/date-format";
@@ -1789,63 +1789,6 @@ function ValueWithPreset({
       {preset && preset !== value ? <p className="text-[10px] text-muted-foreground">Preset: {preset}</p> : null}
     </div>
   );
-}
-
-function protocolPrintSheetFromModality(appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment): ProtocolPrintSheet {
-  const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ") || null;
-  const appointmentDateTime = [appointment.appointmentDate, appointment.bookingTime].filter(Boolean).join(" ") || null;
-  const base = {
-    patientName: appointment.englishFullName || appointment.arabicFullName || `Patient ${appointment.patientId}`,
-    mrn: appointment.mrn,
-    accession: appointment.accessionNumber,
-    appointmentDateTime,
-    modality: assignment.modality,
-    exam: appointment.examNameEn ?? appointment.examNameAr,
-    category: appointment.caseCategory ?? null,
-    clinicalNotes: appointment.notes?.trim() || appointment.specialReasonNote?.trim() || null,
-    protocolName: assignment.protocolName ?? "Free-text protocol",
-    versionNumber: assignment.versionNumber,
-    scanner,
-    assignedBy: assignment.assignedBy,
-    assignedAt: assignment.assignedAt,
-    protocolInstructions: assignment.freeTextProtocol ?? assignment.protocolNotes,
-    contrastInstructions: assignment.contrastNotes,
-  };
-
-  if (assignment.modality === "CT") {
-    return {
-      ...base,
-      modality: "CT",
-      ctPhases: assignment.ctPhases.map((phase) => ({
-        orderIndex: phase.orderIndex,
-        phase: effectiveValue(phase.customPhaseName, phase.phasePresetName),
-        timing: effectiveValue(phase.timingOverride, phase.delaySeconds != null ? `${phase.timingType ?? "Delay"} ${phase.delaySeconds}s` : phase.timingType),
-        coverage: effectiveValue(phase.coverageOverride, phase.coverage),
-        reconstruction: effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes),
-        instructions: effectiveValue(phase.instructionsOverride, phase.instructions),
-        isRequired: phase.isRequired,
-      })),
-    };
-  }
-
-  return {
-    ...base,
-    modality: "MRI",
-    mriSequences: assignment.mriSequences.map((sequence) => ({
-      orderIndex: sequence.orderIndex,
-      scanner: sequence.scannerName ?? scanner,
-      sequence: sequence.sequencePresetName ?? sequence.genericFamily ?? sequence.weighting,
-      vendorSequenceName: sequence.vendorSequenceName,
-      plane: effectiveValue(sequence.planeOverride, sequence.defaultPlane),
-      coverage: effectiveValue(sequence.coverageOverride, sequence.defaultCoverage),
-      bValuesTiming: [
-        effectiveValue(sequence.bValuesOverride, sequence.defaultBValues),
-        effectiveValue(sequence.timingOverride, sequence.defaultDynamicTiming),
-      ].filter(Boolean).join(" / ") || null,
-      notes: effectiveValue(sequence.notesOverride, sequence.notes),
-      isRequired: sequence.isRequired,
-    })),
-  };
 }
 
 function modalitySpecialInstructions(language: Language, appointment: AppointmentWithDetails): string | null {

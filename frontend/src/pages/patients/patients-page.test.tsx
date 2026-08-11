@@ -139,6 +139,7 @@ describe("PatientsPage interactions", () => {
         address: null,
       },
       category: null,
+      registration: { createdAt: "2026-01-01T09:00:00.000Z", createdByUserId: 1, createdByName: "E2E Registrar", createdByUsername: "registrar" },
       warnings: {
         missingPhone: false,
         missingDob: false,
@@ -181,6 +182,7 @@ describe("PatientsPage interactions", () => {
 
     await userEvent.click(row as HTMLElement);
 
+    await screen.findByText("Patient Profile");
     await waitFor(() => {
       expect(screen.getByText("Patient Profile")).toBeTruthy();
     });
@@ -193,7 +195,7 @@ describe("PatientsPage interactions", () => {
   });
 
   it("shows the primary identifier when national id is missing", async () => {
-    fetchPatientDirectorySummaryMock.mockResolvedValueOnce({
+    fetchPatientDirectorySummaryMock.mockResolvedValue({
       demographics: {
         id: 11,
         mrn: "MRN-11",
@@ -233,6 +235,7 @@ describe("PatientsPage interactions", () => {
         address: null,
       },
       category: null,
+      registration: { createdAt: "2026-01-01T09:00:00.000Z", createdByUserId: 1, createdByName: "E2E Registrar", createdByUsername: "registrar" },
       warnings: {
         missingPhone: false,
         missingDob: false,
@@ -259,11 +262,11 @@ describe("PatientsPage interactions", () => {
 
     await userEvent.click(row as HTMLElement);
 
+    await screen.findByText("Patient Profile");
     await waitFor(() => {
-      expect(screen.getByText("Passport")).toBeTruthy();
+      expect(screen.getByText("Passport · Primary")).toBeTruthy();
       expect(screen.getByText("P-12345")).toBeTruthy();
       expect(screen.getByText("ALT-678")).toBeTruthy();
-      expect(screen.getByText("Primary")).toBeTruthy();
     });
   });
 

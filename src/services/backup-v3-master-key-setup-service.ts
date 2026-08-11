@@ -55,7 +55,11 @@ async function loadEncryptedValues(dependencies: BackupV3MasterKeyDependencies):
   return allEncryptedValues();
 }
 
-function defaultEnvPath(): string { return path.join(getProjectRootDir(), ".env"); }
+function defaultEnvPath(): string {
+  return process.env.RISPRO_E2E === "1"
+    ? path.join(getProjectRootDir(), "e2e", ".env")
+    : path.join(getProjectRootDir(), ".env");
+}
 function configuredRuntimeKey(): string { return String(process.env[MASTER_KEY_NAME] || "").trim(); }
 function configBackupDir(envPath: string): string {
   const configured = String(process.env.RISPRO_CONFIG_BACKUP_DIR || "").trim();

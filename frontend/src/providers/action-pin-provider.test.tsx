@@ -598,8 +598,7 @@ describe("ActionPinIdleLock", () => {
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
 
-    await delay(150);
-    expect(screen.getByText("Session locked")).toBeTruthy();
+    expect(await screen.findByText("Session locked", {}, { timeout: 1_000 })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Unlock Action PIN"), { target: { value: "1234" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
@@ -622,8 +621,7 @@ describe("ActionPinIdleLock", () => {
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
 
-    await delay(150);
-    expect(screen.getByText("Session locked")).toBeTruthy();
+    expect(await screen.findByText("Session locked", {}, { timeout: 1_000 })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Unlock Action PIN"), { target: { value: "9999" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
@@ -641,9 +639,7 @@ describe("ActionPinIdleLock", () => {
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
 
-    await delay(150);
-
-    expect(screen.getByText("Action PIN is required to unlock. Switch user or contact super admin.")).toBeTruthy();
+    expect(await screen.findByText("Action PIN is required to unlock. Switch user or contact super admin.", {}, { timeout: 1_000 })).toBeTruthy();
     expect((screen.getByRole("button", { name: "Unlock" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -655,8 +651,7 @@ describe("ActionPinIdleLock", () => {
     await flushIdleQueries();
     expect(screen.getByText("Patient screen content")).toBeTruthy();
 
-    await delay(150);
-    expect(screen.getByText("Session locked")).toBeTruthy();
+    expect(await screen.findByText("Session locked", {}, { timeout: 1_000 })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Unlock Action PIN"), { target: { value: "1234" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Switch user" }));

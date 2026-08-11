@@ -137,9 +137,12 @@ export default function RegistrationsPage() {
         dateTo: "",
       }
     : DEFAULT_FILTERS;
-  const [filters, setFilters] = useState<RegistrationsFilters>(() =>
+  const [storedFilters, setFilters] = useState<RegistrationsFilters>(() =>
     parseRegistrationFiltersFromSearchParams(searchParams, patientScopedDefaultFilters)
   );
+  const filters = patientIdParam
+    ? { ...storedFilters, dateMode: "all" as const, date: "", dateFrom: "", dateTo: "" }
+    : storedFilters;
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -170,21 +173,6 @@ export default function RegistrationsPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
-  useEffect(() => {
-    if (!patientIdParam) return;
-
-    setFilters((current) =>
-      current.dateMode === "all" && current.date === "" && current.dateFrom === "" && current.dateTo === ""
-        ? current
-        : {
-            ...current,
-            dateMode: "all",
-            date: "",
-            dateFrom: "",
-            dateTo: "",
-          },
-    );
-  }, [patientIdParam]);
   const sendNotificationMutation = useMutation({
     mutationFn: async () => {
       if (!notificationAppointment) throw new Error("No appointment selected.");
@@ -270,6 +258,7 @@ export default function RegistrationsPage() {
   const clearPatientScope = () => {
     if (!patientIdParam) return;
 
+    setFilters(filters);
     const nextSearchParams = new URLSearchParams(searchParams);
     nextSearchParams.delete("patientId");
     setSearchParams(nextSearchParams, { replace: true });
@@ -470,6 +459,8 @@ export default function RegistrationsPage() {
   };
 
   const openSlipPreview = (appointment: AppointmentWithDetails) => {
+    setSlipPreviewHtml(null);
+    setSlipPreviewLoading(true);
     setSlipPreviewAppointment(appointment);
   };
 
@@ -580,18 +571,7 @@ export default function RegistrationsPage() {
         ? { slipSettings, patientQrSettings }
         : undefined;
 
-    if (!slipPreviewAppointment) {
-      setSlipPreviewHtml(null);
-      setSlipPreviewLoading(false);
-      return;
-    }
-
-    if (!settingsReady) {
-      setSlipPreviewLoading(true);
-      return;
-    }
-
-    setSlipPreviewLoading(true);
+    if (!slipPreviewAppointment || !settingsReady) return;
     void prepareAppointmentSlipHtml(slipPreviewAppointment, renderOptions)
       .then((html) => {
         if (cancelled || !html) return;

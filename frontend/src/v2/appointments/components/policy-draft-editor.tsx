@@ -348,22 +348,6 @@ export function PolicyDraftEditor({
     return map;
   }, [examTypeCatalog.data, language]);
 
-  const allExamTypeOptions = useMemo(() => {
-    const values = examTypeCatalog.data ?? [];
-    return values
-      .map((examType) => {
-        const examTypeId = Number(examType.id);
-        return Number.isFinite(examTypeId)
-          ? {
-              value: examTypeId,
-              label: chooseLocalized(language, examType.nameAr, examType.nameEn) || examType.name || examType.code || `Exam type ${examTypeId}`,
-            }
-          : null;
-      })
-      .filter((option): option is ExamTypeOption => option != null)
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [examTypeCatalog.data, language]);
-
   const examTypeById = useMemo(() => {
     const map = new Map<number, NonNullable<typeof examTypeCatalog.data>[number]>();
     for (const examType of examTypeCatalog.data ?? []) {

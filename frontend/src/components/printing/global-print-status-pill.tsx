@@ -25,16 +25,16 @@ function SubmittingPrinterIcon() {
 
 export function GlobalPrintStatusPill() {
   const status = useGlobalPrintStatus();
-  const [isDismissing, setIsDismissing] = useState(false);
+  const [dismissingStatus, setDismissingStatus] = useState<typeof status | null>(null);
 
   useEffect(() => {
-    setIsDismissing(false);
     if (status.state !== "submitted") return;
-    const timer = window.setTimeout(() => setIsDismissing(true), PRINT_STATUS_SUCCESS_DISMISS_MS - 500);
+    const timer = window.setTimeout(() => setDismissingStatus(status), PRINT_STATUS_SUCCESS_DISMISS_MS - 500);
     return () => window.clearTimeout(timer);
-  }, [status.state]);
+  }, [status]);
 
   if (status.state === "idle") return null;
+  const isDismissing = dismissingStatus === status;
   const label = labels[status.state];
   const Icon = status.state === "preparing" ? Loader2 : status.state === "submitted" ? Check : status.state === "failed" ? TriangleAlert : Clock3;
   const tone = status.state === "submitted" ? "border-emerald-400/50 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100" : status.state === "failed" ? "border-red-400/50 bg-red-50 text-red-900 dark:bg-red-950/30 dark:text-red-100" : status.state === "status_unknown" ? "border-amber-400/50 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100" : "border-border bg-muted text-foreground";

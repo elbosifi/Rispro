@@ -220,6 +220,7 @@ describe("Option-1 capacity semantics — DB-backed proof", { skip: skipEnv }, (
     caseCategory: "oncology" | "non_oncology";
     useSpecialQuota?: boolean;
   }) {
+    await pool.query(`update patients set category = $2 where id = $1`, [params.patientId, params.caseCategory]);
     return fetch("/api/v2/appointments", {
       method: "POST",
       body: {

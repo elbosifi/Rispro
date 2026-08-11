@@ -191,6 +191,7 @@ describe("RegistrationsPage print actions", () => {
         address: null,
       },
       category: "non_oncology",
+      registration: { createdAt: "2026-01-01T09:00:00.000Z", createdByUserId: 1, createdByName: "E2E Registrar", createdByUsername: "registrar" },
       warnings: {
         missingPhone: false,
         missingDob: false,
@@ -310,7 +311,7 @@ describe("RegistrationsPage print actions", () => {
       examNameEn: "CT Head",
       priorityNameAr: null,
       priorityNameEn: null,
-      appointmentDate: "2027-01-04",
+      appointmentDate: "2027-01-03",
       status: "scheduled",
       isWalkIn: false,
       notes: null,
@@ -497,7 +498,7 @@ describe("RegistrationsPage print actions", () => {
   });
 
   it("opens the Documents workspace from an appointmentId deep link", async () => {
-    fetchAppointmentsMock.mockResolvedValueOnce([
+    fetchAppointmentsMock.mockResolvedValue([
       {
         id: 99,
         modalityId: 1,
@@ -614,7 +615,7 @@ describe("RegistrationsPage print actions", () => {
         publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
       },
     ]);
-    getAppointmentByIdMock.mockResolvedValueOnce({
+    getAppointmentByIdMock.mockResolvedValue({
       id: 7,
       modalityId: 1,
       examTypeId: 3,
@@ -651,6 +652,7 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(getAppointmentRow("ACC-7"));
     const dialog = await screen.findByRole("dialog", { name: "Manage" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Additional workflow timestamps" }));
 
     expect(within(dialog).getByText("Arrival time")).toBeTruthy();
     expect(within(dialog).getByText("Waiting duration")).toBeTruthy();
@@ -706,8 +708,7 @@ describe("RegistrationsPage print actions", () => {
   });
 
   it("shows protocol notes and contrast notes read-only in the manage drawer", async () => {
-    fetchAppointmentsMock.mockResolvedValueOnce([
-      registrationAppointment({
+    const appointment = registrationAppointment({
         protocolAssignmentSummary: {
           assignmentId: 12,
           protocolId: 22,
@@ -724,8 +725,9 @@ describe("RegistrationsPage print actions", () => {
           contrastNotes: "IV contrast unless contraindicated.",
           status: "ASSIGNED",
         },
-      }),
-    ]);
+      });
+    fetchAppointmentsMock.mockResolvedValue([appointment]);
+    getAppointmentByIdMock.mockResolvedValue(appointment);
 
     renderRegistrationsPage();
 
@@ -736,6 +738,7 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(getAppointmentRow("ACC-7"));
     const dialog = await screen.findByRole("dialog", { name: "Manage" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Information" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Technical PACS details" }));
 
     expect(within(dialog).getByText("Protocol notes")).toBeTruthy();
     expect(within(dialog).getByText("Hydration instructions reviewed.")).toBeTruthy();
@@ -942,12 +945,12 @@ describe("RegistrationsPage print actions", () => {
   });
 
   it("shows PACS note above report status in the appointment drawer Report tab only when a note exists", async () => {
-    fetchAppointmentsMock.mockResolvedValueOnce([
-      registrationAppointment({
+    const appointment = registrationAppointment({
         sonicDicomStudyNote: "mwa prior study note with enough text to preview compactly",
         sonicDicomStudyNoteCheckedAt: "2026-07-04T08:00:00.000Z",
-      }),
-    ]);
+      });
+    fetchAppointmentsMock.mockResolvedValue([appointment]);
+    getAppointmentByIdMock.mockResolvedValue(appointment);
     renderRegistrationsPage();
 
     await waitFor(() => {
@@ -979,7 +982,7 @@ describe("RegistrationsPage print actions", () => {
   });
 
   it("does not show open report when status cannot be viewed", async () => {
-    fetchPublicAppointmentReportStatusMock.mockResolvedValueOnce({
+    fetchPublicAppointmentReportStatusMock.mockResolvedValue({
       enabled: true,
       state: "draft",
       canViewReport: false,

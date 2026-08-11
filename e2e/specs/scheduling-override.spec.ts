@@ -10,12 +10,17 @@ test("a reception capacity block requires supervisor approval and persists the a
   await test.step("reception requests the full-capacity exception", async () => {
     await signInWithSession(reception, "e2e_reception");
     await reception.goto("/appointments");
-    await reception.getByPlaceholder("Search patient by name, national ID, or MRN…").fill("E2E Similar Patient Two");
+    await reception.getByPlaceholder(/Search patient by name, national ID, or MRN/).fill("E2E Similar Patient Two");
     await reception.getByRole("button", { name: /e2e similar patient two/i }).click();
     await reception.getByPlaceholder("Enter identifier").fill("100000000002");
     await reception.getByRole("button", { name: "Verify and select" }).click();
-    await reception.getByLabel(/modality/i).selectOption({ label: "E2E CT — التصوير المقطعي E2E" });
-    await reception.getByLabel(/exam type/i).selectOption({ label: "E2E CT Head — رأس E2E" });
+    const modalitySelect = reception.getByLabel(/modality/i);
+    const modalityValue = await modalitySelect.locator("option").filter({ hasText: "E2E CT" }).getAttribute("value");
+    await modalitySelect.selectOption(modalityValue ?? "");
+    await reception.getByRole("button", { name: "Acknowledge and continue" }).click();
+    const examTypeSelect = reception.getByLabel(/exam type/i);
+    const examTypeValue = await examTypeSelect.locator("option").filter({ hasText: "E2E CT Head" }).getAttribute("value");
+    await examTypeSelect.selectOption(examTypeValue ?? "");
     await reception.getByLabel(/start date/i).fill(fullFixtureDate);
     await reception.getByRole("button", { name: "Show full days" }).click();
     const fullSlot = reception.getByRole("button", { name: new RegExp(`${fullFixtureDate} full`, "i") });

@@ -451,10 +451,6 @@ export function CreateAppointmentTab({
   }
 
   const selectedRowSupportedOverrideType = inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
-  const selectedRowRequiresOverride =
-    availabilitySelectedRow != null &&
-    availabilitySelectedRow.status !== "available" &&
-    Boolean(selectedRowSupportedOverrideType);
   const selectedRowCanUseImmediateOverride =
     availabilitySelectedRow != null &&
     availabilitySelectedRow.status !== "available" &&

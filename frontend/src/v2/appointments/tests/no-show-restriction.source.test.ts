@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import source from "../components/CreateAppointmentTab.tsx?raw";
 import drawerSource from "@/components/patients/patient-drawer.tsx?raw";
+import summarySource from "@/components/patients/patient-summary-content.tsx?raw";
 
 describe("no-show restriction UI source guards", () => {
   it("splits no-show warnings from cancelled appointment information", () => {
@@ -20,11 +21,12 @@ describe("no-show restriction UI source guards", () => {
   });
 
   it("shows patient profile no-show state and supervised authorization action", () => {
-    expect(drawerSource).toContain("No-show booking restriction");
-    expect(drawerSource).toContain("summary.noShow.noShowCount");
-    expect(drawerSource).toContain("summary.noShow.bookingRestricted");
-    expect(drawerSource).toContain("patients.noShowRestriction.authorize");
-    expect(drawerSource).toContain("patients.noShowRestriction.superAdminOnlyNonOncology");
+    expect(summarySource).toContain("summary.noShow.noShowCount");
+    expect(summarySource).toContain("summary.noShow.bookingRestricted");
+    expect(summarySource).toContain("patients.noShowRestriction.title");
+    expect(summarySource).toContain("patients.noShowRestriction.authorize");
+    expect(drawerSource).toContain('user?.role === "super_admin"');
+    expect(drawerSource).toContain('summary.category !== "non_oncology"');
     expect(drawerSource).toContain("authorizePatientNoShowBooking");
   });
 });

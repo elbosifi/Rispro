@@ -201,6 +201,10 @@ export function AppointmentManageModal({
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [statusDialogError, setStatusDialogError] = useState<string | null>(null);
   const legacyStatusKeyRef = useRef<string | null>(null);
+  const onTabChangeRef = useRef(onTabChange);
+  useEffect(() => {
+    onTabChangeRef.current = onTabChange;
+  }, [onTabChange]);
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -579,12 +583,12 @@ export function AppointmentManageModal({
       legacyStatusKeyRef.current = statusKey;
       setStatusDialogOpen(true);
       setStatusDialogError(null);
-      onTabChange?.("documents");
+      onTabChangeRef.current?.("documents");
     } else if (normalizedAppointmentId !== null && legacyStatusKeyRef.current !== statusKey) {
       setStatusDialogOpen(false);
       setStatusDialogError(null);
     }
-  }, [initialTab, normalizedAppointmentId, onTabChange]);
+  }, [initialTab, normalizedAppointmentId]);
 
   useEffect(() => {
     setRescheduleDate("");

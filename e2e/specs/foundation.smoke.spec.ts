@@ -9,7 +9,7 @@ test("real frontend, backend readiness, and seeded login are available", async (
   await expect(page.getByRole("heading")).toBeVisible();
   await page.locator('input[autocomplete="username"]').fill("e2e_reception");
   await page.locator('input[autocomplete="current-password"]').fill("E2ePassword!2026");
-  await page.getByRole("button", { name: /sign in|login/i }).click();
+  await page.getByRole("button", { name: /^sign in$/i }).click();
   await expect(page).not.toHaveURL(/login/);
   await page.reload();
   await expect(page).not.toHaveURL(/login/);

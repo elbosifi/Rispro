@@ -117,7 +117,11 @@ export function normalizeQzPrinterSettings(value: unknown, storage: Storage = wi
 function normalizePrinterTray(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
-  if (!normalized || normalized.length > 255 || /[\u0000-\u001f\u007f]/.test(normalized)) return undefined;
+  const hasControlCharacter = Array.from(normalized).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+  if (!normalized || normalized.length > 255 || hasControlCharacter) return undefined;
   return normalized;
 }
 

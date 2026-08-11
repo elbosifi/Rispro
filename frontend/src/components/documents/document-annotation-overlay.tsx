@@ -58,7 +58,6 @@ function arrowPoints(geometry: Record<string, unknown>) {
 
 export function DocumentAnnotationOverlay({
   pageNumber,
-  rotation: _rotation = 0,
   tool,
   annotations,
   selectedAnnotationId,

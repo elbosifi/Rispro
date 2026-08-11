@@ -428,7 +428,7 @@ router.get(
             'implantDescription', screening.implant_description,
             'previousReviewerNameReported', screening.previous_reviewer_name_reported,
             'screenedByUserId', screening.screened_by_user_id,
-            'screenedAt', screening.screened_at
+            'screenedAt', to_char(screening.screened_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
           ) else null end as mri_primary_screening,
           m.general_instruction_ar as modality_general_instruction_ar,
           m.general_instruction_en as modality_general_instruction_en,
@@ -591,7 +591,7 @@ router.get(
       select m.safety_workflow_type as modality_safety_workflow_type,
              screening.result, screening.implant_site, screening.implant_description,
              screening.previous_reviewer_name_reported, screening.screened_by_user_id,
-             screening.screened_at
+             to_char(screening.screened_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as screened_at
       from appointments_v2.bookings b
       join modalities m on m.id = b.modality_id
       left join appointments_v2.mri_primary_screenings screening on screening.booking_id = b.id
@@ -1237,7 +1237,7 @@ router.get(
           'implantDescription', screening.implant_description,
           'previousReviewerNameReported', screening.previous_reviewer_name_reported,
           'screenedByUserId', screening.screened_by_user_id,
-          'screenedAt', screening.screened_at
+          'screenedAt', to_char(screening.screened_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         ) else null end as mri_primary_screening,
         m.general_instruction_ar as modality_general_instruction_ar,
         m.general_instruction_en as modality_general_instruction_en,

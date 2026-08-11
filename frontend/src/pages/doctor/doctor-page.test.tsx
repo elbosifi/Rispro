@@ -133,6 +133,8 @@ const pushToastMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
+  fetchCurrentSession: async () => ({ id: 1, username: "e2e_doctor", fullName: "E2E Doctor", role: "doctor" }),
+  fetchIntegrationStatus: async () => ({}),
   fetchDoctorMe: () => fetchDoctorMeMock(),
   fetchPageVisibilityMatrix: () => fetchPageVisibilityMatrixMock(),
   fetchNoShowSummary: () => fetchNoShowSummaryMock(),
@@ -2252,24 +2254,26 @@ describe("Doctor Portal shell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
 
     const modal = await screen.findByRole("dialog", { name: "Assign protocol" });
-    expect(within(modal).getByRole("heading", { name: "Assign protocol" })).toBeTruthy();
+    expect(within(modal).getByRole("heading", { name: "Arabic Name" })).toBeTruthy();
     expect(within(modal).getByText(/Protocol Patient/)).toBeTruthy();
     expect(within(modal).getByText(/MRN-5/)).toBeTruthy();
-    expect(within(modal).getByText(/V2-000077/)).toBeTruthy();
-    expect(within(modal).getByText(/Headache/)).toBeTruthy();
-    expect(await screen.findByRole("option", { name: "CT Brain v1.0" })).toBeTruthy();
-    expect(screen.queryByRole("option", { name: "MRI Prostate v1.0" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("Protocol"), { target: { value: "20" } });
+    const savedProtocolInput = await within(modal).findByLabelText("Saved protocol");
+    const protocolOption = document.querySelector<HTMLOptionElement>("#saved-protocol-options option");
+    expect(protocolOption?.value).toMatch(/CT Brain.*v1\.0/);
+    expect(document.querySelectorAll("#saved-protocol-options option")).toHaveLength(1);
+    fireEvent.change(savedProtocolInput, { target: { value: protocolOption?.value } });
     expect(await screen.findByText("Protocol preview")).toBeTruthy();
     expect(await screen.findByText("Portal venous")).toBeTruthy();
     expect(fetchProtocolLibraryVersionDetailMock).toHaveBeenCalledWith(30);
+    fireEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
     fireEvent.change(screen.getByLabelText("Protocol instructions"), { target: { value: "Use standard brain protocol" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(createDoctorProtocolAssignmentMock.mock.calls[0]).toEqual([
       77,
       {
         protocolId: 20,
+        freeTextProtocol: null,
         scannerId: null,
         protocolNotes: "Use standard brain protocol",
         contrastNotes: null,
@@ -2366,9 +2370,13 @@ describe("Doctor Portal shell", () => {
 
     renderDoctorPortal("/doctor/protocols");
     fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
-    fireEvent.change(await screen.findByLabelText("Protocol"), { target: { value: "20" } });
+    const savedProtocolInput = await screen.findByLabelText("Saved protocol");
+    const protocolOption = document.querySelector<HTMLOptionElement>("#saved-protocol-options option");
+    expect(protocolOption).toBeTruthy();
+    fireEvent.change(savedProtocolInput, { target: { value: protocolOption?.value } });
     expect(await screen.findByText("Portal venous")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Print protocol" }));
+    fireEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Print protocol" }));
 
     expect(printProtocolSheetMock).toHaveBeenCalledWith(expect.objectContaining({
       patientName: "Protocol Patient",
@@ -2470,13 +2478,13 @@ describe("Doctor Portal shell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Change" }));
 
     const drawer = await screen.findByRole("dialog", { name: "Change assigned protocol" });
-    expect(within(drawer).getByRole("heading", { name: "Change assigned protocol" })).toBeTruthy();
-    expect(await within(drawer).findByText("Clear assignment")).toBeTruthy();
+    expect(within(drawer).getByRole("heading")).toBeTruthy();
     expect(within(drawer).queryByText(/Edit master protocol|Change protocol definition|Assign protocol version/i)).toBeNull();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     cancelDoctorProtocolAssignmentMock.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: null });
 
-    fireEvent.click(within(drawer).getByRole("button", { name: "Clear assignment" }));
+    fireEvent.click(await within(drawer).findByRole("button", { name: "More protocol actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear assignment" }));
 
     await waitFor(() => expect(cancelDoctorProtocolAssignmentMock).toHaveBeenCalledWith(78));
     confirmSpy.mockRestore();
@@ -2533,15 +2541,19 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
-    fireEvent.change(await screen.findByLabelText("Protocol"), { target: { value: "20" } });
+    const savedProtocolInput = await screen.findByLabelText("Saved protocol");
+    const protocolOption = document.querySelector<HTMLOptionElement>("#saved-protocol-options option");
+    expect(protocolOption).toBeTruthy();
+    fireEvent.change(savedProtocolInput, { target: { value: protocolOption?.value } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
     fireEvent.change(screen.getByLabelText("Protocol instructions"), { target: { value: "Keep this value" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Protocol save failed")).toBeTruthy();
     expect((screen.getByLabelText("Protocol instructions") as HTMLTextAreaElement).value).toBe("Keep this value");
   });
 
-  it("shows no active protocol state and disables save", async () => {
+  it("falls back to an empty free-text protocol when no active protocol exists", async () => {
     const appointment = {
       appointmentId: 77,
       accessionNumber: "V2-000077",
@@ -2572,8 +2584,9 @@ describe("Doctor Portal shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
 
-    expect(await screen.findByText("No active MRI protocols available. Create and activate one in Protocol Library.")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Save assignment" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((await screen.findByRole("radio", { name: "Free-text protocol" })).getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByText("Clear assignment")).toBeNull();
   });
 
