@@ -64,6 +64,14 @@ export async function preparePatientSearch(searchTerm = ""): Promise<{ term: str
   // Whole-word scores measured on representative transliterations support 0.30 for
   // longer names; short tokens retain 0.45 because their trigram overlap is less selective.
   const englishStrictWordThreshold = englishSearchTerm.length <= 4 ? 0.45 : 0.3;
+  const singleArabicToken = hasArabic && searchTokens.length === 1;
+  // Arabic one-character spelling variants such as حالد/خالد score 0.25. Keep
+  // three-character names stricter because one shared trigram is less selective.
+  const arabicStrictWordThreshold = normalizedArabicTerm.length <= 3 ? 0.45 : 0.25;
+  const strictWordCandidateThreshold = Math.min(
+    singleEnglishToken ? englishStrictWordThreshold : 1,
+    singleArabicToken ? arabicStrictWordThreshold : 1
+  );
 
   return {
     term,
@@ -87,13 +95,16 @@ export async function preparePatientSearch(searchTerm = ""): Promise<{ term: str
       `%${englishSearchTerm}%`,
       singleEnglishToken,
       englishStrictWordThreshold,
+      singleArabicToken,
+      arabicStrictWordThreshold,
+      strictWordCandidateThreshold,
     ],
   };
 }
 
 export const PATIENT_SEARCH_CANDIDATE_IDS_CTE = String.raw`
   patient_search_trgm_config as materialized (
-    select set_config('pg_trgm.strict_word_similarity_threshold', $19::text, true)
+    select set_config('pg_trgm.strict_word_similarity_threshold', $22::text, true)
   ),
   candidate_ids as materialized (
     select p.id
@@ -139,6 +150,13 @@ export const PATIENT_SEARCH_CANDIDATE_IDS_CTE = String.raw`
     where
       $18::boolean
       and $6 <<% lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))
+    union
+    select p.id
+    from patient_search_trgm_config
+    cross join patients p
+    where
+      $20::boolean
+      and $5 <<% p.normalized_arabic_name
     union
     select p.id
     from patients p
@@ -234,6 +252,10 @@ export const PATIENT_SEARCH_MATCH_SQL = String.raw`
     and strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) >= $19::real
   )
   or (
+    $20::boolean
+    and strict_word_similarity($5, p.normalized_arabic_name) >= $21::real
+  )
+  or (
     $6 <> ''
     and phonetic_match.matching_token_count >= case
       when cardinality(phonetic_names.query_tokens) = 1 then 1
@@ -267,6 +289,8 @@ export const PATIENT_SEARCH_RANK_SQL = String.raw`
     when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 6
     when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 7
     when $12 <> '' and p.normalized_arabic_name ~* $12 then 7
+    when $20::boolean
+      and strict_word_similarity($5, p.normalized_arabic_name) >= $21::real then 8
     when (
       ($5 <> '' and p.normalized_arabic_name % $5 and similarity(p.normalized_arabic_name, $5) >= $15)
       or (
@@ -283,11 +307,11 @@ export const PATIENT_SEARCH_RANK_SQL = String.raw`
         $18::boolean
         and strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) >= $19::real
       )
-    ) then 8
-    when $6 <> '' and phonetic_match.matching_token_count > 0 then 9
-    when p.normalized_arabic_name like $9 then 10
-    when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 10
-    else 11
+    ) then 9
+    when $6 <> '' and phonetic_match.matching_token_count > 0 then 10
+    when p.normalized_arabic_name like $9 then 11
+    when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 11
+    else 12
   end`;
 
 export const PATIENT_SEARCH_SIMILARITY_SQL = String.raw`
@@ -295,5 +319,6 @@ export const PATIENT_SEARCH_SIMILARITY_SQL = String.raw`
     case when $5 <> '' then similarity(p.normalized_arabic_name, $5) else 0 end,
     case when $13 <> '' then similarity(coalesce(p.normalized_arabic_name_compact, ''), $13) else 0 end,
     case when $6 <> '' then similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) else 0 end,
-    case when $18::boolean then strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) else 0 end
+    case when $18::boolean then strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) else 0 end,
+    case when $20::boolean then strict_word_similarity($5, p.normalized_arabic_name) else 0 end
   )`;

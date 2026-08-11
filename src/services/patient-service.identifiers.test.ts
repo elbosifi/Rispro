@@ -808,6 +808,78 @@ test("searchPatients: recovers a misspelled single token anywhere in an English 
   }
 });
 
+test("searchPatients: ranks Arabic single-token strict-word matches above weaker cross-script signals", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const digits = suffix.replace(/\D/g, "");
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_ar_word_fuzzy_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const createdPatientIds: number[] = [];
+  let dictionaryInserted = false;
+
+  const insertPatient = async (arabicFullName: string, englishFullName: string) => {
+    const nationalId = uniqueNationalId("8");
+    const inserted = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name, normalized_arabic_name_compact,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, 'national_id', $1::text, $2, $3, $4, $5, 30, '1996-01-01', 'M', '0912345678', 'city', $6, $6)
+        returning id
+      `,
+      [
+        nationalId,
+        arabicFullName,
+        englishFullName,
+        normalizeArabicName(arabicFullName),
+        normalizeArabicNameCompact(arabicFullName),
+        receptionistUserId,
+      ]
+    );
+    const id = Number(inserted.rows[0]?.id);
+    createdPatientIds.push(id);
+    return id;
+  };
+
+  try {
+    const arabicWordMatch = await insertPatient(`محمد خالد السنوسي ${digits}`, "Entirely Different Person");
+    const crossScriptMatch = await insertPatient(`مريض مختلف تماما ${digits}`, "Mohamed Khalid Salem");
+
+    await pool.query(
+      `insert into name_dictionary (arabic_text, english_text, is_active) values ('حالد', 'Khaled', true)`
+    );
+    dictionaryInserted = true;
+    invalidateAllCache();
+
+    const rankedIds = (await searchPatients("حالد")).map((row) => Number(row.id));
+    assert.ok(rankedIds.includes(arabicWordMatch), "حالد should find خالد as a non-first normalized Arabic token");
+    assert.ok(rankedIds.includes(crossScriptMatch), "The fixture should include a weaker dictionary-generated English fuzzy candidate");
+    assert.ok(rankedIds.indexOf(arabicWordMatch) < rankedIds.indexOf(crossScriptMatch), "Same-script Arabic strict-word similarity should rank above weaker cross-script similarity");
+  } finally {
+    if (dictionaryInserted) {
+      await pool.query(`delete from name_dictionary where arabic_text = 'حالد'`).catch(() => undefined);
+    }
+    invalidateAllCache();
+    if (createdPatientIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]).catch(() => undefined);
+  }
+});
+
 test("createPatient: persists demographics_estimated flag", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const suffix = uniqueSuffix();
