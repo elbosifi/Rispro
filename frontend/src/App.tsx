@@ -174,6 +174,9 @@ function AppContent() {
 
   const currentRoute = (() => {
     const pathname = location.pathname;
+    if (pathname.startsWith("/comparisons/")) {
+      return "comparisons";
+    }
     if (pathname.startsWith("/pacs/remap")) {
       return "pacs.remap";
     }
@@ -314,6 +317,7 @@ function AppContent() {
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
             <Route path="/modality/document-ingestion" element={guardedPage("modality", <DocumentIngestionPage />)} />
             <Route path="/comparisons" element={guardedPage("comparisons", <ComparisonsPage />)} />
+            <Route path="/comparisons/:id/remap" element={guardedPage("comparisons", <PacsRemapPage />)} />
             <Route path="/comparisons/:id" element={guardedPage("comparisons", <ComparisonsPage />)} />
             <Route path="/print" element={guardedPage("print", <PrintPage />)} />
             <Route path="/statistics" element={guardedPage("statistics", <StatisticsPage />)} />

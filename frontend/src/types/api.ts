@@ -635,6 +635,13 @@ export interface ComparisonRequest {
   cancelledBy: number | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  documentCount: number;
+  remapJobId: number | null;
+  remapJobStatus: string | null;
+  remapProcessingStage: string | null;
+  remapSendErrorCode: string | null;
+  remapErrorMessage: string | null;
+  remapUpdatedAt: string | null;
 }
 
 export interface ReportingBoardDoctorStatsRow {

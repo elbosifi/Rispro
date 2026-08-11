@@ -887,6 +887,13 @@ function mapComparisonRequest(raw: RawRecord): ComparisonRequest {
     cancelledBy: rawNumber(raw.cancelledBy),
     cancelledAt: rawString(raw.cancelledAt),
     cancellationReason: rawString(raw.cancellationReason),
+    documentCount: Number(raw.documentCount ?? 0),
+    remapJobId: rawNumber(raw.remapJobId),
+    remapJobStatus: rawString(raw.remapJobStatus),
+    remapProcessingStage: rawString(raw.remapProcessingStage),
+    remapSendErrorCode: rawString(raw.remapSendErrorCode),
+    remapErrorMessage: rawString(raw.remapErrorMessage),
+    remapUpdatedAt: rawString(raw.remapUpdatedAt),
   };
 }
 
@@ -920,8 +927,11 @@ export async function createComparisonRequest(payload: {
   return mapComparisonRequest(raw.comparisonRequest);
 }
 
-export async function fetchComparisonRequests(status?: string | null): Promise<ComparisonRequest[]> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+export async function fetchComparisonRequests(filters: { status?: string | null; q?: string | null } = {}): Promise<ComparisonRequest[]> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.q) params.set("q", filters.q);
+  const query = params.size ? `?${params.toString()}` : "";
   const raw = await api<{ comparisonRequests: RawRecord[] }>(`/comparisons${query}`);
   return (raw.comparisonRequests ?? []).map(mapComparisonRequest);
 }

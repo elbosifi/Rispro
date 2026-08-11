@@ -118,6 +118,39 @@ export async function deleteAppointmentDocument(documentId: number): Promise<{ d
   });
 }
 
+export async function listComparisonDocuments(comparisonRequestId: number): Promise<RequestDocument[]> {
+  const raw = await api<{ documents: RawRecord[] }>(`/comparisons/${comparisonRequestId}/documents`);
+  return (raw.documents ?? []).map(mapRequestDocument);
+}
+
+export async function uploadComparisonDocument(payload: {
+  comparisonRequestId: number;
+  originalFilename: string;
+  mimeType: string;
+  fileContentBase64: string;
+  source?: "manual_upload" | "naps2_webscan";
+}): Promise<RequestDocument> {
+  const raw = await api<{ document: RawRecord }>(`/comparisons/${payload.comparisonRequestId}/documents`, {
+    method: "POST",
+    body: JSON.stringify({
+      originalFilename: payload.originalFilename,
+      mimeType: payload.mimeType,
+      fileContentBase64: payload.fileContentBase64,
+      source: payload.source,
+    }),
+  });
+  return mapRequestDocument(raw.document);
+}
+
+export async function deleteComparisonDocument(
+  comparisonRequestId: number,
+  documentId: number
+): Promise<{ deleted: true; documentId: number }> {
+  return api<{ deleted: true; documentId: number }>(`/comparisons/${comparisonRequestId}/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {
   const raw = await api<{ status: IntegrationStatus }>("/integrations/status");
   return raw.status;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "@/lib/api-client";
 import { statusLabel, t } from "@/lib/i18n";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
@@ -53,6 +54,7 @@ interface ResumedJobSelection {
 
 interface RemapJob {
   id: number;
+  comparison_request_id?: number | null;
   status: JobStatus;
   source_orthanc_study_id: string | null;
   modified_orthanc_study_id: string | null;
@@ -158,6 +160,19 @@ interface TodayStudyOption {
 interface UploadMultipartResult {
   job: RemapJob;
   skippedFilesCount?: number;
+}
+
+interface ComparisonRemapContext {
+  id: number;
+  patientId: number;
+  patientMrn: string | null;
+  patientEnglishName: string | null;
+  patientArabicName: string | null;
+  linkedExamName: string | null;
+  linkedStudyDate: string | null;
+  linkedPreviousAccessionNumber: string | null;
+  reason: string;
+  status: string;
 }
 
 function formatTechnicalDetails(details: unknown): string {
@@ -386,6 +401,26 @@ async function uploadMultipartWithProgress(
 export default function PacsRemapPage() {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const comparisonRequestIdValue = Number(searchParams.get("comparisonRequestId") || 0);
+  const comparisonRequestId = Number.isSafeInteger(comparisonRequestIdValue) && comparisonRequestIdValue > 0 ? comparisonRequestIdValue : null;
+  const requestedReturnPath = String(searchParams.get("returnPath") || "");
+  const comparisonReturnPath = comparisonRequestId && requestedReturnPath === `/comparisons/${comparisonRequestId}`
+    ? requestedReturnPath
+    : comparisonRequestId ? `/comparisons/${comparisonRequestId}` : "";
+  const remapApiPath = (path: string) => {
+    if (!comparisonRequestId) return path;
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}comparisonRequestId=${comparisonRequestId}`;
+  };
+  const comparisonContextQuery = useQuery({
+    queryKey: ["comparison-request", comparisonRequestId, "remap-context"],
+    queryFn: () => api<{ comparisonRequest: ComparisonRemapContext }>(`/comparisons/${comparisonRequestId}`),
+    enabled: comparisonRequestId != null,
+    retry: 0,
+  });
+  const comparisonContext = comparisonContextQuery.data?.comparisonRequest ?? null;
   const [files, setFiles] = useState<File[]>([]);
   const [scanResult, setScanResult] = useState<DicomStudyScanResult | null>(null);
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
@@ -445,7 +480,9 @@ export default function PacsRemapPage() {
 
   const resumedJobSelection = activeResumedJobId == null ? null : resumedJobSelections[activeResumedJobId] || null;
   const scopedStudyInstanceUid = resumedJobSelection?.studyInstanceUid ?? selectedStudyInstanceUid;
-  const scopedPatientId = resumedJobSelection?.patientId ?? selectedPatientId;
+  const scopedPatientId = comparisonRequestId
+    ? (comparisonContext ? String(comparisonContext.patientId) : "")
+    : resumedJobSelection?.patientId ?? selectedPatientId;
   const scopedDestinationKey = resumedJobSelection?.destinationKey ?? selectedDestinationKey;
   const scopedConfirmChecked = resumedJobSelection?.confirmChecked ?? confirmChecked;
   const scopedPatientLookupMode = resumedJobSelection?.patientLookupMode ?? patientLookupMode;
@@ -458,9 +495,11 @@ export default function PacsRemapPage() {
       [activeResumedJobId]: { ...current[activeResumedJobId]!, ...updates },
     }));
   };
-  const selectPatient = (patientId: string): void => activeResumedJobId == null
-    ? setSelectedPatientId(patientId)
-    : updateResumedJobSelection({ patientId });
+  const selectPatient = (patientId: string): void => {
+    if (comparisonRequestId) return;
+    if (activeResumedJobId == null) setSelectedPatientId(patientId);
+    else updateResumedJobSelection({ patientId });
+  };
   const selectDestination = (destinationKey: string): void => activeResumedJobId == null
     ? setSelectedDestinationKey(destinationKey)
     : updateResumedJobSelection({ destinationKey });
@@ -489,7 +528,7 @@ export default function PacsRemapPage() {
 
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
-    queryFn: () => api<{ destinations: Destination[] }>("/pacs/remap/destinations"),
+    queryFn: () => api<{ destinations: Destination[] }>(remapApiPath("/pacs/remap/destinations")),
   });
   const destinations = destinationsQuery.data?.destinations || EMPTY_DESTINATIONS;
   const defaultDestinationKey = useMemo(() => {
@@ -505,7 +544,7 @@ export default function PacsRemapPage() {
     queryKey: ["v2", "lookups", "modalities"],
     queryFn: () => api<{ items: Array<{ id: number; nameEn?: string; nameAr?: string; code?: string }> }>("/v2/lookups/modalities"),
     retry: 0,
-    enabled: uiStep === "patient",
+    enabled: uiStep === "patient" && !comparisonRequestId,
   });
 
   const studyDateForFilter = useMemo(() => {
@@ -527,7 +566,7 @@ export default function PacsRemapPage() {
       if (trimmedPatientSearch) params.set("q", trimmedPatientSearch);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: uiStep === "patient" && scopedPatientLookupMode === "filtered_appointments",
+    enabled: uiStep === "patient" && !comparisonRequestId && scopedPatientLookupMode === "filtered_appointments",
     retry: 0,
   });
 
@@ -539,7 +578,7 @@ export default function PacsRemapPage() {
       if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: uiStep === "patient" && scopedPatientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
+    enabled: uiStep === "patient" && !comparisonRequestId && scopedPatientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
@@ -552,13 +591,14 @@ export default function PacsRemapPage() {
       const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(trimmedPatientSearch)}&page=1&pageSize=25`);
       return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
     },
-    enabled: uiStep === "patient" && scopedPatientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
+    enabled: uiStep === "patient" && !comparisonRequestId && scopedPatientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
   const jobsQuery = useQuery({
     queryKey: ["pacs", "remap", "jobs"],
-    queryFn: () => api<{ jobs: RemapJob[] }>("/pacs/remap/jobs?limit=20"),
+    queryFn: () => api<{ jobs: RemapJob[] }>(remapApiPath("/pacs/remap/jobs?limit=20")),
+    enabled: !comparisonRequestId,
     refetchInterval: (query) => {
       const jobs = (query.state.data as { jobs?: RemapJob[] } | undefined)?.jobs || [];
       return jobs.some((job) => RECENT_JOB_POLL_STATUSES.has(job.status)) ? 2_000 : false;
@@ -567,7 +607,8 @@ export default function PacsRemapPage() {
 
   const activeJobQuery = useQuery({
     queryKey: ["pacs", "remap", "active-job"],
-    queryFn: () => api<{ job: RemapJob | null; comparison: RemapComparison | null }>("/pacs/remap/jobs/active"),
+    queryFn: () => api<{ job: RemapJob | null; comparison: RemapComparison | null }>(remapApiPath("/pacs/remap/jobs/active")),
+    enabled: !comparisonRequestId,
     retry: 0,
   });
   const refetchActiveJob = activeJobQuery.refetch;
@@ -585,7 +626,7 @@ export default function PacsRemapPage() {
     queryKey: ["pacs", "remap", "replacement-preview", scopedPatientId],
     queryFn: async () => {
       if (!scopedPatientId) return null;
-      const response = await api<{ replacement: ReplacementPreview }>("/pacs/remap/replacement-preview", {
+      const response = await api<{ replacement: ReplacementPreview }>(remapApiPath("/pacs/remap/replacement-preview"), {
         method: "POST",
         body: JSON.stringify({ risproPatientId: scopedPatientId }),
       });
@@ -597,7 +638,7 @@ export default function PacsRemapPage() {
 
   const currentJobQuery = useQuery({
     queryKey: ["pacs", "remap", "job", effectiveJobId],
-    queryFn: () => api<{ job: RemapJob; comparison: RemapComparison | null }>(`/pacs/remap/jobs/${effectiveJobId}`),
+    queryFn: () => api<{ job: RemapJob; comparison: RemapComparison | null }>(remapApiPath(`/pacs/remap/jobs/${effectiveJobId}`)),
     enabled: effectiveJobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
@@ -682,7 +723,9 @@ export default function PacsRemapPage() {
   };
 
   const scanMutation = useMutation({
-    mutationFn: async (sourceFiles: File[]) => previewDicomStudiesFromFiles(sourceFiles),
+    mutationFn: async (sourceFiles: File[]) => previewDicomStudiesFromFiles(sourceFiles, {
+      endpoint: `/api${remapApiPath("/pacs/remap/preview-multipart")}`,
+    }),
     onMutate: (sourceFiles) => {
       cancelActiveFullScan();
       const runId = ++scanRunIdRef.current;
@@ -769,7 +812,7 @@ export default function PacsRemapPage() {
       stagingUploadControllerRef.current = controller;
       try {
         return await uploadMultipartWithProgress(
-          "/pacs/remap/jobs/stage-multipart",
+          remapApiPath("/pacs/remap/jobs/stage-multipart"),
           formData,
           900_000,
           (loaded, total) => {
@@ -842,7 +885,7 @@ export default function PacsRemapPage() {
       formData.append("destinationPacsKey", effectiveSelectedDestinationKey);
       formData.append("confirm", "true");
 
-      const uploadResult = await uploadMultipartWithProgress("/pacs/remap/jobs/process-multipart", formData, 900_000, (loaded, total) => {
+      const uploadResult = await uploadMultipartWithProgress(remapApiPath("/pacs/remap/jobs/process-multipart"), formData, 900_000, (loaded, total) => {
         setUploadLoaded(loaded);
         setUploadTotal(total || uploadTotal);
       }, () => {
@@ -896,7 +939,7 @@ export default function PacsRemapPage() {
       targetJobId: number;
       confirmation: StagedConfirmationSnapshot;
       assignWorkflowJob: boolean;
-    }) => api<{ job: RemapJob }>(`/pacs/remap/jobs/${targetJobId}/confirm-staged`, {
+    }) => api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${targetJobId}/confirm-staged`), {
       method: "POST",
       body: JSON.stringify({
         ...confirmation,
@@ -935,7 +978,7 @@ export default function PacsRemapPage() {
   });
 
   const confirmIncompleteStudyMutation = useMutation({
-    mutationFn: async (targetJobId: number) => api<{ job: RemapJob }>(`/pacs/remap/jobs/${targetJobId}/confirm-send`, {
+    mutationFn: async (targetJobId: number) => api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${targetJobId}/confirm-send`), {
       method: "POST",
       body: JSON.stringify({ confirm: true, confirmIncompleteStudy: true }),
     }),
@@ -953,7 +996,7 @@ export default function PacsRemapPage() {
 
   const resetJobMutation = useMutation({
     mutationFn: async ({ targetJobId }: { targetJobId: number }) => {
-      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(`/pacs/remap/jobs/${targetJobId}/reset`, { method: "POST" });
+      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(remapApiPath(`/pacs/remap/jobs/${targetJobId}/reset`), { method: "POST" });
     },
     onSuccess: (data, input) => {
       if (viewedRecentJobIdRef.current === input.targetJobId) {
@@ -983,7 +1026,7 @@ export default function PacsRemapPage() {
 
   const resendJobMutation = useMutation({
     mutationFn: async (input: { targetJobId: number; viewTargetJob?: RemapJob; confirmDestinationChecked?: boolean }) => {
-      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${input.targetJobId}/resend`, {
+      return api<{ job: RemapJob }>(remapApiPath(`/pacs/remap/jobs/${input.targetJobId}/resend`), {
         method: "POST",
         body: JSON.stringify({ confirmDestinationChecked: input.confirmDestinationChecked === true }),
       });
@@ -1033,7 +1076,7 @@ export default function PacsRemapPage() {
   });
 
   const clearFailedStudiesMutation = useMutation({
-    mutationFn: async () => api("/pacs/remap/maintenance/clear-failed-studies", { method: "POST" }),
+    mutationFn: async () => api(remapApiPath("/pacs/remap/maintenance/clear-failed-studies"), { method: "POST" }),
     onSuccess: () => {
       setSuccessMessage(language === "ar" ? "اكتملت صيانة الدراسات الفاشلة." : "Failed-study maintenance completed.");
       setErrorMessage("");
@@ -1400,7 +1443,7 @@ export default function PacsRemapPage() {
       resetWorkflow();
     }
     if (!cancellableJobId) return;
-    void api(`/pacs/remap/jobs/${cancellableJobId}/cancel`, {
+    void api(remapApiPath(`/pacs/remap/jobs/${cancellableJobId}/cancel`), {
       method: "POST",
       body: JSON.stringify({ reason: "Operator cancelled secure staging before final confirmation." }),
     }).then(() => {
@@ -1439,6 +1482,17 @@ export default function PacsRemapPage() {
               {t(language, "pacs.remap.safetyBanner")}
             </div>
           </div>
+          {comparisonRequestId ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-950">
+              <div>
+                <strong>Comparison-linked remap</strong>
+                <span className="ml-2">Request #{comparisonRequestId}; the RISpro patient is locked and the resulting job will be linked automatically.</span>
+              </div>
+              <button type="button" className="btn-secondary rounded-lg px-3 py-2 text-xs" onClick={() => navigate(comparisonReturnPath)}>
+                Return to comparison
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className="flex gap-2 overflow-x-auto border-t border-slate-200/70 bg-white/80 p-3 text-xs" aria-label={language === "ar" ? "مراحل إعادة الربط" : "Remap steps"}>
           {stepLabels.map((label, index) => {
@@ -1779,6 +1833,21 @@ export default function PacsRemapPage() {
                   </span>
                 )}
               </div>
+              {comparisonRequestId ? (
+                <div className="rounded-2xl border border-teal-300 bg-teal-50 p-4 text-sm" data-testid="comparison-remap-context">
+                  <p className="font-semibold">Comparison upload · patient locked</p>
+                  {comparisonContextQuery.isLoading ? <p className="mt-1 text-xs text-slate-600">Loading comparison request...</p> : null}
+                  {comparisonContextQuery.isError ? <p className="mt-1 text-xs text-red-700">Unable to load the comparison request. Upload is disabled.</p> : null}
+                  {comparisonContext ? (
+                    <div className="mt-2 grid gap-1 text-xs">
+                      <p><strong>Patient:</strong> {comparisonContext.patientEnglishName || comparisonContext.patientArabicName || comparisonContext.patientMrn || `Patient #${comparisonContext.patientId}`}</p>
+                      <p><strong>Previous study:</strong> {[comparisonContext.linkedStudyDate, comparisonContext.linkedExamName, comparisonContext.linkedPreviousAccessionNumber].filter(Boolean).join(" | ")}</p>
+                      <p><strong>Reason:</strong> {comparisonContext.reason}</p>
+                      <p className="font-semibold text-teal-800">Patient selection cannot be changed in comparison context.</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
               <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3 space-y-3">
                 <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -1915,6 +1984,7 @@ export default function PacsRemapPage() {
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAnyPatientMatches")}</p>
                 )}
               </div>
+              )}
               {selectedAppointmentPatient && (
                 <div className="rounded-2xl border border-teal-300 bg-teal-50 p-3 text-xs space-y-1">
                   <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)}</p>

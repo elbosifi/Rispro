@@ -19,6 +19,8 @@ DICOM Remap lets authenticated users upload a selected external DICOM study, map
 - `dicom-remap-processing-worker.ts` claims queued jobs with a database lease, validates hashes and the one-selected-study boundary, atomically persists a UID plan, uploads remapped instances to Orthanc, verifies the resulting study and identity, and then reuses the durable asynchronous send worker.
 - Restart/reclaim reuses the same staged manifest and UID plan. Multiple workers cannot own a job while its lease is valid. The staging root must be shared by multiple backend instances.
 - Staged DICOM is PHI and must remain outside public static serving. Use `DICOM_REMAP_STAGING_DIR` on the persistent RISpro storage volume; successful staging is cleaned after send enqueue, while failed staging is retained only for the documented controlled retention period.
+- A remap job may have a nullable `comparison_request_id`. Comparison preparation uses the same staging, verification, rewrite, Orthanc, PACS send, retry, and recovery pipeline; the relationship only supplies durable clinical context.
+- Pending requests under `/comparisons/:id/remap` use the comparison page permission plus backend comparison-context validation. Every remap API call carries the request context, and replacement-patient operations verify the request's authoritative patient. This does not grant access to unrelated PACS administration or ordinary remap jobs.
 
 ## Current Known Risks
 

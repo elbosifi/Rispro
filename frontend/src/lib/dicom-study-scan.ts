@@ -208,7 +208,10 @@ function rehydratePreviewResult(result: DicomStudyScanResult, sampledFiles: File
   };
 }
 
-export async function previewDicomStudiesFromFiles(files: File[]): Promise<DicomStudyScanResult> {
+export async function previewDicomStudiesFromFiles(
+  files: File[],
+  options: { endpoint?: string } = {}
+): Promise<DicomStudyScanResult> {
   const allFiles = Array.isArray(files) ? files : [];
   const candidateFiles = allFiles.filter(isLikelyDicomCandidate);
   const sampledFiles = selectPreviewSampleFiles(candidateFiles);
@@ -227,7 +230,7 @@ export async function previewDicomStudiesFromFiles(files: File[]): Promise<Dicom
     formData.append("files", file.slice(0, DICOM_PREVIEW_HEADER_BYTES), file.name);
   });
 
-  const response = await fetch("/api/pacs/remap/preview-multipart", {
+  const response = await fetch(options.endpoint || "/api/pacs/remap/preview-multipart", {
     method: "POST",
     credentials: "include",
     body: formData,

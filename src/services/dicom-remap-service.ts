@@ -67,6 +67,7 @@ interface OrthancStudyMatchMetadata {
 export interface DicomRemapJobRow {
   id: number;
   created_by_user_id: number;
+  comparison_request_id?: number | null;
   status: DicomRemapJobStatus;
   source_orthanc_study_id: string | null;
   modified_orthanc_study_id: string | null;
@@ -2326,24 +2327,77 @@ async function loadOwnedJob(jobId: number | string, userId: UserId): Promise<Dic
   return job;
 }
 
-async function createEmptyDicomRemapUploadJob(currentUserId: UserId): Promise<DicomRemapJobRow> {
+export async function assertDicomRemapJobComparisonAccess(
+  jobId: number | string,
+  currentUserId: UserId,
+  comparisonRequestIdInput: number | string
+): Promise<void> {
+  const comparisonRequestId = normalizePositiveInteger(comparisonRequestIdInput, "comparisonRequestId");
+  if (!comparisonRequestId) throw new HttpError(400, "comparisonRequestId is required.");
+  const job = await loadOwnedJob(jobId, currentUserId);
+  if (Number(job.comparison_request_id || 0) !== comparisonRequestId) {
+    throw new HttpError(403, "DICOM remap job does not belong to this comparison request.");
+  }
+}
+
+async function createEmptyDicomRemapUploadJob(
+  currentUserId: UserId,
+  comparisonRequestIdInput?: number | string | null
+): Promise<DicomRemapJobRow> {
+  const comparisonRequestId = normalizePositiveInteger(comparisonRequestIdInput, "comparisonRequestId", { required: false });
+  if (comparisonRequestId) {
+    const comparison = await queryDicomRemapDb<{ patient_id: number; status: string }>(
+      "select patient_id, status from comparison_requests where id = $1 limit 1",
+      [comparisonRequestId]
+    );
+    const request = comparison.rows[0];
+    if (!request) throw new HttpError(404, "Comparison request not found.");
+    if (request.status !== "pending_upload_confirmation") {
+      throw new HttpError(409, "Only pending comparison requests can start a comparison remap.");
+    }
+  }
   const createResult = await queryDicomRemapDb<DicomRemapJobRow>(
       `
         insert into dicom_remap_jobs (
           created_by_user_id,
-          status
+          status,
+          comparison_request_id
         )
-        values ($1, 'uploaded')
+        select $1, 'uploaded', $2::bigint
+        where $2::bigint is null
+           or exists (
+             select 1 from comparison_requests
+             where id = $2::bigint and status = 'pending_upload_confirmation'
+           )
         returning *
       `,
-      [currentUserId]
+      [currentUserId, comparisonRequestId]
     );
 
   const job = createResult.rows[0];
   if (!job) {
+    if (comparisonRequestId) {
+      throw new HttpError(409, "Comparison request is no longer pending preparation.");
+    }
     throw new HttpError(500, "Failed to create DICOM remap job.");
   }
   return job;
+}
+
+async function assertDicomRemapComparisonPatient(job: DicomRemapJobRow, patientId: number): Promise<void> {
+  if (!job.comparison_request_id) return;
+  const result = await queryDicomRemapDb<{ patient_id: number }>(
+    "select patient_id from comparison_requests where id = $1 limit 1",
+    [job.comparison_request_id]
+  );
+  const comparisonPatientId = Number(result.rows[0]?.patient_id || 0);
+  if (!comparisonPatientId) throw new HttpError(409, "Linked comparison request is unavailable.");
+  if (comparisonPatientId !== patientId) {
+    throw new HttpError(400, "Comparison remap patient must match the comparison request patient.", {
+      code: "DICOM_REMAP_COMPARISON_PATIENT_MISMATCH",
+      comparisonRequestId: job.comparison_request_id,
+    });
+  }
 }
 
 async function finalizeDicomRemapUploadJob({
@@ -2521,8 +2575,11 @@ async function writePrivateJson(target: string, value: unknown): Promise<void> {
   await rename(temporary, target);
 }
 
-export async function createDicomRemapStagingContext(currentUserId: UserId): Promise<DicomRemapStagingContext> {
-  const job = await createEmptyDicomRemapUploadJob(currentUserId);
+export async function createDicomRemapStagingContext(
+  currentUserId: UserId,
+  comparisonRequestId?: number | string | null
+): Promise<DicomRemapStagingContext> {
+  const job = await createEmptyDicomRemapUploadJob(currentUserId, comparisonRequestId);
   const storageKey = `jobs/${job.id}-${randomUUID()}`;
   const directory = resolveDicomRemapStagingPath(storageKey);
   try {
@@ -2627,6 +2684,8 @@ export async function finalizeDicomRemapStagingJob({
   if (files.length > DICOM_REMAP_STAGING_MAX_FILES) throw new HttpError(413, "Too many files in DICOM upload.");
   const totalBytes = files.reduce((total, file) => total + file.byteSize, 0);
   if (totalBytes <= 0 || totalBytes > DICOM_REMAP_STAGING_MAX_TOTAL_BYTES) throw new HttpError(413, "DICOM upload exceeds the configured size limit.");
+
+  await assertDicomRemapComparisonPatient(context.job, patientId);
 
   const patient = await getPatientForDicomRemap(patientId);
   const replacement = formatReplacementFromPatient(patient);
@@ -4611,6 +4670,7 @@ export async function prepareDicomRemapConfirmation({
   if (!patientId) {
     throw new HttpError(400, "risproPatientId is required.");
   }
+  await assertDicomRemapComparisonPatient(job, patientId);
 
   const patient = await getPatientForDicomRemap(patientId);
   const replacement = formatReplacementFromPatient(patient);
@@ -4728,6 +4788,7 @@ export async function confirmStagedDicomRemapJob({
   const destination = normalizeOrthancModalityKey(destinationPacsKey, "destinationPacsKey");
 
   const initialJob = await loadOwnedJob(cleanJobId, currentUserId);
+  await assertDicomRemapComparisonPatient(initialJob, patientId);
   if (initialJob.status !== "awaiting_confirmation") {
     if (initialJob.status !== "cancelled" && isMatchingStagedConfirmation(initialJob, selectedUid, patientId, destination)) {
       return { job: initialJob };

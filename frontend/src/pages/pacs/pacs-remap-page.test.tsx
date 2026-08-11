@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import PacsRemapPage from "./pacs-remap-page";
 import { ApiError } from "@/lib/api-client";
 import type { DicomStudyScanResult } from "@/lib/dicom-study-scan";
@@ -113,9 +114,9 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderPage() {
+function renderPage(initialEntry = "/pacs/remap") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return { ...render(<QueryClientProvider client={qc}><PacsRemapPage /></QueryClientProvider>), queryClient: qc };
+  return { ...render(<MemoryRouter initialEntries={[initialEntry]}><QueryClientProvider client={qc}><PacsRemapPage /></QueryClientProvider></MemoryRouter>), queryClient: qc };
 }
 
 async function scanOne() {
@@ -1439,6 +1440,30 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getByText("ORIGINAL_PROCESSING_ERROR")).toBeTruthy();
     expect(screen.getByText("orthanc-old")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy();
+  });
+
+  it("locks comparison patient context and creates the upload through a comparison-linked endpoint", async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/comparisons/77") return Promise.resolve({ comparisonRequest: { id: 77, patientId: 10, patientMrn: "MRN-10", patientEnglishName: "Comparison Patient", patientArabicName: null, linkedExamName: "CT Chest", linkedStudyDate: "2026-01-01", linkedPreviousAccessionNumber: "V2-000077", reason: "Compare interval change", status: "pending_upload_confirmation" } });
+      if (path === "/pacs/remap/destinations?comparisonRequestId=77") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
+      if (path === "/pacs/remap/replacement-preview?comparisonRequestId=77") return Promise.resolve({ replacement: { patientId: "N1", patientName: "Comparison^Patient", patientSex: "F", patientBirthDate: "19900101" } });
+      if (path === "/pacs/remap/jobs/88?comparisonRequestId=77") return Promise.resolve({ job: { id: 88, comparison_request_id: 77, status: "sending", destination_pacs_key: "1", processing_stage: "enqueueing_send" }, comparison: null });
+      return Promise.resolve({ items: [] });
+    });
+    renderPage("/comparisons/77/remap?comparisonRequestId=77&patientId=999&returnPath=%2Fcomparisons%2F77");
+    await screen.findByText("Comparison-linked remap");
+
+    await scanOne();
+    expect(previewMock).toHaveBeenCalledWith(expect.any(Array), { endpoint: "/api/pacs/remap/preview-multipart?comparisonRequestId=77" });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    expect(await screen.findByText(/Patient selection cannot be changed/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByPlaceholderText(/Search by patient name/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Destination" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Review" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: /Upload selected study/ }));
+    await waitFor(() => expect(FakeXHR.instances.some((xhr) => xhr.url === "/api/pacs/remap/jobs/process-multipart?comparisonRequestId=77")).toBe(true));
   });
 
   it("renders persisted safe Orthanc verification diagnostics without UID values", async () => {

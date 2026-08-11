@@ -7,17 +7,22 @@ import { HttpError } from "../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../types/http.js";
 import {
   assignComparisonRequest,
+  attachDocumentToComparisonRequest,
   cancelComparisonRequest,
   confirmComparisonMaterials,
   createComparisonRequest,
+  deleteComparisonRequestDocument,
   finalizeComparisonRequest,
   findComparisonRequestById,
   getComparisonInternalLinkTarget,
+  listComparisonRequestDocuments,
   listComparisonRequests,
   listPreviousCompletedStudiesForPatient,
   unassignComparisonRequest,
+  uploadComparisonRequestDocument,
   type ComparisonActor,
 } from "../services/comparison-request-service.js";
+import type { DocumentRow } from "../services/document-service.js";
 
 interface ComparisonsRequest extends Request {
   user?: AuthenticatedUserContext;
@@ -30,6 +35,11 @@ comparisonsRouter.use(requireAuth);
 function actor(req: ComparisonsRequest): ComparisonActor {
   if (!req.user) throw new HttpError(401, "Authentication required.");
   return { userId: req.user.sub, appRole: req.user.role };
+}
+
+function toDocumentResponse(document: DocumentRow) {
+  const { stored_path: _storedPath, content_sha256: _contentSha256, ...safeDocument } = document;
+  return { ...safeDocument, stored_path: "" };
 }
 
 type ComparisonRole = ComparisonActor["appRole"];
@@ -68,7 +78,12 @@ comparisonsRouter.get(
   "/",
   asyncRoute(async (req: ComparisonsRequest, res: Response) => {
     requireComparisonRole(req, WORKLIST_ACCESS_ROLES, "This role cannot view comparison requests.");
-    res.json({ comparisonRequests: await listComparisonRequests({ status: asOptionalString(req.query.status) ?? null }) });
+    res.json({
+      comparisonRequests: await listComparisonRequests({
+        status: asOptionalString(req.query.status) ?? null,
+        q: asOptionalString(req.query.q) ?? null,
+      }),
+    });
   })
 );
 
@@ -82,6 +97,48 @@ comparisonsRouter.post(
       reason: body.reason,
     });
     res.status(201).json({ comparisonRequest });
+  })
+);
+
+comparisonsRouter.get(
+  "/:comparisonRequestId/documents",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    requireComparisonRole(req, WORKLIST_ACCESS_ROLES, "This role cannot view comparison documents.");
+    const documents = await listComparisonRequestDocuments(req.params.comparisonRequestId);
+    res.json({ documents: documents.map(toDocumentResponse) });
+  })
+);
+
+comparisonsRouter.post(
+  "/:comparisonRequestId/documents",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const document = await uploadComparisonRequestDocument(actor(req), req.params.comparisonRequestId, {
+      originalFilename: body.originalFilename as string | undefined,
+      mimeType: body.mimeType as string | undefined,
+      fileContentBase64: body.fileContentBase64 as string | undefined,
+      source: asOptionalString(body.source),
+      pageCount: body.pageCount as number | null | undefined,
+      scannerName: asOptionalString(body.scannerName),
+      workstationName: asOptionalString(body.workstationName),
+      appVersion: asOptionalString(body.appVersion),
+    });
+    res.status(201).json({ document: toDocumentResponse(document) });
+  })
+);
+
+comparisonsRouter.post(
+  "/:comparisonRequestId/documents/:documentId/attach",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    const document = await attachDocumentToComparisonRequest(actor(req), req.params.comparisonRequestId, req.params.documentId);
+    res.json({ document: toDocumentResponse(document) });
+  })
+);
+
+comparisonsRouter.delete(
+  "/:comparisonRequestId/documents/:documentId",
+  asyncRoute(async (req: ComparisonsRequest, res: Response) => {
+    res.json(await deleteComparisonRequestDocument(actor(req), req.params.comparisonRequestId, req.params.documentId));
   })
 );
 

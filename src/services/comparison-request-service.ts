@@ -9,6 +9,12 @@ import { insertDoctorAuditEvent } from "../modules/doctor-portal/profile-reposit
 import { requireRosterManager } from "../modules/doctor-portal/roster-service.js";
 import { createAssignedToMeNotifications, doctorCanReportAllModalities, findAssignableDoctorForReporting } from "../modules/doctor-portal/reporting-board-repository.js";
 import type { ReportingBoardCaseRow, ReportingBoardFilters, ReportingBoardStatsBaseRow } from "../modules/doctor-portal/reporting-board-types.js";
+import {
+  deleteDocumentById,
+  uploadDocument,
+  type DocumentRow,
+  type DocumentUploadPayload,
+} from "./document-service.js";
 
 export type ComparisonRequestStatus =
   | "pending_upload_confirmation"
@@ -75,6 +81,13 @@ export interface ComparisonRequestRow {
   cancelledBy: number | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  documentCount: number;
+  remapJobId: number | null;
+  remapJobStatus: string | null;
+  remapProcessingStage: string | null;
+  remapSendErrorCode: string | null;
+  remapErrorMessage: string | null;
+  remapUpdatedAt: string | null;
 }
 
 const CREATE_ROLES = new Set<Role>(["receptionist", "administrative", "modality_staff", "doctor", "supervisor", "super_admin"]);
@@ -176,6 +189,13 @@ function comparisonRequest(row: Record<string, unknown>): ComparisonRequestRow {
     cancelledBy: row.cancelledBy == null ? null : Number(row.cancelledBy),
     cancelledAt: optionalIso(row.cancelledAt),
     cancellationReason: row.cancellationReason == null ? null : String(row.cancellationReason),
+    documentCount: Number(row.documentCount ?? 0),
+    remapJobId: row.remapJobId == null ? null : Number(row.remapJobId),
+    remapJobStatus: row.remapJobStatus == null ? null : String(row.remapJobStatus),
+    remapProcessingStage: row.remapProcessingStage == null ? null : String(row.remapProcessingStage),
+    remapSendErrorCode: row.remapSendErrorCode == null ? null : String(row.remapSendErrorCode),
+    remapErrorMessage: row.remapErrorMessage == null ? null : String(row.remapErrorMessage),
+    remapUpdatedAt: optionalIso(row.remapUpdatedAt),
   };
 }
 
@@ -217,7 +237,14 @@ const COMPARISON_SELECT = `
     cr.updated_at as "updatedAt",
     cr.cancelled_by as "cancelledBy",
     cr.cancelled_at as "cancelledAt",
-    cr.cancellation_reason as "cancellationReason"
+    cr.cancellation_reason as "cancellationReason",
+    coalesce(comparison_documents.document_count, 0)::integer as "documentCount",
+    latest_remap.id as "remapJobId",
+    latest_remap.status as "remapJobStatus",
+    latest_remap.processing_stage as "remapProcessingStage",
+    latest_remap.send_error_code as "remapSendErrorCode",
+    latest_remap.error_message as "remapErrorMessage",
+    latest_remap.updated_at as "remapUpdatedAt"
   from comparison_requests cr
   join patients p on p.id = cr.patient_id
   left join modalities m on m.id = cr.linked_modality_id
@@ -225,6 +252,18 @@ const COMPARISON_SELECT = `
   left join users finalized_by on finalized_by.id = cr.finalized_by
   left join users created_by on created_by.id = cr.created_by
   left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cr.assigned_doctor_id
+  left join lateral (
+    select count(*)::integer as document_count
+    from comparison_request_documents crd
+    where crd.comparison_request_id = cr.id
+  ) comparison_documents on true
+  left join lateral (
+    select drj.id, drj.status, drj.processing_stage, drj.send_error_code, drj.error_message, drj.updated_at
+    from dicom_remap_jobs drj
+    where drj.comparison_request_id = cr.id
+    order by drj.created_at desc, drj.id desc
+    limit 1
+  ) latest_remap on true
 `;
 
 export async function listPreviousCompletedStudiesForPatient(patientIdInput: unknown): Promise<PreviousCompletedStudy[]> {
@@ -358,13 +397,39 @@ export async function findComparisonRequestById(idInput: unknown, db: PoolClient
   return result.rows[0] ? comparisonRequest(result.rows[0]) : null;
 }
 
-export async function listComparisonRequests(filters: { status?: unknown } = {}): Promise<ComparisonRequestRow[]> {
-  const status = cleanOptionalText(filters.status);
+export async function listComparisonRequests(filters: { status?: unknown; q?: unknown } = {}): Promise<ComparisonRequestRow[]> {
+  const status = cleanOptionalText(filters.status)?.toLowerCase() ?? "active";
+  const q = cleanOptionalText(filters.q)?.toLowerCase() ?? null;
   const values: unknown[] = [];
   const where: string[] = [];
-  if (status) {
-    values.push(status);
-    where.push(`cr.status = $${values.length}`);
+  const statusMap: Record<string, ComparisonRequestStatus[]> = {
+    active: ["pending_upload_confirmation", "ready_for_reporting", "assigned"],
+    pending: ["pending_upload_confirmation"],
+    ready: ["ready_for_reporting"],
+    assigned: ["assigned"],
+    finalized: ["finalized"],
+    cancelled: ["cancelled"],
+    all: [],
+    pending_upload_confirmation: ["pending_upload_confirmation"],
+    ready_for_reporting: ["ready_for_reporting"],
+  };
+  const statuses = statusMap[status];
+  if (!statuses) throw new HttpError(400, "Invalid comparison request status filter.");
+  if (statuses.length) {
+    values.push(statuses);
+    where.push(`cr.status = any($${values.length}::text[])`);
+  }
+  if (q) {
+    values.push(`%${q}%`);
+    const param = `$${values.length}`;
+    where.push(`(
+      lower(coalesce(p.english_full_name, '')) like ${param}
+      or lower(coalesce(p.arabic_full_name, '')) like ${param}
+      or lower(coalesce(p.mrn, '')) like ${param}
+      or lower(coalesce(cr.linked_previous_accession_number, '')) like ${param}
+      or lower(coalesce(cr.linked_exam_name, '')) like ${param}
+      or lower(coalesce(cr.reason, '')) like ${param}
+    )`);
   }
   const result = await pool.query(
     `
@@ -376,6 +441,177 @@ export async function listComparisonRequests(filters: { status?: unknown } = {})
     values
   );
   return result.rows.map(comparisonRequest);
+}
+
+function assertCanPrepareComparisonMaterials(actor: ComparisonActor): void {
+  if (!CONFIRM_ROLES.has(actor.appRole)) {
+    throw new HttpError(403, "This role cannot prepare comparison materials.");
+  }
+}
+
+function assertComparisonAcceptsMaterialChanges(request: ComparisonRequestRow): void {
+  if (request.status !== "pending_upload_confirmation") {
+    throw new HttpError(409, "Only pending comparison requests can change preparation materials.");
+  }
+}
+
+export async function listComparisonRequestDocuments(idInput: unknown): Promise<DocumentRow[]> {
+  const id = normalizeId(idInput, "comparisonRequestId");
+  const request = await findComparisonRequestById(id);
+  if (!request) throw new HttpError(404, "Comparison request not found.");
+  const result = await pool.query<DocumentRow>(
+    `
+      select
+        d.id,
+        d.patient_id,
+        d.appointment_id,
+        d.v2_booking_id,
+        d.document_type,
+        d.original_filename,
+        d.stored_path,
+        d.mime_type,
+        d.file_size,
+        d.storage_location_type,
+        d.source,
+        d.scan_session_id,
+        d.page_count,
+        d.scanner_name,
+        d.workstation_name,
+        d.app_version,
+        d.last_move_attempt_at,
+        d.last_move_error,
+        d.created_at
+      from comparison_request_documents crd
+      join documents d on d.id = crd.document_id
+      where crd.comparison_request_id = $1
+      order by crd.created_at desc, d.id desc
+      limit 100
+    `,
+    [id]
+  );
+  return result.rows;
+}
+
+export async function attachDocumentToComparisonRequest(
+  actor: ComparisonActor,
+  idInput: unknown,
+  documentIdInput: unknown
+): Promise<DocumentRow> {
+  assertCanPrepareComparisonMaterials(actor);
+  const id = normalizeId(idInput, "comparisonRequestId");
+  const documentId = normalizeId(documentIdInput, "documentId");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const request = await lockComparisonRequest(id, client);
+    assertComparisonAcceptsMaterialChanges(request);
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`comparison-document:${documentId}`]);
+    const documentResult = await client.query<DocumentRow>("select * from documents where id = $1 for update", [documentId]);
+    const document = documentResult.rows[0];
+    if (!document) throw new HttpError(404, "Document not found.");
+    if (Number(document.patient_id) !== request.patientId) {
+      throw new HttpError(400, "Document patient does not match the comparison request patient.");
+    }
+    await client.query(
+      `
+        insert into comparison_request_documents (comparison_request_id, document_id, created_by)
+        values ($1, $2, $3)
+        on conflict (comparison_request_id, document_id) do nothing
+      `,
+      [id, documentId, actor.userId]
+    );
+    await audit(client, actor, "comparison_document_attached", request, { documentId }, null);
+    await client.query("commit");
+    return document;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function uploadComparisonRequestDocument(
+  actor: ComparisonActor,
+  idInput: unknown,
+  payload: DocumentUploadPayload
+): Promise<DocumentRow> {
+  assertCanPrepareComparisonMaterials(actor);
+  const id = normalizeId(idInput, "comparisonRequestId");
+  const request = await findComparisonRequestById(id);
+  if (!request) throw new HttpError(404, "Comparison request not found.");
+  assertComparisonAcceptsMaterialChanges(request);
+  const document = await uploadDocument(
+    {
+      ...payload,
+      patientId: request.patientId,
+      appointmentId: undefined,
+      appointmentRefType: undefined,
+      documentType: "comparison_request",
+    },
+    actor.userId
+  );
+  try {
+    return await attachDocumentToComparisonRequest(actor, id, document.id);
+  } catch (error) {
+    await deleteDocumentById(document.id, actor.userId).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function deleteComparisonRequestDocument(
+  actor: ComparisonActor,
+  idInput: unknown,
+  documentIdInput: unknown
+): Promise<{ deleted: true; documentId: number }> {
+  if (!CANCEL_ROLES.has(actor.appRole)) {
+    throw new HttpError(403, "This role cannot remove comparison documents.");
+  }
+  const id = normalizeId(idInput, "comparisonRequestId");
+  const documentId = normalizeId(documentIdInput, "documentId");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const request = await lockComparisonRequest(id, client);
+    assertComparisonAcceptsMaterialChanges(request);
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`comparison-document:${documentId}`]);
+    const linked = await client.query<{
+      appointment_id: number | null;
+      v2_booking_id: number | null;
+      other_comparison_count: number;
+    }>(
+      `
+        select
+          d.appointment_id,
+          d.v2_booking_id,
+          (
+            select count(*)::integer
+            from comparison_request_documents other_link
+            where other_link.document_id = d.id
+              and other_link.comparison_request_id <> $1
+          ) as other_comparison_count
+        from comparison_request_documents crd
+        join documents d on d.id = crd.document_id
+        where crd.comparison_request_id = $1 and crd.document_id = $2
+        limit 1
+      `,
+      [id, documentId]
+    );
+    const row = linked.rows[0];
+    if (!row) throw new HttpError(404, "Comparison document link not found.");
+    if (row.appointment_id != null || row.v2_booking_id != null || Number(row.other_comparison_count) > 0) {
+      throw new HttpError(409, "This canonical document is used elsewhere and cannot be removed from storage.");
+    }
+    await deleteDocumentById(documentId, actor.userId);
+    await audit(client, actor, "comparison_document_deleted", request, { documentId }, null);
+    await client.query("commit");
+    return { deleted: true, documentId };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function lockComparisonRequest(id: number, client: PoolClient): Promise<ComparisonRequestRow> {
@@ -457,6 +693,7 @@ export async function cancelComparisonRequest(actor: ComparisonActor, idInput: u
     await client.query("begin");
     const request = await lockComparisonRequest(id, client);
     if (request.status === "finalized") throw new HttpError(409, "Finalized comparison requests cannot be cancelled.");
+    if (request.status === "cancelled") throw new HttpError(409, "Cancelled comparison requests cannot be cancelled again.");
     await client.query(
       `
         update comparison_requests

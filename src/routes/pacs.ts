@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { type NextFunction, Request, Response } from "express";
 import Busboy from "busboy";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
@@ -33,6 +33,7 @@ import {
   upsertPacsAutoCompletionSetting,
 } from "../services/appointments-v2-pacs-auto-completion-worker.js";
 import {
+  assertDicomRemapJobComparisonAccess,
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
   clearFailedDicomRemapOrthancStudies,
@@ -65,13 +66,90 @@ import {
   writeDicomRemapStagedFile,
 } from "../services/dicom-remap-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
+import { canRoleAccessPage, readPageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
+import { findComparisonRequestById } from "../services/comparison-request-service.js";
 
 const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSupervisorReauth];
 const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();
 
-pacsRouter.use("/remap", requireAuth, requirePageAccess("pacs.remap"));
+const COMPARISON_REMAP_ROLES = new Set(["modality_staff", "doctor", "supervisor", "super_admin"]);
+
+type ComparisonRemapScope = { comparisonRequestId: number; patientId: number };
+
+async function requirePacsRemapAccess(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) throw new HttpError(401, "Authentication required.");
+    const matrix = await readPageVisibilityMatrix();
+    const hasGeneralRemapAccess = canRoleAccessPage("pacs.remap", req.user.role, matrix);
+    const comparisonRequestId = asOptionalString(asUnknownRecord(req.query).comparisonRequestId);
+    if (!comparisonRequestId) {
+      if (hasGeneralRemapAccess) {
+        next();
+        return;
+      }
+      throw new HttpError(403, "This role cannot access this page.");
+    }
+    if (!COMPARISON_REMAP_ROLES.has(req.user.role)) throw new HttpError(403, "This role cannot prepare comparison images.");
+    const comparisonRequest = await findComparisonRequestById(comparisonRequestId);
+    if (!comparisonRequest) throw new HttpError(404, "Comparison request not found.");
+    if (comparisonRequest.status !== "pending_upload_confirmation") {
+      throw new HttpError(409, "Only pending comparison requests can use DICOM remap.");
+    }
+    res.locals.comparisonRemapScope = {
+      comparisonRequestId: comparisonRequest.id,
+      patientId: comparisonRequest.patientId,
+    } satisfies ComparisonRemapScope;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+pacsRouter.use("/remap", requireAuth, requirePacsRemapAccess);
+pacsRouter.use("/remap", async function requireComparisonRemapScope(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const scope = res.locals.comparisonRemapScope as ComparisonRemapScope | undefined;
+    if (!scope) {
+      next();
+      return;
+    }
+    const pathname = new URL(req.originalUrl, "http://rispro.local").pathname;
+    const remapIndex = pathname.indexOf("/remap");
+    const scopedPath = remapIndex >= 0 ? pathname.slice(remapIndex + "/remap".length) : req.path;
+    const isCreationOrPreview = req.method === "POST" && [
+      "/preview-multipart",
+      "/jobs/stage-multipart",
+      "/jobs/process-multipart",
+    ].includes(scopedPath);
+    if (isCreationOrPreview || (req.method === "GET" && scopedPath === "/destinations")) {
+      next();
+      return;
+    }
+    if (req.method === "POST" && scopedPath === "/replacement-preview") {
+      const patientId = Number(asOptionalString(asUnknownRecord(req.body ?? {}).risproPatientId));
+      if (patientId !== scope.patientId) {
+        throw new HttpError(403, "Replacement patient must match the comparison request.");
+      }
+      next();
+      return;
+    }
+    const jobMatch = scopedPath.match(/^\/jobs\/(\d+)(?:\/|$)/);
+    if (jobMatch?.[1] && req.user) {
+      await assertDicomRemapJobComparisonAccess(
+        jobMatch[1],
+        req.user.sub as UserId,
+        scope.comparisonRequestId
+      );
+      next();
+      return;
+    }
+    throw new HttpError(403, "Comparison-linked remap access is limited to this request.");
+  } catch (error) {
+    next(error);
+  }
+});
 
 async function stageDicomRemapMultipartFiles(req: Request): Promise<{
   files: DicomRemapStagedUploadFile[];
@@ -714,7 +792,10 @@ pacsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { user: AuthenticatedUserContext };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
-    const context = await createDicomRemapStagingContext(currentUserId);
+    const context = await createDicomRemapStagingContext(
+      currentUserId,
+      asOptionalString(asUnknownRecord(req.query).comparisonRequestId)
+    );
     try {
       const staged = await stageDicomRemapMultipartDurably(req, context);
       const result = await finalizeDicomRemapAwaitingConfirmationStagingJob({
@@ -739,7 +820,10 @@ pacsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { user: AuthenticatedUserContext };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
-    const context = await createDicomRemapStagingContext(currentUserId);
+    const context = await createDicomRemapStagingContext(
+      currentUserId,
+      asOptionalString(asUnknownRecord(req.query).comparisonRequestId)
+    );
     try {
       const staged = await stageDicomRemapMultipartDurably(req, context);
       const result = await finalizeDicomRemapStagingJob({ context, ...staged });

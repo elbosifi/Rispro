@@ -66,6 +66,14 @@ test("active remap process-multipart bypasses the global Express JSON parser", a
   assert.match(appSource, /Let route-specific body parsers handle it\./);
 });
 
+test("comparison-only remap access is request, patient, and job scoped", async () => {
+  const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  assert.match(routeSource, /res\.locals\.comparisonRemapScope/);
+  assert.match(routeSource, /Replacement patient must match the comparison request/);
+  assert.match(routeSource, /assertDicomRemapJobComparisonAccess/);
+  assert.match(routeSource, /Comparison-linked remap access is limited to this request/);
+});
+
 test("fast durable multipart staging accepts source confirmation without patient or destination fields", async () => {
   const boundary = "fast-durable-boundary";
   const req = multipartRequest(boundary);
