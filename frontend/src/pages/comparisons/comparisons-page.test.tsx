@@ -7,6 +7,7 @@ import path from "node:path";
 import type { ComparisonRequest } from "@/types/api";
 
 const authState = vi.hoisted(() => ({ role: "supervisor" as string }));
+const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const apiMocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   confirm: vi.fn(),
@@ -17,6 +18,7 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({ user: { id: 9, role: authState.role } }),
 }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: languageState.language }) }));
 vi.mock("@/lib/api-hooks", () => ({
   cancelComparisonRequest: apiMocks.cancel,
   confirmComparisonMaterials: apiMocks.confirm,
@@ -44,11 +46,11 @@ describe("comparison request frontend contract", () => {
     const reportingApi = readFileSync(path.join(root, "src/lib/api/doctor-portal-reporting.ts"), "utf8");
 
     expect(drawer).toContain("Request comparison");
-    expect(page).toContain("Confirm and send to reporting pool");
-    expect(page).toContain("Upload / remap comparison study");
-    expect(page).toContain("Cancel comparison request");
+    expect(page).toContain("comparisons.confirmAndRelease");
+    expect(page).toContain("comparisons.uploadRemap");
+    expect(page).toContain("comparisons.cancelTitle");
     expect(page).toContain("ComparisonDocumentsPanel");
-    expect(page).toContain("Open details");
+    expect(page).toContain("comparisons.openDetails");
     expect(documentsPanel).toContain("uploadComparisonDocument");
     expect(documentsPanel).toContain("scanAppointmentRequest");
     expect(documentsPanel).toContain("DocumentPreviewWorkspace");
@@ -125,10 +127,22 @@ function renderPage(pathname = "/comparisons") {
 afterEach(() => {
   cleanup();
   authState.role = "supervisor";
+  languageState.language = "en";
   vi.clearAllMocks();
 });
 
 describe("comparison preparation worklist behavior", () => {
+  it("renders the worklist in Arabic with RTL direction", async () => {
+    languageState.language = "ar";
+    apiMocks.fetchMany.mockResolvedValue([]);
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "تجهيز المقارنات" })).toBeTruthy();
+    expect(screen.getByRole("main").getAttribute("dir")).toBe("rtl");
+    expect(screen.getByLabelText("حالة المقارنة")).toBeTruthy();
+    expect(screen.getByPlaceholderText("المريض أو الرقم الطبي أو رقم الفحص أو اسم الفحص أو السبب")).toBeTruthy();
+  });
+
   it("shows an auditable cancellation dialog only to eligible roles and requires a reason", async () => {
     const row = comparison();
     apiMocks.fetchMany.mockResolvedValue([row]);

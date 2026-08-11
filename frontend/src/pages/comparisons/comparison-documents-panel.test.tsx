@@ -10,6 +10,7 @@ const apiMocks = vi.hoisted(() => ({
   scan: vi.fn(),
   upload: vi.fn(),
 }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en" }) }));
 
 vi.mock("@/lib/api-hooks", () => ({
   deleteComparisonDocument: apiMocks.deleteDocument,

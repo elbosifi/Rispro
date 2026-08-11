@@ -1485,11 +1485,11 @@ export default function PacsRemapPage() {
           {comparisonRequestId ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-950">
               <div>
-                <strong>Comparison-linked remap</strong>
-                <span className="ml-2">Request #{comparisonRequestId}; the RISpro patient is locked and the resulting job will be linked automatically.</span>
+                <strong>{t(language, "comparisons.remapTitle")}</strong>
+                <span className="ms-2">{t(language, "comparisons.remapLocked", { id: comparisonRequestId })}</span>
               </div>
               <button type="button" className="btn-secondary rounded-lg px-3 py-2 text-xs" onClick={() => navigate(comparisonReturnPath)}>
-                Return to comparison
+                {t(language, "comparisons.return")}
               </button>
             </div>
           ) : null}
@@ -1835,15 +1835,15 @@ export default function PacsRemapPage() {
               </div>
               {comparisonRequestId ? (
                 <div className="rounded-2xl border border-teal-300 bg-teal-50 p-4 text-sm" data-testid="comparison-remap-context">
-                  <p className="font-semibold">Comparison upload · patient locked</p>
-                  {comparisonContextQuery.isLoading ? <p className="mt-1 text-xs text-slate-600">Loading comparison request...</p> : null}
-                  {comparisonContextQuery.isError ? <p className="mt-1 text-xs text-red-700">Unable to load the comparison request. Upload is disabled.</p> : null}
+                  <p className="font-semibold">{t(language, "comparisons.uploadLocked")}</p>
+                  {comparisonContextQuery.isLoading ? <p className="mt-1 text-xs text-slate-600">{t(language, "comparisons.loadingRequest")}</p> : null}
+                  {comparisonContextQuery.isError ? <p className="mt-1 text-xs text-red-700">{t(language, "comparisons.requestLoadError")}</p> : null}
                   {comparisonContext ? (
                     <div className="mt-2 grid gap-1 text-xs">
-                      <p><strong>Patient:</strong> {comparisonContext.patientEnglishName || comparisonContext.patientArabicName || comparisonContext.patientMrn || `Patient #${comparisonContext.patientId}`}</p>
-                      <p><strong>Previous study:</strong> {[comparisonContext.linkedStudyDate, comparisonContext.linkedExamName, comparisonContext.linkedPreviousAccessionNumber].filter(Boolean).join(" | ")}</p>
-                      <p><strong>Reason:</strong> {comparisonContext.reason}</p>
-                      <p className="font-semibold text-teal-800">Patient selection cannot be changed in comparison context.</p>
+                      <p><strong>{t(language, "comparisons.patient")}:</strong> {comparisonContext.patientEnglishName || comparisonContext.patientArabicName || comparisonContext.patientMrn || `#${comparisonContext.patientId}`}</p>
+                      <p><strong>{t(language, "comparisons.previousStudy")}:</strong> {[comparisonContext.linkedStudyDate, comparisonContext.linkedExamName, comparisonContext.linkedPreviousAccessionNumber].filter(Boolean).join(" | ")}</p>
+                      <p><strong>{t(language, "comparisons.reason")}:</strong> {comparisonContext.reason}</p>
+                      <p className="font-semibold text-teal-800">{t(language, "comparisons.patientLocked")}</p>
                     </div>
                   ) : null}
                 </div>
