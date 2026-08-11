@@ -67,7 +67,7 @@ describe("Doctor Portal wiring", () => {
   });
 
   it("keeps Settings Users doctor status read-only", () => {
-    const source = readFileSync(join(rootDir, "frontend", "src", "pages", "settings", "settings-page.tsx"), "utf8");
+    const source = readFileSync(join(rootDir, "frontend", "src", "pages", "settings", "users-section.tsx"), "utf8");
     assert.match(source, /Doctor profiles and modality permissions are managed in Doctor Portal/);
     assert.doesNotMatch(source, /Enable Doctor/);
     assert.doesNotMatch(source, /createDoctorProfileForAdmin|updateDoctorProfileForAdmin|updateDoctorProfileModalities/);
