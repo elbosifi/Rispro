@@ -50,6 +50,17 @@ test("patient duplicate scoring catches fuzzy name with demographics", () => {
   assert.ok(result.reasons.includes("date_of_birth_match"));
 });
 
+test("patient duplicate scoring distinguishes similar names from exact name matches", () => {
+  const result = scorePatientDuplicatePair(
+    { ...basePatient, arabic_full_name: "Alpha", normalized_arabic_name: "alpha", normalized_arabic_name_compact: "alpha", english_full_name: "Mohamed Ali" },
+    { ...basePatient, arabic_full_name: "Beta", normalized_arabic_name: "beta", normalized_arabic_name_compact: "beta", english_full_name: "Mohamed Aly" }
+  );
+
+  assert.ok(result.reasons.includes("similar_name"));
+  assert.equal(result.reasons.includes("name_match"), false);
+  assert.ok(result.signals.some((signal) => signal.field === "english_name" && signal.status === "similar"));
+});
+
 test("patient duplicate scoring weights English names like Arabic names", () => {
   const result = scorePatientDuplicatePair(
     { ...basePatient, arabic_full_name: "Alpha", normalized_arabic_name: "alpha", english_full_name: "Kawthar Abdullah Abdelrahim", phone_1: "0911111111" },
