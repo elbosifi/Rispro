@@ -92,4 +92,122 @@ describe("Dialog body scroll lock", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close parent" }));
     expect(document.body.style.position).toBe("");
   });
+
+  it("closes only the topmost nested dialog on Escape and restores scrolling after the parent closes", () => {
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+
+    function Harness() {
+      const [parentOpen, setParentOpen] = useState(true);
+      const [childOpen, setChildOpen] = useState(false);
+      return (
+        <>
+          <button type="button">Page control</button>
+          <Dialog open={parentOpen} onClose={() => setParentOpen(false)}>
+            <DialogContent aria-label="Parent dialog">
+              <button type="button" onClick={() => setChildOpen(true)}>Open child</button>
+              <Dialog open={childOpen} onClose={() => setChildOpen(false)}>
+                <DialogContent aria-label="Child dialog">
+                  <button type="button">Child action</button>
+                </DialogContent>
+              </Dialog>
+            </DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+
+    render(<Harness />);
+    expect(document.body.style.position).toBe("fixed");
+
+    const openChild = screen.getByRole("button", { name: "Open child" });
+    fireEvent.click(openChild);
+    expect(screen.getByRole("dialog", { name: "Child dialog" })).not.toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Child dialog" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Parent dialog" })).not.toBeNull();
+    expect(document.body.style.position).toBe("fixed");
+    expect(document.activeElement).toBe(openChild);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Parent dialog" })).toBeNull();
+    expect(document.body.style.position).toBe("");
+    expect(scrollTo).toHaveBeenCalledWith(18, 240);
+  });
+});
+
+describe("Dialog focus behavior", () => {
+  it("moves focus inside without a caller ref and restores it on close", () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open dialog</button>
+          <Dialog open={open} onClose={() => setOpen(false)}>
+            <DialogContent aria-label="Focus dialog"><button type="button">First action</button></DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Open dialog" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "First action" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("contains Tab and Shift+Tab inside the topmost dialog", () => {
+    render(
+      <>
+        <button type="button">Page control</button>
+        <Dialog open onClose={() => undefined}>
+          <DialogContent aria-label="Keyboard dialog">
+            <button type="button">First</button>
+            <button type="button">Last</button>
+          </DialogContent>
+        </Dialog>
+      </>,
+    );
+
+    const first = screen.getByRole("button", { name: "First" });
+    const last = screen.getByRole("button", { name: "Last" });
+    expect(document.activeElement).toBe(first);
+
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("focuses dialog content when there is no interactive child and closes only the topmost backdrop", () => {
+    function Harness() {
+      const [parentOpen, setParentOpen] = useState(true);
+      const [childOpen, setChildOpen] = useState(true);
+      return (
+        <Dialog open={parentOpen} onClose={() => setParentOpen(false)}>
+          <DialogContent aria-label="Parent backdrop dialog">
+            Parent
+            <Dialog open={childOpen} onClose={() => setChildOpen(false)}>
+              <DialogContent aria-label="Child backdrop dialog">Child</DialogContent>
+            </Dialog>
+          </DialogContent>
+        </Dialog>
+      );
+    }
+
+    render(<Harness />);
+    const child = screen.getByRole("dialog", { name: "Child backdrop dialog" });
+    expect(child.contains(document.activeElement)).toBe(true);
+
+    fireEvent.click(child);
+    expect(screen.queryByRole("dialog", { name: "Child backdrop dialog" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Parent backdrop dialog" })).not.toBeNull();
+  });
 });

@@ -2,6 +2,8 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
+  useRef,
   ReactNode,
   forwardRef,
   HTMLAttributes,
@@ -30,6 +32,36 @@ interface BodyScrollLockSnapshot {
 
 let bodyScrollLockCount = 0;
 let bodyScrollLockSnapshot: BodyScrollLockSnapshot | null = null;
+const dialogStack: DialogStackEntry[] = [];
+
+interface DialogStackEntry {
+  content: HTMLDivElement;
+  previouslyFocused: HTMLElement | null;
+}
+
+const focusableSelector = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+function getFocusableElements(content: HTMLElement) {
+  return Array.from(content.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+    (element) => element.getAttribute("aria-hidden") !== "true",
+  );
+}
+
+function isFocusable(element: HTMLElement | null): element is HTMLElement {
+  return Boolean(
+    element
+    && element.isConnected
+    && !element.hasAttribute("disabled")
+    && element.getAttribute("aria-hidden") !== "true",
+  );
+}
 
 function lockBodyScroll() {
   if (typeof document === "undefined" || typeof window === "undefined") return;
@@ -121,26 +153,86 @@ interface DialogContentProps extends HTMLAttributes<HTMLDivElement> {
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
   ({ children, maxWidth = "400px", scrollable = true, className = "", ...props }, ref) => {
     const { onClose } = useDialog();
+    const contentRef = useRef<HTMLDivElement>(null);
+    const stackEntryRef = useRef<DialogStackEntry | null>(null);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    const setContentRef = (node: HTMLDivElement | null) => {
+      contentRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
-  useEffect(() => {
-    // Focus first interactive element when opened
-    if (ref && typeof ref !== "function" && ref.current) {
-      const focusable = ref.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusable.length > 0) {
-        focusable[0].focus();
+    useLayoutEffect(() => {
+      const content = contentRef.current;
+      if (!content) return;
+
+      const entry: DialogStackEntry = {
+        content,
+        previouslyFocused: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      };
+      stackEntryRef.current = entry;
+      const nestedEntryIndex = dialogStack.findIndex((existingEntry) => content.contains(existingEntry.content));
+      if (nestedEntryIndex === -1) dialogStack.push(entry);
+      else dialogStack.splice(nestedEntryIndex, 0, entry);
+
+      if (dialogStack.at(-1) === entry) {
+        const focusable = getFocusableElements(content);
+        (focusable[0] ?? content).focus();
       }
-    }
-  }, [ref]);
+
+      return () => {
+        const wasTopmost = dialogStack.at(-1) === entry;
+        const index = dialogStack.indexOf(entry);
+        if (index !== -1) dialogStack.splice(index, 1);
+        stackEntryRef.current = null;
+        if (!wasTopmost) return;
+
+        const nextTopmost = dialogStack.at(-1);
+        if (nextTopmost?.content.isConnected) {
+          if (isFocusable(entry.previouslyFocused) && nextTopmost.content.contains(entry.previouslyFocused)) {
+            entry.previouslyFocused.focus();
+          } else {
+            (getFocusableElements(nextTopmost.content)[0] ?? nextTopmost.content).focus();
+          }
+        } else if (isFocusable(entry.previouslyFocused)) {
+          entry.previouslyFocused.focus();
+        }
+      };
+    }, []);
+
+    useEffect(() => {
+      const handleKeyDown = (event: KeyboardEvent) => {
+        const entry = stackEntryRef.current;
+        const content = contentRef.current;
+        if (!entry || !content || dialogStack.at(-1) !== entry) return;
+
+        if (event.key === "Escape") {
+          onClose();
+          return;
+        }
+
+        if (event.key !== "Tab") return;
+        const focusable = getFocusableElements(content);
+        if (focusable.length === 0) {
+          event.preventDefault();
+          content.focus();
+          return;
+        }
+
+        const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+        if (event.shiftKey) {
+          if (currentIndex <= 0) {
+            event.preventDefault();
+            focusable.at(-1)?.focus();
+          }
+        } else if (currentIndex === -1 || currentIndex === focusable.length - 1) {
+          event.preventDefault();
+          focusable[0]?.focus();
+        }
+      };
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }, [onClose]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -176,7 +268,8 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
 
       {/* Dialog */}
       <div
-        ref={ref}
+        ref={setContentRef}
+        tabIndex={props.tabIndex ?? -1}
         style={{
           position: "relative",
           zIndex: 1,
