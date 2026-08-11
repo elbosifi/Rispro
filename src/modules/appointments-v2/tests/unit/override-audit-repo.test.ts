@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "fs";
 import { join } from "path";
+import type { PoolClient } from "pg";
 
 // ---------------------------------------------------------------------------
 // Structure and exports
@@ -29,6 +30,53 @@ describe("Override audit repository — structure", () => {
     );
     const result = recordOverrideAudit.constructor.name;
     assert.strictEqual(result, "AsyncFunction");
+  });
+});
+
+describe("Override audit repository — legacy schema compatibility", () => {
+  it("uses the legacy insert when override_type is not available", async () => {
+    const { recordOverrideAudit } = await import(
+      "../../booking/repositories/override-audit.repo.js"
+    );
+    const queries: Array<{ sql: string; params?: unknown[] }> = [];
+    const client = {
+      query: async (sql: string, params?: unknown[]) => {
+        queries.push({ sql, params });
+        return queries.length === 1
+          ? { rows: [{ exists: false }] }
+          : { rows: [] };
+      },
+    } as unknown as PoolClient;
+
+    await recordOverrideAudit(client, {
+      bookingId: 101,
+      patientId: 202,
+      modalityId: 303,
+      examTypeId: 404,
+      bookingDate: "2026-08-11",
+      requestingUserId: 505,
+      supervisorUserId: 606,
+      overrideReason: "Urgent clinical need",
+      overrideType: "total_capacity_override",
+      decisionSnapshot: { isAllowed: false },
+      outcome: "approved_and_booked",
+    });
+
+    assert.equal(queries.length, 2);
+    assert.match(queries[0].sql, /information_schema\.columns/);
+    assert.doesNotMatch(queries[1].sql, /override_type/);
+    assert.deepEqual(queries[1].params, [
+      101,
+      202,
+      303,
+      404,
+      "2026-08-11",
+      505,
+      606,
+      "Urgent clinical need",
+      JSON.stringify({ isAllowed: false }),
+      "approved_and_booked",
+    ]);
   });
 });
 
