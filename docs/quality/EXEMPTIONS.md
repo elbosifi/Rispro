@@ -28,6 +28,8 @@ Add an allowlist entry in `scripts/harness/check-structure.mjs` only when the im
 
 Large existing files are reported but not failed by `npm run harness:quality`. Do not expand large files unless the task is local to that file and extraction would be riskier than a narrow edit.
 
+The Arabic and English translation catalog files are data catalogs, not executable ownership modules. Their size is protected by fixed key counts, key-set parity, and content hashes. The extracted domain API files are transitional ownership boundaries behind `@/lib/api-hooks`; split them further only with per-domain contract tests and consumer migration evidence.
+
 ## `any`
 
 The harness reports likely TypeScript `any` usage but does not fail initially. Prefer removing `any` only when the local type is clear and the change is in scope.
