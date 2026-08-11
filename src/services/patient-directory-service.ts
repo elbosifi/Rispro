@@ -1,6 +1,12 @@
 import { pool } from "../db/pool.js";
-import { normalizeIdentifierValue } from "../utils/identifier.js";
-import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
+import {
+  PATIENT_SEARCH_CANDIDATE_IDS_CTE,
+  PATIENT_SEARCH_MATCH_SQL,
+  PATIENT_SEARCH_PHONETIC_LATERALS,
+  PATIENT_SEARCH_RANK_SQL,
+  PATIENT_SEARCH_SIMILARITY_SQL,
+  preparePatientSearch,
+} from "./patient-search-query.js";
 
 export interface PatientDirectoryParams {
   search?: string;
@@ -77,47 +83,14 @@ function getAppointmentFilterClause(filter?: string): string {
 }
 
 function buildPatientDirectoryWhere(params: {
-  term: string;
-  normalizedTerm: string;
-  normalizedArabicCompactTerm: string;
-  normalizedPattern: string;
-  normalizedCompactPattern: string;
-  normalizedIdentifierPattern: string;
   sex?: "male" | "female";
   ageMin?: number;
   ageMax?: number;
   category?: "oncology" | "non_oncology";
   appointmentFilter?: "has_future" | "today" | "no_future";
-}): { where: string; values: unknown[] } {
-  const values: unknown[] = [];
+}, initialValues: unknown[] = []): { where: string; values: unknown[] } {
+  const values = [...initialValues];
   const clauses: string[] = [];
-
-  if (params.term) {
-    const normalizedTermParam = addSqlParam(values, params.normalizedTerm);
-    const normalizedPatternParam = addSqlParam(values, params.normalizedPattern);
-    const compactTermParam = addSqlParam(values, params.normalizedArabicCompactTerm);
-    const compactPatternParam = addSqlParam(values, params.normalizedCompactPattern);
-    const identifierPatternParam = addSqlParam(values, params.normalizedIdentifierPattern);
-    clauses.push(`(
-      p.mrn ilike ${normalizedTermParam}
-      or p.national_id ilike ${normalizedTermParam}
-      or p.identifier_value ilike ${normalizedTermParam}
-      or p.phone_1 ilike ${normalizedTermParam}
-      or p.phone_2 ilike ${normalizedTermParam}
-      or p.arabic_full_name ilike ${normalizedTermParam}
-      or p.normalized_arabic_name ilike ${normalizedPatternParam}
-      or (
-        ${compactTermParam} <> ''
-        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
-        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) ilike ${compactPatternParam}
-      )
-      or p.english_full_name ilike ${normalizedTermParam}
-      or exists (
-        select 1 from patient_identifiers pi
-        where pi.patient_id = p.id and (pi.value ilike ${normalizedTermParam} or pi.normalized_value ilike ${identifierPatternParam})
-      )
-    )`);
-  }
 
   const normalizedSex = String(params.sex || "").trim().toLowerCase();
   if (normalizedSex === "male" || normalizedSex === "m") {
@@ -157,34 +130,38 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const page = Math.max(1, Number(params.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 25));
   const offset = (page - 1) * pageSize;
-
-  const normalizedTerm = term ? `%${term}%` : "%";
-  const normalizedArabicTerm = term ? normalizeArabicName(term) : "";
-  const normalizedArabicCompactTerm = term ? normalizeArabicNameCompact(term) : "";
-  const normalizedPattern = normalizedArabicTerm ? `%${normalizedArabicTerm}%` : "%";
-  const normalizedCompactPattern = normalizedArabicCompactTerm ? `%${normalizedArabicCompactTerm}%` : "%";
-  const normalizedIdentifierPattern = term ? `%${normalizeIdentifierValue(term)}%` : "%";
-  const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
-  const normalizedArabicPrefixPattern = `${normalizedArabicTerm}%`;
-  const normalizedEnglishPrefixPattern = `${normalizedEnglishTerm}%`;
-  const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
-  const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
+  const preparedSearch = await preparePatientSearch(term);
+  const searchValues = term ? preparedSearch.queryParameters : [];
 
   const directoryWhere = buildPatientDirectoryWhere({
-    term,
-    normalizedTerm,
-    normalizedArabicCompactTerm,
-    normalizedPattern,
-    normalizedCompactPattern,
-    normalizedIdentifierPattern,
     sex,
     ageMin,
     ageMax,
     category,
     appointmentFilter,
-  });
+  }, searchValues);
 
-  const countQuery = `select count(*)::bigint as total from patients p where ${directoryWhere.where}`;
+  const searchCtes = term ? String.raw`
+    ${PATIENT_SEARCH_CANDIDATE_IDS_CTE},
+    search_matched_patients as materialized (
+      select
+        p.*,
+        ${PATIENT_SEARCH_RANK_SQL} as search_rank,
+        ${PATIENT_SEARCH_SIMILARITY_SQL} as search_similarity,
+        phonetic_match.matching_token_count as search_phonetic_count
+      from candidate_ids candidate
+      join patients p on p.id = candidate.id
+      ${PATIENT_SEARCH_PHONETIC_LATERALS}
+      where ${PATIENT_SEARCH_MATCH_SQL}
+    )` : "";
+  const patientSource = term ? "search_matched_patients p" : "patients p";
+
+  const countQuery = `
+    ${term ? `with ${searchCtes}` : ""}
+    select count(*)::bigint as total
+    from ${patientSource}
+    where ${directoryWhere.where}
+  `;
 
   const countResult = await pool.query<{ total: string }>(countQuery, directoryWhere.values);
   const total = Number(countResult.rows[0]?.total || 0);
@@ -198,29 +175,22 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   }
   if (term) {
     if (sortBy === "recent") {
-      orderBy = "fp.rank asc, fp.id desc";
+      orderBy = "fp.rank asc, fp.search_similarity desc, fp.search_phonetic_count desc, fp.id desc";
     } else if (sortBy === "mrn") {
-      orderBy = "fp.rank asc, fp.mrn asc nulls last, fp.id desc";
+      orderBy = "fp.rank asc, fp.search_similarity desc, fp.search_phonetic_count desc, fp.mrn asc nulls last, fp.id desc";
     } else {
-      orderBy = "fp.rank asc, fp.normalized_arabic_name asc, fp.arabic_full_name asc";
+      orderBy = "fp.rank asc, fp.search_similarity desc, fp.search_phonetic_count desc, fp.normalized_arabic_name asc, fp.arabic_full_name asc";
     }
   }
 
   const queryParams = [...directoryWhere.values];
-  const termParam = addSqlParam(queryParams, term);
-  const rankTermParam = addSqlParam(queryParams, normalizedTerm);
-  const exactArabicParam = addSqlParam(queryParams, normalizedArabicTerm);
-  const compactTermParam = addSqlParam(queryParams, normalizedArabicCompactTerm);
-  const exactEnglishParam = addSqlParam(queryParams, normalizedEnglishTerm);
-  const arabicPrefixParam = addSqlParam(queryParams, normalizedArabicPrefixPattern);
-  const englishPrefixParam = addSqlParam(queryParams, normalizedEnglishPrefixPattern);
-  const arabicLaterTokenParam = addSqlParam(queryParams, normalizedArabicLaterTokenPattern);
-  const englishLaterTokenParam = addSqlParam(queryParams, normalizedEnglishLaterTokenPattern);
   const pageSizeParam = addSqlParam(queryParams, pageSize);
   const offsetParam = addSqlParam(queryParams, offset);
 
   const query = `
-    with filtered_patients as (
+    with
+    ${term ? `${searchCtes},` : ""}
+    filtered_patients as (
       select
         p.id,
         p.mrn,
@@ -233,29 +203,10 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         p.category,
         p.normalized_arabic_name,
         p.estimated_date_of_birth,
-        case
-          when ${termParam} = '' then 99
-          when p.mrn ilike ${rankTermParam}
-            or p.national_id ilike ${rankTermParam}
-            or p.identifier_value ilike ${rankTermParam}
-            or p.phone_1 ilike ${rankTermParam}
-            or p.phone_2 ilike ${rankTermParam} then 1
-          when p.normalized_arabic_name = ${exactArabicParam} then 2
-          when ${compactTermParam} <> ''
-            and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) <> ''
-            and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g')) = ${compactTermParam} then 2
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = ${exactEnglishParam} then 2
-          when split_part(p.normalized_arabic_name, ' ', 1) = ${exactArabicParam} then 3
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = ${exactEnglishParam} then 3
-          when split_part(p.normalized_arabic_name, ' ', 1) like ${arabicPrefixParam} then 4
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like ${englishPrefixParam} then 4
-          when p.normalized_arabic_name like ${arabicPrefixParam} then 6
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like ${englishPrefixParam} then 6
-          when p.normalized_arabic_name like ${arabicLaterTokenParam} then 7
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like ${englishLaterTokenParam} then 7
-          else 8
-        end as rank
-      from patients p
+        ${term ? "p.search_rank" : "99"} as rank,
+        ${term ? "p.search_similarity" : "0"} as search_similarity,
+        ${term ? "p.search_phonetic_count" : "0"} as search_phonetic_count
+      from ${patientSource}
       where ${directoryWhere.where}
     )
     select

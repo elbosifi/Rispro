@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
-import { getPatientDirectory } from "./patient-service.js";
+import { invalidateAllCache } from "../utils/cache.js";
+import { getPatientDirectory, searchPatients } from "./patient-service.js";
 import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normalize.js";
 
 function uniqueSuffix(): string {
@@ -234,6 +235,123 @@ test("patient directory search orders by best match before recent sort", async (
     assert.ok(rankedIds.indexOf(exactOlder) < rankedIds.indexOf(weakNewer));
   } finally {
     if (createdIds.length > 0) {
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [userId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);
+  }
+});
+
+test("patient directory shares canonical identifier, Arabic, ordered, fuzzy, phonetic, and dictionary search semantics", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+
+  const suffix = uniqueSuffix();
+  const digits = suffix.replace(/\D/g, "");
+  const passwordHash = bcrypt.hashSync("test-pass", 10);
+  const user = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_dir_parity_${suffix}`, `Directory Parity Tester ${suffix}`, passwordHash],
+  );
+  const userId = Number(user.rows[0]?.id);
+  const createdIds: number[] = [];
+  const dictionaryArabic = `قاموساختبار${digits}`;
+
+  const insertPatient = async (
+    arabicFullName: string,
+    englishFullName: string,
+    identifierValue?: string,
+  ): Promise<number> => {
+    const nationalId = `${String(Math.floor(Math.random() * 100_000_000_000)).padStart(11, "0")}${createdIds.length}`;
+    const result = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name, normalized_arabic_name_compact,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, 35, '1991-01-01', 'M', $8, 'city', $9, $9)
+        returning id
+      `,
+      [
+        nationalId,
+        identifierValue ? "other" : "national_id",
+        identifierValue || nationalId,
+        arabicFullName,
+        englishFullName,
+        normalizeArabicName(arabicFullName),
+        normalizeArabicNameCompact(arabicFullName),
+        `09${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`,
+        userId,
+      ],
+    );
+    const id = Number(result.rows[0]?.id);
+    createdIds.push(id);
+    return id;
+  };
+
+  try {
+    const compactArabic = await insertPatient(`عبدالله منصور الفيتوري ${digits}`, `Abdullah Mansour Fitouri ${digits}`);
+    const dictionaryExact = await insertPatient(`مريض قاموس مطابق ${digits}`, "Yusuf Abdullah Hussain");
+    const dictionaryPhonetic = await insertPatient(`مريض قاموس ${digits}`, "Yousef Abdallah Hussein");
+    const exactIdentifier = await insertPatient(`مريض معرف ${digits}`, "Entirely Different Person", "Muhammad Aly Salim");
+    const trigramVariant = await insertPatient(`مريض تقارب ${digits}`, "Muhammad Aly Saleem");
+    const phoneticVariant = await insertPatient(`مريض صوتي ${digits}`, "Mohamed Ali Salem");
+    const orderedTokens = await insertPatient(`مريض مرتب ${digits}`, `Kareem Nader Faraj Saleh ${digits}`);
+    const exactMrnName = await insertPatient(`مريض ترتيب ${digits}`, `Nabil Kareem Faraj ${digits}`);
+    const fuzzyMrnName = await insertPatient(`مريض ترتيب تقريبي ${digits}`, `Nabeel Karim Faraj ${digits}`);
+
+    await pool.query(`update patients set mrn = $2 where id = $1`, [exactMrnName, `ZZZ-${digits}`]);
+    await pool.query(`update patients set mrn = $2 where id = $1`, [fuzzyMrnName, `AAA-${digits}`]);
+    await pool.query(
+      `insert into name_dictionary (arabic_text, english_text, is_active) values ($1, $2, true)`,
+      [dictionaryArabic, "Yusuf Abdullah Hussain"],
+    );
+    invalidateAllCache();
+
+    const assertDirectoryAndCanonicalRecall = async (query: string, expectedId: number) => {
+      const directory = await getPatientDirectory({ search: query, page: 1, pageSize: 100 });
+      const canonicalIds = (await searchPatients(query)).map((patient) => Number(patient.id));
+      assert.ok(directory.patients.some((patient) => patient.id === expectedId), `directory should recall ${expectedId} for ${query}`);
+      assert.ok(canonicalIds.includes(expectedId), `canonical search should recall ${expectedId} for ${query}`);
+      return directory;
+    };
+
+    await assertDirectoryAndCanonicalRecall("Muhammad Aly Salim", exactIdentifier);
+    await assertDirectoryAndCanonicalRecall(`عبد الله منصور الفيتوري ${digits}`, compactArabic);
+    const dictionaryDirectory = await assertDirectoryAndCanonicalRecall(dictionaryArabic, dictionaryExact);
+    await assertDirectoryAndCanonicalRecall(dictionaryArabic, dictionaryPhonetic);
+    const dictionaryIds = dictionaryDirectory.patients.map((patient) => patient.id);
+    assert.ok(dictionaryIds.indexOf(dictionaryExact) < dictionaryIds.indexOf(dictionaryPhonetic), "dictionary exact text should outrank phonetic fallback");
+    await assertDirectoryAndCanonicalRecall("Muhamad Aly Saleem", trigramVariant);
+    await assertDirectoryAndCanonicalRecall("Muhammad Aly Salim", phoneticVariant);
+    await assertDirectoryAndCanonicalRecall(`Nader Saleh ${digits}`, orderedTokens);
+
+    const recent = await getPatientDirectory({ search: "Muhammad Aly Salim", sortBy: "recent", page: 1, pageSize: 100 });
+    const recentIds = recent.patients.map((patient) => patient.id);
+    assert.ok(exactIdentifier < trigramVariant && trigramVariant < phoneticVariant, "fixture requires fuzzy matches to be newer");
+    assert.ok(recentIds.indexOf(exactIdentifier) < recentIds.indexOf(trigramVariant), "identifier relevance should outrank recent id");
+    assert.ok(recentIds.indexOf(trigramVariant) < recentIds.indexOf(phoneticVariant), "trigram relevance should outrank phonetic fallback");
+    assert.equal(recent.pagination.total, recent.patients.length, "the first full page should agree with the fuzzy/phonetic count");
+    assert.ok(recent.pagination.total >= 3, "the total should include identifier, trigram, and phonetic matches");
+    const paged = await getPatientDirectory({ search: "Muhammad Aly Salim", sortBy: "recent", page: 1, pageSize: 1 });
+    assert.equal(paged.pagination.total, recent.pagination.total, "fuzzy/phonetic total should remain accurate with pagination");
+    assert.equal(paged.pagination.totalPages, recent.pagination.total);
+
+    const byMrn = await getPatientDirectory({ search: `Nabil Kareem Faraj ${digits}`, sortBy: "mrn", page: 1, pageSize: 100 });
+    const mrnIds = byMrn.patients.map((patient) => patient.id);
+    assert.ok(mrnIds.includes(exactMrnName));
+    assert.ok(mrnIds.includes(fuzzyMrnName));
+    assert.ok(mrnIds.indexOf(exactMrnName) < mrnIds.indexOf(fuzzyMrnName), "exact text relevance should outrank MRN order");
+  } finally {
+    await pool.query(`delete from name_dictionary where arabic_text = $1`, [dictionaryArabic]).catch(() => undefined);
+    invalidateAllCache();
+    if (createdIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdIds]).catch(() => undefined);
       await pool.query(`delete from patients where id = any($1::bigint[])`, [createdIds]).catch(() => undefined);
     }
     await pool.query(`delete from audit_log where changed_by_user_id = $1`, [userId]).catch(() => undefined);
