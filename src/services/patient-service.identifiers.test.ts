@@ -707,6 +707,107 @@ test("searchPatients: adds bounded trigram, dictionary, and token-wise Double Me
   }
 });
 
+test("searchPatients: recovers a misspelled single token anywhere in an English name without weakening safeguards", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const digits = suffix.replace(/\D/g, "");
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_word_fuzzy_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const createdPatientIds: number[] = [];
+  const dictionaryArabic = `بوراوياختبار${digits}`;
+
+  const insertPatient = async (englishFullName: string, identifierValue?: string) => {
+    const nationalId = uniqueNationalId("7");
+    const arabicFullName = `مريض بحث ${createdPatientIds.length + 1} ${digits}`;
+    const inserted = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name, normalized_arabic_name_compact,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, $2, $3, $4, $5, $6, $7, 30, '1996-01-01', 'M', '0912345678', 'city', $8, $8)
+        returning id
+      `,
+      [
+        nationalId,
+        identifierValue ? "other" : "national_id",
+        identifierValue || nationalId,
+        arabicFullName,
+        englishFullName,
+        normalizeArabicName(arabicFullName),
+        normalizeArabicNameCompact(arabicFullName),
+        receptionistUserId,
+      ]
+    );
+    const id = Number(inserted.rows[0]?.id);
+    createdPatientIds.push(id);
+    return id;
+  };
+
+  try {
+    const surnameToken = await insertPatient("Mohamed Salem Borawi");
+    const middleToken = await insertPatient("Kareem Borawi Faraj");
+    const misspelledName = await insertPatient("Mohamed Salem Burawi");
+    const senussi = await insertPatient("Kareem Senussi Faraj");
+    const yousef = await insertPatient("Nader Yousef Omar");
+    const hussein = await insertPatient("Omar Hussein Saleh");
+    const salem = await insertPatient("Faraj Salem Nader");
+    const abdallah = await insertPatient("Nader Abdallah Mansour");
+    const vaguelySimilar = await insertPatient("Omar Hassan Saleh");
+    const unsafeShortMatch = await insertPatient("Li Omar Salem");
+    const exactIdentifier = await insertPatient("Entirely Different Person", "Burawi");
+
+    await pool.query(
+      `insert into name_dictionary (arabic_text, english_text, is_active) values ($1, 'Burawi', true)`,
+      [dictionaryArabic]
+    );
+    invalidateAllCache();
+
+    const misspelledIds = (await searchPatients("Burawi")).map((row) => Number(row.id));
+    assert.ok(misspelledIds.includes(surnameToken), "Burawi should find Borawi as a non-first surname token");
+    assert.ok(misspelledIds.includes(middleToken), "Burawi should find Borawi as a middle token");
+    assert.ok(misspelledIds.indexOf(exactIdentifier) < misspelledIds.indexOf(surnameToken), "Exact identifier must outrank fuzzy names");
+
+    const exactIds = (await searchPatients("Borawi")).map((row) => Number(row.id));
+    assert.ok(exactIds.includes(surnameToken), "Exact Borawi token should be found");
+    assert.ok(exactIds.indexOf(surnameToken) < exactIds.indexOf(misspelledName), "Exact Borawi spelling should outrank Burawi");
+
+    for (const [query, expectedId] of [
+      ["Sanusi", senussi],
+      ["Yusuf", yousef],
+      ["Hussain", hussein],
+      ["Salim", salem],
+      ["Abdullah", abdallah],
+    ] as const) {
+      assert.ok((await searchPatients(query)).some((row) => Number(row.id) === expectedId), `${query} should find its spelling variant anywhere in the name`);
+    }
+
+    const hussainIds = (await searchPatients("Hussain")).map((row) => Number(row.id));
+    assert.ok(hussainIds.indexOf(hussein) < hussainIds.indexOf(vaguelySimilar), "A strong word match must outrank a weak same-code surname");
+    assert.equal((await searchPatients("Lee")).some((row) => Number(row.id) === unsafeShortMatch), false, "Short names still require stronger spelling support");
+    assert.ok((await searchPatients(dictionaryArabic)).some((row) => Number(row.id) === surnameToken), "A fully translated one-token dictionary query should use whole-word fuzzy matching");
+  } finally {
+    await pool.query(`delete from name_dictionary where arabic_text = $1`, [dictionaryArabic]).catch(() => undefined);
+    invalidateAllCache();
+    if (createdPatientIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]).catch(() => undefined);
+  }
+});
+
 test("createPatient: persists demographics_estimated flag", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const suffix = uniqueSuffix();

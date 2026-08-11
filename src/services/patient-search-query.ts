@@ -35,14 +35,18 @@ export async function preparePatientSearch(searchTerm = ""): Promise<{ term: str
   const searchTokens = term ? term.toLowerCase().replace(/\s+/g, " ").split(" ").filter(Boolean) : [];
   const normalizedArabicTerm = normalizeArabicName(term);
   const normalizedArabicCompactTerm = normalizeArabicNameCompact(term);
-  const dictionaryEnglishTerm = /[\u0600-\u06ff]/.test(term)
-    ? generateEnglishFromDictionary(term, await loadPatientNameDictionary()).englishName
+  const hasArabic = /[\u0600-\u06ff]/.test(term);
+  const dictionaryTranslation = hasArabic
+    ? generateEnglishFromDictionary(term, await loadPatientNameDictionary())
+    : null;
+  const dictionaryEnglishTerm = dictionaryTranslation?.missingTokens.length === 0
+    ? dictionaryTranslation.englishName
     : "";
   const normalizedPattern = `%${normalizedArabicTerm}%`;
   const normalizedCompactPattern = `%${normalizedArabicCompactTerm}%`;
   const normalizedIdentifierPattern = `%${normalizeIdentifierValue(term)}%`;
   const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
-  const englishSearchTerm = (dictionaryEnglishTerm || normalizedEnglishTerm).toLowerCase().replace(/\s+/g, " ").trim();
+  const englishSearchTerm = (hasArabic ? dictionaryEnglishTerm : normalizedEnglishTerm).toLowerCase().replace(/\s+/g, " ").trim();
   const englishSearchTokens = englishSearchTerm ? englishSearchTerm.split(" ").filter(Boolean) : [];
   const normalizedArabicPrefixPattern = `${normalizedArabicTerm}%`;
   const normalizedEnglishPrefixPattern = `${englishSearchTerm}%`;
@@ -56,6 +60,10 @@ export async function preparePatientSearch(searchTerm = ""): Promise<{ term: str
     : "";
   const arabicFuzzyThreshold = normalizedArabicCompactTerm.length <= 4 ? 0.45 : 0.3;
   const englishFuzzyThreshold = englishSearchTerm.replace(/\s/g, "").length <= 4 ? 0.45 : 0.3;
+  const singleEnglishToken = englishSearchTokens.length === 1;
+  // Whole-word scores measured on representative transliterations support 0.30 for
+  // longer names; short tokens retain 0.45 because their trigram overlap is less selective.
+  const englishStrictWordThreshold = englishSearchTerm.length <= 4 ? 0.45 : 0.3;
 
   return {
     term,
@@ -77,11 +85,16 @@ export async function preparePatientSearch(searchTerm = ""): Promise<{ term: str
       arabicFuzzyThreshold,
       englishFuzzyThreshold,
       `%${englishSearchTerm}%`,
+      singleEnglishToken,
+      englishStrictWordThreshold,
     ],
   };
 }
 
 export const PATIENT_SEARCH_CANDIDATE_IDS_CTE = String.raw`
+  patient_search_trgm_config as materialized (
+    select set_config('pg_trgm.strict_word_similarity_threshold', $19::text, true)
+  ),
   candidate_ids as materialized (
     select p.id
     from patients p
@@ -121,6 +134,13 @@ export const PATIENT_SEARCH_CANDIDATE_IDS_CTE = String.raw`
       or ($6 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) % $6)
     union
     select p.id
+    from patient_search_trgm_config
+    cross join patients p
+    where
+      $18::boolean
+      and $6 <<% lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))
+    union
+    select p.id
     from patients p
     where
       $6 <> ''
@@ -140,22 +160,31 @@ export const PATIENT_SEARCH_PHONETIC_LATERALS = String.raw`
         where
           (
             dmetaphone(phonetic_names.patient_tokens[token_index]) in (
-              dmetaphone(phonetic_names.query_tokens[token_index]),
-              dmetaphone_alt(phonetic_names.query_tokens[token_index])
+              dmetaphone(phonetic_names.query_tokens[case when cardinality(phonetic_names.query_tokens) = 1 then 1 else token_index end]),
+              dmetaphone_alt(phonetic_names.query_tokens[case when cardinality(phonetic_names.query_tokens) = 1 then 1 else token_index end])
             )
             or dmetaphone_alt(phonetic_names.patient_tokens[token_index]) in (
-              dmetaphone(phonetic_names.query_tokens[token_index]),
-              dmetaphone_alt(phonetic_names.query_tokens[token_index])
+              dmetaphone(phonetic_names.query_tokens[case when cardinality(phonetic_names.query_tokens) = 1 then 1 else token_index end]),
+              dmetaphone_alt(phonetic_names.query_tokens[case when cardinality(phonetic_names.query_tokens) = 1 then 1 else token_index end])
             )
           )
-          and similarity(phonetic_names.patient_tokens[token_index], phonetic_names.query_tokens[token_index]) >= case
-            when least(length(phonetic_names.patient_tokens[token_index]), length(phonetic_names.query_tokens[token_index])) <= 4 then 0.25
+          and similarity(
+            phonetic_names.patient_tokens[token_index],
+            phonetic_names.query_tokens[case when cardinality(phonetic_names.query_tokens) = 1 then 1 else token_index end]
+          ) >= case
+            when least(
+              length(phonetic_names.patient_tokens[token_index]),
+              length(phonetic_names.query_tokens[case when cardinality(phonetic_names.query_tokens) = 1 then 1 else token_index end])
+            ) <= 4 then 0.25
             else 0.08
           end
       )::int as matching_token_count
     from generate_series(
       1,
-      least(cardinality(phonetic_names.patient_tokens), cardinality(phonetic_names.query_tokens))
+      case
+        when cardinality(phonetic_names.query_tokens) = 1 then cardinality(phonetic_names.patient_tokens)
+        else least(cardinality(phonetic_names.patient_tokens), cardinality(phonetic_names.query_tokens))
+      end
     ) as token_position(token_index)
   ) as phonetic_match`;
 
@@ -199,6 +228,10 @@ export const PATIENT_SEARCH_MATCH_SQL = String.raw`
     $6 <> ''
     and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) % $6
     and similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) >= $16
+  )
+  or (
+    $18::boolean
+    and strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) >= $19::real
   )
   or (
     $6 <> ''
@@ -246,6 +279,10 @@ export const PATIENT_SEARCH_RANK_SQL = String.raw`
         and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) % $6
         and similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) >= $16
       )
+      or (
+        $18::boolean
+        and strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) >= $19::real
+      )
     ) then 8
     when $6 <> '' and phonetic_match.matching_token_count > 0 then 9
     when p.normalized_arabic_name like $9 then 10
@@ -257,5 +294,6 @@ export const PATIENT_SEARCH_SIMILARITY_SQL = String.raw`
   greatest(
     case when $5 <> '' then similarity(p.normalized_arabic_name, $5) else 0 end,
     case when $13 <> '' then similarity(coalesce(p.normalized_arabic_name_compact, ''), $13) else 0 end,
-    case when $6 <> '' then similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) else 0 end
+    case when $6 <> '' then similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) else 0 end,
+    case when $18::boolean then strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) else 0 end
   )`;
