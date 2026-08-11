@@ -23,7 +23,7 @@ import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, openProtocolPrintWindow, writeProtocolPrintSheet } from "@/lib/protocol-printing";
 import { buildAppointmentWhatsappText, normalizeWhatsappPhone } from "@/lib/whatsapp";
-import { Card, Button, Input, SearchInput } from "@/components/shared";
+import { Card, Button, Dialog, DialogContent, Input, SearchInput } from "@/components/shared";
 import {
   prepareAppointmentSlipHtml,
 } from "@/lib/print-utils";
@@ -1294,15 +1294,14 @@ export default function RegistrationsPage() {
       ) : null}
 
       {whatsappAppointment ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-4"
-          onClick={() => setWhatsappAppointment(null)}
-          role="presentation"
+        <Dialog open onClose={() => setWhatsappAppointment(null)}>
+          <DialogContent
+            aria-label={t("registrations.whatsappDialogTitle")}
+            maxWidth="560px"
+            className="!mx-3 !rounded-2xl !p-4 !shadow-2xl"
           data-testid="registrations-whatsapp-backdrop"
-        >
+          >
           <form
-            className="w-full max-w-[560px] rounded-2xl border border-border bg-background p-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
               sendWhatsappMessage();
@@ -1399,19 +1398,19 @@ export default function RegistrationsPage() {
               </Button>
             </div>
           </form>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {notificationAppointment ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-4"
-          onClick={() => setNotificationAppointment(null)}
-          role="presentation"
+        <Dialog open onClose={() => setNotificationAppointment(null)}>
+          <DialogContent
+            aria-label={t("registrations.webPushDialogTitle")}
+            maxWidth="520px"
+            className="!mx-3 !rounded-2xl !p-4 !shadow-2xl"
           data-testid="patient-web-push-message-backdrop"
-        >
+          >
           <form
-            className="w-full max-w-[520px] rounded-2xl border border-border bg-background p-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
               if (!canSendCustomNotification || sendNotificationMutation.isPending) return;
@@ -1524,7 +1523,8 @@ export default function RegistrationsPage() {
               </Button>
             </div>
           </form>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {slipPreviewAppointment ? (

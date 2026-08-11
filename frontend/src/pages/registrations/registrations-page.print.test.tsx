@@ -1,6 +1,6 @@
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RegistrationsPage from "./registrations-page";
@@ -146,6 +146,7 @@ function registrationAppointment(overrides: Record<string, unknown> = {}) {
 
 describe("RegistrationsPage print actions", () => {
   beforeEach(() => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
     localStorage.setItem("rispro-language", "en");
     fetchAppointmentsMock.mockReset();
     mockPrintAppointmentSlipById.mockReset();
@@ -843,7 +844,7 @@ describe("RegistrationsPage print actions", () => {
     expect(buttons[5].getAttribute("title")).toBe("Web notifications not enabled");
   });
 
-  it("opens WhatsApp and Notify dialogs from the icon actions", async () => {
+  it("opens the WhatsApp dialog with its existing template default, locks page scrolling, and closes from the backdrop", async () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
@@ -851,16 +852,132 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const row = getAppointmentRow("ACC-7");
-    await userEvent.click(within(row).getByRole("button", { name: "WhatsApp" }));
-    expect(screen.getByText("Send WhatsApp message")).toBeTruthy();
+    const whatsappAction = within(row).getByRole("button", { name: "WhatsApp" });
+    whatsappAction.focus();
+    await userEvent.click(whatsappAction);
 
-    await userEvent.click(screen.getByTestId("registrations-whatsapp-backdrop"));
+    const dialog = screen.getByRole("dialog", { name: "Send WhatsApp message" });
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("qr_link");
+    expect(document.body.style.position).toBe("fixed");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => {
-      expect(screen.queryByText("Send WhatsApp message")).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Send WhatsApp message" })).toBeNull();
     });
 
-    await userEvent.click(within(row).getByRole("button", { name: "Notify" }));
-    expect(screen.getByText("Send patient notification")).toBeTruthy();
+    await userEvent.click(whatsappAction);
+
+    fireEvent.click(screen.getByTestId("registrations-whatsapp-backdrop"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Send WhatsApp message" })).toBeNull();
+    });
+    expect(document.activeElement).toBe(whatsappAction);
+    expect(document.body.style.position).toBe("");
+  });
+
+  it("preserves WhatsApp custom-message sending and Escape focus restoration", async () => {
+    const openWindow = vi.spyOn(window, "open").mockImplementation(() => null);
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    const row = getAppointmentRow("ACC-7");
+    const whatsappAction = within(row).getByRole("button", { name: "WhatsApp" });
+    whatsappAction.focus();
+    await userEvent.click(whatsappAction);
+
+    const dialog = screen.getByRole("dialog", { name: "Send WhatsApp message" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Custom" }));
+    const message = within(dialog).getByRole("textbox");
+    await userEvent.type(message, "Custom WhatsApp message");
+    expect(within(dialog).getAllByText("Custom WhatsApp message")).toHaveLength(2);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Open WhatsApp" }));
+    expect(openWindow).toHaveBeenCalledWith(
+      "https://wa.me/218912345678?text=Custom%20WhatsApp%20message",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    await userEvent.click(whatsappAction);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Send WhatsApp message" })).toBeNull();
+    });
+    expect(document.activeElement).toBe(whatsappAction);
+  });
+
+  it("opens the Web Push dialog with its existing template default and closes from the backdrop", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    const row = getAppointmentRow("ACC-7");
+    const notifyAction = within(row).getByRole("button", { name: "Notify" });
+    notifyAction.focus();
+    await userEvent.click(notifyAction);
+
+    const dialog = screen.getByRole("dialog", { name: "Send patient notification" });
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("appointment_reminder_24h");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Send patient notification" })).toBeNull();
+    });
+
+    await userEvent.click(notifyAction);
+
+    fireEvent.click(screen.getByTestId("patient-web-push-message-backdrop"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Send patient notification" })).toBeNull();
+    });
+    expect(document.activeElement).toBe(notifyAction);
+  });
+
+  it("preserves Web Push custom validation, payload, successful reset, and Escape focus restoration", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    const row = getAppointmentRow("ACC-7");
+    const notifyAction = within(row).getByRole("button", { name: "Notify" });
+    notifyAction.focus();
+    await userEvent.click(notifyAction);
+
+    let dialog = screen.getByRole("dialog", { name: "Send patient notification" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Custom" }));
+    const send = within(dialog).getByRole("button", { name: "Notify" });
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    const [title, message] = within(dialog).getAllByRole("textbox");
+    await userEvent.type(title, "Reminder");
+    await userEvent.type(message, "Your appointment is tomorrow.");
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+
+    await userEvent.click(send);
+    await waitFor(() => {
+      expect(sendPatientWebPushNotificationMock).toHaveBeenCalledWith(7, {
+        templateEventType: undefined,
+        title: "Reminder",
+        message: "Your appointment is tomorrow.",
+      });
+      expect(screen.queryByRole("dialog", { name: "Send patient notification" })).toBeNull();
+    });
+
+    await userEvent.click(notifyAction);
+    dialog = screen.getByRole("dialog", { name: "Send patient notification" });
+    expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("appointment_reminder_24h");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Send patient notification" })).toBeNull();
+    });
+    expect(document.activeElement).toBe(notifyAction);
   });
 
   it("shows the appointment link from the row action button", async () => {
