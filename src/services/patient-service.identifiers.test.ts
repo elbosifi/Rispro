@@ -615,6 +615,98 @@ test("searchPatients: matches Arabic compound names with or without spaces", asy
   }
 });
 
+test("searchPatients: adds bounded trigram, dictionary, and token-wise Double Metaphone recall", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_fuzzy_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const createdPatientIds: number[] = [];
+  const dictionaryArabic = `قاموساختبار${suffix.replace(/\D/g, "")}`;
+
+  const insertPatient = async (englishFullName: string, identifierValue?: string) => {
+    const nationalId = uniqueNationalId("6");
+    const arabicFullName = `مريض بحث ${createdPatientIds.length + 1}`;
+    const inserted = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name, normalized_arabic_name_compact,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, $2, $3, $4, $5, $6, $7, 30, '1996-01-01', 'M', '0912345678', 'city', $8, $8)
+        returning id
+      `,
+      [
+        nationalId,
+        identifierValue ? "other" : "national_id",
+        identifierValue || nationalId,
+        arabicFullName,
+        englishFullName,
+        normalizeArabicName(arabicFullName),
+        normalizeArabicNameCompact(arabicFullName),
+        receptionistUserId,
+      ]
+    );
+    const id = Number(inserted.rows[0]?.id);
+    createdPatientIds.push(id);
+    return id;
+  };
+
+  try {
+    const phoneticVariant = await insertPatient("Mohamed Ali Salem");
+    const highTrigramVariant = await insertPatient("Muhammad Aly Saleem");
+    const secondVariantFamily = await insertPatient("Yousef Abdallah Hussein");
+    const differentRemainingTokens = await insertPatient("Mohamed Faraj Bashir");
+    const sameCodeDifferentName = await insertPatient("Robert Nader Tarek");
+    const unsafeShortMatch = await insertPatient("Li Omar Salem");
+    const exactIdentifier = await insertPatient("Entirely Different Person", "Muhammad Aly Salim");
+
+    await pool.query(
+      `insert into name_dictionary (arabic_text, english_text, is_active) values ($1, $2, true)`,
+      [dictionaryArabic, "Muhammad Aly Salim"]
+    );
+    invalidateAllCache();
+
+    const firstFamilyResults = await searchPatients("Muhammad Aly Salim");
+    const firstFamilyIds = firstFamilyResults.map((row) => Number(row.id));
+    assert.ok(firstFamilyIds.includes(phoneticVariant), "Mohamed/Ali/Salem should match Muhammad/Aly/Salim token-wise");
+    assert.ok(firstFamilyIds.includes(highTrigramVariant), "The closer trigram variant should be returned");
+    assert.ok(firstFamilyIds.indexOf(highTrigramVariant) < firstFamilyIds.indexOf(phoneticVariant), "Trigram similarity should rank above phonetic fallback");
+    assert.ok(firstFamilyIds.indexOf(exactIdentifier) < firstFamilyIds.indexOf(highTrigramVariant), "Exact identifier should rank above fuzzy names");
+    assert.equal(firstFamilyIds.includes(differentRemainingTokens), false, "One phonetic first-name agreement must not admit different remaining tokens");
+
+    const secondFamilyIds = (await searchPatients("Yusuf Abdullah Hussain")).map((row) => Number(row.id));
+    assert.ok(secondFamilyIds.includes(secondVariantFamily), "Yousef/Abdallah/Hussein should match Yusuf/Abdullah/Hussain");
+
+    const dictionaryIds = (await searchPatients(dictionaryArabic)).map((row) => Number(row.id));
+    assert.ok(dictionaryIds.includes(phoneticVariant), "Arabic dictionary output should participate in English phonetic matching");
+
+    const unrelatedSameCodeIds = (await searchPatients("Rupert Salem Kareem")).map((row) => Number(row.id));
+    assert.equal(unrelatedSameCodeIds.includes(sameCodeDifferentName), false, "A same-code first token with unrelated remaining tokens must not match");
+
+    const shortNameIds = (await searchPatients("Lee")).map((row) => Number(row.id));
+    assert.equal(shortNameIds.includes(unsafeShortMatch), false, "Short phonetic names without enough spelling similarity must not match");
+  } finally {
+    await pool.query(`delete from name_dictionary where arabic_text = $1`, [dictionaryArabic]).catch(() => undefined);
+    invalidateAllCache();
+    if (createdPatientIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]).catch(() => undefined);
+  }
+});
+
 test("createPatient: persists demographics_estimated flag", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const suffix = uniqueSuffix();
