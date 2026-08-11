@@ -32,8 +32,6 @@ import {
   insertExamMixQuotaRule,
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
-import { pool } from "../../../../db/pool.js";
-
 export interface CreatePolicyDraftResult {
   draft: PolicyVersionRow;
   basedOnVersionId: number;

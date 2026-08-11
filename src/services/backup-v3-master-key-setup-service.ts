@@ -101,9 +101,8 @@ async function fsyncDirectory(directory: string): Promise<void> {
 }
 function replaceMasterKey(content: string, key: string | null): string {
   const line = key ? `${MASTER_KEY_NAME}=${key}` : "";
-  let updated = false;
   const lines = content.split(/\r?\n/).filter((entry) => {
-    if (/^\s*(?:export\s+)?BACKUP_V3_MASTER_KEY\s*=/.test(entry)) { updated = true; return false; }
+    if (/^\s*(?:export\s+)?BACKUP_V3_MASTER_KEY\s*=/.test(entry)) return false;
     return true;
   });
   if (key) { if (content.length && lines.at(-1) !== "") lines.push(line); else lines[lines.length - 1] = line; }

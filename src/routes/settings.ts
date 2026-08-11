@@ -86,7 +86,7 @@ import {
 } from "../services/patient-duplicate-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import { getUserSchedulingOverridePermission } from "../services/user-service.js";
-import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
+import type { AuthenticatedUserContext, UserId } from "../types/http.js";
 import { readRequestScanSettingsForDisplay, saveRequestScanSettings, resolveRequestScanSettingsForTest } from "../services/request-scan-settings-service.js";
 import { testRequestScanSmb } from "../services/request-scan-smb-service.js";
 

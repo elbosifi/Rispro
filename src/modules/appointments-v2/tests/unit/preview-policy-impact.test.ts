@@ -9,7 +9,6 @@
 import { describe, it, mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import * as adminPolicyRepo from "../../admin/repositories/admin-policy.repo.js";
 import * as poolModule from "../../../../db/pool.js";
 
 // ---------------------------------------------------------------------------

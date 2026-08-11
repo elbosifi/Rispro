@@ -16,11 +16,9 @@ function matchesYearlyRecurrence(
   recurEndMonth: number,
   recurEndDay: number
 ): boolean {
-  const [yearStr, monthStr, dayStr] = dateStr.split("-");
+  const [, monthStr, dayStr] = dateStr.split("-");
   const month = parseInt(monthStr, 10);
   const day = parseInt(dayStr, 10);
-  const year = parseInt(yearStr, 10);
-
   // Normalize: compare (month, day) tuples
   const startNum = recurStartMonth * 100 + recurStartDay;
   const endNum = recurEndMonth * 100 + recurEndDay;

@@ -26,7 +26,6 @@ import {
 import { ensureIdentifierValue, normalizeIdentifierValue } from "../utils/identifier.js";
 import { scheduleBookingWorklistDetailReplacement } from "./dicom-service.js";
 import type { UserId, OptionalUserId, UnknownRecord } from "../types/http.js";
-import type { NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
 import type { Role } from "../types/domain.js";
 import type { PoolClient } from "pg";
@@ -143,11 +142,6 @@ export interface ValidatedPatientPayload {
 interface PatientSettingRow {
   setting_key: string;
   setting_value?: unknown;
-}
-
-interface PatientNoShowSummaryRow {
-  no_show_count?: NullableDbNumeric;
-  last_no_show_date?: string | null;
 }
 
 interface IdentifierTypeRow {
@@ -276,29 +270,6 @@ function normalizePatientCategory(value: unknown): "oncology" | "non_oncology" |
   }
 
   throw new HttpError(400, "category must be one of: oncology, non_oncology.");
-}
-
-function calculateAgeYearsFromDob(dob: string): number | null {
-  const parsed = new Date(`${dob}T00:00:00Z`);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  const today = new Date();
-  let age = today.getUTCFullYear() - parsed.getUTCFullYear();
-  const monthDiff = today.getUTCMonth() - parsed.getUTCMonth();
-  const dayDiff = today.getUTCDate() - parsed.getUTCDate();
-
-  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-    age -= 1;
-  }
-
-  if (!Number.isInteger(age) || age < 0 || age > 130) {
-    return null;
-  }
-
-  return age;
 }
 
 async function loadPatientRegistrationSettings(): Promise<PatientRegistrationRules> {

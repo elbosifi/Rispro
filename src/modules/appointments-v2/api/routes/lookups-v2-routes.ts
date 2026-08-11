@@ -16,7 +16,7 @@ import { requireAuth } from "../../../../middleware/auth.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { listActiveModalities } from "../../catalog/repositories/modality-catalog.repo.js";
-import { listExamTypesForModality, findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
+import { listExamTypesForModality } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { pool } from "../../../../db/pool.js";
 

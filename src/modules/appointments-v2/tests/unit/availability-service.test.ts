@@ -5,44 +5,10 @@
  * without requiring a real database.
  */
 
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { Pool } from "pg";
 import { getAvailability } from "../../scheduler/services/availability.service.js";
 import type { GetAvailabilityParams } from "../../scheduler/services/availability.service.js";
-
-// ---------------------------------------------------------------------------
-// Pool mock helper
-// ---------------------------------------------------------------------------
-
-interface MockRow {
-  [key: string]: unknown;
-}
-
-class MockPoolClient {
-  private _queries: Record<string, MockRow[]> = {};
-
-  setQueryResult(sqlKey: string, rows: MockRow[]): void {
-    this._queries[sqlKey] = rows;
-  }
-
-  async query<T = MockRow[]>(_sql: string, _params?: unknown[]): Promise<{ rows: T }> {
-    // Return empty by default
-    const sqlLower = _sql.toLowerCase();
-    for (const [key, rows] of Object.entries(this._queries)) {
-      if (sqlLower.includes(key)) {
-        return { rows: rows as unknown as T };
-      }
-    }
-    return { rows: [] as unknown as T };
-  }
-
-  release(): void {}
-}
-
-function makeMockClient(): MockPoolClient {
-  return new MockPoolClient();
-}
 
 // We need to mock the pool module. Since Node.js test runner doesn't have
 // built-in ES module mocking, we test the service via its public interface

@@ -15,7 +15,6 @@ import assert from "node:assert/strict";
 import type { BookingDecision } from "../../rules/models/booking-decision.js";
 import {
   compareLegacyVsV2,
-  summarizeShadowDiffs,
   logShadowDiffs,
 } from "../../observability/shadow-diff.js";
 import { isShadowModeEnabled } from "../../observability/shadow-availability.js";

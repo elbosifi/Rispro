@@ -557,7 +557,7 @@ export async function unassignComparisonRequest(
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const request = await lockComparisonRequest(id, client);
+    await lockComparisonRequest(id, client);
     const active = await client.query<{ id: number }>(
       `
         select id

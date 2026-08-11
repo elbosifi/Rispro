@@ -27,7 +27,6 @@ import {
   getBookedCountsByCategoryForDate,
   getSpecialQuotaConsumptionCount,
 } from "../scheduler/repositories/capacity.repo.js";
-import { addDays, todayIso } from "../shared/utils/dates.js";
 import { pool } from "../../../db/pool.js";
 import type { AvailabilityDayDto, GetAvailabilityParams } from "../scheduler/services/availability.service.js";
 import type { CapacityResolutionMode } from "../shared/types/common.js";

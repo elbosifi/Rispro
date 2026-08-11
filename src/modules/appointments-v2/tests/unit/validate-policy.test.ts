@@ -6,10 +6,9 @@
  * orphaned rules, zero limits, zero quotas, and empty rules.
  */
 
-import { describe, it, mock, beforeEach, afterEach } from "node:test";
+import { describe, it, mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import * as adminPolicyRepo from "../../admin/repositories/admin-policy.repo.js";
 import * as poolModule from "../../../../db/pool.js";
 
 // ---------------------------------------------------------------------------

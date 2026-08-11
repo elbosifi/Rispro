@@ -764,10 +764,6 @@ export async function applyCatalogImport(
     durationMinutes: row.durationMinutes == null ? null : Number(row.durationMinutes),
     active: Boolean(row.active)
   }));
-  const allErrors = [
-    ...draft.modalities.filter((row) => !row.selected).flatMap((row) => []),
-    ...draft.examTypes.filter((row) => !row.selected).flatMap((row) => [])
-  ];
   const revalidationErrors = [
     ...collectValidationErrors(selectedModalities, selectedExamTypes, existingModalities)
   ];
@@ -788,7 +784,7 @@ export async function applyCatalogImport(
       revalidationErrors.push(makeError(EXAM_TYPES_SHEET, row.rowNumber, "duration_minutes", "duration_minutes must be a non-negative whole number.", "invalid_integer"));
     }
   }
-  const combinedErrors = [...allErrors, ...revalidationErrors];
+  const combinedErrors = revalidationErrors;
   if (combinedErrors.length > 0) {
     throw new HttpError(400, "Catalog import review still has validation errors.", {
       errorType: "review_has_errors",

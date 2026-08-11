@@ -1,4 +1,4 @@
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import express, { type Request, type Response } from "express";
 import cookieParser from "cookie-parser";

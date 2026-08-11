@@ -16,7 +16,7 @@
  */
 
 import type { BookingDecision } from "../models/booking-decision.js";
-import type { PureEvaluateInput, RuleEvaluationContext } from "../models/rule-evaluation-context.js";
+import type { PureEvaluateInput } from "../models/rule-evaluation-context.js";
 import type { ReasonCode, DecisionStatus } from "../../shared/types/common.js";
 import {
   blockedRuleMatchesDate,

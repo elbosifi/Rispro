@@ -3,7 +3,6 @@ import { pool } from "../db/pool.js";
 import { logAuditEntry } from "./audit-service.js";
 import { HttpError } from "../utils/http-error.js";
 import type { Role } from "../types/domain.js";
-import type { UserId } from "../types/http.js";
 
 export const NO_SHOW_BOOKING_BLOCKED_MESSAGE =
   "This patient has a previous no-show appointment and cannot be booked by reception. A supervisor or super admin must authorize a new booking with a reason.";

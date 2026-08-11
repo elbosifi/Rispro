@@ -9,7 +9,6 @@
 import type { PoolClient } from "pg";
 import {
   findVersionById,
-  loadAllRulesForVersion,
 } from "../../admin/repositories/admin-policy.repo.js";
 import {
   loadModalityBlockedRules,

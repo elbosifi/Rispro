@@ -5,7 +5,6 @@
  * for PostgreSQL-backed integration tests.
  */
 
-import pg from "pg";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { pool } from "../../../../db/pool.js";

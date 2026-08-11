@@ -418,8 +418,6 @@ async function resolveFilenameEvidence(
   };
 }
 
-async function moveOutcome(dependencies: RequestScanServiceDependencies, settings: RequestScanSettings, job: RequestScanJob, folder: string, duplicate = false): Promise<string> { return dependencies.moveRequestScanFile(settings, job.source_relative_path, destination(folder, duplicate), job.filename); }
-
 function legacyFailedRequestScanPath(job: RequestScanJob, settings: RequestScanSettings): string | null {
   if (!job.attachment_completed_at) return null;
   const date = new Date(job.attachment_completed_at);

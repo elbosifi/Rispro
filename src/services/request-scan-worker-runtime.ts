@@ -1,6 +1,6 @@
 import { env } from "../config/env.js";
 import { createRequestScanWorkerId, recoverExpiredRequestScanJobs } from "./request-scan-processing-service.js";
-import { runRequestScanCycle, type RequestScanCycleResult } from "./request-scan-service.js";
+import { runRequestScanCycle } from "./request-scan-service.js";
 import { readRequestScanSettings } from "./request-scan-settings-service.js";
 import { acquireRequestScanWorkerLeadership, heartbeatRequestScanWorker, readRequestScanWorkerRuntime, recordRequestScanWorkerCycleFailure, recordRequestScanWorkerCycleStart, recordRequestScanWorkerCycleSuccess, releaseRequestScanWorkerLeadership, REQUEST_SCAN_WORKER_HEARTBEAT_MS } from "./request-scan-worker-control-service.js";
 

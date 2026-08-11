@@ -9,7 +9,6 @@
 import type { PoolClient } from "pg";
 import {
   findVersionById,
-  findPublishedVersion,
   loadAllRulesForVersion,
   type PolicyRuleRow,
 } from "../repositories/admin-policy.repo.js";

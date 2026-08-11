@@ -11,10 +11,8 @@ import {
   deletePatient,
   mergePatients,
   getPatientById,
-  type PatientPayload,
-  type MergePatientsPayload
+  type PatientPayload
 } from "./patient-service.js";
-import type { OptionalUserId } from "../types/http.js";
 
 interface FixtureContext {
   receptionistUserId: number;

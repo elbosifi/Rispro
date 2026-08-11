@@ -1,4 +1,3 @@
-import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
@@ -185,11 +184,6 @@ export async function createExamType(
   const specificInstructionAr = String(payload.specificInstructionAr || "").trim();
   const specificInstructionEn = String(payload.specificInstructionEn || "").trim();
   const durationMinutes = normalizeDurationMinutes(payload.durationMinutes);
-  const nextIsActive =
-    payload.isActive === undefined && payload.is_active === undefined
-      ? undefined
-      : Boolean(payload.isActive ?? payload.is_active);
-
   if (!nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr and nameEn are required.");
   }

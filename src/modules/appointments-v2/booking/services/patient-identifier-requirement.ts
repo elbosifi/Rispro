@@ -101,7 +101,7 @@ function throwPatientRequirementError(patientId: number, reasonCodes: string[]):
 export async function assertPatientMeetsBookingQueueRequirements(
   client: PoolClient,
   patientId: number,
-  userRole: Role | undefined
+  _userRole: Role | undefined
 ): Promise<void> {
   const settings = await loadRequirementSettings(client);
   if (!settings.phoneRequired && !settings.identifierRequired) {
@@ -132,7 +132,7 @@ export async function assertPatientMeetsBookingQueueRequirements(
 export async function assertPatientIdentifierAllowsBooking(
   client: PoolClient,
   patientId: number,
-  userRole: Role | undefined
+  _userRole: Role | undefined
 ): Promise<void> {
   const settings = await loadRequirementSettings(client);
   if (!settings.identifierRequired) {

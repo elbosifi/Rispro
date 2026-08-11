@@ -11,7 +11,7 @@ import {
   searchOrthancPacsStudies,
   testOrthancPacsTarget,
 } from "../services/orthanc-pacs-service.js";
-import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
+import type { AuthenticatedUserContext, UserId } from "../types/http.js";
 
 interface IntegrationsAuthRequest {
   body?: unknown;

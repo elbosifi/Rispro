@@ -87,10 +87,6 @@ function normalizedArabic(row: PatientIdentityDbRow): string {
   return normalizeArabicName(row.normalized_arabic_name || row.arabic_full_name || "");
 }
 
-function normalizedCompactArabic(row: PatientIdentityDbRow): string {
-  return normalizeArabicNameCompact(row.normalized_arabic_name_compact || row.arabic_full_name || "");
-}
-
 function rowsAreAmbiguous(a: PatientIdentityDbRow, b: PatientIdentityDbRow): boolean {
   const arabicA = normalizedArabic(a);
   const arabicB = normalizedArabic(b);

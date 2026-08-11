@@ -1,4 +1,4 @@
-import type { PoolClient, QueryResult } from "pg";
+import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
@@ -534,7 +534,7 @@ export async function scanAppointmentIntoQueue(
 export async function createWalkInQueueEntry(
   payload: UnknownRecord,
   currentUser: CurrentUser,
-  options: QueueWalkInOptions = {}
+  _options: QueueWalkInOptions = {}
 ): Promise<QueueScanResult & { createdAppointment: UnknownRecord }> {
   const walkInEnabled = await isWalkInQueueEnabled();
   if (!walkInEnabled) {

@@ -11,7 +11,7 @@ import {
   updateNameDictionaryEntry,
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
-import type { UnknownRecord, UserId } from "../types/http.js";
+import type { UserId } from "../types/http.js";
 
 export const nameDictionaryRouter = express.Router();
 

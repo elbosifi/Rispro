@@ -6,7 +6,6 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import {
-  buildAccessionNumber,
   buildSanteOrmO01Message,
   buildSyntheticSanteTestProjection,
   type SanteHl7BookingProjection,

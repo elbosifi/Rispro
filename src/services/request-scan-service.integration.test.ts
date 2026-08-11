@@ -739,7 +739,7 @@ test("invalid, expired, and wrong-action filename tokens all invoke document fal
     { rejection: "expired", token: issueLegacyPublicCancelToken(booking.id, { expiresInSeconds: -1 }) },
     { rejection: "wrong-action", token: issueLegacyPublicCancelToken(booking.id, { action: "view" }) },
   ];
-  for (const { rejection, token } of tokens) {
+  for (const { token } of tokens) {
     assert.ok(token);
     const filename = `https___rispro.nccb.com.ly_public_appointment_t=${token}.jpg`;
     const jobId = await createJob("pending", filename);

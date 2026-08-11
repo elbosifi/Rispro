@@ -106,7 +106,7 @@ test("Request Scan SMB filenames accept normalized Unicode and reject unsafe nam
 });
 test("Request Scan SMB listing, download, and move preserve quoted Arabic filenames", async () => {
   const arabic = "تقرير أشعة.pdf"; const source = `Requests\\Incoming\\${arabic}`; const state = smbState({ [source]: "arabic bytes" });
-  const listing = await listRequestScanFiles({ ...settings, incomingSubfolder: "Requests\\Incoming" }, { ...state.dependencies, async execFile(command, args, options) {
+  const listing = await listRequestScanFiles({ ...settings, incomingSubfolder: "Requests\\Incoming" }, { ...state.dependencies, async execFile(command, args, _options) {
     const smbCommand = args[args.indexOf("-c") + 1] || "";
     if (smbCommand.includes("; ls")) return { stdout: `  ${arabic}  A  12  Wed Jul 24 10:00:00 2026` };
     return state.dependencies.execFile(command, args);

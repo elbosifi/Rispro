@@ -3,7 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PassThrough, type Readable } from "node:stream";
+import { PassThrough } from "node:stream";
 import SftpClient from "ssh2-sftp-client";
 import { HttpError } from "../utils/http-error.js";
 import { sha256File } from "./backup-v3-checksums.js";

@@ -11,15 +11,12 @@ import { withTransaction } from "../../shared/utils/transactions.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import {
   findVersionById,
-  findPolicySetByKey,
   publishVersion,
   archiveOldPublishedVersions,
   loadAllRulesForVersion,
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
 import { validatePolicyDraft } from "../../rules/services/validate-policy.js";
-import { pool } from "../../../../db/pool.js";
-
 export interface PublishPolicyResult {
   published: PolicyVersionRow;
   archivedCount: number;
@@ -40,7 +37,7 @@ async function publishPolicyInternal(
   client: PoolClient,
   versionId: number,
   userId: number,
-  changeNote: string | null
+  _changeNote: string | null
 ): Promise<PublishPolicyResult> {
   // 1. Find the version
   const version = await findVersionById(client, versionId);

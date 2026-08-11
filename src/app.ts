@@ -200,7 +200,7 @@ export function createApp(): Application {
   });
 
   // SPA fallback for new frontend
-  app.get("*", (req: Request, res: Response) => {
+  app.get("*", (_req: Request, res: Response) => {
     res.setHeader("Cache-Control", "no-store");
     res.sendFile(path.join(newFrontendDir, "index.html"));
   });
