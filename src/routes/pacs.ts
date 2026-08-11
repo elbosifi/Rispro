@@ -67,7 +67,6 @@ import {
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSupervisorReauth];
-const supervisorNoReauthMiddleware = [requireAuth, requireSupervisor];
 const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();

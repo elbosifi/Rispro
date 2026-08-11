@@ -1,6 +1,5 @@
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import type { Pool, PoolClient } from "pg";
 import { pool } from "../db/pool.js";
@@ -11,21 +10,16 @@ import { normalizeDateValue } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId, UnknownRecord } from "../types/http.js";
 import type { DbNumeric } from "../types/db.js";
-import type { CategorySettings, SettingsMap } from "../types/settings.js";
+import type { CategorySettings } from "../types/settings.js";
 import {
   APPOINTMENT_STATUS_ARRIVED,
   APPOINTMENT_STATUS_WAITING
 } from "../constants/appointment-statuses.js";
-import { loadSettingsMap } from "./settings-service.js";
 import { resolveGatewaySettings, ensureDicomDirectoriesExist } from "./dicom-settings-resolver.js";
 import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
 import { enqueueSanteHl7ForBooking, enqueueSanteHl7ReplacementForBooking } from "./sante-hl7-outbox-service.js";
 import { buildCanonicalMwlDataset, renderCanonicalMwlToDump } from "./mwl-dataset-builder.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..");
 
 const V2_ACTIVE_WORKLIST_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
 
@@ -182,13 +176,6 @@ export interface DicomLogOverviewResult {
   logSummary: DicomLogSummaryRow;
 }
 
-interface LogPatch {
-  processingStatus: string;
-  errorMessage?: string;
-  deviceId?: number | null;
-  appointmentId?: number | null;
-}
-
 interface WorklistDatasetContext {
   deviceId: number | null;
   scheduledStationAeTitle: string;
@@ -232,46 +219,6 @@ function normalizeIpAddress(value: unknown, fieldName: string): string | null {
   throw new HttpError(400, `${fieldName} must be a valid IP address format.`);
 }
 
-function normalizeDateForDicom(value: string | Date | null | undefined): string {
-  const cleanValue = normalizeDateValue(value);
-  return cleanValue ? cleanValue.replaceAll("-", "") : "";
-}
-
-function normalizeTimeForDicom(value: unknown, fallback = "080000"): string {
-  const raw = String(value || "").trim();
-
-  if (!raw) {
-    return fallback;
-  }
-
-  if (/^\d{6}(\.\d+)?$/.test(raw)) {
-    return raw;
-  }
-
-  const match = raw.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if (match) {
-    return `${match[1]}${match[2]}${match[3] || "00"}`;
-  }
-
-  return fallback;
-}
-
-function normalizeSexForDicom(value: unknown): string {
-  const raw = String(value || "").trim().toUpperCase();
-
-  if (["M", "F", "O"].includes(raw)) {
-    return raw;
-  }
-
-  const fallbackMap: Record<string, string> = {
-    male: "M",
-    female: "F",
-    other: "O"
-  };
-
-  return fallbackMap[raw.toLowerCase()] || "";
-}
-
 function normalizeQrOrAccession(scanValue: unknown): string {
   const raw = String(scanValue || "").trim();
 
@@ -307,49 +254,11 @@ function normalizeQrOrAccession(scanValue: unknown): string {
   throw new HttpError(400, "scanValue must contain a valid accession number.");
 }
 
-function toAbsolutePath(value: unknown, fallback: string): string {
-  const raw = normalizeOptionalText(value) || fallback;
-
-  if (path.isAbsolute(raw)) {
-    return raw;
-  }
-
-  return path.join(rootDir, raw);
-}
-
 function sanitizeFileToken(value: unknown, fallback = "unknown"): string {
   return String(value || fallback)
     .trim()
     .replace(/[^a-zA-Z0-9._-]+/g, "_")
     .replace(/^_+|_+$/g, "") || fallback;
-}
-
-function formatDicomPersonName(englishName: string, arabicName: string): string {
-  const primary = normalizeOptionalText(englishName) || normalizeOptionalText(arabicName);
-
-  if (!primary) {
-    return "UNKNOWN^PATIENT";
-  }
-
-  return primary.replace(/\s+/g, "^");
-}
-
-function formatDicomString(value: unknown, fallback = ""): string {
-  return normalizeOptionalText(value || fallback).replaceAll("\\", "/");
-}
-
-function quoteDicomValue(value: unknown): string {
-  return `[${String(value ?? "").replaceAll("]", "\\]")}]`;
-}
-
-function buildSequenceDump(tag: string, lines: string[]): string[] {
-  return [
-    `${tag} SQ (Sequence with undefined length)`,
-    "(fffe,e000) na (Item with undefined length)",
-    ...lines.map((line) => `  ${line}`),
-    "(fffe,e00d) na (ItemDelimitationItem)",
-    "(fffe,e0dd) na (SequenceDelimitationItem)"
-  ];
 }
 
 function normalizeAeTitle(value: unknown): string {
@@ -362,21 +271,6 @@ function mapAppointmentToScheduledProcedureStepStatus(status: string): string {
   }
 
   return "SCHEDULED";
-}
-
-function parseDicomTimestamp(dateValue: string, timeValue: string): string | null {
-  const date = String(dateValue || "").trim();
-  const time = String(timeValue || "").trim();
-
-  if (!/^\d{8}$/.test(date)) {
-    return null;
-  }
-
-  const normalizedTime = time.match(/^(\d{2})(\d{2})(\d{2})?/)
-    ? `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6) || "00"}`
-    : "00:00:00";
-
-  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${normalizedTime}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,30 +491,6 @@ async function writeWorklistSourceFiles(
   await fs.writeFile(dumpPath, `${dump}\n`, "utf8");
 
   return { files: [{ manifestPath, dumpPath, deviceId: dataset.deviceId }], removedOnly: false, ok: true };
-}
-
-// ---------------------------------------------------------------------------
-// Message log helpers
-// ---------------------------------------------------------------------------
-
-async function updateDicomMessageLog(
-  client: Pool | PoolClient,
-  logId: number | string,
-  patch: LogPatch
-): Promise<void> {
-  await client.query(
-    `
-      update dicom_message_log
-      set
-        processing_status = $2,
-        error_message = $3,
-        device_id = coalesce($4, device_id),
-        appointment_id = coalesce($5, appointment_id),
-        processed_at = now()
-      where id = $1
-    `,
-    [logId, patch.processingStatus, patch.errorMessage || null, patch.deviceId || null, patch.appointmentId || null]
-  );
 }
 
 // ---------------------------------------------------------------------------

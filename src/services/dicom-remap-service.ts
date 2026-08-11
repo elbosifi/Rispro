@@ -15,6 +15,10 @@ import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 import { getPatientById } from "./patient-service.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
+import type { DicomRemapJobStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
+export type { DicomRemapJobStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
+import { validateExplicitConfirm } from "../modules/dicom-remap/validation.js";
+export { validateDicomRemapUploadFilesInput, validateExplicitConfirm } from "../modules/dicom-remap/validation.js";
 
 type DicomRemapQuery = typeof pool.query;
 type DicomRemapAuditLogger = typeof logAuditEntry;
@@ -23,22 +27,6 @@ type RemapSleep = (ms: number) => Promise<void>;
 type DicomRemapPatientLoader = typeof getPatientById;
 type DicomRemapModalityLister = typeof listOrthancRemoteModalities;
 const { DicomMessage, DicomMetaDictionary, datasetToBuffer } = dcmjs.data;
-
-export type DicomRemapJobStatus =
-  | "uploaded"
-  | "processing"
-  | "awaiting_confirmation"
-  | "remapped"
-  | "sending"
-  | "sent"
-  | "failed"
-  | "cancelled";
-
-export interface DicomRemapUploadFileInput {
-  fileName?: unknown;
-  mimeType?: unknown;
-  fileContentBase64?: unknown;
-}
 
 export interface DicomRemapStagedUploadFile {
   fileName: string;
@@ -5010,17 +4998,6 @@ export async function confirmDicomRemapAndSend({
     }
     throw error;
   }
-}
-
-export function validateDicomRemapUploadFilesInput(value: unknown): DicomRemapUploadFileInput[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new HttpError(400, "files must be a non-empty array.");
-  }
-  return value as DicomRemapUploadFileInput[];
-}
-
-export function validateExplicitConfirm(value: unknown): boolean {
-  return value === true || String(value || "").trim().toLowerCase() === "true";
 }
 
 export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId): Promise<UserId> {

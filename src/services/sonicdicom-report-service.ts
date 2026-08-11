@@ -104,20 +104,6 @@ function validateDatabaseName(name: string, fallback: string): string {
   return trimmed;
 }
 
-function validatedBaseUrl(value: string, label: string): string {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) throw new HttpError(503, `${label} is not configured.`);
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error("Unsupported protocol");
-    }
-    return parsed.toString().replace(/\/$/, "");
-  } catch {
-    throw new HttpError(503, `${label} is malformed.`);
-  }
-}
-
 function encodeStaffViewerValue(value: string | null | undefined): string {
   return encodeURIComponent(String(value ?? ""));
 }

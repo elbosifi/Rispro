@@ -7,7 +7,6 @@ import { HttpError } from "../utils/http-error.js";
 import { pool } from "../db/pool.js";
 import { env } from "../config/env.js";
 import {
-  getDicomGatewaySettings,
   getDicomGatewayOverview,
   rebuildAllV2DicomWorklistSources,
   syncBookingWorklistSources,
@@ -45,10 +44,9 @@ import {
   getAllServiceStatuses,
   getServiceStatus
 } from "../services/dicom-gateway-registry.js";
-import { normalizeOptionalText } from "../utils/normalize.js";
 import { ingestMppsEvent } from "../services/mpps-service.js";
 import fs from "fs/promises";
-import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
+import type { AuthenticatedUserContext, UserId } from "../types/http.js";
 
 export const dicomRouter = express.Router();
 
@@ -666,8 +664,7 @@ dicomRouter.post(
 
 dicomRouter.post(
   "/rotate-secret",
-  asyncRoute(async (req: Request, res: Response) => {
-    const request = req as { user: AuthenticatedUserContext };
+  asyncRoute(async (_req: Request, res: Response) => {
     const { randomBytes } = await import("crypto");
     const newSecret = randomBytes(32).toString("hex");
 

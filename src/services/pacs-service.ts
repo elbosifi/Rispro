@@ -1,4 +1,3 @@
-import { pool } from "../db/pool.js";
 import { createRequire } from "module";
 import { HttpError } from "../utils/http-error.js";
 import { validateIsoDate } from "../utils/date.js";

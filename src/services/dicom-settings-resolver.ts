@@ -22,8 +22,6 @@ export const DICOM_GATEWAY_DEFAULTS: Record<string, unknown> = {
   dcmdump_command: "dcmdump"
 };
 
-const DICOM_GATEWAY_KEYS = new Set(Object.keys(DICOM_GATEWAY_DEFAULTS));
-
 export interface ResolvedGatewaySettings {
   enabled: boolean;
   bindHost: string;
