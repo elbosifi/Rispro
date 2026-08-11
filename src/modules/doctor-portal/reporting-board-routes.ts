@@ -91,11 +91,6 @@ function optionalNonNegativeInteger(value: unknown, field: string): number | nul
   return parsed;
 }
 
-function positiveIntegerArray(value: unknown, field: string): number[] {
-  if (!Array.isArray(value) || value.length === 0) throw new HttpError(400, `${field} must be a non-empty array.`);
-  return value.map((item) => requiredPositiveInteger(item, field));
-}
-
 function optionalPositiveIntegerArray(value: unknown, field: string): number[] {
   if (value === null || value === undefined) return [];
   if (!Array.isArray(value)) throw new HttpError(400, `${field} must be an array.`);

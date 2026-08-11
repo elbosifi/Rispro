@@ -557,7 +557,7 @@ export async function findActiveSavedViewByToken(token: string): Promise<Reporti
   return result.rows[0] ? savedView(result.rows[0]) : null;
 }
 
-export async function findSavedViewById(id: number, ownerUserId: UserId): Promise<ReportingBoardSavedView | null> {
+export async function findSavedViewById(id: number, _ownerUserId: UserId): Promise<ReportingBoardSavedView | null> {
   const result = await pool.query(
     `
       select

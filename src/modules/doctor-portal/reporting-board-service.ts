@@ -90,6 +90,7 @@ import {
   updateDoctorWorklistLifecycle,
 } from "./doctor-worklist-repository.js";
 import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-worklist-provisioning.js";
+import { median, minutesBetween, minutesSince, percentile, withTimelineMetrics } from "./reporting-board-metrics.js";
 
 export interface Actor {
   userId: UserId;
@@ -158,56 +159,6 @@ function normalizeSortDirection(sortDirection?: ReportingBoardFilters["sortDirec
   const value = sortDirection ?? "asc";
   if (!REPORTING_BOARD_SORT_DIRECTIONS.has(value)) throw new HttpError(400, "sortDirection must be asc or desc.");
   return value;
-}
-
-function timestampMs(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function minutesBetween(start: string | null | undefined, end: string | null | undefined): number | null {
-  const startMs = timestampMs(start);
-  const endMs = timestampMs(end);
-  if (startMs === null || endMs === null || endMs < startMs) return null;
-  return Math.floor((endMs - startMs) / 60000);
-}
-
-function minutesSince(start: string | null | undefined, nowMs: number): number | null {
-  const startMs = timestampMs(start);
-  if (startMs === null || nowMs < startMs) return null;
-  return Math.floor((nowMs - startMs) / 60000);
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-}
-
-function percentile(values: number[], percentileValue: number): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.ceil((percentileValue / 100) * sorted.length) - 1);
-  return sorted[index];
-}
-
-function withTimelineMetrics(row: ReportingBoardCaseRow, nowMs = Date.now()): ReportingBoardCaseRow {
-  const completedToAssignedMinutes = minutesBetween(row.completedAt, row.firstAssignedAt);
-  const assignedToFinalMinutes = row.reportFinalAt ? minutesBetween(row.currentAssignedAt, row.reportFinalAt) : null;
-  const completedToFinalMinutes = row.reportFinalAt ? minutesBetween(row.completedAt, row.reportFinalAt) : null;
-  const activeNonFinal = row.assignmentStatus === "assigned" && row.reportStatus !== "final";
-  const completedUnassigned = row.appointmentStatus === "completed" && row.assignmentStatus === "unassigned" && !row.reportFinalAt;
-  return {
-    ...row,
-    dueAt: null,
-    completedToAssignedMinutes,
-    assignedToFinalMinutes,
-    completedToFinalMinutes,
-    currentAssignmentAgeMinutes: activeNonFinal ? minutesSince(row.currentAssignedAt, nowMs) : null,
-    completedUnassignedAgeMinutes: completedUnassigned ? minutesSince(row.completedAt, nowMs) : null,
-  };
 }
 
 async function effectiveFilters(input: ReportingBoardFilters = {}): Promise<EffectiveReportingBoardFilters> {
@@ -1787,13 +1738,6 @@ export async function undoScheduledReportingBoardBulkAssignmentJob(
   const refreshed = await findReportingBoardBulkAssignmentJobById(id);
   if (!refreshed) throw new HttpError(404, "Scheduled bulk assignment job not found.");
   return { job: refreshed, result };
-}
-
-function uniquePositiveAppointmentIds(appointmentIds: number[]): number[] {
-  if (!Array.isArray(appointmentIds) || appointmentIds.length === 0) {
-    throw new HttpError(400, "appointmentIds must be a non-empty array.");
-  }
-  return uniquePositiveIds(appointmentIds, "appointmentIds");
 }
 
 function uniquePositiveIds(ids: number[], field: string): number[] {

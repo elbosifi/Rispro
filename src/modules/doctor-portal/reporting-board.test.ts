@@ -484,7 +484,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(routes, /"\/saved-views\/:id\/revoke"/);
     assert.match(publicRoutes, /optionalAuth/);
     assert.match(publicRoutes, /offset: optionalNonNegativeInteger/);
-    assert.match(service, /totalCount: allCases\.length/);
+    assert.match(service, /totalCount: resultCases\.length/);
     assert.match(service, /hasMore:/);
     assert.match(service, /batchReassign: false/);
     assert.match(service, /accessLevel/);
@@ -505,62 +505,3 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(mobileView, /mobileCase\(row, Boolean\(identity\)\)/);
   });
 });
-
-function reportingBoardRow(overrides: Partial<import("./reporting-board-types.js").ReportingBoardCaseRow> = {}): import("./reporting-board-types.js").ReportingBoardCaseRow {
-  return {
-    caseType: "appointment",
-    caseKey: "appointment:1",
-    appointmentId: 1,
-    comparisonRequestId: null,
-    patientId: 1,
-    patientMrn: "MRN-1",
-    patientDicomId: null,
-    patientEnglishName: "Patient One",
-    patientArabicName: null,
-    accessionNumber: "ACC-1",
-    studyInstanceUid: "1.2.3",
-    bookingDate: "2026-07-04",
-    bookingTime: "09:00",
-    modalityId: 1,
-    modalityCode: "CT",
-    modalityName: "CT",
-    examTypeId: 1,
-    examTypeName: "CT Brain",
-    linkedPreviousBookingId: null,
-    linkedPreviousStudyDate: null,
-    linkedPreviousAccessionNumber: null,
-    caseCategory: "oncology",
-    appointmentStatus: "completed",
-    requiresReport: true,
-    reportingPriorityId: null,
-    reportingPriorityCode: null,
-    reportingPriorityName: null,
-    reportingPrioritySortOrder: null,
-    assignedDoctorId: null,
-    assignedDoctorName: null,
-    assignmentStatus: "unassigned",
-    completedAt: "2026-07-04T08:30:00.000Z",
-    currentAssignedAt: null,
-    firstAssignedAt: null,
-    reportFinalAt: null,
-    reportStatusCheckedAt: null,
-    reportStatusSource: null,
-    manualFinalOverrideId: null,
-    manualFinalAt: null,
-    manualFinalByName: null,
-    manualFinalReason: null,
-    dueAt: null,
-    completedToAssignedMinutes: null,
-    assignedToFinalMinutes: null,
-    completedToFinalMinutes: null,
-    currentAssignmentAgeMinutes: null,
-    completedUnassignedAgeMinutes: null,
-    reportStatus: "unavailable",
-    canAssign: true,
-    exclusionReason: null,
-    sonicDicomStudyNote: null,
-    sonicDicomStudyNoteCheckedAt: null,
-    sonicDicomStudyNoteSource: null,
-    ...overrides,
-  };
-}
