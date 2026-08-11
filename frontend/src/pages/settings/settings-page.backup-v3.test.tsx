@@ -418,7 +418,8 @@ describe("BackupRestoreSection v3 UI", () => {
     await uploadV3AndPreview();
     await userEvent.click(await screen.findByRole("button", { name: /run isolated migration rehearsal/i }));
 
-    expect(await screen.findByText(/Migration rehearsal: failed · 100% · not promotion-ready/i)).toBeTruthy();
+    expect(await screen.findByText(/Migration rehearsal: failed · 100% · not promotion-ready/i, {}, { timeout: 2_500 })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/restore/v3/migration-rehearsals/rehearsal-1", { credentials: "include" });
     expect(screen.getByText("Migration failed")).toBeTruthy();
   });
 
