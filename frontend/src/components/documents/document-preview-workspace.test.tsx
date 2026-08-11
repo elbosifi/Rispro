@@ -145,9 +145,11 @@ describe("DocumentPreviewWorkspace", () => {
       </LanguageProvider>
     );
 
-    await waitFor(() => expect(screen.queryByTestId("mock-pdf-page-3")).toBeNull());
-    expect(screen.getByTestId("mock-pdf-page-1")).toBeTruthy();
-    expect(screen.getByTestId("mock-pdf-page-2")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-pdf-page-3")).toBeNull();
+      expect(screen.getByTestId("mock-pdf-page-1")).toBeTruthy();
+      expect(screen.getByTestId("mock-pdf-page-2")).toBeTruthy();
+    });
   });
 
   it("renders an image preview with one selected thumbnail", () => {
