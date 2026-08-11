@@ -31,7 +31,7 @@ import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { SchedulingOverrideRequestModal } from "./SchedulingOverrideRequestModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
-import { Alert, AlertDescription, Badge, Button, Card } from "@/components/shared";
+import { Alert, AlertDescription, Badge, Button, Card, Input } from "@/components/shared";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { Lock, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
@@ -1027,10 +1027,10 @@ export function CreateAppointmentTab({
                                     {t(language, "appointments.create.safety.implantSite")}
                                     <span className="text-xs font-medium text-red-700">{t(language, "appointments.create.safety.required")}</span>
                                   </label>
-                                  <input
+                                  <Input
                                     id="mri-implant-site"
                                     dir="auto"
-                                    className="input-premium w-full"
+                                    className="w-full"
                                     value={implantSite}
                                     onChange={(event) => setImplantSite(event.target.value)}
                                     aria-label={t(language, "appointments.create.safety.implantSite")}
@@ -1048,14 +1048,14 @@ export function CreateAppointmentTab({
                                     {t(language, "appointments.create.safety.implantDescription")}
                                     <span className="text-xs font-normal text-muted-foreground">{t(language, "appointments.create.safety.optional")}</span>
                                   </label>
-                                  <input id="mri-implant-description" dir="auto" className="input-premium w-full" value={implantDescription} onChange={(event) => setImplantDescription(event.target.value)} aria-label={t(language, "appointments.create.safety.implantDescription")} />
+                                  <Input id="mri-implant-description" dir="auto" className="w-full" value={implantDescription} onChange={(event) => setImplantDescription(event.target.value)} aria-label={t(language, "appointments.create.safety.implantDescription")} />
                                 </div>
                                 <div>
                                   <label htmlFor="mri-previous-reviewer" className="mb-1.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
                                     {t(language, "appointments.create.safety.previousReviewer")}
                                     <span className="text-xs font-normal text-muted-foreground">{t(language, "appointments.create.safety.optional")}</span>
                                   </label>
-                                  <input id="mri-previous-reviewer" dir="auto" className="input-premium w-full" value={previousReviewerNameReported} onChange={(event) => setPreviousReviewerNameReported(event.target.value)} aria-label={t(language, "appointments.create.safety.previousReviewer")} />
+                                  <Input id="mri-previous-reviewer" dir="auto" className="w-full" value={previousReviewerNameReported} onChange={(event) => setPreviousReviewerNameReported(event.target.value)} aria-label={t(language, "appointments.create.safety.previousReviewer")} />
                                 </div>
                               </div>
                             )}
@@ -1199,12 +1199,11 @@ export function CreateAppointmentTab({
                 <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.appointmentDate")}
                 </label>
-                <input
+                <Input
                   aria-label={t(language, "appointments.create.appointmentDate")}
                   type="date"
                   value={form.appointmentDate}
                   onChange={(e) => actions.setAppointmentDate(e.target.value, form.overrideRequired)}
-                  className="input-premium"
                 />
               </div>
               )}

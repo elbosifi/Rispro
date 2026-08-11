@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bell, X } from "lucide-react";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
-import { Button, Badge } from "@/components/shared";
+import { Button, Badge, Input } from "@/components/shared";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
@@ -368,7 +368,7 @@ export function SchedulingOverrideRequestsWorkspace({
         <select aria-label={t(language, "overrideRequests.overrideTypeFilter")} className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
           {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : t(language, "overrideRequests.allOverrideTypes")}</option>)}
         </select>
-        <input aria-label={t(language, "overrideRequests.requestedDateFilter")} type="date" className="input-premium h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
+        <Input aria-label={t(language, "overrideRequests.requestedDateFilter")} type="date" className="h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
       </div>
 
       {actionError ? (
@@ -623,17 +623,17 @@ function RequestCard({
             </label>
             {changedDateMode ? (
               <div className="grid grid-cols-2 gap-2">
-                <input
+                <Input
                   aria-label={`New booking date for request ${request.id}`}
                   type="date"
-                  className="input-premium h-9 text-xs"
+                  className="h-9 text-xs"
                   value={approvalDraft.changedBookingDate}
                   onChange={(event) => onChangeApprovalDraft({ changedBookingDate: event.target.value })}
                 />
-                <input
+                <Input
                   aria-label={`New booking time for request ${request.id}`}
                   type="time"
-                  className="input-premium h-9 text-xs"
+                  className="h-9 text-xs"
                   value={approvalDraft.changedBookingTime}
                   onChange={(event) => onChangeApprovalDraft({ changedBookingTime: event.target.value })}
                 />
@@ -641,9 +641,9 @@ function RequestCard({
               </div>
             ) : null}
           </div>
-          <input
+          <Input
             aria-label={t(language, "overrideRequests.approvalNoteForRequest", { id: request.id })}
-            className="input-premium h-9 text-xs"
+            className="h-9 text-xs"
             value={approveReason}
             onChange={(event) => onChangeApproveReason(event.target.value)}
             placeholder={approvalNoteRequired ? "Approval note required" : t(language, "overrideRequests.optionalApprovalNote")}

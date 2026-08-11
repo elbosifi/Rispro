@@ -2,6 +2,7 @@ import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { SpecialReasonCodeDto } from "../types";
 import type { CapacityResolutionMode } from "../types";
+import { Input } from "@/components/shared";
 
 interface Props {
   capacityResolutionMode: CapacityResolutionMode;
@@ -117,11 +118,10 @@ export function SpecialQuotaSection({
               {t(language, "appointments.create.specialReasonConfirm")}
             </span>
           </label>
-          <input
+          <Input
             value={specialReasonNote}
             onChange={(e) => onChangeSpecialReasonNote(e.target.value)}
             placeholder={t(language, "appointments.create.optionalNote")}
-            className="input-premium"
           />
         </div>
       )}

@@ -21,6 +21,16 @@ For the concise repository map, start at the root `AGENTS.md`. Keep this file as
 10. Legacy appointments code outside `src/modules/appointments-v2/` is maintained but not extended. See Legacy freeze policy below.
 11. DB-backed validation uses the disposable Docker PostgreSQL flow in `docs/CODEX_DB_TESTING.md`; do not ask for or reset a local PostgreSQL admin password.
 
+## Frontend UI normalization
+
+- Inspect `frontend/src/components/shared/`, its README, existing tokens in `frontend/src/index.css`, and the target page before creating a generic UI control.
+- Reuse the shared RISpro primitive when its semantics and rendered layout fit. Do not introduce another generic Button, Input, Card, Table, Dialog/modal shell, Badge, LoadingState, EmptyState, or ErrorState without recording why the shared primitive cannot preserve the required behavior or geometry.
+- Reuse existing CSS variables, shared variants, and canonical classes instead of equivalent hard-coded theme values. Do not introduce another design system or component framework alongside RISpro's shared system.
+- Normalization is implementation work, not permission to redesign. Preserve workflow behavior, information hierarchy, control order, modal dimensions, density, breakpoints, sticky/scroll ownership, and established desktop/mobile layout.
+- Keep domain-specific controls local when their interaction or layout semantics genuinely differ. Document intentional exceptions instead of forcing them into a generic abstraction.
+- UI normalization requires rendered browser checks at desktop and every relevant narrow/mobile layout, including representative dialogs and loading/empty/error states where practical. A passing component suite alone is not visual-parity evidence.
+- `npm run harness:ui` is a baseline ratchet for high-confidence generic raw-control and manual-dialog markers. It does not forbid native elements and does not decide whether a specialized control should be abstracted.
+
 ---
 
 ## Harness rules

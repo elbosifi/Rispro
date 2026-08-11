@@ -225,7 +225,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 
 ---
 
-## Migration Status
+## Usage Contract
+
+Use these components for ordinary application UI when their semantics and layout match the target. Preserve existing class overrides and component-specific geometry during migrations.
+
+Native or local controls remain valid when they provide domain-specific interaction, deliberately different layout semantics, or geometry that a shared primitive cannot preserve cleanly. Do not force dense operational tables, segmented workflow controls, radio groups, disclosure triggers, or content-specific overlays into a generic primitive merely because their JSX looks similar.
+
+Reuse the existing variables and canonical classes in `frontend/src/index.css`; do not create a parallel design system. UI normalization requires rendered desktop/mobile parity checks and is not permission to redesign a page.
+
+Migration is incremental. Appointments V2, Registration, and Modality Board already use many shared primitives while retaining documented specialized controls. Consult `docs/plans/active/ui-normalization.md` for the current inventory and exception ledger.
+
+## Historical Migration Notes
+
+The checklist below predates the current source inventory. Treat it as historical context, not a claim that every generic seam or dialog in those pages is normalized.
 
 All major pages have been migrated to use these shared components:
 - ✅ V2 Appointments page

@@ -23,7 +23,7 @@ import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, openProtocolPrintWindow, writeProtocolPrintSheet } from "@/lib/protocol-printing";
 import { buildAppointmentWhatsappText, normalizeWhatsappPhone } from "@/lib/whatsapp";
-import { Card, Button, SearchInput } from "@/components/shared";
+import { Card, Button, Input, SearchInput } from "@/components/shared";
 import {
   prepareAppointmentSlipHtml,
 } from "@/lib/print-utils";
@@ -1482,11 +1482,11 @@ export default function RegistrationsPage() {
                   <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
                     {t("registrations.webPushTitle")}
                   </label>
-                  <input
+                  <Input
                     value={notificationTitle}
                     onChange={(e) => setNotificationTitle(e.target.value)}
                     maxLength={80}
-                    className="input-premium w-full min-h-10"
+                    className="w-full min-h-10"
                     placeholder={t("registrations.webPushTitlePlaceholder")}
                   />
                 </div>

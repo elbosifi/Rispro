@@ -3,6 +3,7 @@ import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { MessageCircle } from "lucide-react";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
+import { Button } from "@/components/shared";
 
 interface Props {
   appointmentSummary: {
@@ -59,30 +60,32 @@ export function AppointmentSuccessState({
       </div>
       {appointmentSummary.mriPrimaryScreeningResult ? <div className="mb-6"><MriPrimaryScreeningBadges result={appointmentSummary.mriPrimaryScreeningResult} /></div> : null}
       <div className="flex flex-wrap gap-4 mb-6">
-        <button type="button" className="btn-secondary" onClick={onPrintView}>{t(language, "appointments.create.printView")}</button>
-        <button type="button" className="btn-secondary" onClick={onPrintNow} disabled={printNowDisabled}>{t(language, "appointments.create.printNow")}</button>
+        <Button type="button" variant="secondary" className="px-6" onClick={onPrintView}>{t(language, "appointments.create.printView")}</Button>
+        <Button type="button" variant="secondary" className="px-6" onClick={onPrintNow} disabled={printNowDisabled}>{t(language, "appointments.create.printNow")}</Button>
         {publicAppointmentUrl ? (
-          <button
+          <Button
             type="button"
-            className="btn-secondary"
+            variant="secondary"
+            className="px-6"
             onClick={() => window.open(publicAppointmentUrl, "_blank", "noopener,noreferrer")}
           >
             {t(language, "registrations.viewAppointmentLink")}
-          </button>
+          </Button>
         ) : null}
         {onSendWhatsapp ? (
-          <button
+          <Button
             type="button"
-            className="btn-secondary inline-flex items-center gap-2"
+            variant="secondary"
+            className="inline-flex items-center gap-2 px-6"
             onClick={onSendWhatsapp}
             style={{ backgroundColor: "#25D366", borderColor: "#25D366", color: "#fff" }}
           >
             <MessageCircle className="h-4 w-4" />
             {t(language, "registrations.whatsappOpen")}
-          </button>
+          </Button>
         ) : null}
-        <button type="button" className="btn-secondary" onClick={onViewDetails}>{t(language, "appointments.create.viewDetails")}</button>
-        <button type="button" className="btn-primary" onClick={onCreateAnother}>{t(language, "appointments.create.createAnother")}</button>
+        <Button type="button" variant="secondary" className="px-6" onClick={onViewDetails}>{t(language, "appointments.create.viewDetails")}</Button>
+        <Button type="button" className="px-6" onClick={onCreateAnother}>{t(language, "appointments.create.createAnother")}</Button>
       </div>
       <div>
         <RequestDocumentsPanel

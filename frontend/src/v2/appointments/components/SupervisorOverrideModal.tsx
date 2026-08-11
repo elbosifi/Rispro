@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { Button } from "@/components/shared";
+import { Button, Input } from "@/components/shared";
 
 interface Props {
   open: boolean;
@@ -45,9 +45,9 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
         <p className="mt-1.5 text-sm text-muted-foreground">{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
 
         <div className="grid gap-3 mt-4">
-          <input className="input-premium" value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
-          <input className="input-premium" type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
-          <input className="input-premium" value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
+          <Input value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
+          <Input type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
+          <Input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
         </div>
 
         {(localError || authError) && (

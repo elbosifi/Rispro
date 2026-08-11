@@ -1,0 +1,85 @@
+{
+  "genericButton": {
+    "total": 91,
+    "files": [
+      "frontend/src/components/layout/navigation.tsx",
+      "frontend/src/components/layout/page-container.tsx",
+      "frontend/src/components/search/global-search.tsx",
+      "frontend/src/pages/auth/login-page.tsx",
+      "frontend/src/pages/doctor/doctor-page.tsx",
+      "frontend/src/pages/pacs/pacs-page.tsx",
+      "frontend/src/pages/pacs/pacs-remap-page.tsx",
+      "frontend/src/pages/search/search-page.tsx",
+      "frontend/src/pages/settings/action-pin-policy-section.tsx",
+      "frontend/src/pages/settings/audit-log-section.tsx",
+      "frontend/src/pages/settings/authoritative-orthanc-section.tsx",
+      "frontend/src/pages/settings/backup-restore-section.tsx",
+      "frontend/src/pages/settings/dicom-devices-section.tsx",
+      "frontend/src/pages/settings/dicom-gateway-section.tsx",
+      "frontend/src/pages/settings/dicom-monitoring-section.tsx",
+      "frontend/src/pages/settings/documents-storage-section.tsx",
+      "frontend/src/pages/settings/orthanc-mwl-section.tsx",
+      "frontend/src/pages/settings/pacs-settings-section.tsx",
+      "frontend/src/pages/settings/request-scan-automation-section.tsx",
+      "frontend/src/pages/settings/role-page-access-section.tsx",
+      "frontend/src/pages/settings/sante-worklist-section.tsx",
+      "frontend/src/pages/settings/scheduling-engine-config-section.tsx",
+      "frontend/src/pages/settings/settings-section-helpers.tsx",
+      "frontend/src/pages/worklist-monitor/worklist-monitor-page.tsx",
+      "frontend/src/v2/appointments/components/SchedulingOverrideApprovalCenter.tsx"
+    ]
+  },
+  "genericInput": {
+    "total": 26,
+    "files": [
+      "frontend/src/pages/auth/login-page.tsx",
+      "frontend/src/pages/print/report-center.tsx",
+      "frontend/src/pages/request-scans/request-scans-page.tsx",
+      "frontend/src/pages/search/search-page.tsx",
+      "frontend/src/pages/settings/audit-log-section.tsx",
+      "frontend/src/pages/settings/qz-tray-printing-section.tsx",
+      "frontend/src/pages/settings/request-scan-automation-section.tsx",
+      "frontend/src/pages/workstation/workstation-printing-page.tsx",
+      "frontend/src/v2/appointments/components/policy-draft-editor.tsx"
+    ]
+  },
+  "genericTextarea": {
+    "total": 2,
+    "files": [
+      "frontend/src/pages/request-scans/request-scans-page.tsx",
+      "frontend/src/v2/appointments/components/SchedulingOverrideApprovalCenter.tsx"
+    ]
+  },
+  "manualDialogMarker": {
+    "total": 42,
+    "files": [
+      "frontend/src/components/appointments/appointment-manage-modal.tsx",
+      "frontend/src/components/auth/action-pin-settings-button.tsx",
+      "frontend/src/components/layout/navigation.tsx",
+      "frontend/src/components/patients/request-comparison-modal.tsx",
+      "frontend/src/pages/doctor/doctor-admin-doctors-page.tsx",
+      "frontend/src/pages/doctor/doctor-page.tsx",
+      "frontend/src/pages/doctor/doctor-protocols-page.tsx",
+      "frontend/src/pages/doctor/doctor-worklists-page.tsx",
+      "frontend/src/pages/public/cancel-appointment-page.tsx",
+      "frontend/src/pages/queue/queue-page.tsx",
+      "frontend/src/pages/registrations/registrations-page.tsx",
+      "frontend/src/pages/settings/audit-log-section.tsx",
+      "frontend/src/pages/settings/exam-types-section.tsx",
+      "frontend/src/providers/action-pin-provider.tsx",
+      "frontend/src/v2/appointments/components/SchedulingOverrideApprovalCenter.tsx"
+    ]
+  },
+  "genericClone": {
+    "total": 7,
+    "files": [
+      "frontend/src/pages/print/print-page.tsx",
+      "frontend/src/pages/print/report-center.tsx",
+      "frontend/src/pages/public/cancel-appointment-page.tsx",
+      "frontend/src/pages/settings/patient-qr-settings-section.tsx",
+      "frontend/src/pages/settings/sonicdicom-reports-section.tsx",
+      "frontend/src/pages/settings/system-diagnostics-section.tsx",
+      "frontend/src/v2/appointments/components/live-policy-panel.tsx"
+    ]
+  }
+}

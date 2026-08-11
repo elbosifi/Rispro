@@ -12,6 +12,7 @@ These rules keep agent work small, verifiable, and safe for a production radiolo
 6. Run the most targeted test first. Expand only when the touched surface justifies it.
 7. Stop at the first unrelated failure and report the exact command and failure.
 8. Do not claim skipped, blocked, or failing checks as passing.
+9. For UI work, inspect and reuse the RISpro shared primitives and existing design tokens when their semantics fit. Normalization must preserve product behavior and established layout; document genuinely specialized exceptions and verify relevant desktop/mobile states in a browser.
 
 ## Authority Boundaries
 
