@@ -186,7 +186,7 @@ describe("Dialog focus behavior", () => {
     expect(document.activeElement).toBe(last);
   });
 
-  it("focuses dialog content when there is no interactive child and closes only the topmost backdrop", () => {
+  it("focuses dialog content when there is no interactive child and only the topmost backdrop closes a dialog", () => {
     function Harness() {
       const [parentOpen, setParentOpen] = useState(true);
       const [childOpen, setChildOpen] = useState(true);
@@ -203,11 +203,83 @@ describe("Dialog focus behavior", () => {
     }
 
     render(<Harness />);
+    const parent = screen.getByRole("dialog", { name: "Parent backdrop dialog" });
     const child = screen.getByRole("dialog", { name: "Child backdrop dialog" });
     expect(child.contains(document.activeElement)).toBe(true);
 
-    fireEvent.click(child);
+    fireEvent.click(parent.firstElementChild!);
+    expect(screen.getByRole("dialog", { name: "Child backdrop dialog" })).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Parent backdrop dialog" })).not.toBeNull();
+
+    fireEvent.click(child.firstElementChild!);
     expect(screen.queryByRole("dialog", { name: "Child backdrop dialog" })).toBeNull();
     expect(screen.getByRole("dialog", { name: "Parent backdrop dialog" })).not.toBeNull();
+  });
+
+  it("skips hidden and disabled controls when entering and trapping focus", () => {
+    render(
+      <Dialog open onClose={() => undefined}>
+        <DialogContent aria-label="Usable controls dialog">
+          <button type="button" disabled>Disabled</button>
+          <div hidden><button type="button">Hidden attribute</button></div>
+          <div aria-hidden="true"><button type="button">Aria hidden</button></div>
+          <div inert><button type="button">Inert</button></div>
+          <div style={{ display: "none" }}><button type="button">Display none</button></div>
+          <div style={{ visibility: "hidden" }}><button type="button">Visibility hidden</button></div>
+          <button type="button">First visible</button>
+          <button type="button">Last visible</button>
+          <div style={{ visibility: "collapse" }}><button type="button">Collapsed</button></div>
+        </DialogContent>
+      </Dialog>,
+    );
+
+    const first = screen.getByRole("button", { name: "First visible" });
+    const last = screen.getByRole("button", { name: "Last visible" });
+    expect(document.activeElement).toBe(first);
+
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    expect(document.activeElement?.textContent).not.toMatch(/Disabled|Hidden|Inert|none|hidden|Collapsed/i);
+  });
+
+  it("restores the page opener when a parent and child unmount together", () => {
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+
+    function Harness() {
+      const [parentOpen, setParentOpen] = useState(false);
+      const [childOpen, setChildOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setParentOpen(true)}>Page opener</button>
+          <Dialog open={parentOpen} onClose={() => setParentOpen(false)}>
+            <DialogContent aria-label="Teardown parent">
+              <button type="button" onClick={() => setChildOpen(true)}>Open teardown child</button>
+              <button type="button" onClick={() => setParentOpen(false)}>Remove parent</button>
+              <Dialog open={childOpen} onClose={() => setChildOpen(false)}>
+                <DialogContent aria-label="Teardown child"><button type="button">Child action</button></DialogContent>
+              </Dialog>
+            </DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Page opener" });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole("button", { name: "Open teardown child" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove parent" }));
+
+    expect(screen.queryByRole("dialog", { name: "Teardown parent" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Teardown child" })).toBeNull();
+    expect(document.body.style.position).toBe("");
+    expect(document.activeElement).toBe(opener);
+    expect(scrollTo).toHaveBeenCalledWith(18, 240);
   });
 });

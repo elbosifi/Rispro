@@ -50,7 +50,16 @@ const focusableSelector = [
 
 function getFocusableElements(content: HTMLElement) {
   return Array.from(content.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-    (element) => element.getAttribute("aria-hidden") !== "true",
+    (element) => {
+      if (element.matches(":disabled") || element.closest('[hidden], [aria-hidden="true"], [inert]')) return false;
+
+      for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+        const style = window.getComputedStyle(ancestor);
+        if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+        if (ancestor === content) break;
+      }
+      return true;
+    },
   );
 }
 
@@ -185,7 +194,13 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
         const index = dialogStack.indexOf(entry);
         if (index !== -1) dialogStack.splice(index, 1);
         stackEntryRef.current = null;
-        if (!wasTopmost) return;
+        if (!wasTopmost) {
+          const nextTopmost = dialogStack.at(-1);
+          if (nextTopmost && content.contains(nextTopmost.content)) {
+            nextTopmost.previouslyFocused = entry.previouslyFocused;
+          }
+          return;
+        }
 
         const nextTopmost = dialogStack.at(-1);
         if (nextTopmost?.content.isConnected) {
@@ -234,11 +249,13 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
       return () => document.removeEventListener("keydown", handleKeyDown);
     }, [onClose]);
 
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose();
-    }
-  };
+    const closeTopmost = () => {
+      if (dialogStack.at(-1) === stackEntryRef.current) onClose();
+    };
+
+    const handleBackdropClick = (event: React.MouseEvent) => {
+      if (event.target === event.currentTarget) closeTopmost();
+    };
 
   return (
     <div
@@ -263,7 +280,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           inset: 0,
           backgroundColor: "rgba(0,0,0,0.5)"
         }}
-        onClick={onClose}
+        onClick={closeTopmost}
       />
 
       {/* Dialog */}
