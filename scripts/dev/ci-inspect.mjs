@@ -30,6 +30,10 @@ export function parseCiInspectArgs(args) {
   return options;
 }
 
+export function isDirectExecution(moduleUrl, entryPath) {
+  return Boolean(entryPath) && path.resolve(entryPath) === fileURLToPath(moduleUrl);
+}
+
 function usage() {
   console.log("Usage: npm run ci:inspect -- --sha <SHA|HEAD> [--wait [seconds]]");
   console.log("Read-only: inspects exact-SHA CI and RISpro self-hosted CI runs. --wait defaults to 300 seconds and is bounded to 900.");
@@ -139,4 +143,4 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (isDirectExecution(import.meta.url, process.argv[1])) await main();

@@ -16,6 +16,7 @@ Use this file for mandatory operating rules. Detailed guidance lives in [docs/ag
 10. Do not commit generated DICOM worklist side-effect files under `storage/dicom/worklist-source/` unless that is the intentional task.
 11. Docker EPERM during preflight means the environment blocked Docker execution, not a RISpro test failure.
 12. No Over-Engineering: Choose the simplest appropriate solution that fully and reliably meets the specific requirements and fits the existing architecture. Avoid premature abstractions, unnecessary layers, hypothetical edge-case handling, and functionality that is not required for the current task. Account for real and likely edge cases, but do not add complexity for purely hypothetical future scenarios. Keep changes small, direct, and easy to understand. Use more complex approaches only when the actual requirements make them necessary.
+13. For UI/browser tasks, a missing Playwright browser binary is an environment prerequisite, not sufficient reason to skip browser validation. Install the compatible browser binary for the repository's currently installed Playwright version and continue validation, normally using the project's Chromium browser. Do not upgrade Playwright, install unrelated global tooling, or make broad machine changes merely to obtain browser validation.
 
 ## Default Git Workflow
 
