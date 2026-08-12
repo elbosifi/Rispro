@@ -115,6 +115,9 @@ export interface AppointmentWithDetails extends Appointment {
   cdPatientActive?: boolean;
   documentCount?: number;
   latestDocumentAt?: string | null;
+  requireRequestDocumentForProtocolQueue?: boolean;
+  protocolQueueAppliesToAppointment?: boolean;
+  hasQualifyingRequestDocument?: boolean;
   modalitySlotNumber: number | null;
   publicCancelToken?: string | null;
   publicAppointmentUrl?: string | null;
@@ -375,6 +378,9 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     cdPatientActive: bool(raw, "cd_patient_active", bool(raw, "cdPatientActive", false)),
     documentCount: num(raw, "document_count") || num(raw, "documentCount"),
     latestDocumentAt: strOrNull(raw, "latest_document_at") ?? strOrNull(raw, "latestDocumentAt"),
+    requireRequestDocumentForProtocolQueue: bool(raw, "require_request_document_for_protocol_queue", bool(raw, "requireRequestDocumentForProtocolQueue", false)),
+    protocolQueueAppliesToAppointment: bool(raw, "protocol_queue_applies_to_appointment", bool(raw, "protocolQueueAppliesToAppointment", false)),
+    hasQualifyingRequestDocument: bool(raw, "has_qualifying_request_document", bool(raw, "hasQualifyingRequestDocument", false)),
     pacsStudyStartedAt: strOrNull(raw, "pacs_study_started_at") ?? strOrNull(raw, "pacsStudyStartedAt"),
     pacsFirstSeenAt: strOrNull(raw, "pacs_first_seen_at") ?? strOrNull(raw, "pacsFirstSeenAt"),
     pacsTimingSource: strOrNull(raw, "pacs_timing_source") ?? strOrNull(raw, "pacsTimingSource"),

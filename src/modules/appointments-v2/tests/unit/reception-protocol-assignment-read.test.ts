@@ -53,4 +53,16 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(doctorRoutes, /router\.patch\(\s*"\/appointments\/:appointmentId\/assignment"/);
     assert.match(doctorRoutes, /router\.delete\(\s*"\/appointments\/:appointmentId\/assignment"/);
   });
+
+  it("includes request-document protocol eligibility in the single registrations list query", () => {
+    const routes = readFileSync(`${root}/src/modules/appointments-v2/api/routes/read-v2-routes.ts`, "utf8");
+
+    assert.match(routes, /isRequestDocumentRequiredForProtocolQueue/);
+    assert.match(routes, /qualifyingRequestDocumentExistsSql\("b\.id"\)/);
+    assert.match(routes, /protocolingModalityAppliesSql\(`\(\$\{PROTOCOLING_MODALITY_SQL\}\)`\)/);
+    assert.match(routes, /require_request_document_for_protocol_queue/);
+    assert.match(routes, /protocol_queue_applies_to_appointment/);
+    assert.match(routes, /has_qualifying_request_document/);
+    assert.doesNotMatch(routes, /rowsWithNotes\.map\(async \(row\)[\s\S]*getRequestDocumentProtocolPolicy/);
+  });
 });

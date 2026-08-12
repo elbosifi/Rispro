@@ -16,6 +16,7 @@ const fetchPublicAppointmentReportStatusMock = vi.fn();
 const fetchPublicSchedulingCapacitySettingsMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
 const sendPatientWebPushNotificationMock = vi.fn();
+const uploadAppointmentDocumentMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
 const rescheduleV2BookingMock = vi.fn();
 const createSchedulingOverrideRequestMock = vi.fn();
@@ -40,7 +41,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchIntegrationStatus: vi.fn(async () => ({ scanner: { scannerAppEnabled: false, naps2WebScanEnabled: false } })),
   listAppointmentDocuments: vi.fn(async () => []),
   deleteAppointmentDocument: vi.fn(),
-  uploadAppointmentDocument: vi.fn(),
+  uploadAppointmentDocument: (...args: unknown[]) => uploadAppointmentDocumentMock(...args),
   prepareScanSession: vi.fn(),
   createScanSession: vi.fn(),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
@@ -154,6 +155,8 @@ describe("RegistrationsPage print actions", () => {
     mockPushToast.mockReset();
     sendPatientWebPushNotificationMock.mockReset();
     sendPatientWebPushNotificationMock.mockResolvedValue({});
+    uploadAppointmentDocumentMock.mockReset();
+    uploadAppointmentDocumentMock.mockResolvedValue({ id: 101 });
     fetchPublicAppointmentReportStatusMock.mockReset();
     fetchPublicSchedulingCapacitySettingsMock.mockReset();
     fetchPublicSchedulingCapacitySettingsMock.mockReturnValue({
@@ -706,6 +709,48 @@ describe("RegistrationsPage print actions", () => {
     });
 
     expect(screen.getAllByText(/Protocol: Not protocolled/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows the authoritative missing-request blocker only for applicable CT/MRI rows and opens request documents", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      registrationAppointment({ id: 11, accessionNumber: "CT-MISSING", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false }),
+      registrationAppointment({ id: 12, accessionNumber: "MRI-MISSING", modalityCode: "MRI", modalityNameEn: "MRI", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false }),
+      registrationAppointment({ id: 13, accessionNumber: "CT-READY", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true }),
+      registrationAppointment({ id: 14, accessionNumber: "CT-ASSIGNED", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true, protocolAssignmentSummary: { assignmentId: 14, protocolName: "CT Head", versionNumber: "1", freeTextProtocol: null, scannerName: null, scannerVendor: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null } }),
+      registrationAppointment({ id: 15, accessionNumber: "MAMMO", modalityCode: "MG", modalityNameEn: "Mammo", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: false, hasQualifyingRequestDocument: false }),
+      registrationAppointment({ id: 16, accessionNumber: "US", modalityCode: "US", modalityNameEn: "Ultrasound", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: false, hasQualifyingRequestDocument: false }),
+    ]);
+
+    renderRegistrationsPage();
+
+    expect(await screen.findAllByRole("button", { name: "Missing request" })).toHaveLength(4);
+    expect(within(getAppointmentRow("CT-READY")).getByText("Protocol: Not protocolled")).toBeTruthy();
+    expect(within(getAppointmentRow("CT-ASSIGNED")).getByText("Protocol assigned")).toBeTruthy();
+    expect(within(getAppointmentRow("MAMMO")).queryByRole("button", { name: "Missing request" })).toBeNull();
+    expect(within(getAppointmentRow("US")).queryByRole("button", { name: "Missing request" })).toBeNull();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Missing request" }).at(-1)!);
+    expect(await screen.findByTestId("appointment-document-workspace")).toBeTruthy();
+  });
+
+  it("refreshes the missing-request row after a request upload invalidates registrations", async () => {
+    fetchAppointmentsMock
+      .mockResolvedValueOnce([registrationAppointment({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false })])
+      .mockResolvedValueOnce([registrationAppointment({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true })]);
+
+    renderRegistrationsPage();
+    await userEvent.click((await screen.findAllByRole("button", { name: "Missing request" })).at(-1)!);
+
+    const input = await screen.findByTestId("document-file-input");
+    fireEvent.change(input, { target: { files: [new File(["request"], "request.pdf", { type: "application/pdf" })] } });
+    await userEvent.click(screen.getByRole("button", { name: "Attach Request" }));
+
+    await waitFor(() => {
+      expect(uploadAppointmentDocumentMock).toHaveBeenCalled();
+      expect(fetchAppointmentsMock).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("button", { name: "Missing request" })).toBeNull();
+      expect(screen.getAllByText("Protocol: Not protocolled").length).toBeGreaterThan(0);
+    });
   });
 
   it("shows protocol notes and contrast notes read-only in the manage drawer", async () => {

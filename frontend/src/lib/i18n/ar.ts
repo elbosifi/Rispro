@@ -734,6 +734,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "registrations.appointmentDetails": "بيانات الموعد",
   "registrations.patientDetailsLoadFailed": "تعذر تحميل بيانات المريض الكاملة. تبقى معلومات الموعد متاحة.",
   "registrations.requestDocuments": "طلب الوثائق",
+  "registrations.missingRequest": "الطلب مفقود",
   "registrations.reschedule": "إعادة جدولة",
   "registrations.rescheduleHint": "اختر تاريخاً جديداً لهذا الموعد. ستبقى باقي تفاصيل الموعد كما هي.",
   "registrations.rescheduleNewDate": "التاريخ الجديد",

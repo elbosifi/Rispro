@@ -637,6 +637,28 @@ export default function RegistrationsPage() {
   }
 
   function ProtocolStatus({ appointment }: { appointment: AppointmentWithDetails }) {
+    const requestDocumentMissing =
+      appointment.requireRequestDocumentForProtocolQueue === true &&
+      appointment.protocolQueueAppliesToAppointment === true &&
+      appointment.hasQualifyingRequestDocument === false;
+
+    if (requestDocumentMissing) {
+      return (
+        <div className="mt-1.5 text-[10.5px] leading-snug">
+          <button
+            type="button"
+            className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+            onClick={(event) => {
+              event.stopPropagation();
+              manageAppointment(appointment);
+            }}
+          >
+            {t("registrations.missingRequest")}
+          </button>
+        </div>
+      );
+    }
+
     if (!usesProtocolWorkflow(appointment)) return null;
     const summary = appointment.protocolAssignmentSummary;
     if (!summary) {

@@ -693,6 +693,7 @@ export const en = {
   "registrations.appointmentDetails": "Appointment details",
   "registrations.patientDetailsLoadFailed": "Could not load complete patient details. Appointment information remains available.",
   "registrations.requestDocuments": "Request Documents",
+  "registrations.missingRequest": "Missing request",
   "registrations.reschedule": "Reschedule",
   "registrations.rescheduleHint": "Choose a new date for this appointment. Other appointment details stay unchanged.",
   "registrations.rescheduleNewDate": "New date",

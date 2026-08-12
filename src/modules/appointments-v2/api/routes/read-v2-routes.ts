@@ -29,6 +29,11 @@ import {
 } from "../../booking/services/no-show-review.service.js";
 import { getModalityProtocolAssignment } from "../../modality/protocol-assignment.service.js";
 import { listCdRobotDeliveries, listCdRobotDestinations, retryCdRobotDelivery, startCdRobotDelivery } from "../../../../services/cd-robot-delivery-service.js";
+import {
+  isRequestDocumentRequiredForProtocolQueue,
+  qualifyingRequestDocumentExistsSql,
+} from "../../../../services/request-document-protocol-policy.js";
+import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../../../services/protocoling-modality.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -301,6 +306,8 @@ router.get(
     const status = parseStatuses(query["status[]"] ?? query.status);
 
     const params: unknown[] = [];
+    params.push(await isRequestDocumentRequiredForProtocolQueue());
+    const requireRequestDocumentForProtocolQueueParam = `$${params.length}`;
     const where: string[] = [];
 
     if (date) {
@@ -438,6 +445,9 @@ router.get(
           et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
+          ${requireRequestDocumentForProtocolQueueParam}::boolean as require_request_document_for_protocol_queue,
+          ${protocolingModalityAppliesSql(`(${PROTOCOLING_MODALITY_SQL})`)} as protocol_queue_applies_to_appointment,
+          ${qualifyingRequestDocumentExistsSql("b.id")} as has_qualifying_request_document,
           ${PROTOCOL_ASSIGNMENT_SELECT},
           (
             select count(*)::int
