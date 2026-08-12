@@ -20,6 +20,8 @@ export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambig
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
 export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null; modality: string | null };
 export type OrthancUploadedInstance = OrthancInstanceDetails;
+export type OrthancResourceStatistics = { studies: number | null; series: number | null; instances: number | null; diskSizeBytes: number | null; diskSizeMb: number | null; uncompressedSizeBytes: number | null; uncompressedSizeMb: number | null };
+export type AuthoritativeOrthancRouteSynchronizationSummary = { created: number; updated: number; unchanged: number; removed: number; warnings: string[] };
 
 type FetchLike = typeof fetch;
 type AutoRouteDestination = { key: string; aet: string; host: string; port: number | null; isCdRobot?: boolean; configurationError?: string | null };
@@ -42,6 +44,7 @@ function record(value: unknown): Record<string, unknown> { return value && typeo
 function first(...values: unknown[]): string | null { for (const value of values) { if (value == null) continue; if (typeof value === "string" || typeof value === "number") { const clean = String(value).trim(); if (clean) return clean; } else if (typeof value === "object") { const row = value as Record<string, unknown>; const nested = first(row.Value, row.value, row.Alphabetic); if (nested) return nested; } } return null; }
 function tags(payload: unknown) { const row = record(payload); return { ...row, ...record(row.MainDicomTags), ...record(row.PatientMainDicomTags), ...record(row.Tags), ...record(row.NormalizedTags) }; }
 function count(value: unknown) { const parsed = Number(first(value) ?? 0); return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0; }
+function optionalNonNegativeNumber(value: unknown): number | null { const raw = first(value); if (raw == null) return null; const parsed = Number(raw); return Number.isFinite(parsed) && parsed >= 0 ? parsed : null; }
 function routeSlug(value: string): string { return value.trim().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, ""); }
 function routeKeyHash(value: string): string { return createHash("sha256").update(value).digest("hex").slice(0, 10); }
 export function buildAuthoritativeOrthancRouteAliases(destinationKeys: string[]): Array<{ destinationKey: string; alias: string }> {
@@ -140,7 +143,7 @@ export class AuthoritativeOrthancClient {
   async listRemoteModalityKeys(): Promise<string[]> { const payload = await this.request("/modalities", {}, { allowDisabled: true }); return Array.isArray(payload) ? payload.map(text).filter(Boolean) : Object.keys(record(payload)); }
   async upsertRemoteModality(key: string, modality: { aet: string; host: string; port: number }): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ AET: modality.aet, Host: modality.host, Port: modality.port }) }); }
   async deleteRemoteModality(key: string): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "DELETE" }, { allowDisabled: true, acceptableStatuses: [404] }); }
-  async echoRemoteModality(key: string): Promise<void> { await this.request(`/modalities/${encodeURIComponent(key)}/echo`, { method: "POST" }); }
+  async echoRemoteModality(key: string, timeoutSeconds = this.settings.timeoutSeconds): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}/echo`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Timeout: Math.max(1, Math.min(120, Math.trunc(timeoutSeconds))) }) }); }
   async enqueueStudyStore(key: string, orthancStudyId: string): Promise<string> {
     const response = record(await this.request(`/modalities/${encodeURIComponent(key)}/store`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Resources: [orthancStudyId], Synchronous: false }) }));
     const jobId = first(response.ID, response.Id, response.id, response.Path);
@@ -148,6 +151,22 @@ export class AuthoritativeOrthancClient {
     return jobId.replace(/^\/jobs\//, "");
   }
   async getJob(jobId: string): Promise<Record<string, unknown>> { return record(await this.request(`/jobs/${encodeURIComponent(jobId)}`)); }
+  async listJobs(): Promise<unknown> { return this.request("/jobs?expand"); }
+  async resubmitJob(jobId: string): Promise<void> { if (!/^[A-Za-z0-9-]{1,128}$/.test(jobId)) throw new HttpError(400, "Invalid Orthanc job ID."); await this.request(`/jobs/${encodeURIComponent(jobId)}/resubmit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); }
+  async getStatistics(): Promise<OrthancResourceStatistics> {
+    const row = record(await this.request("/statistics"));
+    const statistics = {
+      studies: optionalNonNegativeNumber(row.CountStudies ?? row.countStudies),
+      series: optionalNonNegativeNumber(row.CountSeries ?? row.countSeries),
+      instances: optionalNonNegativeNumber(row.CountInstances ?? row.countInstances),
+      diskSizeBytes: optionalNonNegativeNumber(row.TotalDiskSize ?? row.DiskSize ?? row.totalDiskSize),
+      diskSizeMb: optionalNonNegativeNumber(row.TotalDiskSizeMB ?? row.DiskSizeMB ?? row.totalDiskSizeMb),
+      uncompressedSizeBytes: optionalNonNegativeNumber(row.TotalUncompressedSize ?? row.UncompressedSize ?? row.totalUncompressedSize),
+      uncompressedSizeMb: optionalNonNegativeNumber(row.TotalUncompressedSizeMB ?? row.UncompressedSizeMB ?? row.totalUncompressedSizeMb),
+    };
+    if (Object.values(statistics).every((value) => value == null)) throw new HttpError(502, "Authoritative Orthanc returned an invalid statistics response.", { code: "orthanc_invalid_response" });
+    return statistics;
+  }
   async assertStudyStableAndNonEmpty(orthancStudyId: string): Promise<OrthancStudyDetails> {
     const detail = await this.getStudy(orthancStudyId);
     const raw = record(await this.request(`/studies/${encodeURIComponent(orthancStudyId)}`));
@@ -199,13 +218,13 @@ export class AuthoritativeOrthancClient {
     return { status: "matched", matchKey, study };
   }
 }
-export async function synchronizeAuthoritativeOrthancAutoRoute(settings: AuthoritativeOrthancSettings): Promise<void> {
+export async function synchronizeAuthoritativeOrthancAutoRoute(settings: AuthoritativeOrthancSettings): Promise<AuthoritativeOrthancRouteSynchronizationSummary> {
   const client = new AuthoritativeOrthancClient(settings);
   const managedAlias = (key: string) => key.startsWith(AUTHORITATIVE_ORTHANC_ROUTE_PREFIX) || LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS.test(key);
   const existingAliases = settings.baseUrl ? (await client.listRemoteModalityKeys()).filter(managedAlias) : [];
   if (!settings.autoRouteEnabled) {
     for (const alias of existingAliases) await client.deleteRemoteModality(alias);
-    return;
+    return { created: 0, updated: 0, unchanged: 0, removed: existingAliases.length, warnings: [] };
   }
   const { modalities } = await autoRouteDestinationLoader();
   const destinations = settings.autoRouteDestinationKeys.map((key) => modalities.find((item) => item.key === key));
@@ -213,7 +232,15 @@ export async function synchronizeAuthoritativeOrthancAutoRoute(settings: Authori
   const routes = buildAuthoritativeOrthancRouteAliases(settings.autoRouteDestinationKeys);
   const desiredAliases = routes.map((route) => route.alias);
   for (const [index, destination] of destinations.entries()) await client.upsertRemoteModality(routes[index]!.alias, { aet: destination!.aet, host: destination!.host, port: destination!.port! });
-  for (const alias of existingAliases.filter((item) => !desiredAliases.includes(item))) await client.deleteRemoteModality(alias);
+  const obsoleteAliases = existingAliases.filter((item) => !desiredAliases.includes(item));
+  for (const alias of obsoleteAliases) await client.deleteRemoteModality(alias);
+  return {
+    created: desiredAliases.filter((alias) => !existingAliases.includes(alias)).length,
+    updated: desiredAliases.filter((alias) => existingAliases.includes(alias)).length,
+    unchanged: 0,
+    removed: obsoleteAliases.length,
+    warnings: [],
+  };
 }
 export async function synchronizeAuthoritativeOrthancCdRobots(): Promise<void> {
   const settings = await readAuthoritativeOrthancSettings();

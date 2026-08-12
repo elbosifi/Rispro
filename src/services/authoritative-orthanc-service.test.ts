@@ -121,8 +121,31 @@ test("uses Authoritative Orthanc for C-ECHO and whole-study asynchronous C-STORE
   await client.echoRemoteModality("rispro_cd_robot_1");
   assert.equal(await client.enqueueStudyStore("rispro_cd_robot_1", "study-1"), "job-cd-1");
   assert.deepEqual(calls, [
-    { path: "/modalities/rispro_cd_robot_1/echo", method: "POST", body: null },
+    { path: "/modalities/rispro_cd_robot_1/echo", method: "POST", body: { Timeout: 1 } },
     { path: "/modalities/rispro_cd_robot_1/store", method: "POST", body: { Resources: ["study-1"], Synchronous: false } },
+  ]);
+});
+
+test("parses global resource statistics and rejects an unusable statistics response", async () => {
+  service.__setAuthoritativeOrthancFetchForTests(async () => json({ CountStudies: 12, CountSeries: "34", CountInstances: 56, TotalDiskSize: "1024", TotalDiskSizeMB: 1, TotalUncompressedSize: "2048", TotalUncompressedSizeMB: 2 }));
+  assert.deepEqual(await new service.AuthoritativeOrthancClient(enabled).getStatistics(), { studies: 12, series: 34, instances: 56, diskSizeBytes: 1024, diskSizeMb: 1, uncompressedSizeBytes: 2048, uncompressedSizeMb: 2 });
+  service.__setAuthoritativeOrthancFetchForTests(async () => json({ unexpected: true }));
+  await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).getStatistics(), /invalid statistics response/i);
+});
+
+test("lists expanded jobs and resubmits only through the purpose-specific client method", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const parsed = new URL(String(url));
+    calls.push({ path: `${parsed.pathname}${parsed.search}`, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+    return parsed.pathname === "/jobs" ? json({ "job-1": { ID: "job-1", Type: "DicomModalityStore", State: "Failure" } }) : new Response(null, { status: 200 });
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  assert.deepEqual(await client.listJobs(), { "job-1": { ID: "job-1", Type: "DicomModalityStore", State: "Failure" } });
+  await client.resubmitJob("job-1");
+  assert.deepEqual(calls, [
+    { path: "/jobs?expand", method: "GET", body: null },
+    { path: "/jobs/job-1/resubmit", method: "POST", body: {} },
   ]);
 });
 

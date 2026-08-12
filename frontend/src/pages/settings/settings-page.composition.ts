@@ -105,7 +105,8 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
 export const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
 
 export function initialSettingsSection(search: string): SettingsSection {
-  return new URLSearchParams(search).get("section") === "qz_tray" ? "qz_tray" : "menu";
+  const requested = new URLSearchParams(search).get("section");
+  return requested && SETTINGS_MENU_SECTIONS.includes(requested as SettingsMenuSection) ? requested as SettingsMenuSection : "menu";
 }
 
 export function isSettingsMenuSectionVisible(section: SettingsMenuSection, role?: string): boolean {

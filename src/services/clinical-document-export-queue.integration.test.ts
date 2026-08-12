@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { pool } from "../db/pool.js";
 import { enqueueClinicalDocumentExportsForAppointment, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
-import { claimNextClinicalDocumentExport, retryClinicalDocumentExport } from "./clinical-document-export-service.js";
+import { claimNextClinicalDocumentExport, getClinicalDocumentExportOperationsSummary, retryClinicalDocumentExport } from "./clinical-document-export-service.js";
 
 test.after(async () => { await pool.end().catch(() => undefined); });
 
@@ -129,9 +129,12 @@ test("clinical document export queue is idempotent, excludes Reception documents
     userId = user.rows[0]!.id;
     const stableUids = { study: `2.25.${Date.now()}${suffix}`, series: `2.25.${Date.now()}${suffix}1`, sop: `2.25.${Date.now()}${suffix}2` };
     await client.query(
-      "update clinical_document_exports set status='blocked', attempt_count=4, next_retry_at=now()+interval '1 hour', last_error='Patient identity conflict', export_lease_owner='stale-worker', export_lease_expires_at=now()+interval '1 minute', study_instance_uid=$2, series_instance_uid=$3, sop_instance_uid=$4 where id=$1",
+      "update clinical_document_exports set status='blocked', attempt_count=4, next_retry_at=now()+interval '1 hour', last_error='Patient identity conflict', export_lease_owner='stale-worker', export_lease_expires_at=now()+interval '1 minute', study_instance_uid=$2, series_instance_uid=$3, sop_instance_uid=$4, updated_at=now() where id=$1",
       [directExportId, stableUids.study, stableUids.series, stableUids.sop],
     );
+    const operationsSummary = await getClinicalDocumentExportOperationsSummary();
+    assert.ok(operationsSummary.failed >= 1);
+    assert.ok(operationsSummary.latestFailures.some((item) => item.id === Number(directExportId) && item.status === "blocked" && item.retryPermitted));
     const blockedRetry = await retryClinicalDocumentExport(directExportId, userId!);
     assert.equal(blockedRetry.status, "pending");
     assert.equal(blockedRetry.attempt_count, 0);

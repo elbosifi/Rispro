@@ -457,6 +457,57 @@ export async function listClinicalDocumentExportsForAppointment(appointmentId: n
   return rows;
 }
 
+export type ClinicalDocumentExportOperationsSummary = {
+  pending: number;
+  processing: number;
+  retryable: number;
+  failed: number;
+  completed: number;
+  oldestPendingOrRetryableAt: string | null;
+  latestFailures: Array<{ id: number; appointmentId: number; status: "failed" | "blocked"; lastAttemptAt: string | null; updatedAt: string; error: string; retryPermitted: true }>;
+};
+
+export async function getClinicalDocumentExportOperationsSummary(): Promise<ClinicalDocumentExportOperationsSummary> {
+  const [countsResult, failuresResult] = await Promise.all([
+    pool.query<{ pending: number; processing: number; retryable: number; failed: number; completed: number; oldest_pending_or_retryable_at: string | null }>(`
+      select
+        count(*) filter (where status='pending')::int pending,
+        count(*) filter (where status='exporting')::int processing,
+        count(*) filter (where status='failed')::int retryable,
+        count(*) filter (where status='blocked')::int failed,
+        count(*) filter (where status='exported')::int completed,
+        min(created_at) filter (where status in ('pending','failed')) oldest_pending_or_retryable_at
+      from clinical_document_exports
+      where destination_key=$1
+    `, [CLINICAL_DOCUMENT_EXPORT_DESTINATION]),
+    pool.query<Pick<ClinicalDocumentExportRow, "id" | "appointment_id" | "status" | "last_attempt_at" | "updated_at" | "last_error">>(`
+      select id, appointment_id, status, last_attempt_at, updated_at, last_error
+      from clinical_document_exports
+      where destination_key=$1 and status in ('failed','blocked')
+      order by updated_at desc, id desc
+      limit 10
+    `, [CLINICAL_DOCUMENT_EXPORT_DESTINATION]),
+  ]);
+  const counts = countsResult.rows[0] ?? { pending: 0, processing: 0, retryable: 0, failed: 0, completed: 0, oldest_pending_or_retryable_at: null };
+  return {
+    pending: Number(counts.pending) || 0,
+    processing: Number(counts.processing) || 0,
+    retryable: Number(counts.retryable) || 0,
+    failed: Number(counts.failed) || 0,
+    completed: Number(counts.completed) || 0,
+    oldestPendingOrRetryableAt: counts.oldest_pending_or_retryable_at,
+    latestFailures: failuresResult.rows.map((row) => ({
+      id: Number(row.id),
+      appointmentId: Number(row.appointment_id),
+      status: row.status === "blocked" ? "blocked" : "failed",
+      lastAttemptAt: row.last_attempt_at,
+      updatedAt: row.updated_at,
+      error: sanitizeClinicalDocumentExportError(row.last_error),
+      retryPermitted: true,
+    })),
+  };
+}
+
 export async function assertClinicalDocumentExportAppointmentAccess(appointmentId: number, role: string, modalityId: number | null): Promise<void> {
   const { rows } = await pool.query<{ modality_id: number | null }>(`select modality_id from appointments_v2.bookings where id=$1 limit 1`, [appointmentId]);
   if (!rows[0]) throw new HttpError(404, "Appointment not found.");
@@ -486,6 +537,7 @@ export async function retryClinicalDocumentExport(exportId: UserId, changedByUse
 
 export async function reconcileClinicalDocumentExportsManually(changedByUserId: OptionalUserId): Promise<{ queued: number }> {
   const queued = await reconcileClinicalDocumentExports(changedByUserId);
+  await logAuditEntry({ entityType: "integration", entityId: null, actionType: "clinical_document_exports_reconciled_manually", oldValues: null, newValues: { outcome: "success", queued }, changedByUserId });
   return { queued };
 }
 

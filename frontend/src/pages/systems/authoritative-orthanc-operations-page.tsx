@@ -1,0 +1,136 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, AlertTriangle, Database, HardDrive, Search, Server } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/providers/auth-provider";
+import { api } from "@/lib/api-client";
+import { Badge, Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Input, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shared";
+
+type SectionError = { code: string; message: string } | null;
+type RouteTestState = "not_tested" | "reachable" | "unreachable" | "timeout" | "missing_route" | "configuration_error";
+type OperationalRoute = {
+  destinationKey: string; destinationName: string; alias: string; aet: string; host: string; port: number | null;
+  selectedForAutoRouting: true; autoRouteActive: boolean; managedAliasExists: boolean | null;
+  configurationState: "configured" | "missing_managed_route" | "invalid_pacs_configuration" | "not_checked";
+  configurationError: string | null;
+  dicomTest: { state: RouteTestState; connected: boolean | null; testedAt: string | null; code: string | null; message: string | null };
+};
+type OperationalJob = { id: string; type: string; state: "Pending" | "Running" | "Success" | "Failure" | "Paused" | "Retry"; progress: number | null; creationTime: string | null; startTime: string | null; completionTime: string | null; updatedAt: string | null; description: string; error: string | null; retryPermitted: boolean };
+type ClinicalFailure = { id: number; appointmentId: number; status: "failed" | "blocked"; lastAttemptAt: string | null; updatedAt: string; error: string; retryPermitted: true };
+type OperationsSummary = {
+  overallState: "healthy" | "degraded" | "offline" | "disabled";
+  connectionState: "connected" | "degraded" | "unavailable" | "disabled";
+  healthSentence: string;
+  reasons: Array<{ code: string; message: string }>;
+  system: { name: string | null; version: string | null; apiVersion: string | null; uptimeSeconds: number | null } | null;
+  statistics: { data: { studies: number | null; series: number | null; instances: number | null; diskSizeBytes: number | null; diskSizeMb: number | null; uncompressedSizeBytes: number | null; uncompressedSizeMb: number | null } | null; error: SectionError };
+  routing: { autoRouteEnabled: boolean; selected: number; configured: number; missing: number; invalid: number; routes: OperationalRoute[]; error: SectionError };
+  jobs: { items: OperationalJob[]; summary: { total: number; running: number; pending: number; failed: number; successful: number; paused: number; recentRelevantFailed: number; recentFailureWindowHours: number }; error: SectionError };
+  clinicalDocuments: { data: { pending: number; processing: number; retryable: number; failed: number; completed: number; oldestPendingOrRetryableAt: string | null; latestFailures: ClinicalFailure[] }; error: SectionError };
+  generatedAt: string;
+};
+type StudyResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; reason?: string; study: { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number } | null };
+type Confirmation = { title: string; description: string; run: () => void } | null;
+
+const statePresentation = {
+  healthy: { label: "Healthy", variant: "success" as const, className: "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30" },
+  degraded: { label: "Degraded", variant: "warning" as const, className: "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30" },
+  offline: { label: "Offline", variant: "error" as const, className: "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30" },
+  disabled: { label: "Disabled", variant: "neutral" as const, className: "border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/40" },
+};
+
+function formatDate(value: string | null): string { if (!value) return "—"; const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(); }
+function formatDicomDate(value: string | null): string { if (!value) return "—"; return /^\d{8}$/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : value; }
+function formatStorage(bytes: number | null, mb: number | null): string { const value = bytes ?? (mb == null ? null : mb * 1024 * 1024); if (value == null) return "Unavailable"; const units = ["B", "KB", "MB", "GB", "TB"]; let scaled = value; let index = 0; while (scaled >= 1024 && index < units.length - 1) { scaled /= 1024; index += 1; } return `${scaled >= 10 || index === 0 ? scaled.toFixed(0) : scaled.toFixed(1)} ${units[index]}`; }
+function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) { return <Card variant="compact" className="flex min-w-0 items-center gap-3"><span className="rounded-lg bg-accent/10 p-2 text-accent">{icon}</span><span className="min-w-0"><span className="block text-xs font-medium text-muted-foreground">{label}</span><strong className="block truncate text-xl text-foreground">{value}</strong></span></Card>; }
+function SectionHeading({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="text-sm text-muted-foreground">{description}</p></div>{action}</div>; }
+function RouteTestBadge({ state }: { state: RouteTestState }) { const display = { not_tested: ["Not tested", "neutral"], reachable: ["Reachable", "success"], unreachable: ["Unreachable", "error"], timeout: ["Timeout", "error"], missing_route: ["Missing route", "warning"], configuration_error: ["Configuration error", "warning"] } as const; return <Badge variant={display[state][1]}>{display[state][0]}</Badge>; }
+
+export default function AuthoritativeOrthancOperationsPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(null);
+  const [jobFilter, setJobFilter] = useState<"all" | "active" | "failed" | "successful">("all");
+  const [lookupType, setLookupType] = useState<"accessionNumber" | "studyInstanceUid">("accessionNumber");
+  const [lookupValue, setLookupValue] = useState("");
+  const [studyResult, setStudyResult] = useState<StudyResult | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation>(null);
+  const canOperate = user?.role === "supervisor" || user?.role === "super_admin";
+  const isSuperAdmin = user?.role === "super_admin";
+  const summary = useQuery({ queryKey: ["authoritative-orthanc", "operations", "summary"], queryFn: () => api<OperationsSummary>("/integrations/authoritative-orthanc/operations/summary"), refetchInterval: 30_000, retry: false });
+  const refresh = async () => { await summary.refetch(); setNotice("Operations status refreshed."); };
+  const mutation = useMutation({
+    mutationFn: async ({ path, method = "POST" }: { path: string; method?: string }) => api<unknown>(path, { method }),
+    onSuccess: async () => { setConfirmation(null); setNotice("Action completed."); await queryClient.invalidateQueries({ queryKey: ["authoritative-orthanc", "operations"] }); },
+    onError: (error: Error) => { setConfirmation(null); setNotice(error.message); },
+  });
+  const lookup = useMutation({
+    mutationFn: () => api<StudyResult>(`/integrations/authoritative-orthanc/operations/studies/search?${new URLSearchParams({ [lookupType]: lookupValue.trim() })}`),
+    onSuccess: (result) => { setStudyResult(result); setNotice(null); },
+    onError: (error: Error) => { setStudyResult(null); setNotice(error.message); },
+  });
+  const filteredJobs = useMemo(() => (summary.data?.jobs.items || []).filter((job) => {
+    if (jobFilter === "all") return true;
+    if (jobFilter === "active") return ["Pending", "Running", "Paused", "Retry"].includes(job.state);
+    if (jobFilter === "failed") return job.state === "Failure";
+    return job.state === "Success";
+  }), [jobFilter, summary.data?.jobs.items]);
+  const data = summary.data;
+  const presentation = statePresentation[data?.overallState || "offline"];
+  const orthancActionsDisabled = !data || data.overallState === "offline" || data.overallState === "disabled" || mutation.isPending;
+  const runConfirmed = (title: string, description: string, path: string) => setConfirmation({ title, description, run: () => mutation.mutate({ path }) });
+
+  return <div className="mx-auto max-w-[1500px] space-y-5" data-testid="authoritative-orthanc-operations-page">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><h1 className="text-2xl font-semibold text-foreground">Authoritative Orthanc</h1><p className="text-sm text-muted-foreground">Monitor the primary Orthanc archive, DICOM routing, transfer jobs, and RISpro clinical-document integration.</p></div>
+      <div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void refresh()} disabled={summary.isFetching}>Refresh</Button>{canOperate ? <Button variant="secondary" disabled={orthancActionsDisabled} onClick={() => mutation.mutate({ path: "/integrations/authoritative-orthanc/operations/routes/test-all" })}>Test all destinations</Button> : null}{isSuperAdmin ? <Button disabled={orthancActionsDisabled} onClick={() => runConfirmed("Synchronize managed routes?", "RISpro will create or update expected rispro_route_* aliases and remove only obsolete RISpro-managed aliases. Unrelated Orthanc modalities are preserved.", "/integrations/authoritative-orthanc/operations/routes/synchronize")}>Synchronize routes</Button> : null}</div>
+    </div>
+
+    {notice ? <p role="status" className="rounded-lg border bg-card px-3 py-2 text-sm text-foreground">{notice}</p> : null}
+    {summary.isLoading ? <LoadingState message="Loading Authoritative Orthanc operations…" /> : summary.error ? <Card className="p-5"><ErrorState message={(summary.error as Error).message} onRetry={() => void summary.refetch()} /></Card> : data ? <>
+      <Card className={`border p-5 ${presentation.className}`}>
+        <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><span className="rounded-xl bg-background/80 p-3 text-accent"><Server size={24} /></span><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">Authoritative Orthanc</h2><Badge variant={presentation.variant}>{presentation.label}</Badge></div><p className="mt-1 text-sm font-medium">{data.system?.name || "Orthanc system unavailable"}{data.system?.version ? ` · Orthanc ${data.system.version}` : ""}{data.system?.apiVersion ? ` · API ${data.system.apiVersion}` : ""}</p><p className="mt-2 max-w-4xl text-sm">{data.healthSentence}</p></div></div><div className="text-end text-xs text-muted-foreground">Last refresh<br/><span className="font-medium text-foreground">{formatDate(data.generatedAt)}</span></div></div>
+        {data.reasons.length ? <ul className="mt-4 grid gap-2 md:grid-cols-2">{data.reasons.map((reason) => <li key={reason.code} className="flex gap-2 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0"/><span>{reason.message}</span></li>)}</ul> : null}
+      </Card>
+
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7" aria-label="Orthanc operational metrics">
+        <MetricCard label="Studies" value={data.statistics.data?.studies ?? "Unavailable"} icon={<Database size={18}/>} />
+        <MetricCard label="Series" value={data.statistics.data?.series ?? "Unavailable"} icon={<Database size={18}/>} />
+        <MetricCard label="Instances" value={data.statistics.data?.instances ?? "Unavailable"} icon={<Database size={18}/>} />
+        <MetricCard label="Storage used" value={formatStorage(data.statistics.data?.diskSizeBytes ?? null, data.statistics.data?.diskSizeMb ?? null)} icon={<HardDrive size={18}/>} />
+        <MetricCard label="Running jobs" value={data.jobs.summary.running} icon={<Activity size={18}/>} />
+        <MetricCard label="Pending jobs" value={data.jobs.summary.pending} icon={<Activity size={18}/>} />
+        <MetricCard label="Failed jobs" value={data.jobs.summary.failed} icon={<AlertTriangle size={18}/>} />
+      </section>
+
+      <Card className="space-y-4 p-5">
+        <SectionHeading title="Routing destinations" description="Selected PACS destinations and their expected RISpro-managed Authoritative Orthanc aliases." action={canOperate ? <Button variant="secondary" size="sm" disabled={orthancActionsDisabled} onClick={() => mutation.mutate({ path: "/integrations/authoritative-orthanc/operations/routes/test-all" })}>Test all</Button> : undefined}/>
+        {data.routing.autoRouteEnabled && data.routing.selected === 0 ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">Auto-routing is enabled but no destinations are selected. Configure destinations in Settings.</div> : null}
+        {data.routing.error ? <ErrorState message={data.routing.error.message} onRetry={() => void summary.refetch()} /> : data.routing.routes.length === 0 ? <EmptyState message="No auto-routing destinations are selected." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Destination</TableHead><TableHead>Orthanc alias</TableHead><TableHead>AET</TableHead><TableHead>Host:Port</TableHead><TableHead>Configuration</TableHead><TableHead>Last DICOM test</TableHead><TableHead>Auto-route</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader><TableBody>{data.routing.routes.map((route) => <TableRow key={route.alias}><TableCell className="font-medium">{route.destinationName}</TableCell><TableCell><code>{route.alias}</code></TableCell><TableCell>{route.aet || "—"}</TableCell><TableCell>{route.host ? `${route.host}:${route.port ?? "—"}` : "—"}</TableCell><TableCell>{route.configurationState === "configured" ? <Badge variant="success">Configured</Badge> : route.configurationState === "missing_managed_route" ? <Badge variant="warning">Missing managed route</Badge> : route.configurationState === "invalid_pacs_configuration" ? <Badge variant="error">Invalid PACS configuration</Badge> : <Badge variant="neutral">Not checked</Badge>}{route.configurationError ? <p className="mt-1 max-w-64 text-xs text-red-700 dark:text-red-300">{route.configurationError}</p> : null}</TableCell><TableCell><RouteTestBadge state={route.dicomTest.state}/>{route.dicomTest.testedAt ? <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">{formatDate(route.dicomTest.testedAt)}</p> : null}</TableCell><TableCell><Badge variant={route.autoRouteActive ? "success" : "neutral"}>{route.autoRouteActive ? "Active" : "Inactive"}</Badge></TableCell><TableCell>{canOperate ? <Button variant="secondary" size="sm" disabled={orthancActionsDisabled || route.configurationState !== "configured"} onClick={() => mutation.mutate({ path: `/integrations/authoritative-orthanc/operations/routes/${encodeURIComponent(route.alias)}/test` })}>Test</Button> : "—"}</TableCell></TableRow>)}</TableBody></Table></div>}
+      </Card>
+
+      <Card className="space-y-4 p-5">
+        <SectionHeading title="Orthanc jobs" description="Failures appear first, followed by active work and recent successful jobs."/>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Job filters">{(["all", "active", "failed", "successful"] as const).map((filter) => <Button key={filter} size="sm" variant={jobFilter === filter ? "primary" : "secondary"} onClick={() => setJobFilter(filter)}>{filter[0].toUpperCase() + filter.slice(1)}</Button>)}</div>
+        {data.jobs.error ? <ErrorState message={data.jobs.error.message} onRetry={() => void summary.refetch()} /> : filteredJobs.length === 0 ? <EmptyState message="No jobs match this filter." /> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>State</TableHead><TableHead>Type</TableHead><TableHead>Progress</TableHead><TableHead>Created</TableHead><TableHead>Finished / updated</TableHead><TableHead>Description / error</TableHead><TableHead>Action</TableHead></TableRow></TableHeader><TableBody>{filteredJobs.map((job) => <TableRow key={job.id}><TableCell><Badge variant={job.state === "Success" ? "success" : job.state === "Failure" ? "error" : job.state === "Running" ? "info" : "warning"}>{job.state}</Badge></TableCell><TableCell className="font-medium">{job.type}</TableCell><TableCell>{job.progress == null ? "—" : `${job.progress}%`}</TableCell><TableCell className="whitespace-nowrap">{formatDate(job.creationTime)}</TableCell><TableCell className="whitespace-nowrap">{formatDate(job.completionTime || job.updatedAt)}</TableCell><TableCell><p>{job.description}</p>{job.error ? <p className="mt-1 max-w-xl text-xs text-red-700 dark:text-red-300">{job.error}</p> : null}</TableCell><TableCell>{canOperate && job.retryPermitted ? <Button size="sm" variant="secondary" disabled={orthancActionsDisabled} onClick={() => runConfirmed("Retry failed Orthanc job?", `Retry ${job.type} job ${job.id}. Orthanc will resubmit this failed job.`, `/integrations/authoritative-orthanc/operations/jobs/${encodeURIComponent(job.id)}/retry`)}>Retry</Button> : "—"}</TableCell></TableRow>)}</TableBody></Table></div>}
+      </Card>
+
+      <Card className="space-y-4 p-5">
+        <SectionHeading title="Study lookup" description="Search Authoritative Orthanc using one exact clinical identifier. This tool is read-only."/>
+        <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); if (lookupValue.trim()) lookup.mutate(); }}><label className="sm:w-64"><span className="mb-1 block text-sm font-medium">Search type</span><select className="input w-full" aria-label="Study search type" value={lookupType} onChange={(event) => { setLookupType(event.target.value as typeof lookupType); setStudyResult(null); }}><option value="accessionNumber">Accession Number</option><option value="studyInstanceUid">StudyInstanceUID</option></select></label><label className="min-w-0 flex-1"><span className="mb-1 block text-sm font-medium">{lookupType === "accessionNumber" ? "Accession Number" : "StudyInstanceUID"}</span><Input aria-label="Study lookup value" value={lookupValue} onChange={(event) => setLookupValue(event.target.value)} placeholder={lookupType === "accessionNumber" ? "Enter exact accession number" : "Enter exact StudyInstanceUID"}/></label><Button type="submit" disabled={!lookupValue.trim() || lookup.isPending || data.overallState === "offline" || data.overallState === "disabled"}><Search size={16}/> Search</Button></form>
+        {lookup.isPending ? <LoadingState message="Searching Authoritative Orthanc…" /> : studyResult?.status === "not_found" ? <EmptyState message="No study matched that identifier." /> : studyResult?.status === "ambiguous" ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">Multiple or conflicting studies matched this identifier. Refine the identifier or verify it directly with an administrator.</div> : studyResult?.study ? <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-muted-foreground">Patient</span><p className="font-medium">{studyResult.study.patientName || "—"}</p></div><div><span className="text-xs text-muted-foreground">Patient ID</span><p className="font-medium">{studyResult.study.patientId || "—"}</p></div><div><span className="text-xs text-muted-foreground">DOB / sex</span><p className="font-medium">{formatDicomDate(studyResult.study.patientBirthDate)} / {studyResult.study.patientSex || "—"}</p></div><div><span className="text-xs text-muted-foreground">Accession</span><p className="font-medium">{studyResult.study.accessionNumber || "—"}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">StudyInstanceUID</span><p className="break-all font-mono text-sm">{studyResult.study.studyInstanceUid || "—"}</p></div><div><span className="text-xs text-muted-foreground">Study date</span><p className="font-medium">{formatDicomDate(studyResult.study.studyDate)}</p></div><div><span className="text-xs text-muted-foreground">Modalities</span><p className="font-medium">{studyResult.study.modalitiesInStudy.join(", ") || "—"}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">Description</span><p className="font-medium">{studyResult.study.studyDescription || "—"}</p></div><div><span className="text-xs text-muted-foreground">Series</span><p className="font-medium">{studyResult.study.seriesCount}</p></div><div><span className="text-xs text-muted-foreground">Instances</span><p className="font-medium">{studyResult.study.instanceCount}</p></div></div> : null}
+      </Card>
+
+      <Card className="space-y-4 p-5">
+        <SectionHeading title="Clinical-document export health" description="Existing RISpro clinical-document export queue health and recovery controls." action={isSuperAdmin ? <Button size="sm" variant="secondary" disabled={mutation.isPending} onClick={() => runConfirmed("Reconcile clinical-document exports?", "RISpro will use the existing reconciliation service to queue eligible missing exports. No separate queue is created.", "/integrations/authoritative-orthanc/document-exports/reconcile")}>Reconcile exports</Button> : undefined}/>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><MetricCard label="Pending" value={data.clinicalDocuments.data.pending} icon={<Activity size={18}/>}/><MetricCard label="Processing" value={data.clinicalDocuments.data.processing} icon={<Activity size={18}/>}/><MetricCard label="Retryable" value={data.clinicalDocuments.data.retryable} icon={<AlertTriangle size={18}/>}/><MetricCard label="Failed / blocked" value={data.clinicalDocuments.data.failed} icon={<AlertTriangle size={18}/>}/><MetricCard label="Completed" value={data.clinicalDocuments.data.completed} icon={<Database size={18}/>}/></div>
+        {data.clinicalDocuments.error ? <ErrorState message={data.clinicalDocuments.error.message} onRetry={() => void summary.refetch()} /> : data.clinicalDocuments.data.latestFailures.length === 0 ? <p className="text-sm text-muted-foreground">No failed or blocked clinical-document exports.</p> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Export</TableHead><TableHead>Appointment</TableHead><TableHead>Status</TableHead><TableHead>Last attempt</TableHead><TableHead>Error</TableHead><TableHead>Action</TableHead></TableRow></TableHeader><TableBody>{data.clinicalDocuments.data.latestFailures.map((item) => <TableRow key={item.id}><TableCell>#{item.id}</TableCell><TableCell>#{item.appointmentId}</TableCell><TableCell><Badge variant="error">{item.status}</Badge></TableCell><TableCell>{formatDate(item.lastAttemptAt || item.updatedAt)}</TableCell><TableCell className="max-w-xl">{item.error}</TableCell><TableCell>{canOperate ? <Button size="sm" variant="secondary" disabled={mutation.isPending} onClick={() => runConfirmed("Retry clinical-document export?", `Retry export ${item.id} for appointment ${item.appointmentId} using the existing export queue.`, `/integrations/authoritative-orthanc/document-exports/${item.id}/retry`)}>Retry</Button> : "—"}</TableCell></TableRow>)}</TableBody></Table></div>}
+      </Card>
+
+      {isSuperAdmin ? <div className="flex justify-end"><Button variant="ghost" onClick={() => navigate("/settings?section=authoritative_orthanc")}>Open Authoritative Orthanc Settings</Button></div> : null}
+    </> : null}
+
+    <Dialog open={Boolean(confirmation)} onClose={() => { if (!mutation.isPending) setConfirmation(null); }}><DialogContent maxWidth="520px"><DialogHeader><DialogTitle>{confirmation?.title}</DialogTitle><DialogDescription>{confirmation?.description}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" disabled={mutation.isPending} onClick={() => setConfirmation(null)}>Cancel</Button><Button disabled={mutation.isPending} onClick={() => confirmation?.run()}>{mutation.isPending ? "Working…" : "Confirm"}</Button></DialogFooter></DialogContent></Dialog>
+  </div>;
+}

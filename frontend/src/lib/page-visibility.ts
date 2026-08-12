@@ -82,6 +82,7 @@ const DEFAULT_LANDING_PRIORITY: readonly PageVisibilityRouteKey[] = [
   "print",
   "pacs",
   "pacs.remap",
+  "authoritative.orthanc",
   "worklist.monitor",
   "legacy",
   "v2.appointments.admin",

@@ -11,6 +11,12 @@ const modalities = [{ key: "PACS_A", aet: "PACS_AE", host: "10.0.0.10", port: 10
 function renderSection(onReAuthRequired = vi.fn()) { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AuthoritativeOrthancSection onReAuthRequired={onReAuthRequired} /></QueryClientProvider>); }
 
 describe("AuthoritativeOrthancSection", () => {
+  it("links configuration to the dedicated Operations page", async () => {
+    renderSection();
+    const link = await screen.findByRole("link", { name: "Open Authoritative Orthanc Operations" });
+    expect(link.getAttribute("href")).toBe("/systems/authoritative-orthanc");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {

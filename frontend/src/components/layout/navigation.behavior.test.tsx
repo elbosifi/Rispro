@@ -66,6 +66,26 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 describe("Navigation governance", () => {
+  it("places Authoritative Orthanc between PACS and MWL monitor for authorized users", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(<SideNav currentRoute="authoritative.orthanc" user={{ id: 5, username: "sa", fullName: "Super Admin", role: "super_admin" }} language="en" isRtl={false} onNavigate={() => {}} />);
+    const systems = screen.getByRole("button", { name: /Systems/ });
+    if (systems.getAttribute("aria-expanded") === "false") await userEvent.click(systems);
+    const labels = screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"));
+    const pacs = labels.indexOf("PACS");
+    const orthanc = labels.indexOf("Authoritative Orthanc");
+    const worklist = labels.indexOf("MWL monitor");
+    expect(orthanc).toBeGreaterThan(-1);
+    expect(pacs).toBeLessThan(orthanc);
+    expect(orthanc).toBeLessThan(worklist);
+  });
+
+  it("does not expose Authoritative Orthanc navigation to unrelated roles", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(<SideNav currentRoute="dashboard" user={{ id: 2, username: "rec", fullName: "Reception", role: "receptionist" }} language="en" isRtl={false} onNavigate={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Authoritative Orthanc" })).toBeNull();
+  });
+
   it("does not include V3 create route in NAV_ITEMS", () => {
     expect(NAV_ITEMS.map((item) => item.route)).not.toContain("v3.appointments.create");
   });

@@ -41,6 +41,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   statistics: "Statistics",
   pacs: "PACS",
   "pacs.remap": "PACS remap",
+  "authoritative.orthanc": "Authoritative Orthanc",
   "worklist.monitor": "MWL Monitor",
   legacy: "Legacy",
   settings: "Settings",

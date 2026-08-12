@@ -23,6 +23,7 @@ export type AppRouteKey =
   | "search"
   | "pacs"
   | "pacs.remap"
+  | "authoritative.orthanc"
   | "worklist.monitor"
   | "legacy"
   | "settings";
@@ -49,6 +50,7 @@ export type AppNavIcon =
   | "statistics"
   | "pacs"
   | "pacsRemap"
+  | "authoritativeOrthanc"
   | "worklistMonitor"
   | "settings"
   | "legacy";
@@ -263,6 +265,15 @@ const ROUTE_REGISTRY: readonly AppRouteRegistryEntry[] = [
     defaultRoles: ["supervisor", "doctor", "super_admin"],
     navLabelKey: "nav.pacsRemap",
     navIcon: "pacsRemap",
+  },
+  {
+    key: "authoritative.orthanc",
+    path: "/systems/authoritative-orthanc",
+    titleKey: "routeTitle.authoritativeOrthanc",
+    accessKey: "authoritative.orthanc",
+    defaultRoles: ["modality_staff", "supervisor", "super_admin"],
+    navLabelKey: "nav.authoritativeOrthanc",
+    navIcon: "authoritativeOrthanc",
   },
   {
     key: "worklist.monitor",

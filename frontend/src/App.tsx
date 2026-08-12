@@ -40,6 +40,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import PacsRemapPage from "@/pages/pacs/pacs-remap-page";
 import WorklistMonitorPage from "@/pages/worklist-monitor/worklist-monitor-page";
+import AuthoritativeOrthancOperationsPage from "@/pages/systems/authoritative-orthanc-operations-page";
 import RequestScansPage from "@/pages/request-scans/request-scans-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
@@ -324,6 +325,7 @@ function AppContent() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/pacs" element={guardedPage("pacs", <PacsPage />)} />
             <Route path="/pacs/remap" element={guardedPage("pacs.remap", <PacsRemapPage />)} />
+            <Route path="/systems/authoritative-orthanc" element={guardedPage("authoritative.orthanc", <AuthoritativeOrthancOperationsPage />)} />
             <Route path="/worklist-monitor" element={guardedPage("worklist.monitor", <WorklistMonitorPage />)} />
             <Route path="/settings" element={guardedPage("settings", <SettingsPage />)} />
             <Route path="/workstation/printing" element={canAccessWorkstationPrinting(user.role) ? <WorkstationPrintingPage /> : <Navigate to="/" replace />} />

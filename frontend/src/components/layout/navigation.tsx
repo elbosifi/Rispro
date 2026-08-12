@@ -97,6 +97,7 @@ const ICON_MAP: Record<AppNavIcon, typeof LayoutGrid> = {
   statistics: BarChart3,
   pacs: Database,
   pacsRemap: Database,
+  authoritativeOrthanc: Database,
   worklistMonitor: ClipboardList,
   settings: Settings,
   legacy: History
@@ -244,7 +245,7 @@ function buildSidebarGroups(): Array<{ key: SidebarGroupKey; labelKey: AppNavIte
     group("clinical", "navGroup.clinicalWorkflow", [["modality"], ["pacs.remap"], ["comparisons"], ["queue.checkin"]], true),
     group("reporting", "navGroup.reporting", [["print"], ["statistics"]], false),
     group("administration", "navGroup.administration", [["scheduling.override.requests"], ["v2.appointments.admin"], ["patients.merge"], ["name.dictionary"], ["settings"]], false),
-    group("systems", "navGroup.systems", [["pacs"], ["worklist.monitor"]], false),
+    group("systems", "navGroup.systems", [["pacs"], ["authoritative.orthanc"], ["worklist.monitor"]], false),
     group("other", "navGroup.legacyFallback", [["legacy"]], false),
   ];
 }
