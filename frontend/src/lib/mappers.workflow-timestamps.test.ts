@@ -74,6 +74,16 @@ describe("workflow timestamp mapping", () => {
     expect(appointment.autoCompletedAt).toBe("2026-06-18T08:28:00Z");
   });
 
+  it("maps modality document summaries with safe defaults", () => {
+    const mapped = mapAppointmentWithDetails({ document_count: 2, latest_document_at: "2026-06-18T08:29:00Z" });
+    const legacy = mapAppointmentWithDetails({});
+
+    expect(mapped.documentCount).toBe(2);
+    expect(mapped.latestDocumentAt).toBe("2026-06-18T08:29:00Z");
+    expect(legacy.documentCount).toBe(0);
+    expect(legacy.latestDocumentAt).toBeNull();
+  });
+
   it("maps MRI safety fields without treating missing workflow data as standard acknowledgement", () => {
     const mriAppointment = mapAppointmentWithDetails({
       id: 1,

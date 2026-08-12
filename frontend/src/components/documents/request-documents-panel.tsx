@@ -55,6 +55,7 @@ interface RequestDocumentsPanelProps {
   enableAnnotations?: boolean;
   onAnnotationDirtyChange?: (dirty: boolean) => void;
   readOnly?: boolean;
+  onDocumentsChanged?: () => void;
 }
 
 export function RequestDocumentsPanel({
@@ -71,6 +72,7 @@ export function RequestDocumentsPanel({
   enableAnnotations = false,
   onAnnotationDirtyChange,
   readOnly = false,
+  onDocumentsChanged,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -295,6 +297,7 @@ export function RequestDocumentsPanel({
         setSelectedDocumentId(uploadedDocument.id);
       }
       queryClient.invalidateQueries({ queryKey });
+      onDocumentsChanged?.();
       pushToast({
         type: "success",
         title: t("documents.uploadedTitle"),
@@ -316,6 +319,7 @@ export function RequestDocumentsPanel({
       if (selectedDocumentId === documentId) setSelectedDocumentId(null);
       if (selectedPreview?.id === documentId) setSelectedPreview(null);
       queryClient.invalidateQueries({ queryKey });
+      onDocumentsChanged?.();
       pushToast({
         type: "success",
         title: t("documents.deletedTitle"),
@@ -453,6 +457,7 @@ export function RequestDocumentsPanel({
 
       if (failures.length === 0) {
         queryClient.invalidateQueries({ queryKey });
+        onDocumentsChanged?.();
         pushToast({
           type: "success",
           title: t("documents.scanUploadedTitle"),
@@ -505,6 +510,7 @@ export function RequestDocumentsPanel({
       setFailedScanUploads(remainingFailures);
       if (retriedSuccessCount > 0) {
         queryClient.invalidateQueries({ queryKey });
+        onDocumentsChanged?.();
         pushToast({
           type: "success",
           title: t("documents.retryUploadedTitle"),
@@ -893,8 +899,9 @@ export function RequestDocumentsPanel({
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-stone-900 dark:text-white">{doc.originalFilename}</div>
                   <div className="text-xs text-stone-500">
-                    {doc.documentType} - {doc.mimeType || "file"} - {doc.storageLocationType}
+                    {[doc.pageCount ? t("documents.pagesCount").replace("{count}", String(doc.pageCount)) : null, doc.documentType, doc.source].filter(Boolean).join(" · ")}
                   </div>
+                  {doc.createdAt ? <div className="text-xs text-stone-500">{new Date(doc.createdAt).toLocaleString()}</div> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   {previewMode === "modal" ? (

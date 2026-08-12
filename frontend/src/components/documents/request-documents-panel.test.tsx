@@ -99,7 +99,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean; readOnly?: boolean } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -126,6 +126,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           supplementaryPanel={options.supplementaryPanel}
           enableAnnotations={options.enableAnnotations}
           readOnly={options.readOnly}
+          onDocumentsChanged={options.onDocumentsChanged}
         />
       </LanguageProvider>
     </QueryClientProvider>
@@ -434,6 +435,32 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await userEvent.upload(input, new File(["second"], "second.pdf", { type: "application/pdf" }));
     await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
     await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(2));
+  });
+
+  it("reports successful document changes to its parent", async () => {
+    const onDocumentsChanged = vi.fn();
+    renderPanel({ layout: "workspace", onDocumentsChanged });
+    const input = await screen.findByTestId("document-file-input") as HTMLInputElement;
+
+    await userEvent.upload(input, new File(["request"], "request.pdf", { type: "application/pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
+
+    await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalledTimes(1));
+  });
+
+  it("reports successful document deletion to its parent", async () => {
+    const onDocumentsChanged = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockFetchCurrentSession.mockResolvedValue({ id: 1, role: "super_admin", username: "admin", fullName: "Admin" });
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(7, "remove.pdf", "application/pdf")]);
+    mockDeleteAppointmentDocument.mockResolvedValue({ deleted: true, documentId: 7 });
+    renderPanel({ previewMode: "link", onDocumentsChanged });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalledTimes(1));
+    expect(mockDeleteAppointmentDocument).toHaveBeenCalledWith(7);
+    confirmSpy.mockRestore();
   });
 
   it("passes configured direct NAPS2 endpoint from integration status to scanner adapter", async () => {

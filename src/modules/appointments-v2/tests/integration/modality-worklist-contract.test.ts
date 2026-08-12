@@ -34,6 +34,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
 
   after(async () => {
     if (!testData) return;
+    await pool.query("delete from documents where stored_path like $1", [`tests/${TEST_PREFIX}%`]);
     await app.close();
     await testDb.cleanup();
   });
@@ -147,5 +148,65 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     assert.equal(fallbackRow?.patient_primary_identifier_type, "mrn");
     assert.equal(fallbackRow?.patient_primary_identifier_value, "MRN-MODWL-1");
     assert.equal(fallbackRow?.priority_name_en, "Routine");
+  });
+
+  it("returns exact-booking document summaries without double-counting", async () => {
+    guard();
+    const zeroBookingId = await createBooking(testData.patientId);
+    const directBookingId = await createBooking(testData.patientId);
+    const multipleBookingId = await createBooking(testData.patientId);
+    const linkedBookingId = await createBooking(testData.patientId);
+    const dualLinkedBookingId = await createBooking(testData.patientId);
+    const otherAppointmentId = await createBooking(testData.patientId);
+
+    const insertDocument = async (filename: string, bookingId: number | null) => {
+      const result = await pool.query<{ id: string }>(
+        `
+          insert into documents (
+            patient_id, v2_booking_id, document_type, original_filename,
+            stored_path, mime_type, file_size, source
+          )
+          values ($1, $2, 'appointment_request', $3, $4, 'application/pdf', 10, 'manual_upload')
+          returning id::text
+        `,
+        [testData.patientId, bookingId, filename, `tests/${TEST_PREFIX}${filename}`]
+      );
+      return Number(result.rows[0].id);
+    };
+
+    await insertDocument("direct.pdf", directBookingId);
+    await insertDocument("multiple-a.pdf", multipleBookingId);
+    await insertDocument("multiple-b.pdf", multipleBookingId);
+    const linkedDocumentId = await insertDocument("linked.pdf", null);
+    await pool.query(
+      "insert into document_appointment_links(document_id, appointment_id) values($1, $2)",
+      [linkedDocumentId, linkedBookingId]
+    );
+    const dualLinkedDocumentId = await insertDocument("dual-linked.pdf", dualLinkedBookingId);
+    await pool.query(
+      "insert into document_appointment_links(document_id, appointment_id) values($1, $2)",
+      [dualLinkedDocumentId, dualLinkedBookingId]
+    );
+    await insertDocument("same-patient-other-appointment.pdf", otherAppointmentId);
+
+    const response = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(
+      app.baseUrl,
+      `/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`,
+      { cookie: authCookie }
+    );
+
+    assert.equal(response.status, 200);
+    const row = (bookingId: number) => response.data.appointments.find((appointment) => Number(appointment.id) === bookingId);
+    assert.equal(row(zeroBookingId)?.document_count, 0);
+    assert.equal(row(directBookingId)?.document_count, 1);
+    assert.equal(row(multipleBookingId)?.document_count, 2);
+    assert.equal(row(linkedBookingId)?.document_count, 1);
+    assert.equal(row(dualLinkedBookingId)?.document_count, 1);
+    assert.equal(row(otherAppointmentId)?.document_count, 1);
+    assert.equal(Number(row(zeroBookingId)?.patient_id), testData.patientId);
+    assert.equal(row(zeroBookingId)?.accession_number, `V2-${String(zeroBookingId).padStart(6, "0")}`);
+    assert.equal(row(zeroBookingId)?.status, "completed");
+    assert.equal(row(zeroBookingId)?.latest_document_at, null);
+    assert.equal(typeof row(directBookingId)?.latest_document_at, "string");
   });
 });

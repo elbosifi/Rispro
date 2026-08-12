@@ -50,6 +50,7 @@ const PROBLEM_STATUSES = new Set<AppointmentStatus>(["no-show", "cancelled", "di
 const EMPTY_VALUE = "—";
 
 type BoardFilter = "operational" | "ready" | "waiting" | "arrived" | "in-progress" | "not-arrived" | "completed" | "problem" | "all";
+type DocumentFilter = "all" | "missing" | "uploaded";
 type BoardStatusAction = {
   appointment: AppointmentWithDetails;
   status: "arrived" | "waiting" | "discontinued";
@@ -258,6 +259,13 @@ function matchesBoardFilter(appointment: AppointmentWithDetails, filter: BoardFi
     case "all":
       return true;
   }
+}
+
+function matchesDocumentFilter(appointment: AppointmentWithDetails, filter: DocumentFilter): boolean {
+  const documentCount = appointment.documentCount ?? 0;
+  if (filter === "missing") return documentCount === 0;
+  if (filter === "uploaded") return documentCount > 0;
+  return true;
 }
 
 function formatClockValue(language: Language, value: string | null | undefined): string {
@@ -529,6 +537,8 @@ export default function ModalityPage() {
   const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
   const [boardFilter, setBoardFilter] = useState<BoardFilter>("operational");
+  const [documentFilter, setDocumentFilter] = useState<DocumentFilter>("all");
+  const [documentAppointmentId, setDocumentAppointmentId] = useState<number | null>(null);
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [confirmTargetId, setConfirmTargetId] = useState<number | null>(null);
   const [confirmVerified, setConfirmVerified] = useState(false);
@@ -642,8 +652,8 @@ export default function ModalityPage() {
     [appointments]
   );
   const visibleBoardAppointments = useMemo(
-    () => boardAppointments.filter((appointment) => matchesBoardFilter(appointment, boardFilter)),
-    [boardAppointments, boardFilter]
+    () => boardAppointments.filter((appointment) => matchesBoardFilter(appointment, boardFilter) && matchesDocumentFilter(appointment, documentFilter)),
+    [boardAppointments, boardFilter, documentFilter]
   );
   const statusCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -668,6 +678,7 @@ export default function ModalityPage() {
   const canComplete = Boolean(selectedAppointment && ACTIVE_STATUSES.has(selectedAppointment.status));
   const canCloseAsProblem = Boolean(selectedAppointment && ACTIVE_STATUSES.has(selectedAppointment.status));
   const completionTarget = confirmTargetId == null ? null : appointments.find((appointment) => appointment.id === confirmTargetId) ?? null;
+  const documentAppointment = documentAppointmentId == null ? null : appointments.find((appointment) => appointment.id === documentAppointmentId) ?? null;
 
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
@@ -689,6 +700,7 @@ export default function ModalityPage() {
 
   const handleResetView = () => {
     setBoardFilter("operational");
+    setDocumentFilter("all");
     setDate(todayIsoDateLy());
     setScope("day");
     setSelectedAppointmentId(null);
@@ -784,8 +796,11 @@ export default function ModalityPage() {
   const currentModalityLabel = currentModality
     ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
     : "";
-  const activeFilterParts = [boardFilter !== "operational" ? boardFilterLabel(language, boardFilter) : ""].filter(Boolean);
-  const hasActiveFilters = boardFilter !== "operational";
+  const activeFilterParts = [
+    boardFilter !== "operational" ? boardFilterLabel(language, boardFilter) : "",
+    documentFilter !== "all" ? `${t(language, "modality.documents.filterLabel")}: ${t(language, documentFilter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")}` : "",
+  ].filter(Boolean);
+  const hasActiveFilters = boardFilter !== "operational" || documentFilter !== "all";
   const lastRefreshedText = dataUpdatedAt > 0
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     : EMPTY_VALUE;
@@ -951,6 +966,23 @@ export default function ModalityPage() {
                   ))}
                 </div>
               </div>
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-3 py-1.5" role="group" aria-label={t(language, "modality.documents.filterLabel")}>
+                <span className="me-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "modality.documents.filterLabel")}:</span>
+                {(["all", "missing", "uploaded"] as const).map((filter) => (
+                  <Button
+                    key={filter}
+                    type="button"
+                    variant={documentFilter === filter ? "primary" : "secondary"}
+                    size="sm"
+                    className="h-7 px-2 text-[11px] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                    aria-pressed={documentFilter === filter}
+                    aria-label={`${t(language, filter === "all" ? "modality.documents.filterAll" : filter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")} ${t(language, "modality.documents.filterLabel")}`}
+                    onClick={() => setDocumentFilter(filter)}
+                  >
+                    {t(language, filter === "all" ? "modality.documents.filterAll" : filter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")}
+                  </Button>
+                ))}
+              </div>
 
               {hasActiveFilters ? (
                 <div
@@ -962,9 +994,16 @@ export default function ModalityPage() {
                     <span>{activeFilterParts.join(" • ")}</span>
                   </div>
                   <div className={`flex flex-wrap items-center gap-1.5 ${isArabic ? "flex-row-reverse" : ""}`}>
-                    <Button type="button" variant="secondary" size="sm" onClick={handleClearStatusFilter} className="h-7 px-2 text-[11px]">
-                      {chooseLocalized(language, "مسح الحالة", "Clear status")}
-                    </Button>
+                    {boardFilter !== "operational" ? (
+                      <Button type="button" variant="secondary" size="sm" onClick={handleClearStatusFilter} className="h-7 px-2 text-[11px]">
+                        {chooseLocalized(language, "مسح الحالة", "Clear status")}
+                      </Button>
+                    ) : null}
+                    {documentFilter !== "all" ? (
+                      <Button type="button" variant="secondary" size="sm" onClick={() => setDocumentFilter("all")} className="h-7 px-2 text-[11px]">
+                        {t(language, "modality.documents.clearFilter")}
+                      </Button>
+                    ) : null}
                     <Button type="button" variant="secondary" size="sm" onClick={handleResetView} className="h-7 px-2 text-[11px]">
                       {chooseLocalized(language, "إعادة العرض", "Reset view")}
                     </Button>
@@ -991,7 +1030,7 @@ export default function ModalityPage() {
                   </div>
                 ) : (
                   <div data-testid="modality-board-table-wrap" dir={isArabic ? "rtl" : "ltr"} className="overflow-x-auto">
-                    <table data-testid="modality-board" dir={isArabic ? "rtl" : "ltr"} className="min-w-[1280px] table-fixed text-start text-[11px]">
+                    <table data-testid="modality-board" dir={isArabic ? "rtl" : "ltr"} className="min-w-[1380px] table-fixed text-start text-[11px]">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] uppercase tracking-[0.12em] text-muted-foreground shadow-sm">
                         <tr>
                           <th scope="col" className="w-[100px] px-2 py-2 font-semibold">{chooseLocalized(language, "الحالة", "Status")}</th>
@@ -1004,6 +1043,7 @@ export default function ModalityPage() {
                           <th scope="col" className="w-[150px] px-2 py-2 font-semibold">Protocol</th>
                           <th scope="col" className="w-[90px] px-2 py-2 font-semibold">{chooseLocalized(language, "الأولوية", "Priority")}</th>
                           <th scope="col" className="w-[118px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
+                          <th scope="col" className="w-[112px] px-2 py-2 font-semibold">{t(language, "modality.documents.column")}</th>
                           <th scope="col" className="w-[92px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
                           <th scope="col" className="w-[270px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
                         </tr>
@@ -1023,6 +1063,7 @@ export default function ModalityPage() {
                       const waitingWarning = waitingWarningInfo(language, appointment, elapsedNow);
                       const missingWaitingInfo = waitingInfo ? null : missingWaitingDurationInfo(language, appointment);
                       const missingPrimaryIdentifier = !hasPrimaryIdentifier(appointment);
+                      const documentCount = appointment.documentCount ?? 0;
                       const englishName = appointment.englishFullName?.trim();
                       const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
                       return (
@@ -1137,6 +1178,21 @@ export default function ModalityPage() {
                                 <code data-testid="modality-board-accession" dir="ltr" className="font-mono text-[11px] text-foreground">
                                   {appointment.accessionNumber}
                                 </code>
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <button
+                                  type="button"
+                                  data-testid="modality-document-status"
+                                  className={`state-chip inline-flex max-w-full items-center gap-1 whitespace-nowrap text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${documentCount > 0 ? "state-chip--success" : "state-chip--neutral"}`}
+                                  aria-label={t(language, "modality.documents.open", { accession: appointment.accessionNumber })}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setDocumentAppointmentId(appointment.id);
+                                  }}
+                                >
+                                  {documentCount > 0 ? <CheckCircle2 size={12} aria-hidden="true" /> : <span aria-hidden="true">—</span>}
+                                  <span>{documentCount === 0 ? t(language, "modality.documents.none") : documentCount === 1 ? t(language, "modality.documents.one") : t(language, "modality.documents.many", { count: documentCount })}</span>
+                                </button>
                               </td>
                               <td className="px-2 py-1.5">
                                 {appointment.notes?.trim() || appointment.specialReasonNote?.trim() ? (
@@ -1439,6 +1495,26 @@ export default function ModalityPage() {
       ) : null}
 
       {cdError ? <div role="alert" className="fixed bottom-4 right-4 z-50 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{cdError}</div> : null}
+      <Dialog open={Boolean(documentAppointment)} onClose={() => setDocumentAppointmentId(null)}>
+        <DialogContent maxWidth="min(94vw, 760px)" className="!p-5">
+          {documentAppointment ? (
+            <div dir={isArabic ? "rtl" : "ltr"}>
+              <DialogHeader>
+                <DialogTitle>{t(language, "modality.documents.dialogTitle", { accession: documentAppointment.accessionNumber })}</DialogTitle>
+              </DialogHeader>
+              <RequestDocumentsPanel
+                appointmentId={documentAppointment.id}
+                patientId={documentAppointment.patientId}
+                appointmentRefType="v2_booking"
+                previewMode="modal"
+                enableLocalScan
+                title={t(language, "modality.documents.column")}
+                onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] })}
+              />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(cdDialog)} onClose={() => setCdDialog(null)}>
         <DialogContent maxWidth="min(94vw, 600px)" className="!p-5">
           <div dir={isArabic ? "rtl" : "ltr"}>

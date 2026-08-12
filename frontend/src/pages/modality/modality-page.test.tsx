@@ -134,6 +134,7 @@ function appointment(overrides: Partial<AppointmentWithDetails> = {}): Appointme
     createdByUserId: null,
     createdByName: null,
     createdByUsername: null,
+    documentCount: 0,
     ...overrides,
   };
 }
@@ -407,6 +408,71 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: "All" }));
     expect(boardAccessions()).toEqual(["ACC-WAIT", "ACC-DONE"]);
+  });
+
+  it("shows exact document counts with accessible success and neutral states", async () => {
+    await openBoard([
+      appointment({ id: 21, accessionNumber: "ACC-NONE", documentCount: 0 }),
+      appointment({ id: 22, accessionNumber: "ACC-ONE", documentCount: 1 }),
+      appointment({ id: 23, accessionNumber: "ACC-TWO", documentCount: 2 }),
+    ]);
+
+    const noDocuments = within(screen.getByTestId("modality-board-row-21")).getByTestId("modality-document-status");
+    const oneDocument = within(screen.getByTestId("modality-board-row-22")).getByTestId("modality-document-status");
+    const twoDocuments = within(screen.getByTestId("modality-board-row-23")).getByTestId("modality-document-status");
+    expect(noDocuments.textContent).toContain("No docs");
+    expect(noDocuments.className).toContain("state-chip--neutral");
+    expect(oneDocument.textContent).toContain("1 doc");
+    expect(oneDocument.className).toContain("state-chip--success");
+    expect(oneDocument.querySelector("svg")).toBeTruthy();
+    expect(twoDocuments.textContent).toContain("2 docs");
+  });
+
+  it("lazily opens exact-appointment documents without leaving the board", async () => {
+    const user = await openBoard([appointment({ id: 24, accessionNumber: "V2-000024", documentCount: 1 })]);
+    expect(listAppointmentDocumentsMock).not.toHaveBeenCalled();
+    listAppointmentDocumentsMock.mockResolvedValue([{
+      id: 51,
+      patientId: 10,
+      appointmentId: null,
+      v2BookingId: 24,
+      documentType: "appointment_request",
+      originalFilename: "Referral.pdf",
+      storedPath: "documents/referral.pdf",
+      mimeType: "application/pdf",
+      fileSize: 128,
+      storageLocationType: "local_fallback",
+      source: "manual_upload",
+      pageCount: 5,
+      lastMoveAttemptAt: null,
+      lastMoveError: null,
+      createdAt: "2026-06-18T08:29:00.000Z",
+    }]);
+
+    await user.click(screen.getByRole("button", { name: "Open documents for V2-000024" }));
+
+    expect(await screen.findByText("Documents — V2-000024")).toBeTruthy();
+    expect(await screen.findByText("Referral.pdf")).toBeTruthy();
+    expect(screen.getByText(/5 pages/)).toBeTruthy();
+    expect(listAppointmentDocumentsMock).toHaveBeenCalledWith(24, "v2_booking");
+    expect(screen.getByTestId("location").textContent).toContain("/modality");
+    expect(screen.queryByTestId("selected-appointment-drawer")).toBeNull();
+  });
+
+  it("combines Missing and Uploaded document filters with board status filters", async () => {
+    const user = await openBoard([
+      appointment({ id: 31, accessionNumber: "ACC-WAIT-MISSING", status: "waiting", documentCount: 0 }),
+      appointment({ id: 32, accessionNumber: "ACC-WAIT-UPLOADED", status: "waiting", documentCount: 2 }),
+      appointment({ id: 33, accessionNumber: "ACC-DONE-UPLOADED", status: "completed", documentCount: 1 }),
+    ]);
+
+    expect(within(screen.getByTestId("modality-board-row-31")).getByRole("button", { name: "Mark arrived" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Missing Documents" }));
+    expect(boardAccessions()).toEqual(["ACC-WAIT-MISSING"]);
+    await user.click(screen.getByRole("button", { name: "Uploaded Documents" }));
+    expect(boardAccessions()).toEqual(["ACC-WAIT-UPLOADED"]);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    expect(boardAccessions()).toEqual(["ACC-DONE-UPLOADED"]);
   });
 
   it("status filter chips show and hide operational groups", async () => {
