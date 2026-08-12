@@ -25,9 +25,11 @@ describe("settings page composition", () => {
     expect(SETTINGS_MENU_SECTIONS.map((section) => [section, SECTION_GROUPS[section]])).toMatchSnapshot();
   });
 
-  it("preserves the qz-tray-only query-string deep link", () => {
+  it("preserves valid settings query-string deep links", () => {
     expect(initialSettingsSection("?section=qz_tray")).toBe("qz_tray");
-    expect(initialSettingsSection("?section=users")).toBe("menu");
+    expect(initialSettingsSection("?section=users")).toBe("users");
+    expect(initialSettingsSection("?section=backup_restore")).toBe("backup_restore");
+    expect(initialSettingsSection("?section=not_real")).toBe("menu");
     expect(initialSettingsSection("")).toBe("menu");
   });
 
