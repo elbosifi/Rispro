@@ -57,6 +57,7 @@ interface RequestDocumentsPanelProps {
   onAnnotationDirtyChange?: (dirty: boolean) => void;
   readOnly?: boolean;
   onDocumentsChanged?: () => void;
+  newDocumentType?: "appointment_request" | "clinical_document";
 }
 
 export function RequestDocumentsPanel({
@@ -74,6 +75,7 @@ export function RequestDocumentsPanel({
   onAnnotationDirtyChange,
   readOnly = false,
   onDocumentsChanged,
+  newDocumentType = "appointment_request",
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -92,7 +94,6 @@ export function RequestDocumentsPanel({
   const [isMobile, setIsMobile] = useState(false);
   const [printingDocumentId, setPrintingDocumentId] = useState<number | null>(null);
   const resolvedTitle = title ?? t("documents.title");
-  const documentType = "appointment_request";
   const documentSourceLabel = (source: RequestDocument["source"]) => {
     if (source === "naps2_webscan") return t("documents.source.scanner");
     if (source === "scanner_app") return t("documents.source.scannerApp");
@@ -315,7 +316,7 @@ export function RequestDocumentsPanel({
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error(t("documents.chooseFileFirst"));
-      return uploadFileAsDocument(file, documentType, "manual_upload");
+      return uploadFileAsDocument(file, newDocumentType, "manual_upload");
     },
     onSuccess: (uploadedDocument) => {
       setFile(null);
@@ -402,7 +403,7 @@ export function RequestDocumentsPanel({
       const response = await createScanSession({
         appointmentId,
         patientId,
-        documentType,
+        documentType: newDocumentType,
         appointmentRefType,
       });
       launchScannerApp(response.launchUrl);
@@ -433,7 +434,6 @@ export function RequestDocumentsPanel({
       return;
     }
 
-    const normalizedDocumentType = documentType.trim() || "referral_request";
     setScanUploading(true);
     setFailedScanUploads([]);
 
@@ -441,15 +441,10 @@ export function RequestDocumentsPanel({
       const preparationResponse = await prepareScanSession({
         appointmentId,
         patientId,
-        documentType,
+        documentType: newDocumentType,
         appointmentRefType,
       });
       const preparation = (preparationResponse as { preparation?: Record<string, unknown> }).preparation;
-      const preparedDocumentTypeRaw = preparation?.documentType;
-      const preparedDocumentType =
-        typeof preparedDocumentTypeRaw === "string" && preparedDocumentTypeRaw.trim()
-          ? preparedDocumentTypeRaw.trim()
-          : normalizedDocumentType;
       const suggestedFileNameRaw = preparation?.suggestedFileName;
       const suggestedFileName = typeof suggestedFileNameRaw === "string" ? suggestedFileNameRaw : undefined;
       const preparedSessionCode = typeof preparation?.sessionCode === "string" ? preparation.sessionCode : "";
@@ -467,13 +462,13 @@ export function RequestDocumentsPanel({
         dpi: Number.isFinite(scanDpi) && scanDpi > 0 ? scanDpi : 200,
         colorMode: scanColorMode,
         source: scanSource,
-        fileName: suggestedFileName || `appointment-${appointmentId}-request.pdf`,
+        fileName: suggestedFileName || `appointment-${appointmentId}-${newDocumentType}.pdf`,
       });
       let successfulUploads = 0;
       const scanFiles = scanResult.files?.length ? scanResult.files : [scanResult.file];
       for (const scannedFile of scanFiles) {
         try {
-          const uploadedDocument = await uploadFileAsDocument(scannedFile, preparedDocumentType, scanResult.source);
+          const uploadedDocument = await uploadFileAsDocument(scannedFile, newDocumentType, scanResult.source);
           if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
             setSelectedDocumentId(uploadedDocument.id);
           }
@@ -482,7 +477,7 @@ export function RequestDocumentsPanel({
           failures.push({
             file: scannedFile,
             error: err instanceof Error ? err.message : t("documents.uploadFailedMessage"),
-            documentType: preparedDocumentType,
+            documentType: newDocumentType,
           });
         }
       }

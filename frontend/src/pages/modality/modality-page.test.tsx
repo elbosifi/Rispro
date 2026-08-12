@@ -459,6 +459,7 @@ describe("ModalityPage modality board", () => {
     expect(listAppointmentDocumentsMock).toHaveBeenCalledWith(24, "v2_booking");
     expect(screen.getByTestId("location").textContent).toContain("/modality");
     expect(screen.queryByTestId("selected-appointment-drawer")).toBeNull();
+    expect(modalityPageSource).toMatch(/<RequestDocumentsPanel[\s\S]*?newDocumentType="clinical_document"[\s\S]*?onDocumentsChanged=/);
   });
 
   it("combines Missing and Uploaded document filters with board status filters", async () => {

@@ -1509,6 +1509,7 @@ export default function ModalityPage() {
                 appointmentRefType="v2_booking"
                 previewMode="modal"
                 enableLocalScan
+                newDocumentType="clinical_document"
                 title={t(language, "modality.documents.column")}
                 onDocumentsChanged={() => void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] })}
               />

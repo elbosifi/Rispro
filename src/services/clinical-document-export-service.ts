@@ -255,9 +255,9 @@ async function prepareSecondaryCapturePages(row: ClinicalDocumentExportWorkRow, 
     let persistedSeriesUid = row.series_instance_uid;
     let persistedSeriesNumber = row.series_number;
     if (persistedSeriesNumber != null && row.exported_page_count === 0 && row.verified_page_count === 0) {
-      const uploaded = await client.query<{ count: number }>("select count(*)::int count from clinical_document_export_instances where export_id=$1 and (exported_at is not null or status='verified')", [row.id]);
-      if (Number(uploaded.rows[0]?.count || 0) === 0) {
-        await client.query("delete from clinical_document_export_instances where export_id=$1", [row.id]);
+      const instances = await client.query<{ count: number }>("select count(*)::int count from clinical_document_export_instances where export_id=$1", [row.id]);
+      const hasExportEvidence = Boolean(row.orthanc_study_id || row.orthanc_series_id || row.orthanc_instance_id || row.sop_instance_uid || row.exported_at || row.verified_at);
+      if (Number(instances.rows[0]?.count || 0) === 0 && !hasExportEvidence) {
         await client.query("update clinical_document_exports set series_instance_uid=null,series_number=null,expected_page_count=null,updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$2", [row.id, row.export_lease_owner]);
         persistedSeriesUid = null;
         persistedSeriesNumber = null;
@@ -339,7 +339,7 @@ async function markFailure(row: ClinicalDocumentExportWorkRow, error: unknown): 
   const retryable = isRetryableError(error);
   const exhausted = retryable && row.attempt_count >= MAX_AUTOMATIC_ATTEMPTS;
   const nextRetryAt = !retryable || exhausted ? null : new Date(Date.now() + retryDelayMs(row.attempt_count)).toISOString();
-  const status: ClinicalDocumentExportStatus = retryable ? "failed" : "blocked";
+  const status: ClinicalDocumentExportStatus = retryable && !exhausted ? "failed" : "blocked";
   const updated = await pool.query(
     `update clinical_document_exports set status=$2, next_retry_at=$3, last_error=$4, export_lease_owner=null, export_lease_expires_at=null, updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$5`,
     [row.id, status, nextRetryAt, exhausted ? "Automatic retry limit reached. Manual retry is required." : message, row.export_lease_owner],
@@ -392,7 +392,8 @@ export async function claimNextClinicalDocumentExport(workerId: string, leaseSec
         join appointments_v2.bookings b on b.id=e.appointment_id
         where b.status='completed'
           and (
-            (e.status in ('pending','failed') and (e.next_retry_at is null or e.next_retry_at <= now()))
+            (e.status='pending' and (e.next_retry_at is null or e.next_retry_at <= now()))
+            or (e.status='failed' and e.next_retry_at is not null and e.next_retry_at <= now())
             or (e.status='exporting' and e.export_lease_expires_at < now())
           )
         order by e.created_at asc, e.id asc

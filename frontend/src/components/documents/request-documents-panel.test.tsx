@@ -103,7 +103,7 @@ vi.mock("@/lib/naps2-webscan", () => ({
   scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
-function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void } = {}) {
+function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expanded?: boolean; onExpandedChange?: (expanded: boolean) => void; layout?: "default" | "workspace"; supplementaryPanel?: ReactNode; enableAnnotations?: boolean; readOnly?: boolean; onDocumentsChanged?: () => void; newDocumentType?: "appointment_request" | "clinical_document" } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -131,6 +131,7 @@ function renderPanel(options: { previewMode?: "link" | "modal" | "inline"; expan
           enableAnnotations={options.enableAnnotations}
           readOnly={options.readOnly}
           onDocumentsChanged={options.onDocumentsChanged}
+          newDocumentType={options.newDocumentType}
         />
       </LanguageProvider>
     </QueryClientProvider>
@@ -414,6 +415,60 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
     expect(screen.getByText("Upload request document")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Attach Request" })).toBeNull();
+  });
+
+  it("keeps default manual uploads classified as appointment requests", async () => {
+    renderPanel();
+    await userEvent.upload(await screen.findByTestId("document-file-input") as HTMLInputElement, new File(["request"], "request.pdf", { type: "application/pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
+
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(expect.objectContaining({
+      documentType: "appointment_request",
+      source: "manual_upload",
+    })));
+  });
+
+  it("classifies configured manual uploads as clinical documents without changing their source", async () => {
+    renderPanel({ newDocumentType: "clinical_document" });
+    await userEvent.upload(await screen.findByTestId("document-file-input") as HTMLInputElement, new File(["clinical"], "clinical.pdf", { type: "application/pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
+
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(expect.objectContaining({
+      documentType: "clinical_document",
+      source: "manual_upload",
+    })));
+  });
+
+  it("classifies configured NAPS2 scans and retries as clinical documents", async () => {
+    mockUploadAppointmentDocument.mockRejectedValueOnce(new Error("Temporary upload failure")).mockResolvedValueOnce(documentFixture(2, "clinical.pdf", "application/pdf"));
+    renderPanel({ newDocumentType: "clinical_document" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
+    await waitFor(() => expect(mockPrepareScanSession).toHaveBeenCalledWith(expect.objectContaining({ documentType: "clinical_document" })));
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenNthCalledWith(1, expect.objectContaining({ documentType: "clinical_document", source: "naps2_webscan" })));
+    await userEvent.click(screen.getByRole("button", { name: "Retry failed uploads" }));
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenNthCalledWith(2, expect.objectContaining({ documentType: "clinical_document", source: "naps2_webscan" })));
+  });
+
+  it("creates configured scanner-app sessions as clinical documents", async () => {
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true, allowedFileTypes: ["pdf", "jpg", "png"], documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "manual_browser_upload", scannerProfileName: "default", scannerSource: "feeder", scanDpi: "200",
+        scanColorMode: "grayscale", scanFileFormat: "pdf", bridgeReady: true, naps2WebScanEnabled: false,
+        naps2WebScanEndpoint: "", scannerAppEnabled: true, scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi", scanSessionExpiryMinutes: "15",
+      },
+    });
+    renderPanel({ newDocumentType: "clinical_document" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
+
+    await waitFor(() => expect(mockCreateScanSession).toHaveBeenCalledWith({
+      appointmentId: 42,
+      patientId: 9,
+      documentType: "clinical_document",
+      appointmentRefType: "v2_booking",
+    }));
   });
 
   it("hides Attach Request until a file is selected and enables it after selection", async () => {
