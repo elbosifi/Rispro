@@ -339,7 +339,7 @@ describe("PrintPage autoprint", () => {
     renderWithRouter("/print");
 
     expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
-    expect(screen.getByText("Daily appointment list")).toBeTruthy();
+    expect(screen.getAllByText("Daily appointment list").length).toBeGreaterThan(0);
   });
 
   it("autoprint resets and fires again when appointmentId changes", async () => {

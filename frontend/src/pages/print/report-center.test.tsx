@@ -13,6 +13,7 @@ const recordReportOutputMock = vi.fn();
 const exportReportXlsxMock = vi.fn();
 const directPrintReportCenterMock = vi.fn();
 const fetchReportCenterPdfMock = vi.fn();
+const directPrintRegistrationRowsMock = vi.fn();
 let role = "supervisor";
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -43,6 +44,9 @@ vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrint
 vi.mock("@/lib/toast", () => ({
   pushToast: vi.fn(),
 }));
+vi.mock("@/lib/registration-list-printing", () => ({
+  directPrintRegistrationRows: (...args: unknown[]) => directPrintRegistrationRowsMock(...args),
+}));
 
 function renderCenter() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -60,7 +64,7 @@ describe("ReportCenter", () => {
     role = "supervisor";
     recordReportOutputMock.mockResolvedValue(undefined);
     exportReportXlsxMock.mockResolvedValue(undefined);
-    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 1, nameEn: "CT", nameAr: "CT" }] });
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 1, nameEn: "CT", nameAr: "CT" }], priorities: [{ id: 1, nameEn: "Urgent", nameAr: "Urgent" }] });
     directPrintReportCenterMock.mockResolvedValue({ success: true, printerName: "A4", jobName: "report" });
     fetchReportCenterPdfMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
     fetchPatientDirectoryMock.mockResolvedValue({ patients: [{ id: 4, englishFullName: "Patient One", arabicFullName: "", mrn: "MRN-4", sex: "F", ageYears: 40, phone1: "091", category: "oncology" }], pagination: { page: 1, pageSize: 100, total: 1, totalPages: 1 } });
@@ -80,12 +84,13 @@ describe("ReportCenter", () => {
         status: "scheduled",
       },
     ]);
+    directPrintRegistrationRowsMock.mockResolvedValue(undefined);
   });
 
-  it("defines fourteen enabled appointment templates and sixteen enabled templates overall", () => {
-    expect(REPORT_TEMPLATES.filter((template) => template.source === "appointments")).toHaveLength(14);
-    expect(REPORT_TEMPLATES.filter((template) => template.source !== "disabled")).toHaveLength(16);
-    expect(REPORT_TEMPLATES.filter((template) => template.source === "disabled")).toHaveLength(5);
+  it("exposes only supported templates, with routine workflows separate from operations", () => {
+    expect(REPORT_TEMPLATES.filter((template) => template.source === "appointments")).toHaveLength(11);
+    expect(REPORT_TEMPLATES).toHaveLength(13);
+    expect(REPORT_TEMPLATES.some((template) => template.id === "appointment-slips" || template.id === "preparation-instructions" || template.id === "capacity-utilization")).toBe(false);
   });
 
   it("routes appointment and patient physical Print through finalized Report Center direct printing", async () => {
@@ -95,7 +100,7 @@ describe("ReportCenter", () => {
     expect(directPrintReportCenterMock).toHaveBeenCalledWith(expect.objectContaining({ source: "appointments", orientation: "landscape", templateId: "daily-appointments" }));
     expect(recordReportOutputMock).toHaveBeenCalledWith(expect.objectContaining({ outputType: "print" }));
 
-    await userEvent.selectOptions(screen.getByDisplayValue("Daily appointment list"), "patient-directory");
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "patient-directory");
     await screen.findByText("Patient One");
     await userEvent.click(screen.getByRole("button", { name: "Print" }));
     expect(directPrintReportCenterMock).toHaveBeenLastCalledWith(expect.objectContaining({ source: "patients", templateId: "patient-directory" }));
@@ -105,7 +110,7 @@ describe("ReportCenter", () => {
     role = "super_admin";
     renderCenter();
     await screen.findAllByText("Print & Reports Center");
-    await userEvent.selectOptions(screen.getByDisplayValue("Daily appointment list"), "printed-documents-audit");
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "printed-documents-audit");
     await screen.findByText("daily-appointments");
     await userEvent.click(screen.getByRole("button", { name: "Print" }));
     expect(directPrintReportCenterMock).toHaveBeenCalledWith(expect.objectContaining({ source: "audit", templateId: "printed-documents-audit" }));
@@ -129,7 +134,7 @@ describe("ReportCenter", () => {
 
     expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
     await screen.findByRole("option", { name: "CT" });
-    await userEvent.selectOptions(screen.getByLabelText("Modality"), "1");
+    await userEvent.selectOptions(screen.getAllByLabelText("Modality")[0], "1");
 
     await waitFor(() => {
       expect(fetchAppointmentsMock).toHaveBeenCalledWith(expect.objectContaining({ modalityId: "1" }));
@@ -140,8 +145,9 @@ describe("ReportCenter", () => {
     renderCenter();
 
     expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
-    await userEvent.type(screen.getByLabelText("Preset name"), "Morning CT");
-    await userEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    await userEvent.click(screen.getByRole("button", { name: "Saved views / advanced" }));
+    await userEvent.type(screen.getByLabelText("Saved view name"), "Morning CT");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(screen.getByRole("option", { name: "Morning CT" })).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "CSV" }));
@@ -166,5 +172,30 @@ describe("ReportCenter", () => {
       includePatientIdentifiers: true,
       rows: [expect.objectContaining({ Accession: "V2-000001" })],
     }));
+  });
+
+  it("sends a real priority filter and keeps fixed report conditions out of the status selector", async () => {
+    renderCenter();
+    await screen.findAllByText("Print & Reports Center");
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "priority-urgent");
+    await userEvent.selectOptions(screen.getByLabelText("Reporting priority"), "Urgent");
+    await waitFor(() => expect(fetchAppointmentsMock).toHaveBeenCalledWith(expect.objectContaining({ priority: "Urgent" })));
+
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "no-show-list");
+    expect(screen.queryByRole("combobox", { name: "Status" })).toBeNull();
+    expect(screen.getByText(/Status:/).textContent).toContain("no-show");
+  });
+
+  it("uses exam grouping and the specialized registration printer", async () => {
+    renderCenter();
+    await screen.findAllByText("Print & Reports Center");
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "exam-type-volume");
+    expect(await screen.findByText((_, element) => element?.textContent === "Grouped by: exam")).toBeTruthy();
+    expect((await screen.findAllByText("Brain")).length).toBeGreaterThan(0);
+
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "registration-list");
+    await userEvent.click(screen.getByRole("button", { name: "Print" }));
+    expect(directPrintRegistrationRowsMock).toHaveBeenCalledWith([expect.objectContaining({ id: 1 })], expect.any(String));
+    expect(directPrintReportCenterMock).not.toHaveBeenCalledWith(expect.objectContaining({ templateId: "registration-list" }));
   });
 });

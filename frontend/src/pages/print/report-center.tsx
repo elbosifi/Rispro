@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
-import { Button, Card, Badge } from "@/components/shared";
+import { Badge, Button, Card, DisclosureSection } from "@/components/shared";
+import { directPrintRegistrationRows } from "@/lib/registration-list-printing";
 import { exportReportXlsx, fetchAppointments, fetchAppointmentLookups, fetchAuditEntries, fetchPatientDirectory, recordReportOutput, type PatientDirectoryParams } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AuditEntry } from "@/types/api";
@@ -15,28 +16,14 @@ import { directPrintReportCenter, fetchReportCenterPdf } from "@/services/printi
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import type { ReportCenterRenderModel } from "@/types/printing";
-import { REPORT_TEMPLATES } from "./report-center-templates";
+import { REPORT_TEMPLATES, type AppointmentGrouping } from "./report-center-templates";
 
-const APPOINTMENT_COLUMNS = ["time", "patient", "accession", "modality", "exam", "category", "priority", "status", "phone", "identifier"];
+const APPOINTMENT_COLUMNS = ["time", "patient", "accession", "modality", "exam", "category", "priority", "status", "phone", "identifier"] as const;
+const COLUMN_LABELS: Record<string, string> = { time: "Time", patient: "Patient", accession: "Accession", modality: "Modality", exam: "Exam", category: "Category", priority: "Priority", status: "Status", phone: "Phone", identifier: "MRN / Identifier" };
+const OUTPUT_ROW_LIMIT = 500;
 const PRESETS_KEY = "rispro-print-report-presets";
-
-interface ReportPreset {
-  name: string;
-  templateId: string;
-  date: string;
-  dateTo: string;
-  modalityId: string;
-  status: string;
-  caseCategory: string;
-  query: string;
-  groupBy: string;
-  orientation: "portrait" | "landscape";
-  paperSize: string;
-  includeCharts: boolean;
-  includePhones: boolean;
-  includeIdentifiers: boolean;
-  columns: string[];
-}
+type Column = typeof APPOINTMENT_COLUMNS[number];
+type ReportPreset = Partial<{ name: string; templateId: string; date: string; dateTo: string; modalityId: string; status: string; caseCategory: string; query: string; groupBy: AppointmentGrouping | ""; orientation: "portrait" | "landscape"; includeCharts: boolean; includePhones: boolean; includeIdentifiers: boolean; columns: Column[] }>;
 
 export function ReportCenter() {
   const { user } = useAuth();
@@ -47,632 +34,104 @@ export function ReportCenter() {
   const [modalityId, setModalityId] = useState("");
   const [status, setStatus] = useState("");
   const [caseCategory, setCaseCategory] = useState("");
+  const [priority, setPriority] = useState("");
   const [query, setQuery] = useState("");
-  const [groupBy, setGroupBy] = useState("");
+  const [groupBy, setGroupBy] = useState<AppointmentGrouping | "">("");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("landscape");
-  const [paperSize, setPaperSize] = useState("A4");
   const [includeCharts, setIncludeCharts] = useState(true);
   const [includePhones, setIncludePhones] = useState(false);
   const [includeIdentifiers, setIncludeIdentifiers] = useState(user?.role === "supervisor" || user?.role === "super_admin");
-  const [columns, setColumns] = useState<string[]>(APPOINTMENT_COLUMNS.slice(0, 8));
+  const [columns, setColumns] = useState<Column[]>(APPOINTMENT_COLUMNS.slice(0, 8));
   const [presetName, setPresetName] = useState("");
-  const [presets, setPresets] = useState<ReportPreset[]>(() => loadPresets());
-
-  const templates = useMemo(
-    () => REPORT_TEMPLATES.filter((template) => user && template.roles.includes(user.role)),
-    [user]
-  );
-  const selectedTemplate = templates.find((template) => template.id === templateId) ?? templates[0] ?? REPORT_TEMPLATES[0];
-
-  const { data: lookups } = useQuery({
-    queryKey: ["lookups"],
-    queryFn: fetchAppointmentLookups,
-    staleTime: 1000 * 60 * 5,
-  });
-
+  const [presets, setPresets] = useState<ReportPreset[]>(loadPresets);
+  const templates = useMemo(() => REPORT_TEMPLATES.filter((item) => user && item.roles.includes(user.role)), [user]);
+  const selectedTemplate = templates.find((item) => item.id === templateId) ?? templates[0] ?? REPORT_TEMPLATES[0];
+  const sensitiveOutputAllowed = user?.role === "supervisor" || user?.role === "super_admin";
+  const effectiveIncludePhones = sensitiveOutputAllowed && includePhones;
+  const effectiveIncludeIdentifiers = sensitiveOutputAllowed && includeIdentifiers;
+  const appointmentTemplate = selectedTemplate.source === "appointments";
   const appointmentParams = useMemo(() => {
-    const params: Record<string, string> = {
-      dateFrom: date,
-      dateTo: dateTo || date,
-      sort: "time-asc",
-    };
+    const params: Record<string, string> = { dateFrom: date, dateTo: dateTo || date, sort: "time-asc" };
     if (modalityId) params.modalityId = modalityId;
-    if (status || selectedTemplate.status) params.status = status || selectedTemplate.status || "";
+    if (selectedTemplate.status) params.status = selectedTemplate.status; else if (status) params.status = status;
     if (caseCategory) params.caseCategory = caseCategory;
+    if (selectedTemplate.prioritySelector && priority) params.priority = priority;
     if (query) params.q = query;
     if (selectedTemplate.walkIn) params.walkIn = selectedTemplate.walkIn;
     if (selectedTemplate.specialQuota) params.specialQuota = selectedTemplate.specialQuota;
     if (selectedTemplate.supervisorOverride) params.supervisorOverride = selectedTemplate.supervisorOverride;
     return params;
-  }, [caseCategory, date, dateTo, modalityId, query, selectedTemplate, status]);
-
-  const patientParams = useMemo<PatientDirectoryParams>(() => ({
-    q: query || undefined,
-    category: caseCategory === "oncology" || caseCategory === "non_oncology" ? caseCategory : undefined,
-    page: 1,
-    pageSize: 100,
-  }), [caseCategory, query]);
-
-  const appointmentsQuery = useQuery({
-    queryKey: ["report-center-appointments", selectedTemplate.id, appointmentParams],
-    queryFn: () => fetchAppointments(appointmentParams),
-    enabled: selectedTemplate.source === "appointments",
-    staleTime: 1000 * 30,
-  });
-
-  const patientsQuery = useQuery({
-    queryKey: ["report-center-patients", selectedTemplate.id, patientParams],
-    queryFn: () => fetchPatientDirectory(patientParams),
-    enabled: selectedTemplate.source === "patients",
-    staleTime: 1000 * 30,
-  });
-  const auditQuery = useQuery({
-    queryKey: ["report-center-audit", selectedTemplate.id],
-    queryFn: () => fetchAuditEntries(200),
-    enabled: selectedTemplate.source === "audit",
-    staleTime: 1000 * 30,
-  });
-
-  const appointmentRows = appointmentsQuery.data ?? [];
-  const patientRows = patientsQuery.data?.patients ?? [];
-  const auditRows = (auditQuery.data?.entries ?? []).filter((entry) => entry.entityType === "report_output");
-  const activeRows = selectedTemplate.source === "patients" ? patientRows : selectedTemplate.source === "audit" ? auditRows : appointmentRows;
-  const isLoading = selectedTemplate.source === "patients" ? patientsQuery.isLoading : selectedTemplate.source === "audit" ? auditQuery.isLoading : appointmentsQuery.isLoading;
-  const isError = selectedTemplate.source === "patients" ? patientsQuery.isError : selectedTemplate.source === "audit" ? auditQuery.isError : appointmentsQuery.isError;
+  }, [caseCategory, date, dateTo, modalityId, priority, query, selectedTemplate, status]);
+  const patientParams = useMemo<PatientDirectoryParams>(() => ({ q: query || undefined, category: caseCategory === "oncology" || caseCategory === "non_oncology" ? caseCategory : undefined, page: 1, pageSize: 100 }), [caseCategory, query]);
+  const lookups = useQuery({ queryKey: ["lookups"], queryFn: fetchAppointmentLookups, staleTime: 300_000 });
+  const appointments = useQuery({ queryKey: ["report-center-appointments", selectedTemplate.id, appointmentParams], queryFn: () => fetchAppointments(appointmentParams), enabled: appointmentTemplate, staleTime: 30_000 });
+  const patients = useQuery({ queryKey: ["report-center-patients", patientParams], queryFn: () => fetchPatientDirectory(patientParams), enabled: selectedTemplate.source === "patients", staleTime: 30_000 });
+  const audit = useQuery({ queryKey: ["report-center-audit"], queryFn: () => fetchAuditEntries(200), enabled: selectedTemplate.source === "audit", staleTime: 30_000 });
+  const appointmentRows = (appointments.data ?? []).slice(0, OUTPUT_ROW_LIMIT);
+  const patientRows = patients.data?.patients ?? [];
+  const auditRows = (audit.data?.entries ?? []).filter((entry) => entry.entityType === "report_output");
+  const activeRows = selectedTemplate.source === "appointments" ? appointmentRows : selectedTemplate.source === "patients" ? patientRows : auditRows;
+  const isLoading = appointmentTemplate ? appointments.isLoading : selectedTemplate.source === "patients" ? patients.isLoading : audit.isLoading;
+  const isError = appointmentTemplate ? appointments.isError : selectedTemplate.source === "patients" ? patients.isError : audit.isError;
   const grouping = groupBy || selectedTemplate.grouping || "";
-  const groupedCounts = selectedTemplate.source === "appointments" ? buildGroupedCounts(appointmentRows, grouping, language) : [];
-  const sensitiveOutputAllowed = user?.role === "supervisor" || user?.role === "super_admin";
-  const effectiveIncludePhones = sensitiveOutputAllowed && includePhones;
-  const effectiveIncludeIdentifiers = sensitiveOutputAllowed && includeIdentifiers;
-
-  const exportRows = selectedTemplate.source === "audit"
-    ? auditRows.map((entry) => auditExportRow(entry))
-    : selectedTemplate.source === "patients"
-    ? patientRows.map((patient) => ({
-      Patient: patient.englishFullName || patient.arabicFullName,
-      MRN: effectiveIncludeIdentifiers ? patient.mrn || "" : "",
-      Sex: patient.sex || "",
-      Age: patient.ageYears,
-      Phone: effectiveIncludePhones ? patient.phone1 || "" : "",
-      Category: patient.category || "",
-    }))
-    : appointmentRows.map((appointment) => appointmentExportRow(appointment, language, effectiveIncludePhones, effectiveIncludeIdentifiers));
+  const groupedCounts = appointmentTemplate ? buildGroupedCounts(appointmentRows, grouping, language) : [];
+  const exportRows = selectedTemplate.source === "appointments" ? appointmentRows.map((row) => appointmentExportRow(row, language, effectiveIncludePhones, effectiveIncludeIdentifiers)) : selectedTemplate.source === "patients" ? patientRows.map((row) => ({ Patient: row.englishFullName || row.arabicFullName, MRN: effectiveIncludeIdentifiers ? row.mrn || "" : "", Sex: row.sex || "", Age: row.ageYears, Phone: effectiveIncludePhones ? row.phone1 || "" : "", Category: row.category || "" })) : auditRows.map(auditExportRow);
+  const dateLabel = dateTo ? `${date} to ${dateTo}` : date;
+  const limitNote = selectedTemplate.source === "patients" ? "First 100 matching patients" : selectedTemplate.source === "audit" ? "200 most recent audit entries" : (appointments.data?.length ?? 0) > OUTPUT_ROW_LIMIT ? `First ${OUTPUT_ROW_LIMIT} matching appointments` : `${activeRows.length} matching rows`;
 
   async function auditOutput(outputType: "print" | "pdf" | "csv" | "copy" | "xlsx") {
-    try {
-      await recordReportOutput({
-        reportTemplate: selectedTemplate.id,
-        outputType,
-        filters: selectedTemplate.source === "patients" ? { ...patientParams } : appointmentParams,
-        rowCount: activeRows.length,
-        includePhoneNumbers: effectiveIncludePhones,
-        includePatientIdentifiers: effectiveIncludeIdentifiers,
-      });
-      return true;
-    } catch (error) {
-      pushToast({
-        type: "error",
-        title: "Output blocked",
-        message: error instanceof Error ? error.message : "Could not write the required audit log.",
-      });
-      return false;
+    try { await recordReportOutput({ reportTemplate: selectedTemplate.id, outputType, filters: selectedTemplate.source === "patients" ? { ...patientParams } : appointmentParams, rowCount: activeRows.length, includePhoneNumbers: effectiveIncludePhones, includePatientIdentifiers: effectiveIncludeIdentifiers }); return true; }
+    catch (error) { pushToast({ type: "error", title: "Output blocked", message: error instanceof Error ? error.message : "Could not write the required audit log." }); return false; }
+  }
+  function buildRenderModel(): ReportCenterRenderModel | null {
+    if (!activeRows.length || selectedTemplate.registrationList) return null;
+    if (appointmentTemplate) {
+      const outputColumns = columns.filter((column) => (column !== "phone" || effectiveIncludePhones) && (column !== "identifier" || effectiveIncludeIdentifiers));
+      if (!outputColumns.length) return null;
+      return { templateId: selectedTemplate.id, source: "appointments", orientation, title: selectedTemplate.title, dateLabel, columns: outputColumns.map((key) => ({ key, label: COLUMN_LABELS[key] })), rows: appointmentRows.map((row) => Object.fromEntries(outputColumns.map((key) => [key, String(appointmentCell(row, key, language, effectiveIncludePhones, effectiveIncludeIdentifiers) ?? "")]))), summaryRows: includeCharts ? groupedCounts.map((row) => ({ label: row.label, value: String(row.count) })) : [] };
     }
+    if (selectedTemplate.source === "patients") { const reportColumns = [{ key: "patient", label: "Patient" }, ...(effectiveIncludeIdentifiers ? [{ key: "identifier", label: "MRN" }] : []), { key: "sex", label: "Sex" }, { key: "age", label: "Age" }, ...(effectiveIncludePhones ? [{ key: "phone", label: "Phone" }] : []), { key: "category", label: "Category" }]; return { templateId: selectedTemplate.id, source: "patients", orientation, title: selectedTemplate.title, dateLabel, columns: reportColumns, rows: patientRows.map((row) => Object.fromEntries(reportColumns.map(({ key }) => [key, String(({ patient: row.englishFullName || row.arabicFullName, identifier: row.mrn, sex: row.sex, age: row.ageYears, phone: row.phone1, category: row.category } as Record<string, unknown>)[key] ?? "")]))) , summaryRows: [] }; }
+    return { templateId: selectedTemplate.id, source: "audit", orientation, title: selectedTemplate.title, dateLabel, columns: [{ key: "time", label: "Time" }, { key: "user", label: "User" }, { key: "action", label: "Output" }, { key: "report", label: "Template" }, { key: "rows", label: "Rows" }, { key: "details", label: "Sensitive fields" }], rows: auditRows.map(auditRow), summaryRows: [] };
   }
-
-  async function exportCsv() {
-    if (!(await auditOutput("csv"))) return;
-    downloadText(`${selectedTemplate.id}-${date}.csv`, toCsv(exportRows));
-  }
-
-  async function copyTable() {
-    if (!(await auditOutput("copy"))) return;
-    const text = toCsv(exportRows);
-    if (navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(text).then(() => pushToast({ type: "success", title: "Table copied", message: "Report rows were copied to the clipboard." }));
-    }
-  }
-
   async function printReport() {
     if (!(await auditOutput("print"))) return;
-    const model = buildRenderModel();
-    if (!model) return;
+    if (selectedTemplate.registrationList) { await directPrintRegistrationRows(appointmentRows, dateLabel); return; }
+    const model = buildRenderModel(); if (!model) return;
     const result = await directPrintReportCenter(model);
-    if (result.success) {
-      pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` });
-      return;
-    }
+    if (result.success) { pushToast({ type: "success", title: "Print job submitted", message: `Print job sent to ${result.printerName}.` }); return; }
     const action = resolveDirectPrintFailureAction(result.errorCode, true, loadQzPrinterSettings().browserPrintFallbackEnabled);
-    const toastAction = action === "OPEN_SETTINGS"
-      ? { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") }
-      : action === "BROWSER_PRINT"
-        ? { label: "Use browser printing", onClick: () => void browserPrintReport(model) }
-        : null;
-    pushToast({ type: "error", title: "Print failed", message: result.message, ...(toastAction ? { action: toastAction } : {}) }, 10_000);
+    pushToast({ type: "error", title: "Print failed", message: result.message, ...(action === "OPEN_SETTINGS" ? { action: { label: "Open Printing settings", onClick: () => window.location.assign("/workstation/printing") } } : action === "BROWSER_PRINT" ? { action: { label: "Use browser printing", onClick: () => void browserPrintReport(model) } } : {}) }, 10_000);
   }
-
-  async function printPdf() {
-    if (!(await auditOutput("pdf"))) return;
-    const model = buildRenderModel();
-    if (!model) return;
-    try {
-      downloadPdf(await fetchReportCenterPdf(model), `${selectedTemplate.id}-${date}.pdf`);
-    } catch (error) {
-      pushToast({ type: "error", title: "PDF generation failed", message: error instanceof Error ? error.message : "The report PDF could not be generated." });
-    }
-  }
-
-  function buildRenderModel(): ReportCenterRenderModel | null {
-    if (selectedTemplate.source === "disabled") return null;
-    const dateLabel = dateTo ? `${date} to ${dateTo}` : date;
-    const summaryRows = includeCharts ? groupedCounts.map((row) => ({ label: row.label, value: String(row.count) })) : [];
-    if (selectedTemplate.source === "appointments") {
-      const outputColumns = columns.filter((column) => (column !== "phone" || effectiveIncludePhones) && (column !== "identifier" || effectiveIncludeIdentifiers));
-      return {
-        templateId: selectedTemplate.id, source: "appointments", orientation, title: selectedTemplate.title, dateLabel,
-        columns: outputColumns.map((key) => ({ key, label: key })),
-        rows: appointmentRows.map((row) => Object.fromEntries(outputColumns.map((key) => [key, String(appointmentCell(row, key, language, effectiveIncludePhones, effectiveIncludeIdentifiers) ?? "")]))),
-        summaryRows,
-      };
-    }
-    if (selectedTemplate.source === "patients") {
-      const reportColumns = [
-        { key: "patient", label: "Patient" },
-        ...(effectiveIncludeIdentifiers ? [{ key: "identifier", label: "MRN" }] : []),
-        { key: "sex", label: "Sex" }, { key: "age", label: "Age" },
-        ...(effectiveIncludePhones ? [{ key: "phone", label: "Phone" }] : []),
-        { key: "category", label: "Category" },
-      ];
-      return {
-        templateId: selectedTemplate.id, source: "patients", orientation, title: selectedTemplate.title, dateLabel,
-        columns: reportColumns,
-        rows: patientRows.map((row) => {
-          const values: Record<string, string> = { patient: row.englishFullName || row.arabicFullName, identifier: row.mrn || "", sex: row.sex || "", age: String(row.ageYears ?? ""), phone: row.phone1 || "", category: row.category || "" };
-          return Object.fromEntries(reportColumns.map(({ key }) => [key, values[key] || ""]));
-        }),
-        summaryRows: [],
-      };
-    }
-    return {
-      templateId: selectedTemplate.id, source: "audit", orientation, title: selectedTemplate.title, dateLabel,
-      columns: [{ key: "time", label: "Time" }, { key: "user", label: "User" }, { key: "action", label: "Output" }, { key: "report", label: "Template" }, { key: "rows", label: "Rows" }, { key: "details", label: "Sensitive fields" }],
-      rows: auditRows.map((row) => {
-        const values = asRecord(row.newValues);
-        return { time: row.createdAt || "", user: String(row.changedByUserId ?? ""), action: String(values.outputType || row.actionType || ""), report: String(values.reportTemplate || ""), rows: String(values.rowCount ?? ""), details: `${values.includePhoneNumbers ? "phones " : ""}${values.includePatientIdentifiers ? "identifiers" : ""}`.trim() || "none" };
-      }),
-      summaryRows: [],
-    };
-  }
-
-  async function exportExcel() {
-    try {
-      await exportReportXlsx({
-        reportTemplate: selectedTemplate.id,
-        filters: asRecord(selectedTemplate.source === "patients" ? patientParams : appointmentParams),
-        rows: exportRows,
-        includePhoneNumbers: effectiveIncludePhones,
-        includePatientIdentifiers: effectiveIncludeIdentifiers,
-      });
-    } catch (error) {
-      pushToast({
-        type: "error",
-        title: "Excel export failed",
-        message: error instanceof Error ? error.message : "Could not generate the workbook.",
-      });
-    }
-  }
-
-  function savePreset() {
-    const name = presetName.trim();
-    if (!name) return;
-    const nextPreset: ReportPreset = {
-      name,
-      templateId: selectedTemplate.id,
-      date,
-      dateTo,
-      modalityId,
-      status,
-      caseCategory,
-      query,
-      groupBy,
-      orientation,
-      paperSize,
-      includeCharts,
-      includePhones,
-      includeIdentifiers,
-      columns,
-    };
-    const next = [nextPreset, ...presets.filter((preset) => preset.name !== name)].slice(0, 12);
-    setPresets(next);
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
-    pushToast({ type: "success", title: "Preset saved", message: `${name} is ready to reuse.` });
-  }
-
-  function loadPreset(name: string) {
-    const preset = presets.find((item) => item.name === name);
-    if (!preset) return;
-    setTemplateId(preset.templateId);
-    setDate(preset.date);
-    setDateTo(preset.dateTo);
-    setModalityId(preset.modalityId);
-    setStatus(preset.status);
-    setCaseCategory(preset.caseCategory);
-    setQuery(preset.query);
-    setGroupBy(preset.groupBy);
-    setOrientation(preset.orientation);
-    setPaperSize("A4");
-    setIncludeCharts(preset.includeCharts);
-    setIncludePhones(preset.includePhones);
-    setIncludeIdentifiers(preset.includeIdentifiers);
-    setColumns(preset.columns);
-  }
-
-  return (
-    <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex flex-col gap-2 lg:hidden">
-        <h2 className="text-2xl font-bold">Print & Reports Center</h2>
-        <p className="text-sm text-muted-foreground">Templates, filters, preview, and exports.</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[320px_1fr]">
-        <Card className="p-4 space-y-4">
-          <div>
-            <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">Report template</p>
-            <select className="input-premium mt-2 w-full" value={selectedTemplate.id} onChange={(event) => setTemplateId(event.target.value)}>
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>{template.title}</option>
-              ))}
-            </select>
-            <p className="mt-2 text-sm text-muted-foreground">{selectedTemplate.description}</p>
-            {selectedTemplate.disabledReason ? <p className="mt-2 text-xs text-amber-700">{selectedTemplate.disabledReason}</p> : null}
-          </div>
-
-          <div className="grid gap-2">
-            <Input label="Preset name" value={presetName} onChange={setPresetName} />
-            <div className="flex gap-2">
-              <Button type="button" size="sm" variant="secondary" onClick={savePreset} disabled={!presetName.trim()}>
-                Save preset
-              </Button>
-              <select className="input-premium h-10 flex-1" aria-label="Load preset" defaultValue="" onChange={(event) => loadPreset(event.target.value)}>
-                <option value="">Load preset</option>
-                {presets.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid gap-3">
-            <DateInput label="Date from" value={date} onChange={setDate} />
-            <DateInput label="Date to" value={dateTo} onChange={setDateTo} />
-            <Select label="Modality" value={modalityId} onChange={setModalityId} options={[{ value: "", label: "All modalities" }, ...(lookups?.modalities ?? []).map((modality) => ({ value: String(modality.id), label: modality.nameEn }))]} />
-            <Select label="Status" value={status} onChange={setStatus} options={[
-              { value: "", label: selectedTemplate.status ? `Template default (${selectedTemplate.status})` : "Active statuses" },
-              ...["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled", "discontinued"].map((value) => ({ value, label: value })),
-            ]} />
-            <Select label="Patient category" value={caseCategory} onChange={setCaseCategory} options={[
-              { value: "", label: "All categories" },
-              { value: "oncology", label: "Oncology" },
-              { value: "non_oncology", label: "General / non-oncology" },
-            ]} />
-            <Input label="Patient, MRN, ID, accession" value={query} onChange={setQuery} />
-            <Select label="Grouping" value={groupBy} onChange={setGroupBy} options={[
-              { value: "", label: selectedTemplate.grouping ? `Template default (${selectedTemplate.grouping})` : "None" },
-              { value: "modality", label: "Modality" },
-              { value: "status", label: "Status" },
-              { value: "category", label: "Patient category" },
-            ]} />
-          </div>
-        </Card>
-
-        <div className="space-y-5">
-          <Card className="p-4 space-y-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <h2 className="text-2xl font-bold">Print & Reports Center</h2>
-                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  <Badge variant="info">{activeRows.length} rows</Badge>
-                  <Badge variant={selectedTemplate.source === "disabled" ? "warning" : "success"}>{selectedTemplate.source}</Badge>
-                  <Badge variant="neutral">{paperSize} {orientation}</Badge>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" onClick={() => void printReport()} disabled={activeRows.length === 0 || selectedTemplate.source === "disabled"}>
-                  <Printer size={15} /> Print
-                </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => void printPdf()} disabled={activeRows.length === 0 || selectedTemplate.source === "disabled"}>
-                  <FileText size={15} /> Download PDF
-                </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => void exportExcel()} disabled={activeRows.length === 0}>
-                  <FileSpreadsheet size={15} /> Excel
-                </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => void exportCsv()} disabled={activeRows.length === 0}>
-                  <Download size={15} /> CSV
-                </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => void copyTable()} disabled={activeRows.length === 0}>
-                  <Copy size={15} /> Copy
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Select label="Paper" value={paperSize} onChange={setPaperSize} options={[{ value: "A4", label: "A4" }]} />
-              <Select label="Orientation" value={orientation} onChange={(value) => setOrientation(value as "portrait" | "landscape")} options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]} />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeCharts} onChange={(event) => setIncludeCharts(event.target.checked)} /> Charts</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includePhones} disabled={!sensitiveOutputAllowed} onChange={(event) => setIncludePhones(event.target.checked)} /> Patient phones</label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={includeIdentifiers} disabled={!sensitiveOutputAllowed} onChange={(event) => setIncludeIdentifiers(event.target.checked)} />
-                Patient identifiers
-              </label>
-            </div>
-
-            {selectedTemplate.source === "appointments" ? (
-              <div>
-                <p className="mb-2 text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">Columns</p>
-                <div className="flex flex-wrap gap-2">
-                  {APPOINTMENT_COLUMNS.map((column) => (
-                    <label key={column} className="rounded-lg border border-border px-2 py-1 text-xs">
-                      <input
-                        type="checkbox"
-                        className="mr-1"
-                        checked={columns.includes(column)}
-                        onChange={(event) => setColumns((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))}
-                      />
-                      {column}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </Card>
-
-          {includeCharts && groupedCounts.length > 0 ? <MiniChart rows={groupedCounts} /> : null}
-
-          <Card className="overflow-hidden">
-            <div className="border-b border-border p-4">
-              <h3 className="font-semibold">Live preview</h3>
-            </div>
-            {selectedTemplate.source === "disabled" ? (
-              <div className="p-8 text-center text-muted-foreground">{selectedTemplate.disabledReason}</div>
-            ) : isLoading ? (
-              <div className="p-8 text-center text-muted-foreground">Loading report preview...</div>
-            ) : isError ? (
-              <div className="p-8 text-center text-rose-700">Could not load report preview.</div>
-            ) : activeRows.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">No rows match these filters.</div>
-            ) : selectedTemplate.source === "audit" ? (
-              <AuditPreview rows={auditRows} />
-            ) : selectedTemplate.source === "patients" ? (
-              <PatientPreview rows={patientRows} includePhones={effectiveIncludePhones} includeIdentifiers={effectiveIncludeIdentifiers} />
-            ) : (
-              <AppointmentPreview rows={appointmentRows} columns={columns} language={language} includePhones={effectiveIncludePhones} includeIdentifiers={effectiveIncludeIdentifiers} />
-            )}
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
+  async function downloadPdf() { if (!(await auditOutput("pdf"))) return; const model = buildRenderModel(); if (!model) return; try { downloadBlob(await fetchReportCenterPdf(model), `${selectedTemplate.id}-${date}.pdf`); } catch (error) { pushToast({ type: "error", title: "PDF generation failed", message: error instanceof Error ? error.message : "The report PDF could not be generated." }); } }
+  async function exportExcel() { if (!(await auditOutput("xlsx"))) return; try { await exportReportXlsx({ reportTemplate: selectedTemplate.id, filters: selectedTemplate.source === "patients" ? { ...patientParams } : appointmentParams, rows: exportRows, includePhoneNumbers: effectiveIncludePhones, includePatientIdentifiers: effectiveIncludeIdentifiers }); } catch (error) { pushToast({ type: "error", title: "Excel export failed", message: error instanceof Error ? error.message : "Could not generate the workbook." }); } }
+  function savePreset() { const name = presetName.trim(); if (!name) return; const next = [{ name, templateId: selectedTemplate.id, date, dateTo, modalityId, status, caseCategory, query, groupBy, orientation, includeCharts, includePhones, includeIdentifiers, columns }, ...presets.filter((item) => item.name !== name)].slice(0, 12); setPresets(next); localStorage.setItem(PRESETS_KEY, JSON.stringify(next)); pushToast({ type: "success", title: "Saved view saved", message: `${name} is ready to reuse.` }); }
+  function loadPreset(name: string) { const item = presets.find((preset) => preset.name === name); if (!item) return; setTemplateId(item.templateId || "daily-appointments"); setDate(item.date || todayIsoDateLy()); setDateTo(item.dateTo || ""); setModalityId(item.modalityId || ""); setStatus(item.status || ""); setCaseCategory(item.caseCategory || ""); setQuery(item.query || ""); setGroupBy(item.groupBy || ""); setOrientation(item.orientation || "landscape"); setIncludeCharts(item.includeCharts ?? true); setIncludePhones(item.includePhones ?? false); setIncludeIdentifiers(item.includeIdentifiers ?? sensitiveOutputAllowed); setColumns(item.columns?.filter((column): column is Column => APPOINTMENT_COLUMNS.includes(column)) || APPOINTMENT_COLUMNS.slice(0, 8)); }
+  function toggleColumn(column: Column, checked: boolean) { setColumns((current) => checked ? [...current, column] : current.length > 1 ? current.filter((item) => item !== column) : current); }
+  const primary = templates.filter((item) => item.area === "primary"); const operational = templates.filter((item) => item.area === "operational");
+  return <div className="max-w-7xl mx-auto space-y-5"><header><h2 className="text-2xl font-bold">Print & Reports Center</h2><p className="mt-1 text-sm text-muted-foreground">Routine printing first; operational reporting and exports are kept separate.</p></header>
+    <section aria-label="Primary printing" className="grid gap-3 md:grid-cols-3"><Card className="p-4"><h3 className="font-semibold">Appointment slip</h3><p className="mt-1 text-sm text-muted-foreground">Open an appointment’s Print View to preview and print its individual slip.</p></Card>{primary.map((item) => <Card key={item.id} className="p-4"><h3 className="font-semibold">{item.title}</h3><p className="mt-1 text-sm text-muted-foreground">{item.description}</p><Button className="mt-3" size="sm" variant={selectedTemplate.id === item.id ? "primary" : "secondary"} onClick={() => setTemplateId(item.id)}>Use this workflow</Button></Card>)}</section>
+    <div className="grid gap-5 xl:grid-cols-[310px_1fr]"><Card className="p-4 space-y-4"><label className="block"><span className="text-xs font-mono uppercase tracking-[.15em] text-muted-foreground">Operational report</span><select aria-label="Report template" className="input-premium mt-1 w-full" value={selectedTemplate.id} onChange={(event) => setTemplateId(event.target.value)}><optgroup label="Primary printing">{primary.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</optgroup><optgroup label="Operational reports / exports">{operational.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</optgroup></select></label><p className="text-sm text-muted-foreground">{selectedTemplate.description}</p>
+      {appointmentTemplate ? <div className="grid gap-3"><DateInput label="Date from" value={date} onChange={setDate} /><DateInput label="Date to" value={dateTo} onChange={setDateTo} /><Select label="Modality" value={modalityId} onChange={setModalityId} options={[{ value: "", label: "All modalities" }, ...(lookups.data?.modalities ?? []).map((item) => ({ value: String(item.id), label: item.nameEn }))]} />{!selectedTemplate.status ? <Select label="Status" value={status} onChange={setStatus} options={[{ value: "", label: "Active statuses" }, ...["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled", "discontinued"].map((value) => ({ value, label: value }))]} /> : <p className="rounded-lg bg-muted px-3 py-2 text-sm">Status: <strong>{selectedTemplate.status}</strong> (fixed)</p>}<Select label="Patient category" value={caseCategory} onChange={setCaseCategory} options={[{ value: "", label: "All categories" }, { value: "oncology", label: "Oncology" }, { value: "non_oncology", label: "General / non-oncology" }]} />{selectedTemplate.prioritySelector ? <Select label="Reporting priority" value={priority} onChange={setPriority} options={[{ value: "", label: "Choose a priority" }, ...(lookups.data?.priorities ?? []).map((item) => ({ value: item.nameEn || item.nameAr, label: item.nameEn || item.nameAr }))]} /> : null}<Input label="Patient, MRN, ID, accession" value={query} onChange={setQuery} />{selectedTemplate.grouping ? <p className="rounded-lg bg-muted px-3 py-2 text-sm">Grouped by: <strong>{selectedTemplate.grouping}</strong></p> : <Select label="Grouping" value={groupBy} onChange={(value) => setGroupBy(value as AppointmentGrouping | "")} options={[{ value: "", label: "None" }, { value: "modality", label: "Modality" }, { value: "status", label: "Status" }, { value: "category", label: "Patient category" }, { value: "exam", label: "Exam" }]} />}</div> : selectedTemplate.source === "patients" ? <div className="grid gap-3"><Input label="Patient, MRN, ID" value={query} onChange={setQuery} /><Select label="Patient category" value={caseCategory} onChange={setCaseCategory} options={[{ value: "", label: "All categories" }, { value: "oncology", label: "Oncology" }, { value: "non_oncology", label: "General / non-oncology" }]} /></div> : <p className="rounded-lg bg-muted px-3 py-2 text-sm">No filters apply to the recent output-audit view.</p>}
+      <DisclosureSection title="Saved views / advanced"><Input label="Saved view name" value={presetName} onChange={setPresetName} /><div className="mt-2 flex gap-2"><Button size="sm" variant="secondary" onClick={savePreset} disabled={!presetName.trim()}>Save</Button><select className="input-premium h-10 flex-1" aria-label="Load saved view" defaultValue="" onChange={(event) => loadPreset(event.target.value)}><option value="">Load saved view</option>{presets.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></div></DisclosureSection></Card>
+      <div className="space-y-5"><Card className="p-4 space-y-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><h3 className="text-xl font-bold">{selectedTemplate.title}</h3><div className="mt-2 flex flex-wrap gap-2 text-xs"><Badge variant="info">{limitNote}</Badge><Badge variant="neutral">A4 {orientation}</Badge></div></div><div className="flex flex-wrap gap-2"><Button onClick={() => void printReport()} disabled={!activeRows.length}><Printer size={15} /> Print</Button>{!selectedTemplate.registrationList ? <Button variant="secondary" onClick={() => void downloadPdf()} disabled={!activeRows.length}><FileText size={15} /> Download PDF</Button> : null}<Button size="sm" variant="secondary" onClick={() => void exportExcel()} disabled={!activeRows.length}><FileSpreadsheet size={15} /> Excel</Button><Button size="sm" variant="secondary" onClick={() => void auditOutput("csv").then((ok) => { if (ok) downloadText(`${selectedTemplate.id}-${date}.csv`, toCsv(exportRows)); })} disabled={!activeRows.length}><Download size={15} /> CSV</Button><Button size="sm" variant="secondary" onClick={() => void auditOutput("copy").then((ok) => { if (ok) void navigator.clipboard?.writeText(toCsv(exportRows)); })} disabled={!activeRows.length}><Copy size={15} /> Copy</Button></div></div><div className="grid gap-3 md:grid-cols-3"><Select label="Orientation" value={orientation} onChange={(value) => setOrientation(value as "portrait" | "landscape")} options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]} />{appointmentTemplate ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeCharts} onChange={(event) => setIncludeCharts(event.target.checked)} /> Show grouped counts</label> : null}{sensitiveOutputAllowed ? <><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includePhones} onChange={(event) => setIncludePhones(event.target.checked)} /> Include patient phones</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeIdentifiers} onChange={(event) => setIncludeIdentifiers(event.target.checked)} /> Include identifiers</label></> : null}</div>{appointmentTemplate ? <div><p className="mb-2 text-xs font-mono uppercase tracking-[.15em] text-muted-foreground">Columns (at least one is required)</p><div className="flex flex-wrap gap-2">{APPOINTMENT_COLUMNS.filter((column) => sensitiveOutputAllowed || (column !== "phone" && column !== "identifier")).map((column) => <label key={column} className="rounded-lg border border-border px-2 py-1 text-xs"><input aria-label={`Select column: ${COLUMN_LABELS[column]}`} type="checkbox" className="mr-1" checked={columns.includes(column)} disabled={columns.length === 1 && columns.includes(column)} onChange={(event) => toggleColumn(column, event.target.checked)} />{COLUMN_LABELS[column]}</label>)}</div></div> : null}</Card>
+        {includeCharts && groupedCounts.length ? <MiniChart rows={groupedCounts} /> : null}<Card className="overflow-hidden"><div className="border-b border-border p-4"><h3 className="font-semibold">Data preview</h3><p className="mt-1 text-sm text-muted-foreground">This table is the selected output dataset; it is not a page-accurate print preview.</p></div>{isLoading ? <State text="Loading report data..." /> : isError ? <State text="Could not load report data." error /> : !activeRows.length ? <State text="No rows match these filters." /> : selectedTemplate.source === "patients" ? <PatientPreview rows={patientRows} phones={effectiveIncludePhones} identifiers={effectiveIncludeIdentifiers} /> : selectedTemplate.source === "audit" ? <AuditPreview rows={auditRows} /> : <AppointmentPreview rows={appointmentRows} columns={columns} language={language} phones={effectiveIncludePhones} identifiers={effectiveIncludeIdentifiers} onOpenSlip={selectedTemplate.id === "daily-appointments" ? (id) => window.location.assign(`/print?appointmentId=${id}`) : undefined} />}</Card></div></div></div>;
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">{label}</span>
-      <select className="input-premium mt-1 w-full" value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
-  );
-}
-
-function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">{label}</span>
-      <input className="input-premium input-ltr mt-1 w-full" value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function AppointmentPreview({ rows, columns, language, includePhones, includeIdentifiers }: { rows: AppointmentWithDetails[]; columns: string[]; language: "ar" | "en"; includePhones: boolean; includeIdentifiers: boolean }) {
-  return (
-    <div className="overflow-auto">
-      <table className="w-full min-w-[860px] text-sm">
-        <thead className="bg-muted/50 text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          <tr>{columns.map((column) => <th key={column} className="px-3 py-2 text-left">{column}</th>)}</tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.slice(0, 100).map((row) => (
-            <tr key={row.id}>
-              {columns.map((column) => <td key={column} className="px-3 py-2">{appointmentCell(row, column, language, includePhones, includeIdentifiers)}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function PatientPreview({ rows, includePhones, includeIdentifiers }: { rows: Awaited<ReturnType<typeof fetchPatientDirectory>>["patients"]; includePhones: boolean; includeIdentifiers: boolean }) {
-  return (
-    <div className="overflow-auto">
-      <table className="w-full min-w-[720px] text-sm">
-        <thead className="bg-muted/50 text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          <tr><th className="px-3 py-2 text-left">Patient</th><th className="px-3 py-2 text-left">MRN</th><th className="px-3 py-2 text-left">Age/Sex</th><th className="px-3 py-2 text-left">Phone</th><th className="px-3 py-2 text-left">Category</th></tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td className="px-3 py-2">{row.englishFullName || row.arabicFullName}</td>
-              <td className="px-3 py-2">{includeIdentifiers ? row.mrn || "-" : "Restricted"}</td>
-              <td className="px-3 py-2">{row.ageYears || "-"} / {row.sex || "-"}</td>
-              <td className="px-3 py-2">{includePhones ? row.phone1 || "-" : "Hidden"}</td>
-              <td className="px-3 py-2">{row.category || "-"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function AuditPreview({ rows }: { rows: AuditEntry[] }) {
-  return (
-    <div className="overflow-auto">
-      <table className="w-full min-w-[780px] text-sm">
-        <thead className="bg-muted/50 text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          <tr><th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Output</th><th className="px-3 py-2 text-left">Template</th><th className="px-3 py-2 text-left">Rows</th><th className="px-3 py-2 text-left">Sensitive fields</th></tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((row) => {
-            const values = asRecord(row.newValues);
-            return (
-              <tr key={row.id}>
-                <td className="px-3 py-2">{row.createdAt || "-"}</td>
-                <td className="px-3 py-2">{String(values.outputType || row.actionType || "-")}</td>
-                <td className="px-3 py-2">{String(values.reportTemplate || "-")}</td>
-                <td className="px-3 py-2">{String(values.rowCount ?? "-")}</td>
-                <td className="px-3 py-2">
-                  {values.includePhoneNumbers ? "phones " : ""}
-                  {values.includePatientIdentifiers ? "identifiers" : ""}
-                  {!values.includePhoneNumbers && !values.includePatientIdentifiers ? "none" : ""}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function MiniChart({ rows }: { rows: Array<{ label: string; count: number }> }) {
-  const max = Math.max(...rows.map((row) => row.count), 1);
-  return (
-    <Card className="p-4">
-      <h3 className="mb-3 font-semibold">Charts</h3>
-      <div className="space-y-2">
-        {rows.slice(0, 10).map((row) => (
-          <div key={row.label} className="grid grid-cols-[160px_1fr_48px] items-center gap-3 text-sm">
-            <span className="truncate">{row.label}</span>
-            <div className="h-3 rounded bg-muted"><div className="h-3 rounded bg-accent" style={{ width: `${Math.max(4, (row.count / max) * 100)}%` }} /></div>
-            <span className="text-right font-mono">{row.count}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function appointmentCell(row: AppointmentWithDetails, column: string, language: "ar" | "en", includePhones: boolean, includeIdentifiers: boolean) {
-  switch (column) {
-    case "time": return row.bookingTime || "-";
-    case "patient": return chooseLocalized(language, row.arabicFullName, row.englishFullName);
-    case "accession": return row.accessionNumber;
-    case "modality": return chooseLocalized(language, row.modalityNameAr, row.modalityNameEn) || "-";
-    case "exam": return chooseLocalized(language, row.examNameAr, row.examNameEn) || "-";
-    case "category": return row.caseCategory || "-";
-    case "priority": return chooseLocalized(language, row.priorityNameAr, row.priorityNameEn) || "-";
-    case "status": return statusLabel(language, row.status);
-    case "phone": return includePhones ? row.phone1 || "-" : "Hidden";
-    case "identifier": return includeIdentifiers ? row.mrn || row.nationalId || "-" : "Restricted";
-    default: return "";
-  }
-}
-
-function appointmentExportRow(row: AppointmentWithDetails, language: "ar" | "en", includePhones: boolean, includeIdentifiers: boolean) {
-  return {
-    Date: formatDateLy(row.appointmentDate),
-    Time: row.bookingTime || "",
-    Patient: chooseLocalized(language, row.arabicFullName, row.englishFullName),
-    Accession: row.accessionNumber,
-    Modality: chooseLocalized(language, row.modalityNameAr, row.modalityNameEn) || "",
-    Exam: chooseLocalized(language, row.examNameAr, row.examNameEn) || "",
-    Category: row.caseCategory || "",
-    Priority: chooseLocalized(language, row.priorityNameAr, row.priorityNameEn) || "",
-    Status: row.status,
-    Phone: includePhones ? row.phone1 || "" : "",
-    Identifier: includeIdentifiers ? row.mrn || row.nationalId || "" : "",
-  };
-}
-
-function auditExportRow(row: AuditEntry) {
-  const values = asRecord(row.newValues);
-  return {
-    Time: row.createdAt || "",
-    Output: values.outputType || row.actionType,
-    Template: values.reportTemplate || "",
-    Rows: values.rowCount ?? "",
-    IncludePhones: Boolean(values.includePhoneNumbers),
-    IncludeIdentifiers: Boolean(values.includePatientIdentifiers),
-    UserId: row.changedByUserId ?? "",
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function downloadPdf(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-}
-
-async function browserPrintReport(model: ReportCenterRenderModel): Promise<void> {
-  try {
-    const blob = await fetchReportCenterPdf(model);
-    const url = URL.createObjectURL(blob);
-    const printWindow = window.open(url, "_blank");
-    if (!printWindow) { URL.revokeObjectURL(url); throw new Error("The browser blocked the print window."); }
-    printWindow.addEventListener("load", () => { printWindow.focus(); printWindow.print(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); }, { once: true });
-  } catch (error) {
-    pushToast({ type: "error", title: "Browser printing failed", message: error instanceof Error ? error.message : "The report could not be opened for browser printing." });
-  }
-}
-
-function buildGroupedCounts(rows: AppointmentWithDetails[], grouping: string, language: "ar" | "en") {
-  if (!grouping) return [];
-  const counts = new Map<string, number>();
-  rows.forEach((row) => {
-    const label = grouping === "modality"
-      ? chooseLocalized(language, row.modalityNameAr, row.modalityNameEn) || "Unknown"
-      : grouping === "status"
-        ? row.status || "Unknown"
-        : row.caseCategory || "Uncategorized";
-    counts.set(label, (counts.get(label) || 0) + 1);
-  });
-  return Array.from(counts, ([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
-}
-
-function toCsv(rows: Array<Record<string, unknown>>) {
-  if (rows.length === 0) return "";
-  const headers = Object.keys(rows[0]);
-  const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  return [headers.map(escape).join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
-}
-
-function downloadText(fileName: string, text: string) {
-  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
-  const anchor = document.createElement("a");
-  anchor.href = URL.createObjectURL(blob);
-  anchor.download = fileName;
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(anchor.href);
-    anchor.remove();
-  }, 1000);
-}
-
-function loadPresets(): ReportPreset[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PRESETS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.slice(0, 12) : [];
-  } catch {
-    return [];
-  }
-}
+function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) { return <label className="block"><span className="text-xs font-mono uppercase tracking-[.15em] text-muted-foreground">{label}</span><select className="input-premium mt-1 w-full" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>; }
+function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="block"><span className="text-xs font-mono uppercase tracking-[.15em] text-muted-foreground">{label}</span><input className="input-premium input-ltr mt-1 w-full" value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
+function State({ text, error = false }: { text: string; error?: boolean }) { return <div className={`p-8 text-center ${error ? "text-rose-700" : "text-muted-foreground"}`}>{text}</div>; }
+function AppointmentPreview({ rows, columns, language, phones, identifiers, onOpenSlip }: { rows: AppointmentWithDetails[]; columns: Column[]; language: "ar" | "en"; phones: boolean; identifiers: boolean; onOpenSlip?: (id: number) => void }) { return <div className="overflow-auto"><table className="w-full min-w-[860px] text-sm"><thead className="bg-muted/50 text-xs uppercase tracking-[.12em] text-muted-foreground"><tr>{columns.map((column) => <th key={column} className="px-3 py-2 text-left">{COLUMN_LABELS[column]}</th>)}{onOpenSlip ? <th className="px-3 py-2" /> : null}</tr></thead><tbody className="divide-y divide-border">{rows.map((row) => <tr key={row.id}>{columns.map((column) => <td key={column} className="px-3 py-2">{appointmentCell(row, column, language, phones, identifiers)}</td>)}{onOpenSlip ? <td className="px-3 py-2"><Button size="sm" variant="secondary" onClick={() => onOpenSlip(row.id)}>Appointment slip</Button></td> : null}</tr>)}</tbody></table></div>; }
+function PatientPreview({ rows, phones, identifiers }: { rows: Awaited<ReturnType<typeof fetchPatientDirectory>>["patients"]; phones: boolean; identifiers: boolean }) { return <div className="overflow-auto"><table className="w-full min-w-[720px] text-sm"><thead className="bg-muted/50 text-xs uppercase"><tr><th>Patient</th>{identifiers ? <th>MRN</th> : null}<th>Age/Sex</th>{phones ? <th>Phone</th> : null}<th>Category</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.englishFullName || row.arabicFullName}</td>{identifiers ? <td>{row.mrn || "-"}</td> : null}<td>{row.ageYears || "-"} / {row.sex || "-"}</td>{phones ? <td>{row.phone1 || "-"}</td> : null}<td>{row.category || "-"}</td></tr>)}</tbody></table></div>; }
+function AuditPreview({ rows }: { rows: AuditEntry[] }) { return <div className="overflow-auto"><table className="w-full min-w-[720px] text-sm"><thead className="bg-muted/50 text-xs uppercase"><tr><th>Time</th><th>Output</th><th>Template</th><th>Rows</th><th>Sensitive fields</th></tr></thead><tbody>{rows.map((row) => { const values = asRecord(row.newValues); return <tr key={row.id}><td>{row.createdAt || "-"}</td><td>{String(values.outputType || row.actionType || "-")}</td><td>{String(values.reportTemplate || "-")}</td><td>{String(values.rowCount ?? "-")}</td><td>{values.includePhoneNumbers ? "phones " : ""}{values.includePatientIdentifiers ? "identifiers" : ""}{!values.includePhoneNumbers && !values.includePatientIdentifiers ? "none" : ""}</td></tr>; })}</tbody></table></div>; }
+function MiniChart({ rows }: { rows: Array<{ label: string; count: number }> }) { const max = Math.max(...rows.map((row) => row.count), 1); return <Card className="p-4"><h3 className="mb-3 font-semibold">Grouped counts</h3><div className="space-y-2">{rows.slice(0, 10).map((row) => <div key={row.label} className="grid grid-cols-[160px_1fr_48px] items-center gap-3 text-sm"><span className="truncate">{row.label}</span><div className="h-3 rounded bg-muted"><div className="h-3 rounded bg-accent" style={{ width: `${Math.max(4, row.count / max * 100)}%` }} /></div><span className="text-right font-mono">{row.count}</span></div>)}</div></Card>; }
+function appointmentCell(row: AppointmentWithDetails, column: Column, language: "ar" | "en", phones: boolean, identifiers: boolean) { const values: Record<Column, string> = { time: row.bookingTime || "-", patient: chooseLocalized(language, row.arabicFullName, row.englishFullName), accession: row.accessionNumber, modality: chooseLocalized(language, row.modalityNameAr, row.modalityNameEn) || "-", exam: chooseLocalized(language, row.examNameAr, row.examNameEn) || "-", category: row.caseCategory || "-", priority: chooseLocalized(language, row.priorityNameAr, row.priorityNameEn) || "-", status: statusLabel(language, row.status), phone: phones ? row.phone1 || "-" : "", identifier: identifiers ? row.mrn || row.nationalId || "-" : "" }; return values[column]; }
+function appointmentExportRow(row: AppointmentWithDetails, language: "ar" | "en", phones: boolean, identifiers: boolean) { return { Date: formatDateLy(row.appointmentDate), Time: row.bookingTime || "", Patient: chooseLocalized(language, row.arabicFullName, row.englishFullName), Accession: row.accessionNumber, Modality: chooseLocalized(language, row.modalityNameAr, row.modalityNameEn) || "", Exam: chooseLocalized(language, row.examNameAr, row.examNameEn) || "", Category: row.caseCategory || "", Priority: chooseLocalized(language, row.priorityNameAr, row.priorityNameEn) || "", Status: row.status, Phone: phones ? row.phone1 || "" : "", Identifier: identifiers ? row.mrn || row.nationalId || "" : "" }; }
+function buildGroupedCounts(rows: AppointmentWithDetails[], grouping: string, language: "ar" | "en") { if (!grouping) return []; const counts = new Map<string, number>(); for (const row of rows) { const label = grouping === "modality" ? chooseLocalized(language, row.modalityNameAr, row.modalityNameEn) || "Unknown" : grouping === "exam" ? chooseLocalized(language, row.examNameAr, row.examNameEn) || "Unspecified exam" : grouping === "status" ? row.status || "Unknown" : row.caseCategory || "Uncategorized"; counts.set(label, (counts.get(label) || 0) + 1); } return Array.from(counts, ([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count); }
+function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function auditRow(row: AuditEntry) { const values = asRecord(row.newValues); return { time: row.createdAt || "", user: String(row.changedByUserId ?? ""), action: String(values.outputType || row.actionType || ""), report: String(values.reportTemplate || ""), rows: String(values.rowCount ?? ""), details: `${values.includePhoneNumbers ? "phones " : ""}${values.includePatientIdentifiers ? "identifiers" : ""}`.trim() || "none" }; }
+function auditExportRow(row: AuditEntry) { const values = asRecord(row.newValues); return { Time: row.createdAt || "", Output: values.outputType || row.actionType, Template: values.reportTemplate || "", Rows: values.rowCount ?? "", IncludePhones: Boolean(values.includePhoneNumbers), IncludeIdentifiers: Boolean(values.includePatientIdentifiers), UserId: row.changedByUserId ?? "" }; }
+function toCsv(rows: Array<Record<string, unknown>>) { if (!rows.length) return ""; const headers = Object.keys(rows[0]); const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`; return [headers.map(escape).join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n"); }
+function downloadText(name: string, text: string) { const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function downloadBlob(blob: Blob, name: string) { const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = name; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+async function browserPrintReport(model: ReportCenterRenderModel) { try { const url = URL.createObjectURL(await fetchReportCenterPdf(model)); const printWindow = window.open(url, "_blank"); if (!printWindow) throw new Error("The browser blocked the print window."); printWindow.addEventListener("load", () => { printWindow.focus(); printWindow.print(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); }, { once: true }); } catch (error) { pushToast({ type: "error", title: "Browser printing failed", message: error instanceof Error ? error.message : "The report could not be opened." }); } }
+function loadPresets(): ReportPreset[] { try { const parsed = JSON.parse(localStorage.getItem(PRESETS_KEY) || "[]"); return Array.isArray(parsed) ? parsed.slice(0, 12) : []; } catch { return []; } }

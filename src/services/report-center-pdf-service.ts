@@ -16,11 +16,10 @@ export interface ReportCenterRenderModel {
 }
 
 const APPOINTMENT_TEMPLATES = new Set([
-  "daily-appointments", "daily-modality", "appointment-slips", "registration-list", "no-show-list",
-  "cancellation-list", "walk-in-list", "priority-urgent", "waiting-list", "preparation-instructions",
-  "capacity-utilization", "special-quota", "supervisor-override", "exam-type-volume",
+  "daily-appointments", "no-show-list", "cancellation-list", "walk-in-list", "priority-urgent",
+  "waiting-list", "appointment-volume-by-modality", "special-quota", "supervisor-override", "exam-type-volume",
 ]);
-const SUPERVISOR_APPOINTMENT_TEMPLATES = new Set(["no-show-list", "cancellation-list", "capacity-utilization", "special-quota", "supervisor-override", "exam-type-volume"]);
+const SUPERVISOR_APPOINTMENT_TEMPLATES = new Set(["no-show-list", "cancellation-list", "appointment-volume-by-modality", "special-quota", "supervisor-override", "exam-type-volume"]);
 const SOURCE_COLUMNS: Record<ReportSource, Set<string>> = {
   appointments: new Set(["time", "patient", "accession", "modality", "exam", "category", "priority", "status", "phone", "identifier"]),
   patients: new Set(["patient", "identifier", "sex", "age", "phone", "category"]),

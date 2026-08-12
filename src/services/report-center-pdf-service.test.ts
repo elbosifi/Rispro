@@ -23,9 +23,9 @@ describe("Report Center PDF render model", () => {
     assert.match(html, /data-report-center-document="true"/);
   });
 
-  it("supports all fourteen enabled appointment templates", () => {
-    const ids = ["daily-appointments", "daily-modality", "appointment-slips", "registration-list", "no-show-list", "cancellation-list", "walk-in-list", "priority-urgent", "waiting-list", "preparation-instructions", "capacity-utilization", "special-quota", "supervisor-override", "exam-type-volume"];
-    assert.equal(ids.length, 14);
+  it("supports only the ten truthful appointment report templates", () => {
+    const ids = ["daily-appointments", "no-show-list", "cancellation-list", "walk-in-list", "priority-urgent", "waiting-list", "appointment-volume-by-modality", "special-quota", "supervisor-override", "exam-type-volume"];
+    assert.equal(ids.length, 10);
     for (const templateId of ids) assert.doesNotThrow(() => parseReportCenterRenderModel({ ...base, templateId }, "supervisor"));
   });
 
