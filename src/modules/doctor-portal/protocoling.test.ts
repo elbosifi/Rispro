@@ -51,11 +51,13 @@ describe("Doctor Portal protocoling worklist backend", () => {
 
   it("lists CT and MRI appointments with assignment state from protocol library tables", () => {
     const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    const modalityPolicy = readFileSync(`${root}/src/services/protocoling-modality.ts`, "utf8");
 
     assert.match(repo, /appointments_v2\.bookings/);
     assert.match(repo, /appointment_protocol_assignments/);
-    assert.match(repo, /protocoling_modality\.modality_code in \('CT', 'MRI'\)/);
-    assert.match(repo, /upper\(m\.code\) in \('MRI', 'MR'\)/);
+    assert.match(repo, /protocolingModalityAppliesSql\("protocoling_modality\.modality_code"\)/);
+    assert.match(modalityPolicy, /in \('CT', 'MRI'\)/);
+    assert.match(modalityPolicy, /upper\(m\.code\) in \('MRI', 'MR'\)/);
     assert.match(repo, /protocol_name/);
     assert.match(repo, /version_number/);
     assert.match(repo, /scanner_name/);

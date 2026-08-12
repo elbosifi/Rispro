@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DocumentsStorageSection from "./documents-storage-section";
+import { t as translate, type TranslationKey } from "@/lib/i18n";
 
 const { fetchSettings, saveSettings } = vi.hoisted(() => ({ fetchSettings: vi.fn(), saveSettings: vi.fn() }));
 
@@ -15,7 +16,7 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 vi.mock("@/lib/naps2-webscan", () => ({ scanAppointmentRequest: vi.fn() }));
 vi.mock("@/providers/language-provider", () => ({
-  useLanguage: () => ({ language: "en", t: (key: string) => key }),
+  useLanguage: () => ({ language: "en", t: (key: TranslationKey) => translate("en", key) }),
 }));
 
 function renderSection() {
@@ -42,7 +43,7 @@ describe("Documents & Uploads protocol queue setting", () => {
     expect(screen.getByText(/appointments without an attached request\/referral document remain booked but are withheld/i)).toBeTruthy();
 
     await userEvent.click(toggle);
-    await userEvent.click(screen.getByRole("button", { name: "settings.documents.save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save document settings" }));
 
     await waitFor(() => expect(saveSettings).toHaveBeenCalled());
     expect(saveSettings).toHaveBeenCalledWith("documents_and_uploads", expect.objectContaining({

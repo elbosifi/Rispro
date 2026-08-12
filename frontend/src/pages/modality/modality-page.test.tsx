@@ -242,7 +242,7 @@ function renderPage(
   fetchModalityWorklistMock.mockResolvedValue(rows);
   fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
   listAppointmentDocumentsMock.mockResolvedValue([]);
-  fetchRequestDocumentProtocolPolicyMock.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, hasQualifyingRequestDocument: null });
+  fetchRequestDocumentProtocolPolicyMock.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
   uploadAppointmentDocumentMock.mockResolvedValue({ id: 90, patientId: 10, appointmentId: null, v2BookingId: rows[0]?.id ?? 1, documentType: "clinical_document", originalFilename: "clinical.pdf", storedPath: "", mimeType: "application/pdf", fileSize: 8, storageLocationType: "local_fallback", source: "manual_upload", createdAt: "2026-06-18T08:30:00.000Z" });
   prepareScanSessionMock.mockResolvedValue({ preparation: { documentType: "clinical_document", sessionCode: "SCAN-MODALITY", guidance: "Ready" } });
   createScanSessionMock.mockResolvedValue({ launchUrl: "rispro-scanner://scan?token=modality-test", expiresAt: "2026-06-18T09:00:00.000Z", fallbackUploadAllowed: true });

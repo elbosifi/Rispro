@@ -91,9 +91,15 @@ export async function listAppointmentDocuments(
   return (raw.documents ?? []).map(mapRequestDocument);
 }
 
-export async function fetchRequestDocumentProtocolPolicy(appointmentId?: number): Promise<{ requireRequestDocumentForProtocolQueue: boolean; hasQualifyingRequestDocument: boolean | null }> {
+export type RequestDocumentProtocolPolicy = {
+  requireRequestDocumentForProtocolQueue: boolean;
+  protocolQueueAppliesToAppointment: boolean | null;
+  hasQualifyingRequestDocument: boolean | null;
+};
+
+export async function fetchRequestDocumentProtocolPolicy(appointmentId?: number): Promise<RequestDocumentProtocolPolicy> {
   const query = appointmentId ? `?appointmentId=${encodeURIComponent(String(appointmentId))}` : "";
-  return api<{ requireRequestDocumentForProtocolQueue: boolean; hasQualifyingRequestDocument: boolean | null }>(`/documents/protocol-eligibility-policy${query}`);
+  return api<RequestDocumentProtocolPolicy>(`/documents/protocol-eligibility-policy${query}`);
 }
 
 export async function uploadAppointmentDocument(payload: {

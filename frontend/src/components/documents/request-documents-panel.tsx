@@ -165,12 +165,13 @@ export function RequestDocumentsPanel({
     queryClient.invalidateQueries({ queryKey });
     queryClient.invalidateQueries({ queryKey: ["documents", "protocol-eligibility-policy", appointmentId] });
   };
-  const protocolEligibilityStatus = protocolPolicy?.requireRequestDocumentForProtocolQueue ? (
+  const protocolEligibilityStatus = protocolPolicy?.requireRequestDocumentForProtocolQueue
+    && protocolPolicy.protocolQueueAppliesToAppointment ? (
     <div
       className={`rounded-lg border px-3 py-2 text-xs font-medium ${hasQualifyingRequestDocument ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}
       data-testid="request-document-protocol-status"
     >
-      {hasQualifyingRequestDocument ? "Request attached" : "Request missing — not yet eligible for protocoling"}
+      {hasQualifyingRequestDocument ? t("documents.protocolRequestAttached") : t("documents.protocolRequestMissing")}
     </div>
   ) : null;
   const selectedDocument = useMemo(

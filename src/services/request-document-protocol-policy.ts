@@ -1,10 +1,17 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { loadSettingsMap } from "./settings-service.js";
+import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "./protocoling-modality.js";
 
 export const REQUEST_DOCUMENT_PROTOCOL_SETTING_CATEGORY = "documents_and_uploads";
 export const REQUEST_DOCUMENT_PROTOCOL_SETTING_KEY = "require_request_document_for_protocol_queue";
 export const QUALIFYING_REQUEST_DOCUMENT_TYPE = "appointment_request";
+
+export type RequestDocumentProtocolPolicy = {
+  requireRequestDocumentForProtocolQueue: boolean;
+  protocolQueueAppliesToAppointment: boolean | null;
+  hasQualifyingRequestDocument: boolean | null;
+};
 
 function isEnabled(value: unknown): boolean {
   return String(value ?? "").trim().toLowerCase() === "enabled";
@@ -38,6 +45,32 @@ export async function hasQualifyingRequestDocument(appointmentId: number): Promi
     [appointmentId]
   );
   return Boolean(result.rows[0]?.qualifies);
+}
+
+export async function getRequestDocumentProtocolPolicy(appointmentId?: number): Promise<RequestDocumentProtocolPolicy> {
+  const requireRequestDocumentForProtocolQueue = await isRequestDocumentRequiredForProtocolQueue();
+  if (!appointmentId) {
+    return {
+      requireRequestDocumentForProtocolQueue,
+      protocolQueueAppliesToAppointment: null,
+      hasQualifyingRequestDocument: null,
+    };
+  }
+
+  const result = await pool.query<{ protocol_queue_applies: boolean; has_qualifying_request: boolean }>(
+    `select
+       ${protocolingModalityAppliesSql(`(${PROTOCOLING_MODALITY_SQL})`)} as protocol_queue_applies,
+       ${qualifyingRequestDocumentExistsSql("b.id")} as has_qualifying_request
+     from appointments_v2.bookings b
+     join modalities m on m.id = b.modality_id
+     where b.id = $1`,
+    [appointmentId]
+  );
+  return {
+    requireRequestDocumentForProtocolQueue,
+    protocolQueueAppliesToAppointment: Boolean(result.rows[0]?.protocol_queue_applies),
+    hasQualifyingRequestDocument: Boolean(result.rows[0]?.has_qualifying_request),
+  };
 }
 
 export async function assertRequestDocumentProtocolEligibility(appointmentId: number): Promise<void> {

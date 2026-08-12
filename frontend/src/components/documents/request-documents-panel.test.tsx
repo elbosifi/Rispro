@@ -9,8 +9,8 @@ import { saveWorkstationNaps2Settings, WORKSTATION_NAPS2_SETTINGS_KEY } from "@/
 
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(async () => []);
 const mockFetchRequestDocumentProtocolPolicy = vi.fn<
-  (appointmentId?: number) => Promise<{ requireRequestDocumentForProtocolQueue: boolean; hasQualifyingRequestDocument: boolean | null }>
->(async () => ({ requireRequestDocumentForProtocolQueue: false, hasQualifyingRequestDocument: null }));
+  (appointmentId?: number) => Promise<{ requireRequestDocumentForProtocolQueue: boolean; protocolQueueAppliesToAppointment: boolean | null; hasQualifyingRequestDocument: boolean | null }>
+>(async () => ({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null }));
 const mockUploadAppointmentDocument = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({
   id: 1,
   patientId: 9,
@@ -227,7 +227,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     setMobileViewport(false);
     mockListAppointmentDocuments.mockReset();
     mockFetchRequestDocumentProtocolPolicy.mockReset();
-    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, hasQualifyingRequestDocument: null });
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     mockUploadAppointmentDocument.mockReset();
     mockDeleteAppointmentDocument.mockReset();
     mockPrepareScanSession.mockReset();
@@ -936,18 +936,39 @@ describe("RequestDocumentsPanel local scan flow", () => {
   });
 
   it("shows missing and attached protocol eligibility from canonical appointment-request documents", async () => {
-    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: false });
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false });
     const missing = renderPanel();
     expect(await screen.findByText("Request missing — not yet eligible for protocoling")).toBeTruthy();
     missing.unmount();
 
     mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.pdf", "application/pdf")]);
-    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: true });
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
     renderPanel();
     expect(await screen.findByText("Request attached")).toBeTruthy();
   });
 
   it("does not show protocol eligibility status when the policy is disabled", async () => {
+    renderPanel();
+    await waitFor(() => expect(mockFetchRequestDocumentProtocolPolicy).toHaveBeenCalled());
+    expect(screen.queryByTestId("request-document-protocol-status")).toBeNull();
+  });
+
+  it("does not show protocol eligibility status when the appointment does not use protocoling", async () => {
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({
+      requireRequestDocumentForProtocolQueue: true,
+      protocolQueueAppliesToAppointment: false,
+      hasQualifyingRequestDocument: false,
+    });
+    const missing = renderPanel();
+    await waitFor(() => expect(mockFetchRequestDocumentProtocolPolicy).toHaveBeenCalled());
+    expect(screen.queryByTestId("request-document-protocol-status")).toBeNull();
+    missing.unmount();
+
+    mockFetchRequestDocumentProtocolPolicy.mockResolvedValue({
+      requireRequestDocumentForProtocolQueue: true,
+      protocolQueueAppliesToAppointment: false,
+      hasQualifyingRequestDocument: true,
+    });
     renderPanel();
     await waitFor(() => expect(mockFetchRequestDocumentProtocolPolicy).toHaveBeenCalled());
     expect(screen.queryByTestId("request-document-protocol-status")).toBeNull();

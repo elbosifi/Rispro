@@ -10,7 +10,7 @@ import {
   listDocuments,
   uploadDocument,
 } from "../services/document-service.js";
-import { hasQualifyingRequestDocument, isRequestDocumentRequiredForProtocolQueue } from "../services/request-document-protocol-policy.js";
+import { getRequestDocumentProtocolPolicy } from "../services/request-document-protocol-policy.js";
 import type { DocumentRow } from "../services/document-service.js";
 
 export const documentsRouter = express.Router();
@@ -21,10 +21,7 @@ documentsRouter.get(
   "/protocol-eligibility-policy",
   asyncRoute(async (req: Request, res: Response) => {
     const appointmentId = asOptionalUserId(asUnknownRecord(req.query).appointmentId);
-    res.json({
-      requireRequestDocumentForProtocolQueue: await isRequestDocumentRequiredForProtocolQueue(),
-      hasQualifyingRequestDocument: appointmentId ? await hasQualifyingRequestDocument(Number(appointmentId)) : null,
-    });
+    res.json(await getRequestDocumentProtocolPolicy(appointmentId ? Number(appointmentId) : undefined));
   })
 );
 

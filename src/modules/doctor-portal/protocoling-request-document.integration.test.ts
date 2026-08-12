@@ -5,11 +5,13 @@ import { pool } from "../../db/pool.js";
 import { HttpError } from "../../utils/http-error.js";
 import { errorHandler } from "../../middleware/error-handler.js";
 import { settingsRouter } from "../../routes/settings.js";
+import { documentsRouter } from "../../routes/documents.js";
 import { upsertSettings } from "../../services/settings-service.js";
 import {
   REQUEST_DOCUMENT_PROTOCOL_SETTING_CATEGORY,
   REQUEST_DOCUMENT_PROTOCOL_SETTING_KEY,
   isRequestDocumentRequiredForProtocolQueue,
+  type RequestDocumentProtocolPolicy,
 } from "../../services/request-document-protocol-policy.js";
 import { listProtocolingAppointments, saveProtocolAssignment } from "./protocoling-repository.js";
 import {
@@ -26,8 +28,8 @@ type Fixture = {
   userId: number;
   patientId: number;
   otherPatientId: number;
-  modalityIds: { ct: number; mri: number; us: number };
-  examTypeIds: { ct: number; mri: number; us: number };
+  modalityIds: { ct: number; mri: number; us: number; mammo: number };
+  examTypeIds: { ct: number; mri: number; us: number; mammo: number };
   policySetId: number;
   policyVersionId: number;
   bookingIds: number[];
@@ -96,6 +98,7 @@ async function createSettingsTestApp(): Promise<{ baseUrl: string; close: () => 
   testApp.use(express.json());
   testApp.use(cookieParser());
   testApp.use("/api/settings", settingsRouter);
+  testApp.use("/api/documents", documentsRouter);
   testApp.use(errorHandler);
   const server = http.createServer(testApp);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -163,7 +166,7 @@ describe("request-document protocol queue policy", () => {
     );
     const modalityIds = {} as Fixture["modalityIds"];
     const examTypeIds = {} as Fixture["examTypeIds"];
-    for (const [key, code] of [["ct", "CT"], ["mri", "MRI"], ["us", "US"]] as const) {
+    for (const [key, code] of [["ct", "CT"], ["mri", "MRI"], ["us", "US"], ["mammo", "MAMMO"]] as const) {
       const modality = await pool.query<{ id: number }>(
         `insert into modalities (code, name_ar, name_en, daily_capacity, is_active)
          values ($1, $2, $2, 20, true) returning id`,
@@ -285,6 +288,46 @@ describe("request-document protocol queue policy", () => {
     await saveProtocolAssignment(ct, assignmentInput("Assigned CT protocol"), fixture.userId);
     const assigned = await listProtocolingAppointments({ dateFrom: TEST_DATE, dateTo: TEST_DATE, protocolStatus: "ASSIGNED" });
     assert.equal(assigned.some((row) => row.appointmentId === ct), true);
+  });
+
+  it("reports appointment-specific protocol applicability from the protocoling modality definition", async () => {
+    if (!fixture || !app) return;
+    await setRequirement(true);
+    const auth = createTestAuthCookie(fixture.userId, "supervisor");
+    const bookings = {
+      ct: await createBooking({ modality: "ct" }),
+      mri: await createBooking({ modality: "mri" }),
+      us: await createBooking({ modality: "us" }),
+      mammo: await createBooking({ modality: "mammo" }),
+    };
+
+    const globalPolicy = await fetchJson<RequestDocumentProtocolPolicy>(app.baseUrl, "/api/documents/protocol-eligibility-policy", { cookie: auth });
+    assert.equal(globalPolicy.status, 200);
+    assert.deepEqual(globalPolicy.data, {
+      requireRequestDocumentForProtocolQueue: true,
+      protocolQueueAppliesToAppointment: null,
+      hasQualifyingRequestDocument: null,
+    });
+
+    for (const modality of ["ct", "mri"] as const) {
+      const response: { status: number; data: RequestDocumentProtocolPolicy } = await fetchJson<RequestDocumentProtocolPolicy>(app.baseUrl, `/api/documents/protocol-eligibility-policy?appointmentId=${bookings[modality]}`, { cookie: auth });
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.data, {
+        requireRequestDocumentForProtocolQueue: true,
+        protocolQueueAppliesToAppointment: true,
+        hasQualifyingRequestDocument: false,
+      });
+    }
+
+    for (const modality of ["us", "mammo"] as const) {
+      const response: { status: number; data: RequestDocumentProtocolPolicy } = await fetchJson<RequestDocumentProtocolPolicy>(app.baseUrl, `/api/documents/protocol-eligibility-policy?appointmentId=${bookings[modality]}`, { cookie: auth });
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.data, {
+        requireRequestDocumentForProtocolQueue: true,
+        protocolQueueAppliesToAppointment: false,
+        hasQualifyingRequestDocument: false,
+      });
+    }
   });
 
   it("blocks direct assignment only when enabled and the request is missing", async () => {

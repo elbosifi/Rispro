@@ -30,8 +30,8 @@ describe("documents and printing API contracts", () => {
   });
 
   it("reads the request-document protocol policy from the authenticated document API", async () => {
-    vi.mocked(api).mockResolvedValueOnce({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: true });
-    await expect(fetchRequestDocumentProtocolPolicy(42)).resolves.toEqual({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: true });
+    vi.mocked(api).mockResolvedValueOnce({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
+    await expect(fetchRequestDocumentProtocolPolicy(42)).resolves.toEqual({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true });
     expect(api).toHaveBeenCalledWith("/documents/protocol-eligibility-policy?appointmentId=42");
   });
 

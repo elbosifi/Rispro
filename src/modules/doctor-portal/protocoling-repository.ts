@@ -3,6 +3,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
+import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
 import {
   assertRequestDocumentProtocolEligibility,
   isRequestDocumentRequiredForProtocolQueue,
@@ -123,20 +124,6 @@ function mapMriSequence(row: RawRecord): ProtocolingMriSequenceRow {
   };
 }
 
-const PROTOCOLING_MODALITY_SQL = `
-  case
-    when upper(m.code) = 'CT'
-      or coalesce(m.name_en, '') ~* '(^|[^[:alpha:]])CT([^[:alpha:]]|$)|computed tomography'
-      or coalesce(m.name_ar, '') like '%مقط%'
-      then 'CT'
-    when upper(m.code) in ('MRI', 'MR')
-      or coalesce(m.name_en, '') ~* '(^|[^[:alpha:]])MRI([^[:alpha:]]|$)|magnetic resonance'
-      or coalesce(m.name_ar, '') like '%رنين%'
-      then 'MRI'
-    else null
-  end
-`;
-
 const APPOINTMENT_SELECT = `
   select
     b.id as appointment_id,
@@ -224,7 +211,7 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
     "b.booking_date >= $1::date",
     "b.booking_date <= $2::date",
     "b.status not in ('cancelled', 'discontinued', 'voided')",
-    "protocoling_modality.modality_code in ('CT', 'MRI')",
+    protocolingModalityAppliesSql("protocoling_modality.modality_code"),
   ];
   if (await isRequestDocumentRequiredForProtocolQueue()) {
     where.push(qualifyingRequestDocumentExistsSql("b.id"));
@@ -263,7 +250,7 @@ async function getProtocolingAppointment(appointmentId: number): Promise<DoctorP
   const result = await pool.query<RawRecord>(
     `${APPOINTMENT_SELECT}
      where b.id = $1
-       and protocoling_modality.modality_code in ('CT', 'MRI')
+       and ${protocolingModalityAppliesSql("protocoling_modality.modality_code")}
      limit 1`,
     [appointmentId]
   );

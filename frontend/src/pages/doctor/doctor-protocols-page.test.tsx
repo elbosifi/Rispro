@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorMe, DoctorProtocolingAppointment } from "@/types/api";
+import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 
 const appointment: DoctorProtocolingAppointment = {
@@ -58,7 +59,7 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
-vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false }) }));
+vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false, t: (key: TranslationKey) => translate("en", key) }) }));
 vi.mock("@/v2/appointments/api", () => ({
   rescheduleV2Booking: mockRescheduleBooking,
   useV2ExamTypes: () => ({ data: [{ id: 10, name: "CT Chest", nameEn: "CT Chest", nameAr: "صدر", code: "CTC", modalityId: 4, isActive: true }, { id: 11, name: "CT Chest Abdomen", nameEn: "CT Chest Abdomen", nameAr: "صدر وبطن", code: "CTCA", modalityId: 4, isActive: true }, { id: 12, name: "MRI Brain", nameEn: "MRI Brain", nameAr: "دماغ", code: "MRB", modalityId: 5, isActive: true }], isLoading: false, isError: false }),
@@ -94,7 +95,7 @@ describe("Doctor protocoling request documents", () => {
   beforeEach(() => {
     mockFetchAppointments.mockResolvedValue([appointment]);
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
-    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, hasQualifyingRequestDocument: null });
+    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
@@ -105,13 +106,13 @@ describe("Doctor protocoling request documents", () => {
   });
 
   it("shows the request-document queue policy only when enabled", async () => {
-    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: null });
+    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     const enabledClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     const enabled = render(<QueryClientProvider client={enabledClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
     expect(await screen.findByText("Only appointments with an attached request/referral document are eligible for protocoling.")).toBeTruthy();
     enabled.unmount();
 
-    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, hasQualifyingRequestDocument: null });
+    mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     const disabledClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     render(<QueryClientProvider client={disabledClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
     await screen.findByRole("button", { name: "Assign" });

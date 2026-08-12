@@ -64,6 +64,7 @@ import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { ProtocolingAppointmentDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 import { buildRadiantPacsTagUrl } from "./doctor-reporting-board-page.helpers";
+import { useLanguage } from "@/providers/language-provider";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -994,6 +995,7 @@ function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving:
 }
 
 function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [dateFrom, setDateFrom] = useState(todayIso());
   const [dateTo, setDateTo] = useState(addDays(todayIso(), 7));
@@ -1107,7 +1109,7 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
 
       {protocolPolicyQuery.data?.requireRequestDocumentForProtocolQueue ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900" data-testid="protocol-request-document-policy">
-          Only appointments with an attached request/referral document are eligible for protocoling.
+          {t("doctor.protocols.requestDocumentPolicyNotice")}
         </div>
       ) : null}
 

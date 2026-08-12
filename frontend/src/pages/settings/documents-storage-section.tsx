@@ -222,9 +222,9 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
             className="mt-1"
           />
           <span>
-            <strong className="block">Require request document before protocol queue</strong>
+            <strong className="block">{t("settings.documents.requireRequestForProtocolQueue")}</strong>
             <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">
-              When enabled, appointments without an attached request/referral document remain booked but are withheld from the doctor's protocol queue until the document is attached.
+              {t("settings.documents.requireRequestForProtocolQueueHelp")}
             </span>
           </span>
         </label>
