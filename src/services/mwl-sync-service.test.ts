@@ -6,7 +6,7 @@ test("shouldSkipOrthancInitialUpsertForQueueGate skips first scheduled upsert wh
   assert.equal(
     shouldSkipOrthancInitialUpsertForQueueGate({
       sendOnlyWhenPatientEntersQueue: true,
-      previousSyncExists: false,
+      currentProjectionExists: false,
       status: "scheduled",
     }),
     true
@@ -17,7 +17,7 @@ test("shouldSkipOrthancInitialUpsertForQueueGate allows queued statuses and exis
   assert.equal(
     shouldSkipOrthancInitialUpsertForQueueGate({
       sendOnlyWhenPatientEntersQueue: true,
-      previousSyncExists: false,
+      currentProjectionExists: false,
       status: "arrived",
     }),
     false
@@ -25,7 +25,7 @@ test("shouldSkipOrthancInitialUpsertForQueueGate allows queued statuses and exis
   assert.equal(
     shouldSkipOrthancInitialUpsertForQueueGate({
       sendOnlyWhenPatientEntersQueue: true,
-      previousSyncExists: true,
+      currentProjectionExists: true,
       status: "scheduled",
     }),
     false

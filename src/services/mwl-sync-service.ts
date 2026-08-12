@@ -78,11 +78,11 @@ function deriveOperationFromStatus(status: string | null | undefined): OrthancMw
 
 export function shouldSkipOrthancInitialUpsertForQueueGate(input: {
   sendOnlyWhenPatientEntersQueue: boolean;
-  previousSyncExists: boolean;
+  currentProjectionExists: boolean;
   status: string | null | undefined;
 }): boolean {
   return input.sendOnlyWhenPatientEntersQueue
-    && !input.previousSyncExists
+    && !input.currentProjectionExists
     && deriveOperationFromStatus(input.status) === "upsert"
     && !ORTHANC_QUEUE_STATUSES.has(String(input.status || ""));
 }
@@ -129,7 +129,7 @@ async function loadBookingSyncSnapshot(
   return rows[0] ?? null;
 }
 
-async function hasPreviousOrthancSync(client: PoolClient, bookingId: number): Promise<boolean> {
+async function hasCurrentOrthancProjection(client: PoolClient, bookingId: number): Promise<boolean> {
   const { rows } = await client.query<{ exists: boolean }>(
     `
       select exists(
@@ -137,7 +137,7 @@ async function hasPreviousOrthancSync(client: PoolClient, bookingId: number): Pr
         from external_mwl_sync
         where booking_id = $1::bigint
           and external_system = 'orthanc'
-          and sync_status <> 'skipped'
+          and deleted_at is null
       )
     `,
     [bookingId]
@@ -193,10 +193,10 @@ export async function enqueueOrthancSyncForBooking(
     }
 
     let operation = deriveOperationFromStatus(snapshot.status);
-    const previousSyncExists = await hasPreviousOrthancSync(client, bookingId);
+    const currentProjectionExists = await hasCurrentOrthancProjection(client, bookingId);
     const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(bookingId, client);
     if (operation === "upsert" && !eligibility.protocolGateSatisfied) {
-      if (!previousSyncExists) {
+      if (!currentProjectionExists) {
         await client.query("rollback");
         return { enqueued: false, jobId: null, operation: null, reason: "waiting_for_protocol" };
       }
@@ -204,7 +204,7 @@ export async function enqueueOrthancSyncForBooking(
     }
     if (shouldSkipOrthancInitialUpsertForQueueGate({
       sendOnlyWhenPatientEntersQueue: settings.sendOnlyWhenPatientEntersQueue,
-      previousSyncExists,
+      currentProjectionExists,
       status: snapshot.status,
     })) {
       await client.query("rollback");
@@ -248,7 +248,24 @@ export async function enqueueOrthancSyncForBooking(
 
     const existingJob = await client.query<{ id: number }>(
       `
-        update external_mwl_outbox
+        with mutable_job as (
+          select id
+          from external_mwl_outbox
+          where booking_id = $1::bigint
+            and external_system = 'orthanc'
+            and status in ('pending', 'failed')
+            and not exists (
+              select 1
+              from external_mwl_outbox newer
+              where newer.booking_id = external_mwl_outbox.booking_id
+                and newer.external_system = external_mwl_outbox.external_system
+                and newer.id > external_mwl_outbox.id
+            )
+          order by id desc
+          limit 1
+          for update
+        )
+        update external_mwl_outbox outbox
         set
           operation = $2,
           status = 'pending',
@@ -257,10 +274,9 @@ export async function enqueueOrthancSyncForBooking(
           payload_hash = $3,
           last_error = null,
           updated_at = now()
-        where booking_id = $1::bigint
-          and external_system = 'orthanc'
-          and status in ('pending', 'processing', 'failed')
-        returning id
+        from mutable_job
+        where outbox.id = mutable_job.id
+        returning outbox.id
       `,
       [bookingId, operation, payloadHash]
     );
@@ -355,12 +371,27 @@ export async function claimOrthancOutboxBatch(limit = 20): Promise<OrthancOutbox
   }>(
     `
       with candidates as (
-        select id
-        from external_mwl_outbox
-        where external_system = 'orthanc'
-          and status in ('pending', 'failed')
-          and next_attempt_at <= now()
-        order by next_attempt_at asc, id asc
+        select candidate.id
+        from external_mwl_outbox candidate
+        where candidate.external_system = 'orthanc'
+          and candidate.status in ('pending', 'failed')
+          and candidate.next_attempt_at <= now()
+          and not exists (
+            select 1
+            from external_mwl_outbox newer
+            where newer.booking_id = candidate.booking_id
+              and newer.external_system = candidate.external_system
+              and newer.id > candidate.id
+          )
+          and not exists (
+            select 1
+            from external_mwl_outbox in_flight
+            where in_flight.booking_id = candidate.booking_id
+              and in_flight.external_system = candidate.external_system
+              and in_flight.status = 'processing'
+              and in_flight.id < candidate.id
+          )
+        order by candidate.next_attempt_at asc, candidate.id asc
         for update skip locked
         limit $1
       )
@@ -391,18 +422,28 @@ export async function claimOrthancOutboxBatch(limit = 20): Promise<OrthancOutbox
   }));
 
   if (jobs.length > 0) {
-    const bookingIds = jobs.map((j) => j.bookingId);
     await pool.query(
       `
-        update external_mwl_sync
+        with claimed(booking_id, job_id) as (
+          select * from unnest($1::bigint[], $2::bigint[])
+        )
+        update external_mwl_sync sync
         set
           sync_status = 'in_progress',
           last_attempt_at = now(),
           updated_at = now()
-        where external_system = 'orthanc'
-          and booking_id = any($1::bigint[])
+        from claimed
+        where sync.external_system = 'orthanc'
+          and sync.booking_id = claimed.booking_id
+          and not exists (
+            select 1
+            from external_mwl_outbox newer
+            where newer.booking_id = claimed.booking_id
+              and newer.external_system = 'orthanc'
+              and newer.id > claimed.job_id
+          )
       `,
-      [bookingIds]
+      [jobs.map((job) => job.bookingId), jobs.map((job) => job.id)]
     );
   }
 
@@ -444,8 +485,15 @@ export async function markOrthancOutboxSuccess(
           updated_at = now()
         where booking_id = $1::bigint
           and external_system = 'orthanc'
+          and not exists (
+            select 1
+            from external_mwl_outbox newer
+            where newer.booking_id = $1::bigint
+              and newer.external_system = 'orthanc'
+              and newer.id > $4
+          )
       `,
-      [bookingId, operation, externalWorklistId]
+      [bookingId, operation, externalWorklistId, jobId]
     );
 
     await client.query("commit");
@@ -493,8 +541,15 @@ export async function markOrthancOutboxFailure(
           updated_at = now()
         where booking_id = $1::bigint
           and external_system = 'orthanc'
+          and not exists (
+            select 1
+            from external_mwl_outbox newer
+            where newer.booking_id = $1::bigint
+              and newer.external_system = 'orthanc'
+              and newer.id > $3
+          )
       `,
-      [bookingId, errorMessage]
+      [bookingId, errorMessage, jobId]
     );
 
     await client.query("commit");

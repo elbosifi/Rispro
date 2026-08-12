@@ -19,8 +19,18 @@ import {
   reconcileMwlProtocolPolicyChange,
   syncBookingWorklistSources,
 } from "./dicom-service.js";
-import { claimOrthancOutboxBatch, enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
-import { claimSanteOutboxBatch, enqueueSanteHl7ForBooking } from "./sante-hl7-outbox-service.js";
+import {
+  claimOrthancOutboxBatch,
+  enqueueOrthancSyncForBooking,
+  markOrthancOutboxFailure,
+  markOrthancOutboxSuccess,
+} from "./mwl-sync-service.js";
+import {
+  claimSanteOutboxBatch,
+  enqueueSanteHl7ForBooking,
+  markSanteOutboxFailure,
+  writeSanteOutboxJob,
+} from "./sante-hl7-outbox-service.js";
 import {
   MWL_POLICY_CATEGORY,
   REQUIRE_PROTOCOL_BEFORE_MWL_KEY,
@@ -45,6 +55,7 @@ const SETTINGS_CATEGORIES = [MWL_POLICY_CATEGORY, "orthanc_mwl_sync", "sante_wor
 let fixture: Fixture | null = null;
 let settingsSnapshot: SettingSnapshot[] = [];
 let tempRoot = "";
+let santeOutputRoot = "";
 let testApp: { baseUrl: string; close: () => Promise<void> } | null = null;
 
 async function createSettingsTestApp(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
@@ -134,6 +145,39 @@ async function latestSanteEvent(bookingId: number): Promise<string | null> {
   return rows[0]?.event_type ?? null;
 }
 
+async function claimOrthancJob(bookingId: number, operation: "upsert" | "delete") {
+  const jobs = await claimOrthancOutboxBatch(500);
+  const job = jobs.find((candidate) => candidate.bookingId === bookingId && candidate.operation === operation);
+  assert.ok(job, `Expected claimable Orthanc ${operation} for booking ${bookingId}.`);
+  return job;
+}
+
+async function claimSanteJob(bookingId: number, eventType: "create" | "update" | "cancel") {
+  const jobs = await claimSanteOutboxBatch(500);
+  const job = jobs.find((candidate) => candidate.bookingId === bookingId && candidate.eventType === eventType);
+  assert.ok(job, `Expected claimable Sante ${eventType} for booking ${bookingId}.`);
+  return job;
+}
+
+async function establishPublishedProjection(bookingId: number): Promise<void> {
+  const orthanc = await enqueueOrthancSyncForBooking(bookingId);
+  assert.equal(orthanc.operation, "upsert");
+  const orthancJob = await claimOrthancJob(bookingId, "upsert");
+  await markOrthancOutboxSuccess(orthancJob.id, bookingId, "upsert", `test-${bookingId}`);
+
+  const sante = await enqueueSanteHl7ForBooking(bookingId);
+  assert.equal(sante.enqueued, true);
+  const santeJob = await claimSanteJob(bookingId, "create");
+  await writeSanteOutboxJob(santeJob);
+}
+
+async function completeWithdrawal(bookingId: number): Promise<void> {
+  const orthancJob = await claimOrthancJob(bookingId, "delete");
+  await markOrthancOutboxSuccess(orthancJob.id, bookingId, "delete", `test-${bookingId}`);
+  const santeJob = await claimSanteJob(bookingId, "cancel");
+  await writeSanteOutboxJob(santeJob);
+}
+
 describe("shared MWL protocol policy", () => {
   before(async () => {
     if (!await canReachDatabase()) return;
@@ -143,6 +187,8 @@ describe("shared MWL protocol policy", () => {
     )).rows;
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rispro-mwl-protocol-policy-"));
     const suffix = randomUUID().replace(/-/g, "").slice(0, 10);
+    santeOutputRoot = path.join(process.cwd(), "storage", "sante-hl7-output", `mwl-protocol-${suffix}`);
+    await fs.mkdir(santeOutputRoot, { recursive: true });
     const user = await pool.query<{ id: number }>(
       `insert into users(username,password_hash,full_name,role,is_active)
        values($1,'test-hash',$2,'supervisor',true) returning id`,
@@ -207,6 +253,8 @@ describe("shared MWL protocol policy", () => {
     await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "false");
     await setSetting("sante_worklist_hl7", "enabled", "true");
     await setSetting("sante_worklist_hl7", "mode", "shadow");
+    await setSetting("sante_worklist_hl7", "delivery_method", "file_drop");
+    await setSetting("sante_worklist_hl7", "output_folder_path", santeOutputRoot);
     await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "false");
     await setSetting("dicom_gateway", "worklist_source_dir", path.join(tempRoot, "source"));
     await setSetting("dicom_gateway", "worklist_output_dir", path.join(tempRoot, "output"));
@@ -238,6 +286,9 @@ describe("shared MWL protocol policy", () => {
     invalidateAllCache();
     if (tempRoot && path.resolve(tempRoot).startsWith(path.resolve(os.tmpdir()))) {
       await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+    if (santeOutputRoot && path.resolve(santeOutputRoot).startsWith(path.resolve(process.cwd(), "storage", "sante-hl7-output"))) {
+      await fs.rm(santeOutputRoot, { recursive: true, force: true });
     }
     await pool.end();
   });
@@ -399,6 +450,172 @@ describe("shared MWL protocol policy", () => {
     const claimed = await claimOrthancOutboxBatch(100);
     const job = claimed.find((candidate) => candidate.bookingId === bookingId);
     assert.equal(job?.operation, "delete");
+  });
+
+  it("preserves a DELETE successor when an in-flight Orthanc UPSERT succeeds or fails", async () => {
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+
+    for (const outcome of ["success", "failure"] as const) {
+      const bookingId = await createBooking("ct", "arrived");
+      const queued = await enqueueOrthancSyncForBooking(bookingId);
+      const inFlight = await claimOrthancJob(bookingId, "upsert");
+      assert.equal(inFlight.id, queued.jobId);
+
+      await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "enabled");
+      const withdrawal = await enqueueOrthancSyncForBooking(bookingId);
+      assert.equal(withdrawal.operation, "delete");
+      assert.notEqual(withdrawal.jobId, inFlight.id);
+
+      const rowsBefore = await pool.query<{ id: number; operation: string; status: string }>(
+        "select id,operation,status from external_mwl_outbox where booking_id=$1 order by id",
+        [bookingId]
+      );
+      assert.deepEqual(rowsBefore.rows.map((row) => [Number(row.id), row.operation, row.status]), [
+        [inFlight.id, "upsert", "processing"],
+        [withdrawal.jobId, "delete", "pending"],
+      ]);
+      assert.ok(!(await claimOrthancOutboxBatch(500)).some((job) => job.id === withdrawal.jobId));
+
+      if (outcome === "success") {
+        await markOrthancOutboxSuccess(inFlight.id, bookingId, "upsert", `old-${bookingId}`);
+      } else {
+        await markOrthancOutboxFailure(inFlight.id, bookingId, "obsolete upsert failed", 1);
+      }
+
+      const desiredBeforeDelete = await pool.query<{ sync_status: string; deleted_at: string | null }>(
+        "select sync_status,deleted_at::text as deleted_at from external_mwl_sync where booking_id=$1 and external_system='orthanc'",
+        [bookingId]
+      );
+      assert.equal(desiredBeforeDelete.rows[0]!.sync_status, "pending");
+      assert.ok(desiredBeforeDelete.rows[0]!.deleted_at);
+
+      const deleteJob = await claimOrthancJob(bookingId, "delete");
+      assert.equal(deleteJob.id, withdrawal.jobId);
+      await markOrthancOutboxSuccess(deleteJob.id, bookingId, "delete", `old-${bookingId}`);
+      const finalSync = await pool.query<{ sync_status: string; deleted_at: string | null }>(
+        "select sync_status,deleted_at::text as deleted_at from external_mwl_sync where booking_id=$1 and external_system='orthanc'",
+        [bookingId]
+      );
+      assert.equal(finalSync.rows[0]!.sync_status, "deleted");
+      assert.ok(finalSync.rows[0]!.deleted_at);
+      await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    }
+  });
+
+  it("preserves a Sante CA successor when an in-flight publication succeeds or fails", async () => {
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+
+    for (const outcome of ["success", "failure"] as const) {
+      const bookingId = await createBooking("ct", "arrived");
+      const queued = await enqueueSanteHl7ForBooking(bookingId);
+      const inFlight = await claimSanteJob(bookingId, "create");
+      assert.equal(inFlight.id, queued.jobId);
+
+      await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "enabled");
+      const withdrawal = await enqueueSanteHl7ForBooking(bookingId);
+      assert.equal(withdrawal.enqueued, true);
+      assert.notEqual(withdrawal.jobId, inFlight.id);
+
+      const rowsBefore = await pool.query<{ id: number; event_type: string; order_control: string; status: string }>(
+        "select id,event_type,order_control,status from sante_hl7_outbox where booking_id=$1 order by id",
+        [bookingId]
+      );
+      assert.deepEqual(rowsBefore.rows.map((row) => [Number(row.id), row.event_type, row.order_control, row.status]), [
+        [inFlight.id, "create", "NW", "writing"],
+        [withdrawal.jobId, "cancel", "CA", "pending"],
+      ]);
+      assert.ok(!(await claimSanteOutboxBatch(500)).some((job) => job.id === withdrawal.jobId));
+
+      if (outcome === "success") {
+        await writeSanteOutboxJob(inFlight);
+      } else {
+        await markSanteOutboxFailure(inFlight, "obsolete publication failed", true);
+      }
+      const oldStatus = await pool.query<{ status: string }>("select status from sante_hl7_outbox where id=$1", [inFlight.id]);
+      assert.equal(oldStatus.rows[0]!.status, outcome === "success" ? "pending_import" : "skipped");
+
+      const authoritative = await pool.query<{ last_outbox_id: number; sync_status: string; deleted_at: string | null }>(
+        "select last_outbox_id,sync_status,deleted_at::text as deleted_at from sante_worklist_sync where booking_id=$1",
+        [bookingId]
+      );
+      assert.equal(Number(authoritative.rows[0]!.last_outbox_id), withdrawal.jobId);
+      assert.equal(authoritative.rows[0]!.sync_status, "pending");
+      assert.ok(authoritative.rows[0]!.deleted_at);
+
+      const cancelJob = await claimSanteJob(bookingId, "cancel");
+      assert.equal(cancelJob.id, withdrawal.jobId);
+      await writeSanteOutboxJob(cancelJob);
+      const finalSync = await pool.query<{ last_outbox_id: number; sync_status: string; deleted_at: string | null }>(
+        "select last_outbox_id,sync_status,deleted_at::text as deleted_at from sante_worklist_sync where booking_id=$1",
+        [bookingId]
+      );
+      assert.equal(Number(finalSync.rows[0]!.last_outbox_id), cancelJob.id);
+      assert.equal(finalSync.rows[0]!.sync_status, "written");
+      assert.ok(finalSync.rows[0]!.deleted_at);
+      await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    }
+  });
+
+  it("does not let withdrawn history bypass queue-only when protocol eligibility returns", async () => {
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "false");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "false");
+    const bookingId = await createBooking("ct", "scheduled");
+    await establishPublishedProjection(bookingId);
+
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "true");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "true");
+    assert.equal((await enqueueOrthancSyncForBooking(bookingId)).operation, "upsert");
+    assert.equal((await enqueueSanteHl7ForBooking(bookingId)).enqueued, true);
+    assert.equal(await latestSanteEvent(bookingId), "update");
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "false");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "false");
+
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "enabled");
+    assert.equal((await enqueueOrthancSyncForBooking(bookingId)).operation, "delete");
+    assert.equal((await enqueueSanteHl7ForBooking(bookingId)).reason, "waiting_for_protocol");
+    await completeWithdrawal(bookingId);
+
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "true");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "true");
+    await addFreeTextAssignment(bookingId);
+    assert.equal((await enqueueOrthancSyncForBooking(bookingId)).reason, "waiting_for_patient_queue");
+    assert.equal((await enqueueSanteHl7ForBooking(bookingId)).reason, "waiting_for_patient_queue");
+
+    await pool.query("update appointments_v2.bookings set status='arrived' where id=$1", [bookingId]);
+    assert.equal((await enqueueOrthancSyncForBooking(bookingId)).operation, "upsert");
+    assert.equal((await enqueueSanteHl7ForBooking(bookingId)).enqueued, true);
+
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "false");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "false");
+  });
+
+  it("does not let withdrawn history bypass queue-only when the protocol gate is disabled", async () => {
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "false");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "false");
+    const bookingId = await createBooking("ct", "scheduled");
+    await establishPublishedProjection(bookingId);
+
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "enabled");
+    await enqueueOrthancSyncForBooking(bookingId);
+    await enqueueSanteHl7ForBooking(bookingId);
+    await completeWithdrawal(bookingId);
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "true");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "true");
+
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    await reconcileMwlProtocolPolicyChange();
+    assert.equal(await latestOrthancOperation(bookingId), "delete");
+    assert.equal(await latestSanteEvent(bookingId), "cancel");
+    assert.equal((await enqueueOrthancSyncForBooking(bookingId)).reason, "waiting_for_patient_queue");
+    assert.equal((await enqueueSanteHl7ForBooking(bookingId)).reason, "waiting_for_patient_queue");
+
+    await pool.query("update appointments_v2.bookings set status='waiting' where id=$1", [bookingId]);
+    assert.equal((await enqueueOrthancSyncForBooking(bookingId)).operation, "upsert");
+    assert.equal((await enqueueSanteHl7ForBooking(bookingId)).enqueued, true);
+    await setSetting("orthanc_mwl_sync", "send_only_when_patient_enters_queue", "false");
+    await setSetting("sante_worklist_hl7", "send_only_when_patient_enters_queue", "false");
   });
 
   it("setting transitions reconcile only affected CT/MRI bookings", async () => {

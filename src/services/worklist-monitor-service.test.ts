@@ -52,6 +52,18 @@ test("monitor reports queue hold after the protocol gate passes", () => {
   }), "waiting_for_queue");
 });
 
+test("monitor reports queue hold when historical projection state is withdrawn", () => {
+  assert.equal(computeWorklistMonitorBackendStatus({
+    bookingStatus: "scheduled",
+    protocolingModalityCode: "CT",
+    activeProtocolAssignmentExists: true,
+    protocolRequirementEnabled: true,
+    queueOnly: true,
+    syncStatus: "deleted",
+    deletedAt: "2026-08-12T12:00:00.000Z",
+  }), "waiting_for_queue");
+});
+
 test("monitor never applies protocol holds to Mammo or Ultrasound", () => {
   for (const modality of ["MG", "US"]) {
     assert.equal(computeWorklistMonitorBackendStatus({

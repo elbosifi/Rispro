@@ -129,12 +129,28 @@ async function loadBookingProjection(client: PoolClient, bookingId: number): Pro
   return rows[0] ?? null;
 }
 
-async function hasPreviousSanteSync(client: PoolClient, bookingId: number): Promise<boolean> {
-  const { rows } = await client.query<{ exists: boolean }>(
-    `select exists(select 1 from sante_worklist_sync where booking_id = $1::bigint and sync_status <> 'skipped')`,
+async function loadSanteProjectionState(
+  client: PoolClient,
+  bookingId: number
+): Promise<{ currentProjectionExists: boolean; syncHistoryExists: boolean }> {
+  const { rows } = await client.query<{ current_projection_exists: boolean; sync_history_exists: boolean }>(
+    `
+      select
+        exists(
+          select 1 from sante_worklist_sync
+          where booking_id = $1::bigint and deleted_at is null and sync_status <> 'skipped'
+        ) as current_projection_exists,
+        exists(
+          select 1 from sante_worklist_sync
+          where booking_id = $1::bigint and sync_status <> 'skipped'
+        ) as sync_history_exists
+    `,
     [bookingId]
   );
-  return Boolean(rows[0]?.exists);
+  return {
+    currentProjectionExists: Boolean(rows[0]?.current_projection_exists),
+    syncHistoryExists: Boolean(rows[0]?.sync_history_exists),
+  };
 }
 
 async function loadPreviousSanteProjection(client: PoolClient, bookingId: number): Promise<SanteHl7BookingProjection | null> {
@@ -171,23 +187,27 @@ async function supersedePendingSantePublicationJobs(client: PoolClient, bookingI
           updated_at = now()
       where booking_id = $1::bigint
         and event_type in ('create', 'update')
-        and status in ('pending', 'retry_scheduled', 'writing', 'send_failed', 'nack_received')
+        and status in ('pending', 'retry_scheduled', 'send_failed', 'nack_received')
     `,
     [bookingId]
   );
 }
 
-function deriveEvent(snapshot: SanteHl7BookingProjection, previousSyncExists: boolean): {
+function deriveEvent(
+  snapshot: SanteHl7BookingProjection,
+  currentProjectionExists: boolean,
+  syncHistoryExists: boolean
+): {
   eventType: "create" | "update" | "cancel";
   orderControl: SanteOrderControl;
   skipped: boolean;
 } {
   if (ACTIVE_STATUSES.has(snapshot.status)) {
-    return previousSyncExists
+    return currentProjectionExists
       ? { eventType: "update", orderControl: "XO", skipped: false }
       : { eventType: "create", orderControl: "NW", skipped: false };
   }
-  return previousSyncExists
+  return syncHistoryExists
     ? { eventType: "cancel", orderControl: "CA", skipped: false }
     : { eventType: "cancel", orderControl: "CA", skipped: true };
 }
@@ -324,16 +344,17 @@ export async function enqueueSanteHl7ForBooking(
       await client.query("rollback");
       return { enqueued: false, jobId: null, reason: "booking_not_found" };
     }
-    const previousSyncExists = await hasPreviousSanteSync(client, bookingId);
+    const projectionState = await loadSanteProjectionState(client, bookingId);
+    const { currentProjectionExists } = projectionState;
     const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(bookingId, client);
-    if (ACTIVE_STATUSES.has(projection.status) && !eligibility.protocolGateSatisfied && !previousSyncExists) {
+    if (ACTIVE_STATUSES.has(projection.status) && !eligibility.protocolGateSatisfied && !currentProjectionExists) {
       await client.query("rollback");
       return { enqueued: false, jobId: null, reason: "waiting_for_protocol" };
     }
     if (
       eligibility.protocolGateSatisfied &&
       settings.sendOnlyWhenPatientEntersQueue &&
-      !previousSyncExists &&
+      !currentProjectionExists &&
       ACTIVE_STATUSES.has(projection.status) &&
       !QUEUE_STATUSES.has(projection.status)
     ) {
@@ -342,7 +363,7 @@ export async function enqueueSanteHl7ForBooking(
     }
     const event = ACTIVE_STATUSES.has(projection.status) && !eligibility.protocolGateSatisfied
       ? { eventType: "cancel" as const, orderControl: "CA" as const, skipped: false }
-      : deriveEvent(projection, previousSyncExists);
+      : deriveEvent(projection, currentProjectionExists, projectionState.syncHistoryExists);
     if (event.eventType === "cancel" && !event.skipped) {
       await supersedePendingSantePublicationJobs(client, bookingId);
     }
@@ -396,9 +417,9 @@ export async function enqueueSanteHl7ReplacementForBooking(
       return { enqueued: false, jobIds: [], reason: "booking_not_found" };
     }
     const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(bookingId, client);
-    const previousSyncExists = await hasPreviousSanteSync(client, bookingId);
+    const { currentProjectionExists } = await loadSanteProjectionState(client, bookingId);
     if (!eligibility.protocolGateSatisfied) {
-      if (!previousSyncExists) {
+      if (!currentProjectionExists) {
         await client.query("rollback");
         return { enqueued: false, jobIds: [], reason: "waiting_for_protocol" };
       }
@@ -422,7 +443,7 @@ export async function enqueueSanteHl7ReplacementForBooking(
     }
 
     const jobIds: number[] = [];
-    if (previousSyncExists) {
+    if (currentProjectionExists) {
       const previousProjection = await loadPreviousSanteProjection(client, bookingId);
       const cancel = await insertOutboxRow({
         client,
@@ -498,11 +519,18 @@ export async function claimSanteOutboxBatch(limit = 20): Promise<SanteOutboxJob[
   }>(
     `
       with candidates as (
-        select id
-        from sante_hl7_outbox
-        where status in ('pending', 'retry_scheduled')
-          and next_attempt_at <= now()
-        order by next_attempt_at asc, id asc
+        select candidate.id
+        from sante_hl7_outbox candidate
+        where candidate.status in ('pending', 'retry_scheduled')
+          and candidate.next_attempt_at <= now()
+          and not exists (
+            select 1
+            from sante_hl7_outbox in_flight
+            where in_flight.booking_id = candidate.booking_id
+              and in_flight.status = 'writing'
+              and in_flight.id < candidate.id
+          )
+        order by candidate.next_attempt_at asc, candidate.id asc
         for update skip locked
         limit $1
       )
@@ -610,6 +638,7 @@ async function writeSanteOutboxJobToFileDrop(
               last_error = null,
               updated_at = now()
           where booking_id = $1::bigint
+            and last_outbox_id = $3
         `,
       [job.bookingId, built.payloadHash, job.id]
     );
@@ -648,6 +677,7 @@ async function markSanteOutboxAcknowledged(input: {
             last_error = null,
             updated_at = now()
         where booking_id = $1::bigint
+          and last_outbox_id = $3
       `,
       [input.job.bookingId, input.built.payloadHash, input.job.id]
     );
@@ -686,6 +716,7 @@ async function markSanteOutboxNack(input: {
             last_error = $4,
             updated_at = now()
         where booking_id = $1::bigint
+          and last_outbox_id = $3
       `,
       [input.job.bookingId, input.built.payloadHash, input.job.id, message]
     );
@@ -723,6 +754,7 @@ async function markSanteOutboxSendFailed(
             last_error = $4,
             updated_at = now()
         where booking_id = $1::bigint
+          and last_outbox_id = $3
       `,
       [job.bookingId, built.payloadHash, job.id, message]
     );
@@ -765,9 +797,23 @@ export async function markSanteOutboxFailure(job: SanteOutboxJob, message: strin
   await pool.query(
     `
       update sante_hl7_outbox
-      set status = $2,
+      set status = case
+            when booking_id is null or exists (
+              select 1 from sante_worklist_sync sync
+              where sync.booking_id = sante_hl7_outbox.booking_id
+                and sync.last_outbox_id = sante_hl7_outbox.id
+            ) then $2
+            else 'skipped'
+          end,
           locked_at = null,
-          last_error = $3,
+          last_error = case
+            when booking_id is null or exists (
+              select 1 from sante_worklist_sync sync
+              where sync.booking_id = sante_hl7_outbox.booking_id
+                and sync.last_outbox_id = sante_hl7_outbox.id
+            ) then $3
+            else 'superseded_by_newer_outbox_job'
+          end,
           next_attempt_at = now() + ($4::text || ' seconds')::interval,
           updated_at = now()
       where id = $1
@@ -783,8 +829,9 @@ export async function markSanteOutboxFailure(job: SanteOutboxJob, message: strin
             last_error = $3,
             updated_at = now()
         where booking_id = $1::bigint
+          and last_outbox_id = $4
       `,
-      [job.bookingId, status, message]
+      [job.bookingId, status, message, job.id]
     );
   }
 }
@@ -870,8 +917,9 @@ export async function monitorSantePendingImports(limit = 100): Promise<{ checked
               last_error = $3,
               updated_at = now()
           where booking_id = $1::bigint
+            and last_outbox_id = $4
         `,
-        [row.booking_id, status, lastError]
+        [row.booking_id, status, lastError, row.id]
       );
     }
     updated += 1;

@@ -58,6 +58,7 @@ interface WorklistMonitorDbRow {
   orthanc_sync_status: string | null;
   orthanc_last_attempt_at: string | null;
   orthanc_last_error: string | null;
+  orthanc_deleted_at: string | null;
   orthanc_outbox_id: number | null;
   orthanc_outbox_status: string | null;
   orthanc_operation: string | null;
@@ -65,6 +66,7 @@ interface WorklistMonitorDbRow {
   sante_sync_status: string | null;
   sante_last_attempt_at: string | null;
   sante_last_error: string | null;
+  sante_deleted_at: string | null;
   sante_outbox_id: number | null;
   sante_outbox_status: string | null;
   sante_history: unknown;
@@ -106,6 +108,7 @@ export function computeWorklistMonitorBackendStatus(input: {
   protocolRequirementEnabled: boolean;
   queueOnly: boolean;
   syncStatus: string | null;
+  deletedAt?: string | null;
   outboxStatus?: string | null;
 }): string {
   if (input.protocolRequirementEnabled
@@ -114,7 +117,7 @@ export function computeWorklistMonitorBackendStatus(input: {
     && !input.activeProtocolAssignmentExists) {
     return "waiting_for_protocol";
   }
-  if (input.queueOnly && input.bookingStatus === "scheduled" && !input.syncStatus) return "waiting_for_queue";
+  if (input.queueOnly && input.bookingStatus === "scheduled" && (!input.syncStatus || input.deletedAt)) return "waiting_for_queue";
   return input.syncStatus || input.outboxStatus || "not_enqueued";
 }
 
@@ -126,6 +129,7 @@ function orthancComputedStatus(row: WorklistMonitorDbRow, queueOnly: boolean, pr
     protocolRequirementEnabled,
     queueOnly,
     syncStatus: row.orthanc_sync_status,
+    deletedAt: row.orthanc_deleted_at,
   });
 }
 
@@ -137,6 +141,7 @@ function santeComputedStatus(row: WorklistMonitorDbRow, queueOnly: boolean, prot
     protocolRequirementEnabled,
     queueOnly,
     syncStatus: row.sante_sync_status,
+    deletedAt: row.sante_deleted_at,
     outboxStatus: row.sante_outbox_status,
   });
 }
@@ -281,6 +286,7 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
         os.sync_status as orthanc_sync_status,
         os.last_attempt_at::text as orthanc_last_attempt_at,
         os.last_error as orthanc_last_error,
+        os.deleted_at::text as orthanc_deleted_at,
         oo.id as orthanc_outbox_id,
         oo.status as orthanc_outbox_status,
         oo.operation as orthanc_operation,
@@ -288,6 +294,7 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
         ss.sync_status as sante_sync_status,
         ss.last_attempt_at::text as sante_last_attempt_at,
         ss.last_error as sante_last_error,
+        ss.deleted_at::text as sante_deleted_at,
         so.id as sante_outbox_id,
         so.status as sante_outbox_status,
         coalesce(sh.history, '[]'::jsonb) as sante_history,
