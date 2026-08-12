@@ -1,5 +1,7 @@
 # Authoritative Orthanc Operations
 
+The main DICOM transfers table shows DICOM C-STORE operations rather than generic Orthanc jobs. Patient and study context is derived read-only from the transferred Orthanc resource when available; unresolved clinical context does not mean the transfer failed. Technical Orthanc information remains available in Details, and Retry still resubmits the individual failed Orthanc job.
+
 RISpro exposes Authoritative Orthanc operational state at **Systems → Authoritative Orthanc** (`/systems/authoritative-orthanc`). This page monitors the primary archive, selected stable-series routes, Orthanc transfer jobs, study lookup, and the existing clinical-document export queue.
 
 Configuration remains in **Settings → Authoritative Orthanc**. Enablement, URL, credentials, TLS verification, timeout, clinical-document auto-export, auto-routing, and destination selection must not be copied to the Operations page.

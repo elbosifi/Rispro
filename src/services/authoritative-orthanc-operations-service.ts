@@ -32,6 +32,7 @@ export type OrthancOperationalJob = {
   description: string;
   error: string | null;
   retryPermitted: boolean;
+  transfer: { remoteAet: string | null; localAet: string | null; destinationName: string | null; instanceCount: number | null; failedInstanceCount: number | null; parentResourceIds: string[]; contextStatus: "resolved" | "unavailable" | "multiple_resources"; study: { orthancStudyId: string; patientId: string | null; patientName: string | null; accessionNumber: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[] } | null } | null;
 };
 export type AuthoritativeOrthancRouteTestState = "not_tested" | "reachable" | "unreachable" | "timeout" | "missing_route" | "configuration_error";
 export type AuthoritativeOrthancOperationalRoute = {
@@ -91,6 +92,8 @@ function httpErrorCode(error: unknown): string {
 }
 function sectionError(error: unknown, fallback: string) { return { code: httpErrorCode(error), message: safeText(error instanceof Error ? error.message : error, fallback) }; }
 function normalizedProgress(value: unknown): number | null { const parsed = Number(value); return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null; }
+function optionalNonNegativeNumber(value: unknown): number | null { const raw = first(value); if (raw == null) return null; const parsed = Number(raw); return Number.isFinite(parsed) && parsed >= 0 ? parsed : null; }
+function textValues(value: unknown): string[] { return [...new Set((Array.isArray(value) ? value : [value]).map((item) => first(item)).filter((item): item is string => Boolean(item)))]; }
 
 export function normalizeOrthancJob(payload: unknown, fallbackId = ""): OrthancOperationalJob {
   const row = record(payload);
@@ -101,6 +104,7 @@ export function normalizeOrthancJob(payload: unknown, fallbackId = ""): OrthancO
   if (!id || !type || !state || !allowedStates.includes(state)) throw new HttpError(502, "Authoritative Orthanc returned a malformed job response.", { code: "orthanc_invalid_response" });
   const content = record(row.Content ?? row.content);
   const error = state === "Failure" ? safeText(first(row.ErrorDescription, row.errorDescription, row.ErrorDetails, row.error) || "Orthanc job failed.", "Orthanc job failed.") : null;
+  const isStore = /^DicomModalityStore$/i.test(type);
   return {
     id,
     type: safeText(type, "Orthanc job", 100),
@@ -113,10 +117,11 @@ export function normalizeOrthancJob(payload: unknown, fallbackId = ""): OrthancO
     description: safeText(first(content.Description, content.description, row.Description, row.description, type), "Orthanc job"),
     error,
     retryPermitted: state === "Failure",
+    transfer: isStore ? { remoteAet: first(content.RemoteAet, content.RemoteAET), localAet: first(content.LocalAet, content.LocalAET), destinationName: null, instanceCount: optionalNonNegativeNumber(content.InstancesCount), failedInstanceCount: optionalNonNegativeNumber(content.FailedInstancesCount), parentResourceIds: textValues(content.ParentResources), contextStatus: textValues(content.ParentResources).length > 1 ? "multiple_resources" : "unavailable", study: null } : null,
   };
 }
 
-async function loadJobs(client: AuthoritativeOrthancClient): Promise<OrthancOperationalJob[]> {
+async function loadJobs(client: AuthoritativeOrthancClient, dependencies: AuthoritativeOrthancOperationsDependencies): Promise<OrthancOperationalJob[]> {
   const payload = await client.listJobs();
   let jobs: OrthancOperationalJob[];
   if (Array.isArray(payload)) {
@@ -125,6 +130,19 @@ async function loadJobs(client: AuthoritativeOrthancClient): Promise<OrthancOper
     const rows = record(payload);
     jobs = Object.entries(rows).map(([id, item]) => normalizeOrthancJob(item, id));
   }
+  let destinations: PacsDestination[] = [];
+  try { destinations = (await dependencies.loadPacsDestinations()).modalities; } catch { /* transfer rows retain their remote AET */ }
+  const resourceIds = [...new Set(jobs.flatMap((job) => job.transfer?.parentResourceIds.length === 1 ? job.transfer.parentResourceIds : []))];
+  const studies = new Map<string, Awaited<ReturnType<AuthoritativeOrthancClient["getStudySummaryForTransferredResource"]>>>();
+  await mapBounded(resourceIds, 3, async (resourceId) => { try { studies.set(resourceId, await client.getStudySummaryForTransferredResource(resourceId)); } catch { studies.set(resourceId, null); } });
+  jobs = jobs.map((job) => {
+    if (!job.transfer) return job;
+    const matches = job.transfer.remoteAet ? destinations.filter((destination) => destination.aet.trim().toUpperCase() === job.transfer!.remoteAet!.trim().toUpperCase()) : [];
+    const destinationName = matches.length === 1 ? matches[0]!.key : job.transfer.remoteAet;
+    if (job.transfer.parentResourceIds.length !== 1) return { ...job, transfer: { ...job.transfer, destinationName } };
+    const study = studies.get(job.transfer.parentResourceIds[0]!) || null;
+    return { ...job, transfer: { ...job.transfer, destinationName, contextStatus: study ? "resolved" : "unavailable", study } };
+  });
   const rank = (state: OrthancJobState) => state === "Failure" ? 0 : ["Running", "Pending", "Paused", "Retry"].includes(state) ? 1 : 2;
   return jobs.sort((a, b) => rank(a.state) - rank(b.state) || String(b.creationTime || b.updatedAt || "").localeCompare(String(a.creationTime || a.updatedAt || "")));
 }
@@ -247,7 +265,7 @@ export async function synchronizeAuthoritativeOrthancOperationalRoutes(userId: U
 
 export async function getAuthoritativeOrthancOperationalJobs(dependencies: AuthoritativeOrthancOperationsDependencies = productionDependencies) {
   const settings = await dependencies.readSettings();
-  const jobs = await loadJobs(dependencies.createClient(settings));
+  const jobs = await loadJobs(dependencies.createClient(settings), dependencies);
   return { jobs, summary: summarizeJobs(jobs, dependencies.now()), generatedAt: dependencies.now().toISOString() };
 }
 
@@ -328,7 +346,7 @@ export async function getAuthoritativeOrthancOperationsSummary(dependencies: Aut
 
   const [statisticsResult, jobsResult, routesResult, clinicalResult] = await Promise.allSettled([
     client.getStatistics(),
-    loadJobs(client),
+    loadJobs(client, dependencies),
     loadRoutes(settings, client, dependencies),
     clinicalPromise,
   ]);

@@ -16,6 +16,7 @@ export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinica
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
+export type OrthancTransferredStudySummary = Pick<OrthancStudyDetails, "orthancStudyId" | "patientId" | "patientName" | "accessionNumber" | "studyDate" | "studyDescription" | "modalitiesInStudy">;
 export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; study: OrthancStudyDetails | null; reason?: string };
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
 export type OrthancInstanceDetails = { orthancInstanceId: string; orthancSeriesId: string | null; orthancStudyId: string | null; studyInstanceUid: string | null; seriesInstanceUid: string | null; sopInstanceUid: string | null; patientId: string | null; accessionNumber: string | null; modality: string | null };
@@ -175,6 +176,17 @@ export class AuthoritativeOrthancClient {
     return detail;
   }
   async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); const row = { ...record(detail), ...record(statistics) }; const dicom = tags(row); return { orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]), patientSex: first(dicom.PatientSex, dicom["00100040"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean), seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"]), instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"]) }; }
+  async getStudySummaryForTransferredResource(resourceId: string): Promise<OrthancTransferredStudySummary | null> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(resourceId)) throw new HttpError(400, "Invalid Orthanc resource ID.");
+    const seriesStudy = await this.request(`/series/${encodeURIComponent(resourceId)}/study`, {}, { acceptableStatuses: [404] });
+    const detail = seriesStudy ?? await this.request(`/studies/${encodeURIComponent(resourceId)}`, {}, { acceptableStatuses: [404] });
+    if (!detail) return null;
+    const row = record(detail);
+    const dicom = tags(row);
+    const orthancStudyId = first(row.ID, row.Id, row.id, row.Study, row.study, seriesStudy ? null : resourceId);
+    if (!orthancStudyId) return null;
+    return { orthancStudyId, patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom.Modality, dicom["00080061"], dicom["00080060"]) || "").split("\\").filter(Boolean) };
+  }
   async getInstance(orthancInstanceId: string): Promise<OrthancInstanceDetails> {
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancInstanceId)) throw new HttpError(400, "Invalid Orthanc instance ID.");
     const detail = record(await this.request(`/instances/${encodeURIComponent(orthancInstanceId)}`));
