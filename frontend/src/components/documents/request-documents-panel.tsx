@@ -94,6 +94,12 @@ export function RequestDocumentsPanel({
   const [isMobile, setIsMobile] = useState(false);
   const [printingDocumentId, setPrintingDocumentId] = useState<number | null>(null);
   const resolvedTitle = title ?? t("documents.title");
+  const uploadDocumentLabel = newDocumentType === "clinical_document"
+    ? t("documents.uploadClinicalDocument")
+    : t("documents.uploadRequest");
+  const attachDocumentLabel = newDocumentType === "clinical_document"
+    ? t("documents.attachClinicalDocument")
+    : t("documents.attachRequest");
   const documentSourceLabel = (source: RequestDocument["source"]) => {
     if (source === "naps2_webscan") return t("documents.source.scanner");
     if (source === "scanner_app") return t("documents.source.scannerApp");
@@ -282,6 +288,7 @@ export function RequestDocumentsPanel({
   });
   const canScanOrUpload =
     currentUser?.role === "receptionist" ||
+    currentUser?.role === "modality_staff" ||
     currentUser?.role === "supervisor" ||
     currentUser?.role === "super_admin";
   const canDelete = currentUser?.role === "supervisor" || currentUser?.role === "super_admin";
@@ -605,7 +612,7 @@ export function RequestDocumentsPanel({
         ) : null}
         <label htmlFor="request-documents-upload-file" className="order-0 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground transition hover:opacity-90 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
           <Upload size={15} aria-hidden="true" />
-          <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span>
+          <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : uploadDocumentLabel}</span>
         </label>
         <input
           ref={fileInputRef}
@@ -624,7 +631,7 @@ export function RequestDocumentsPanel({
             disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads || !canAttachDocuments}
           >
             <Upload size={15} aria-hidden="true" />
-            {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
+            {uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}
           </button>
         ) : null}
       </div>
@@ -676,7 +683,7 @@ export function RequestDocumentsPanel({
               <span className="mt-2 text-[10px] font-semibold text-muted-foreground [writing-mode:vertical-rl]">{t("documents.documentSelector")}</span>
             </aside>
           ) : <aside className="min-h-0 space-y-3 overflow-y-auto pb-20 lg:pb-0" aria-label={t("documents.documentSelector")} data-testid="document-rail">
-            {layout === "workspace" ? null : (isMobile ? (canAttachDocuments ? <section className="rounded-xl border border-border bg-background p-3"><label htmlFor="request-documents-upload-file" className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span></label><input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />{file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent disabled:opacity-50" disabled={uploadMutation.isPending || !canAttachDocuments}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button> : null}</section> : null) : canAttachDocuments ? scanControls : null)}
+            {layout === "workspace" ? null : (isMobile ? (canAttachDocuments ? <section className="rounded-xl border border-border bg-background p-3"><label htmlFor="request-documents-upload-file" className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : uploadDocumentLabel}</span></label><input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />{file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs font-semibold text-accent disabled:opacity-50" disabled={uploadMutation.isPending || !canAttachDocuments}>{uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}</button> : null}</section> : null) : canAttachDocuments ? scanControls : null)}
             <section className="rounded-xl border border-border bg-background p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="truncate text-xs font-semibold text-foreground">{t("documents.documentSelector")}</h3>
@@ -684,9 +691,9 @@ export function RequestDocumentsPanel({
               </div>
               <span className="block text-[10px] text-muted-foreground">{documents.length} {documents.length === 1 ? "document" : "documents"}</span>
               {canAttachDocuments && documents.length > 0 ? <>
-                <label htmlFor="request-documents-upload-file" className="mt-2 inline-flex min-h-8 w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] font-semibold text-accent focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={13} aria-hidden="true" />{t("documents.uploadRequest")}</label>
+                <label htmlFor="request-documents-upload-file" className="mt-2 inline-flex min-h-8 w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] font-semibold text-accent focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={13} aria-hidden="true" />{uploadDocumentLabel}</label>
                 <input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />
-                {file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[11px] font-semibold text-accent-foreground disabled:opacity-50" disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads}>{uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}</button> : null}
+                {file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[11px] font-semibold text-accent-foreground disabled:opacity-50" disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads}>{uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}</button> : null}
                 {!isMobile && naps2ScannerEnabled ? <button type="button" onClick={handleScanAndAttach} disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scanUploading ? t("documents.scanning") : t("documents.scanPaper")}</button> : null}
                 {!isMobile && !naps2ScannerEnabled && scannerAppEnabled ? <button type="button" onClick={handleLaunchScannerApp} disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}><ScanLine size={13} aria-hidden="true" />{scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}</button> : null}
               </> : null}
@@ -740,7 +747,7 @@ export function RequestDocumentsPanel({
       {!expanded && canAttachDocuments ? <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
         <label htmlFor="request-documents-upload-file" className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
           <Upload size={15} aria-hidden="true" />
-          <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : t("documents.uploadRequest")}</span>
+          <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : uploadDocumentLabel}</span>
         </label>
         <input
           ref={fileInputRef}
@@ -778,7 +785,7 @@ export function RequestDocumentsPanel({
             className="px-3 py-2 rounded-lg bg-teal-600 text-white text-sm"
             disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads || !canAttachDocuments}
           >
-            {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
+            {uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}
           </button> : null}
         </div>
       </div> : null}

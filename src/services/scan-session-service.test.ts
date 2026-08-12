@@ -14,6 +14,9 @@ let userId = 0;
 let patientId = 0;
 let appointmentId = 0;
 let modalityId = 0;
+let policySetId = 0;
+let policyVersionId = 0;
+let v2BookingId = 0;
 
 function tokenFromLaunchUrl(launchUrl: string): string {
   const url = new URL(launchUrl);
@@ -62,6 +65,41 @@ before(async () => {
   );
   modalityId = Number(modality.rows[0].id);
 
+  const policySet = await pool.query(
+    `
+      insert into appointments_v2.policy_sets (key, name, created_by_user_id)
+      values ($1, 'Scanner Test Policy', $2)
+      returning id
+    `,
+    [`scanner_test_${suffix}`, userId]
+  );
+  policySetId = Number(policySet.rows[0].id);
+
+  const policyVersion = await pool.query(
+    `
+      insert into appointments_v2.policy_versions (
+        policy_set_id, version_no, status, config_hash, created_by_user_id
+      )
+      values ($1, 1, 'published', $2, $3)
+      returning id
+    `,
+    [policySetId, `scanner-test-${suffix}`, userId]
+  );
+  policyVersionId = Number(policyVersion.rows[0].id);
+
+  const v2Booking = await pool.query(
+    `
+      insert into appointments_v2.bookings (
+        patient_id, modality_id, booking_date, case_category, status,
+        policy_version_id, created_by_user_id
+      )
+      values ($1, $2, current_date, 'non_oncology', 'scheduled', $3, $4)
+      returning id
+    `,
+    [patientId, modalityId, policyVersionId, userId]
+  );
+  v2BookingId = Number(v2Booking.rows[0].id);
+
   const legacySlotNumber = 9000 + (Number(suffix) % 900);
 
   const appointment = await pool.query(
@@ -86,7 +124,10 @@ before(async () => {
 after(async () => {
   await pool.query("delete from documents where patient_id = $1", [patientId]);
   await pool.query("delete from scan_sessions where patient_id = $1", [patientId]);
+  await pool.query("delete from appointments_v2.bookings where id = $1", [v2BookingId]);
   await pool.query("delete from appointments where id = $1", [appointmentId]);
+  await pool.query("delete from appointments_v2.policy_versions where id = $1", [policyVersionId]);
+  await pool.query("delete from appointments_v2.policy_sets where id = $1", [policySetId]);
   await pool.query("delete from modalities where id = $1", [modalityId]);
   await pool.query("delete from patients where id = $1", [patientId]);
   await pool.query("delete from audit_log where changed_by_user_id = $1", [userId]);
@@ -158,5 +199,53 @@ describe("scan session service", () => {
       () => getScanSessionContextByToken(token),
       (error: unknown) => error instanceof HttpError && error.statusCode === 409
     );
+  });
+
+  it("uses the authoritative V2 scan-session document type despite conflicting upload fields", async () => {
+    const clinicalSession = await createScanSession({
+      appointmentId: v2BookingId,
+      appointmentRefType: "v2_booking",
+      patientId,
+      documentType: "clinical_document",
+      currentUserId: userId,
+    });
+    const clinicalToken = tokenFromLaunchUrl(clinicalSession.launchUrl);
+    const clinicalContext = await getScanSessionContextByToken(clinicalToken);
+    assert.equal(clinicalContext.documentType, "clinical_document");
+
+    const conflictingClinicalUpload = {
+      fileBuffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+      originalFilename: "clinical-scan.pdf",
+      mimeType: "application/pdf",
+      documentType: "appointment_request",
+    };
+    const clinicalUpload = await uploadScanSessionDocument(clinicalToken, conflictingClinicalUpload);
+    assert.equal(clinicalUpload.document.document_type, "clinical_document");
+    assert.equal(clinicalUpload.document.source, "scanner_app");
+    assert.equal(Number(clinicalUpload.document.v2_booking_id), v2BookingId);
+    assert.equal(clinicalUpload.document.appointment_id, null);
+
+    const requestSession = await createScanSession({
+      appointmentId: v2BookingId,
+      appointmentRefType: "v2_booking",
+      patientId,
+      documentType: "appointment_request",
+      currentUserId: userId,
+    });
+    const requestToken = tokenFromLaunchUrl(requestSession.launchUrl);
+    const requestContext = await getScanSessionContextByToken(requestToken);
+    assert.equal(requestContext.documentType, "appointment_request");
+
+    const conflictingRequestUpload = {
+      fileBuffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+      originalFilename: "request-scan.pdf",
+      mimeType: "application/pdf",
+      documentType: "clinical_document",
+    };
+    const requestUpload = await uploadScanSessionDocument(requestToken, conflictingRequestUpload);
+    assert.equal(requestUpload.document.document_type, "appointment_request");
+    assert.equal(requestUpload.document.source, "scanner_app");
+    assert.equal(Number(requestUpload.document.v2_booking_id), v2BookingId);
+    assert.equal(requestUpload.document.appointment_id, null);
   });
 });

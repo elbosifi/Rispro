@@ -23,6 +23,8 @@ test("request and clinical documents export into separate exact-name unnumbered 
   const exportIds: number[] = [];
   const uploaded = new Map<string, OrthancInstanceDetails>();
   const datasets: Record<string, unknown>[] = [];
+  const sopLookups: string[] = [];
+  let uploadCallCount = 0;
   const uidSuffix = `${Date.now()}${Math.floor(Math.random() * 1_000_000)}`;
   const studyUid = `2.25.${uidSuffix}`;
   const patientPrimaryId = `PID-${suffix}`;
@@ -55,8 +57,12 @@ test("request and clinical documents export into separate exact-name unnumbered 
     const study: OrthancStudyDetails = { orthancStudyId: "study-1", studyInstanceUid: studyUid, accessionNumber: accession, patientId: patientPrimaryId, patientName: "Series^Patient", patientBirthDate: null, patientSex: "O", studyDate: new Date().toISOString().slice(0, 10).replaceAll("-", ""), studyDescription: null, modalitiesInStudy: ["CT"], seriesCount: 1, instanceCount: 1 };
     const orthancClient = {
       findStudy: async () => ({ status: "matched" as const, matchKey: "study_instance_uid" as const, study }),
-      findInstanceBySopInstanceUid: async (uid: string) => uploaded.get(uid) ?? null,
+      findInstanceBySopInstanceUid: async (uid: string) => {
+        sopLookups.push(uid);
+        return uploaded.get(uid) ?? null;
+      },
       uploadDicomInstance: async (bytes: Buffer) => {
+        uploadCallCount += 1;
         const dataset = parseDicom(bytes);
         datasets.push(dataset);
         const instance: OrthancInstanceDetails = {
@@ -134,13 +140,17 @@ test("request and clinical documents export into separate exact-name unnumbered 
       const pixelSha = createHash("sha256").update(pixels).digest("hex");
       await pool.query("insert into clinical_document_export_instances(export_id,page_number,instance_number,sop_instance_uid,series_instance_uid,pixel_sha256,rows,columns,status) values($1,1,1,$2,$3,$4,1,1,'pending')", [crashExportId, crashSopUid, crashSeriesUid, pixelSha]);
       uploaded.set(crashSopUid, { orthancInstanceId: "crash-page-1", orthancSeriesId: "crash-series", orthancStudyId: study.orthancStudyId, studyInstanceUid: studyUid, seriesInstanceUid: crashSeriesUid, sopInstanceUid: crashSopUid, patientId: patientPrimaryId, accessionNumber: accession, modality: "CT" });
-      const uploadCountBeforeRecovery = datasets.length;
+      const pendingPage = await pool.query<{ status: string; exported_at: string | null; verified_at: string | null }>("select status,exported_at,verified_at from clinical_document_export_instances where export_id=$1", [crashExportId]);
+      assert.deepEqual(pendingPage.rows[0], { status: "pending", exported_at: null, verified_at: null });
+      const lookupCountBeforeRecovery = sopLookups.length;
+      const uploadCountBeforeRecovery = uploadCallCount;
 
       const crashRow = await claimNextClinicalDocumentExport(`series-test-crash-${suffix}`);
       assert.equal(Number(crashRow?.id), crashExportId);
       await processClaimedClinicalDocumentExport(crashRow!, dependencies);
 
-      assert.equal(datasets.length, uploadCountBeforeRecovery);
+      assert.deepEqual(sopLookups.slice(lookupCountBeforeRecovery), [crashSopUid]);
+      assert.equal(uploadCallCount, uploadCountBeforeRecovery);
       const recoveredExport = await pool.query<{ status: string; series_number: number | null; series_instance_uid: string; verified_page_count: number }>("select status,series_number,series_instance_uid,verified_page_count from clinical_document_exports where id=$1", [crashExportId]);
       assert.deepEqual(recoveredExport.rows[0], { status: "exported", series_number: 9000, series_instance_uid: crashSeriesUid, verified_page_count: 1 });
       const recoveredPage = await pool.query<{ status: string; sop_instance_uid: string; series_instance_uid: string; exported_at: string | null; verified_at: string | null }>("select status,sop_instance_uid,series_instance_uid,exported_at,verified_at from clinical_document_export_instances where export_id=$1", [crashExportId]);

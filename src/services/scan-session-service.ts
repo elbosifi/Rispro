@@ -56,7 +56,6 @@ export interface UploadScanSessionDocumentInput {
   fileBuffer: Buffer;
   originalFilename: string;
   mimeType: string;
-  documentType?: string;
   pageCount?: number | null;
   scannerName?: string | null;
   workstationName?: string | null;
@@ -367,7 +366,7 @@ export async function uploadScanSessionDocument(token: string, input: UploadScan
       patientId: session.patient_id,
       appointmentId,
       appointmentRefType: session.appointment_ref_type,
-      documentType: sanitizeDocumentType(input.documentType || session.document_type),
+      documentType: session.document_type,
       originalFilename: input.originalFilename,
       mimeType: input.mimeType,
       fileContentBuffer: input.fileBuffer,

@@ -15,6 +15,10 @@ const fetchModalityWorklistMock = vi.fn();
 const fetchModalityProtocolAssignmentMock = vi.fn();
 const fetchStatisticsMock = vi.fn();
 const listAppointmentDocumentsMock = vi.fn();
+const fetchRequestDocumentProtocolPolicyMock = vi.fn();
+const uploadAppointmentDocumentMock = vi.fn();
+const prepareScanSessionMock = vi.fn();
+const createScanSessionMock = vi.fn();
 const fetchCurrentSessionMock = vi.fn();
 const fetchIntegrationStatusMock = vi.fn();
 const completeAppointmentMock = vi.fn();
@@ -35,6 +39,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchModalityProtocolAssignment: (...args: unknown[]) => fetchModalityProtocolAssignmentMock(...args),
   fetchStatistics: (...args: unknown[]) => fetchStatisticsMock(...args),
   listAppointmentDocuments: (...args: unknown[]) => listAppointmentDocumentsMock(...args),
+  fetchRequestDocumentProtocolPolicy: (...args: unknown[]) => fetchRequestDocumentProtocolPolicyMock(...args),
+  uploadAppointmentDocument: (...args: unknown[]) => uploadAppointmentDocumentMock(...args),
+  prepareScanSession: (...args: unknown[]) => prepareScanSessionMock(...args),
+  createScanSession: (...args: unknown[]) => createScanSessionMock(...args),
   fetchCurrentSession: (...args: unknown[]) => fetchCurrentSessionMock(...args),
   fetchIntegrationStatus: (...args: unknown[]) => fetchIntegrationStatusMock(...args),
   completeAppointment: (...args: unknown[]) => completeAppointmentMock(...args),
@@ -212,7 +220,12 @@ function mriAssignment(overrides: Partial<ModalityProtocolAssignment> = {}): Mod
   };
 }
 
-function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality", cdDestinations: Array<{ key: string; name: string }> = []) {
+function renderPage(
+  rows: AppointmentWithDetails[],
+  initialEntry = "/modality",
+  cdDestinations: Array<{ key: string; name: string }> = [],
+  options: { role?: string; scanner?: Record<string, unknown> | null } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -229,8 +242,12 @@ function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality", 
   fetchModalityWorklistMock.mockResolvedValue(rows);
   fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
   listAppointmentDocumentsMock.mockResolvedValue([]);
-  fetchCurrentSessionMock.mockResolvedValue({ id: 1, role: "super_admin", username: "modality", fullName: "Modality Staff" });
-  fetchIntegrationStatusMock.mockResolvedValue({ scanner: null });
+  fetchRequestDocumentProtocolPolicyMock.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, hasQualifyingRequestDocument: null });
+  uploadAppointmentDocumentMock.mockResolvedValue({ id: 90, patientId: 10, appointmentId: null, v2BookingId: rows[0]?.id ?? 1, documentType: "clinical_document", originalFilename: "clinical.pdf", storedPath: "", mimeType: "application/pdf", fileSize: 8, storageLocationType: "local_fallback", source: "manual_upload", createdAt: "2026-06-18T08:30:00.000Z" });
+  prepareScanSessionMock.mockResolvedValue({ preparation: { documentType: "clinical_document", sessionCode: "SCAN-MODALITY", guidance: "Ready" } });
+  createScanSessionMock.mockResolvedValue({ launchUrl: "rispro-scanner://scan?token=modality-test", expiresAt: "2026-06-18T09:00:00.000Z", fallbackUploadAllowed: true });
+  fetchCurrentSessionMock.mockResolvedValue({ id: 1, role: options.role ?? "super_admin", username: "modality", fullName: "Modality Staff" });
+  fetchIntegrationStatusMock.mockResolvedValue({ scanner: options.scanner ?? null });
   fetchStatisticsMock.mockResolvedValue({
     statusBreakdown: [
       { status: "waiting", count: rows.filter((row) => row.status === "waiting").length },
@@ -256,9 +273,13 @@ function renderPage(rows: AppointmentWithDetails[], initialEntry = "/modality", 
   );
 }
 
-async function openBoard(rows: AppointmentWithDetails[], cdDestinations: Array<{ key: string; name: string }> = []) {
+async function openBoard(
+  rows: AppointmentWithDetails[],
+  cdDestinations: Array<{ key: string; name: string }> = [],
+  options: { role?: string; scanner?: Record<string, unknown> | null } = {},
+) {
   const user = userEvent.setup();
-  renderPage(rows, "/modality", cdDestinations);
+  renderPage(rows, "/modality", cdDestinations, options);
   await screen.findByRole("option", { name: "CT" });
   await user.selectOptions(screen.getByRole("combobox"), "1");
   await screen.findByRole("button", { name: languageState.language === "ar" ? "نشط" : "Operational" });
@@ -460,6 +481,55 @@ describe("ModalityPage modality board", () => {
     expect(screen.getByTestId("location").textContent).toContain("/modality");
     expect(screen.queryByTestId("selected-appointment-drawer")).toBeNull();
     expect(modalityPageSource).toMatch(/<RequestDocumentsPanel[\s\S]*?newDocumentType="clinical_document"[\s\S]*?onDocumentsChanged=/);
+  });
+
+  it("lets modality staff create clinical documents from the board dialog", async () => {
+    const user = await openBoard(
+      [appointment({ id: 25, accessionNumber: "V2-000025", documentCount: 1 })],
+      [],
+      {
+        role: "modality_staff",
+        scanner: {
+          referralUploadEnabled: true,
+          allowedFileTypes: ["pdf", "jpg", "png"],
+          documentLinkScope: "patient_and_appointment",
+          scannerBridgeMode: "manual_browser_upload",
+          scannerProfileName: "default",
+          scannerSource: "feeder",
+          scanDpi: "200",
+          scanColorMode: "grayscale",
+          scanFileFormat: "pdf",
+          bridgeReady: true,
+          naps2WebScanEnabled: false,
+          naps2WebScanEndpoint: "",
+          scannerAppEnabled: true,
+          scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+          scanSessionExpiryMinutes: "15",
+        },
+      },
+    );
+
+    await user.click(screen.getByRole("button", { name: "1 doc. Open documents for V2-000025" }));
+    const fileInput = await screen.findByTestId("document-file-input") as HTMLInputElement;
+    expect(screen.getByText("Upload Clinical Document")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+
+    await user.upload(fileInput, new File(["clinical"], "clinical.pdf", { type: "application/pdf" }));
+    await user.click(await screen.findByRole("button", { name: "Attach Clinical Document" }));
+    await waitFor(() => expect(uploadAppointmentDocumentMock).toHaveBeenCalledWith(expect.objectContaining({
+      appointmentId: 25,
+      appointmentRefType: "v2_booking",
+      documentType: "clinical_document",
+      source: "manual_upload",
+    })));
+
+    await user.click(screen.getByRole("button", { name: "Scan Paper" }));
+    await waitFor(() => expect(createScanSessionMock).toHaveBeenCalledWith({
+      appointmentId: 25,
+      patientId: 10,
+      documentType: "clinical_document",
+      appointmentRefType: "v2_booking",
+    }));
   });
 
   it("combines Missing and Uploaded document filters with board status filters", async () => {

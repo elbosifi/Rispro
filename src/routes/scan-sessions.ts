@@ -149,7 +149,6 @@ scanSessionsRouter.post(
       fileBuffer: upload.fileBuffer,
       originalFilename: upload.originalFilename,
       mimeType: upload.mimeType,
-      documentType: upload.fields.documentType,
       pageCount: upload.fields.pageCount ? Number(upload.fields.pageCount) : null,
       scannerName: upload.fields.scannerName,
       workstationName: upload.fields.workstationName,

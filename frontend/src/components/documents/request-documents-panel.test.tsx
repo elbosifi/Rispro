@@ -430,8 +430,10 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
   it("classifies configured manual uploads as clinical documents without changing their source", async () => {
     renderPanel({ newDocumentType: "clinical_document" });
+    expect(await screen.findByText("Upload Clinical Document")).toBeTruthy();
+    expect(screen.queryByText("Upload request document")).toBeNull();
     await userEvent.upload(await screen.findByTestId("document-file-input") as HTMLInputElement, new File(["clinical"], "clinical.pdf", { type: "application/pdf" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Attach Request" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Attach Clinical Document" }));
 
     await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(expect.objectContaining({
       documentType: "clinical_document",
@@ -469,6 +471,15 @@ describe("RequestDocumentsPanel local scan flow", () => {
       documentType: "clinical_document",
       appointmentRefType: "v2_booking",
     }));
+  });
+
+  it("localizes clinical-document upload labels in Arabic", async () => {
+    localStorage.setItem("rispro-language", "ar");
+    renderPanel({ newDocumentType: "clinical_document" });
+
+    expect(await screen.findByText("رفع مستند سريري")).toBeTruthy();
+    await userEvent.upload(screen.getByTestId("document-file-input") as HTMLInputElement, new File(["clinical"], "clinical.pdf", { type: "application/pdf" }));
+    expect(await screen.findByRole("button", { name: "إرفاق المستند السريري" })).toBeTruthy();
   });
 
   it("hides Attach Request until a file is selected and enables it after selection", async () => {
@@ -810,6 +821,17 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(await screen.findByText("No document has been attached to this appointment.")).toBeTruthy();
     expect(screen.queryByText("Upload request document")).toBeNull();
     expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
+  });
+
+  it("allows modality staff to upload and scan without granting delete permission", async () => {
+    mockFetchCurrentSession.mockResolvedValue({ id: 3, role: "modality_staff", username: "tech", fullName: "Technologist" });
+    mockListAppointmentDocuments.mockResolvedValue([documentFixture(1, "request.png", "image/png")]);
+    renderPanel({ newDocumentType: "clinical_document" });
+
+    expect(await screen.findByTestId("document-file-input")).toBeTruthy();
+    expect(screen.getByText("Upload Clinical Document")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Scan Paper" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("keeps upload, delete, and open actions available when inline preview is unsupported", async () => {
