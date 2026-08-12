@@ -24,9 +24,9 @@ function fixture(state: "healthy" | "degraded" | "offline" | "disabled" = "healt
       { destinationKey: "Backup PACS", destinationName: "Backup PACS", alias: "rispro_route_backup_pacs", aet: "BACKUP", host: "10.0.0.11", port: 11112, selectedForAutoRouting: true, autoRouteActive: true, managedAliasExists: state !== "degraded", configurationState: state === "degraded" ? "missing_managed_route" : "configured", configurationError: null, dicomTest: { state: state === "degraded" ? "unreachable" : "reachable", connected: state !== "degraded", testedAt: "2026-08-12T10:00:00.000Z", code: state === "degraded" ? "orthanc_timeout" : null, message: null } },
     ] },
     jobs: { error: null as { code: string; message: string } | null, summary: { total: 3, running: 1, pending: 0, failed: 1, successful: 1, paused: 0, recentRelevantFailed: state === "degraded" ? 1 : 0, recentFailureWindowHours: 24 }, items: [
-      { id: "failed-job", type: "DicomModalityStore", state: "Failure", progress: 60, creationTime: "20260812T090000", startTime: null, completionTime: "20260812T090100", updatedAt: null, description: "Store to SonicDICOM", error: "Connection failed.", retryPermitted: true },
-      { id: "running-job", type: "Archive", state: "Running", progress: 42, creationTime: "20260812T091000", startTime: null, completionTime: null, updatedAt: "20260812T091100", description: "Archive", error: null, retryPermitted: false },
-      { id: "success-job", type: "DicomModalityStore", state: "Success", progress: 100, creationTime: "20260811T091000", startTime: null, completionTime: "20260811T091100", updatedAt: null, description: "Store completed", error: null, retryPermitted: false },
+      { id: "failed-job", type: "DicomModalityStore", state: "Failure", progress: 60, creationTime: "20260812T090000", startTime: null, completionTime: "20260812T090100", updatedAt: null, description: "REST API", error: "Connection failed.", retryPermitted: true, transfer: { remoteAet: "SONIC", localAet: "RISPRO", destinationName: "SonicDICOM", instanceCount: 220, failedInstanceCount: 2, parentResourceIds: ["series-1"], contextStatus: "resolved", study: { orthancStudyId: "study-1", patientId: "P-1042", patientName: "Sample Patient", accessionNumber: "ACC-1042", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"] } } },
+      { id: "running-job", type: "Archive", state: "Running", progress: 42, creationTime: "20260812T091000", startTime: null, completionTime: null, updatedAt: "20260812T091100", description: "Archive", error: null, retryPermitted: false, transfer: null },
+      { id: "success-job", type: "DicomModalityStore", state: "Success", progress: 100, creationTime: "20260811T091000", startTime: null, completionTime: "20260812T215657.381990", updatedAt: null, description: "REST API", error: null, retryPermitted: false, transfer: { remoteAet: "SONIC", localAet: "RISPRO", destinationName: "SonicDICOM", instanceCount: 220, failedInstanceCount: null, parentResourceIds: ["series-1"], contextStatus: "resolved", study: { orthancStudyId: "study-1", patientId: "P-1042", patientName: "Sample Patient", accessionNumber: "ACC-1042", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"] } } },
     ] },
     clinicalDocuments: { error: null, data: { pending: 2, processing: 1, retryable: 1, failed: 1, completed: 10, oldestPendingOrRetryableAt: "2026-08-12T08:00:00.000Z", latestFailures: [{ id: 88, appointmentId: 42, status: "failed", lastAttemptAt: "2026-08-12T09:00:00.000Z", updatedAt: "2026-08-12T09:00:00.000Z", error: "Upload failed.", retryPermitted: true }] } },
     generatedAt: "2026-08-12T10:00:00.000Z",
@@ -78,8 +78,8 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     renderPage();
     await screen.findByText("failed-job", { exact: false }).catch(() => undefined);
     await userEvent.click(screen.getByRole("button", { name: "Successful" }));
-    expect(screen.getByText("Store completed")).toBeTruthy();
-    expect(screen.queryByText("Store to SonicDICOM")).toBeNull();
+    expect(screen.getByText("CT chest")).toBeTruthy();
+    expect(screen.queryByText("REST API")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Failed" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]!);
     expect(screen.getByRole("dialog")).toBeTruthy();
@@ -92,13 +92,27 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     await screen.findByText("Study lookup");
     await userEvent.type(screen.getByLabelText("Study lookup value"), "ACC-1");
     await userEvent.click(screen.getByRole("button", { name: /Search/ }));
-    expect(await screen.findByText("Sample Patient")).toBeTruthy();
+    expect((await screen.findAllByText("Sample Patient")).length).toBeGreaterThan(0);
     vi.mocked(api).mockImplementation(async (path) => path.includes("studies/search") ? ({ status: "not_found", matchKey: "accession_number", study: null }) as never : summary as never);
     await userEvent.click(screen.getByRole("button", { name: /Search/ }));
     expect(await screen.findByText("No study matched that identifier.")).toBeTruthy();
     vi.mocked(api).mockImplementation(async (path) => path.includes("studies/search") ? ({ status: "ambiguous", matchKey: "accession_number", reason: "multiple_studies", study: null }) as never : summary as never);
     await userEvent.click(screen.getByRole("button", { name: /Search/ }));
     expect(await screen.findByText(/Multiple or conflicting studies/)).toBeTruthy();
+  });
+
+  it("shows transfer context and technical details while safely handling unavailable context", async () => {
+    summary = fixture();
+    summary.jobs.items.push({ id: "unknown-context", type: "DicomModalityStore", state: "Success", progress: 100, creationTime: "20260812T100000", startTime: null, completionTime: null, updatedAt: null, description: "REST API", error: null, retryPermitted: false, transfer: { remoteAet: "UNKNOWN", localAet: "RISPRO", destinationName: "UNKNOWN", instanceCount: null, failedInstanceCount: null, parentResourceIds: [], contextStatus: "unavailable", study: null } } as never);
+    renderPage();
+    expect(await screen.findByText("Recent DICOM transfers")).toBeTruthy();
+    for (const text of ["Sample Patient", "P-1042", "ACC-1042", "CT chest", "CT", "SonicDICOM", "220 instances", "Connection failed.", "Context unavailable"]) expect(screen.getAllByText(text).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Archive")).toBeNull();
+    expect(screen.queryByText("DicomModalityStore")).toBeNull();
+    expect(screen.queryByText("20260812T215657.381990")).toBeNull();
+    await userEvent.click(screen.getAllByRole("button", { name: "Details" })[0]!);
+    const dialog = screen.getByRole("dialog");
+    for (const text of ["failed-job", "DicomModalityStore", "RISPRO", "SONIC", "REST API"]) expect(within(dialog).getAllByText(text, { exact: false }).length).toBeGreaterThan(0);
   });
 
   it("matches privileged actions to role and exposes clinical-document recovery", async () => {
@@ -108,6 +122,7 @@ describe("AuthoritativeOrthancOperationsPage", () => {
     expect(screen.queryByRole("button", { name: "Test all destinations" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Synchronize routes" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Details" }).length).toBeGreaterThan(0);
     view.unmount();
     role = "super_admin";
     renderPage();

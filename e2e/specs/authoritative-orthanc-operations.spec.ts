@@ -12,9 +12,9 @@ const summary = {
     { destinationKey: "Backup PACS", destinationName: "Backup PACS", alias: "rispro_route_backup_pacs", aet: "BACKUP", host: "10.0.0.11", port: 11112, selectedForAutoRouting: true, autoRouteActive: true, managedAliasExists: true, configurationState: "configured", configurationError: null, dicomTest: { state: "not_tested", connected: null, testedAt: null, code: null, message: null } },
   ] },
   jobs: { error: null, summary: { total: 3, running: 1, pending: 1, failed: 1, successful: 0, paused: 0, recentRelevantFailed: 0, recentFailureWindowHours: 24 }, items: [
-    { id: "failed-job", type: "DicomModalityStore", state: "Failure", progress: 60, creationTime: "20260811T090000", startTime: null, completionTime: "20260811T090100", updatedAt: null, description: "Store to SonicDICOM", error: "Connection failed.", retryPermitted: true },
-    { id: "running-job", type: "DicomModalityStore", state: "Running", progress: 42, creationTime: "20260812T091000", startTime: null, completionTime: null, updatedAt: "20260812T091100", description: "Store to Backup PACS", error: null, retryPermitted: false },
-    { id: "pending-job", type: "Archive", state: "Pending", progress: 0, creationTime: "20260812T092000", startTime: null, completionTime: null, updatedAt: null, description: "Archive", error: null, retryPermitted: false },
+    { id: "failed-job", type: "DicomModalityStore", state: "Failure", progress: 60, creationTime: "20260811T090000", startTime: null, completionTime: "20260811T090100", updatedAt: null, description: "REST API", error: "Connection failed.", retryPermitted: true, transfer: { remoteAet: "SONIC", localAet: "RISPRO", destinationName: "SonicDICOM", instanceCount: 220, failedInstanceCount: 2, parentResourceIds: ["series-1"], contextStatus: "resolved", study: { orthancStudyId: "study-1", patientId: "P-1042", patientName: "Sample Patient", accessionNumber: "ACC-1042", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"] } } },
+    { id: "running-job", type: "DicomModalityStore", state: "Running", progress: 42, creationTime: "20260812T091000", startTime: null, completionTime: null, updatedAt: "20260812T091100", description: "REST API", error: null, retryPermitted: false, transfer: { remoteAet: "SONIC", localAet: "RISPRO", destinationName: "SonicDICOM", instanceCount: 220, failedInstanceCount: null, parentResourceIds: ["series-1"], contextStatus: "resolved", study: { orthancStudyId: "study-1", patientId: "P-1042", patientName: "Sample Patient", accessionNumber: "ACC-1042", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"] } } },
+    { id: "pending-job", type: "Archive", state: "Pending", progress: 0, creationTime: "20260812T092000", startTime: null, completionTime: null, updatedAt: null, description: "Archive", error: null, retryPermitted: false, transfer: null },
   ] },
   clinicalDocuments: { error: null, data: { pending: 2, processing: 1, retryable: 1, failed: 1, completed: 218, oldestPendingOrRetryableAt: "2026-08-12T08:00:00.000Z", latestFailures: [{ id: 88, appointmentId: 42, status: "failed", lastAttemptAt: "2026-08-12T09:00:00.000Z", updatedAt: "2026-08-12T09:00:00.000Z", error: "Upload failed after a bounded timeout.", retryPermitted: true }] } },
   generatedAt: "2026-08-12T10:00:00.000Z",
@@ -42,6 +42,7 @@ test("renders the Authoritative Orthanc operational workspace at desktop width",
   await expect(page.getByText("rispro_route_sonicdicom")).toBeVisible();
   await expect(page.getByText("Not tested")).toBeVisible();
   await expect(page.getByText("Reachable")).toBeVisible();
+  for (const text of ["Sample Patient", "P-1042", "ACC-1042", "CT chest", "CT", "SonicDICOM", "220 instances"]) await expect(page.getByText(text, { exact: false }).first()).toBeVisible();
   await page.getByRole("button", { name: "Synchronize routes" }).click();
   await expect(page.getByRole("dialog").getByText("Synchronize managed routes?")).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();

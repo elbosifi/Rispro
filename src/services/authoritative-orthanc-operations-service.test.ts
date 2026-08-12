@@ -162,3 +162,18 @@ test("study lookup supports accession and StudyInstanceUID and rejects missing o
   await assert.rejects(() => searchAuthoritativeOrthancOperationalStudy({}, deps), /required/i);
   await assert.rejects(() => searchAuthoritativeOrthancOperationalStudy({ studyInstanceUid: "1", accessionNumber: "A" }, deps), /only one/i);
 });
+
+test("enriches DICOM transfers without changing job sorting, health, or retry behavior", async () => {
+  const normalized = normalizeOrthancJob({ ID: "store", Type: "DicomModalityStore", State: "Failure", Content: { RemoteAET: "sonic", LocalAET: "RISPRO", InstancesCount: 220, FailedInstancesCount: 2, ParentResources: ["series-1"] } });
+  assert.deepEqual(normalized.transfer && { remote: normalized.transfer.remoteAet, local: normalized.transfer.localAet, instances: normalized.transfer.instanceCount, failed: normalized.transfer.failedInstanceCount, parents: normalized.transfer.parentResourceIds }, { remote: "sonic", local: "RISPRO", instances: 220, failed: 2, parents: ["series-1"] });
+  assert.equal(normalizeOrthancJob({ ID: "archive", Type: "Archive", State: "Success" }).transfer, null);
+  const base = dependencies(); const client = base.createClient(settings) as unknown as Record<string, unknown>;
+  const summary = await getAuthoritativeOrthancOperationsSummary(dependencies({ createClient: () => ({ ...client, listJobs: async () => [
+    { ID: "failed", Type: "DicomModalityStore", State: "Failure", CreationTime: "20260812T090000", Content: { RemoteAet: "SONIC", ParentResources: ["series-1"] } },
+    { ID: "multiple", Type: "DicomModalityStore", State: "Success", Content: { ParentResources: ["a", "b"] } },
+  ], getStudySummaryForTransferredResource: async (id: string) => id === "series-1" ? { orthancStudyId: "study-1", patientId: "P-1042", patientName: "Sample Patient", accessionNumber: "ACC-1042", studyDate: "20260812", studyDescription: "CT chest", modalitiesInStudy: ["CT"] } : Promise.reject(new Error("gone")) } as never) }));
+  assert.equal(summary.jobs.items[0]?.transfer?.destinationName, "SonicDICOM");
+  assert.equal(summary.jobs.items[0]?.transfer?.study?.patientId, "P-1042");
+  assert.equal(summary.jobs.items[1]?.transfer?.contextStatus, "multiple_resources");
+  assert.equal(summary.jobs.summary.recentRelevantFailed, 1);
+});

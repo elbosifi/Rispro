@@ -304,3 +304,14 @@ test("preserves Orthanc availability errors while trying tag fallbacks", async (
   });
   await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).getInstance("instance-1"), /unavailable/i);
 });
+
+test("resolves transferred series, direct studies, and unavailable resources read-only", async () => {
+  for (const [resource, expected, responses] of [
+    ["series-1", "study-1", { "/series/series-1/study": json({ ID: "study-1", MainDicomTags: { PatientName: "Sample Patient", PatientID: "P-1042", AccessionNumber: "ACC-1042", StudyDescription: "CT chest", ModalitiesInStudy: "CT" } }) }],
+    ["study-1", "study-1", { "/series/study-1/study": json({}, 404), "/studies/study-1": json({ ID: "study-1", MainDicomTags: { PatientName: "Sample Patient" } }) }],
+    ["missing", null, { "/series/missing/study": json({}, 404), "/studies/missing": json({}, 404) }],
+  ] as const) {
+    service.__setAuthoritativeOrthancFetchForTests(async (url) => responses[new URL(String(url)).pathname as keyof typeof responses] || json({}, 404));
+    assert.equal((await new service.AuthoritativeOrthancClient(enabled).getStudySummaryForTransferredResource(resource))?.orthancStudyId || null, expected);
+  }
+});
