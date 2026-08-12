@@ -70,7 +70,9 @@ describe("Doctor Portal protocoling worklist backend", () => {
     process.env.DATABASE_URL ??= "postgresql://example@example/protocoling_test";
     process.env.JWT_SECRET ??= "protocoling-test-secret";
     const poolModule = await import("../../db/pool.js");
-    const queryMock = mock.method(poolModule.pool, "query", async () => ({ rows: [protocolingAppointmentRow()] }));
+    const queryMock = mock.method(poolModule.pool, "query", async (sql: string) => String(sql).includes("system_settings")
+      ? { rows: [] }
+      : { rows: [protocolingAppointmentRow()] });
 
     try {
       const { listProtocolingAppointments } = await import("./protocoling-repository.js");
@@ -91,6 +93,7 @@ describe("Doctor Portal protocoling worklist backend", () => {
     const poolModule = await import("../../db/pool.js");
     const queries: Array<{ sql: string; params: unknown[] }> = [];
     const queryMock = mock.method(poolModule.pool, "query", async (sql: string, params?: unknown[]) => {
+      if (String(sql).includes("system_settings")) return { rows: [] };
       queries.push({ sql, params: params ?? [] });
       return { rows: [protocolingAppointmentRow({ modality_code: "MRI" })] };
     });
@@ -127,6 +130,22 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /update appointment_protocol_assignments/);
     assert.match(repo, /insert into appointment_protocol_assignments/);
     assert.match(repo, /assigned_at = now\(\)/);
+    assert.match(repo, /assertRequestDocumentProtocolEligibility\(appointmentId\)/);
+  });
+
+  it("adds a booking-scoped request-document predicate without changing MWL behavior", () => {
+    const repo = readFileSync(`${root}/src/modules/doctor-portal/protocoling-repository.ts`, "utf8");
+    const policy = readFileSync(`${root}/src/services/request-document-protocol-policy.ts`, "utf8");
+    const migration = readFileSync(`${root}/src/db/migrations/164_require_request_document_for_protocol_queue.sql`, "utf8");
+
+    assert.match(repo, /qualifyingRequestDocumentExistsSql\("b\.id"\)/);
+    assert.match(policy, /document_type = '\$\{QUALIFYING_REQUEST_DOCUMENT_TYPE\}'/);
+    assert.match(policy, /request_document\.v2_booking_id = \$\{bookingIdSql\}/);
+    assert.match(policy, /document_appointment_links/);
+    assert.match(policy, /A request document must be attached before this appointment can be protocolled\./);
+    assert.match(migration, /require_request_document_for_protocol_queue/);
+    assert.match(migration, /"disabled"/);
+    assert.doesNotMatch(repo, /orthanc|sante|mwl/i);
   });
 
   it("returns assigned protocol CT phases and MRI sequences for read-only assignment detail", () => {

@@ -12,6 +12,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
 
 type DocumentsStorageForm = {
+  requireRequestDocumentForProtocolQueue: boolean;
   storagePath: string;
   authUsername: string;
   authPassword: string;
@@ -36,6 +37,7 @@ function normalizeDocumentsStorageForm(
   settings: Record<string, string> | undefined
 ): DocumentsStorageForm {
   return {
+    requireRequestDocumentForProtocolQueue: String(settings?.require_request_document_for_protocol_queue || "disabled").toLowerCase() === "enabled",
     storagePath: settings?.storage_path || "",
     authUsername: settings?.storage_auth_username || "",
     authPassword: settings?.storage_auth_password || "",
@@ -95,6 +97,7 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
     mutationFn: async () =>
       saveSettings("documents_and_uploads", {
         entries: [
+          { key: "require_request_document_for_protocol_queue", value: { value: form.requireRequestDocumentForProtocolQueue ? "enabled" : "disabled" } },
           { key: "storage_path", value: { value: form.storagePath } },
           { key: "storage_auth_username", value: { value: form.authUsername } },
           { key: "storage_auth_password", value: { value: form.authPassword } },
@@ -210,6 +213,22 @@ export default function DocumentsStorageSection({ onReAuthRequired }: { onReAuth
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-700">
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={form.requireRequestDocumentForProtocolQueue}
+            onChange={(event) => updateForm("requireRequestDocumentForProtocolQueue", event.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <strong className="block">Require request document before protocol queue</strong>
+            <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">
+              When enabled, appointments without an attached request/referral document remain booked but are withheld from the doctor's protocol queue until the document is attached.
+            </span>
+          </span>
+        </label>
+      </div>
       <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
         <h4 className="font-medium text-sm">{t("settings.documents.naps2Title")}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

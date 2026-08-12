@@ -7,6 +7,7 @@ import {
   createScanSession,
   fetchCurrentSession,
   fetchIntegrationStatus,
+  fetchRequestDocumentProtocolPolicy,
   listAppointmentDocuments,
   prepareScanSession,
   uploadAppointmentDocument,
@@ -146,6 +147,25 @@ export function RequestDocumentsPanel({
     queryFn: () => listAppointmentDocuments(appointmentId, appointmentRefType),
     enabled: Number.isFinite(appointmentId) && appointmentId > 0,
   });
+  const { data: protocolPolicy } = useQuery({
+    queryKey: ["documents", "protocol-eligibility-policy", appointmentId],
+    queryFn: () => fetchRequestDocumentProtocolPolicy(appointmentId),
+    enabled: Number.isFinite(appointmentId) && appointmentId > 0,
+    staleTime: 60_000,
+  });
+  const hasQualifyingRequestDocument = protocolPolicy?.hasQualifyingRequestDocument === true;
+  const invalidateDocumentQueries = () => {
+    queryClient.invalidateQueries({ queryKey });
+    queryClient.invalidateQueries({ queryKey: ["documents", "protocol-eligibility-policy", appointmentId] });
+  };
+  const protocolEligibilityStatus = protocolPolicy?.requireRequestDocumentForProtocolQueue ? (
+    <div
+      className={`rounded-lg border px-3 py-2 text-xs font-medium ${hasQualifyingRequestDocument ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}
+      data-testid="request-document-protocol-status"
+    >
+      {hasQualifyingRequestDocument ? "Request attached" : "Request missing — not yet eligible for protocoling"}
+    </div>
+  ) : null;
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
     [documents, selectedDocumentId]
@@ -303,7 +323,7 @@ export function RequestDocumentsPanel({
       if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
         setSelectedDocumentId(uploadedDocument.id);
       }
-      queryClient.invalidateQueries({ queryKey });
+      invalidateDocumentQueries();
       onDocumentsChanged?.();
       pushToast({
         type: "success",
@@ -325,7 +345,7 @@ export function RequestDocumentsPanel({
     onSuccess: (_result, documentId) => {
       if (selectedDocumentId === documentId) setSelectedDocumentId(null);
       if (selectedPreview?.id === documentId) setSelectedPreview(null);
-      queryClient.invalidateQueries({ queryKey });
+      invalidateDocumentQueries();
       onDocumentsChanged?.();
       pushToast({
         type: "success",
@@ -468,7 +488,7 @@ export function RequestDocumentsPanel({
       }
 
       if (successfulUploads > 0) {
-        queryClient.invalidateQueries({ queryKey });
+        invalidateDocumentQueries();
         onDocumentsChanged?.();
       }
 
@@ -524,7 +544,7 @@ export function RequestDocumentsPanel({
 
       setFailedScanUploads(remainingFailures);
       if (retriedSuccessCount > 0) {
-        queryClient.invalidateQueries({ queryKey });
+        invalidateDocumentQueries();
         onDocumentsChanged?.();
         pushToast({
           type: "success",
@@ -637,6 +657,7 @@ export function RequestDocumentsPanel({
   if (layout === "workspace") {
     return (
       <div data-expanded={expanded ? "true" : "false"} data-layout="appointment-workspace" data-testid="appointment-document-workspace" className="flex h-full min-h-0 min-w-0 flex-col">
+        {protocolEligibilityStatus ? <div className="mb-2 shrink-0">{protocolEligibilityStatus}</div> : null}
         <div className={`grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 ${documentRailCollapsed ? "lg:grid-cols-[minmax(0,1fr)_44px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]"}`}>
           <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-border bg-background p-1 sm:p-1.5" aria-label={resolvedTitle}>
             <div className="flex min-h-0 flex-1 flex-col">
@@ -719,6 +740,7 @@ export function RequestDocumentsPanel({
           <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{resolvedTitle}</h4>
         </div>
       ) : null}
+      {!expanded && protocolEligibilityStatus ? <div className="mt-3 shrink-0">{protocolEligibilityStatus}</div> : null}
 
       {!expanded && canAttachDocuments ? <div className="mt-3 grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
         <label htmlFor="request-documents-upload-file" className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">

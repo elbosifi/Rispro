@@ -3,6 +3,11 @@ import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
+import {
+  assertRequestDocumentProtocolEligibility,
+  isRequestDocumentRequiredForProtocolQueue,
+  qualifyingRequestDocumentExistsSql,
+} from "../../services/request-document-protocol-policy.js";
 import type {
   DoctorProtocolingAppointmentDetail,
   DoctorProtocolingAppointmentRow,
@@ -221,6 +226,9 @@ export async function listProtocolingAppointments(filters: ProtocolingFilters): 
     "b.status not in ('cancelled', 'discontinued', 'voided')",
     "protocoling_modality.modality_code in ('CT', 'MRI')",
   ];
+  if (await isRequestDocumentRequiredForProtocolQueue()) {
+    where.push(qualifyingRequestDocumentExistsSql("b.id"));
+  }
   if (filters.modality) {
     values.push(filters.modality);
     where.push(`protocoling_modality.modality_code = $${values.length}`);
@@ -354,6 +362,7 @@ async function scannerModality(scannerId: number): Promise<ProtocolingModality |
 async function validateAssignment(appointmentId: number, input: ProtocolAssignmentInput) {
   const appointment = await getProtocolingAppointment(appointmentId);
   if (!appointment) throw new HttpError(404, "Appointment not found.");
+  await assertRequestDocumentProtocolEligibility(appointmentId);
   let protocolVersionId: number | null = null;
   if (input.protocolId !== null) {
     const protocol = await activeProtocol(input.protocolId);

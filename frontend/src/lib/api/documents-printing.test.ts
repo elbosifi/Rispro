@@ -9,6 +9,7 @@ import {
   fetchIntegrationStatus,
   listAppointmentDocuments,
   mapRequestDocument,
+  fetchRequestDocumentProtocolPolicy,
   prepareScanSession,
   uploadAppointmentDocument,
 } from "./documents-printing";
@@ -26,6 +27,12 @@ describe("documents and printing API contracts", () => {
     expect(api).toHaveBeenNthCalledWith(1, "/documents?appointmentId=8&appointmentRefType=v2_booking");
     expect(api).toHaveBeenNthCalledWith(2, "/documents", { method: "POST", body: JSON.stringify({ patientId: 3, appointmentId: 8, appointmentRefType: "v2_booking", documentType: "request", originalFilename: "request.pdf", mimeType: "application/pdf", fileContentBase64: "base64" }) });
     expect(api).toHaveBeenNthCalledWith(3, "/documents/12", { method: "DELETE" });
+  });
+
+  it("reads the request-document protocol policy from the authenticated document API", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: true });
+    await expect(fetchRequestDocumentProtocolPolicy(42)).resolves.toEqual({ requireRequestDocumentForProtocolQueue: true, hasQualifyingRequestDocument: true });
+    expect(api).toHaveBeenCalledWith("/documents/protocol-eligibility-policy?appointmentId=42");
   });
 
   it("preserves scan integration and administrative storage routes", async () => {

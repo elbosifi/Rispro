@@ -21,6 +21,7 @@ import {
   exportMriSequencePresetsWorkbook,
   fetchDoctorProtocolingAppointmentDetail,
   fetchDoctorProtocolingAppointments,
+  fetchRequestDocumentProtocolPolicy,
   fetchProtocolingPreviousAppointments,
   fetchProtocolLibraryAnatomyRegions,
   fetchProtocolLibraryCtPhasePresets,
@@ -1015,6 +1016,12 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
     queryFn: () => fetchDoctorProtocolingAppointments(filters),
     enabled: canAssign,
   });
+  const protocolPolicyQuery = useQuery({
+    queryKey: ["documents", "protocol-eligibility-policy"],
+    queryFn: () => fetchRequestDocumentProtocolPolicy(),
+    enabled: canAssign,
+    staleTime: 60_000,
+  });
   const appointmentDetailQuery = useQuery({
     queryKey: ["doctor", "protocoling", "appointments", selectedAppointmentId],
     queryFn: () => fetchDoctorProtocolingAppointmentDetail(selectedAppointmentId!),
@@ -1095,6 +1102,12 @@ function ProtocolingWorklist({ canAssign }: { canAssign: boolean }) {
       {!canAssign ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           You do not have permission to assign protocols.
+        </div>
+      ) : null}
+
+      {protocolPolicyQuery.data?.requireRequestDocumentForProtocolQueue ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900" data-testid="protocol-request-document-policy">
+          Only appointments with an attached request/referral document are eligible for protocoling.
         </div>
       ) : null}
 

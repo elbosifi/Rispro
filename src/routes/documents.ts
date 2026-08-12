@@ -10,11 +10,23 @@ import {
   listDocuments,
   uploadDocument,
 } from "../services/document-service.js";
+import { hasQualifyingRequestDocument, isRequestDocumentRequiredForProtocolQueue } from "../services/request-document-protocol-policy.js";
 import type { DocumentRow } from "../services/document-service.js";
 
 export const documentsRouter = express.Router();
 
 documentsRouter.use(requireAuth);
+
+documentsRouter.get(
+  "/protocol-eligibility-policy",
+  asyncRoute(async (req: Request, res: Response) => {
+    const appointmentId = asOptionalUserId(asUnknownRecord(req.query).appointmentId);
+    res.json({
+      requireRequestDocumentForProtocolQueue: await isRequestDocumentRequiredForProtocolQueue(),
+      hasQualifyingRequestDocument: appointmentId ? await hasQualifyingRequestDocument(Number(appointmentId)) : null,
+    });
+  })
+);
 
 function toDocumentResponse(document: DocumentRow): Omit<DocumentRow, "stored_path" | "content_sha256"> & { stored_path: string } {
   const { content_sha256: _contentSha256, ...safeDocument } = document;
