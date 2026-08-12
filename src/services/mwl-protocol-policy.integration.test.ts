@@ -29,8 +29,10 @@ import {
   claimSanteOutboxBatch,
   enqueueSanteHl7ForBooking,
   markSanteOutboxFailure,
+  retrySanteOutbox,
   writeSanteOutboxJob,
 } from "./sante-hl7-outbox-service.js";
+import { getWorklistMonitorEntries } from "./worklist-monitor-service.js";
 import {
   MWL_POLICY_CATEGORY,
   REQUIRE_PROTOCOL_BEFORE_MWL_KEY,
@@ -452,6 +454,61 @@ describe("shared MWL protocol policy", () => {
     assert.equal(job?.operation, "delete");
   });
 
+  it("does not convert an obsolete failed Orthanc upsert or hide the required withdrawal", async () => {
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    const bookingId = await createBooking("ct", "arrived");
+    const queuedA = await enqueueOrthancSyncForBooking(bookingId);
+    const jobA = await claimOrthancJob(bookingId, "upsert");
+    assert.equal(jobA.id, queuedA.jobId);
+    await markOrthancOutboxFailure(jobA.id, bookingId, "historical upsert failed", 300);
+
+    const insertedB = await pool.query<{ id: number }>(
+      `insert into external_mwl_outbox(
+         booking_id,external_system,operation,status,attempt_count,next_attempt_at,payload_hash,created_at,updated_at
+       ) values ($1,'orthanc','upsert','pending',0,now(),'newer-upsert',now(),now()) returning id`,
+      [bookingId]
+    );
+    const jobBId = Number(insertedB.rows[0]!.id);
+    const jobB = await claimOrthancJob(bookingId, "upsert");
+    assert.equal(jobB.id, jobBId);
+    await markOrthancOutboxSuccess(jobB.id, bookingId, "upsert", `current-${bookingId}`);
+
+    const current = await pool.query<{ sync_status: string; deleted_at: string | null }>(
+      "select sync_status,deleted_at::text as deleted_at from external_mwl_sync where booking_id=$1 and external_system='orthanc'",
+      [bookingId]
+    );
+    assert.equal(current.rows[0]!.sync_status, "synced");
+    assert.equal(current.rows[0]!.deleted_at, null);
+
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "enabled");
+    assert.ok(!(await claimOrthancOutboxBatch(500)).some((job) => job.bookingId === bookingId));
+    const historical = await pool.query<{ operation: string; status: string }>(
+      "select operation,status from external_mwl_outbox where id=$1",
+      [jobA.id]
+    );
+    assert.deepEqual(historical.rows[0], { operation: "upsert", status: "failed" });
+    const stillCurrent = await pool.query<{ sync_status: string; deleted_at: string | null }>(
+      "select sync_status,deleted_at::text as deleted_at from external_mwl_sync where booking_id=$1 and external_system='orthanc'",
+      [bookingId]
+    );
+    assert.equal(stillCurrent.rows[0]!.sync_status, "synced");
+    assert.equal(stillCurrent.rows[0]!.deleted_at, null);
+
+    const withdrawal = await enqueueOrthancSyncForBooking(bookingId);
+    assert.equal(withdrawal.operation, "delete");
+    assert.notEqual(withdrawal.jobId, jobA.id);
+    assert.notEqual(withdrawal.jobId, jobB.id);
+    const deleteJob = await claimOrthancJob(bookingId, "delete");
+    assert.equal(deleteJob.id, withdrawal.jobId);
+    await markOrthancOutboxSuccess(deleteJob.id, bookingId, "delete", `current-${bookingId}`);
+    const finalSync = await pool.query<{ sync_status: string; deleted_at: string | null }>(
+      "select sync_status,deleted_at::text as deleted_at from external_mwl_sync where booking_id=$1 and external_system='orthanc'",
+      [bookingId]
+    );
+    assert.equal(finalSync.rows[0]!.sync_status, "deleted");
+    assert.ok(finalSync.rows[0]!.deleted_at);
+  });
+
   it("preserves a DELETE successor when an in-flight Orthanc UPSERT succeeds or fails", async () => {
     await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
 
@@ -554,6 +611,77 @@ describe("shared MWL protocol policy", () => {
       assert.ok(finalSync.rows[0]!.deleted_at);
       await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
     }
+  });
+
+  it("uses and retries only the authoritative Sante outbox job", async () => {
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    const bookingId = await createBooking("ct", "arrived");
+    const queuedA = await enqueueSanteHl7ForBooking(bookingId);
+    assert.equal(queuedA.enqueued, true);
+
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "enabled");
+    const queuedB = await enqueueSanteHl7ForBooking(bookingId);
+    assert.equal(queuedB.enqueued, true);
+    assert.notEqual(queuedB.jobId, queuedA.jobId);
+    const jobB = await claimSanteJob(bookingId, "cancel");
+    assert.equal(jobB.id, queuedB.jobId);
+    await writeSanteOutboxJob(jobB);
+    await pool.query("update sante_hl7_outbox set updated_at=now() + interval '1 day' where id=$1", [queuedA.jobId]);
+
+    const monitor = await getWorklistMonitorEntries({
+      dateFrom: TEST_DATE,
+      dateTo: TEST_DATE,
+      q: String(bookingId),
+      limit: 10,
+    });
+    const monitorEntry = monitor.entries.find((entry) => entry.bookingId === bookingId);
+    assert.equal(monitorEntry?.sante.outboxId, queuedB.jobId);
+    assert.ok(Array.isArray(monitorEntry?.sante.history));
+    assert.ok((monitorEntry?.sante.history as Array<{ id: number }>).some((row) => Number(row.id) === queuedA.jobId));
+    assert.ok((monitorEntry?.sante.history as Array<{ id: number }>).some((row) => Number(row.id) === queuedB.jobId));
+
+    await assert.rejects(
+      retrySanteOutbox(queuedA.jobId!, fixture!.userId),
+      (error: unknown) => {
+        assert.equal((error as { statusCode?: number }).statusCode, 409);
+        assert.match((error as Error).message, /superseded by a newer job/i);
+        return true;
+      }
+    );
+    const superseded = await pool.query<{ status: string }>("select status from sante_hl7_outbox where id=$1", [queuedA.jobId]);
+    assert.equal(superseded.rows[0]!.status, "skipped");
+    const authoritative = await pool.query<{ last_outbox_id: number }>(
+      "select last_outbox_id from sante_worklist_sync where booking_id=$1",
+      [bookingId]
+    );
+    assert.equal(Number(authoritative.rows[0]!.last_outbox_id), queuedB.jobId);
+    const currentB = await pool.query<{ status: string }>("select status from sante_hl7_outbox where id=$1", [queuedB.jobId]);
+    assert.equal(currentB.rows[0]!.status, "pending_import");
+    await assert.rejects(
+      retrySanteOutbox(queuedB.jobId!, fixture!.userId),
+      (error: unknown) => {
+        assert.equal((error as { statusCode?: number }).statusCode, 409);
+        assert.match((error as Error).message, /not in a retryable failed state/i);
+        return true;
+      }
+    );
+    const successfulB = await pool.query<{ status: string }>("select status from sante_hl7_outbox where id=$1", [queuedB.jobId]);
+    assert.equal(successfulB.rows[0]!.status, "pending_import");
+
+    await setSetting(MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY, "disabled");
+    const retryableBookingId = await createBooking("ct", "arrived");
+    const retryableQueued = await enqueueSanteHl7ForBooking(retryableBookingId);
+    const retryableJob = await claimSanteJob(retryableBookingId, "create");
+    assert.equal(retryableJob.id, retryableQueued.jobId);
+    await markSanteOutboxFailure(retryableJob, "genuine delivery failure", false);
+    await retrySanteOutbox(retryableJob.id, fixture!.userId);
+    const retried = await pool.query<{ status: string }>("select status from sante_hl7_outbox where id=$1", [retryableJob.id]);
+    assert.equal(retried.rows[0]!.status, "retry_scheduled");
+    const retryAuthority = await pool.query<{ last_outbox_id: number }>(
+      "select last_outbox_id from sante_worklist_sync where booking_id=$1",
+      [retryableBookingId]
+    );
+    assert.equal(Number(retryAuthority.rows[0]!.last_outbox_id), retryableJob.id);
   });
 
   it("does not let withdrawn history bypass queue-only when protocol eligibility returns", async () => {

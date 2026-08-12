@@ -982,31 +982,62 @@ export async function sendSyntheticSanteTestFile(currentUserId: UserId): Promise
 export async function retrySanteOutbox(outboxId: number, currentUserId: UserId): Promise<{ ok: true; outboxId: number }> {
   const id = Number(outboxId);
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "outboxId must be a positive integer.");
-  await pool.query(
-    `
-      update sante_hl7_outbox
-      set status = 'retry_scheduled',
-          next_attempt_at = now(),
-          locked_at = null,
-          target_path = null,
-          tmp_path = null,
-          observed_path = null,
-          last_file_state = 'manual_retry_new_file',
-          last_error = null,
-          updated_at = now()
-      where id = $1
-    `,
-    [id]
-  );
-  await logAuditEntry({
-    entityType: "integration",
-    entityId: id,
-    actionType: "sante_hl7_retry_queued",
-    oldValues: null,
-    newValues: { outboxId: id, createsNewDeliveryAttempt: true },
-    changedByUserId: currentUserId,
-  });
-  return { ok: true, outboxId: id };
+  const retryableStatuses: SanteOutboxStatus[] = ["import_failed", "pending_timeout", "dead_letter", "nack_received", "send_failed"];
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const requested = await client.query<{ booking_id: number | null; status: SanteOutboxStatus }>(
+      "select booking_id,status from sante_hl7_outbox where id=$1 for update",
+      [id]
+    );
+    const row = requested.rows[0];
+    if (!row) throw new HttpError(404, "Sante outbox job not found.");
+
+    if (row.booking_id != null) {
+      const sync = await client.query<{ last_outbox_id: number | null }>(
+        "select last_outbox_id from sante_worklist_sync where booking_id=$1::bigint for update",
+        [row.booking_id]
+      );
+      if (Number(sync.rows[0]?.last_outbox_id) !== id) {
+        throw new HttpError(409, "This Sante outbox job has been superseded by a newer job.");
+      }
+    }
+    if (!retryableStatuses.includes(row.status)) {
+      throw new HttpError(409, "This Sante outbox job is not in a retryable failed state.");
+    }
+
+    await client.query(
+      `
+        update sante_hl7_outbox
+        set status = 'retry_scheduled',
+            next_attempt_at = now(),
+            locked_at = null,
+            target_path = null,
+            tmp_path = null,
+            observed_path = null,
+            last_file_state = 'manual_retry_new_file',
+            last_error = null,
+            updated_at = now()
+        where id = $1
+      `,
+      [id]
+    );
+    await logAuditEntry({
+      entityType: "integration",
+      entityId: id,
+      actionType: "sante_hl7_retry_queued",
+      oldValues: null,
+      newValues: { outboxId: id, createsNewDeliveryAttempt: true },
+      changedByUserId: currentUserId,
+    }, client);
+    await client.query("commit");
+    return { ok: true, outboxId: id };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function reconcileSanteHl7Window(input: {

@@ -337,6 +337,13 @@ export async function claimOrthancOutboxBatch(limit = 20): Promise<OrthancOutbox
         and outbox.external_system = 'orthanc'
         and outbox.operation = 'upsert'
         and outbox.status in ('pending', 'failed')
+        and not exists (
+          select 1
+          from external_mwl_outbox newer
+          where newer.booking_id = outbox.booking_id
+            and newer.external_system = outbox.external_system
+            and newer.id > outbox.id
+        )
         and b.status in ('scheduled', 'arrived', 'waiting')
         and protocoling_modality.modality_code in ('CT', 'MRI')
         and exists (

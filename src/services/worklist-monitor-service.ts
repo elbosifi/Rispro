@@ -339,13 +339,7 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
         ) h
       ) oh on true
       left join sante_worklist_sync ss on ss.booking_id = b.id
-      left join lateral (
-        select id, status
-        from sante_hl7_outbox
-        where booking_id = b.id
-        order by updated_at desc, id desc
-        limit 1
-      ) so on true
+      left join sante_hl7_outbox so on so.id = ss.last_outbox_id
       left join lateral (
         select jsonb_agg(jsonb_build_object(
           'id', h.id,
