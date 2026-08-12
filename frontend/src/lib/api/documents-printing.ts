@@ -14,7 +14,7 @@ export interface RequestDocument {
   mimeType: string;
   fileSize: number;
   storageLocationType: "network" | "local_fallback";
-  source: "manual_upload" | "naps2_webscan" | "scanner_app";
+  source: "manual_upload" | "naps2_webscan" | "scanner_app" | "request_scan_automation" | "modality_scan_automation";
   scanSessionId?: number | null;
   pageCount?: number | null;
   scannerName?: string | null;
@@ -45,7 +45,11 @@ export interface IntegrationStatus {
   };
 }
 
-function mapRequestDocument(raw: RawRecord): RequestDocument {
+export function mapRequestDocument(raw: RawRecord): RequestDocument {
+  const rawSource = String(raw.source ?? "manual_upload");
+  const source: RequestDocument["source"] = rawSource === "naps2_webscan" || rawSource === "scanner_app" || rawSource === "request_scan_automation" || rawSource === "modality_scan_automation"
+    ? rawSource
+    : "manual_upload";
   return {
     id: Number(raw.id ?? 0),
     patientId: raw.patient_id == null ? (raw.patientId == null ? null : Number(raw.patientId)) : Number(raw.patient_id),
@@ -62,12 +66,7 @@ function mapRequestDocument(raw: RawRecord): RequestDocument {
       String(raw.storage_location_type ?? raw.storageLocationType ?? "local_fallback") === "network"
         ? "network"
         : "local_fallback",
-    source:
-      String(raw.source ?? "manual_upload") === "scanner_app"
-        ? "scanner_app"
-        : String(raw.source ?? "manual_upload") === "naps2_webscan"
-          ? "naps2_webscan"
-          : "manual_upload",
+    source,
     scanSessionId:
       raw.scan_session_id == null ? (raw.scanSessionId == null ? null : Number(raw.scanSessionId)) : Number(raw.scan_session_id),
     pageCount: raw.page_count == null ? (raw.pageCount == null ? null : Number(raw.pageCount)) : Number(raw.page_count),

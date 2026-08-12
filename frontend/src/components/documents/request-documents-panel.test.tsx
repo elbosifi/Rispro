@@ -40,7 +40,7 @@ const mockCreateScanSession = vi.fn<(payload: unknown) => Promise<unknown>>(asyn
   expiresAt: "2026-01-01T00:15:00.000Z",
   fallbackUploadAllowed: true,
 }));
-const mockScanAppointmentRequest = vi.fn<(customOptions?: unknown) => Promise<{ file: File; pageCount: number; source: "naps2_webscan" }>>(
+const mockScanAppointmentRequest = vi.fn<(customOptions?: unknown) => Promise<{ file: File; files?: File[]; pageCount: number; source: "naps2_webscan" }>>(
   async () => ({
     file: new File([new Blob(["page-1"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
     pageCount: 1,
@@ -448,6 +448,37 @@ describe("RequestDocumentsPanel local scan flow", () => {
     await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalledTimes(1));
   });
 
+  it("refreshes once when a multi-file scan only partially uploads", async () => {
+    const onDocumentsChanged = vi.fn();
+    const first = new File(["first"], "first.pdf", { type: "application/pdf" });
+    const second = new File(["second"], "second.pdf", { type: "application/pdf" });
+    mockScanAppointmentRequest.mockResolvedValue({ file: first, files: [first, second], pageCount: 2, source: "naps2_webscan" });
+    mockUploadAppointmentDocument
+      .mockResolvedValueOnce({ ...documentFixture(11, "first.pdf", "application/pdf"), storedPath: "documents/first.pdf" })
+      .mockRejectedValueOnce(new Error("Second upload failed"));
+
+    const { queryClient } = renderPanel({ onDocumentsChanged });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
+
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(2));
+    expect(onDocumentsChanged).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["appointment-documents", "v2_booking", 42] });
+    expect(screen.getByRole("button", { name: "Retry failed uploads" })).toBeTruthy();
+  });
+
+  it("does not report a document change when every scanned upload fails", async () => {
+    const onDocumentsChanged = vi.fn();
+    mockUploadAppointmentDocument.mockRejectedValue(new Error("Upload failed"));
+    renderPanel({ onDocumentsChanged });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
+
+    await waitFor(() => expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(1));
+    expect(onDocumentsChanged).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Retry failed uploads" })).toBeTruthy();
+  });
+
   it("reports successful document deletion to its parent", async () => {
     const onDocumentsChanged = vi.fn();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -597,6 +628,20 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByText("Attached documents")).toBeTruthy();
     expect(await screen.findByText("request.png")).toBeTruthy();
     expect(screen.getByText("Images and report")).toBeTruthy();
+  });
+
+  it("shows friendly labels for automated document sources", async () => {
+    mockListAppointmentDocuments.mockResolvedValue([
+      { ...documentFixture(1, "request.pdf", "application/pdf"), source: "request_scan_automation" },
+      { ...documentFixture(2, "clinical.pdf", "application/pdf"), source: "modality_scan_automation" },
+    ]);
+
+    renderPanel();
+
+    expect(await screen.findByText(/Request Scan/)).toBeTruthy();
+    expect(screen.getByText(/Modality Scan/)).toBeTruthy();
+    expect(screen.queryByText(/request_scan_automation/)).toBeNull();
+    expect(screen.queryByText(/modality_scan_automation/)).toBeNull();
   });
 
   it("keeps the document rail narrow and collapsible", async () => {

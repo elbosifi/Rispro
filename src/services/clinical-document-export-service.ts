@@ -6,7 +6,7 @@ import { normalizePositiveInteger } from "../utils/normalize.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getDocumentAbsolutePath } from "./document-service.js";
-import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
+import { createClinicalDocumentDicom, createClinicalDocumentSecondaryCapture, createClinicalDocumentUid, documentSeriesKind, normalizeRisproModalityCode } from "./clinical-document-dicom.js";
 import { cleanupRenderedClinicalDocument, readRenderedRgbPage, renderClinicalDocument, type RenderedClinicalDocument } from "./clinical-document-renderer.js";
 import { createAuthoritativeOrthancClient, isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings, type AuthoritativeOrthancClient, type OrthancInstanceDetails, type OrthancStudyDetails } from "./authoritative-orthanc-service.js";
 import { CLINICAL_DOCUMENT_EXPORT_DESTINATION, enqueueClinicalDocumentExportsForAppointmentAutomatically, reconcileClinicalDocumentExports } from "./clinical-document-export-queue-service.js";
@@ -205,13 +205,9 @@ async function ensureStableIdentifiers(row: ClinicalDocumentExportWorkRow, targe
   try {
     await client.query("begin");
     await client.query("select pg_advisory_xact_lock($1::bigint)", [row.appointment_id]);
-    const seriesResult = await client.query<{ series_instance_uid: string | null }>(
-      `select distinct series_instance_uid from clinical_document_exports where appointment_id=$1 and destination_key=$2 and series_instance_uid is not null`,
-      [row.appointment_id, CLINICAL_DOCUMENT_EXPORT_DESTINATION],
-    );
-    const seriesUids = [...new Set(seriesResult.rows.map((value) => value.series_instance_uid).filter((value): value is string => Boolean(value)))];
-    if (seriesUids.length > 1) throw new ClinicalDocumentExportBlockedError("series_uid_conflict", "Multiple RISpro clinical document series identifiers exist for this appointment.");
-    const seriesInstanceUid = row.series_instance_uid || seriesUids[0] || createClinicalDocumentUid();
+    // Encapsulated exports predate semantic series separation. Preserve a row's
+    // persisted UID on retry, but never attach a new row to an unknown legacy series.
+    const seriesInstanceUid = row.series_instance_uid || createClinicalDocumentUid();
     const sopInstanceUid = row.sop_instance_uid || createClinicalDocumentUid();
     const duplicate = await client.query<{ id: number }>(
       `select id from clinical_document_exports where appointment_id=$1 and destination_key=$2 and sop_instance_uid=$3 and id<>$4 limit 1`,
@@ -252,19 +248,30 @@ async function renewLease(row: ClinicalDocumentExportWorkRow): Promise<void> {
   if (result.rowCount !== 1) throw new Error("Clinical document export lease was lost.");
 }
 
-async function prepareSecondaryCapturePages(row: ClinicalDocumentExportWorkRow, studyUid: string, rendered: RenderedClinicalDocument, dependencies: ClinicalDocumentProcessorDependencies): Promise<ClinicalDocumentExportInstanceRow[]> {
+async function prepareSecondaryCapturePages(row: ClinicalDocumentExportWorkRow, studyUid: string, rendered: RenderedClinicalDocument, dependencies: ClinicalDocumentProcessorDependencies): Promise<{ pages: ClinicalDocumentExportInstanceRow[]; seriesNumber: number | null }> {
   const client = await pool.connect();
   try {
     await client.query("begin"); await client.query("select pg_advisory_xact_lock($1::bigint)", [row.appointment_id]);
-    const existing = await client.query<{ series_instance_uid: string | null; series_number: number | null }>("select distinct series_instance_uid,series_number from clinical_document_exports where appointment_id=$1 and destination_key=$2 and representation_type='secondary_capture' and series_instance_uid is not null", [row.appointment_id, CLINICAL_DOCUMENT_EXPORT_DESTINATION]);
+    let persistedSeriesUid = row.series_instance_uid;
+    let persistedSeriesNumber = row.series_number;
+    if (persistedSeriesNumber != null && row.exported_page_count === 0 && row.verified_page_count === 0) {
+      const uploaded = await client.query<{ count: number }>("select count(*)::int count from clinical_document_export_instances where export_id=$1 and (exported_at is not null or status='verified')", [row.id]);
+      if (Number(uploaded.rows[0]?.count || 0) === 0) {
+        await client.query("delete from clinical_document_export_instances where export_id=$1", [row.id]);
+        await client.query("update clinical_document_exports set series_instance_uid=null,series_number=null,expected_page_count=null,updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$2", [row.id, row.export_lease_owner]);
+        persistedSeriesUid = null;
+        persistedSeriesNumber = null;
+      }
+    }
+    const existing = await client.query<{ series_instance_uid: string | null }>("select distinct e.series_instance_uid from clinical_document_exports e join documents d on d.id=e.document_id where e.appointment_id=$1 and e.destination_key=$2 and e.representation_type='secondary_capture' and d.document_type=$3 and e.series_number is null and e.series_instance_uid is not null", [row.appointment_id, CLINICAL_DOCUMENT_EXPORT_DESTINATION, row.document_type]);
     const series = [...new Set(existing.rows.map((value) => value.series_instance_uid).filter(Boolean))]; if (series.length > 1) throw new ClinicalDocumentExportBlockedError("series_uid_conflict", "Multiple RISpro scanned-document series identifiers exist for this appointment.");
-    const seriesUid = row.series_instance_uid || series[0] || createClinicalDocumentUid(); const seriesNumber = row.series_number || existing.rows.find((value) => value.series_number)?.series_number || 9000;
+    const seriesUid = persistedSeriesUid || series[0] || createClinicalDocumentUid();
     const max = await client.query<{ max: number | null }>("select max(i.instance_number) from clinical_document_export_instances i join clinical_document_exports e on e.id=i.export_id where e.appointment_id=$1 and i.series_instance_uid=$2", [row.appointment_id, seriesUid]);
     const start = Number(max.rows[0]?.max || 0) + 1;
     const expected = await client.query<{ expected_page_count: number | null }>("select expected_page_count from clinical_document_exports where id=$1 and status='exporting' and export_lease_owner=$2 for update", [row.id, row.export_lease_owner]);
     if (!expected.rows[0]) throw new Error("Clinical document export lease was lost before page preparation.");
     if (expected.rows[0].expected_page_count != null && Number(expected.rows[0].expected_page_count) !== rendered.pages.length) throw new ClinicalDocumentExportBlockedError("page_set_conflict", "The persisted clinical document page set does not match the rendered document.");
-    const updated = await client.query("update clinical_document_exports set study_instance_uid=coalesce(study_instance_uid,$2),series_instance_uid=coalesce(series_instance_uid,$3),series_number=coalesce(series_number,$4),expected_page_count=coalesce(expected_page_count,$5),updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$6", [row.id, studyUid, seriesUid, seriesNumber, rendered.pages.length, row.export_lease_owner]);
+    const updated = await client.query("update clinical_document_exports set study_instance_uid=coalesce(study_instance_uid,$2),series_instance_uid=coalesce(series_instance_uid,$3),series_number=$4,expected_page_count=coalesce(expected_page_count,$5),updated_at=now() where id=$1 and status='exporting' and export_lease_owner=$6", [row.id, studyUid, seriesUid, persistedSeriesNumber, rendered.pages.length, row.export_lease_owner]);
     if (updated.rowCount !== 1) throw new Error("Clinical document export lease was lost before page preparation.");
     const persisted = await client.query<ClinicalDocumentExportInstanceRow>("select * from clinical_document_export_instances where export_id=$1 order by page_number", [row.id]);
     const existingPages = new Map(persisted.rows.map((page) => [page.page_number, page]));
@@ -276,7 +283,7 @@ async function prepareSecondaryCapturePages(row: ClinicalDocumentExportWorkRow, 
     }
     const pages = await client.query<ClinicalDocumentExportInstanceRow>("select * from clinical_document_export_instances where export_id=$1 order by page_number", [row.id]);
     if (pages.rowCount !== rendered.pages.length) throw new ClinicalDocumentExportBlockedError("page_set_conflict", "The persisted clinical document page set does not match the rendered document.");
-    await client.query("commit"); return pages.rows;
+    await client.query("commit"); return { pages: pages.rows, seriesNumber: persistedSeriesNumber };
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 
@@ -294,13 +301,15 @@ async function processSecondaryCaptureExport(row: ClinicalDocumentExportWorkRow,
   let activePage: ClinicalDocumentExportInstanceRow | null = null;
   try {
     await renewLease(row); const source = await dependencies.readDocumentBytes(row.document_stored_path); rendered = await dependencies.renderDocument(source, row.document_mime_type, { onProgress: async () => renewLease(row) });
-    const pages = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered, dependencies); const client = await dependencies.createOrthancClient();
+    const prepared = await prepareSecondaryCapturePages(row, study.studyInstanceUid!, rendered, dependencies); const client = await dependencies.createOrthancClient();
+    const seriesKind = documentSeriesKind(row.document_type);
+    const pages = prepared.pages;
     for (const page of pages) {
       activePage = page;
       await renewLease(row); let instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid);
       if (!instance) {
         const renderedPage = rendered.pages[page.page_number - 1]!; const pixels = await dependencies.readRenderedPage(renderedPage.path);
-        const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, seriesNumber: row.series_number || 9000, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number });
+        const dicom = await createClinicalDocumentSecondaryCapture(pixels, page.rows, page.columns, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: page.series_instance_uid, sopInstanceUid: page.sop_instance_uid, modality, seriesKind, legacySeriesNumber: prepared.seriesNumber, instanceNumber: page.instance_number, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number });
         try { instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!); } catch (error) { instance = await client.findInstanceBySopInstanceUid(page.sop_instance_uid).catch(() => null); if (!instance) throw error; }
       }
       verifySecondaryCaptureInstance(instance, row, study, page, modality);
@@ -357,7 +366,7 @@ export async function processClaimedClinicalDocumentExport(row: ClinicalDocument
       verifyInstance(instance, row, study, identifiers);
     } else {
       const source = await dependencies.readDocumentBytes(row.document_stored_path);
-      const dicom = await createClinicalDocumentDicom(source, row.document_mime_type, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: identifiers.seriesInstanceUid, sopInstanceUid: identifiers.sopInstanceUid, patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number, documentTitle: row.document_type || row.document_original_filename, originalFilename: row.document_original_filename, instanceNumber: String(row.id) });
+      const dicom = await createClinicalDocumentDicom(source, row.document_mime_type, { studyInstanceUid: study.studyInstanceUid!, seriesInstanceUid: identifiers.seriesInstanceUid, sopInstanceUid: identifiers.sopInstanceUid, seriesKind: documentSeriesKind(row.document_type), patientId: study.patientId || row.patient_primary_id || row.patient_national_id || row.patient_mrn || "UNKNOWN", patientName: study.patientName || row.patient_name || "UNKNOWN", patientBirthDate: study.patientBirthDate || row.patient_birth_date, patientSex: study.patientSex || row.patient_sex, studyDate: study.studyDate || row.appointment_booking_date, accessionNumber: row.appointment_accession_number, documentTitle: row.document_type || row.document_original_filename, originalFilename: row.document_original_filename, instanceNumber: String(row.id) });
       try {
         instance = await client.uploadDicomInstance(dicom, study.studyInstanceUid!);
       } catch (error) {

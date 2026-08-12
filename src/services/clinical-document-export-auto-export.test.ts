@@ -39,3 +39,12 @@ test("automatic appointment enqueue does not create rows while export is off", a
   assert.deepEqual(await queue.enqueueClinicalDocumentExportsForAppointmentAutomatically(42), []);
   assert.equal(queries, 1);
 });
+
+test("export eligibility is semantic and independent of upload source", () => {
+  for (const documentType of ["appointment_request", "clinical_document"]) {
+    assert.equal(queue.isClinicalDocumentExportDocumentType(documentType), true);
+  }
+  for (const documentType of ["referral_request", "other", "", null]) {
+    assert.equal(queue.isClinicalDocumentExportDocumentType(documentType), false);
+  }
+});

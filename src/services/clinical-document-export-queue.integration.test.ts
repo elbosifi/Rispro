@@ -7,7 +7,7 @@ import { claimNextClinicalDocumentExport, getClinicalDocumentExportOperationsSum
 
 test.after(async () => { await pool.end().catch(() => undefined); });
 
-test("clinical document export queue is idempotent, excludes Reception documents, and claims only completed appointments", async (t) => {
+test("document export queue includes request and clinical documents, deduplicates exact links, and claims only completed appointments", async (t) => {
   const client = await pool.connect();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 11);
   let patientId: number | null = null;
@@ -16,6 +16,7 @@ test("clinical document export queue is idempotent, excludes Reception documents
   let policySetId: number | null = null;
   let policyVersionId: number | null = null;
   let bookingId: number | null = null;
+  let secondBookingId: number | null = null;
   let clinicalDocumentId: number | null = null;
   let receptionDocumentId: number | null = null;
   let linkedClinicalDocumentId: number | null = null;
@@ -57,6 +58,10 @@ test("clinical document export queue is idempotent, excludes Reception documents
       [patientId, modalityId, examTypeId, policyVersionId],
     );
     bookingId = booking.rows[0]!.id;
+    secondBookingId = Number((await client.query<{ id: number }>(
+      "insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,booking_date,case_category,status,policy_version_id) values($1,$2,$3,current_date + 1,'non_oncology','scheduled',$4) returning id",
+      [patientId, modalityId, examTypeId, policyVersionId],
+    )).rows[0]!.id);
     const clinicalDocument = await client.query<{ id: number }>(
       "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','modality_scan_automation',$2,$3,'application/pdf',5,$4) returning id",
       [patientId, `clinical-${suffix}.pdf`, `documents/export-test/${suffix}.pdf`, bookingId],
@@ -69,29 +74,36 @@ test("clinical document export queue is idempotent, excludes Reception documents
     receptionDocumentId = receptionDocument.rows[0]!.id;
 
     const firstQueue = await enqueueClinicalDocumentExportsForAppointment(bookingId);
-    assert.equal(firstQueue.length, 1);
+    assert.equal(firstQueue.length, 2);
     firstQueue.forEach((id) => exportIds.add(id));
     const secondQueue = await enqueueClinicalDocumentExportsForAppointment(bookingId);
     assert.deepEqual(secondQueue, []);
 
+    await client.query("insert into document_appointment_links(document_id,appointment_id) values($1,$2)", [receptionDocumentId, bookingId]);
+    assert.deepEqual(await enqueueClinicalDocumentExportsForAppointment(bookingId), []);
+
     const linkedClinicalDocument = await client.query<{ id: number }>(
-      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'clinical_document','modality_scan_automation',$2,$3,'application/pdf',5) returning id",
+      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size) values($1,'appointment_request','manual_upload',$2,$3,'application/pdf',5) returning id",
       [patientId, `linked-${suffix}.pdf`, `documents/export-test/${suffix}-linked.pdf`],
     );
     linkedClinicalDocumentId = linkedClinicalDocument.rows[0]!.id;
     await client.query("insert into document_appointment_links(document_id,appointment_id) values($1,$2)", [linkedClinicalDocumentId, bookingId]);
+    await client.query("insert into document_appointment_links(document_id,appointment_id) values($1,$2)", [linkedClinicalDocumentId, secondBookingId]);
     const linkedQueue = await enqueueClinicalDocumentExportsForAppointment(bookingId);
     assert.equal(linkedQueue.length, 1);
     linkedQueue.forEach((id) => exportIds.add(id));
     assert.deepEqual(await enqueueClinicalDocumentExportsForAppointment(bookingId), []);
+    const secondAppointmentQueue = await enqueueClinicalDocumentExportsForAppointment(secondBookingId);
+    assert.equal(secondAppointmentQueue.length, 1);
+    secondAppointmentQueue.forEach((id) => exportIds.add(id));
 
     const historical = await client.query<{ id: number }>(
-      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','modality_scan_automation',$2,$3,'application/pdf',5,$4) returning id",
+      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','manual_upload',$2,$3,'application/pdf',5,$4) returning id",
       [patientId, `historical-${suffix}.pdf`, `documents/export-test/${suffix}-historical.pdf`, bookingId],
     );
     historicalClinicalDocumentId = historical.rows[0]!.id;
     const unrelated = await client.query<{ id: number }>(
-      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'clinical_document','manual_upload',$2,$3,'application/pdf',5,$4) returning id",
+      "insert into documents(patient_id,document_type,source,original_filename,stored_path,mime_type,file_size,v2_booking_id) values($1,'other','modality_scan_automation',$2,$3,'application/pdf',5,$4) returning id",
       [patientId, `unrelated-${suffix}.pdf`, `documents/export-test/${suffix}-unrelated.pdf`, bookingId],
     );
     unrelatedClinicalDocumentId = unrelated.rows[0]!.id;
@@ -106,7 +118,7 @@ test("clinical document export queue is idempotent, excludes Reception documents
     assert.equal(incompleteClaim, null);
 
     await client.query("update appointments_v2.bookings set status='completed', completed_at=now() where id=$1", [bookingId]);
-    const qualifyingDocumentIds = new Set([clinicalDocumentId, linkedClinicalDocumentId, historicalClinicalDocumentId]);
+    const qualifyingDocumentIds = new Set([clinicalDocumentId, receptionDocumentId, linkedClinicalDocumentId, historicalClinicalDocumentId]);
     const claimedByDocument = new Map<number, number>();
     while (claimedByDocument.size < qualifyingDocumentIds.size) {
       const claimed = await claimNextClinicalDocumentExport(`queue-test-${suffix}-${claimedByDocument.size}`);
@@ -157,12 +169,12 @@ test("clinical document export queue is idempotent, excludes Reception documents
     await assert.rejects(() => retryClinicalDocumentExport(directExportId, userId!), /Only failed or blocked clinical document exports can be retried/);
 
     const receptionRows = await client.query("select 1 from clinical_document_exports where document_id=$1", [receptionDocumentId]);
-    assert.equal(receptionRows.rowCount, 0);
+    assert.equal(receptionRows.rowCount, 1);
   } finally {
     if (exportIds.size) await client.query("delete from audit_log where entity_type='clinical_document_export' and entity_id=any($1::bigint[])", [[...exportIds]]);
-    await client.query("delete from clinical_document_exports where appointment_id=$1", [bookingId]);
+    await client.query("delete from clinical_document_exports where appointment_id=any($1::bigint[])", [[bookingId, secondBookingId].filter((id): id is number => id !== null)]);
     await client.query("delete from documents where id = any($1::bigint[])", [[clinicalDocumentId, receptionDocumentId, linkedClinicalDocumentId, historicalClinicalDocumentId, unrelatedClinicalDocumentId].filter((id): id is number => id !== null)]);
-    await client.query("delete from appointments_v2.bookings where id=$1", [bookingId]);
+    await client.query("delete from appointments_v2.bookings where id=any($1::bigint[])", [[bookingId, secondBookingId].filter((id): id is number => id !== null)]);
     await client.query("delete from patients where id=$1", [patientId]);
     await client.query("delete from exam_types where id=$1", [examTypeId]);
     await client.query("delete from modalities where id=$1", [modalityId]);

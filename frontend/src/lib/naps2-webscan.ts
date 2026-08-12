@@ -15,6 +15,7 @@ export interface Naps2ScanOptions {
 
 export interface Naps2ScanResult {
   file: File;
+  files?: File[];
   pageCount: number;
   source: "naps2_webscan";
 }

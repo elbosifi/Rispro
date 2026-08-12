@@ -426,6 +426,8 @@ describe("ModalityPage modality board", () => {
     expect(oneDocument.className).toContain("state-chip--success");
     expect(oneDocument.querySelector("svg")).toBeTruthy();
     expect(twoDocuments.textContent).toContain("2 docs");
+    expect(within(screen.getByTestId("modality-board-row-22")).getByRole("button", { name: "1 doc. Open documents for ACC-ONE" })).toBeTruthy();
+    expect(within(screen.getByTestId("modality-board-row-23")).getByRole("button", { name: "2 docs. Open documents for ACC-TWO" })).toBeTruthy();
   });
 
   it("lazily opens exact-appointment documents without leaving the board", async () => {
@@ -449,7 +451,7 @@ describe("ModalityPage modality board", () => {
       createdAt: "2026-06-18T08:29:00.000Z",
     }]);
 
-    await user.click(screen.getByRole("button", { name: "Open documents for V2-000024" }));
+    await user.click(screen.getByRole("button", { name: "1 doc. Open documents for V2-000024" }));
 
     expect(await screen.findByText("Documents — V2-000024")).toBeTruthy();
     expect(await screen.findByText("Referral.pdf")).toBeTruthy();

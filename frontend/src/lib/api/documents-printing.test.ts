@@ -8,6 +8,7 @@ import {
   deleteAppointmentDocument,
   fetchIntegrationStatus,
   listAppointmentDocuments,
+  mapRequestDocument,
   prepareScanSession,
   uploadAppointmentDocument,
 } from "./documents-printing";
@@ -42,5 +43,14 @@ describe("documents and printing API contracts", () => {
     expect(api).toHaveBeenNthCalledWith(4, "/admin/documents/delete", { method: "POST", body: JSON.stringify({ mode: "appointment_date_range", dateFrom: "2026-01-01", dateTo: "2026-01-31" }) });
     expect(api).toHaveBeenNthCalledWith(5, "/admin/documents/move-storage", { method: "POST", body: JSON.stringify({ mode: "all" }) });
     expect(api).toHaveBeenNthCalledWith(6, "/admin/documents/storage-test", { method: "POST" });
+  });
+
+  it.each(["request_scan_automation", "modality_scan_automation"] as const)("preserves the %s source", (source) => {
+    expect(mapRequestDocument({ id: 1, source }).source).toBe(source);
+  });
+
+  it("uses manual upload only for absent or unknown legacy sources", () => {
+    expect(mapRequestDocument({ id: 1 }).source).toBe("manual_upload");
+    expect(mapRequestDocument({ id: 1, source: "unknown_legacy_source" }).source).toBe("manual_upload");
   });
 });

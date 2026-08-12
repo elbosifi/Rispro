@@ -92,6 +92,13 @@ export function RequestDocumentsPanel({
   const [printingDocumentId, setPrintingDocumentId] = useState<number | null>(null);
   const resolvedTitle = title ?? t("documents.title");
   const documentType = "appointment_request";
+  const documentSourceLabel = (source: RequestDocument["source"]) => {
+    if (source === "naps2_webscan") return t("documents.source.scanner");
+    if (source === "scanner_app") return t("documents.source.scannerApp");
+    if (source === "request_scan_automation") return t("documents.source.requestScan");
+    if (source === "modality_scan_automation") return t("documents.source.modalityScan");
+    return t("documents.source.manualUpload");
+  };
 
   async function printPdfDocument(document: RequestDocument, profile: Extract<PrinterDocumentType, "A4_DOCUMENT" | "A5_DOCUMENT">) {
     if (printingDocumentId != null) return;
@@ -442,22 +449,30 @@ export function RequestDocumentsPanel({
         source: scanSource,
         fileName: suggestedFileName || `appointment-${appointmentId}-request.pdf`,
       });
-      try {
-        const uploadedDocument = await uploadFileAsDocument(scanResult.file, preparedDocumentType, scanResult.source);
-        if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
-          setSelectedDocumentId(uploadedDocument.id);
+      let successfulUploads = 0;
+      const scanFiles = scanResult.files?.length ? scanResult.files : [scanResult.file];
+      for (const scannedFile of scanFiles) {
+        try {
+          const uploadedDocument = await uploadFileAsDocument(scannedFile, preparedDocumentType, scanResult.source);
+          if (Number.isInteger(uploadedDocument.id) && uploadedDocument.id > 0) {
+            setSelectedDocumentId(uploadedDocument.id);
+          }
+          successfulUploads += 1;
+        } catch (err) {
+          failures.push({
+            file: scannedFile,
+            error: err instanceof Error ? err.message : t("documents.uploadFailedMessage"),
+            documentType: preparedDocumentType,
+          });
         }
-      } catch (err) {
-        failures.push({
-          file: scanResult.file,
-          error: err instanceof Error ? err.message : t("documents.uploadFailedMessage"),
-          documentType: preparedDocumentType,
-        });
+      }
+
+      if (successfulUploads > 0) {
+        queryClient.invalidateQueries({ queryKey });
+        onDocumentsChanged?.();
       }
 
       if (failures.length === 0) {
-        queryClient.invalidateQueries({ queryKey });
-        onDocumentsChanged?.();
         pushToast({
           type: "success",
           title: t("documents.scanUploadedTitle"),
@@ -899,7 +914,7 @@ export function RequestDocumentsPanel({
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-stone-900 dark:text-white">{doc.originalFilename}</div>
                   <div className="text-xs text-stone-500">
-                    {[doc.pageCount ? t("documents.pagesCount").replace("{count}", String(doc.pageCount)) : null, doc.documentType, doc.source].filter(Boolean).join(" · ")}
+                    {[doc.pageCount ? t("documents.pagesCount").replace("{count}", String(doc.pageCount)) : null, doc.documentType, documentSourceLabel(doc.source)].filter(Boolean).join(" · ")}
                   </div>
                   {doc.createdAt ? <div className="text-xs text-stone-500">{new Date(doc.createdAt).toLocaleString()}</div> : null}
                 </div>

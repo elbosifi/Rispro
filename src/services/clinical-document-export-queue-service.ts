@@ -4,6 +4,11 @@ import type { OptionalUserId } from "../types/http.js";
 import { isClinicalDocumentAutoExportEnabled, readAuthoritativeOrthancSettings } from "./authoritative-orthanc-service.js";
 
 export const CLINICAL_DOCUMENT_EXPORT_DESTINATION = "authoritative_orthanc";
+const EXPORTABLE_DOCUMENT_TYPES = ["appointment_request", "clinical_document"] as const;
+
+export function isClinicalDocumentExportDocumentType(documentType: unknown): boolean {
+  return EXPORTABLE_DOCUMENT_TYPES.includes(String(documentType) as (typeof EXPORTABLE_DOCUMENT_TYPES)[number]);
+}
 
 export async function enqueueClinicalDocumentExportsForAppointment(
   appointmentId: number,
@@ -15,8 +20,7 @@ export async function enqueueClinicalDocumentExportsForAppointment(
       select distinct d.id, b.id, $2, 'secondary_capture', now()
       from appointments_v2.bookings b
       join documents d
-        on d.document_type = 'clinical_document'
-       and d.source = 'modality_scan_automation'
+        on d.document_type in ('appointment_request', 'clinical_document')
        and (
          d.v2_booking_id = b.id
          or exists (
@@ -69,8 +73,7 @@ export async function reconcileClinicalDocumentExports(changedByUserId: Optional
           where link.document_id = d.id
             and link.appointment_id = b.id
         )
-      where d.document_type = 'clinical_document'
-        and d.source = 'modality_scan_automation'
+      where d.document_type in ('appointment_request', 'clinical_document')
       on conflict (document_id, appointment_id, destination_key) do nothing
       returning id, appointment_id
     `,

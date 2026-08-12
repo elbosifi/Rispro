@@ -1064,6 +1064,7 @@ export default function ModalityPage() {
                       const missingWaitingInfo = waitingInfo ? null : missingWaitingDurationInfo(language, appointment);
                       const missingPrimaryIdentifier = !hasPrimaryIdentifier(appointment);
                       const documentCount = appointment.documentCount ?? 0;
+                      const documentStatusLabel = documentCount === 0 ? t(language, "modality.documents.none") : documentCount === 1 ? t(language, "modality.documents.one") : t(language, "modality.documents.many", { count: documentCount });
                       const englishName = appointment.englishFullName?.trim();
                       const showEnglishName = Boolean(englishName && englishName !== appointment.arabicFullName?.trim());
                       return (
@@ -1184,14 +1185,14 @@ export default function ModalityPage() {
                                   type="button"
                                   data-testid="modality-document-status"
                                   className={`state-chip inline-flex max-w-full items-center gap-1 whitespace-nowrap text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${documentCount > 0 ? "state-chip--success" : "state-chip--neutral"}`}
-                                  aria-label={t(language, "modality.documents.open", { accession: appointment.accessionNumber })}
+                                  aria-label={t(language, "modality.documents.openWithStatus", { status: documentStatusLabel, accession: appointment.accessionNumber })}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setDocumentAppointmentId(appointment.id);
                                   }}
                                 >
                                   {documentCount > 0 ? <CheckCircle2 size={12} aria-hidden="true" /> : <span aria-hidden="true">—</span>}
-                                  <span>{documentCount === 0 ? t(language, "modality.documents.none") : documentCount === 1 ? t(language, "modality.documents.one") : t(language, "modality.documents.many", { count: documentCount })}</span>
+                                  <span>{documentStatusLabel}</span>
                                 </button>
                               </td>
                               <td className="px-2 py-1.5">
