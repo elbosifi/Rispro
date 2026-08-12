@@ -14,6 +14,7 @@ const exportReportXlsxMock = vi.fn();
 const directPrintReportCenterMock = vi.fn();
 const fetchReportCenterPdfMock = vi.fn();
 const directPrintRegistrationRowsMock = vi.fn();
+const pushToastMock = vi.fn();
 let role = "supervisor";
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -42,7 +43,7 @@ vi.mock("@/services/printing/direct-print-failure-action", () => ({ resolveDirec
 vi.mock("@/services/printing/workstation-printer-settings", () => ({ loadQzPrinterSettings: () => ({ browserPrintFallbackEnabled: true }) }));
 
 vi.mock("@/lib/toast", () => ({
-  pushToast: vi.fn(),
+  pushToast: (...args: unknown[]) => pushToastMock(...args),
 }));
 vi.mock("@/lib/registration-list-printing", () => ({
   directPrintRegistrationRows: (...args: unknown[]) => directPrintRegistrationRowsMock(...args),
@@ -172,6 +173,7 @@ describe("ReportCenter", () => {
       includePatientIdentifiers: true,
       rows: [expect.objectContaining({ Accession: "V2-000001" })],
     }));
+    expect(recordReportOutputMock).not.toHaveBeenCalledWith(expect.objectContaining({ outputType: "xlsx" }));
   });
 
   it("sends a real priority filter and keeps fixed report conditions out of the status selector", async () => {
@@ -197,5 +199,76 @@ describe("ReportCenter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Print" }));
     expect(directPrintRegistrationRowsMock).toHaveBeenCalledWith([expect.objectContaining({ id: 1 })], expect.any(String));
     expect(directPrintReportCenterMock).not.toHaveBeenCalledWith(expect.objectContaining({ templateId: "registration-list" }));
+  });
+
+  it("uses the same effective appointment columns for preview, print, and Excel", async () => {
+    renderCenter();
+    await userEvent.click(screen.getByLabelText("Select column: Accession"));
+    expect(screen.queryByRole("columnheader", { name: "Accession" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Print" }));
+    expect(directPrintReportCenterMock).toHaveBeenLastCalledWith(expect.objectContaining({ columns: expect.not.arrayContaining([expect.objectContaining({ key: "accession" })]) }));
+    await userEvent.click(screen.getByRole("button", { name: "Excel" }));
+    expect(exportReportXlsxMock).toHaveBeenLastCalledWith(expect.objectContaining({ rows: [expect.not.objectContaining({ Accession: expect.anything() })] }));
+  });
+
+  it("hides generic controls for Registration List while retaining its specialized print", async () => {
+    renderCenter();
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "registration-list");
+    expect(screen.queryByLabelText("Orientation")).toBeNull();
+    expect(screen.queryByText("Show grouped counts")).toBeNull();
+    expect(screen.queryByLabelText("Include patient phones")).toBeNull();
+    expect(screen.queryByText(/Columns \(/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download PDF" })).toBeNull();
+    expect(screen.getByText("Layout is fixed for this document.")).toBeTruthy();
+  });
+
+  it("uses source-specific audit query and document labels", async () => {
+    role = "super_admin";
+    renderCenter();
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "patient-directory");
+    await screen.findByText("Patient One");
+    await userEvent.click(screen.getByRole("button", { name: "Print" }));
+    expect(directPrintReportCenterMock).toHaveBeenLastCalledWith(expect.objectContaining({ dateLabel: "Current directory result" }));
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "printed-documents-audit");
+    await waitFor(() => expect(fetchAuditEntriesMock).toHaveBeenCalledWith({ entityType: "report_output", page: 1, pageSize: 200 }));
+    await userEvent.click(screen.getByRole("button", { name: "Print" }));
+    expect(directPrintReportCenterMock).toHaveBeenLastCalledWith(expect.objectContaining({ dateLabel: "Most recent report outputs" }));
+  });
+
+  it("does not fall back to a global template for a role with no workflows", async () => {
+    role = "doctor";
+    renderCenter();
+    expect(await screen.findByText("No Print Center workflows are available for this role.")).toBeTruthy();
+    expect(screen.queryByLabelText("Report template")).toBeNull();
+  });
+
+  it("keeps fixed summaries mandatory and only exposes ordinary summary controls after grouping", async () => {
+    renderCenter();
+    expect(screen.queryByText("Show grouped counts")).toBeNull();
+    await userEvent.selectOptions(screen.getByLabelText("Grouping"), "modality");
+    expect(screen.getByText("Show grouped counts")).toBeTruthy();
+    await userEvent.selectOptions(screen.getByLabelText("Report template"), "exam-type-volume");
+    expect(screen.queryByText("Show grouped counts")).toBeNull();
+    expect(await screen.findByText("Grouped counts")).toBeTruthy();
+  });
+
+  it("disables output actions when no permitted appointment columns remain", async () => {
+    renderCenter();
+    await userEvent.click(screen.getByLabelText("Select column: Phone"));
+    for (const label of ["Time", "Patient", "Accession", "Modality", "Exam", "Category", "Priority", "Status"]) await userEvent.click(screen.getByLabelText(`Select column: ${label}`));
+    expect(screen.getByRole("button", { name: "Print" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Download PDF" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("reports clipboard success and failure", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    renderCenter();
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: "success", title: "Report copied" })));
+    writeText.mockRejectedValueOnce(new Error("Denied"));
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(pushToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: "error", title: "Copy failed" })));
+    vi.unstubAllGlobals();
   });
 });
