@@ -20,6 +20,12 @@ import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
 import { enqueueSanteHl7ForBooking, enqueueSanteHl7ReplacementForBooking } from "./sante-hl7-outbox-service.js";
 import { buildCanonicalMwlDataset, renderCanonicalMwlToDump } from "./mwl-dataset-builder.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
+import {
+  listActiveBookingsAffectedByMwlProtocolPolicy,
+  resolveMwlEligibilityForBooking,
+  resolveMwlEligibilityForBookings,
+  type MwlEligibility,
+} from "./mwl-eligibility-service.js";
 
 const V2_ACTIVE_WORKLIST_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
 
@@ -144,6 +150,7 @@ export interface WorklistSyncResult {
   files: WorklistManifestFile[];
   removedOnly: boolean;
   ok: boolean;
+  reason?: string;
 }
 
 export interface DicomDeviceCreatePayload {
@@ -466,7 +473,8 @@ async function removeMatchingOutputFiles(outputDir: string, prefix: string): Pro
 async function writeWorklistSourceFiles(
   appointment: WorklistAppointmentRow,
   devices: DicomDeviceRow[],
-  gatewaySettings: Partial<GatewaySettings> & { worklistSourceDir: string; worklistOutputDir: string }
+  gatewaySettings: Partial<GatewaySettings> & { worklistSourceDir: string; worklistOutputDir: string },
+  eligibility: MwlEligibility
 ): Promise<WorklistSyncResult> {
   const sourceDir = gatewaySettings.worklistSourceDir;
   const outputDir = gatewaySettings.worklistOutputDir;
@@ -479,6 +487,9 @@ async function writeWorklistSourceFiles(
 
   if (!V2_ACTIVE_WORKLIST_STATUSES.has(appointment.status)) {
     return { files: [], removedOnly: true, ok: true };
+  }
+  if (!eligibility.protocolGateSatisfied) {
+    return { files: [], removedOnly: true, ok: true, reason: "waiting_for_protocol" };
   }
 
   const fileStem = `${sourcePrefix}${sanitizeFileToken(dataset.scheduledStationAeTitle)}`;
@@ -776,8 +787,9 @@ export async function deleteDicomDevice(
 }
 
 export async function syncBookingWorklistSources(
-  bookingId: number | string
-): Promise<{ ok: boolean; removedOnly?: boolean; files?: WorklistManifestFile[] }> {
+  bookingId: number | string,
+  resolvedEligibility?: MwlEligibility
+): Promise<{ ok: boolean; removedOnly?: boolean; files?: WorklistManifestFile[]; reason?: string }> {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
 
@@ -788,8 +800,9 @@ export async function syncBookingWorklistSources(
       return { ok: true, removedOnly: true };
     }
 
+    const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(Number(bookingId), client);
     const devices = await listDevicesForModality(client, appointment.modality_id);
-    const result = await writeWorklistSourceFiles(appointment, devices, gatewaySettings);
+    const result = await writeWorklistSourceFiles(appointment, devices, gatewaySettings, eligibility);
     return result;
   } finally {
     client.release();
@@ -810,8 +823,10 @@ export async function rebuildAllV2DicomWorklistSources(): Promise<{ ok: boolean;
       `
     );
 
-    for (const row of rows) {
-      await syncBookingWorklistSources(row.id);
+    const bookingIds = rows.map((row) => Number(row.id));
+    const eligibilityByBookingId = await resolveMwlEligibilityForBookings(bookingIds, client);
+    for (const bookingId of bookingIds) {
+      await syncBookingWorklistSources(bookingId, eligibilityByBookingId.get(bookingId));
     }
 
     return { ok: true, count: rows.length };
@@ -823,6 +838,7 @@ export async function rebuildAllV2DicomWorklistSources(): Promise<{ ok: boolean;
 interface ScheduledBookingWorklistSync {
   bookingId: UserId;
   replacement: boolean;
+  eligibility?: MwlEligibility;
 }
 
 const scheduledBookingWorklistSyncQueue: ScheduledBookingWorklistSync[] = [];
@@ -841,14 +857,22 @@ async function drainScheduledBookingWorklistSyncs(): Promise<void> {
         continue;
       }
 
-      await syncBookingWorklistSources(item.bookingId).catch((error) => {
+      let eligibility: MwlEligibility;
+      try {
+        eligibility = item.eligibility ?? await resolveMwlEligibilityForBooking(Number(item.bookingId));
+      } catch (error) {
+        console.warn(`[MWL] Failed to resolve eligibility for booking ${item.bookingId}.`, error);
+        continue;
+      }
+
+      await syncBookingWorklistSources(item.bookingId, eligibility).catch((error) => {
         console.warn(
           `[DICOM Worklist] Failed to sync booking ${item.bookingId}. Will retry on next mutation.`,
           error
         );
       });
 
-      await enqueueOrthancSyncForBooking(Number(item.bookingId)).catch((error) => {
+      await enqueueOrthancSyncForBooking(Number(item.bookingId), eligibility).catch((error) => {
         console.warn(
           `[Orthanc MWL] Failed to enqueue sync job for booking ${item.bookingId}.`,
           error
@@ -856,7 +880,7 @@ async function drainScheduledBookingWorklistSyncs(): Promise<void> {
       });
 
       const enqueueSante = item.replacement ? enqueueSanteHl7ReplacementForBooking : enqueueSanteHl7ForBooking;
-      await enqueueSante(Number(item.bookingId)).catch((error) => {
+      await enqueueSante(Number(item.bookingId), eligibility).catch((error) => {
         console.warn(
           `[Sante HL7] Failed to enqueue ${item.replacement ? "replacement " : ""}delivery job for booking ${item.bookingId}.`,
           error
@@ -876,6 +900,18 @@ export function scheduleBookingWorklistSync(bookingId: UserId): void {
 export function scheduleBookingWorklistDetailReplacement(bookingId: UserId): void {
   scheduledBookingWorklistSyncQueue.push({ bookingId, replacement: true });
   void drainScheduledBookingWorklistSyncs();
+}
+
+export async function reconcileMwlProtocolPolicyChange(): Promise<number[]> {
+  const bookingIds = await listActiveBookingsAffectedByMwlProtocolPolicy();
+  const eligibilityByBookingId = await resolveMwlEligibilityForBookings(bookingIds);
+  for (const bookingId of bookingIds) {
+    const eligibility = eligibilityByBookingId.get(bookingId);
+    await syncBookingWorklistSources(bookingId, eligibility);
+    await enqueueOrthancSyncForBooking(bookingId, eligibility);
+    await enqueueSanteHl7ForBooking(bookingId, eligibility);
+  }
+  return bookingIds;
 }
 
 export function scheduleV2WorklistRebuild(): void {

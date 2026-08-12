@@ -6,9 +6,10 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuth } from "@/providers/auth-provider";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
+import { useLanguage } from "@/providers/language-provider";
 
 type MonitorTab = "orthanc" | "sante";
-type MonitorStatus = "all" | "failed" | "pending" | "synced" | "waiting_for_queue";
+type MonitorStatus = "all" | "failed" | "pending" | "synced" | "waiting_for_protocol" | "waiting_for_queue";
 
 type CountRow = { status: string; count: number };
 type ModalityOption = { id: number; code?: string | null; nameEn?: string | null; nameAr?: string | null; name_en?: string | null; name_ar?: string | null };
@@ -112,6 +113,7 @@ function isSupervisorReauthError(error: unknown): boolean {
 }
 
 export default function WorklistMonitorPage() {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -297,6 +299,7 @@ export default function WorklistMonitorPage() {
             <option value="failed">Failed</option>
             <option value="pending">Pending</option>
             <option value="synced">Synced</option>
+            <option value="waiting_for_protocol">{t("worklistMonitor.waitingForProtocol")}</option>
             <option value="waiting_for_queue">Waiting for queue</option>
           </select>
         </label>
@@ -350,8 +353,8 @@ export default function WorklistMonitorPage() {
                 <td className="px-3 py-2">{entry.procedure || "-"}</td>
                 <td className="px-3 py-2">{entry.bookingDate}<div className="text-xs text-stone-500">{entry.bookingTime || "-"}</div></td>
                 <td className="px-3 py-2">{entry.queueStatus}</td>
-                <td className="px-3 py-2">{entry.orthanc.status}<div className="text-xs text-stone-500">{entry.orthanc.lastAttemptAt || ""}</div>{entry.orthanc.lastError && <div className="max-w-xs truncate text-xs text-red-600">{entry.orthanc.lastError}</div>}</td>
-                <td className="px-3 py-2">{entry.sante.status}<div className="text-xs text-stone-500">{entry.sante.lastAttemptAt || ""}</div>{entry.sante.lastError && <div className="max-w-xs truncate text-xs text-red-600">{entry.sante.lastError}</div>}</td>
+                <td className="px-3 py-2">{entry.orthanc.status === "waiting_for_protocol" ? t("worklistMonitor.waitingForProtocol") : entry.orthanc.status}<div className="text-xs text-stone-500">{entry.orthanc.lastAttemptAt || ""}</div>{entry.orthanc.lastError && <div className="max-w-xs truncate text-xs text-red-600">{entry.orthanc.lastError}</div>}</td>
+                <td className="px-3 py-2">{entry.sante.status === "waiting_for_protocol" ? t("worklistMonitor.waitingForProtocol") : entry.sante.status}<div className="text-xs text-stone-500">{entry.sante.lastAttemptAt || ""}</div>{entry.sante.lastError && <div className="max-w-xs truncate text-xs text-red-600">{entry.sante.lastError}</div>}</td>
                 <td className="px-3 py-2">
                   {tab === "orthanc" ? (
                     <button className="btn-secondary text-xs" disabled={orthancRetry.isPending} onClick={() => orthancRetry.mutate(entry.bookingId)}>Retry Orthanc</button>
@@ -380,8 +383,8 @@ export default function WorklistMonitorPage() {
             <button className="btn-secondary text-sm" onClick={() => setSelected(null)}>Close</button>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <Info label="Orthanc status" value={selected.orthanc.status} />
-            <Info label="Sante status" value={selected.sante.status} />
+            <Info label="Orthanc status" value={selected.orthanc.status === "waiting_for_protocol" ? t("worklistMonitor.waitingForProtocol") : selected.orthanc.status} />
+            <Info label="Sante status" value={selected.sante.status === "waiting_for_protocol" ? t("worklistMonitor.waitingForProtocol") : selected.sante.status} />
             <Info label="Orthanc source settings" value={formatJson(entriesQuery.data?.settings.orthanc.compatibility)} />
             <Info label="Sante source settings" value={formatJson(entriesQuery.data?.settings.sante.compatibility)} />
             <Info label="Recent retry history" value={formatJson(selectedHistory)} />

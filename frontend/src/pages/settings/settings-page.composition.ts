@@ -10,6 +10,7 @@ export type SettingsSection =
   | "dicom_gateway_config"
   | "dicom_gateway_devices"
   | "dicom_gateway_monitoring"
+  | "mwl_policy"
   | "orthanc_mwl_sync"
   | "sante_worklist_hl7"
   | "users"
@@ -46,6 +47,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
   "dicom_gateway_config",
   "dicom_gateway_devices",
   "dicom_gateway_monitoring",
+  "mwl_policy",
   "orthanc_mwl_sync",
   "sante_worklist_hl7",
   "users",
@@ -87,6 +89,7 @@ export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, 
   dicom_gateway_config: "integrations",
   dicom_gateway_devices: "integrations",
   dicom_gateway_monitoring: "integrations",
+  mwl_policy: "integrations",
   orthanc_mwl_sync: "integrations",
   sante_worklist_hl7: "integrations",
   sonicdicom_reports: "integrations",

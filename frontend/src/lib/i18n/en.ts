@@ -1165,6 +1165,7 @@ export const en = {
   "settings.section.dicom_gateway_config": "DICOM Gateway",
   "settings.section.dicom_gateway_devices": "DICOM Devices",
   "settings.section.dicom_gateway_monitoring": "DICOM Gateway Monitoring",
+  "settings.section.mwl_policy": "Modality Worklist Policy",
   "settings.section.orthanc_mwl_sync": "Orthanc MWL Sync",
   "settings.section.users": "Users",
   "settings.section.role_page_access": "Role Page Access",
@@ -2147,4 +2148,9 @@ export const en = {
   "comparisons.removeSuccessMessage": "The document was removed from canonical storage.",
   "comparisons.removeFailed": "Removal failed",
   "comparisons.removeFailedMessage": "Unable to remove the comparison paper.",
+  "settings.mwlPolicy.requireProtocol": "Require protocol before modality worklist",
+  "settings.mwlPolicy.requireProtocolHelp": "When enabled, appointments that use doctor protocoling are withheld from the DICOM modality worklist until a doctor assigns a protocol. Modalities that do not use protocoling are unaffected.",
+  "settings.mwlPolicy.saved": "Modality worklist policy saved. Affected appointments are being reconciled.",
+  "settings.mwlPolicy.saveFailed": "Failed to save the modality worklist policy.",
+  "worklistMonitor.waitingForProtocol": "Waiting for protocol",
   } satisfies Record<string, string>;

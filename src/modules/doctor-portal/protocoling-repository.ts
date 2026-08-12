@@ -3,6 +3,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSonicDicomReportStatus } from "../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
+import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
 import {
   assertRequestDocumentProtocolEligibility,
@@ -447,6 +448,7 @@ export async function saveProtocolAssignment(
 
   const detail = await getProtocolingAppointmentDetail(appointmentId);
   if (!detail) throw new HttpError(404, "Appointment not found.");
+  scheduleBookingWorklistSync(appointmentId);
   return detail;
 }
 
@@ -463,6 +465,7 @@ export async function cancelProtocolAssignment(appointmentId: number): Promise<D
   );
   const detail = await getProtocolingAppointmentDetail(appointmentId);
   if (!detail) throw new HttpError(404, "Appointment not found.");
+  scheduleBookingWorklistSync(appointmentId);
   return detail;
 }
 

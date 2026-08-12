@@ -22,6 +22,14 @@ import {
   type SanteMllpSendResult,
 } from "./sante-mllp-client.js";
 import type { UserId } from "../types/http.js";
+import {
+  MWL_POLICY_CATEGORY,
+  REQUIRE_PROTOCOL_BEFORE_MWL_KEY,
+  resolveMwlEligibilityForBooking,
+  resolveMwlEligibilityForBookings,
+  type MwlEligibility,
+} from "./mwl-eligibility-service.js";
+import { PROTOCOLING_MODALITY_SQL } from "./protocoling-modality.js";
 
 export type SanteOutboxStatus =
   | "pending"
@@ -151,6 +159,22 @@ async function loadOutboxProjectionSnapshot(client: PoolClient, outboxId: number
   );
   const snapshot = rows[0]?.projection_json;
   return snapshot && typeof snapshot === "object" && Number.isInteger(Number(snapshot.id)) ? snapshot : null;
+}
+
+async function supersedePendingSantePublicationJobs(client: PoolClient, bookingId: number): Promise<void> {
+  await client.query(
+    `
+      update sante_hl7_outbox
+      set status = 'skipped',
+          last_error = 'superseded_by_worklist_withdrawal',
+          locked_at = null,
+          updated_at = now()
+      where booking_id = $1::bigint
+        and event_type in ('create', 'update')
+        and status in ('pending', 'retry_scheduled', 'writing', 'send_failed', 'nack_received')
+    `,
+    [bookingId]
+  );
 }
 
 function deriveEvent(snapshot: SanteHl7BookingProjection, previousSyncExists: boolean): {
@@ -283,7 +307,10 @@ async function insertOutboxRow(input: {
   return { id, skipped: input.status === "skipped" };
 }
 
-export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ enqueued: boolean; jobId: number | null; reason?: string }> {
+export async function enqueueSanteHl7ForBooking(
+  bookingId: number,
+  resolvedEligibility?: MwlEligibility
+): Promise<{ enqueued: boolean; jobId: number | null; reason?: string }> {
   const settings = await resolveSanteWorklistSettings();
   if (!settings.enabled || settings.mode === "disabled") {
     return { enqueued: false, jobId: null, reason: "sante_hl7_disabled" };
@@ -298,7 +325,13 @@ export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ en
       return { enqueued: false, jobId: null, reason: "booking_not_found" };
     }
     const previousSyncExists = await hasPreviousSanteSync(client, bookingId);
+    const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(bookingId, client);
+    if (ACTIVE_STATUSES.has(projection.status) && !eligibility.protocolGateSatisfied && !previousSyncExists) {
+      await client.query("rollback");
+      return { enqueued: false, jobId: null, reason: "waiting_for_protocol" };
+    }
     if (
+      eligibility.protocolGateSatisfied &&
       settings.sendOnlyWhenPatientEntersQueue &&
       !previousSyncExists &&
       ACTIVE_STATUSES.has(projection.status) &&
@@ -307,11 +340,19 @@ export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ en
       await client.query("rollback");
       return { enqueued: false, jobId: null, reason: "waiting_for_patient_queue" };
     }
-    const event = deriveEvent(projection, previousSyncExists);
+    const event = ACTIVE_STATUSES.has(projection.status) && !eligibility.protocolGateSatisfied
+      ? { eventType: "cancel" as const, orderControl: "CA" as const, skipped: false }
+      : deriveEvent(projection, previousSyncExists);
+    if (event.eventType === "cancel" && !event.skipped) {
+      await supersedePendingSantePublicationJobs(client, bookingId);
+    }
+    const cancellationProjection = event.eventType === "cancel"
+      ? await loadPreviousSanteProjection(client, bookingId) ?? projection
+      : projection;
     const inserted = await insertOutboxRow({
       client,
       bookingId,
-      projection,
+      projection: cancellationProjection,
       eventType: event.eventType,
       orderControl: event.orderControl,
       status: event.skipped ? "skipped" : "pending",
@@ -320,7 +361,11 @@ export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ en
     await client.query("commit");
     return inserted.skipped
       ? { enqueued: false, jobId: inserted.id, reason: "inactive_without_previous_sante_sync" }
-      : { enqueued: true, jobId: inserted.id };
+      : {
+          enqueued: true,
+          jobId: inserted.id,
+          reason: event.eventType === "cancel" && eligibility.holdReason ? eligibility.holdReason : undefined,
+        };
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -329,7 +374,10 @@ export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ en
   }
 }
 
-export async function enqueueSanteHl7ReplacementForBooking(bookingId: number): Promise<{
+export async function enqueueSanteHl7ReplacementForBooking(
+  bookingId: number,
+  resolvedEligibility?: MwlEligibility
+): Promise<{
   enqueued: boolean;
   jobIds: number[];
   reason?: string;
@@ -347,13 +395,34 @@ export async function enqueueSanteHl7ReplacementForBooking(bookingId: number): P
       await client.query("rollback");
       return { enqueued: false, jobIds: [], reason: "booking_not_found" };
     }
+    const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(bookingId, client);
+    const previousSyncExists = await hasPreviousSanteSync(client, bookingId);
+    if (!eligibility.protocolGateSatisfied) {
+      if (!previousSyncExists) {
+        await client.query("rollback");
+        return { enqueued: false, jobIds: [], reason: "waiting_for_protocol" };
+      }
+      await supersedePendingSantePublicationJobs(client, bookingId);
+      const previousProjection = await loadPreviousSanteProjection(client, bookingId);
+      const cancel = await insertOutboxRow({
+        client,
+        bookingId,
+        projection: previousProjection ?? projection,
+        eventType: "cancel",
+        orderControl: "CA",
+        status: "pending",
+        settings,
+      });
+      await client.query("commit");
+      return { enqueued: true, jobIds: [cancel.id], reason: "waiting_for_protocol" };
+    }
     if (!QUEUE_STATUSES.has(projection.status)) {
       await client.query("rollback");
       return { enqueued: false, jobIds: [], reason: "booking_not_in_queue" };
     }
 
     const jobIds: number[] = [];
-    if (await hasPreviousSanteSync(client, bookingId)) {
+    if (previousSyncExists) {
       const previousProjection = await loadPreviousSanteProjection(client, bookingId);
       const cancel = await insertOutboxRow({
         client,
@@ -390,6 +459,35 @@ export async function enqueueSanteHl7ReplacementForBooking(bookingId: number): P
 }
 
 export async function claimSanteOutboxBatch(limit = 20): Promise<SanteOutboxJob[]> {
+  await pool.query(
+    `
+      update sante_hl7_outbox outbox
+      set status = 'skipped',
+          last_error = 'waiting_for_protocol',
+          locked_at = null,
+          updated_at = now()
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      cross join lateral (select ${PROTOCOLING_MODALITY_SQL} as modality_code) protocoling_modality
+      where outbox.booking_id = b.id
+        and outbox.event_type in ('create', 'update')
+        and outbox.status in ('pending', 'retry_scheduled')
+        and b.status in ('scheduled', 'arrived', 'waiting')
+        and protocoling_modality.modality_code in ('CT', 'MRI')
+        and exists (
+          select 1 from system_settings setting
+          where setting.category = $1
+            and setting.setting_key = $2
+            and lower(nullif(trim(setting.setting_value ->> 'value'), '')) in ('enabled', 'true', '1', 'yes', 'on')
+        )
+        and not exists (
+          select 1 from appointment_protocol_assignments assignment
+          where assignment.appointment_id = b.id
+            and assignment.status <> 'CANCELLED'
+        )
+    `,
+    [MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY]
+  );
   const { rows } = await pool.query<{
     id: number;
     booking_id: number | null;
@@ -873,12 +971,13 @@ export async function reconcileSanteHl7Window(input: {
   missing: number[];
   failed: number[];
   pendingTimeout: number[];
+  waitingForProtocol: number[];
   repaired: number[];
 }> {
   const limit = Number.isInteger(input.limit) && (input.limit as number) > 0 ? Number(input.limit) : 5000;
-  const { rows } = await pool.query<{ id: number; sync_status: string | null }>(
+  const { rows } = await pool.query<{ id: number; sync_status: string | null; deleted_at: string | null }>(
     `
-      select b.id, s.sync_status
+      select b.id, s.sync_status, s.deleted_at::text as deleted_at
       from appointments_v2.bookings b
       join modalities m on m.id = b.modality_id
       left join sante_worklist_sync s on s.booking_id = b.id
@@ -891,21 +990,29 @@ export async function reconcileSanteHl7Window(input: {
     [input.dateFrom, input.dateTo, input.modalityCode || null, limit]
   );
 
-  const missing = rows.filter((row) => !row.sync_status).map((row) => Number(row.id));
-  const failed = rows
-    .filter((row) => ["import_failed", "dead_letter", "nack_received", "send_failed"].includes(row.sync_status || ""))
+  const eligibilityByBookingId = await resolveMwlEligibilityForBookings(rows.map((row) => Number(row.id)));
+  const waitingForProtocol = rows
+    .filter((row) => eligibilityByBookingId.get(Number(row.id))?.protocolGateSatisfied === false)
     .map((row) => Number(row.id));
-  const pendingTimeout = rows.filter((row) => row.sync_status === "pending_timeout").map((row) => Number(row.id));
-  const repairCandidates = Array.from(new Set([...missing, ...failed, ...pendingTimeout]));
+  const waitingForProtocolSet = new Set(waitingForProtocol);
+  const missing = rows.filter((row) => !waitingForProtocolSet.has(Number(row.id)) && !row.sync_status).map((row) => Number(row.id));
+  const failed = rows
+    .filter((row) => !waitingForProtocolSet.has(Number(row.id)) && ["import_failed", "dead_letter", "nack_received", "send_failed"].includes(row.sync_status || ""))
+    .map((row) => Number(row.id));
+  const pendingTimeout = rows.filter((row) => !waitingForProtocolSet.has(Number(row.id)) && row.sync_status === "pending_timeout").map((row) => Number(row.id));
+  const stalePublished = rows
+    .filter((row) => waitingForProtocolSet.has(Number(row.id)) && row.sync_status && !row.deleted_at)
+    .map((row) => Number(row.id));
+  const repairCandidates = Array.from(new Set([...missing, ...failed, ...pendingTimeout, ...stalePublished]));
   const repaired: number[] = [];
   if (input.apply) {
     for (const bookingId of repairCandidates) {
-      const result = await enqueueSanteHl7ForBooking(bookingId);
+      const result = await enqueueSanteHl7ForBooking(bookingId, eligibilityByBookingId.get(bookingId));
       if (result.enqueued) repaired.push(bookingId);
     }
   }
 
-  return { missing, failed, pendingTimeout, repaired };
+  return { missing, failed, pendingTimeout, waitingForProtocol, repaired };
 }
 
 export async function forceResyncSanteHl7Window(input: {
@@ -924,6 +1031,7 @@ export async function forceResyncSanteHl7Window(input: {
   const limit = Number.isInteger(input.limit) && (input.limit as number) > 0 ? Number(input.limit) : 5000;
   const client = await pool.connect();
   let selectedBookingIds: number[] = [];
+  let eligibilityByBookingId = new Map<number, MwlEligibility>();
   let deletedOutboxCount = 0;
   let deletedSyncCount = 0;
 
@@ -943,15 +1051,19 @@ export async function forceResyncSanteHl7Window(input: {
       [input.dateFrom, input.dateTo, input.modalityCode || null, limit]
     );
     selectedBookingIds = rows.map((row) => Number(row.id));
+    eligibilityByBookingId = await resolveMwlEligibilityForBookings(selectedBookingIds, client);
+    const resettableBookingIds = selectedBookingIds.filter(
+      (bookingId) => eligibilityByBookingId.get(bookingId)?.protocolGateSatisfied !== false
+    );
 
-    if (selectedBookingIds.length > 0) {
+    if (resettableBookingIds.length > 0) {
       const deletedSync = await client.query(
         `delete from sante_worklist_sync where booking_id = any($1::bigint[])`,
-        [selectedBookingIds]
+        [resettableBookingIds]
       );
       const deletedOutbox = await client.query(
         `delete from sante_hl7_outbox where booking_id = any($1::bigint[])`,
-        [selectedBookingIds]
+        [resettableBookingIds]
       );
       deletedSyncCount = deletedSync.rowCount ?? 0;
       deletedOutboxCount = deletedOutbox.rowCount ?? 0;
@@ -983,7 +1095,7 @@ export async function forceResyncSanteHl7Window(input: {
   const enqueuedBookingIds: number[] = [];
   const skippedBookingIds: number[] = [];
   for (const bookingId of selectedBookingIds) {
-    const result = await enqueueSanteHl7ForBooking(bookingId);
+    const result = await enqueueSanteHl7ForBooking(bookingId, eligibilityByBookingId.get(bookingId));
     if (result.enqueued) {
       enqueuedBookingIds.push(bookingId);
     } else {

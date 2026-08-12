@@ -32,6 +32,7 @@ import {
   createDicomDevice,
   deleteDicomDevice,
   listDicomDevices,
+  reconcileMwlProtocolPolicyChange,
   updateDicomDevice
 } from "../services/dicom-service.js";
 import {
@@ -89,6 +90,14 @@ import { getUserSchedulingOverridePermission } from "../services/user-service.js
 import type { AuthenticatedUserContext, UserId } from "../types/http.js";
 import { readRequestScanSettingsForDisplay, saveRequestScanSettings, resolveRequestScanSettingsForTest } from "../services/request-scan-settings-service.js";
 import { testRequestScanSmb } from "../services/request-scan-smb-service.js";
+import { MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY } from "../services/mwl-eligibility-service.js";
+
+function settingScalar(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value) && "value" in (value as Record<string, unknown>)) {
+    return String((value as Record<string, unknown>).value ?? "").trim().toLowerCase();
+  }
+  return String(value ?? "").trim().toLowerCase();
+}
 
 function validateNoShowSettings(entries: Array<{ key: string; value?: unknown }>): void {
   const values = new Map(entries.map((entry) => [entry.key, String(entry.value ?? "").trim().toLowerCase()]));
@@ -799,6 +808,12 @@ settingsRouter.put(
     if (category === SANTE_HL7_CATEGORY) {
       validateSanteSettingsEntries(entries);
     }
+    if (category === MWL_POLICY_CATEGORY) {
+      const policyEntry = entries.find((entry) => entry.key === REQUIRE_PROTOCOL_BEFORE_MWL_KEY);
+      if (!policyEntry || !["enabled", "disabled"].includes(settingScalar(policyEntry.value))) {
+        throw new HttpError(400, `${REQUIRE_PROTOCOL_BEFORE_MWL_KEY} must be enabled or disabled.`);
+      }
+    }
     if (category === "sonicdicom_reports") {
       const config = entries.find((entry) => entry.key === "config")?.value;
       if (config !== undefined) validateSonicDicomReportSettings(config);
@@ -815,6 +830,11 @@ settingsRouter.put(
     }
 
     const settings = await upsertSettings(category, entries, request.user.sub as UserId);
+    if (category === MWL_POLICY_CATEGORY) {
+      // Reconcile on every accepted save so retrying a request that failed after
+      // persistence repairs any partially applied projection state idempotently.
+      await reconcileMwlProtocolPolicyChange();
+    }
     res.json({ settings });
   })
 );

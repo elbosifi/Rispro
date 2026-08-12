@@ -133,6 +133,7 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /insert into appointment_protocol_assignments/);
     assert.match(repo, /assigned_at = now\(\)/);
     assert.match(repo, /assertRequestDocumentProtocolEligibility\(appointmentId\)/);
+    assert.match(repo, /scheduleBookingWorklistSync\(appointmentId\)/);
   });
 
   it("adds a booking-scoped request-document predicate without changing MWL behavior", () => {

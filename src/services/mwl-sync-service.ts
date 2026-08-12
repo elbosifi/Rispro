@@ -2,6 +2,13 @@ import { createHash } from "crypto";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
+import {
+  MWL_POLICY_CATEGORY,
+  REQUIRE_PROTOCOL_BEFORE_MWL_KEY,
+  resolveMwlEligibilityForBooking,
+  type MwlEligibility,
+} from "./mwl-eligibility-service.js";
+import { PROTOCOLING_MODALITY_SQL } from "./protocoling-modality.js";
 
 export type OrthancMwlOperation = "upsert" | "delete";
 
@@ -167,7 +174,10 @@ function computePayloadHash(snapshot: BookingSyncSnapshot | null): string | null
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<OrthancSyncEnqueueResult> {
+export async function enqueueOrthancSyncForBooking(
+  bookingId: number,
+  resolvedEligibility?: MwlEligibility
+): Promise<OrthancSyncEnqueueResult> {
   const settings = await resolveOrthancSettings();
   if (!settings.enabled) {
     return { enqueued: false, jobId: null, operation: null, reason: "orthanc_mwl_disabled" };
@@ -182,8 +192,16 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
       return { enqueued: false, jobId: null, operation: null, reason: "booking_not_found" };
     }
 
-    const operation = deriveOperationFromStatus(snapshot.status);
+    let operation = deriveOperationFromStatus(snapshot.status);
     const previousSyncExists = await hasPreviousOrthancSync(client, bookingId);
+    const eligibility = resolvedEligibility ?? await resolveMwlEligibilityForBooking(bookingId, client);
+    if (operation === "upsert" && !eligibility.protocolGateSatisfied) {
+      if (!previousSyncExists) {
+        await client.query("rollback");
+        return { enqueued: false, jobId: null, operation: null, reason: "waiting_for_protocol" };
+      }
+      operation = "delete";
+    }
     if (shouldSkipOrthancInitialUpsertForQueueGate({
       sendOnlyWhenPatientEntersQueue: settings.sendOnlyWhenPatientEntersQueue,
       previousSyncExists,
@@ -273,7 +291,12 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
     }
 
     await client.query("commit");
-    return { enqueued: true, jobId, operation };
+    return {
+      enqueued: true,
+      jobId,
+      operation,
+      reason: operation === "delete" && eligibility.holdReason ? eligibility.holdReason : undefined,
+    };
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -284,6 +307,45 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
 
 export async function claimOrthancOutboxBatch(limit = 20): Promise<OrthancOutboxJob[]> {
   const size = Number.isInteger(limit) && limit > 0 ? limit : 20;
+  const converted = await pool.query<{ booking_id: number }>(
+    `
+      update external_mwl_outbox outbox
+      set operation = 'delete',
+          payload_hash = null,
+          last_error = null,
+          updated_at = now()
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      cross join lateral (select ${PROTOCOLING_MODALITY_SQL} as modality_code) protocoling_modality
+      where outbox.booking_id = b.id
+        and outbox.external_system = 'orthanc'
+        and outbox.operation = 'upsert'
+        and outbox.status in ('pending', 'failed')
+        and b.status in ('scheduled', 'arrived', 'waiting')
+        and protocoling_modality.modality_code in ('CT', 'MRI')
+        and exists (
+          select 1 from system_settings setting
+          where setting.category = $1
+            and setting.setting_key = $2
+            and lower(nullif(trim(setting.setting_value ->> 'value'), '')) in ('enabled', 'true', '1', 'yes', 'on')
+        )
+        and not exists (
+          select 1 from appointment_protocol_assignments assignment
+          where assignment.appointment_id = b.id
+            and assignment.status <> 'CANCELLED'
+        )
+      returning outbox.booking_id
+    `,
+    [MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY]
+  );
+  if (converted.rows.length > 0) {
+    await pool.query(
+      `update external_mwl_sync
+       set payload_hash=null, deleted_at=now(), updated_at=now()
+       where external_system='orthanc' and booking_id=any($1::bigint[])`,
+      [converted.rows.map((row) => Number(row.booking_id))]
+    );
+  }
   const { rows } = await pool.query<{
     id: number;
     booking_id: number;

@@ -17,13 +17,13 @@ describe("i18n catalog parity", () => {
     const englishKeys = Object.keys(__i18nTestables.en).sort();
     const arabicKeys = Object.keys(__i18nTestables.ar).sort();
 
-    expect(englishKeys).toHaveLength(2119);
+    expect(englishKeys).toHaveLength(2125);
     expect(arabicKeys).toEqual(englishKeys);
   });
 
   it("keeps every translation key and value byte-for-byte stable", () => {
-    expect(catalogHash(__i18nTestables.en)).toBe("513fd12f422cbe94e6f7717e251311f4f7110136fc14cb389c7a55d926e45f33");
-    expect(catalogHash(__i18nTestables.ar)).toBe("76b9f4d93b997583ed682c6972be033a6deec71cd666c85390188e331b9c9d24");
+    expect(catalogHash(__i18nTestables.en)).toBe("38ade69d9b9e23cb9fa87fcff165828fb32935835479e7e2769a75f961a0e9ad");
+    expect(catalogHash(__i18nTestables.ar)).toBe("0e80404454b5b59346fa9a83e6524f30b09fe74430fcae8b9096b6d4d2bbdd23");
   });
 
   it("preserves interpolation and localized fallback behavior", () => {
@@ -40,6 +40,23 @@ describe("i18n catalog parity", () => {
       "doctor.protocols.requestDocumentPolicyNotice",
       "documents.protocolRequestAttached",
       "documents.protocolRequestMissing",
+    ] as const;
+
+    for (const key of keys) {
+      expect(t("en", key)).not.toBe(key);
+      expect(t("ar", key)).not.toBe(key);
+      expect(t("ar", key)).not.toBe(t("en", key));
+    }
+  });
+
+  it("provides English and Arabic copy for the MWL protocol policy", () => {
+    const keys = [
+      "settings.section.mwl_policy",
+      "settings.mwlPolicy.requireProtocol",
+      "settings.mwlPolicy.requireProtocolHelp",
+      "settings.mwlPolicy.saved",
+      "settings.mwlPolicy.saveFailed",
+      "worklistMonitor.waitingForProtocol",
     ] as const;
 
     for (const key of keys) {

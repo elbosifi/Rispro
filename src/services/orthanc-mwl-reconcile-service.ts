@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
+import { resolveMwlEligibilityForBookings } from "./mwl-eligibility-service.js";
 import { deleteOrthancEntriesForBookingIds, probeOrthancWorklistApi } from "./orthanc-mwl-adapter.js";
 import { createHash } from "crypto";
 
@@ -195,7 +196,13 @@ export async function reconcileOrthancMwlProjection(
     probeOrthancWorklistApi().catch(() => null),
   ]);
 
-  const activeIds = toSortedUniqueIds(activeBookingsResult.rows.map((r) => Number(r.booking_id)));
+  const eligibilityByBookingId = await resolveMwlEligibilityForBookings(toSortedUniqueIds([
+    ...activeBookingsResult.rows.map((row) => Number(row.booking_id)),
+    ...syncRowsResult.rows.map((row) => Number(row.booking_id)),
+  ]));
+  const activeIds = toSortedUniqueIds(activeBookingsResult.rows
+    .map((r) => Number(r.booking_id))
+    .filter((bookingId) => eligibilityByBookingId.get(bookingId)?.protocolGateSatisfied !== false));
   const activeSet = new Set(activeIds);
   const syncByBookingId = new Map<number, SyncRow>();
   for (const row of syncRowsResult.rows) {
@@ -252,7 +259,7 @@ export async function reconcileOrthancMwlProjection(
   if (apply) {
     for (const bookingId of repairCandidates) {
       try {
-        const result = await enqueueOrthancSyncForBooking(bookingId);
+        const result = await enqueueOrthancSyncForBooking(bookingId, eligibilityByBookingId.get(bookingId));
         if (result.enqueued) {
           repaired.enqueuedBookingIds.push(bookingId);
         }
@@ -442,6 +449,7 @@ export async function resetOrthancMwlWindow(
   );
 
   const activeBookingIds = toSortedUniqueIds(activeBookingsResult.rows.map((row) => Number(row.booking_id)));
+  const eligibilityByBookingId = await resolveMwlEligibilityForBookings(activeBookingIds);
   const deletion = await deleteOrthancEntriesForBookingIds(activeBookingIds);
 
   const requeuedBookingIds: number[] = [];
@@ -449,7 +457,7 @@ export async function resetOrthancMwlWindow(
 
   for (const bookingId of activeBookingIds) {
     try {
-      const result = await enqueueOrthancSyncForBooking(bookingId);
+      const result = await enqueueOrthancSyncForBooking(bookingId, eligibilityByBookingId.get(bookingId));
       if (result.enqueued) {
         requeuedBookingIds.push(bookingId);
       }

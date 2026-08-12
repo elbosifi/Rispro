@@ -1206,6 +1206,7 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "settings.section.dicom_gateway_config": "بوابة DICOM",
   "settings.section.dicom_gateway_devices": "أجهزة DICOM",
   "settings.section.dicom_gateway_monitoring": "مراقبة بوابة DICOM",
+  "settings.section.mwl_policy": "سياسة قائمة عمل الأجهزة",
   "settings.section.orthanc_mwl_sync": "مزامنة Orthanc MWL",
   "settings.section.users": "المستخدمون",
   "settings.section.role_page_access": "صلاحيات ظهور الصفحات",
@@ -2145,5 +2146,10 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "comparisons.removeSuccess": "تمت إزالة ورقة المقارنة",
   "comparisons.removeSuccessMessage": "تمت إزالة المستند من المخزن المعتمد.",
   "comparisons.removeFailed": "فشلت الإزالة",
-  "comparisons.removeFailedMessage": "تعذّرت إزالة ورقة المقارنة."
+  "comparisons.removeFailedMessage": "تعذّرت إزالة ورقة المقارنة.",
+  "settings.mwlPolicy.requireProtocol": "اشتراط البروتوكول قبل قائمة عمل الأجهزة",
+  "settings.mwlPolicy.requireProtocolHelp": "عند التفعيل، تُحجب مواعيد الأجهزة التي تستخدم سير عمل بروتوكول الطبيب عن قائمة عمل DICOM حتى يعيّن الطبيب بروتوكولاً. الأجهزة التي لا تستخدم البروتوكول لا تتأثر.",
+  "settings.mwlPolicy.saved": "تم حفظ سياسة قائمة عمل الأجهزة، وتجري الآن مطابقة المواعيد المتأثرة.",
+  "settings.mwlPolicy.saveFailed": "تعذر حفظ سياسة قائمة عمل الأجهزة.",
+  "worklistMonitor.waitingForProtocol": "في انتظار البروتوكول"
 } satisfies Record<string, string>;

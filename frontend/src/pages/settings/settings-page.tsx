@@ -9,6 +9,7 @@ import { Card } from "@/components/shared/Card";
 import DicomGatewaySettingsSection from "./dicom-gateway-section";
 import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
+import MwlPolicySection from "./mwl-policy-section";
 import OrthancMwlSection from "./orthanc-mwl-section";
 import SanteWorklistSection from "./sante-worklist-section";
 import PacsSettingsSection from "./pacs-settings-section";
@@ -264,6 +265,7 @@ export default function SettingsPage() {
             {section === "dicom_gateway_config" && <DicomGatewaySettingsSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_devices" && <DicomDevicesSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_monitoring" && <DicomMonitoringSection onReAuthRequired={requestReAuth} />}
+            {section === "mwl_policy" && <MwlPolicySection onReAuthRequired={requestReAuth} />}
             {section === "orthanc_mwl_sync" && <OrthancMwlSection onReAuthRequired={requestReAuth} />}
             {section === "sante_worklist_hl7" && <SanteWorklistSection onReAuthRequired={requestReAuth} />}
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}

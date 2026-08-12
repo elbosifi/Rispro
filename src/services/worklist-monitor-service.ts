@@ -10,12 +10,15 @@ import {
 import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 import { buildSanteOrmO01Message, type SanteHl7BookingProjection } from "./sante-hl7-message-builder.js";
 import { resolveSanteWorklistSettings } from "./sante-worklist-settings-resolver.js";
+import { PROTOCOLING_MODALITY_SQL } from "./protocoling-modality.js";
+import { isMwlProtocolRequirementEnabled } from "./mwl-eligibility-service.js";
 
 export type WorklistMonitorStatus =
   | "all"
   | "failed"
   | "pending"
   | "synced"
+  | "waiting_for_protocol"
   | "waiting_for_queue";
 
 export interface WorklistMonitorQuery {
@@ -65,9 +68,12 @@ interface WorklistMonitorDbRow {
   sante_outbox_id: number | null;
   sante_outbox_status: string | null;
   sante_history: unknown;
+  protocoling_modality_code: string | null;
+  active_protocol_assignment_exists: boolean;
 }
 
-const SUPPORTED_STATUSES = new Set<WorklistMonitorStatus>(["all", "failed", "pending", "synced", "waiting_for_queue"]);
+const SUPPORTED_STATUSES = new Set<WorklistMonitorStatus>(["all", "failed", "pending", "synced", "waiting_for_protocol", "waiting_for_queue"]);
+const ACTIVE_WORKLIST_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
 const FAILURE_STATUSES = new Set(["failed", "import_failed", "pending_timeout", "retry_scheduled", "dead_letter", "nack_received", "send_failed"]);
 const PENDING_STATUSES = new Set(["pending", "in_progress", "processing", "writing", "pending_import"]);
 const SYNCED_STATUSES = new Set(["synced", "written", "imported_assumed", "imported_done", "completed"]);
@@ -93,17 +99,66 @@ export function normalizeWorklistMonitorQuery(raw: Record<string, unknown>, toda
   };
 }
 
-function orthancComputedStatus(row: WorklistMonitorDbRow, queueOnly: boolean): string {
-  if (queueOnly && row.status === "scheduled" && !row.orthanc_sync_status) return "waiting_for_queue";
-  return row.orthanc_sync_status || "not_enqueued";
+export function computeWorklistMonitorBackendStatus(input: {
+  bookingStatus: string;
+  protocolingModalityCode: string | null;
+  activeProtocolAssignmentExists: boolean;
+  protocolRequirementEnabled: boolean;
+  queueOnly: boolean;
+  syncStatus: string | null;
+  outboxStatus?: string | null;
+}): string {
+  if (input.protocolRequirementEnabled
+    && ACTIVE_WORKLIST_STATUSES.has(input.bookingStatus)
+    && (input.protocolingModalityCode === "CT" || input.protocolingModalityCode === "MRI")
+    && !input.activeProtocolAssignmentExists) {
+    return "waiting_for_protocol";
+  }
+  if (input.queueOnly && input.bookingStatus === "scheduled" && !input.syncStatus) return "waiting_for_queue";
+  return input.syncStatus || input.outboxStatus || "not_enqueued";
 }
 
-function rowMatchesStatus(row: WorklistMonitorDbRow, status: WorklistMonitorStatus, queueOnly: boolean): boolean {
+function orthancComputedStatus(row: WorklistMonitorDbRow, queueOnly: boolean, protocolRequirementEnabled: boolean): string {
+  return computeWorklistMonitorBackendStatus({
+    bookingStatus: row.status,
+    protocolingModalityCode: row.protocoling_modality_code,
+    activeProtocolAssignmentExists: row.active_protocol_assignment_exists,
+    protocolRequirementEnabled,
+    queueOnly,
+    syncStatus: row.orthanc_sync_status,
+  });
+}
+
+function santeComputedStatus(row: WorklistMonitorDbRow, queueOnly: boolean, protocolRequirementEnabled: boolean): string {
+  return computeWorklistMonitorBackendStatus({
+    bookingStatus: row.status,
+    protocolingModalityCode: row.protocoling_modality_code,
+    activeProtocolAssignmentExists: row.active_protocol_assignment_exists,
+    protocolRequirementEnabled,
+    queueOnly,
+    syncStatus: row.sante_sync_status,
+    outboxStatus: row.sante_outbox_status,
+  });
+}
+
+function rowMatchesStatus(
+  row: WorklistMonitorDbRow,
+  status: WorklistMonitorStatus,
+  orthancQueueOnly: boolean,
+  santeQueueOnly: boolean,
+  protocolRequirementEnabled: boolean
+): boolean {
   if (status === "all") return true;
-  const orthancStatus = orthancComputedStatus(row, queueOnly);
-  const santeStatus = row.sante_sync_status || row.sante_outbox_status || "not_enqueued";
-  if (status === "waiting_for_queue") return orthancStatus === "waiting_for_queue";
-  if (status === "failed") return FAILURE_STATUSES.has(orthancStatus) || FAILURE_STATUSES.has(santeStatus) || FAILURE_STATUSES.has(row.orthanc_outbox_status || "");
+  const orthancStatus = orthancComputedStatus(row, orthancQueueOnly, protocolRequirementEnabled);
+  const santeStatus = santeComputedStatus(row, santeQueueOnly, protocolRequirementEnabled);
+  if (status === "waiting_for_protocol") return orthancStatus === "waiting_for_protocol" || santeStatus === "waiting_for_protocol";
+  if (status === "waiting_for_queue") return orthancStatus === "waiting_for_queue" || santeStatus === "waiting_for_queue";
+  if (status === "failed") return FAILURE_STATUSES.has(orthancStatus)
+    || FAILURE_STATUSES.has(santeStatus)
+    || FAILURE_STATUSES.has(row.orthanc_sync_status || "")
+    || FAILURE_STATUSES.has(row.sante_sync_status || "")
+    || FAILURE_STATUSES.has(row.orthanc_outbox_status || "")
+    || FAILURE_STATUSES.has(row.sante_outbox_status || "");
   if (status === "pending") return PENDING_STATUSES.has(orthancStatus) || PENDING_STATUSES.has(santeStatus) || PENDING_STATUSES.has(row.orthanc_outbox_status || "");
   return SYNCED_STATUSES.has(orthancStatus) || SYNCED_STATUSES.has(santeStatus);
 }
@@ -170,9 +225,10 @@ function safePreview<T>(builder: () => T): { value: T | null; error: string | nu
 
 export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown>) {
   const query = normalizeWorklistMonitorQuery(rawQuery);
-  const [orthancSettings, santeSettings] = await Promise.all([
+  const [orthancSettings, santeSettings, protocolRequirementEnabled] = await Promise.all([
     resolveOrthancSettings(),
     resolveSanteWorklistSettings(),
+    isMwlProtocolRequirementEnabled(),
   ]);
 
   const values: unknown[] = [query.dateFrom, query.dateTo];
@@ -234,10 +290,20 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
         ss.last_error as sante_last_error,
         so.id as sante_outbox_id,
         so.status as sante_outbox_status,
-        coalesce(sh.history, '[]'::jsonb) as sante_history
+        coalesce(sh.history, '[]'::jsonb) as sante_history,
+        protocoling_modality.modality_code as protocoling_modality_code,
+        exists (
+          select 1
+          from appointment_protocol_assignments assignment
+          where assignment.appointment_id = b.id
+            and assignment.status <> 'CANCELLED'
+        ) as active_protocol_assignment_exists
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
+      cross join lateral (
+        select ${PROTOCOLING_MODALITY_SQL} as modality_code
+      ) protocoling_modality
       left join exam_types et on et.id = b.exam_type_id
       left join doctor_portal.appointment_protocols ap on ap.appointment_id = b.id and ap.protocol_status = 'assigned'
       left join external_mwl_sync os on os.booking_id = b.id and os.external_system = 'orthanc'
@@ -298,7 +364,13 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
     values
   );
 
-  const filteredRows = rows.filter((row) => rowMatchesStatus(row, query.status, orthancSettings.sendOnlyWhenPatientEntersQueue));
+  const filteredRows = rows.filter((row) => rowMatchesStatus(
+    row,
+    query.status,
+    orthancSettings.sendOnlyWhenPatientEntersQueue,
+    santeSettings.sendOnlyWhenPatientEntersQueue,
+    protocolRequirementEnabled
+  ));
 
   return {
     query,
@@ -349,7 +421,7 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
         bookingTime: row.booking_time,
         queueStatus: row.status,
         orthanc: {
-          status: orthancComputedStatus(row, orthancSettings.sendOnlyWhenPatientEntersQueue),
+          status: orthancComputedStatus(row, orthancSettings.sendOnlyWhenPatientEntersQueue, protocolRequirementEnabled),
           outboxStatus: row.orthanc_outbox_status,
           outboxId: row.orthanc_outbox_id == null ? null : Number(row.orthanc_outbox_id),
           operation: row.orthanc_operation,
@@ -360,7 +432,7 @@ export async function getWorklistMonitorEntries(rawQuery: Record<string, unknown
           previewError: orthancPreview.error,
         },
         sante: {
-          status: row.sante_sync_status || row.sante_outbox_status || "not_enqueued",
+          status: santeComputedStatus(row, santeSettings.sendOnlyWhenPatientEntersQueue, protocolRequirementEnabled),
           outboxStatus: row.sante_outbox_status,
           outboxId: row.sante_outbox_id == null ? null : Number(row.sante_outbox_id),
           lastAttemptAt: row.sante_last_attempt_at,

@@ -10,12 +10,12 @@ import {
 describe("settings page composition", () => {
   it("preserves the ordered settings menu and group assignment matrix", () => {
     expect(SETTINGS_GROUPS).toEqual(["all", "clinical", "scheduling", "integrations", "admin", "system"]);
-    expect(SETTINGS_MENU_SECTIONS).toHaveLength(30);
+    expect(SETTINGS_MENU_SECTIONS).toHaveLength(31);
     expect(SETTINGS_MENU_SECTIONS).toEqual([
       "patient_registration", "patient_import", "patient_duplicate_resolver",
       "scheduling_and_capacity", "queue_and_arrival", "scheduling_engine_config",
       "pacs_connection", "dicom_gateway_config", "dicom_gateway_devices",
-      "dicom_gateway_monitoring", "orthanc_mwl_sync", "sante_worklist_hl7",
+      "dicom_gateway_monitoring", "mwl_policy", "orthanc_mwl_sync", "sante_worklist_hl7",
       "users", "action_pin_policy", "role_page_access", "audit_log", "exam_types",
       "modalities", "not_allowed_name_words", "appointment_slip", "qz_tray",
       "patient_qr_self_service", "passkey_configuration", "sonicdicom_reports",

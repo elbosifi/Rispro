@@ -43,6 +43,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "integrations",
   ],
   [
+    "mwl_policy",
+    "integrations",
+  ],
+  [
     "orthanc_mwl_sync",
     "integrations",
   ],
