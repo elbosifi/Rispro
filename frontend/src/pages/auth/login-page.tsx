@@ -5,6 +5,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { fetchDoctorMe } from "@/lib/api-hooks";
 import { Lock, User, Power, KeyRound } from "lucide-react";
+import { shouldAutoEnterDoctorWorkspace } from "@/components/layout/navigation.helpers";
 
 export function LoginPage() {
   const { language } = useLanguage();
@@ -28,18 +29,13 @@ export function LoginPage() {
     }
   };
 
-  const completeLogin = async (user: { mustChangePassword?: boolean }) => {
+  const completeLogin = async (user: Awaited<ReturnType<typeof login>>) => {
     if (user.mustChangePassword) {
       navigate(from, { replace: true });
       return;
     }
     const doctorMe = await fetchDoctorMe().catch(() => null);
-    if (
-      doctorMe?.doctorPortalAutoRedirect !== false &&
-      doctorMe?.hasActiveDoctorProfile &&
-      !doctorMe.canAccessCoreWorkspace &&
-      (from === "/" || from === "/login")
-    ) {
+    if (shouldAutoEnterDoctorWorkspace(user, doctorMe) && (from === "/" || from === "/login")) {
       navigate("/doctor/dashboard", { replace: true });
       return;
     }

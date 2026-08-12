@@ -48,7 +48,7 @@ import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page"
 import { AppointmentCreatePage, SchedulingAdminPage } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
-import { hasDoctorWorkspaceAccess } from "@/components/layout/navigation.helpers";
+import { hasDoctorWorkspaceAccess, shouldAutoEnterDoctorWorkspace } from "@/components/layout/navigation.helpers";
 import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -159,8 +159,9 @@ function AppContent() {
   const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
   const defaultLandingRoute = getDefaultLandingRouteForRole(normalizedMatrix, user?.role ?? "receptionist");
   const defaultLandingPath = getLandingPath(defaultLandingRoute);
-  const effectiveDefaultLandingPath =
-    doctorMe?.hasActiveDoctorProfile && !doctorMe.canAccessCoreWorkspace ? "/doctor/dashboard" : defaultLandingPath;
+  const effectiveDefaultLandingPath = shouldAutoEnterDoctorWorkspace(user, doctorMe)
+    ? "/doctor/dashboard"
+    : defaultLandingPath;
 
   const handleNavigate = useCallback(
     (route: string) => {

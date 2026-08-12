@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import { LoginPage } from "./login-page";
+import type { User } from "@/types/api";
+
+function loggedInUser(role: User["role"], mustChangePassword = false): User {
+  return { id: 1, username: role, fullName: role, role, mustChangePassword };
+}
 
 const testState = vi.hoisted(() => ({
   fetchDoctorMe: vi.fn(),
@@ -61,8 +66,8 @@ async function submitLogin(container: HTMLElement) {
 
 describe("LoginPage routing", () => {
   beforeEach(() => {
-    testState.login.mockResolvedValue({ mustChangePassword: false });
-    testState.loginWithPasskey.mockResolvedValue({ mustChangePassword: false });
+    testState.login.mockResolvedValue(loggedInUser("doctor"));
+    testState.loginWithPasskey.mockResolvedValue(loggedInUser("doctor"));
     testState.fetchDoctorMe.mockReset();
   });
 
@@ -70,10 +75,10 @@ describe("LoginPage routing", () => {
     vi.clearAllMocks();
   });
 
-  it("lands doctor-only users in Doctor Portal from the default login target", async () => {
+  it("lands dual-access doctors in Doctor Portal from the default login target", async () => {
     testState.fetchDoctorMe.mockResolvedValue({
       hasActiveDoctorProfile: true,
-      canAccessCoreWorkspace: false,
+      canAccessCoreWorkspace: true,
       doctorPortalAutoRedirect: true,
     });
     const { container } = renderLogin("/");
@@ -83,7 +88,8 @@ describe("LoginPage routing", () => {
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/doctor/dashboard"));
   });
 
-  it("does not force Doctor Portal for dual-access users", async () => {
+  it("keeps supervisors in Core from the default login target", async () => {
+    testState.login.mockResolvedValue(loggedInUser("supervisor"));
     testState.fetchDoctorMe.mockResolvedValue({
       hasActiveDoctorProfile: true,
       canAccessCoreWorkspace: true,
@@ -96,10 +102,23 @@ describe("LoginPage routing", () => {
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/"));
   });
 
+  it("keeps doctors in Core when Doctor Portal auto redirect is disabled", async () => {
+    testState.fetchDoctorMe.mockResolvedValue({
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: true,
+      doctorPortalAutoRedirect: false,
+    });
+    const { container } = renderLogin("/");
+
+    await submitLogin(container);
+
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/"));
+  });
+
   it("respects an explicit appointments request after login", async () => {
     testState.fetchDoctorMe.mockResolvedValue({
       hasActiveDoctorProfile: true,
-      canAccessCoreWorkspace: false,
+      canAccessCoreWorkspace: true,
       doctorPortalAutoRedirect: true,
     });
     const { container } = renderLogin("/appointments");
@@ -112,7 +131,7 @@ describe("LoginPage routing", () => {
   it("uses the same redirect behavior after passkey sign-in", async () => {
     testState.fetchDoctorMe.mockResolvedValue({
       hasActiveDoctorProfile: true,
-      canAccessCoreWorkspace: false,
+      canAccessCoreWorkspace: true,
       doctorPortalAutoRedirect: true,
     });
     renderLogin("/");
@@ -121,5 +140,15 @@ describe("LoginPage routing", () => {
 
     await waitFor(() => expect(testState.loginWithPasskey).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/doctor/dashboard"));
+  });
+
+  it("preserves the forced password-change route without loading Doctor Portal identity", async () => {
+    testState.login.mockResolvedValue(loggedInUser("doctor", true));
+    const { container } = renderLogin("/change-password");
+
+    await submitLogin(container);
+
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/change-password"));
+    expect(testState.fetchDoctorMe).not.toHaveBeenCalled();
   });
 });

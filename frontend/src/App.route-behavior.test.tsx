@@ -287,17 +287,20 @@ describe("App route behavior", () => {
     expect(await screen.findByTestId("queue-page")).toBeTruthy();
   });
 
-  it("uses Doctor Portal as the root landing for doctor-only users", async () => {
+  it("uses Doctor Portal as the root landing for dual-access doctors", async () => {
+    testState.user = { id: 2, username: "doctor", fullName: "Doctor User", role: "doctor" } as User;
     renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
       hasActiveDoctorProfile: true,
-      canAccessCoreWorkspace: false,
+      canAccessCoreWorkspace: true,
+      doctorPortalAutoRedirect: true,
     });
 
     await waitFor(() => expect(window.location.pathname).toBe("/doctor/dashboard"));
     expect(await screen.findByTestId("doctor-page")).toBeTruthy();
   });
 
-  it("uses the core default root landing for dual-access users", async () => {
+  it("uses the Core default root landing for supervisors with Doctor Portal access", async () => {
+    testState.user = { id: 2, username: "supervisor", fullName: "Supervisor User", role: "supervisor" } as User;
     renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
       hasActiveDoctorProfile: true,
       canAccessCoreWorkspace: true,
@@ -305,6 +308,30 @@ describe("App route behavior", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/queue"));
     expect(await screen.findByTestId("queue-page")).toBeTruthy();
+  });
+
+  it("uses the Core default root landing for doctors without an active profile", async () => {
+    testState.user = { id: 2, username: "doctor", fullName: "Doctor User", role: "doctor" } as User;
+    renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
+      hasActiveDoctorProfile: false,
+      canAccessCoreWorkspace: true,
+      doctorPortalAutoRedirect: true,
+    });
+
+    await waitFor(() => expect(window.location.pathname).toBe("/patients"));
+    expect(await screen.findByTestId("patients-page")).toBeTruthy();
+  });
+
+  it("uses the Core default root landing when doctor auto redirect is disabled", async () => {
+    testState.user = { id: 2, username: "doctor", fullName: "Doctor User", role: "doctor" } as User;
+    renderAppAt("/", DEFAULT_PAGE_VISIBILITY_MATRIX, {
+      hasActiveDoctorProfile: true,
+      canAccessCoreWorkspace: true,
+      doctorPortalAutoRedirect: false,
+    });
+
+    await waitFor(() => expect(window.location.pathname).toBe("/patients"));
+    expect(await screen.findByTestId("patients-page")).toBeTruthy();
   });
 
   it("keeps Doctor Portal manually accessible for dual-access users", async () => {
