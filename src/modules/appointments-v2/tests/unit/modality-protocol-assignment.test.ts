@@ -189,7 +189,7 @@ test("modality protocol assignment returns free-text CT without querying phase t
   assert.equal(db.calls.length, 1);
 });
 
-test("modality protocol assignment returns free-text MRI using booking modality", async () => {
+test("modality protocol assignment returns free-text MRI using an MR booking modality", async () => {
   const db = executor([[{
     assignment_id: 15, appointment_id: 106, protocol_id: null, protocol_version_id: null,
     protocol_name: null, version_number: null, free_text_protocol: "MRI brain with contrast",
@@ -201,6 +201,7 @@ test("modality protocol assignment returns free-text MRI using booking modality"
   assert.equal(assignment?.modality, "MRI");
   assert.equal(assignment?.free_text_protocol, "MRI brain with contrast");
   assert.equal(db.calls.length, 1);
+  assert.match(db.calls[0].sql, /upper\(coalesce\(protocol\.modality, modality\.code\)\) in \('MR', 'MRI'\)/);
 });
 
 test("modality protocol assignment excludes cancelled assignments and appointments", () => {

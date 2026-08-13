@@ -1,3 +1,5 @@
+import { protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../../services/protocoling-modality.js";
+
 type QueryExecutor = {
   query<T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<{ rows: T[] }>;
 };
@@ -148,7 +150,7 @@ export async function getModalityProtocolAssignment(
         assignment.protocol_version_id,
         protocol.name as protocol_name,
         version.version_number,
-        upper(coalesce(protocol.modality, modality.code)) as modality,
+        ${protocolingModalityCodeSql("coalesce(protocol.modality, modality.code)")} as modality,
         assignment.free_text_protocol,
         assignment.scanner_id,
         scanner.name as scanner_name,
@@ -168,7 +170,7 @@ export async function getModalityProtocolAssignment(
       left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
       where booking.id = $1
         and booking.status not in ('cancelled', 'discontinued', 'voided')
-        and upper(coalesce(protocol.modality, modality.code)) in ('CT', 'MRI')
+        and ${protocolingModalityAppliesSql(protocolingModalityCodeSql("coalesce(protocol.modality, modality.code)"))}
         and assignment.status <> 'CANCELLED'
       order by assignment.updated_at desc, assignment.id desc
       limit 1

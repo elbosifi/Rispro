@@ -12,6 +12,14 @@ export const PROTOCOLING_MODALITY_SQL = `
   end
 `;
 
+export function protocolingModalityCodeSql(modalityCodeSql: string): string {
+  return `case
+    when upper(${modalityCodeSql}) = 'CT' then 'CT'
+    when upper(${modalityCodeSql}) in ('MR', 'MRI') then 'MRI'
+    else null
+  end`;
+}
+
 export function protocolingModalityAppliesSql(modalityCodeSql: string): string {
   return `${modalityCodeSql} in ('CT', 'MRI')`;
 }

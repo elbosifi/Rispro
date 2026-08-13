@@ -43,3 +43,7 @@ test("modality worklist exposes the active protocol assignment in the same query
   assert.match(source, /b\.status not in \('cancelled', 'discontinued', 'voided'\)/);
   assert.match(source, /limit 1\r?\n\s*\) protocol_assignment on true/);
 });
+
+test("modality worklist normalizes MR booking codes for free-text protocol assignments", () => {
+  assert.match(source, /protocolingModalityCodeSql\("coalesce\(protocol\.modality, m\.code\)"\)/);
+});

@@ -1571,6 +1571,38 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("oblique axial")).toBeTruthy();
   });
 
+  it("treats MR as MRI, retaining the assignment badge and fetching its detail", async () => {
+    const assigned = mriAssignment({ appointmentId: 20, protocolId: null, protocolVersionId: null, freeTextProtocol: "MRI brain with contrast", protocolName: null, versionNumber: null, mriSequences: [] });
+    const user = await openBoard([appointment({
+      id: 20,
+      modalityCode: "MR",
+      modalityNameEn: "MRI",
+      examNameEn: "MRI Brain",
+      protocolAssignmentSummary: {
+        assignmentId: 96,
+        protocolName: null,
+        versionNumber: null,
+        freeTextProtocol: "MRI brain with contrast",
+        scannerName: null,
+        assignedBy: null,
+        assignedAt: null,
+        protocolNotes: null,
+        contrastNotes: null,
+      },
+    })]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(assigned);
+
+    const row = screen.getByTestId("modality-board-row-20");
+    expect(within(row).getByText("Protocol assigned")).toBeTruthy();
+    await user.click(row);
+
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    expect(await within(drawer).findByText("Assigned protocol")).toBeTruthy();
+    expect(within(drawer).getByText("MRI brain with contrast")).toBeTruthy();
+    expect(within(drawer).queryByText("No protocol assigned")).toBeNull();
+    expect(fetchModalityProtocolAssignmentMock).toHaveBeenCalledWith(20);
+  });
+
   it("renders no assignment state cleanly for CT and exposes no protocol edit controls", async () => {
     fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
     const user = await openBoard([appointment({ id: 9, accessionNumber: "ACC-NO-PROTOCOL" })]);

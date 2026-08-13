@@ -33,7 +33,7 @@ import {
   isRequestDocumentRequiredForProtocolQueue,
   qualifyingRequestDocumentExistsSql,
 } from "../../../../services/request-document-protocol-policy.js";
-import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../../../services/protocoling-modality.js";
+import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql, protocolingModalityCodeSql } from "../../../../services/protocoling-modality.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -1381,7 +1381,7 @@ router.get(
         where assignment.appointment_id = b.id
           and assignment.status <> 'CANCELLED'
           and b.status not in ('cancelled', 'discontinued', 'voided')
-          and upper(coalesce(protocol.modality, m.code)) in ('CT', 'MRI')
+          and ${protocolingModalityAppliesSql(protocolingModalityCodeSql("coalesce(protocol.modality, m.code)"))}
         order by assignment.updated_at desc, assignment.id desc
         limit 1
       ) protocol_assignment on true

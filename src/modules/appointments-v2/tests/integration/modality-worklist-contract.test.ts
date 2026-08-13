@@ -43,7 +43,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     if (!testData) throw new Error("Test setup failed - database unreachable");
   }
 
-  async function createBooking(patientId: number): Promise<number> {
+  async function createBooking(patientId: number, modalityId = testData.modalityId, examTypeId = testData.examTypeId): Promise<number> {
     const result = await pool.query<{ id: string }>(
       `
         insert into appointments_v2.bookings (
@@ -61,7 +61,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
         values ($1, $2, $3, '2026-06-20'::date, null, 'non_oncology', 'completed', $4, $5, $5)
         returning id::text
       `,
-      [patientId, testData.modalityId, testData.examTypeId, testData.policyVersionId, testData.userId]
+      [patientId, modalityId, examTypeId, testData.policyVersionId, testData.userId]
     );
     return Number(result.rows[0].id);
   }
@@ -208,5 +208,53 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     assert.equal(row(zeroBookingId)?.status, "completed");
     assert.equal(row(zeroBookingId)?.latest_document_at, null);
     assert.equal(typeof row(directBookingId)?.latest_document_at, "string");
+  });
+
+  it("returns active free-text MR protocol assignments in the worklist and detail read", async () => {
+    guard();
+    const mrModality = await pool.query<{ id: string }>("select id::text from modalities where upper(code) = 'MR' limit 1");
+    assert.ok(mrModality.rows[0]?.id, "an MR modality is required for the regression fixture");
+    const mrModalityId = Number(mrModality.rows[0].id);
+    const examType = await pool.query<{ id: string }>(
+      `
+        insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+        values ($1, $2, $3, $4, true)
+        returning id::text
+      `,
+      [mrModalityId, `${TEST_PREFIX} MR Exam`, `${TEST_PREFIX} MR Exam`, `${TEST_PREFIX}MR_EXAM`]
+    );
+    const bookingId = await createBooking(testData.patientId, mrModalityId, Number(examType.rows[0].id));
+    const assignmentResult = await pool.query<{ id: string }>(
+      `
+        insert into appointment_protocol_assignments (
+          appointment_id, protocol_id, protocol_version_id, free_text_protocol,
+          assigned_by, assigned_at, status
+        )
+        values ($1, null, null, 'MRI brain with contrast', $2, now(), 'ASSIGNED')
+        returning id::text
+      `,
+      [bookingId, testData.userId]
+    );
+    const assignmentId = Number(assignmentResult.rows[0].id);
+
+    const worklist = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(
+      app.baseUrl,
+      `/api/v2/read/modality/worklist?modalityId=${mrModalityId}&scope=all`,
+      { cookie: authCookie }
+    );
+    const detail = await fetchJson<{ assignment: Record<string, unknown> | null }>(
+      app.baseUrl,
+      `/api/v2/read/modality/appointments/${bookingId}/protocol-assignment`,
+      { cookie: authCookie }
+    );
+
+    assert.equal(worklist.status, 200);
+    const row = worklist.data.appointments.find((appointment) => Number(appointment.id) === bookingId);
+    assert.equal(Number(row?.protocol_assignment_id), assignmentId);
+    assert.equal(row?.assigned_free_text_protocol, "MRI brain with contrast");
+    assert.equal(detail.status, 200);
+    assert.equal(Number(detail.data.assignment?.assignment_id), assignmentId);
+    assert.equal(detail.data.assignment?.modality, "MRI");
+    assert.equal(detail.data.assignment?.free_text_protocol, "MRI brain with contrast");
   });
 });

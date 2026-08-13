@@ -291,7 +291,7 @@ function notesIndicator(language: Language, appointment: AppointmentWithDetails)
 
 function isProtocolModality(appointment: AppointmentWithDetails | null): boolean {
   const code = appointment?.modalityCode?.toUpperCase();
-  return code === "CT" || code === "MRI";
+  return code === "CT" || code === "MR" || code === "MRI";
 }
 
 function protocolVersionLabel(name: string | null, version: string | null, freeText?: string | null): string {
