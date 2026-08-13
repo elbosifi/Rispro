@@ -1401,7 +1401,13 @@ router.get(
         select
           count(*) filter (where d.status = 'success')::int as successful_count,
           max(d.status) filter (where d.status = 'sending') as active_status,
-          bool_or(d.status = 'failed') as latest_failed
+          coalesce((
+            select latest.status = 'failed'
+            from cd_robot_deliveries latest
+            where latest.booking_id = b.id
+            order by latest.requested_at desc, latest.id desc
+            limit 1
+          ), false) as latest_failed
         from cd_robot_deliveries d
         where d.booking_id = b.id
       ) cd_summary on true

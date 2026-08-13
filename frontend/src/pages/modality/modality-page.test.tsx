@@ -1240,8 +1240,10 @@ describe("ModalityPage modality board", () => {
     await user.click(failedButton);
     await screen.findByRole("heading", { name: "CD delivery history" });
     await screen.findByText(/C-ECHO failed/);
+    fetchModalityWorklistMock.mockResolvedValue([appointment({ id: 34, status: "completed", cdSuccessfulCount: 3, cdLatestFailed: false })]);
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(retryCdRobotDeliveryMock.mock.calls[0]?.[0]).toBe(44));
+    await waitFor(() => expect(within(row).getByRole("button", { name: "Sent" }).textContent).toContain("×3"));
   });
 
   it("keeps successful CD resend available with the successful-copy count", async () => {

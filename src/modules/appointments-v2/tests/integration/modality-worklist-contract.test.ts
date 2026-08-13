@@ -35,6 +35,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
   after(async () => {
     if (!testData) return;
     await pool.query("delete from documents where stored_path like $1", [`tests/${TEST_PREFIX}%`]);
+    await pool.query("delete from cd_robot_deliveries where requested_by_user_id = $1", [testData.userId]);
     await app.close();
     await testDb.cleanup();
   });
@@ -64,6 +65,20 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
       [patientId, modalityId, examTypeId, testData.policyVersionId, testData.userId]
     );
     return Number(result.rows[0].id);
+  }
+
+  async function createCdDelivery(bookingId: number, status: "sending" | "success" | "failed", requestedAt: string): Promise<void> {
+    await pool.query(
+      `
+        insert into cd_robot_deliveries (
+          patient_id, booking_id, destination_key, status, requested_by_user_id,
+          requested_at, completed_at
+        )
+        values ($1, $2, 'MODWL-CD', $3, $4, $5::timestamptz,
+          case when $3 = 'sending' then null else $5::timestamptz end)
+      `,
+      [testData.patientId, bookingId, status, testData.userId, requestedAt]
+    );
   }
 
   it("returns PACS timing, primary identifier, and Routine priority defaults", async () => {
@@ -256,5 +271,36 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     assert.equal(Number(detail.data.assignment?.assignment_id), assignmentId);
     assert.equal(detail.data.assignment?.modality, "MRI");
     assert.equal(detail.data.assignment?.free_text_protocol, "MRI brain with contrast");
+  });
+
+  it("summarizes only the most recent CD delivery status while preserving success counts", async () => {
+    guard();
+    const retrySucceededBooking = await createBooking(testData.patientId);
+    const newerFailureBooking = await createBooking(testData.patientId);
+    const sendingBooking = await createBooking(testData.patientId);
+
+    await createCdDelivery(retrySucceededBooking, "failed", "2026-06-20T08:00:00Z");
+    await createCdDelivery(retrySucceededBooking, "success", "2026-06-20T08:01:00Z");
+    await createCdDelivery(retrySucceededBooking, "success", "2026-06-20T08:02:00Z");
+    await createCdDelivery(newerFailureBooking, "success", "2026-06-20T08:00:00Z");
+    await createCdDelivery(newerFailureBooking, "failed", "2026-06-20T08:01:00Z");
+    await createCdDelivery(sendingBooking, "failed", "2026-06-20T08:00:00Z");
+    await createCdDelivery(sendingBooking, "success", "2026-06-20T08:01:00Z");
+    await createCdDelivery(sendingBooking, "sending", "2026-06-20T08:02:00Z");
+
+    const response = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(
+      app.baseUrl,
+      `/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`,
+      { cookie: authCookie }
+    );
+    assert.equal(response.status, 200);
+    const row = (bookingId: number) => response.data.appointments.find((appointment) => Number(appointment.id) === bookingId);
+
+    assert.equal(row(retrySucceededBooking)?.cd_latest_failed, false);
+    assert.equal(row(retrySucceededBooking)?.cd_successful_count, 2);
+    assert.equal(row(newerFailureBooking)?.cd_latest_failed, true);
+    assert.equal(row(newerFailureBooking)?.cd_successful_count, 1);
+    assert.equal(row(sendingBooking)?.cd_active_status, "sending");
+    assert.equal(row(sendingBooking)?.cd_latest_failed, false);
   });
 });
