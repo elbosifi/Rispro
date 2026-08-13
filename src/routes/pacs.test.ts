@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Request } from "express";
 import { cleanupDicomRemapStagingStorage, cleanupDicomRemapUploadTempDir } from "../services/dicom-remap-service.js";
+import { HttpError } from "../utils/http-error.js";
 import { __pacsRouteTestables } from "./pacs.js";
 
 const TEMP_PREFIX = "rispro-dicom-remap-";
@@ -68,10 +69,62 @@ test("active remap process-multipart bypasses the global Express JSON parser", a
 
 test("comparison-only remap access is request, patient, and job scoped", async () => {
   const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  const comparisonScopeMiddleware = routeSource.slice(
+    routeSource.indexOf('pacsRouter.use("/remap", async function requireComparisonRemapScope'),
+    routeSource.indexOf("async function stageDicomRemapMultipartFiles")
+  );
   assert.match(routeSource, /res\.locals\.comparisonRemapScope/);
   assert.match(routeSource, /Replacement patient must match the comparison request/);
   assert.match(routeSource, /assertDicomRemapJobComparisonAccess/);
   assert.match(routeSource, /Comparison-linked remap access is limited to this request/);
+  assert.doesNotMatch(comparisonScopeMiddleware, /patient-search/);
+});
+
+test("remap patient search keeps patient lookup within the remap authorization boundary", async () => {
+  const routeSource = await readFile(new URL("./pacs.ts", import.meta.url), "utf8");
+  const patientsRouteSource = await readFile(new URL("./patients.ts", import.meta.url), "utf8");
+
+  assert.match(routeSource, /pacsRouter\.use\("\/remap", requireAuth, requirePacsRemapAccess\)/);
+  assert.match(routeSource, /pacsRouter\.get\(\s*"\/remap\/patient-search",\s*\.\.\.authMiddleware/);
+  assert.match(routeSource, /const patients = await searchPatients\(search\)/);
+  assert.match(patientsRouteSource, /patientsRouter\.use\(requirePageAccess\("patients"\)\)/);
+});
+
+test("remap patient search input and response remain bounded to picker fields", () => {
+  assert.equal(__pacsRouteTestables.normalizeRemapPatientSearch("  Ja  "), "Ja");
+  assert.throws(
+    () => __pacsRouteTestables.normalizeRemapPatientSearch("J"),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 400
+  );
+  assert.throws(
+    () => __pacsRouteTestables.normalizeRemapPatientSearch("x".repeat(201)),
+    (error: unknown) => error instanceof HttpError && error.statusCode === 400
+  );
+
+  const patients = Array.from({ length: 26 }, (_, index) => ({
+    id: index + 1,
+    arabic_full_name: `Arabic ${index + 1}`,
+    english_full_name: `English ${index + 1}`,
+    national_id: `N-${index + 1}`,
+    mrn: `MRN-${index + 1}`,
+    sex: "F",
+    estimated_date_of_birth: "1990-01-02",
+    phone_1: "should-not-leak",
+    address: "should-not-leak",
+  })) as never;
+  const response = __pacsRouteTestables.toRemapPatientSearchPatients(patients);
+
+  assert.equal(response.length, 25);
+  assert.deepEqual(Object.keys(response[0]!).sort(), [
+    "arabic_full_name",
+    "date_of_birth",
+    "english_full_name",
+    "id",
+    "mrn",
+    "national_id",
+    "sex",
+  ]);
+  assert.equal(response[0]!.date_of_birth, "1990-01-02");
 });
 
 test("fast durable multipart staging accepts source confirmation without patient or destination fields", async () => {

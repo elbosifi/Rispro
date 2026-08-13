@@ -186,6 +186,32 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.getAllByText(/Source|Patient|Destination|Review|Processing/).length).toBeGreaterThanOrEqual(5);
   });
 
+  it("uses the scoped remap patient search for All RISpro patients and selects a result", async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
+      if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) return Promise.resolve({ appointments: [] });
+      if (path === "/pacs/remap/patient-search?q=Ja") return Promise.resolve({ patients: [{ id: 42, english_full_name: "Jane Patient", national_id: "N-42", mrn: "MRN-42", sex: "F", date_of_birth: "1990-01-02" }] });
+      if (path === "/pacs/remap/replacement-preview") return Promise.resolve({ replacement: { patientId: "N-42", patientName: "Jane^Patient", patientSex: "F", patientBirthDate: "19900102" } });
+      if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
+      return Promise.resolve({ items: [] });
+    });
+
+    renderPage();
+    await scanOne();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Patient" }));
+    fireEvent.change(screen.getAllByRole("combobox")[0]!, { target: { value: "all_patients" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Ja" } });
+
+    const patient = await screen.findByRole("button", { name: /Jane Patient/ });
+    expect(apiMock).toHaveBeenCalledWith("/pacs/remap/patient-search?q=Ja");
+    expect(apiMock.mock.calls.some(([path]) => String(path).startsWith("/patients?q="))).toBe(false);
+    expect(apiMock.mock.calls.some(([path]) => String(path).startsWith("/patients/directory?"))).toBe(false);
+
+    fireEvent.click(patient);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Continue to Destination" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it("does not let a background processing job auto-hijack or disable Source", async () => {
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });

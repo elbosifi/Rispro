@@ -69,6 +69,7 @@ import {
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 import { canRoleAccessPage, readPageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
 import { findComparisonRequestById } from "../services/comparison-request-service.js";
+import { searchPatients } from "../services/patient-service.js";
 
 const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSupervisorReauth];
 const authMiddleware = [requireAuth];
@@ -76,6 +77,8 @@ const authMiddleware = [requireAuth];
 export const pacsRouter = express.Router();
 
 const COMPARISON_REMAP_ROLES = new Set(["modality_staff", "doctor", "supervisor", "super_admin"]);
+const REMAP_PATIENT_SEARCH_MAX_LENGTH = 200;
+const REMAP_PATIENT_SEARCH_RESULT_LIMIT = 25;
 
 type ComparisonRemapScope = { comparisonRequestId: number; patientId: number };
 
@@ -106,6 +109,29 @@ async function requirePacsRemapAccess(req: Request, res: Response, next: NextFun
   } catch (error) {
     next(error);
   }
+}
+
+function normalizeRemapPatientSearch(value: unknown): string {
+  const search = String(value || "").trim();
+  if (search.length < 2) {
+    throw new HttpError(400, "q must contain at least 2 characters.");
+  }
+  if (search.length > REMAP_PATIENT_SEARCH_MAX_LENGTH) {
+    throw new HttpError(400, `q must not exceed ${REMAP_PATIENT_SEARCH_MAX_LENGTH} characters.`);
+  }
+  return search;
+}
+
+function toRemapPatientSearchPatients(patients: Awaited<ReturnType<typeof searchPatients>>) {
+  return patients.slice(0, REMAP_PATIENT_SEARCH_RESULT_LIMIT).map((patient) => ({
+    id: patient.id,
+    arabic_full_name: patient.arabic_full_name,
+    english_full_name: patient.english_full_name,
+    national_id: patient.national_id,
+    mrn: patient.mrn,
+    sex: patient.sex,
+    date_of_birth: patient.estimated_date_of_birth,
+  }));
 }
 
 pacsRouter.use("/remap", requireAuth, requirePacsRemapAccess);
@@ -500,6 +526,8 @@ export const __pacsRouteTestables = {
   stageDicomRemapMultipartFiles,
   stageDicomRemapPreviewMultipartFiles,
   stageDicomRemapMultipartDurably,
+  normalizeRemapPatientSearch,
+  toRemapPatientSearchPatients,
 };
 
 // ---------------------------------------------------------------------------
@@ -768,6 +796,16 @@ pacsRouter.post(
 // ---------------------------------------------------------------------------
 // Internal DICOM remap/send tool (authenticated users, backend-orchestrated)
 // ---------------------------------------------------------------------------
+
+pacsRouter.get(
+  "/remap/patient-search",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const search = normalizeRemapPatientSearch(asUnknownRecord(req.query).q);
+    const patients = await searchPatients(search);
+    res.json({ patients: toRemapPatientSearchPatients(patients) });
+  })
+);
 
 pacsRouter.post(
   "/remap/preview-multipart",

@@ -607,13 +607,7 @@ export default function PacsRemapPage() {
 
   const patientQuery = useQuery({
     queryKey: ["patients", "remap-search", trimmedPatientSearch, scopedPatientLookupMode],
-    queryFn: async () => {
-      const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(trimmedPatientSearch)}`);
-      const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
-      if (primaryPatients) return { patients: primaryPatients as PatientOption[] };
-      const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(trimmedPatientSearch)}&page=1&pageSize=25`);
-      return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
-    },
+    queryFn: () => api<{ patients: PatientOption[] }>(`/pacs/remap/patient-search?q=${encodeURIComponent(trimmedPatientSearch)}`),
     enabled: uiStep === "patient" && !comparisonRequestId && scopedPatientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
