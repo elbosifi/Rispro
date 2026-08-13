@@ -14,9 +14,13 @@ test("DICOM remap async-send migration persists durable monitoring fields and in
     [[
       "orthanc_send_job_id", "send_attempt_count", "send_started_at", "send_completed_at",
       "send_last_checked_at", "send_last_heartbeat_at", "send_error_code", "send_error_details",
+      "dicom_integrity_version", "dicom_integrity_verified_at", "orthanc_recovery_status",
+      "orthanc_recovery_attempt_count", "orthanc_recovery_source_study_id", "orthanc_recovery_started_at",
+      "orthanc_recovery_completed_at", "orthanc_recovery_error_code", "orthanc_recovery_error_details",
+      "orthanc_recovery_expires_at",
     ]]
   );
-  assert.equal(columns.rowCount, 8);
+  assert.equal(columns.rowCount, 18);
 
   const indexes = await pool.query<{ indexname: string }>(
     `select indexname from pg_indexes where schemaname = 'public' and tablename = 'dicom_remap_jobs' and indexname = any($1::text[])`,
@@ -33,7 +37,7 @@ test("a failed job resends idempotently while another same-user job is processin
   const userId = Number(user.rows[0]!.id);
   let storeCalls = 0;
   try {
-    const failed = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage, source_orthanc_study_id, modified_orthanc_study_id, destination_pacs_key, error_message, send_error_code, send_error_details, send_attempt_count) values ($1, 'failed', 'failed', 'source-a', 'modified-a', 'PACS_TEST', 'Original send failure', 'ORTHANC_SEND_JOB_FAILED', '{"original":true}'::jsonb, 2) returning id`, [userId]);
+    const failed = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage, source_orthanc_study_id, modified_orthanc_study_id, destination_pacs_key, error_message, send_error_code, send_error_details, send_attempt_count, dicom_integrity_version, dicom_integrity_verified_at) values ($1, 'failed', 'failed', 'source-a', 'modified-a', 'PACS_TEST', 'Original send failure', 'ORTHANC_SEND_JOB_FAILED', '{"original":true}'::jsonb, 2, 1, now()) returning id`, [userId]);
     const other = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage, processing_lease_owner, processing_lease_expires_at) values ($1, 'processing', 'rewriting', 'other-worker', now() + interval '10 minutes') returning id`, [userId]);
     __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
     __dicomRemapTestables.setOrthancFetchForTests(async (requestPath, options = {}) => {

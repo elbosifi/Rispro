@@ -166,3 +166,8 @@ export async function fetchCdRobotDestinations() { return api<{ destinations: Cd
 export async function fetchCdRobotDeliveries(bookingId: number) { return api<{ deliveries: CdRobotDelivery[] }>(`/v2/read/modality/appointments/${bookingId}/cd-deliveries`); }
 export async function createCdRobotDelivery(bookingId: number, input: { destinationKey: string; resendReasonCode?: string; resendReasonText?: string }) { return api<{ delivery: CdRobotDelivery }>(`/v2/read/modality/appointments/${bookingId}/cd-deliveries`, { method: "POST", body: JSON.stringify(input) }); }
 export async function retryCdRobotDelivery(deliveryId: number) { return api<{ delivery: CdRobotDelivery }>(`/v2/read/modality/cd-deliveries/${deliveryId}/retry`, { method: "POST" }); }
+
+export async function retryDicomRemapWithOrthanc<TJob>(jobId: number, comparisonRequestId?: number | null): Promise<{ job: TJob }> {
+  const query = comparisonRequestId ? `?comparisonRequestId=${comparisonRequestId}` : "";
+  return api<{ job: TJob }>(`/pacs/remap/jobs/${jobId}/retry-with-orthanc${query}`, { method: "POST" });
+}

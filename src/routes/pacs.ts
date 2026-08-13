@@ -59,6 +59,7 @@ import {
   listDicomRemapDestinations,
   listMyDicomRemapJobs,
   prepareDicomRemapConfirmation,
+  retryFailedDicomRemapWithOrthanc,
   resendDicomRemapJobToPacs,
   resetDicomRemapJob,
   validateDicomRemapUploadFilesInput,
@@ -1073,6 +1074,22 @@ pacsRouter.post(
       confirmDestinationChecked: validateExplicitConfirm(asUnknownRecord(request.body ?? {}).confirmDestinationChecked),
     });
 
+    res.status(202).json(result);
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/retry-with-orthanc",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+
+    const result = await retryFailedDicomRemapWithOrthanc({ jobId, currentUserId });
     res.status(202).json(result);
   })
 );

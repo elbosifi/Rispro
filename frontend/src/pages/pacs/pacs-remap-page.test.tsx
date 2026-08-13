@@ -728,7 +728,7 @@ describe("PacsRemapPage five-step wizard", () => {
 
   it.each(["success", "failure"] as const)("binds direct Recent Job resend %s to Job B and restores Draft A", async (outcome) => {
     const draftStudy = study("1.2.resend-draft-a", "Resend Draft A");
-    let recentJob = { id: 502, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source-b", modified_orthanc_study_id: "modified-b", selected_study_instance_uid: "9.9.resend-b", original_patient_name: "Resend^SourceB", replacement_patient_name: "Resend^TargetB", destination_pacs_key: "DEST-B", orthanc_send_job_id: null as string | null, error_message: "Original Job B failure", staged_file_count: 5, processed_file_count: 5, send_attempt_count: 2 };
+    let recentJob = { id: 502, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source-b", modified_orthanc_study_id: "modified-b", selected_study_instance_uid: "9.9.resend-b", original_patient_name: "Resend^SourceB", replacement_patient_name: "Resend^TargetB", destination_pacs_key: "DEST-B", orthanc_send_job_id: null as string | null, error_message: "Original Job B failure", staged_file_count: 5, processed_file_count: 5, send_attempt_count: 2, send_error_code: "ORTHANC_SEND_JOB_FAILED", dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z" };
     previewMock.mockResolvedValue(result([draftStudy]));
     scanMock.mockResolvedValue(result([draftStudy]));
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {
@@ -1420,7 +1420,7 @@ describe("PacsRemapPage five-step wizard", () => {
   });
 
   it("shows resend-action errors separately without hiding persisted job failure details", async () => {
-    const job = { id: 82, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source", modified_orthanc_study_id: "modified", destination_pacs_key: "1", error_message: "Original persisted failure", processing_error_code: "ORIGINAL_PROCESSING_ERROR", processing_error_details: { original: true }, orthanc_send_job_id: "orthanc-old", send_attempt_count: 3, send_error_code: null, send_error_details: null };
+    const job = { id: 82, status: "failed", processing_stage: "failed", source_orthanc_study_id: "source", modified_orthanc_study_id: "modified", destination_pacs_key: "1", error_message: "Original persisted failure", processing_error_code: "ORIGINAL_PROCESSING_ERROR", processing_error_details: { original: true }, orthanc_send_job_id: "orthanc-old", send_attempt_count: 3, send_error_code: "ORTHANC_SEND_JOB_FAILED", send_error_details: null, dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z" };
     apiMock.mockImplementation((path: string, options?: { method?: string }) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs/active") return Promise.resolve({ job: null, comparison: null });
@@ -1486,7 +1486,7 @@ describe("PacsRemapPage five-step wizard", () => {
   });
 
   it("keeps Recent Jobs secondary and requires the existing ambiguous-send confirmation", async () => {
-    const job = { id: 91, status: "failed", source_orthanc_study_id: "s", modified_orthanc_study_id: "s", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", error_message: "RISpro could not confirm whether PACS received this study." };
+    const job = { id: 91, status: "failed", source_orthanc_study_id: "s", modified_orthanc_study_id: "s", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS", error_message: "RISpro could not confirm whether PACS received this study.", dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z" };
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
       if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
@@ -1503,5 +1503,42 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(resend.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/I checked the destination PACS/i));
     expect(resend.disabled).toBe(false);
+  });
+
+  it("shows Retry with Orthanc only for an eligible failed processing job", async () => {
+    let job = { id: 92, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", processing_error_details: { failedInvariant: "TransferSyntaxUID" }, orthanc_recovery_status: "available", orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(), staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null as string | null, send_error_code: null, send_attempt_count: 0, dicom_integrity_version: null as number | null, dicom_integrity_verified_at: null as string | null };
+    apiMock.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/92") return Promise.resolve({ job, comparison: null });
+      if (path === "/pacs/remap/jobs/92/retry-with-orthanc" && options?.method === "POST") {
+        job = { ...job, status: "sending", processing_stage: "enqueueing_send", orthanc_recovery_status: "completed", modified_orthanc_study_id: "orthanc-modified", dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z" };
+        return Promise.resolve({ job });
+      }
+      return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#92.*Failed/i }));
+    expect(await screen.findByRole("button", { name: "Retry with Orthanc" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resend to PACS" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry with Orthanc" }));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/pacs/remap/jobs/92/retry-with-orthanc", { method: "POST" }));
+  });
+
+  it("shows Re-upload required when Orthanc recovery staging has expired", async () => {
+    const job = { id: 93, status: "failed", processing_stage: "failed", processing_error_code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED", orthanc_recovery_status: "available", orthanc_recovery_expires_at: "2026-01-01T00:00:00.000Z", staging_cleanup_completed_at: null, destination_pacs_key: "1", modified_orthanc_study_id: null, send_error_code: null, send_attempt_count: 0 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === "/pacs/remap/jobs/93") return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: /#93.*Failed/i }));
+    expect((await screen.findAllByText("Re-upload required")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Retry with Orthanc" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resend to PACS" })).toBeNull();
   });
 });

@@ -8,6 +8,13 @@ export type DicomRemapJobStatus =
   | "failed"
   | "cancelled";
 
+export type DicomRemapOrthancRecoveryStatus =
+  | "none"
+  | "available"
+  | "processing"
+  | "failed"
+  | "completed";
+
 export interface DicomRemapUploadFileInput {
   fileName?: unknown;
   mimeType?: unknown;

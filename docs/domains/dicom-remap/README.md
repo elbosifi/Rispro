@@ -16,9 +16,11 @@ DICOM Remap lets authenticated users upload a selected external DICOM study, map
 ## Durable Processing Architecture
 
 - `POST /api/pacs/remap/jobs/process-multipart` finishes after authenticated browser bytes have been staged to private persistent storage and a versioned manifest is committed. It returns `202` with a job in `uploaded` / `queued` state.
-- `dicom-remap-processing-worker.ts` claims queued jobs with a database lease, validates hashes and the one-selected-study boundary, atomically persists a UID plan, uploads remapped instances to Orthanc, verifies the resulting study and identity, and then reuses the durable asynchronous send worker.
+- `dicom-remap-processing-worker.ts` claims queued jobs with a database lease, validates hashes and the one-selected-study boundary, atomically persists a UID plan, performs a metadata-only rewrite that preserves the original transfer syntax and pixel payload, uploads only integrity-verified instances to Orthanc, verifies the resulting study and identity, and then reuses the durable asynchronous send worker.
 - Restart/reclaim reuses the same staged manifest and UID plan. Multiple workers cannot own a job while its lease is valid. The staging root must be shared by multiple backend instances.
-- Staged DICOM is PHI and must remain outside public static serving. Use `DICOM_REMAP_STAGING_DIR` on the persistent RISpro storage volume; successful staging is cleaned after send enqueue, while failed staging is retained only for the documented controlled retention period.
+- Staged DICOM is PHI and must remain outside public static serving. Use `DICOM_REMAP_STAGING_DIR` on the persistent RISpro storage volume. Pristine staging is retained through PACS send and cleaned after confirmed send success, explicit safe cancellation/reset, or the applicable retention expiry.
+- A remapped study cannot enter or re-enter PACS send unless its current `dicom_integrity_version` is recorded with `dicom_integrity_verified_at`. Legacy unverified jobs must use the explicit Orthanc recovery path while pristine staging remains, or be re-uploaded.
+- An eligible technical processing failure exposes a manual **Retry with Orthanc** action. It revalidates the staged manifest, uploads the original bytes unchanged, uses Orthanc's existing study-modify operation, verifies the modified study, records the current integrity version, and then invokes the same durable PACS send implementation. Source-selection, manifest-integrity, and identity-safety failures are never eligible.
 - A remap job may have a nullable `comparison_request_id`. Comparison preparation uses the same staging, verification, rewrite, Orthanc, PACS send, retry, and recovery pipeline; the relationship only supplies durable clinical context.
 - Pending requests under `/comparisons/:id/remap` use the comparison page permission plus backend comparison-context validation. Every remap API call carries the request context, and replacement-patient operations verify the request's authoritative patient. This does not grant access to unrelated PACS administration or ordinary remap jobs.
 
@@ -26,7 +28,7 @@ DICOM Remap lets authenticated users upload a selected external DICOM study, map
 
 - The workflow handles patient identity in DICOM metadata and must avoid accidental wrong-patient sends.
 - Large studies require a persistent staging volume shared with the processing worker.
-- A failed Orthanc ingestion is intentionally retained for controlled diagnosis; it must not be treated as resendable until a remapped study has verified.
+- A failed Orthanc ingestion is intentionally retained for controlled diagnosis and manual recovery; it must not be treated as resendable until a remapped study has verified.
 - Orthanc must remain server-side.
 
 ## What Agents Must Not Do

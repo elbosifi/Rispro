@@ -15,8 +15,8 @@ import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 import { getPatientById } from "./patient-service.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
-import type { DicomRemapJobStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
-export type { DicomRemapJobStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
+import type { DicomRemapJobStatus, DicomRemapOrthancRecoveryStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
+export type { DicomRemapJobStatus, DicomRemapOrthancRecoveryStatus, DicomRemapUploadFileInput } from "../modules/dicom-remap/types.js";
 import { validateExplicitConfirm } from "../modules/dicom-remap/validation.js";
 export { validateDicomRemapUploadFilesInput, validateExplicitConfirm } from "../modules/dicom-remap/validation.js";
 
@@ -107,6 +107,16 @@ export interface DicomRemapJobRow {
   processing_error_code?: string | null;
   processing_error_details?: unknown;
   staging_cleanup_completed_at?: string | null;
+  dicom_integrity_version?: number | null;
+  dicom_integrity_verified_at?: string | null;
+  orthanc_recovery_status?: DicomRemapOrthancRecoveryStatus | null;
+  orthanc_recovery_attempt_count?: number | null;
+  orthanc_recovery_source_study_id?: string | null;
+  orthanc_recovery_started_at?: string | null;
+  orthanc_recovery_completed_at?: string | null;
+  orthanc_recovery_error_code?: string | null;
+  orthanc_recovery_error_details?: unknown;
+  orthanc_recovery_expires_at?: string | null;
   selected_study_instance_uid?: string | null;
   provisional_source_identity?: DicomRemapProvisionalSourceIdentity | null;
   processing_selection_counts?: DicomRemapSelectionCounts | null;
@@ -275,6 +285,7 @@ export const DICOM_REMAP_PREVIEW_HEADER_BYTES = 512 * 1024;
 const DICOM_REMAP_STAGING_MANIFEST_VERSION = 1;
 const DICOM_REMAP_SELECTED_STUDY_MANIFEST_VERSION = 2;
 const DICOM_REMAP_UID_PLAN_VERSION = 3;
+export const DICOM_REMAP_INTEGRITY_VERSION = 1;
 const DICOM_REMAP_UPLOAD_MAX_RETRIES = 2;
 const DICOM_REMAP_FAILURE_SAMPLE_LIMIT = 20;
 function readDicomRemapPositiveLimit(value: unknown, fallback: number): number {
@@ -283,6 +294,7 @@ function readDicomRemapPositiveLimit(value: unknown, fallback: number): number {
 }
 const DICOM_REMAP_STAGING_MAX_FILES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_FILES, 5_000);
 const DICOM_REMAP_STAGING_MAX_TOTAL_BYTES = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_STAGING_MAX_TOTAL_BYTES, 20 * 1024 * 1024 * 1024);
+const DICOM_REMAP_ORTHANC_RECOVERY_RETENTION_HOURS = readDicomRemapPositiveLimit(process.env.DICOM_REMAP_ORTHANC_RECOVERY_RETENTION_HOURS, 168);
 const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "processing", "awaiting_confirmation", "remapped", "sending"];
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
@@ -299,6 +311,9 @@ let getPatientForDicomRemap: DicomRemapPatientLoader = getPatientById;
 let listModalitiesForDicomRemap: DicomRemapModalityLister = listOrthancRemoteModalities;
 let orthancBulkModifyAvailableForTests: boolean | null = null;
 let afterRemappedInstanceUploadForTests: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null = null;
+let afterOrthancRecoverySourceUploadForTests: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null = null;
+let afterOrthancRecoveryModifyForTests: ((details: { jobId: number; sourceStudyId: string; modifiedStudyId: string }) => void | Promise<void>) | null = null;
+let mutateStagedRewriteBeforeIntegrityForTests: ((output: Buffer) => Buffer) | null = null;
 
 function joinUrl(baseUrl: string, suffix: string): string {
   const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
@@ -941,11 +956,159 @@ function getOrCreateSeriesInstanceUid(
   return created;
 }
 
+const DICOM_FILE_META_TRANSFER_SYNTAX_TAG = "00020010";
+const DICOM_FILE_META_MEDIA_STORAGE_SOP_INSTANCE_TAG = "00020003";
+const DICOM_PIXEL_DATA_TAG = "7FE00010";
+const DICOM_PIXEL_INTEGRITY_FIELDS = [
+  "SOPClassUID",
+  "Rows",
+  "Columns",
+  "SamplesPerPixel",
+  "PhotometricInterpretation",
+  "BitsAllocated",
+  "BitsStored",
+  "HighBit",
+  "PixelRepresentation",
+] as const;
+
+type DicomElement = { vr?: unknown; Value?: unknown; _rawValue?: unknown };
+
+function cloneDicomElementValue(value: unknown): unknown {
+  if (value instanceof ArrayBuffer) return value.slice(0);
+  if (ArrayBuffer.isView(value)) {
+    return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+  }
+  if (Array.isArray(value)) return value.map(cloneDicomElementValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, cloneDicomElementValue(nested)]));
+  }
+  return value;
+}
+
+function cloneDicomFileMetaForWriter(meta: Record<string, unknown>): Record<string, unknown> {
+  const cloned = Object.fromEntries(Object.entries(meta).map(([tag, element]) => [tag, cloneDicomElementValue(element)]));
+  const transferSyntaxElement = cloned[DICOM_FILE_META_TRANSFER_SYNTAX_TAG];
+  if (!transferSyntaxElement || typeof transferSyntaxElement !== "object") {
+    throw new HttpError(400, "DICOM file meta is missing TransferSyntaxUID.", { code: "DICOM_REMAP_DICOM_REWRITE_FAILED" });
+  }
+  // dcmjs datasetToBuffer reads this named property as a structured element.
+  cloned.TransferSyntaxUID = transferSyntaxElement;
+  const mediaStorageSopElement = cloned[DICOM_FILE_META_MEDIA_STORAGE_SOP_INSTANCE_TAG];
+  if (mediaStorageSopElement && typeof mediaStorageSopElement === "object") {
+    cloned.MediaStorageSOPInstanceUID = mediaStorageSopElement;
+  }
+  return cloned;
+}
+
+function updateStructuredMediaStorageSopInstanceUid(meta: Record<string, unknown>, sopInstanceUid: string): void {
+  const current = meta[DICOM_FILE_META_MEDIA_STORAGE_SOP_INSTANCE_TAG];
+  const element: DicomElement = current && typeof current === "object"
+    ? current as DicomElement
+    : { vr: "UI", Value: [] };
+  element.Value = [sopInstanceUid];
+  if ("_rawValue" in element) element._rawValue = [sopInstanceUid];
+  meta[DICOM_FILE_META_MEDIA_STORAGE_SOP_INSTANCE_TAG] = element;
+  meta.MediaStorageSOPInstanceUID = element;
+}
+
+function readStructuredDicomElementString(element: unknown): string {
+  if (!element || typeof element !== "object") return "";
+  return readDicomStringValue((element as DicomElement).Value);
+}
+
+function isEncapsulatedTransferSyntax(transferSyntaxUid: string): boolean {
+  return transferSyntaxUid.startsWith("1.2.840.10008.1.2.4.") || transferSyntaxUid === "1.2.840.10008.1.2.5";
+}
+
+function dicomElementBuffers(element: unknown): Buffer[] {
+  if (!element || typeof element !== "object") return [];
+  const rawValues = (element as DicomElement).Value;
+  const values = Array.isArray(rawValues) ? rawValues : rawValues == null ? [] : [rawValues];
+  const buffers: Buffer[] = [];
+  for (const value of values) {
+    if (value instanceof ArrayBuffer) {
+      buffers.push(Buffer.from(value));
+    } else if (ArrayBuffer.isView(value)) {
+      buffers.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+    }
+  }
+  return buffers;
+}
+
+function hashDicomPixelPayload(buffers: Buffer[], encapsulated: boolean): { sha256: string; byteLength: number } {
+  const hash = createHash("sha256");
+  let byteLength = 0;
+  for (const buffer of buffers) {
+    const canonical = encapsulated && buffer.length > 0 && buffer[buffer.length - 1] === 0
+      ? buffer.subarray(0, buffer.length - 1)
+      : buffer;
+    hash.update(canonical);
+    byteLength += canonical.length;
+  }
+  return { sha256: hash.digest("hex"), byteLength };
+}
+
+function inspectDicomPixelIntegrity(buffer: Buffer): {
+  transferSyntax: string;
+  dataset: Record<string, unknown>;
+  pixelRepresentation: "absent" | "encapsulated" | "native";
+  pixelSha256: string;
+  pixelLength: number;
+} {
+  const dicom = DicomMessage.readFile(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)) as { dict: Record<string, unknown>; meta: Record<string, unknown> };
+  const transferSyntax = readStructuredDicomElementString(dicom.meta[DICOM_FILE_META_TRANSFER_SYNTAX_TAG]);
+  const dataset = DicomMetaDictionary.naturalizeDataset(dicom.dict) as Record<string, unknown>;
+  const pixelElement = dicom.dict[DICOM_PIXEL_DATA_TAG];
+  const buffers = dicomElementBuffers(pixelElement);
+  const pixelRepresentation = !pixelElement
+    ? "absent"
+    : isEncapsulatedTransferSyntax(transferSyntax) ? "encapsulated" : "native";
+  const payload = hashDicomPixelPayload(buffers, pixelRepresentation === "encapsulated");
+  return { transferSyntax, dataset, pixelRepresentation, pixelSha256: payload.sha256, pixelLength: payload.byteLength };
+}
+
+function throwDicomPixelIntegrityFailure(
+  failedInvariant: string,
+  source: ReturnType<typeof inspectDicomPixelIntegrity>,
+  output: ReturnType<typeof inspectDicomPixelIntegrity> | null,
+): never {
+  throw new HttpError(409, "Rewritten DICOM failed pixel integrity validation and was not uploaded.", {
+    code: "DICOM_REMAP_PIXEL_INTEGRITY_FAILED",
+    sourceTransferSyntax: source.transferSyntax,
+    outputTransferSyntax: output?.transferSyntax || "unreadable",
+    sourcePixelLength: source.pixelLength,
+    outputPixelLength: output?.pixelLength ?? 0,
+    failedInvariant,
+  });
+}
+
+function assertRewrittenDicomPixelIntegrity(sourceBuffer: Buffer, outputBuffer: Buffer): void {
+  const source = inspectDicomPixelIntegrity(sourceBuffer);
+  let output: ReturnType<typeof inspectDicomPixelIntegrity>;
+  try {
+    output = inspectDicomPixelIntegrity(outputBuffer);
+  } catch {
+    throwDicomPixelIntegrityFailure("outputReadable", source, null);
+  }
+  if (source.transferSyntax !== output.transferSyntax) throwDicomPixelIntegrityFailure("TransferSyntaxUID", source, output);
+  for (const field of DICOM_PIXEL_INTEGRITY_FIELDS) {
+    if (readDicomStringValue(source.dataset[field]) !== readDicomStringValue(output.dataset[field])) {
+      throwDicomPixelIntegrityFailure(field, source, output);
+    }
+  }
+  if ((source.dataset.NumberOfFrames != null || output.dataset.NumberOfFrames != null) && readDicomStringValue(source.dataset.NumberOfFrames) !== readDicomStringValue(output.dataset.NumberOfFrames)) {
+    throwDicomPixelIntegrityFailure("NumberOfFrames", source, output);
+  }
+  if (source.pixelRepresentation !== output.pixelRepresentation) throwDicomPixelIntegrityFailure("PixelDataRepresentation", source, output);
+  if (source.pixelLength !== output.pixelLength) throwDicomPixelIntegrityFailure("PixelDataLength", source, output);
+  if (source.pixelSha256 !== output.pixelSha256) throwDicomPixelIntegrityFailure("PixelDataPayload", source, output);
+}
+
 async function rewriteDicomFileForRemap(
   stagedFile: DicomRemapStagedUploadFile,
   replacement: OrthancPatientSummary,
   uidPlan?: DicomUidRemapPlan,
-): Promise<{ body: Buffer; originalSummary: OrthancStudySummary }> {
+): Promise<{ body: Buffer; originalSummary: OrthancStudySummary; replacementSopInstanceUid: string | null }> {
   const raw = await readFile(stagedFile.path);
   let dicomFile: { dict: Record<string, unknown>; meta: Record<string, unknown> };
 
@@ -965,7 +1128,7 @@ async function rewriteDicomFileForRemap(
   }
 
   const dataset = DicomMetaDictionary.naturalizeDataset(dicomFile.dict) as Record<string, unknown>;
-  dataset._meta = DicomMetaDictionary.naturalizeDataset(dicomFile.meta) as Record<string, unknown>;
+  dataset._meta = cloneDicomFileMetaForWriter(dicomFile.meta);
 
   const originalSummary = readNaturalizedStudySummary(dataset);
   const originalSeriesInstanceUid = readDicomStringValue(dataset.SeriesInstanceUID);
@@ -973,19 +1136,25 @@ async function rewriteDicomFileForRemap(
   dataset.PatientName = replacement.patientName;
   dataset.PatientSex = replacement.patientSex;
   dataset.PatientBirthDate = replacement.patientBirthDate;
+  let replacementSopInstanceUid: string | null = null;
   if (uidPlan) {
     dataset.StudyInstanceUID = uidPlan.studyInstanceUid;
     dataset.SeriesInstanceUID = getOrCreateSeriesInstanceUid(originalSeriesInstanceUid, uidPlan);
     const newSopInstanceUid = createDicomUid();
+    replacementSopInstanceUid = newSopInstanceUid;
     dataset.SOPInstanceUID = newSopInstanceUid;
     if (dataset._meta && typeof dataset._meta === "object") {
-      (dataset._meta as Record<string, unknown>).MediaStorageSOPInstanceUID = newSopInstanceUid;
+      updateStructuredMediaStorageSopInstanceUid(dataset._meta as Record<string, unknown>, newSopInstanceUid);
     }
   }
 
+  const body = Buffer.from(datasetToBuffer(dataset));
+  assertRewrittenDicomPixelIntegrity(raw, body);
+
   return {
-    body: Buffer.from(datasetToBuffer(dataset)),
+    body,
     originalSummary,
+    replacementSopInstanceUid,
   };
 }
 
@@ -1983,6 +2152,17 @@ function resolveSendStudyIdForJob(job: DicomRemapJobRow): string {
   return String(job.modified_orthanc_study_id || job.source_orthanc_study_id || "").trim();
 }
 
+function hasCurrentDicomIntegrityVerification(job: DicomRemapJobRow): boolean {
+  return Number(job.dicom_integrity_version) === DICOM_REMAP_INTEGRITY_VERSION && Boolean(job.dicom_integrity_verified_at);
+}
+
+function hasUnexpiredOrthancRecovery(job: DicomRemapJobRow): boolean {
+  if (!job.staged_storage_key || job.staging_cleanup_completed_at) return false;
+  if (!["available", "failed", "processing"].includes(String(job.orthanc_recovery_status || ""))) return false;
+  const expiresAt = Date.parse(String(job.orthanc_recovery_expires_at || ""));
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
 function normalizeOrthancModalityKey(value: unknown, fieldName = "destinationPacsKey"): string {
   const key = normalizeOptionalText(value);
   if (!key) {
@@ -2021,6 +2201,16 @@ async function sendExistingDicomRemapJobToDestination({
     throw new HttpError(409, "PACS send enqueue is still being recovered; do not retry automatically.", {
       code: "ORTHANC_SEND_ENQUEUE_AMBIGUOUS",
       status: job.status,
+    });
+  }
+  if (!hasCurrentDicomIntegrityVerification(job)) {
+    const recoveryAvailable = hasUnexpiredOrthancRecovery(job);
+    throw new HttpError(409, recoveryAvailable
+      ? "This remapped study predates the current DICOM integrity verification. Use Retry with Orthanc from the preserved source files."
+      : "This remapped study is not verified by the current DICOM integrity gate. Re-upload the original study.", {
+      code: recoveryAvailable ? "DICOM_REMAP_ORTHANC_RECOVERY_REQUIRED" : "DICOM_REMAP_REUPLOAD_REQUIRED",
+      currentIntegrityVersion: DICOM_REMAP_INTEGRITY_VERSION,
+      recoveryAvailable,
     });
   }
 
@@ -2177,10 +2367,26 @@ function sanitizeOrthancSendJobResult(payload: unknown, job: DicomRemapJobRow): 
 }
 
 function classifyOrthancSendFailure(details: Record<string, unknown>): string {
-  const combined = JSON.stringify(details).toLowerCase();
-  if (/dimse|association rejected|store rejected|0xa[0-9a-f]{3}/.test(combined)) return "PACS_DIMSE_REJECTED";
-  if (/network|connect|timeout|refused|unreachable/.test(combined)) return "PACS_NETWORK_FAILURE";
+  const dimseStatus = String(details.dimseStatus ?? "").trim().toLowerCase();
+  const errorText = [details.orthancErrorCode, details.orthancErrorDescription]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  if (dimseStatus || /association\s+(?:rejected|failed)|(?:c-?store|store)\s+(?:rejected|refused|failure)|dicom\s+status|0xa[0-9a-f]{3}/i.test(errorText)) return "PACS_DIMSE_REJECTED";
+  if (/network|connect(?:ion)?|timeout|timed out|refused|unreachable|host down|no route/.test(errorText)) return "PACS_NETWORK_FAILURE";
   return "ORTHANC_SEND_JOB_FAILED";
+}
+
+async function cleanupSentDicomRemapStaging(job: DicomRemapJobRow): Promise<void> {
+  if (!job.staged_storage_key || job.staging_cleanup_completed_at) return;
+  await cleanupDicomRemapStagingStorage(job.staged_storage_key);
+  const cleaned = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1 and status = 'sent' and staging_cleanup_completed_at is null returning *`,
+    [job.id]
+  );
+  if (cleaned.rows[0]) {
+    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_cleaned", oldValues: null, newValues: { sendStatus: "sent" }, changedByUserId: null });
+  }
 }
 
 function orthancJobState(payload: unknown): string {
@@ -2279,7 +2485,10 @@ export async function monitorDicomRemapSendJob(job: DicomRemapJobRow): Promise<D
   if (["success", "completed", "done"].includes(state)) {
     const result = await queryDicomRemapDb<DicomRemapJobRow>(`update dicom_remap_jobs set status = 'sent', send_completed_at = now(), send_last_checked_at = now(), send_result = $2::jsonb, send_error_code = null, send_error_details = null, error_message = null, updated_at = now() where id = $1 and status = 'sending' and orthanc_send_job_id = $3 returning *`, [job.id, JSON.stringify(details), job.orthanc_send_job_id]);
     const sent = result.rows[0] || null;
-    if (sent) await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: sent.id, actionType: "pacs_send_completed", oldValues: { status: "sending" }, newValues: { status: "sent", orthancJobId: sent.orthanc_send_job_id, attemptNumber: sent.send_attempt_count }, changedByUserId: null });
+    if (sent) {
+      await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: sent.id, actionType: "pacs_send_completed", oldValues: { status: "sending" }, newValues: { status: "sent", orthancJobId: sent.orthanc_send_job_id, attemptNumber: sent.send_attempt_count }, changedByUserId: null });
+      await cleanupSentDicomRemapStaging(sent).catch(() => undefined);
+    }
     return sent;
   }
   if (["failure", "failed", "error", "canceled", "cancelled"].includes(state)) {
@@ -2818,7 +3027,7 @@ export async function cleanupDicomRemapStagingStorage(storageKey: string): Promi
 export async function cleanupExpiredFailedDicomRemapStaging(retentionHours: number, limit = 25): Promise<number> {
   const safeHours = Math.max(1, Math.min(Math.floor(retentionHours), 24 * 365));
   const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
-    `select * from dicom_remap_jobs where status = 'failed' and staged_storage_key is not null and staging_cleanup_completed_at is null and coalesce(processing_completed_at, updated_at) < now() - ($1::text || ' hours')::interval order by updated_at asc limit $2`,
+    `select * from dicom_remap_jobs where status = 'failed' and staged_storage_key is not null and staging_cleanup_completed_at is null and coalesce(processing_completed_at, updated_at) < now() - ($1::text || ' hours')::interval and not (orthanc_recovery_status in ('available', 'processing', 'failed') and orthanc_recovery_expires_at > now()) order by updated_at asc limit $2`,
     [safeHours, Math.max(1, Math.min(limit, 100))]
   );
   let cleaned = 0;
@@ -2942,6 +3151,8 @@ function processingErrorMessage(code: string): string {
     DICOM_REMAP_STAGED_FILE_HASH_MISMATCH: "A staged DICOM file did not pass integrity validation.",
     DICOM_REMAP_UID_PLAN_INVALID: "DICOM remap UID plan is invalid.",
     DICOM_REMAP_DICOM_PARSE_FAILED: "DICOM study validation failed.",
+    DICOM_REMAP_DICOM_REWRITE_FAILED: "DICOM metadata rewrite failed.",
+    DICOM_REMAP_PIXEL_INTEGRITY_FAILED: "DICOM pixel integrity verification failed. The rewritten object was not uploaded.",
     DICOM_REMAP_MULTIPLE_STUDIES: "Uploaded files must belong to exactly one selected study.",
     DICOM_REMAP_MULTIPLE_STUDIES_DETECTED: "More than one DICOM study was found in the selected folder. Start again, allow the complete folder scan to finish, and select the required study.",
     DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT: "The selected folder contains conflicting source-patient identity information. No DICOM files were remapped or sent. Run the complete folder scan and select the required study.",
@@ -2954,6 +3165,24 @@ function processingErrorMessage(code: string): string {
     DICOM_REMAP_PROCESSING_LEASE_LOST: "DICOM remap processing lease was lost and will be recovered safely.",
   };
   return messages[code] || "DICOM remap processing failed.";
+}
+
+const ORTHANC_RECOVERY_ELIGIBLE_PROCESSING_ERRORS = new Set([
+  "DICOM_REMAP_DICOM_REWRITE_FAILED",
+  "DICOM_REMAP_PIXEL_INTEGRITY_FAILED",
+  "DICOM_REMAP_ORTHANC_UPLOAD_FAILED",
+  "DICOM_REMAP_ORTHANC_UPLOAD_RETRY_EXHAUSTED",
+  "DICOM_REMAP_ORTHANC_FILE_REJECTED",
+  "DICOM_REMAP_ORTHANC_INSTANCE_CONFLICT",
+  "DICOM_REMAP_ORTHANC_AUTH_FAILED",
+  "DICOM_REMAP_ORTHANC_INFRASTRUCTURE_FAILURE",
+  "DICOM_REMAP_ORTHANC_VERIFICATION_FAILED",
+  "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED",
+  "DICOM_REMAP_MULTIFRAME_OBJECT_FAILED",
+]);
+
+function isOrthancRecoveryEligibleProcessingError(code: unknown): boolean {
+  return ORTHANC_RECOVERY_ELIGIBLE_PROCESSING_ERRORS.has(String(code || ""));
 }
 
 async function readDicomRemapStagingManifestMetadata(job: DicomRemapJobRow): Promise<{ manifest: DicomRemapStagingManifest; directory: string }> {
@@ -3261,7 +3490,7 @@ async function rewriteStagedDicomForPersistedPlan(file: DicomRemapStagedManifest
   const raw = await readFile(path.join(directory, file.relativePath));
   const dicom = DicomMessage.readFile(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)) as { dict: Record<string, unknown>; meta: Record<string, unknown> };
   const dataset = DicomMetaDictionary.naturalizeDataset(dicom.dict) as Record<string, unknown>;
-  dataset._meta = DicomMetaDictionary.naturalizeDataset(dicom.meta) as Record<string, unknown>;
+  dataset._meta = cloneDicomFileMetaForWriter(dicom.meta);
   const seriesUid = plan.seriesInstanceUidByOriginal[readDicomStringValue(dataset.SeriesInstanceUID)];
   const sopUid = plan.sopInstanceUidByFileId[file.id];
   if (!seriesUid || !sopUid) throw new HttpError(409, "DICOM remap UID plan is invalid.", { code: "DICOM_REMAP_UID_PLAN_INVALID" });
@@ -3272,8 +3501,11 @@ async function rewriteStagedDicomForPersistedPlan(file: DicomRemapStagedManifest
   dataset.StudyInstanceUID = plan.studyInstanceUid;
   dataset.SeriesInstanceUID = seriesUid;
   dataset.SOPInstanceUID = sopUid;
-  (dataset._meta as Record<string, unknown>).MediaStorageSOPInstanceUID = sopUid;
-  return Buffer.from(datasetToBuffer(dataset));
+  updateStructuredMediaStorageSopInstanceUid(dataset._meta as Record<string, unknown>, sopUid);
+  let output: Buffer = Buffer.from(datasetToBuffer(dataset));
+  if (mutateStagedRewriteBeforeIntegrityForTests) output = mutateStagedRewriteBeforeIntegrityForTests(output);
+  assertRewrittenDicomPixelIntegrity(raw, output);
+  return output;
 }
 
 export async function claimNextDicomRemapProcessingJob(leaseOwner: string, leaseSeconds: number): Promise<{ job: DicomRemapJobRow; recovered: boolean } | null> {
@@ -3661,7 +3893,8 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       let body: Buffer;
       try {
         body = await rewriteStagedDicomForPersistedPlan(file, staged.directory, replacement, planned.plan);
-      } catch {
+      } catch (error) {
+        if (processingErrorCode(error) === "DICOM_REMAP_PIXEL_INTEGRITY_FAILED") throw error;
         planned.plan.fileOutcomes[file.id] = {
           fileLabel,
           category: replacementSopInstanceUid ? "skipped_unparseable" : "skipped_missing_identity",
@@ -3735,18 +3968,14 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
     const requiresAcknowledgement = Boolean(finalSelectionCounts.partial || finalSelectionCounts.completenessUncertain);
 
     const remapped = await queryDicomRemapDb<DicomRemapJobRow>(
-      `update dicom_remap_jobs set status = $13, processing_stage = $14, source_orthanc_study_id = $3, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, replacement_patient_id = $8, replacement_patient_name = $9, replacement_patient_sex = $10, replacement_patient_birth_date = $11, processed_file_count = $15, processing_selection_counts = $12::jsonb, processing_completed_at = now(), processing_last_heartbeat_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = null, processing_error_details = null, error_message = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
-      [job.id, leaseOwner, modifiedStudyId, planned.originalSummary.patientId, planned.originalSummary.patientName, planned.originalSummary.patientSex, planned.originalSummary.patientBirthDate, replacement.patientId, replacement.patientName, replacement.patientSex, replacement.patientBirthDate, JSON.stringify(finalSelectionCounts), requiresAcknowledgement ? "awaiting_confirmation" : "remapped", requiresAcknowledgement ? "awaiting_send_confirmation" : "enqueueing_send", acceptedSops.size]
+      `update dicom_remap_jobs set status = $13, processing_stage = $14, source_orthanc_study_id = $3, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, replacement_patient_id = $8, replacement_patient_name = $9, replacement_patient_sex = $10, replacement_patient_birth_date = $11, processed_file_count = $15, processing_selection_counts = $12::jsonb, processing_completed_at = now(), processing_last_heartbeat_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = null, processing_error_details = null, dicom_integrity_version = $16, dicom_integrity_verified_at = now(), orthanc_recovery_status = 'none', orthanc_recovery_expires_at = null, error_message = null, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+      [job.id, leaseOwner, modifiedStudyId, planned.originalSummary.patientId, planned.originalSummary.patientName, planned.originalSummary.patientSex, planned.originalSummary.patientBirthDate, replacement.patientId, replacement.patientName, replacement.patientSex, replacement.patientBirthDate, JSON.stringify(finalSelectionCounts), requiresAcknowledgement ? "awaiting_confirmation" : "remapped", requiresAcknowledgement ? "awaiting_send_confirmation" : "enqueueing_send", acceptedSops.size, DICOM_REMAP_INTEGRITY_VERSION]
     );
     const remappedJob = remapped.rows[0];
     if (!remappedJob) throw new HttpError(409, "DICOM remap processing lease was lost.", { code: "DICOM_REMAP_PROCESSING_LEASE_LOST" });
     await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: remappedJob.id, actionType: "dicom_remap_processing_completed", oldValues: { status: "processing" }, newValues: { status: remappedJob.status, processingStage: remappedJob.processing_stage, processedFileCount: acceptedSops.size, skippedFileCount: planned.skippedFiles, selectionCounts: finalSelectionCounts, modifiedOrthancStudyId: modifiedStudyId }, changedByUserId: null });
     if (requiresAcknowledgement) return remappedJob;
     const sending = await sendExistingDicomRemapJobToDestination({ job: remappedJob, currentUserId: remappedJob.created_by_user_id, auditActionType: "pacs_send_enqueued" });
-    await cleanupDicomRemapStagingStorage(String(job.staged_storage_key || "")).then(async () => {
-      await queryDicomRemapDb(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1`, [job.id]);
-      await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_staging_cleaned", oldValues: null, newValues: { processingStage: "completed" }, changedByUserId: null });
-    }).catch(() => undefined);
     return sending.job;
   } catch (error) {
     const code = processingErrorCode(error);
@@ -3775,6 +4004,11 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
         studyResponseShape?: unknown;
         statisticsResponseShape?: unknown;
         instancesResponseShape?: unknown;
+        sourceTransferSyntax?: unknown;
+        outputTransferSyntax?: unknown;
+        sourcePixelLength?: unknown;
+        outputPixelLength?: unknown;
+        failedInvariant?: unknown;
       }
       : null;
     const numericDiagnostic = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
@@ -3803,12 +4037,23 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       ...(typeof details?.studyResponseShape === "string" ? { studyResponseShape: details.studyResponseShape.slice(0, 500) } : {}),
       ...(typeof details?.statisticsResponseShape === "string" ? { statisticsResponseShape: details.statisticsResponseShape.slice(0, 500) } : {}),
       ...(typeof details?.instancesResponseShape === "string" ? { instancesResponseShape: details.instancesResponseShape.slice(0, 1000) } : {}),
+      ...(typeof details?.sourceTransferSyntax === "string" ? { sourceTransferSyntax: details.sourceTransferSyntax.slice(0, 128) } : {}),
+      ...(typeof details?.outputTransferSyntax === "string" ? { outputTransferSyntax: details.outputTransferSyntax.slice(0, 128) } : {}),
+      ...(numericDiagnostic(details?.sourcePixelLength) !== undefined ? { sourcePixelLength: numericDiagnostic(details?.sourcePixelLength) } : {}),
+      ...(numericDiagnostic(details?.outputPixelLength) !== undefined ? { outputPixelLength: numericDiagnostic(details?.outputPixelLength) } : {}),
+      ...(typeof details?.failedInvariant === "string" ? { failedInvariant: details.failedInvariant.slice(0, 128) } : {}),
     };
+    const recoveryAvailable = Boolean(job.staged_storage_key && !job.staging_cleanup_completed_at && isOrthancRecoveryEligibleProcessingError(code));
     const updated = await queryDicomRemapDb<DicomRemapJobRow>(
-      `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3::text, processing_error_details = $4::jsonb, error_message = $5::text, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
-      [job.id, leaseOwner, code, JSON.stringify(processingDiagnostics), processingErrorMessage(code)]
+      `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_completed_at = now(), processing_last_checked_at = now(), processing_lease_owner = null, processing_lease_expires_at = null, processing_error_code = $3::text, processing_error_details = $4::jsonb, error_message = $5::text, orthanc_recovery_status = case when $6 then 'available' else 'none' end, orthanc_recovery_expires_at = case when $6 then now() + ($7::text || ' hours')::interval else null end, updated_at = now() where id = $1 and status = 'processing' and processing_lease_owner = $2 returning *`,
+      [job.id, leaseOwner, code, JSON.stringify(processingDiagnostics), processingErrorMessage(code), recoveryAvailable, DICOM_REMAP_ORTHANC_RECOVERY_RETENTION_HOURS]
     );
-    if (updated.rows[0]) await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_processing_failed", oldValues: { status: "processing" }, newValues: { status: "failed", processingStage: "failed", errorCode: code }, changedByUserId: null });
+    if (updated.rows[0]) {
+      await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_processing_failed", oldValues: { status: "processing" }, newValues: { status: "failed", processingStage: "failed", errorCode: code, orthancRecoveryStatus: recoveryAvailable ? "available" : "none" }, changedByUserId: null });
+      if (code === "DICOM_REMAP_PIXEL_INTEGRITY_FAILED") {
+        await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_primary_integrity_failed", oldValues: { status: "processing" }, newValues: processingDiagnostics, changedByUserId: null });
+      }
+    }
     throw error;
   }
 }
@@ -4159,6 +4404,7 @@ export async function processDicomRemapMultipartJob({
     let uploadedFileCount = 0;
     let skippedFilesCount = 0;
     let originalSummary: OrthancStudySummary | null = null;
+    const rewrittenSopInstanceUids = new Set<string>();
     const expectedStudyInstanceUID = String(selectedStudyInstanceUID || "").trim();
     const uidPlan: DicomUidRemapPlan = {
       studyInstanceUid: createDicomUid(),
@@ -4194,6 +4440,7 @@ export async function processDicomRemapMultipartJob({
       if (!rewritten) {
         continue;
       }
+      if (rewritten.replacementSopInstanceUid) rewrittenSopInstanceUids.add(rewritten.replacementSopInstanceUid);
       if (!originalSummary) {
         originalSummary = rewritten.originalSummary;
       }
@@ -4255,6 +4502,7 @@ export async function processDicomRemapMultipartJob({
         }
       );
     }
+    await verifyOrthancStudyAcceptedSopSet(sourceStudyId, rewrittenSopInstanceUids);
 
     const remappedResult = await queryDicomRemapDb<DicomRemapJobRow>(
       `
@@ -4273,6 +4521,8 @@ export async function processDicomRemapMultipartJob({
           replacement_patient_name = $11,
           replacement_patient_sex = $12,
           replacement_patient_birth_date = $13,
+          dicom_integrity_version = $14,
+          dicom_integrity_verified_at = now(),
           error_message = null,
           updated_at = now()
         where id = $1
@@ -4292,6 +4542,7 @@ export async function processDicomRemapMultipartJob({
         replacement.patientName,
         replacement.patientSex,
         replacement.patientBirthDate,
+        DICOM_REMAP_INTEGRITY_VERSION,
       ]
     );
 
@@ -4878,6 +5129,243 @@ export async function confirmStagedDicomRemapJob({
   return { job };
 }
 
+async function validateOrthancRecoverySelectedFiles(
+  job: DicomRemapJobRow,
+  directory: string,
+  files: DicomRemapStagedManifestFile[],
+  manifestSelectedStudyUid?: string | null,
+): Promise<{ originalSummary: OrthancStudySummary; sopInstanceUids: Set<string> }> {
+  const selectedStudyUid = String(job.selected_study_instance_uid || manifestSelectedStudyUid || "").trim();
+  if (!selectedStudyUid) throw new HttpError(409, "Confirmed selected study is missing.", { code: "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND" });
+  const patientIds = new Set<string>();
+  const patientNames = new Set<string>();
+  const birthDates = new Set<string>();
+  const sexes = new Set<string>();
+  const sopInstanceUids = new Set<string>();
+  let firstSummary: OrthancStudySummary | null = null;
+  for (const file of files) {
+    const parsed = parseStagedDicomSummary(await readFile(path.join(directory, file.relativePath)));
+    if (parsed.summary.studyInstanceUid !== selectedStudyUid) {
+      throw new HttpError(409, "Persisted selected-study files no longer match the confirmed study.", { code: "DICOM_REMAP_SELECTED_STUDY_NOT_FOUND" });
+    }
+    firstSummary ||= parsed.summary;
+    sopInstanceUids.add(parsed.sopInstanceUid);
+    const patientId = normalizeSourceIdentityValue(parsed.summary.patientId, "patientId");
+    const patientName = normalizeSourceIdentityValue(parsed.summary.patientName, "patientName");
+    const birthDate = normalizeSourceIdentityValue(parsed.summary.patientBirthDate, "patientBirthDate");
+    const sex = normalizeSourceIdentityValue(parsed.summary.patientSex, "patientSex");
+    if (patientId) patientIds.add(patientId);
+    if (patientName) patientNames.add(patientName);
+    if (birthDate) birthDates.add(birthDate);
+    if (sex) sexes.add(sex);
+  }
+  if (!firstSummary || sopInstanceUids.size !== files.length || [patientIds, patientNames, birthDates, sexes].some((values) => values.size > 1)) {
+    throw new HttpError(409, "Preserved source study identity is inconsistent.", { code: "DICOM_REMAP_SOURCE_IDENTITY_INCONSISTENT" });
+  }
+  const originalSummary: OrthancStudySummary = {
+    studyInstanceUid: selectedStudyUid,
+    patientId: Array.from(patientIds)[0] || "",
+    patientName: firstSummary.patientName,
+    patientBirthDate: firstSummary.patientBirthDate,
+    patientSex: firstSummary.patientSex,
+  };
+  const persistedOriginal: OrthancPatientSummary = {
+    patientId: job.original_patient_id || originalSummary.patientId,
+    patientName: job.original_patient_name || originalSummary.patientName,
+    patientBirthDate: job.original_patient_birth_date || originalSummary.patientBirthDate,
+    patientSex: job.original_patient_sex || originalSummary.patientSex,
+  };
+  if (!hasSameReplacementIdentity(originalSummary, persistedOriginal)) {
+    throw new HttpError(409, "Preserved source identity does not match the confirmed source.", { code: "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH" });
+  }
+  return { originalSummary, sopInstanceUids };
+}
+
+async function readStableOrthancStudySopSet(studyId: string, expectedCount: number): Promise<Set<string>> {
+  const preflight = await waitForOrthancStudyStable(studyId);
+  if (preflight.instanceCount !== expectedCount) {
+    throw orthancVerificationError("Orthanc study instance count does not match preserved staging.", {
+      verificationReason: "EXPECTED_ACTUAL_COUNT_MISMATCH",
+      expectedCount,
+      actualCount: preflight.instanceCount ?? 0,
+      seriesCount: preflight.seriesCount ?? undefined,
+    });
+  }
+  const studyPayload = preflight.studyResponse.json && typeof preflight.studyResponse.json === "object" && !Array.isArray(preflight.studyResponse.json)
+    ? preflight.studyResponse.json as Record<string, unknown>
+    : null;
+  if (!studyPayload) throw orthancVerificationError("Orthanc study response was malformed.", { verificationReason: "STUDY_RESPONSE_MALFORMED", expectedCount });
+  const enumerated = await listOrthancStudyInstanceIds(studyId, studyPayload, { expectedCount, actualCount: expectedCount, seriesCount: preflight.seriesCount ?? undefined });
+  const sops = await mapWithConcurrency(enumerated.ids, DICOM_REMAP_ORTHANC_SOP_READ_CONCURRENCY, async (instanceId) => {
+    const expanded = enumerated.sopsById.get(instanceId);
+    if (expanded) return expanded;
+    const tags = await fetchOrthancForRemap(`/instances/${encodeURIComponent(instanceId)}/simplified-tags`, { method: "GET" });
+    return tags.ok && tags.json && typeof tags.json === "object" && !Array.isArray(tags.json)
+      ? readDicomStringValue((tags.json as Record<string, unknown>).SOPInstanceUID)
+      : "";
+  });
+  if (sops.some((sop) => !sop) || new Set(sops).size !== expectedCount) {
+    throw orthancVerificationError("Orthanc instance identity could not be verified.", { verificationReason: "INSTANCE_SOP_UID_UNREADABLE", expectedCount, actualCount: sops.filter(Boolean).length });
+  }
+  return new Set(sops);
+}
+
+function sanitizedOrthancRecoveryError(error: unknown): { code: string; details: Record<string, unknown> } {
+  const raw = error instanceof HttpError && error.details && typeof error.details === "object"
+    ? error.details as Record<string, unknown>
+    : {};
+  const code = String(raw.code || processingErrorCode(error) || "DICOM_REMAP_ORTHANC_RECOVERY_FAILED");
+  const details: Record<string, unknown> = { code };
+  for (const key of ["orthancStatus", "verificationReason", "expectedCount", "actualCount", "seriesCount", "enumerationMethod", "responseShape", "failedInvariant", "sourceTransferSyntax", "outputTransferSyntax", "sourcePixelLength", "outputPixelLength"]) {
+    const value = raw[key];
+    if (typeof value === "number" && Number.isFinite(value)) details[key] = value;
+    if (typeof value === "string" && value.length <= 256) details[key] = value;
+  }
+  return { code, details };
+}
+
+export async function retryFailedDicomRemapWithOrthanc({
+  jobId,
+  currentUserId,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow }> {
+  const initial = await loadOwnedJob(jobId, currentUserId);
+  if (initial.orthanc_recovery_status === "completed") {
+    if (initial.status === "remapped") {
+      return sendExistingDicomRemapJobToDestination({ job: initial, currentUserId, auditActionType: "pacs_send_enqueued" });
+    }
+    return { job: initial };
+  }
+  if (initial.orthanc_recovery_status === "processing") {
+    throw new HttpError(409, "Orthanc recovery is already processing.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_IN_PROGRESS" });
+  }
+  if (initial.status !== "failed" || !["available", "failed"].includes(String(initial.orthanc_recovery_status || ""))) {
+    throw new HttpError(409, "This job is not eligible for Orthanc recovery.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
+  }
+  if (!isOrthancRecoveryEligibleProcessingError(initial.processing_error_code)) {
+    throw new HttpError(409, "This source-safety failure cannot be recovered through Orthanc.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_SAFE" });
+  }
+  if (!initial.staged_storage_key || initial.staging_cleanup_completed_at || !initial.orthanc_recovery_expires_at || Date.parse(initial.orthanc_recovery_expires_at) <= Date.now()) {
+    throw new HttpError(409, "Preserved source staging is unavailable or expired. Re-upload the original study.", { code: "DICOM_REMAP_REUPLOAD_REQUIRED" });
+  }
+  const replacement: OrthancPatientSummary = {
+    patientId: initial.replacement_patient_id || "",
+    patientName: initial.replacement_patient_name || "",
+    patientSex: initial.replacement_patient_sex || "",
+    patientBirthDate: initial.replacement_patient_birth_date || "",
+  };
+  if (!replacement.patientId || !replacement.patientName || !initial.destination_pacs_key) {
+    throw new HttpError(409, "Recovery patient identity or PACS destination is missing.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
+  }
+
+  const claimed = await queryDicomRemapDb<DicomRemapJobRow>(
+    `update dicom_remap_jobs set orthanc_recovery_status = 'processing', orthanc_recovery_attempt_count = coalesce(orthanc_recovery_attempt_count, 0) + 1, orthanc_recovery_started_at = now(), orthanc_recovery_completed_at = null, orthanc_recovery_error_code = null, orthanc_recovery_error_details = null, updated_at = now() where id = $1 and created_by_user_id = $2 and status = 'failed' and orthanc_recovery_status in ('available', 'failed') and staged_storage_key is not null and staging_cleanup_completed_at is null and orthanc_recovery_expires_at > now() returning *`,
+    [initial.id, currentUserId]
+  );
+  let job = claimed.rows[0];
+  if (!job) {
+    const current = await loadOwnedJob(initial.id, currentUserId);
+    if (current.orthanc_recovery_status === "completed" || current.orthanc_recovery_status === "processing") return { job: current };
+    throw new HttpError(409, "Orthanc recovery state changed before it could be claimed.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_NOT_AVAILABLE" });
+  }
+  await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_orthanc_recovery_started", oldValues: { orthancRecoveryStatus: initial.orthanc_recovery_status }, newValues: { orthancRecoveryStatus: "processing", attemptNumber: job.orthanc_recovery_attempt_count }, changedByUserId: currentUserId });
+
+  let recoveredForSend: DicomRemapJobRow | null = null;
+  try {
+    const staged = await loadDicomRemapStagingManifest(job);
+    const planned = await readOrBuildDicomRemapUidPlan({ ...staged, selectedStudyInstanceUID: job.selected_study_instance_uid });
+    const selected = await validateOrthancRecoverySelectedFiles(job, staged.directory, planned.validFiles, staged.manifest.selectedStudyInstanceUID || staged.manifest.provisionalSelectedStudyInstanceUID);
+    let sourceStudyId = String(job.orthanc_recovery_source_study_id || job.source_orthanc_study_id || "").trim();
+    let sourceVerified = false;
+    if (sourceStudyId && await readOrthancStudyExists(sourceStudyId)) {
+      const summary = await readStudySummary(sourceStudyId);
+      if (summary.studyInstanceUid !== selected.originalSummary.studyInstanceUid || !hasSameReplacementIdentity(summary, selected.originalSummary)) {
+        throw new HttpError(409, "Persisted Orthanc recovery source does not match preserved staging.", { code: "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH" });
+      }
+      try {
+        await verifyOrthancStudyAcceptedSopSet(sourceStudyId, selected.sopInstanceUids);
+        sourceVerified = true;
+      } catch (error) {
+        const reason = error instanceof HttpError ? String((error.details as { verificationReason?: unknown } | null)?.verificationReason || "") : "";
+        if (!["ZERO_INSTANCES", "EXPECTED_ACTUAL_COUNT_MISMATCH", "SOP_SET_MISMATCH"].includes(reason)) throw error;
+      }
+    }
+    if (!sourceVerified) {
+      const studyIds = new Set<string>();
+      for (const [index, file] of planned.validFiles.entries()) {
+        const body = await readFile(path.join(staged.directory, file.relativePath));
+        const uploadedStudyId = await uploadDicomContentToOrthanc({ body, fileName: file.displayName, fileIndex: index + 1 });
+        if (!uploadedStudyId) throw new HttpError(502, "Orthanc did not accept a preserved source instance.", { code: "DICOM_REMAP_ORTHANC_UPLOAD_FAILED" });
+        studyIds.add(uploadedStudyId);
+        if (!sourceStudyId) {
+          sourceStudyId = uploadedStudyId;
+          const persisted = await queryDicomRemapDb<DicomRemapJobRow>(
+            `update dicom_remap_jobs set orthanc_recovery_source_study_id = $2, source_orthanc_study_id = $2, updated_at = now() where id = $1 and orthanc_recovery_status = 'processing' returning *`,
+            [job.id, sourceStudyId]
+          );
+          if (!persisted.rows[0]) throw new HttpError(409, "Orthanc recovery claim was lost.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_CLAIM_LOST" });
+          job = persisted.rows[0];
+        }
+        if (uploadedStudyId !== sourceStudyId) throw orthancVerificationError("Original staged instances produced multiple Orthanc studies.", { verificationReason: "MULTIPLE_MODIFIED_STUDIES", expectedCount: planned.validFiles.length, actualCount: studyIds.size });
+        if (afterOrthancRecoverySourceUploadForTests) await afterOrthancRecoverySourceUploadForTests({ jobId: job.id, fileIndex: index + 1, studyId: uploadedStudyId, body });
+      }
+      if (!sourceStudyId) throw new HttpError(502, "Orthanc recovery source study was not created.", { code: "DICOM_REMAP_ORTHANC_UPLOAD_FAILED" });
+      await verifyOrthancStudyAcceptedSopSet(sourceStudyId, selected.sopInstanceUids);
+    }
+
+    const sourceSummary = await readStudySummary(sourceStudyId);
+    if (sourceSummary.studyInstanceUid !== selected.originalSummary.studyInstanceUid || !hasSameReplacementIdentity(sourceSummary, selected.originalSummary)) {
+      throw new HttpError(409, "Orthanc recovery source identity could not be verified.", { code: "DICOM_REMAP_SOURCE_IDENTITY_MISMATCH" });
+    }
+
+    let modifiedStudyId = String(job.modified_orthanc_study_id || "").trim();
+    if (!modifiedStudyId) {
+      const discovered = await findMissingModifiedStudyIdsForJob({ ...job, source_orthanc_study_id: sourceStudyId }, new Set([sourceStudyId]));
+      if (discovered.length > 1) throw orthancVerificationError("Multiple possible Orthanc recovery studies were found.", { verificationReason: "MULTIPLE_MODIFIED_STUDIES", actualCount: discovered.length, expectedCount: 1 });
+      modifiedStudyId = discovered[0] || await createModifiedStudyCopy(sourceStudyId, replacement);
+      if (!discovered[0] && afterOrthancRecoveryModifyForTests) await afterOrthancRecoveryModifyForTests({ jobId: job.id, sourceStudyId, modifiedStudyId });
+      const persisted = await queryDicomRemapDb<DicomRemapJobRow>(
+        `update dicom_remap_jobs set modified_orthanc_study_id = $2, updated_at = now() where id = $1 and orthanc_recovery_status = 'processing' returning *`,
+        [job.id, modifiedStudyId]
+      );
+      if (!persisted.rows[0]) throw new HttpError(409, "Orthanc recovery claim was lost.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_CLAIM_LOST" });
+      job = persisted.rows[0];
+    }
+
+    await readStableOrthancStudySopSet(modifiedStudyId, selected.sopInstanceUids.size);
+    const modifiedSummary = await readStudySummary(modifiedStudyId);
+    if (!modifiedSummary.studyInstanceUid || modifiedSummary.studyInstanceUid === sourceSummary.studyInstanceUid) {
+      throw orthancVerificationError("Orthanc recovery did not create a distinct modified Study Instance UID.", { verificationReason: "STUDY_UID_MISMATCH", expectedCount: selected.sopInstanceUids.size });
+    }
+    if (!hasSameReplacementIdentity(modifiedSummary, replacement)) {
+      throw new HttpError(502, "Orthanc recovery did not verify replacement identity.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
+    }
+
+    const completed = await queryDicomRemapDb<DicomRemapJobRow>(
+      `update dicom_remap_jobs set status = 'remapped', processing_stage = 'enqueueing_send', source_orthanc_study_id = $2, orthanc_recovery_source_study_id = $2, modified_orthanc_study_id = $3, original_patient_id = $4, original_patient_name = $5, original_patient_sex = $6, original_patient_birth_date = $7, orthanc_recovery_status = 'completed', orthanc_recovery_completed_at = now(), orthanc_recovery_error_code = null, orthanc_recovery_error_details = null, dicom_integrity_version = $8, dicom_integrity_verified_at = now(), processing_error_code = null, processing_error_details = null, error_message = null, updated_at = now() where id = $1 and orthanc_recovery_status = 'processing' returning *`,
+      [job.id, sourceStudyId, modifiedStudyId, selected.originalSummary.patientId, selected.originalSummary.patientName, selected.originalSummary.patientSex, selected.originalSummary.patientBirthDate, DICOM_REMAP_INTEGRITY_VERSION]
+    );
+    const recovered = completed.rows[0];
+    if (!recovered) throw new HttpError(409, "Orthanc recovery claim was lost.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_CLAIM_LOST" });
+    await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: recovered.id, actionType: "dicom_remap_orthanc_recovery_completed", oldValues: { status: "failed", orthancRecoveryStatus: "processing" }, newValues: { status: "remapped", orthancRecoveryStatus: "completed", attemptNumber: recovered.orthanc_recovery_attempt_count, integrityVersion: DICOM_REMAP_INTEGRITY_VERSION }, changedByUserId: currentUserId });
+    recoveredForSend = recovered;
+  } catch (error) {
+    const sanitized = sanitizedOrthancRecoveryError(error);
+    const failed = await queryDicomRemapDb<DicomRemapJobRow>(
+      `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', orthanc_recovery_status = 'failed', orthanc_recovery_error_code = $2, orthanc_recovery_error_details = $3::jsonb, error_message = 'Orthanc recovery failed. Preserved source staging remains available until recovery expiry.', updated_at = now() where id = $1 and orthanc_recovery_status = 'processing' returning *`,
+      [job.id, sanitized.code, JSON.stringify(sanitized.details)]
+    );
+    if (failed.rows[0]) {
+      await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: job.id, actionType: "dicom_remap_orthanc_recovery_failed", oldValues: { orthancRecoveryStatus: "processing" }, newValues: { status: "failed", orthancRecoveryStatus: "failed", errorCode: sanitized.code, attemptNumber: failed.rows[0].orthanc_recovery_attempt_count }, changedByUserId: currentUserId });
+    }
+    throw error;
+  }
+  if (!recoveredForSend) throw new HttpError(500, "Orthanc recovery did not produce a verified study.");
+  return sendExistingDicomRemapJobToDestination({ job: recoveredForSend, currentUserId, auditActionType: "pacs_send_enqueued" });
+}
+
 export async function resendDicomRemapJobToPacs({
   jobId,
   currentUserId,
@@ -4898,6 +5386,12 @@ export async function resendDicomRemapJobToPacs({
   }
   if (job.status === "failed" && !job.modified_orthanc_study_id) {
     throw new HttpError(409, "A processing failure has no verified remapped study to resend.", { status: job.status, processingErrorCode: job.processing_error_code });
+  }
+  if (job.status === "failed" && job.processing_error_code && !job.send_error_code) {
+    throw new HttpError(409, "A processing failure must be recovered from preserved staging or re-uploaded; Retry Send is not allowed.", {
+      code: hasUnexpiredOrthancRecovery(job) ? "DICOM_REMAP_ORTHANC_RECOVERY_REQUIRED" : "DICOM_REMAP_REUPLOAD_REQUIRED",
+      processingErrorCode: job.processing_error_code,
+    });
   }
   if (isDestinationVerificationRequired(job.send_error_code) && !confirmDestinationChecked) {
     throw new HttpError(409, "RISpro could not confirm whether PACS received this study. Check the destination PACS before resending to avoid a duplicate study.", {
@@ -4955,13 +5449,7 @@ export async function confirmDicomRemapAndSend({
     const acknowledgedJob = acknowledged.rows[0];
     if (!acknowledgedJob) throw new HttpError(409, "Partial-study confirmation state changed before send.");
     await logDicomRemapAuditEntry({ entityType: "dicom_remap_job", entityId: acknowledgedJob.id, actionType: "dicom_remap_partial_study_acknowledged", oldValues: { status: "awaiting_confirmation", processingStage: "awaiting_send_confirmation" }, newValues: { status: "remapped", processingStage: "enqueueing_send", selectionCounts }, changedByUserId: currentUserId });
-    const sending = await sendExistingDicomRemapJobToDestination({ job: acknowledgedJob, currentUserId, auditActionType: "pacs_send_enqueued" });
-    if (acknowledgedJob.staged_storage_key) {
-      await cleanupDicomRemapStagingStorage(acknowledgedJob.staged_storage_key).then(async () => {
-        await queryDicomRemapDb(`update dicom_remap_jobs set staging_cleanup_completed_at = now(), updated_at = now() where id = $1`, [acknowledgedJob.id]);
-      }).catch(() => undefined);
-    }
-    return sending;
+    return sendExistingDicomRemapJobToDestination({ job: acknowledgedJob, currentUserId, auditActionType: "pacs_send_enqueued" });
   };
   const claimResult = await queryDicomRemapDb<DicomRemapJobRow>(
     `
@@ -5070,6 +5558,7 @@ export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId)
 }
 
 export const __dicomRemapTestables = {
+  DICOM_REMAP_INTEGRITY_VERSION,
   REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
   DICOM_REMAP_ORTHANC_STABILITY_TIMEOUT_SECONDS,
   DICOM_REMAP_UPLOAD_CONCURRENCY,
@@ -5095,6 +5584,8 @@ export const __dicomRemapTestables = {
   readNaturalizedStudySummary,
   getMyActiveDicomRemapJob,
   rewriteDicomFileForRemap,
+  assertRewrittenDicomPixelIntegrity,
+  inspectDicomPixelIntegrity,
   parseOrthancResourceId,
   parseOrthancModifiedStudyId,
   parseOrthancSendJobId,
@@ -5118,6 +5609,9 @@ export const __dicomRemapTestables = {
   isDestinationVerificationRequired,
   sanitizeOrthancSendJobResult,
   classifyOrthancSendFailure,
+  hasCurrentDicomIntegrityVerification,
+  hasUnexpiredOrthancRecovery,
+  isOrthancRecoveryEligibleProcessingError,
   isOrthancBulkModifyRouteAvailable,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
@@ -5152,6 +5646,15 @@ export const __dicomRemapTestables = {
   setAfterRemappedInstanceUploadForTests(hook: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null): void {
     afterRemappedInstanceUploadForTests = hook;
   },
+  setAfterOrthancRecoverySourceUploadForTests(hook: ((details: { jobId: number; fileIndex: number; studyId: string; body: Buffer }) => void | Promise<void>) | null): void {
+    afterOrthancRecoverySourceUploadForTests = hook;
+  },
+  setAfterOrthancRecoveryModifyForTests(hook: ((details: { jobId: number; sourceStudyId: string; modifiedStudyId: string }) => void | Promise<void>) | null): void {
+    afterOrthancRecoveryModifyForTests = hook;
+  },
+  setMutateStagedRewriteBeforeIntegrityForTests(hook: ((output: Buffer) => Buffer) | null): void {
+    mutateStagedRewriteBeforeIntegrityForTests = hook;
+  },
   resetTestOverrides(): void {
     queryDicomRemapDb = pool.query.bind(pool);
     logDicomRemapAuditEntry = logAuditEntry;
@@ -5161,5 +5664,8 @@ export const __dicomRemapTestables = {
     listModalitiesForDicomRemap = listOrthancRemoteModalities;
     orthancBulkModifyAvailableForTests = null;
     afterRemappedInstanceUploadForTests = null;
+    afterOrthancRecoverySourceUploadForTests = null;
+    afterOrthancRecoveryModifyForTests = null;
+    mutateStagedRewriteBeforeIntegrityForTests = null;
   },
 };

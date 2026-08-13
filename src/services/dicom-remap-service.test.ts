@@ -12,6 +12,7 @@ import {
   cancelDicomRemapJob,
   claimNextDicomRemapProcessingJob,
   cleanupExpiredAwaitingDicomRemapStaging,
+  cleanupExpiredFailedDicomRemapStaging,
   cleanupDicomRemapStagingStorage,
   confirmStagedDicomRemapJob,
   confirmDicomRemapAndSend,
@@ -57,6 +58,16 @@ function remapJob(overrides: Partial<DicomRemapJobRow> = {}): DicomRemapJobRow {
     send_last_heartbeat_at: null,
     send_error_code: null,
     send_error_details: null,
+    dicom_integrity_version: 1,
+    dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z",
+    orthanc_recovery_status: "none",
+    orthanc_recovery_attempt_count: 0,
+    orthanc_recovery_source_study_id: null,
+    orthanc_recovery_started_at: null,
+    orthanc_recovery_completed_at: null,
+    orthanc_recovery_error_code: null,
+    orthanc_recovery_error_details: null,
+    orthanc_recovery_expires_at: null,
     error_message: null,
     cancellation_reason: null,
     created_at: "2026-04-30T00:00:00.000Z",
@@ -154,6 +165,32 @@ function makeSyntheticDicomBuffer(overrides: Record<string, unknown> = {}): Buff
     PixelRepresentation: 0,
     PixelData: new Uint16Array([1]),
     ...overrides,
+  }));
+}
+
+function makeSyntheticEncapsulatedDicomBuffer(transferSyntaxUid: string, payload: Uint8Array): Buffer {
+  return Buffer.from(datasetToBuffer({
+    _meta: {
+      TransferSyntaxUID: { vr: "UI", Value: [transferSyntaxUid] },
+    },
+    _vrMap: { PixelData: "OB" },
+    SOPClassUID: "1.2.840.10008.5.1.4.1.1.2",
+    SOPInstanceUID: "1.2.3.4.5.6",
+    StudyInstanceUID: "1.2.840.113619.2.55.3.604688433.1234.1456789012.1",
+    SeriesInstanceUID: "1.2.840.113619.2.55.3.604688433.1234.1456789012.1.1",
+    PatientID: "OLDID",
+    PatientName: "OLD^PATIENT",
+    PatientSex: "M",
+    PatientBirthDate: "19900101",
+    Rows: 512,
+    Columns: 678,
+    SamplesPerPixel: 1,
+    PhotometricInterpretation: "MONOCHROME2",
+    BitsAllocated: 16,
+    BitsStored: 16,
+    HighBit: 15,
+    PixelRepresentation: 0,
+    PixelData: [payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)],
   }));
 }
 
@@ -441,6 +478,31 @@ test("expired awaiting-confirmation staging is cancelled before staged PHI is re
   assert.match(calls[0]!.sql, /status = 'awaiting_confirmation'/i);
   assert.match(calls[1]!.sql, /cancellation_reason = 'AWAITING_CONFIRMATION_EXPIRED'/i);
   assert.match(calls[2]!.sql, /staging_cleanup_completed_at = now\(\)/i);
+  await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
+});
+
+test("failed staging cleanup preserves unexpired Orthanc recovery and permits cleanup after expiry", async () => {
+  const storageKey = `jobs/902-${randomUUID()}`;
+  const directory = path.resolve("storage/dicom/remap-staging", storageKey);
+  await mkdir(path.join(directory, "files"), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(directory, "files", "staged.dcm"), Buffer.from("synthetic-dicom"));
+  const expired = remapJob({ id: 902, status: "failed", staged_storage_key: storageKey, staging_cleanup_completed_at: null, orthanc_recovery_status: "failed", orthanc_recovery_expires_at: "2026-08-12T00:00:00.000Z" });
+  const preservedCalls = queueQueryResults([{ rows: [] }, { rows: [{ staged_storage_key: storageKey }] }]);
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const preserved = await cleanupExpiredFailedDicomRemapStaging(72);
+  assert.equal(preserved, 0);
+  assert.match(preservedCalls[0]!.sql, /orthanc_recovery_expires_at > now\(\)/i);
+  assert.equal((await readFile(path.join(directory, "files", "staged.dcm"))).toString("utf8"), "synthetic-dicom");
+
+  const expiredCalls = queueQueryResults([
+    { rows: [expired] },
+    { rows: [{ ...expired, staging_cleanup_completed_at: "2026-08-13T00:00:00.000Z" }] },
+    { rows: [{ staged_storage_key: storageKey }] },
+  ]);
+  const cleaned = await cleanupExpiredFailedDicomRemapStaging(72);
+  assert.equal(cleaned, 1);
+  assert.match(expiredCalls[0]!.sql, /orthanc_recovery_expires_at > now\(\)/i);
+  assert.match(expiredCalls[0]!.sql, /not \(orthanc_recovery_status in \('available', 'processing', 'failed'\)/i);
   await assert.rejects(() => readFile(path.join(directory, "files", "staged.dcm")));
 });
 
@@ -799,6 +861,91 @@ test("dicom helper: rewriteDicomFileForRemap preserves study identity and replac
   assert.equal(summary.patientName, "NEW^PATIENT");
   assert.equal(summary.patientSex, "F");
   assert.equal(summary.patientBirthDate, "20000101");
+});
+
+test("PACS send refuses an unverified legacy remap and directs preserved staging to Orthanc recovery", async () => {
+  const legacy = remapJob({
+    status: "failed",
+    destination_pacs_key: "PACS_MAIN",
+    modified_orthanc_study_id: "legacy-study",
+    dicom_integrity_version: null,
+    dicom_integrity_verified_at: null,
+    staged_storage_key: "jobs/legacy-staging",
+    staging_cleanup_completed_at: null,
+    orthanc_recovery_status: "available",
+    orthanc_recovery_expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+  await assert.rejects(
+    () => __dicomRemapTestables.sendExistingDicomRemapJobToDestination({ job: legacy, currentUserId: 42, auditActionType: "pacs_resend_enqueued" }),
+    (error: unknown) => error instanceof HttpError && (error.details as { code?: string }).code === "DICOM_REMAP_ORTHANC_RECOVERY_REQUIRED",
+  );
+  assert.equal(__dicomRemapTestables.hasCurrentDicomIntegrityVerification(legacy), false);
+});
+
+test("Orthanc send failure classification uses DIMSE values rather than the dimseStatus property name", () => {
+  assert.equal(__dicomRemapTestables.classifyOrthancSendFailure({ dimseStatus: null, orthancErrorCode: null, orthancErrorDescription: "Connection refused" }), "PACS_NETWORK_FAILURE");
+  assert.equal(__dicomRemapTestables.classifyOrthancSendFailure({ dimseStatus: null, orthancErrorCode: "InternalError", orthancErrorDescription: "Worker failed" }), "ORTHANC_SEND_JOB_FAILED");
+  assert.equal(__dicomRemapTestables.classifyOrthancSendFailure({ dimseStatus: "0xA700", orthancErrorDescription: null }), "PACS_DIMSE_REJECTED");
+});
+
+for (const transferSyntaxUid of [
+  "1.2.840.10008.1.2.4.70",
+  "1.2.840.10008.1.2.4.80",
+  "1.2.840.10008.1.2.4.90",
+  "1.2.840.10008.1.2.4.91",
+  "1.2.840.10008.1.2.5",
+]) {
+  test(`dicom helper: rewrite preserves encapsulated transfer syntax and payload ${transferSyntaxUid}`, async () => {
+    const payload = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x01, 0x02]);
+    const source = makeSyntheticEncapsulatedDicomBuffer(transferSyntaxUid, payload);
+    const stagedFiles = await makeStagedFiles([{ fileName: "compressed.dcm", mimeType: "application/dicom" }]);
+    await writeFile(stagedFiles.staged[0].path, source);
+    const rewritten = await __dicomRemapTestables.rewriteDicomFileForRemap(stagedFiles.staged[0], {
+      patientId: "NEWID",
+      patientName: "NEW^PATIENT",
+      patientSex: "F",
+      patientBirthDate: "20000101",
+    }, { studyInstanceUid: "2.25.999001", seriesInstanceUidByOriginal: new Map() });
+    const sourceIntegrity = __dicomRemapTestables.inspectDicomPixelIntegrity(source);
+    const outputIntegrity = __dicomRemapTestables.inspectDicomPixelIntegrity(rewritten.body);
+    assert.equal(outputIntegrity.transferSyntax, transferSyntaxUid);
+    assert.notEqual(outputIntegrity.transferSyntax, "1.2.840.10008.1.2.1");
+    assert.equal(outputIntegrity.pixelRepresentation, "encapsulated");
+    assert.equal(outputIntegrity.pixelSha256, sourceIntegrity.pixelSha256);
+    assert.equal(outputIntegrity.pixelLength, sourceIntegrity.pixelLength);
+    const outputFile = DicomMessage.readFile(rewritten.body.buffer.slice(rewritten.body.byteOffset, rewritten.body.byteOffset + rewritten.body.byteLength));
+    const mediaStorageSop = outputFile.meta["00020003"] as { Value?: unknown[] } | undefined;
+    assert.equal(String(mediaStorageSop?.Value?.[0] || ""), rewritten.replacementSopInstanceUid);
+  });
+}
+
+test("dicom helper: native Explicit VR Little Endian pixel bytes remain unchanged", async () => {
+  const source = makeSyntheticDicomBuffer({ PixelData: new Uint16Array([0x0102, 0x0304, 0x0506]) });
+  const stagedFiles = await makeStagedFiles([{ fileName: "native.dcm", mimeType: "application/dicom" }]);
+  await writeFile(stagedFiles.staged[0].path, source);
+  const rewritten = await __dicomRemapTestables.rewriteDicomFileForRemap(stagedFiles.staged[0], {
+    patientId: "NEWID", patientName: "NEW^PATIENT", patientSex: "F", patientBirthDate: "20000101",
+  }, { studyInstanceUid: "2.25.999002", seriesInstanceUidByOriginal: new Map() });
+  const sourceIntegrity = __dicomRemapTestables.inspectDicomPixelIntegrity(source);
+  const outputIntegrity = __dicomRemapTestables.inspectDicomPixelIntegrity(rewritten.body);
+  assert.equal(outputIntegrity.transferSyntax, "1.2.840.10008.1.2.1");
+  assert.equal(outputIntegrity.pixelRepresentation, "native");
+  assert.equal(outputIntegrity.pixelSha256, sourceIntegrity.pixelSha256);
+});
+
+test("dicom integrity gate rejects transfer-syntax and pixel-payload changes", () => {
+  const payload = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+  const source = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", payload);
+  const wrongSyntax = makeSyntheticDicomBuffer({ Rows: 512, Columns: 678, PixelData: new Uint16Array([0xd8ff, 0xe0ff, 0x0201, 0x0403]) });
+  assert.throws(
+    () => __dicomRemapTestables.assertRewrittenDicomPixelIntegrity(source, wrongSyntax),
+    (error: unknown) => error instanceof HttpError && (error.details as { code?: string }).code === "DICOM_REMAP_PIXEL_INTEGRITY_FAILED" && (error.details as { failedInvariant?: string }).failedInvariant === "TransferSyntaxUID",
+  );
+  const altered = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 9]));
+  assert.throws(
+    () => __dicomRemapTestables.assertRewrittenDicomPixelIntegrity(source, altered),
+    (error: unknown) => error instanceof HttpError && (error.details as { code?: string }).code === "DICOM_REMAP_PIXEL_INTEGRITY_FAILED" && (error.details as { failedInvariant?: string }).failedInvariant === "PixelDataPayload",
+  );
 });
 
 test("dicom preview: parses bounded headers without Orthanc upload, rewrite, or send", async () => {

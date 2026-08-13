@@ -6,6 +6,7 @@ import { statusLabel, t } from "@/lib/i18n";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useLanguage } from "@/providers/language-provider";
 import { buildDicomUploadSelectionPlan, DicomStudyScanCancelledError, isLikelyDicomCandidate, previewDicomStudiesFromFiles, scanDicomStudiesFromFiles, type DicomScanFileEntry, type DicomStudyScanProgress, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
+import { retryDicomRemapWithOrthanc } from "@/lib/api/clinical-workflows";
 
 type JobStatus = "uploaded" | "processing" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
 type RemapWizardUiStep = "source" | "patient" | "destination" | "review" | "processing";
@@ -19,6 +20,7 @@ type RemapProcessingStage =
   | "rewriting"
   | "uploading_to_orthanc"
   | "verifying_orthanc"
+  | "orthanc_recovery"
   | "awaiting_send_confirmation"
   | "enqueueing_send"
   | "completed"
@@ -83,6 +85,14 @@ interface RemapJob {
   processing_last_heartbeat_at?: string | null;
   processing_error_code?: string | null;
   processing_error_details?: unknown;
+  staging_cleanup_completed_at?: string | null;
+  dicom_integrity_version?: number | null;
+  dicom_integrity_verified_at?: string | null;
+  orthanc_recovery_status?: "none" | "available" | "processing" | "failed" | "completed" | null;
+  orthanc_recovery_attempt_count?: number | null;
+  orthanc_recovery_error_code?: string | null;
+  orthanc_recovery_error_details?: unknown;
+  orthanc_recovery_expires_at?: string | null;
   staged_manifest_version?: number | null;
   staged_total_bytes?: number | null;
   selected_study_instance_uid?: string | null;
@@ -209,7 +219,18 @@ function canResendJob(job: RemapJob | null | undefined): boolean {
   if (!job) return false;
   if (!["failed", "remapped", "sent"].includes(job.status)) return false;
   if (requiresDestinationCheck(job)) return false;
-  return Boolean(job.destination_pacs_key && job.modified_orthanc_study_id);
+  if (job.status === "failed" && !job.send_error_code) return false;
+  return Boolean(job.destination_pacs_key && job.modified_orthanc_study_id && job.dicom_integrity_verified_at && Number(job.dicom_integrity_version) === 1);
+}
+
+function canRetryWithOrthanc(job: RemapJob | null | undefined): boolean {
+  if (!job || job.status !== "failed" || !["available", "failed"].includes(job.orthanc_recovery_status || "")) return false;
+  if (job.staging_cleanup_completed_at || !job.orthanc_recovery_expires_at) return false;
+  return Date.parse(job.orthanc_recovery_expires_at) > Date.now();
+}
+
+function requiresDicomReupload(job: RemapJob | null | undefined): boolean {
+  return Boolean(job && job.status === "failed" && job.processing_error_code && job.orthanc_recovery_status !== "processing" && !canRetryWithOrthanc(job));
 }
 
 function requiresDestinationCheck(job: RemapJob | null | undefined): boolean {
@@ -224,7 +245,7 @@ function requiresDestinationCheck(job: RemapJob | null | undefined): boolean {
 
 function isSendFailedJob(job: RemapJob | null | undefined): boolean {
   if (!job || job.status !== "failed") return false;
-  return Boolean(job.destination_pacs_key && job.modified_orthanc_study_id);
+  return Boolean(job.send_error_code && job.destination_pacs_key && job.modified_orthanc_study_id && job.dicom_integrity_verified_at && Number(job.dicom_integrity_version) === 1);
 }
 
 function processingStageLabel(language: string, stage: string | null | undefined): string {
@@ -232,6 +253,7 @@ function processingStageLabel(language: string, stage: string | null | undefined
     staging: ["Staging upload", "تجهيز الرفع"], queued: ["Queued", "في الانتظار"], validating: ["Validating study", "التحقق من الدراسة"],
     building_uid_plan: ["Preparing UID remap", "تحضير تعيين UID"], rewriting: ["Rewriting DICOM", "إعادة كتابة DICOM"],
     uploading_to_orthanc: ["Uploading to Orthanc", "الرفع إلى Orthanc"], verifying_orthanc: ["Verifying study", "التحقق من الدراسة"],
+    orthanc_recovery: ["Recovering with Orthanc", "الاسترداد باستخدام Orthanc"],
     enqueueing_send: ["Sending to PACS", "الإرسال إلى PACS"], completed: ["Completed", "مكتمل"], failed: ["Failed", "فشل"],
   };
   return labels[stage || ""]?.[language === "ar" ? 1 : 0] || (language === "ar" ? "قيد المعالجة" : "Processing");
@@ -601,7 +623,7 @@ export default function PacsRemapPage() {
     enabled: !comparisonRequestId,
     refetchInterval: (query) => {
       const jobs = (query.state.data as { jobs?: RemapJob[] } | undefined)?.jobs || [];
-      return jobs.some((job) => RECENT_JOB_POLL_STATUSES.has(job.status)) ? 2_000 : false;
+      return jobs.some((job) => RECENT_JOB_POLL_STATUSES.has(job.status) || job.orthanc_recovery_status === "processing") ? 2_000 : false;
     },
   });
 
@@ -642,7 +664,8 @@ export default function PacsRemapPage() {
     enabled: effectiveJobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
-      if (status === "uploaded" || status === "processing" || status === "remapped" || status === "sending") return 1500;
+      const job = (query.state.data as { job?: RemapJob } | undefined)?.job;
+      if (status === "uploaded" || status === "processing" || status === "remapped" || status === "sending" || job?.orthanc_recovery_status === "processing") return 1500;
       return query.state.status === "error" ? 5_000 : false;
     },
   });
@@ -1075,6 +1098,47 @@ export default function PacsRemapPage() {
     },
   });
 
+  const orthancRecoveryMutation = useMutation({
+    mutationFn: async (input: { targetJobId: number; viewTargetJob?: RemapJob }) => {
+      return retryDicomRemapWithOrthanc<RemapJob>(input.targetJobId, comparisonRequestId);
+    },
+    onMutate: (input) => {
+      if (input.viewTargetJob) {
+        if (viewedRecentJobId == null) {
+          localWorkflowStepBeforeRecentRef.current = uiStep;
+          localResumedJobIdBeforeRecentRef.current = activeResumedJobId;
+        }
+        viewedRecentJobIdRef.current = input.targetJobId;
+        setViewedRecentJobId(input.targetJobId);
+        setActiveResumedJobId(null);
+        setAutoResumeDismissed(true);
+        queryClient.setQueryData(["pacs", "remap", "job", input.targetJobId], { job: { ...input.viewTargetJob, orthanc_recovery_status: "processing" }, comparison: null });
+      }
+      setUiStep("processing");
+      if (input.viewTargetJob || viewedRecentJobId === input.targetJobId) setViewedProcessingStage("orthanc_recovery");
+      else setProcessingStage("orthanc_recovery");
+      setRetryActionError("");
+      setRetryActionErrorDetails("");
+      setSuccessMessage("");
+    },
+    onSuccess: (data, input) => {
+      const nextStage: RemapProcessingStage = data.job.status === "sending" ? "enqueueing_send" : data.job.status === "sent" ? "completed" : data.job.orthanc_recovery_status === "processing" ? "orthanc_recovery" : "failed";
+      if (input.viewTargetJob || viewedRecentJobId === input.targetJobId) setViewedProcessingStage(nextStage);
+      else setProcessingStage(nextStage);
+      queryClient.setQueryData(["pacs", "remap", "job", input.targetJobId], (existing: { comparison: RemapComparison | null } | undefined) => ({ job: data.job, comparison: existing?.comparison || null }));
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", input.targetJobId] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+    onError: (error: unknown, input) => {
+      if (input.viewTargetJob || viewedRecentJobId === input.targetJobId) setViewedProcessingStage("failed");
+      else setProcessingStage("failed");
+      setRetryActionError(error instanceof Error ? error.message : t(language, "pacs.remap.orthancRecoveryFailed"));
+      setRetryActionErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "job", input.targetJobId] });
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+  });
+
   const clearFailedStudiesMutation = useMutation({
     mutationFn: async () => api(remapApiPath("/pacs/remap/maintenance/clear-failed-studies"), { method: "POST" }),
     onSuccess: () => {
@@ -1233,7 +1297,10 @@ export default function PacsRemapPage() {
     : files.filter(isLikelyDicomCandidate);
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
-  const effectiveProcessingStage: RemapProcessingStage = currentJob?.status === "sent"
+  const recoveryIsProcessing = currentJob?.orthanc_recovery_status === "processing" || orthancRecoveryMutation.isPending;
+  const effectiveProcessingStage: RemapProcessingStage = recoveryIsProcessing
+    ? "orthanc_recovery"
+    : currentJob?.status === "sent"
     ? "completed"
     : currentJob?.status === "sending"
       ? "enqueueing_send"
@@ -1241,12 +1308,12 @@ export default function PacsRemapPage() {
         ? "failed"
         : currentJob?.processing_stage && currentJob.processing_stage in {
           staging: true, queued: true, validating: true, building_uid_plan: true, rewriting: true,
-          uploading_to_orthanc: true, verifying_orthanc: true, awaiting_send_confirmation: true, enqueueing_send: true, completed: true, failed: true,
+          uploading_to_orthanc: true, verifying_orthanc: true, orthanc_recovery: true, awaiting_send_confirmation: true, enqueueing_send: true, completed: true, failed: true,
         }
           ? currentJob.processing_stage as RemapProcessingStage
           : viewedRecentJobId != null ? viewedProcessingStage : processingStage;
   const isTerminalSuccess = effectiveProcessingStage === "completed" || currentJob?.status === "sent";
-  const isTerminalFailure = effectiveProcessingStage === "failed" || currentJob?.status === "failed" || currentJob?.status === "cancelled";
+  const isTerminalFailure = !recoveryIsProcessing && (effectiveProcessingStage === "failed" || currentJob?.status === "failed" || currentJob?.status === "cancelled");
 
   const navigateTo = (nextStep: RemapWizardUiStep): void => {
     focusHeadingAfterNavigationRef.current = true;
@@ -1338,7 +1405,9 @@ export default function PacsRemapPage() {
         : viewingPersistedJob
           ? currentJob?.error_message || ""
           : errorMessage || currentJob?.error_message || "";
-  const persistedJobErrorDetails = currentJob?.processing_error_details
+  const persistedJobErrorDetails = currentJob?.orthanc_recovery_error_details
+    ? formatTechnicalDetails(currentJob.orthanc_recovery_error_details)
+    : currentJob?.processing_error_details
     ? formatTechnicalDetails(currentJob.processing_error_details)
     : currentJob?.send_error_details ? formatTechnicalDetails(currentJob.send_error_details) : "";
   const visibleErrorDetails = viewingPersistedJob ? persistedJobErrorDetails : errorDetails || persistedJobErrorDetails;
@@ -2176,6 +2245,11 @@ export default function PacsRemapPage() {
           {effectiveUiStep === "processing" && !isTerminalSuccess && !isTerminalFailure && (
             <div {...activeCardProps}>
               <h3 ref={mainHeadingRef} tabIndex={-1} className="text-base font-semibold">{stepLabels[4]}</h3>
+              {recoveryIsProcessing && (
+                <p className="rounded border border-teal-200 bg-teal-50 p-3 text-sm text-teal-950" role="status">
+                  {t(language, "pacs.remap.orthancRecoveryProcessing")}
+                </p>
+              )}
               {currentJob?.status === "awaiting_confirmation" && currentJob.processing_stage === "awaiting_send_confirmation" && (() => {
                 const counts = currentJob.processing_selection_counts || {};
                 const uncertainOnly = !counts.partial && counts.completenessUncertain;
@@ -2324,6 +2398,7 @@ export default function PacsRemapPage() {
                   {currentJob && (
                     <dl className="grid grid-cols-1 gap-1 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-800 sm:grid-cols-2">
                       {currentJob.processing_error_code && <div><dt className="font-semibold">Processing error</dt><dd className="font-mono">{currentJob.processing_error_code}</dd></div>}
+                      {currentJob.orthanc_recovery_error_code && <div><dt className="font-semibold">{t(language, "pacs.remap.orthancRecoveryError")}</dt><dd className="font-mono">{currentJob.orthanc_recovery_error_code}</dd></div>}
                       {currentJob.send_error_code && <div><dt className="font-semibold">Send error</dt><dd className="font-mono">{currentJob.send_error_code}</dd></div>}
                       {currentJob.orthanc_send_job_id && <div><dt className="font-semibold">Orthanc job ID</dt><dd className="break-all font-mono">{currentJob.orthanc_send_job_id}</dd></div>}
                       <div><dt className="font-semibold">Send attempts</dt><dd>{currentJob.send_attempt_count || 0}</dd></div>
@@ -2386,6 +2461,21 @@ export default function PacsRemapPage() {
                         {t(language, "pacs.remap.resendToPacs")}
                       </button>
                     )}
+                    {canRetryWithOrthanc(currentJob) && (
+                      <button
+                        type="button"
+                        onClick={() => orthancRecoveryMutation.mutate({ targetJobId: effectiveJobId })}
+                        disabled={orthancRecoveryMutation.isPending}
+                        className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
+                      >
+                        {orthancRecoveryMutation.isPending ? t(language, "pacs.remap.orthancRecoveryProcessing") : t(language, "pacs.remap.retryWithOrthanc")}
+                      </button>
+                    )}
+                    {requiresDicomReupload(currentJob) && (
+                      <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+                        {t(language, "pacs.remap.reuploadRequired")}
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={() => resetJobMutation.mutate({ targetJobId: effectiveJobId })}
@@ -2435,6 +2525,8 @@ export default function PacsRemapPage() {
                     {isSendFailedJob(job) && (
                       <p className="text-[11px] text-red-700 truncate">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(job.error_message) || t(language, "pacs.remap.failedResend")}</p>
                     )}
+                    {job.orthanc_recovery_status === "processing" && <p className="text-[11px] font-semibold text-teal-800">{t(language, "pacs.remap.orthancRecoveryProcessing")}</p>}
+                    {requiresDicomReupload(job) && <p className="text-[11px] font-semibold text-amber-800">{t(language, "pacs.remap.reuploadRequired")}</p>}
                   </button>
                   {canResendJob(job) && viewedRecentJobId !== job.id && (
                     <button
@@ -2444,6 +2536,16 @@ export default function PacsRemapPage() {
                       className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
                     >
                       {t(language, "pacs.remap.resendToPacs")}
+                    </button>
+                  )}
+                  {canRetryWithOrthanc(job) && viewedRecentJobId !== job.id && (
+                    <button
+                      type="button"
+                      onClick={() => orthancRecoveryMutation.mutate({ targetJobId: job.id, viewTargetJob: job })}
+                      disabled={orthancRecoveryMutation.isPending}
+                      className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
+                    >
+                      {t(language, "pacs.remap.retryWithOrthanc")}
                     </button>
                   )}
                 </div>
