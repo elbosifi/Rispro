@@ -1425,7 +1425,7 @@ describe("ModalityPage modality board", () => {
     expect(within(requestSection).queryByRole("toolbar", { name: "Document annotation controls" })).toBeNull();
   });
 
-  it("shows assigned protocol as one compact board-row line", async () => {
+  it("shows assigned protocol in the Protocol column without a Patient-cell badge", async () => {
     await openBoard([
       appointment({
         id: 7,
@@ -1446,12 +1446,12 @@ describe("ModalityPage modality board", () => {
 
     const row = screen.getByTestId("modality-board-row-7");
     expect(within(row).getByText("MRI Rectum Primary Staging v1.2")).toBeTruthy();
-    expect(within(row).getByText("Protocol assigned")).toBeTruthy();
+    expect(within(row).queryByText("Protocol assigned")).toBeNull();
     expect(within(row).queryByText("Scanner: Philips Ingenia Elition 3T")).toBeNull();
     expect(within(row).queryByText("Notes available")).toBeNull();
   });
 
-  it("renders the protocol badge through the Arabic localization", async () => {
+  it("does not render the redundant protocol-assigned label in Arabic", async () => {
     languageState.language = "ar";
     await openBoard([
       appointment({
@@ -1472,7 +1472,8 @@ describe("ModalityPage modality board", () => {
     ]);
 
     const row = screen.getByTestId("modality-board-row-19");
-    expect(within(row).getByText(translate("ar", "modality.protocolAssigned"))).toBeTruthy();
+    expect(within(row).getByText("CT Abdomen v1.0")).toBeTruthy();
+    expect(within(row).queryByText(translate("ar", "modality.protocolAssigned"))).toBeNull();
   });
 
   it("renders Assigned CT Protocol with CT phase terminology", async () => {
@@ -1590,7 +1591,7 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("oblique axial")).toBeTruthy();
   });
 
-  it("treats MR as MRI, retaining the assignment badge and fetching its detail", async () => {
+  it("treats MR as MRI, showing the assigned protocol and fetching its detail", async () => {
     const assigned = mriAssignment({ appointmentId: 20, protocolId: null, protocolVersionId: null, freeTextProtocol: "MRI brain with contrast", protocolName: null, versionNumber: null, mriSequences: [] });
     const user = await openBoard([appointment({
       id: 20,
@@ -1612,7 +1613,8 @@ describe("ModalityPage modality board", () => {
     fetchModalityProtocolAssignmentMock.mockResolvedValue(assigned);
 
     const row = screen.getByTestId("modality-board-row-20");
-    expect(within(row).getByText("Protocol assigned")).toBeTruthy();
+    expect(within(row).getByText("Free-text protocol")).toBeTruthy();
+    expect(within(row).queryByText("Protocol assigned")).toBeNull();
     await user.click(row);
 
     const drawer = await screen.findByTestId("selected-appointment-drawer");

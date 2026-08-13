@@ -1131,18 +1131,6 @@ export default function ModalityPage() {
                                 {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
                                   <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact />
                                 ) : null}
-                                {appointment.protocolAssignmentSummary ? (
-                                  <Badge
-                                    variant="success"
-                                    size="sm"
-                                    aria-label={t(language, "modality.protocolAssigned")}
-                                    title={t(language, "modality.protocolAssigned")}
-                                    className="mt-0.5 inline-flex max-w-full items-center gap-1 whitespace-nowrap text-[10px]"
-                                  >
-                                    <BadgeCheck size={12} aria-hidden="true" />
-                                    <span className="truncate">{t(language, "modality.protocolAssigned")}</span>
-                                  </Badge>
-                                ) : null}
                                 {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-[10px] leading-4 text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</p> : null}
                               </td>
                               <td className="px-2 py-1.5 text-xs font-medium text-slate-800">
