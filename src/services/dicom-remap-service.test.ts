@@ -1733,6 +1733,51 @@ test("dicom helper: createModifiedStudyCopy keeps timeout clear when verificatio
   );
 });
 
+test("dicom helper: strict recovery timeout accepts only one exact ModifiedFrom child", async () => {
+  const cases = [
+    { name: "wrong provenance", modifiedFrom: ["unrelated-source"], expectedId: null, expectedCode: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED" },
+    { name: "exact provenance", modifiedFrom: ["study-id"], expectedId: "candidate-1", expectedCode: null },
+    { name: "multiple exact children", modifiedFrom: ["study-id", "study-id"], expectedId: null, expectedCode: "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN" },
+  ];
+  for (const scenario of cases) {
+    let patientReads = 0;
+    let modifyCalls = 0;
+    __dicomRemapTestables.setOrthancFetchForTests(async (requestPath, options = {}) => {
+      if (requestPath === "/studies/study-id") return orthancResult({ json: { ID: "study-id", IsStable: true, LastUpdate: "20260814T100000", Series: ["series-1"], ParentPatient: "patient-1" } });
+      if (requestPath === "/studies/study-id/statistics") return orthancResult({ json: { CountInstances: 2 } });
+      if (requestPath === "/system") return orthancResult({ json: { Version: "1.12.11" } });
+      if (requestPath === "/patients/patient-1") {
+        patientReads += 1;
+        const candidates = scenario.modifiedFrom.map((_, index) => `candidate-${index + 1}`);
+        return orthancResult({ json: { Studies: patientReads === 1 ? ["study-id"] : ["study-id", ...candidates] } });
+      }
+      if (requestPath === "/studies/study-id/modify" && options.method === "POST") {
+        modifyCalls += 1;
+        throw new HttpError(504, "Orthanc request timed out after 60000ms.");
+      }
+      const candidateMatch = requestPath.match(/^\/studies\/(candidate-\d+)$/);
+      if (candidateMatch) return orthancResult({ json: { MainDicomTags: {}, PatientMainDicomTags: { PatientID: "P1", PatientName: "Test^Patient", PatientSex: "M", PatientBirthDate: "19900101" } } });
+      const provenanceMatch = requestPath.match(/^\/studies\/(candidate-(\d+))\/metadata\/ModifiedFrom$/);
+      if (provenanceMatch) {
+        const value = scenario.modifiedFrom[Number(provenanceMatch[2]) - 1]!;
+        return orthancResult({ text: JSON.stringify(value), json: value });
+      }
+      throw new Error(`Unexpected Orthanc request for ${scenario.name}: ${requestPath}`);
+    });
+    if (scenario.expectedId) {
+      const result = await __dicomRemapTestables.createModifiedStudyCopy("study-id", { patientId: "P1", patientName: "Test^Patient", patientSex: "M", patientBirthDate: "19900101" }, { requireExactModifiedFromProvenance: true });
+      assert.equal(result, scenario.expectedId, scenario.name);
+    } else {
+      await assert.rejects(
+        () => __dicomRemapTestables.createModifiedStudyCopy("study-id", { patientId: "P1", patientName: "Test^Patient", patientSex: "M", patientBirthDate: "19900101" }, { requireExactModifiedFromProvenance: true }),
+        (error: unknown) => error instanceof HttpError && (error.details as { code?: string })?.code === scenario.expectedCode,
+        scenario.name,
+      );
+    }
+    assert.equal(modifyCalls, 1, scenario.name);
+  }
+});
+
 test("dicom helper: verifySendCompletionAfterTimeout finds completed job when available", async () => {
   __dicomRemapTestables.setOrthancFetchForTests(async (path) => {
     if (path === "/jobs?expand") {

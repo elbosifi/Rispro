@@ -1391,7 +1391,8 @@ function findStringLike(value: unknown, needle: string): boolean {
 
 async function verifyModifiedStudyAfterTimeout(
   preflight: OrthancStudyModifyPreflight,
-  replacement: OrthancPatientSummary
+  replacement: OrthancPatientSummary,
+  options: { requireExactModifiedFromProvenance?: boolean } = {},
 ): Promise<string | null> {
   if (!preflight.parentPatientId) {
     return null;
@@ -1401,16 +1402,29 @@ async function verifyModifiedStudyAfterTimeout(
   const beforeSet = new Set(preflight.patientStudyIds);
   const candidates = afterStudyIds.filter((studyId) => !beforeSet.has(studyId) && studyId !== preflight.sourceStudyId);
 
+  const exactProvenanceCandidates: string[] = [];
   for (const candidateId of candidates) {
     try {
       const summary = await readStudySummary(candidateId);
       if (hasSameReplacementIdentity(summary, replacement)) {
-        return candidateId;
+        if (!options.requireExactModifiedFromProvenance) return candidateId;
+        const provenance = await readOrthancModifiedFromStudyId(candidateId);
+        if (provenance.available && provenance.sourceStudyId === preflight.sourceStudyId) {
+          exactProvenanceCandidates.push(candidateId);
+        }
       }
     } catch {
       continue;
     }
   }
+
+  if (exactProvenanceCandidates.length > 1) {
+    throw new HttpError(409, "Multiple exact Orthanc recovery children were found after an ambiguous modify.", {
+      code: "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN",
+      actualCount: exactProvenanceCandidates.length,
+    });
+  }
+  if (exactProvenanceCandidates.length === 1) return exactProvenanceCandidates[0]!;
 
   return null;
 }
@@ -2014,7 +2028,7 @@ async function tryBulkModifiedStudyCopy(
 async function createModifiedStudyCopy(
   sourceStudyId: string,
   replacement: OrthancPatientSummary,
-  options: { stabilityTimeoutMs?: number } = {},
+  options: { stabilityTimeoutMs?: number; requireExactModifiedFromProvenance?: boolean } = {},
 ): Promise<string> {
   const validatedReplacement = validateOrthancReplacementIdentity(replacement);
   let preflight: OrthancStudyModifyPreflight;
@@ -2068,9 +2082,14 @@ async function createModifiedStudyCopy(
       if (!isOrthancTimeoutError(error)) {
         throw error;
       }
-      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, validatedReplacement);
+      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, validatedReplacement, options);
       if (verifiedStudyId) {
         return verifiedStudyId;
+      }
+      if (options.requireExactModifiedFromProvenance) {
+        throw new HttpError(502, "Orthanc study modify timed out and exact recovery provenance could not be confirmed.", {
+          code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED",
+        });
       }
       throw new HttpError(
         502,
@@ -5324,6 +5343,14 @@ function sanitizedOrthancRecoveryError(error: unknown): { code: string; details:
   return { code, details };
 }
 
+const DICOM_REMAP_INTERRUPTIBLE_RECOVERY_STAGES = new Set<DicomRemapOrthancRecoveryStage>([
+  "validating_staging",
+  "uploading_source",
+  "verifying_source",
+  "modifying",
+  "verifying_modified",
+]);
+
 async function renewDicomRemapOrthancRecoveryLease(jobId: number, leaseOwner: string, stage?: DicomRemapOrthancRecoveryStage): Promise<DicomRemapJobRow> {
   const leaseSeconds = Math.max(180, DICOM_REMAP_ORTHANC_RECOVERY_LEASE_SECONDS);
   const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
@@ -5349,27 +5376,48 @@ async function readOrthancModifiedFromStudyId(candidateStudyId: string): Promise
   return { available: true, sourceStudyId: String(value || "").replace(/^"|"$/g, "").trim() };
 }
 
-async function findProvenOrthancRecoveryModifiedChildren(job: DicomRemapJobRow, sourceStudyId: string): Promise<{ exact: string[]; provenanceAvailable: boolean }> {
-  const studies = await fetchOrthancForRemap("/studies", { method: "GET" }).catch(() => null);
-  if (!studies?.ok || !Array.isArray(studies.json)) return { exact: [], provenanceAvailable: false };
+async function findProvenOrthancRecoveryModifiedChildren(
+  job: DicomRemapJobRow,
+  sourceStudyId: string,
+  options: { renewLease?: () => Promise<void> } = {},
+): Promise<{ exact: string[]; provenanceAvailable: boolean; searchConclusive: boolean }> {
+  await options.renewLease?.();
   const sourceMetadata = await readOrthancStudyMatchMetadata(sourceStudyId);
+  const query: Record<string, string> = {};
+  const replacementPatientId = String(job.replacement_patient_id || "").trim();
+  if (replacementPatientId) query.PatientID = replacementPatientId;
+  if (sourceMetadata?.studyDate) query.StudyDate = sourceMetadata.studyDate;
+  if (sourceMetadata?.accessionNumber) query.AccessionNumber = sourceMetadata.accessionNumber;
+  await options.renewLease?.();
+  const studies = await fetchOrthancForRemap("/tools/find", {
+    method: "POST",
+    body: { Level: "Study", Query: query },
+    timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+  }).catch(() => null);
+  await options.renewLease?.();
+  if (!studies?.ok || !Array.isArray(studies.json)) return { exact: [], provenanceAvailable: false, searchConclusive: false };
+  const candidateIds: string[] = [];
+  for (const candidate of studies.json) {
+    const candidateId = typeof candidate === "string" ? candidate.trim() : parseOrthancResourceId(candidate);
+    if (!candidateId) return { exact: [], provenanceAvailable: false, searchConclusive: false };
+    if (!candidateIds.includes(candidateId)) candidateIds.push(candidateId);
+  }
   let provenanceAvailable = false;
   const exact: string[] = [];
-  for (const rawId of studies.json) {
-    const candidateId = String(rawId || "").trim();
+  for (const candidateId of candidateIds) {
     if (!candidateId || candidateId === sourceStudyId) continue;
+    await options.renewLease?.();
     const candidateMetadata = await readOrthancStudyMatchMetadata(candidateId);
-    if (sourceMetadata && candidateMetadata) {
-      if (sourceMetadata.accessionNumber && candidateMetadata.accessionNumber !== sourceMetadata.accessionNumber) continue;
-      if (sourceMetadata.studyDate && candidateMetadata.studyDate !== sourceMetadata.studyDate) continue;
-      if (sourceMetadata.modality && candidateMetadata.modality && candidateMetadata.modality !== sourceMetadata.modality) continue;
-      if (candidateMetadata.patientId !== String(job.replacement_patient_id || "").trim()) continue;
-    }
+    if (!candidateMetadata || candidateMetadata.patientId !== replacementPatientId) continue;
+    if (sourceMetadata?.accessionNumber && candidateMetadata.accessionNumber !== sourceMetadata.accessionNumber) continue;
+    if (sourceMetadata?.studyDate && candidateMetadata.studyDate !== sourceMetadata.studyDate) continue;
+    if (sourceMetadata?.modality && candidateMetadata.modality && candidateMetadata.modality !== sourceMetadata.modality) continue;
     const provenance = await readOrthancModifiedFromStudyId(candidateId);
+    await options.renewLease?.();
     provenanceAvailable ||= provenance.available;
     if (provenance.available && provenance.sourceStudyId === sourceStudyId) exact.push(candidateId);
   }
-  return { exact, provenanceAvailable };
+  return { exact, provenanceAvailable, searchConclusive: true };
 }
 
 export async function retryFailedDicomRemapWithOrthanc({
@@ -5510,13 +5558,15 @@ export async function retryFailedDicomRemapWithOrthanc({
       const mustReconcile = possiblePreviousModify || job.orthanc_recovery_stage === "modifying";
       if (mustReconcile) {
         job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying");
-        const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId);
+        const discovered = await findProvenOrthancRecoveryModifiedChildren(job, sourceStudyId, {
+          renewLease: async () => { job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying"); },
+        });
         if (discovered.exact.length > 1) throw new HttpError(409, "Multiple exact Orthanc recovery children were found.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_MULTIPLE_MODIFIED_CHILDREN", actualCount: discovered.exact.length });
-        if (discovered.exact.length !== 1) throw new HttpError(409, "Orthanc recovery provenance could not prove the modified child.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED", provenanceAvailable: discovered.provenanceAvailable });
+        if (!discovered.searchConclusive || discovered.exact.length !== 1) throw new HttpError(409, "Orthanc recovery provenance could not prove the modified child.", { code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED", provenanceAvailable: discovered.provenanceAvailable });
         modifiedStudyId = discovered.exact[0]!;
       } else {
         job = await renewDicomRemapOrthancRecoveryLease(job.id, leaseOwner, "modifying");
-        modifiedStudyId = await createModifiedStudyCopy(sourceStudyId, replacement);
+        modifiedStudyId = await createModifiedStudyCopy(sourceStudyId, replacement, { requireExactModifiedFromProvenance: true });
         if (afterOrthancRecoveryModifyForTests) await afterOrthancRecoveryModifyForTests({ jobId: job.id, sourceStudyId, modifiedStudyId });
       }
       const persisted = await queryDicomRemapDb<DicomRemapJobRow>(
@@ -5548,6 +5598,10 @@ export async function retryFailedDicomRemapWithOrthanc({
     recoveredForSend = recovered;
   } catch (error) {
     const sanitized = sanitizedOrthancRecoveryError(error);
+    const interruptedStage = DICOM_REMAP_INTERRUPTIBLE_RECOVERY_STAGES.has(job.orthanc_recovery_stage as DicomRemapOrthancRecoveryStage)
+      ? job.orthanc_recovery_stage as DicomRemapOrthancRecoveryStage
+      : null;
+    if (interruptedStage) sanitized.details.interruptedStage = interruptedStage;
     const failed = await queryDicomRemapDb<DicomRemapJobRow>(
       `update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', orthanc_recovery_status = 'failed', orthanc_recovery_stage = 'failed', orthanc_recovery_error_code = $2, orthanc_recovery_error_details = $3::jsonb, orthanc_recovery_lease_owner = null, orthanc_recovery_lease_expires_at = null, error_message = 'Orthanc recovery failed. Preserved source staging remains available until recovery expiry.', updated_at = now() where id = $1 and orthanc_recovery_status = 'processing' and orthanc_recovery_lease_owner = $4 returning *`,
       [job.id, sanitized.code, JSON.stringify(sanitized.details), leaseOwner]

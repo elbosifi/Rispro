@@ -35,6 +35,9 @@ interface FakeOrthancScenario {
   malformedStatistics?: boolean;
   modifiedFromOverride?: string;
   provenanceUnavailable?: boolean;
+  toolsFindStatus?: number;
+  malformedToolsFind?: boolean;
+  includeLookalike?: boolean;
 }
 
 interface FakeOrthancState {
@@ -52,6 +55,9 @@ interface FakeOrthancState {
   modifiedPatient: { patientId: string; patientName: string; patientSex: string; patientBirthDate: string } | null;
   modifiedFromStudyId: string | null;
   modifyCount: number;
+  toolsFindCount: number;
+  allStudiesListCount: number;
+  lastToolsFindBody: unknown;
 }
 
 function uniqueSuffix(): string {
@@ -150,6 +156,9 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
     modifiedPatient: null,
     modifiedFromStudyId: null,
     modifyCount: 0,
+    toolsFindCount: 0,
+    allStudiesListCount: 0,
+    lastToolsFindBody: null,
   };
   const parentStudyForSop = (sop: string): string => {
     const direct = state.scenario.parentStudyBySop?.[sop];
@@ -164,7 +173,21 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
       if (req.method === "GET" && requestPath === "/modalities") return jsonResponse(res, 200, ["PACS_TEST"]);
       if (req.method === "GET" && requestPath === "/system") return jsonResponse(res, 200, { Version: "fake-deployment" });
       if (req.method === "GET" && requestPath === "/modalities/PACS_TEST/configuration") return jsonResponse(res, 200, ["PACS_AE", "127.0.0.1", 104]);
-      if (req.method === "GET" && requestPath === "/studies") return jsonResponse(res, 200, [state.studyId, ...(state.modifiedStudyId ? [state.modifiedStudyId] : [])]);
+      if (req.method === "GET" && requestPath === "/studies") {
+        state.allStudiesListCount += 1;
+        return jsonResponse(res, 200, [state.studyId, ...(state.modifiedStudyId ? [state.modifiedStudyId] : [])]);
+      }
+      if (req.method === "POST" && requestPath === "/tools/find") {
+        state.toolsFindCount += 1;
+        state.lastToolsFindBody = JSON.parse((await readRequestBody(req)).toString("utf8"));
+        const status = state.scenario.toolsFindStatus ?? 200;
+        if (status !== 200) return jsonResponse(res, status, { error: "simulated find failure" });
+        if (state.scenario.malformedToolsFind) return jsonResponse(res, 200, { unexpected: true });
+        return jsonResponse(res, 200, [
+          ...(state.scenario.includeLookalike ? ["fake-lookalike-study"] : []),
+          ...(state.modifiedStudyId ? [state.modifiedStudyId] : []),
+        ]);
+      }
       if (req.method === "PUT" && requestPath === "/modalities/PACS_TEST") {
         await readRequestBody(req);
         return jsonResponse(res, 200, {});
@@ -223,12 +246,13 @@ async function startFakeOrthanc(initialScenario: FakeOrthancScenario = {}): Prom
       }
       if (req.method === "GET" && requestPath.endsWith("/metadata/ModifiedFrom")) {
         const requestedStudyId = decodeURIComponent(requestPath.slice("/studies/".length, -"/metadata/ModifiedFrom".length));
+        if (requestedStudyId === "fake-lookalike-study") return jsonResponse(res, 200, "unrelated-source-study");
         if (state.scenario.provenanceUnavailable || requestedStudyId !== state.modifiedStudyId || !state.modifiedFromStudyId) return jsonResponse(res, 404, { HttpStatus: 404 });
         return jsonResponse(res, 200, state.scenario.modifiedFromOverride || state.modifiedFromStudyId);
       }
       if (req.method === "GET" && requestPath.startsWith("/studies/")) {
         const requestedStudyId = decodeURIComponent(requestPath.slice("/studies/".length));
-        if (requestedStudyId === state.modifiedStudyId && state.modifiedPatient) {
+        if ((requestedStudyId === state.modifiedStudyId || requestedStudyId === "fake-lookalike-study") && state.modifiedPatient) {
           return jsonResponse(res, 200, {
             ID: requestedStudyId,
             IsStable: true,
@@ -299,6 +323,9 @@ function resetFakeOrthancState(state: FakeOrthancState, scenario: FakeOrthancSce
   state.modifiedPatient = null;
   state.modifiedFromStudyId = null;
   state.modifyCount = 0;
+  state.toolsFindCount = 0;
+  state.allStudiesListCount = 0;
+  state.lastToolsFindBody = null;
 }
 
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
@@ -826,54 +853,22 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
       () => retryFailedDicomRemapWithOrthanc({ jobId, currentUserId: userId }),
       /simulated crash after Orthanc modify before persistence/
     );
-    const interruptedRow = await pool.query<{ orthanc_recovery_status: string; orthanc_recovery_source_study_id: string; modified_orthanc_study_id: string | null }>(`select orthanc_recovery_status, orthanc_recovery_source_study_id, modified_orthanc_study_id from dicom_remap_jobs where id = $1`, [jobId]);
+    const interruptedRow = await pool.query<{ status: string; orthanc_recovery_status: string; orthanc_recovery_stage: string; orthanc_recovery_source_study_id: string; modified_orthanc_study_id: string | null; orthanc_recovery_error_details: { interruptedStage?: string } }>(`select status, orthanc_recovery_status, orthanc_recovery_stage, orthanc_recovery_source_study_id, modified_orthanc_study_id, orthanc_recovery_error_details from dicom_remap_jobs where id = $1`, [jobId]);
+    assert.equal(interruptedRow.rows[0]?.status, "failed");
     assert.equal(interruptedRow.rows[0]?.orthanc_recovery_status, "failed");
+    assert.equal(interruptedRow.rows[0]?.orthanc_recovery_stage, "failed");
     assert.equal(interruptedRow.rows[0]?.orthanc_recovery_source_study_id, fake.state.studyId);
     assert.equal(interruptedRow.rows[0]?.modified_orthanc_study_id, null);
+    assert.equal(interruptedRow.rows[0]?.orthanc_recovery_error_details.interruptedStage, "modifying");
     assert.equal(fake.state.modifyCount, 1);
     assert.equal(fake.state.sendCount, 0);
     assert.equal(fake.state.uploadRecords.length, 2);
 
     __dicomRemapTestables.setAfterOrthancRecoveryModifyForTests(null);
-    await pool.query(`update dicom_remap_jobs set orthanc_recovery_status = 'processing', orthanc_recovery_stage = 'modifying', orthanc_recovery_lease_owner = 'dead-process', orthanc_recovery_lease_expires_at = now() + interval '10 minutes', orthanc_recovery_last_heartbeat_at = now(), orthanc_recovery_error_code = null, orthanc_recovery_error_details = null where id = $1`, [jobId]);
-    const attemptsBeforeDuplicate = await pool.query<{ orthanc_recovery_attempt_count: number }>(`select orthanc_recovery_attempt_count from dicom_remap_jobs where id = $1`, [jobId]);
-    const activeDuplicate = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
-    assert.equal(activeDuplicate.status, 202);
-    const activeJob = await activeDuplicate.json() as { job: { orthanc_recovery_status: string; orthanc_recovery_attempt_count: number } };
-    assert.equal(activeJob.job.orthanc_recovery_status, "processing");
-    assert.equal(activeJob.job.orthanc_recovery_attempt_count, attemptsBeforeDuplicate.rows[0]?.orthanc_recovery_attempt_count);
-    assert.equal(fake.state.modifyCount, 1);
-    assert.equal(fake.state.sendCount, 0);
-    assert.equal(fake.state.uploadRecords.length, 2);
-
-    await pool.query(`update dicom_remap_jobs set orthanc_recovery_lease_expires_at = now() - interval '1 second' where id = $1`, [jobId]);
-    fake.state.scenario.modifiedFromOverride = "unrelated-source-study";
-    const wrongLookalike = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
-    assert.equal(wrongLookalike.status, 409);
-    const wrongRow = await pool.query<{ orthanc_recovery_error_code: string; modified_orthanc_study_id: string | null }>(`select orthanc_recovery_error_code, modified_orthanc_study_id from dicom_remap_jobs where id = $1`, [jobId]);
-    assert.deepEqual(wrongRow.rows[0], { orthanc_recovery_error_code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED", modified_orthanc_study_id: null });
-    assert.equal(fake.state.modifyCount, 1);
-    assert.equal(fake.state.sendCount, 0);
-    const repeatedWrongLookalike = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
-    assert.equal(repeatedWrongLookalike.status, 409);
-    assert.equal(fake.state.modifyCount, 1);
-    assert.equal(fake.state.sendCount, 0);
-
-    fake.state.scenario.modifiedFromOverride = undefined;
-    fake.state.scenario.provenanceUnavailable = true;
-    await pool.query(`update dicom_remap_jobs set orthanc_recovery_status = 'processing', orthanc_recovery_stage = 'modifying', orthanc_recovery_lease_owner = 'dead-process-2', orthanc_recovery_lease_expires_at = now() - interval '1 second' where id = $1`, [jobId]);
-    const unavailableProvenance = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
-    assert.equal(unavailableProvenance.status, 409);
-    const unavailableRow = await pool.query<{ orthanc_recovery_error_code: string; modified_orthanc_study_id: string | null; staging_cleanup_completed_at: string | null }>(`select orthanc_recovery_error_code, modified_orthanc_study_id, staging_cleanup_completed_at from dicom_remap_jobs where id = $1`, [jobId]);
-    assert.deepEqual(unavailableRow.rows[0], { orthanc_recovery_error_code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED", modified_orthanc_study_id: null, staging_cleanup_completed_at: null });
-    assert.equal(fake.state.modifyCount, 1);
-    assert.equal(fake.state.sendCount, 0);
-
-    fake.state.scenario.provenanceUnavailable = false;
-    await pool.query(`update dicom_remap_jobs set orthanc_recovery_status = 'processing', orthanc_recovery_stage = 'modifying', orthanc_recovery_lease_owner = 'dead-process-3', orthanc_recovery_lease_expires_at = now() - interval '1 second' where id = $1`, [jobId]);
-    const recoveryResponse = await fetch(`${risproUrl}/api/pacs/remap/jobs/${jobId}/retry-with-orthanc`, { method: "POST", headers: { Cookie: `${env.cookieName}=${token}` } });
-    assert.equal(recoveryResponse.status, 202);
-    const recovered = await recoveryResponse.json() as Awaited<ReturnType<typeof retryFailedDicomRemapWithOrthanc>>;
+    fake.state.scenario.includeLookalike = true;
+    fake.state.toolsFindCount = 0;
+    fake.state.allStudiesListCount = 0;
+    const recovered = await retryFailedDicomRemapWithOrthanc({ jobId, currentUserId: userId });
     assert.equal(recovered.job.status, "sending");
     assert.equal(recovered.job.orthanc_recovery_status, "completed");
     assert.equal(recovered.job.dicom_integrity_version, 1);
@@ -881,7 +876,9 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(fake.state.modifyCount, 1);
     assert.equal(fake.state.sendCount, 1);
     assert.equal(fake.state.uploadRecords.length, 2);
-    assert.ok(Number(recovered.job.orthanc_recovery_attempt_count) > Number(attemptsBeforeDuplicate.rows[0]?.orthanc_recovery_attempt_count || 0));
+    assert.equal(fake.state.toolsFindCount, 1);
+    assert.equal(fake.state.allStudiesListCount, 0);
+    assert.deepEqual(fake.state.lastToolsFindBody, { Level: "Study", Query: { PatientID: recovered.job.replacement_patient_id, StudyDate: "20260813", AccessionNumber: "RECOVERY-1" } });
     assert.equal(Buffer.compare(fake.state.uploadRecords[0]!.body, sourceA), 0);
     assert.equal(Buffer.compare(fake.state.uploadRecords[1]!.body, sourceB), 0);
     const persisted = await pool.query<{ orthanc_recovery_source_study_id: string; modified_orthanc_study_id: string; dicom_integrity_version: number; orthanc_recovery_status: string; staging_cleanup_completed_at: string | null }>(`select orthanc_recovery_source_study_id, modified_orthanc_study_id, dicom_integrity_version, orthanc_recovery_status, staging_cleanup_completed_at from dicom_remap_jobs where id = $1`, [jobId]);
@@ -899,6 +896,28 @@ test("manual Orthanc recovery uploads pristine staged bytes once, persists verif
     assert.equal(fake.state.modifyCount, 1);
     assert.equal(fake.state.sendCount, 1);
     assert.equal(fake.state.uploadRecords.length, 2);
+
+    fake.state.scenario.toolsFindStatus = 404;
+    fake.state.toolsFindCount = 0;
+    fake.state.allStudiesListCount = 0;
+    fake.state.sendCount = 0;
+    await pool.query(`update dicom_remap_jobs set status = 'failed', processing_stage = 'failed', processing_error_code = 'DICOM_REMAP_PIXEL_INTEGRITY_FAILED', orthanc_recovery_status = 'failed', orthanc_recovery_stage = 'failed', orthanc_recovery_error_code = 'DICOM_REMAP_ORTHANC_RECOVERY_FAILED', orthanc_recovery_error_details = '{"code":"DICOM_REMAP_ORTHANC_RECOVERY_FAILED","interruptedStage":"modifying"}'::jsonb, orthanc_recovery_completed_at = null, modified_orthanc_study_id = null, dicom_integrity_version = null, dicom_integrity_verified_at = null where id = $1`, [jobId]);
+    await assert.rejects(
+      () => retryFailedDicomRemapWithOrthanc({ jobId, currentUserId: userId }),
+      (error: unknown) => (error as { details?: { code?: string } })?.details?.code === "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED",
+    );
+    const searchFailure = await pool.query<{ orthanc_recovery_error_code: string; orthanc_recovery_source_study_id: string; modified_orthanc_study_id: string | null; staging_cleanup_completed_at: string | null }>(`select orthanc_recovery_error_code, orthanc_recovery_source_study_id, modified_orthanc_study_id, staging_cleanup_completed_at from dicom_remap_jobs where id = $1`, [jobId]);
+    assert.deepEqual(searchFailure.rows[0], {
+      orthanc_recovery_error_code: "DICOM_REMAP_ORTHANC_RECOVERY_PROVENANCE_UNVERIFIED",
+      orthanc_recovery_source_study_id: fake.state.studyId,
+      modified_orthanc_study_id: null,
+      staging_cleanup_completed_at: null,
+    });
+    assert.equal(fake.state.toolsFindCount, 1);
+    assert.equal(fake.state.allStudiesListCount, 0);
+    assert.equal(fake.state.modifyCount, 1);
+    assert.equal(fake.state.sendCount, 0);
+    await fs.access(path.join(stagingRoot, storageKey, "manifest.json"));
   } finally {
     __dicomRemapTestables.resetTestOverrides();
     __resetOrthancPacsFetchForTests();
