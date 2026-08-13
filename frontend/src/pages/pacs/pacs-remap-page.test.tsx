@@ -1541,4 +1541,18 @@ describe("PacsRemapPage five-step wizard", () => {
     expect(screen.queryByRole("button", { name: "Retry with Orthanc" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Resend to PACS" })).toBeNull();
   });
+
+  it.each(["remapped", "sent"])("does not expose Retry Send for a %s job", async (status) => {
+    const job = { id: status === "remapped" ? 94 : 95, status, processing_stage: status === "remapped" ? "enqueueing_send" : "completed", modified_orthanc_study_id: "verified-study", destination_pacs_key: "1", send_error_code: null, dicom_integrity_version: 1, dicom_integrity_verified_at: "2026-08-13T00:00:00.000Z", send_attempt_count: 1 };
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [] });
+      if (path === "/pacs/remap/jobs?limit=20") return Promise.resolve({ jobs: [job] });
+      if (path === `/pacs/remap/jobs/${job.id}`) return Promise.resolve({ job, comparison: null });
+      return Promise.resolve({ job: null, comparison: null, appointments: [], items: [] });
+    });
+    renderPage();
+    fireEvent.click(screen.getByText("View recent jobs"));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`#${job.id}.*${status}`, "i") }));
+    expect(screen.queryByRole("button", { name: "Resend to PACS" })).toBeNull();
+  });
 });

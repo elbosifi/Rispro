@@ -93,6 +93,8 @@ interface RemapJob {
   orthanc_recovery_error_code?: string | null;
   orthanc_recovery_error_details?: unknown;
   orthanc_recovery_expires_at?: string | null;
+  orthanc_recovery_stage?: string | null;
+  orthanc_recovery_lease_expires_at?: string | null;
   staged_manifest_version?: number | null;
   staged_total_bytes?: number | null;
   selected_study_instance_uid?: string | null;
@@ -217,9 +219,8 @@ function formatFallbackModalityLabel(language: string, id: number): string {
 
 function canResendJob(job: RemapJob | null | undefined): boolean {
   if (!job) return false;
-  if (!["failed", "remapped", "sent"].includes(job.status)) return false;
+  if (job.status !== "failed" || !job.send_error_code) return false;
   if (requiresDestinationCheck(job)) return false;
-  if (job.status === "failed" && !job.send_error_code) return false;
   return Boolean(job.destination_pacs_key && job.modified_orthanc_study_id && job.dicom_integrity_verified_at && Number(job.dicom_integrity_version) === 1);
 }
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   claimNextDicomRemapProcessingJob,
   cleanupExpiredDicomRemapStaging,
+  releaseExpiredDicomRemapOrthancRecoveryClaims,
   processClaimedDicomRemapJob,
 } from "./dicom-remap-service.js";
 import type { DicomRemapJobRow } from "./dicom-remap-service.js";
@@ -18,6 +19,7 @@ type ClaimJob = { job: DicomRemapJobRow; recovered: boolean } | null;
 let claimJob = claimNextDicomRemapProcessingJob;
 let processJob = processClaimedDicomRemapJob;
 let cleanupStaging = cleanupExpiredDicomRemapStaging;
+let releaseExpiredRecoveries = releaseExpiredDicomRemapOrthancRecoveryClaims;
 
 function normalizeProcessingConcurrency(value: unknown): number {
   const parsed = Number(value);
@@ -35,6 +37,7 @@ export async function runDicomRemapProcessingWorkerTick(options: { batchSize?: n
   let completed = 0;
   let failed = 0;
   try {
+    await releaseExpiredRecoveries().catch(() => 0);
     await cleanupStaging(
       Math.max(1, Number(process.env.DICOM_REMAP_FAILED_STAGING_RETENTION_HOURS || 72)),
       Math.max(1, Number(process.env.DICOM_REMAP_AWAITING_CONFIRMATION_RETENTION_HOURS || 24))
@@ -75,15 +78,18 @@ export const __dicomRemapProcessingWorkerTestables = {
     claim?: (owner: string, leaseSeconds: number) => Promise<ClaimJob>;
     process?: typeof processClaimedDicomRemapJob;
     cleanup?: (failedRetentionHours: number, awaitingConfirmationRetentionHours: number) => Promise<number>;
+    releaseRecoveries?: () => Promise<number>;
   }): void {
     claimJob = dependencies.claim || claimNextDicomRemapProcessingJob;
     processJob = dependencies.process || processClaimedDicomRemapJob;
     cleanupStaging = dependencies.cleanup || cleanupExpiredDicomRemapStaging;
+    releaseExpiredRecoveries = dependencies.releaseRecoveries || releaseExpiredDicomRemapOrthancRecoveryClaims;
   },
   resetDependencies(): void {
     claimJob = claimNextDicomRemapProcessingJob;
     processJob = processClaimedDicomRemapJob;
     cleanupStaging = cleanupExpiredDicomRemapStaging;
+    releaseExpiredRecoveries = releaseExpiredDicomRemapOrthancRecoveryClaims;
     stopped = false;
   },
   normalizeProcessingConcurrency,

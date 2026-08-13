@@ -911,6 +911,9 @@ for (const transferSyntaxUid of [
     assert.equal(outputIntegrity.transferSyntax, transferSyntaxUid);
     assert.notEqual(outputIntegrity.transferSyntax, "1.2.840.10008.1.2.1");
     assert.equal(outputIntegrity.pixelRepresentation, "encapsulated");
+    assert.equal(outputIntegrity.actualPixelRepresentation, "encapsulated");
+    assert.equal(outputIntegrity.pixelValueLengthMode, "undefined");
+    assert.ok(outputIntegrity.fragmentCount > 0);
     assert.equal(outputIntegrity.pixelSha256, sourceIntegrity.pixelSha256);
     assert.equal(outputIntegrity.pixelLength, sourceIntegrity.pixelLength);
     const outputFile = DicomMessage.readFile(rewritten.body.buffer.slice(rewritten.body.byteOffset, rewritten.body.byteOffset + rewritten.body.byteLength));
@@ -930,7 +933,46 @@ test("dicom helper: native Explicit VR Little Endian pixel bytes remain unchange
   const outputIntegrity = __dicomRemapTestables.inspectDicomPixelIntegrity(rewritten.body);
   assert.equal(outputIntegrity.transferSyntax, "1.2.840.10008.1.2.1");
   assert.equal(outputIntegrity.pixelRepresentation, "native");
+  assert.equal(outputIntegrity.actualPixelRepresentation, "native");
+  assert.equal(outputIntegrity.pixelValueLengthMode, "finite");
   assert.equal(outputIntegrity.pixelSha256, sourceIntegrity.pixelSha256);
+});
+
+test("dicom integrity gate independently rejects declared and physical PixelData encoding mismatches", () => {
+  const compressed = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]));
+  const nativeDeclared = Buffer.from(compressed);
+  const syntax = Buffer.from("1.2.840.10008.1.2.4.70", "ascii");
+  const syntaxOffset = nativeDeclared.indexOf(syntax);
+  assert.ok(syntaxOffset >= 0);
+  nativeDeclared.fill(0x20, syntaxOffset, syntaxOffset + syntax.length);
+  Buffer.from("1.2.840.10008.1.2.1", "ascii").copy(nativeDeclared, syntaxOffset);
+  assert.throws(
+    () => __dicomRemapTestables.assertRewrittenDicomPixelIntegrity(nativeDeclared, nativeDeclared),
+    (error: unknown) => error instanceof HttpError && (error.details as { failedInvariant?: string }).failedInvariant === "PixelDataEncoding",
+  );
+
+  const finiteCompressed = Buffer.from(compressed);
+  const pixelOffset = finiteCompressed.indexOf(Buffer.from([0xe0, 0x7f, 0x10, 0x00]));
+  assert.ok(pixelOffset >= 0);
+  finiteCompressed.writeUInt32LE(finiteCompressed.length - (pixelOffset + 12), pixelOffset + 8);
+  assert.throws(
+    () => __dicomRemapTestables.assertRewrittenDicomPixelIntegrity(finiteCompressed, finiteCompressed),
+    (error: unknown) => error instanceof HttpError && (error.details as { failedInvariant?: string }).failedInvariant === "PixelDataEncoding",
+  );
+});
+
+test("encapsulated payload hashing preserves a legitimate terminal zero byte", () => {
+  const withTerminalZero = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 1, 0]));
+  const mutatedTerminalByte = makeSyntheticEncapsulatedDicomBuffer("1.2.840.10008.1.2.4.70", new Uint8Array([0xff, 0xd8, 1, 1]));
+  const withHash = __dicomRemapTestables.inspectDicomPixelIntegrity(withTerminalZero);
+  const mutatedHash = __dicomRemapTestables.inspectDicomPixelIntegrity(mutatedTerminalByte);
+  assert.equal(withHash.pixelLength, 4);
+  assert.equal(withHash.pixelSha256, createHash("sha256").update(Buffer.from([0xff, 0xd8, 1, 0])).digest("hex"));
+  assert.notEqual(withHash.pixelSha256, mutatedHash.pixelSha256);
+  assert.throws(
+    () => __dicomRemapTestables.assertRewrittenDicomPixelIntegrity(withTerminalZero, mutatedTerminalByte),
+    (error: unknown) => error instanceof HttpError && ["PixelDataLength", "PixelDataPayload"].includes(String((error.details as { failedInvariant?: string }).failedInvariant)),
+  );
 });
 
 test("dicom integrity gate rejects transfer-syntax and pixel-payload changes", () => {
@@ -2771,8 +2813,8 @@ test("resendDicomRemapJobToPacs atomically enqueues an asynchronous Orthanc job"
   } as never));
 
   queueQueryResults([
-    { rows: [remapJob({ id: 21, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
-    { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", send_attempt_count: 1 })] },
+    { rows: [remapJob({ id: 21, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_JOB_FAILED" })] },
+    { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", send_error_code: "ORTHANC_SEND_JOB_FAILED", send_attempt_count: 1 })] },
     { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", orthanc_send_job_id: "orthanc-send-21", send_attempt_count: 1 })] },
   ]);
 
@@ -2824,6 +2866,22 @@ test("repeated resend returns the persisted sending job without another Orthanc 
   assert.equal(result.job.send_attempt_count, 2);
   assert.equal(orthancCalls.length, 0);
 });
+
+for (const disallowed of [
+  remapJob({ id: 231, status: "remapped", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" }),
+  remapJob({ id: 232, status: "sent", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" }),
+  remapJob({ id: 233, status: "failed", modified_orthanc_study_id: null, destination_pacs_key: "1", processing_error_code: "DICOM_REMAP_DICOM_REWRITE_FAILED", send_error_code: null }),
+]) {
+  test(`Retry Send rejects ${disallowed.status} job ${disallowed.id} without a failed PACS send`, async () => {
+    queueQueryResults([{ rows: [disallowed] }]);
+    const orthancCalls = queueOrthancResults([]);
+    await assert.rejects(
+      () => resendDicomRemapJobToPacs({ jobId: disallowed.id, currentUserId: 42 }),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+    );
+    assert.equal(orthancCalls.length, 0);
+  });
+}
 
 test("resendDicomRemapJobToPacs records asynchronous enqueue failures without a fallback send", async () => {
   const auditEntries: Array<Record<string, unknown>> = [];

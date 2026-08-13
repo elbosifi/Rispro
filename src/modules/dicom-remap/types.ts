@@ -15,6 +15,15 @@ export type DicomRemapOrthancRecoveryStatus =
   | "failed"
   | "completed";
 
+export type DicomRemapOrthancRecoveryStage =
+  | "validating_staging"
+  | "uploading_source"
+  | "verifying_source"
+  | "modifying"
+  | "verifying_modified"
+  | "completed"
+  | "failed";
+
 export interface DicomRemapUploadFileInput {
   fileName?: unknown;
   mimeType?: unknown;

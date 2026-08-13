@@ -18,9 +18,11 @@ test("DICOM remap async-send migration persists durable monitoring fields and in
       "orthanc_recovery_attempt_count", "orthanc_recovery_source_study_id", "orthanc_recovery_started_at",
       "orthanc_recovery_completed_at", "orthanc_recovery_error_code", "orthanc_recovery_error_details",
       "orthanc_recovery_expires_at",
+      "orthanc_recovery_stage", "orthanc_recovery_lease_owner", "orthanc_recovery_lease_expires_at",
+      "orthanc_recovery_last_heartbeat_at",
     ]]
   );
-  assert.equal(columns.rowCount, 18);
+  assert.equal(columns.rowCount, 22);
 
   const indexes = await pool.query<{ indexname: string }>(
     `select indexname from pg_indexes where schemaname = 'public' and tablename = 'dicom_remap_jobs' and indexname = any($1::text[])`,
@@ -56,6 +58,33 @@ test("a failed job resends idempotently while another same-user job is processin
     assert.equal(storeCalls, 1);
     const untouched = await pool.query<{ status: string; processing_lease_owner: string }>(`select status, processing_lease_owner from dicom_remap_jobs where id = $1`, [other.rows[0]!.id]);
     assert.deepEqual(untouched.rows[0], { status: "processing", processing_lease_owner: "other-worker" });
+  } finally {
+    __dicomRemapTestables.resetTestOverrides();
+    await pool.query(`delete from dicom_remap_jobs where created_by_user_id = $1`, [userId]);
+    await pool.query(`delete from users where id = $1`, [userId]);
+  }
+});
+
+test("expired Orthanc recovery claims become retryable without clearing durable checkpoints", { skip }, async () => {
+  const { pool } = await import("../db/pool.js");
+  const { releaseExpiredDicomRemapOrthancRecoveryClaims, __dicomRemapTestables } = await import("./dicom-remap-service.js");
+  const suffix = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const user = await pool.query<{ id: number }>(`insert into users (username, full_name, password_hash, role, is_active) values ($1, $2, 'test-hash', 'supervisor', true) returning id`, [`dicom_recovery_cleanup_${suffix}`, `DICOM Recovery Cleanup ${suffix}`]);
+  const userId = Number(user.rows[0]!.id);
+  try {
+    const inserted = await pool.query<{ id: number }>(`insert into dicom_remap_jobs (created_by_user_id, status, processing_stage, staged_storage_key, source_orthanc_study_id, modified_orthanc_study_id, orthanc_recovery_status, orthanc_recovery_stage, orthanc_recovery_attempt_count, orthanc_recovery_source_study_id, orthanc_recovery_expires_at, orthanc_recovery_lease_owner, orthanc_recovery_lease_expires_at) values ($1, 'failed', 'failed', 'jobs/synthetic-staging', 'source-checkpoint', 'modified-checkpoint', 'processing', 'verifying_modified', 2, 'source-checkpoint', now() + interval '7 days', 'dead-owner', now() - interval '1 minute') returning id`, [userId]);
+    __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+    const released = await releaseExpiredDicomRemapOrthancRecoveryClaims();
+    assert.ok(released >= 1);
+    const row = await pool.query<{ orthanc_recovery_status: string; orthanc_recovery_stage: string; orthanc_recovery_error_code: string; orthanc_recovery_lease_owner: string | null; orthanc_recovery_source_study_id: string; modified_orthanc_study_id: string; staged_storage_key: string; orthanc_recovery_expires_at: string }>(`select orthanc_recovery_status, orthanc_recovery_stage, orthanc_recovery_error_code, orthanc_recovery_lease_owner, orthanc_recovery_source_study_id, modified_orthanc_study_id, staged_storage_key, orthanc_recovery_expires_at from dicom_remap_jobs where id = $1`, [inserted.rows[0]!.id]);
+    assert.equal(row.rows[0]?.orthanc_recovery_status, "failed");
+    assert.equal(row.rows[0]?.orthanc_recovery_stage, "failed");
+    assert.equal(row.rows[0]?.orthanc_recovery_error_code, "DICOM_REMAP_ORTHANC_RECOVERY_INTERRUPTED");
+    assert.equal(row.rows[0]?.orthanc_recovery_lease_owner, null);
+    assert.equal(row.rows[0]?.orthanc_recovery_source_study_id, "source-checkpoint");
+    assert.equal(row.rows[0]?.modified_orthanc_study_id, "modified-checkpoint");
+    assert.equal(row.rows[0]?.staged_storage_key, "jobs/synthetic-staging");
+    assert.ok(Date.parse(row.rows[0]!.orthanc_recovery_expires_at) > Date.now());
   } finally {
     __dicomRemapTestables.resetTestOverrides();
     await pool.query(`delete from dicom_remap_jobs where created_by_user_id = $1`, [userId]);
