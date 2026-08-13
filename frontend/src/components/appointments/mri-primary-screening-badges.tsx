@@ -10,10 +10,30 @@ export type MriPrimaryScreeningResult =
 interface MriPrimaryScreeningBadgesProps {
   result: MriPrimaryScreeningResult | null;
   expected?: boolean;
+  compact?: boolean;
 }
 
-export function MriPrimaryScreeningBadges({ result, expected = true }: MriPrimaryScreeningBadgesProps) {
+export function MriPrimaryScreeningBadges({ result, expected = true, compact = false }: MriPrimaryScreeningBadgesProps) {
   const { language } = useLanguage();
+
+  if (compact) {
+    if (!result) {
+      return expected ? (
+        <span aria-label="Primary MRI screening not recorded — complete screening before MRI examination." title="Primary MRI screening not recorded — complete screening before MRI examination." className="inline-flex h-7 min-w-7 items-center justify-center rounded border-2 border-amber-500 px-0.5 text-[10px] font-bold leading-none text-amber-700">MR?</span>
+      ) : null;
+    }
+
+    if (result === "no_known_implant_reported") {
+      return <span aria-label="Primary MRI screening complete — no known implant/device reported." title="Primary MRI screening complete — no known implant/device reported." className="inline-flex h-7 w-7 items-center justify-center rounded-sm border-2 border-emerald-600 text-[10px] font-bold leading-none text-emerald-700">MR</span>;
+    }
+
+    return (
+      <span aria-label="MR safety review required — implant/device reported during primary screening. Verify device MR status before scanning." title="MR safety review required — implant/device reported during primary screening. Verify device MR status before scanning." className="relative inline-flex h-7 w-7 items-center justify-center text-amber-600">
+        <TriangleAlert size={28} strokeWidth={2.25} aria-hidden="true" />
+        <span className="absolute top-[11px] text-[8px] font-bold leading-none">MR</span>
+      </span>
+    );
+  }
 
   if (!result) {
     return expected ? (

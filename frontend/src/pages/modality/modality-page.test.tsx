@@ -1091,7 +1091,7 @@ describe("ModalityPage modality board", () => {
     expect(within(row).getByTestId("modality-board-status").textContent).not.toContain("Oncology");
   });
 
-  it("renders the MRI primary-screening badge in the patient status area", async () => {
+  it("renders a compact complete MR screening indicator in the patient status area", async () => {
     await openBoard([
       appointment({
         id: 35,
@@ -1100,7 +1100,24 @@ describe("ModalityPage modality board", () => {
       }),
     ]);
 
-    expect(within(screen.getByTestId("modality-board-row-35")).getByText("MRI primary screening complete — no implant reported")).toBeTruthy();
+    const complete = within(screen.getByTestId("modality-board-row-35")).getByLabelText("Primary MRI screening complete — no known implant/device reported.");
+    expect(complete.textContent).toBe("MR");
+    expect(complete.getAttribute("title")).toBe("Primary MRI screening complete — no known implant/device reported.");
+    expect(within(screen.getByTestId("modality-board-row-35")).queryByText("MRI primary screening complete — no implant reported")).toBeNull();
+  });
+
+  it("renders compact MR review and missing-screening indicators", async () => {
+    await openBoard([
+      appointment({ id: 36, modalitySafetyWorkflowType: "mri_primary_implant_screening", mriPrimaryScreening: { result: "implant_reported_review_required", implantSite: "head", implantDescription: "Clip", previousReviewerNameReported: null, screenedByUserId: 1, screenedAt: "2026-06-18T08:00:00Z" } }),
+      appointment({ id: 37, modalitySafetyWorkflowType: "mri_primary_implant_screening", mriPrimaryScreening: null }),
+    ]);
+
+    const review = within(screen.getByTestId("modality-board-row-36")).getByLabelText("MR safety review required — implant/device reported during primary screening. Verify device MR status before scanning.");
+    expect(review.textContent).toBe("MR");
+    expect(review.getAttribute("title")).toBe("MR safety review required — implant/device reported during primary screening. Verify device MR status before scanning.");
+    const missing = within(screen.getByTestId("modality-board-row-37")).getByLabelText("Primary MRI screening not recorded — complete screening before MRI examination.");
+    expect(missing.textContent).toBe("MR?");
+    expect(missing.getAttribute("title")).toBe("Primary MRI screening not recorded — complete screening before MRI examination.");
   });
 
   it("uses language-specific direction spans for Arabic, English, identifiers, and duration", async () => {

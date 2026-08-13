@@ -1129,7 +1129,7 @@ export default function ModalityPage() {
                                   </div>
                                 ) : null}
                                 {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
-                                  <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} />
+                                  <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact />
                                 ) : null}
                                 {appointment.protocolAssignmentSummary ? (
                                   <Badge
