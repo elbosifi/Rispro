@@ -153,8 +153,8 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
   });
 
   return (
-    <article className="overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-      <header className="border-b border-border bg-muted/20 px-4 py-3">
+    <article className="overflow-hidden rounded-xl border border-border bg-card shadow-md">
+      <header className="border-b border-border bg-muted/50 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -173,8 +173,8 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
         </div>
       </header>
 
-      <div className="space-y-3 px-4 py-3">
-      <section className="grid gap-3 rounded-lg border border-border/70 bg-muted/10 p-3 md:grid-cols-3" aria-label={t(language, "comparisons.materialReadiness")}>
+      <div className="space-y-3 bg-card px-4 py-3">
+      <section className="grid gap-3 rounded-lg border border-border/70 bg-muted/30 p-3 md:grid-cols-3" aria-label={t(language, "comparisons.materialReadiness")}>
         <div className="space-y-1">
           <h4 className="text-sm font-semibold">{t(language, "comparisons.images")}</h4>
           <p className={`text-xs font-semibold ${image.tone}`}>{image.label}</p>
@@ -201,7 +201,7 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
       {row.status === "cancelled" ? <p className="rounded-md bg-red-50 p-2 text-xs text-red-800"><strong>{t(language, "comparisons.cancelled")}:</strong> {row.cancellationReason || t(language, "comparisons.noReason")}{row.cancelledAt ? ` · ${formatDateTimeLy(row.cancelledAt)}` : ""}</p> : null}
       {canConfirm ? <ConfirmationPanel row={row} /> : null}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/10 px-4 py-2.5">
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-2.5">
         {row.materialsConfirmed ? (
           <div className="flex flex-wrap gap-2 text-xs text-emerald-700"><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.imagesConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.documentsConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.priorConfirmed")}</span>{row.materialsConfirmedAt ? <span>{t(language, "comparisons.by", { name: row.materialsConfirmedByName || t(language, "comparisons.staff") })} · {formatDateTimeLy(row.materialsConfirmedAt)}</span> : null}</div>
         ) : (
@@ -248,7 +248,7 @@ export default function ComparisonsPage() {
           </form>
         </div>
       ) : null}
-      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl bg-muted/20 p-3"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} />)}</div></div>}
+      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl border border-border/70 bg-muted/60 p-4"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} />)}</div></div>}
     </main>
   );
 }

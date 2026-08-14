@@ -125,7 +125,7 @@ export function ComparisonDocumentsPanel({
   const busy = uploadMutation.isPending || scanMutation.isPending;
 
   return (
-    <section className="rounded-lg border border-border bg-muted/10 p-3" aria-label={t(language, "comparisons.papers")}>
+    <section className="rounded-lg border border-border bg-muted/25 p-3" aria-label={t(language, "comparisons.papers")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h4 className="text-sm font-semibold">{t(language, "comparisons.papers")}</h4>
