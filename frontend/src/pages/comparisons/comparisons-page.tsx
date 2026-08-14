@@ -153,8 +153,9 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
   });
 
   return (
-    <article className="space-y-3 rounded-lg border border-border bg-background p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <article className="overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+      <header className="border-b border-border bg-muted/20 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-semibold">{patientName(row)}</h3>
@@ -169,9 +170,11 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
           <div>{t(language, "comparisons.by", { name: row.createdByName || (row.createdBy ? `#${row.createdBy}` : "-") })}</div>
           <Link to={`/comparisons/${row.id}`} className="mt-2 inline-flex items-center gap-1 font-semibold text-accent"><ExternalLink size={13} />{t(language, "comparisons.openDetails")}</Link>
         </div>
-      </div>
+        </div>
+      </header>
 
-      <section className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-3" aria-label={t(language, "comparisons.materialReadiness")}>
+      <div className="space-y-3 px-4 py-3">
+      <section className="grid gap-3 rounded-lg border border-border/70 bg-muted/10 p-3 md:grid-cols-3" aria-label={t(language, "comparisons.materialReadiness")}>
         <div className="space-y-1">
           <h4 className="text-sm font-semibold">{t(language, "comparisons.images")}</h4>
           <p className={`text-xs font-semibold ${image.tone}`}>{image.label}</p>
@@ -193,16 +196,19 @@ function ComparisonRow({ row, canConfirm, canCancel }: { row: ComparisonRequest;
 
       <ComparisonDocumentsPanel comparisonRequestId={row.id} canAttach={canConfirm && canPrepare} canDelete={canCancel && canPrepare} />
 
-      {row.materialsConfirmed ? (
-        <div className="flex flex-wrap gap-2 text-xs text-emerald-700"><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.imagesConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.documentsConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.priorConfirmed")}</span>{row.materialsConfirmedAt ? <span>{t(language, "comparisons.by", { name: row.materialsConfirmedByName || t(language, "comparisons.staff") })} · {formatDateTimeLy(row.materialsConfirmedAt)}</span> : null}</div>
-      ) : (
-        <div className="inline-flex items-center gap-1 text-xs text-amber-700"><XCircle size={13} />{t(language, "comparisons.waitingConfirmation")}</div>
-      )}
       {row.assignedDoctorName ? <p className="text-xs text-muted-foreground">{t(language, "comparisons.assignedDoctor", { name: row.assignedDoctorName })}</p> : null}
       {row.finalizedAt ? <p className="text-xs text-emerald-700">{t(language, "comparisons.finalizedBy", { date: formatDateTimeLy(row.finalizedAt), name: row.finalizedByName || t(language, "comparisons.staff") })}</p> : null}
       {row.status === "cancelled" ? <p className="rounded-md bg-red-50 p-2 text-xs text-red-800"><strong>{t(language, "comparisons.cancelled")}:</strong> {row.cancellationReason || t(language, "comparisons.noReason")}{row.cancelledAt ? ` · ${formatDateTimeLy(row.cancelledAt)}` : ""}</p> : null}
       {canConfirm ? <ConfirmationPanel row={row} /> : null}
-      {canCancel && canCancelRequest ? <div className="flex justify-end"><Button type="button" variant="ghost" className="text-red-700" onClick={() => setCancelOpen(true)}>{t(language, "comparisons.cancelRequest")}</Button></div> : null}
+      </div>
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/10 px-4 py-2.5">
+        {row.materialsConfirmed ? (
+          <div className="flex flex-wrap gap-2 text-xs text-emerald-700"><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.imagesConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.documentsConfirmed")}</span><span className="inline-flex items-center gap-1"><CheckCircle2 size={13} />{t(language, "comparisons.priorConfirmed")}</span>{row.materialsConfirmedAt ? <span>{t(language, "comparisons.by", { name: row.materialsConfirmedByName || t(language, "comparisons.staff") })} · {formatDateTimeLy(row.materialsConfirmedAt)}</span> : null}</div>
+        ) : (
+          <div className="inline-flex items-center gap-1 text-xs text-amber-700"><XCircle size={13} />{t(language, "comparisons.waitingConfirmation")}</div>
+        )}
+        {canCancel && canCancelRequest ? <Button type="button" variant="ghost" className="text-red-700" onClick={() => setCancelOpen(true)}>{t(language, "comparisons.cancelRequest")}</Button> : null}
+      </footer>
       <CancelComparisonDialog row={row} open={cancelOpen} onClose={() => setCancelOpen(false)} />
     </article>
   );
@@ -242,7 +248,7 @@ export default function ComparisonsPage() {
           </form>
         </div>
       ) : null}
-      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="grid gap-3">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} />)}</div>}
+      {isLoading ? <p className="text-sm text-muted-foreground">{t(language, "comparisons.loading")}</p> : error ? <p className="text-sm text-red-600">{error instanceof Error ? error.message : t(language, "comparisons.loadError")}</p> : rows.length === 0 ? <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">{t(language, "comparisons.empty")}</p> : <div className="rounded-xl bg-muted/20 p-3"><div className="grid gap-5">{rows.map((row) => <ComparisonRow key={row.id} row={row} canConfirm={canConfirm} canCancel={canCancel} />)}</div></div>}
     </main>
   );
 }
