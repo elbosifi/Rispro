@@ -214,10 +214,11 @@ describe("QZ Tray service", () => {
     });
   });
 
-  it("uses custom media and profile-controlled rasterization for a 50 x 30 mm label", async () => {
+  it("uses custom media, auto orientation, and profile-controlled rasterization for a 50 x 30 mm label", async () => {
     const profile = { ...DEFAULT_PRINTER_PROFILES[3], printerName: "Xprinter" };
     await printPdf(profile, "JVBERi0xLjQ=", { jobName: "label" });
-    expect(qzMocks.create).toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 50, height: 30, custom: true }, orientation: "landscape", rasterize: true }));
+    expect(qzMocks.create).toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 50, height: 30, custom: true }, orientation: null, rasterize: true }));
+    expect(qzMocks.create).not.toHaveBeenCalledWith("Xprinter", expect.objectContaining({ size: { width: 30, height: 50, custom: true } }));
   });
 
   it("keeps the A5 standard profile unchanged", async () => {

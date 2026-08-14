@@ -114,6 +114,7 @@ function qzConfig(profile: PrinterProfile, copies: number, jobName: string, pres
       || (profile.paperWidthMm === 297 && profile.paperHeightMm === 210));
   const standardA4Landscape = standardA4 && profile.paperWidthMm === 297 && profile.paperHeightMm === 210;
   const finalizedA4Landscape = standardA4Landscape && preservePdfPageGeometry;
+  const accessionLabelCustomMedia = profile.documentType === "ACCESSION_LABEL" && profile.customPaperSize;
   const size = {
     width: standardA4 ? 210 : profile.paperWidthMm,
     height: standardA4 ? 297 : profile.paperHeightMm,
@@ -122,7 +123,7 @@ function qzConfig(profile: PrinterProfile, copies: number, jobName: string, pres
   return qz.configs.create(profile.printerName, {
     units: "mm",
     ...(!finalizedA4Landscape && standardA4Landscape ? {} : { size }),
-    orientation: finalizedA4Landscape ? "landscape" : preservePdfPageGeometry ? null : expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
+    orientation: finalizedA4Landscape ? "landscape" : preservePdfPageGeometry || accessionLabelCustomMedia ? null : expectedOrientation(profile.paperWidthMm, profile.paperHeightMm),
     copies,
     scaleContent: preservePdfPageGeometry ? false : profile.scaleContent,
     margins: preservePdfPageGeometry ? { top: 0, right: 0, bottom: 0, left: 0 } : profile.marginsMm ?? 0,
