@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintRegistrationList, directPrintReportCenter, directPrintStatistics, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
+import { DIRECT_PRINT_TIMEOUTS, DirectPrintError, directPrint, directPrintIrSpecimenLabel, directPrintRegistrationList, directPrintReportCenter, directPrintStatistics, directTestPrint, getDirectPrintJobState, mapDirectPrintError, validateProfilePageSize } from "./direct-print-service";
 import { createDefaultQzPrinterSettings, loadQzPrinterSettings, saveQzPrinterSettings } from "./workstation-printer-settings";
 import { getGlobalPrintStatus, resetGlobalPrintStatusForTests, subscribeToGlobalPrintStatus } from "./global-print-status";
 
@@ -67,6 +67,32 @@ describe("direct print service", () => {
     expect(connectQzTray).toHaveBeenCalledBefore(getInstalledPrinters);
     expect(printPdf).toHaveBeenCalledTimes(1);
     expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/accession-label/7/pdf?widthMm=50&heightMm=30", expect.objectContaining({ credentials: "include", cache: "no-store" }));
+  });
+
+  it("prints an IR specimen label through the existing accession-label profile and records normalized audit metadata", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!.printerName = "RISPRO Label Queue";
+    saveQzPrinterSettings(settings);
+    getInstalledPrinters.mockResolvedValue(["RISPRO Label Queue"]);
+
+    await expect(directPrintIrSpecimenLabel(7, "V2-000007", "Liver\n lesion  biopsy")).resolves.toMatchObject({ success: true, printerName: "RISPRO Label Queue" });
+    expect(appointmentSlipFetch).toHaveBeenCalledWith("/api/printing/ir-specimen-label/7/pdf", expect.objectContaining({ method: "POST", body: JSON.stringify({ specimenText: "Liver lesion biopsy", widthMm: 50, heightMm: 30 }) }));
+    expect(printPdf).toHaveBeenCalledWith(expect.objectContaining({ documentType: "ACCESSION_LABEL" }), expect.any(String), expect.objectContaining({ jobName: "RISpro IR specimen label - V2-000007" }));
+    expect(auditApi).toHaveBeenCalledWith("/printing/audit", expect.objectContaining({ body: expect.stringContaining('"printPurpose":"ir_specimen"') }));
+    expect(auditApi.mock.calls[0][1].body).toContain('"specimenText":"Liver lesion biopsy"');
+  });
+
+  it("keeps duplicate protection active for IR specimen labels", async () => {
+    const settings = createDefaultQzPrinterSettings();
+    settings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!.printerName = "RISPRO Label Queue";
+    saveQzPrinterSettings(settings);
+    let release!: (printers: string[]) => void;
+    getInstalledPrinters.mockReturnValue(new Promise<string[]>((resolve) => { release = resolve; }));
+    const first = directPrintIrSpecimenLabel(7, "V2-000007", "Liver");
+    await Promise.resolve();
+    await expect(directPrintIrSpecimenLabel(7, "V2-000007", "Liver")).resolves.toMatchObject({ success: false, errorCode: "DUPLICATE_PRINT" });
+    release(["RISPRO Label Queue"]);
+    await expect(first).resolves.toMatchObject({ success: true });
   });
 
   it("publishes the direct-print lifecycle", async () => {

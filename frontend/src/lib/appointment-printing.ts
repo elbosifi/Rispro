@@ -2,7 +2,7 @@ import { getAppointmentById } from "@/lib/api-hooks";
 import { type Language, t } from "@/lib/i18n";
 import { printAppointmentSlip } from "@/lib/print-utils";
 import { pushToast } from "@/lib/toast";
-import { directPrint, resolveAppointmentDocumentType } from "@/services/printing/direct-print-service";
+import { directPrint, directPrintIrSpecimenLabel, resolveAppointmentDocumentType } from "@/services/printing/direct-print-service";
 import { loadQzPrinterSettings } from "@/services/printing/workstation-printer-settings";
 import type { DirectPrintResult } from "@/types/printing";
 import { resolveDirectPrintFailureAction } from "@/services/printing/direct-print-failure-action";
@@ -56,6 +56,21 @@ export async function printAccessionLabelById(appointmentId: number, language?: 
   try {
     const appointment = await getAppointmentById(appointmentId);
     const result = await directPrint({ documentType: "ACCESSION_LABEL", appointmentId, accessionNumber: appointment.accessionNumber, appointmentSnapshot: appointment });
+    if (result.success) {
+      pushToast({ type: "success", title: "Label job submitted", message: `Print job sent to ${result.printerName}.` });
+      return;
+    }
+    showDirectPrintFailure(result, null, language);
+  } catch (error) {
+    const printLanguage = resolvePrintLanguage(language);
+    pushToast({ type: "error", title: t(printLanguage, "print.failed"), message: error instanceof Error ? error.message : t(printLanguage, "common.validationError") });
+  }
+}
+
+export async function printIrSpecimenLabelById(appointmentId: number, specimenText: string, language?: Language): Promise<void> {
+  try {
+    const appointment = await getAppointmentById(appointmentId);
+    const result = await directPrintIrSpecimenLabel(appointmentId, appointment.accessionNumber, specimenText.replace(/\s+/g, " ").trim());
     if (result.success) {
       pushToast({ type: "success", title: "Label job submitted", message: `Print job sent to ${result.printerName}.` });
       return;

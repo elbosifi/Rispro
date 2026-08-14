@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { printAccessionLabelById, printAppointmentSlipById } from "./appointment-printing";
+import { printAccessionLabelById, printAppointmentSlipById, printIrSpecimenLabelById } from "./appointment-printing";
 
 const mockGetAppointmentById = vi.fn();
 const mockPrintAppointmentSlip = vi.fn();
 const mockPushToast = vi.fn();
 const mockDirectPrint = vi.fn();
+const mockDirectPrintIrSpecimenLabel = vi.fn();
 const mockResolveAppointmentDocumentType = vi.fn();
 let mockPrinterSettings: { browserPrintFallbackEnabled: boolean; profiles: Array<{ documentType: string; enabled: boolean }> };
 
@@ -22,6 +23,7 @@ vi.mock("@/lib/toast", () => ({
 
 vi.mock("@/services/printing/direct-print-service", () => ({
   directPrint: (...args: unknown[]) => mockDirectPrint(...args),
+  directPrintIrSpecimenLabel: (...args: unknown[]) => mockDirectPrintIrSpecimenLabel(...args),
   resolveAppointmentDocumentType: (...args: unknown[]) => mockResolveAppointmentDocumentType(...args),
 }));
 
@@ -35,6 +37,7 @@ describe("printAppointmentSlipById", () => {
     mockPrintAppointmentSlip.mockReset();
     mockPushToast.mockReset();
     mockDirectPrint.mockReset();
+    mockDirectPrintIrSpecimenLabel.mockReset();
     mockResolveAppointmentDocumentType.mockReset();
     mockResolveAppointmentDocumentType.mockResolvedValue("A5_DOCUMENT");
     mockPrinterSettings = { browserPrintFallbackEnabled: true, profiles: [{ documentType: "A5_DOCUMENT", enabled: true }] };
@@ -110,6 +113,21 @@ describe("printAppointmentSlipById", () => {
     await printAccessionLabelById(42);
 
     expect(mockPrintAppointmentSlip).not.toHaveBeenCalled();
+    expect(mockPushToast.mock.calls[0][0].action.label).toBe("Open Printing settings");
+  });
+
+  it("loads the appointment and sends normalized IR specimen text through the accession label printer", async () => {
+    mockGetAppointmentById.mockResolvedValue({ id: 42, accessionNumber: "V2-000042" });
+    mockDirectPrintIrSpecimenLabel.mockResolvedValue({ success: true, printerName: "Label Queue", jobName: "test" });
+    await printIrSpecimenLabelById(42, "Liver\n lesion  biopsy");
+    expect(mockGetAppointmentById).toHaveBeenCalledWith(42);
+    expect(mockDirectPrintIrSpecimenLabel).toHaveBeenCalledWith(42, "V2-000042", "Liver lesion biopsy");
+  });
+
+  it("uses the existing printing-settings failure action for an IR specimen label printer error", async () => {
+    mockGetAppointmentById.mockResolvedValue({ id: 42, accessionNumber: "V2-000042" });
+    mockDirectPrintIrSpecimenLabel.mockResolvedValue({ success: false, errorCode: "PRINTER_NOT_CONFIGURED", message: "No label printer." });
+    await printIrSpecimenLabelById(42, "Liver");
     expect(mockPushToast.mock.calls[0][0].action.label).toBe("Open Printing settings");
   });
 

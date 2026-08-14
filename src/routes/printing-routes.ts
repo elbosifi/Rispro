@@ -15,7 +15,7 @@ import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { renderChromiumPdf, ChromiumPdfRenderError } from "../services/chromium-pdf-service.js";
 import { createRegistrationListRenderContext, deleteRegistrationListRenderContext, issueRegistrationListRenderToken } from "../services/registration-list-render-context-service.js";
-import { buildAccessionLabelHtml, buildPrinterTestHtml } from "../services/generated-print-html-service.js";
+import { buildAccessionLabelHtml, buildIrSpecimenLabelHtml, buildPrinterTestHtml } from "../services/generated-print-html-service.js";
 import { buildReportCenterHtml, parseReportCenterRenderModel } from "../services/report-center-pdf-service.js";
 import { buildStatisticsHtml, parseStatisticsRenderModel } from "../services/statistics-pdf-service.js";
 
@@ -61,6 +61,19 @@ function requiredDimension(value: unknown, max: number, label: string): number {
   const parsed = dimension(value, max);
   if (parsed == null) throw new HttpError(400, `${label} is required.`);
   return parsed;
+}
+
+function normalizeSpecimenText(value: unknown, errorMessage = "Specimen / Site is required."): string {
+  if (typeof value !== "string") throw new HttpError(400, errorMessage);
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text || text.length > 80) throw new HttpError(400, errorMessage);
+  return text;
+}
+
+function formatTripoliPrintedAt(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Tripoli", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(value);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
 }
 
 function assertValidRenderProfile(raw: Record<string, unknown>) {
@@ -109,7 +122,12 @@ function parseAudit(body: unknown) {
   if (outcome === "submitted" && failureCode) throw new HttpError(400, "Submitted print audits cannot include a failure code.");
   if (outcome !== "submitted" && !failureCode) throw new HttpError(400, "Failed or unknown print audits require a failure code.");
   if (raw.testPrint != null && typeof raw.testPrint !== "boolean") throw new HttpError(400, "Print audit test marker is invalid.");
-  return { workstationId, documentType, outcome, documentId: optionalString(raw.documentId, 100, /^(?:[1-9]\d{0,19}|[0-9a-f]{8}-[0-9a-f-]{27})$/i), appointmentId, accessionNumber: optionalString(raw.accessionNumber, 100), printerName: optionalString(raw.printerName, 255), paperWidthMm: dimension(raw.paperWidthMm, 500), paperHeightMm: dimension(raw.paperHeightMm, 1000), failureCode, testPrint: raw.testPrint === true };
+  const printPurpose = raw.printPurpose == null ? null : raw.printPurpose;
+  if (printPurpose !== null && printPurpose !== "ir_specimen") throw new HttpError(400, "Print audit purpose is invalid.");
+  const specimenText = raw.specimenText == null ? null : normalizeSpecimenText(raw.specimenText, "Print audit specimen text is invalid.");
+  if (printPurpose === "ir_specimen" && !specimenText) throw new HttpError(400, "Print audit specimen text is required.");
+  if (printPurpose !== "ir_specimen" && raw.specimenText != null) throw new HttpError(400, "Print audit specimen text is invalid.");
+  return { workstationId, documentType, outcome, documentId: optionalString(raw.documentId, 100, /^(?:[1-9]\d{0,19}|[0-9a-f]{8}-[0-9a-f-]{27})$/i), appointmentId, accessionNumber: optionalString(raw.accessionNumber, 100), printerName: optionalString(raw.printerName, 255), paperWidthMm: dimension(raw.paperWidthMm, 500), paperHeightMm: dimension(raw.paperHeightMm, 1000), failureCode, testPrint: raw.testPrint === true, ...(printPurpose ? { printPurpose, specimenText } : {}) };
 }
 
 export const printingRouter = express.Router();
@@ -224,6 +242,25 @@ printingRouter.get("/accession-label/:appointmentId/pdf", chromiumRenderConcurre
   res.setHeader("Cache-Control", "no-store, private");
   res.type("application/pdf").send(pdf);
 }));
+printingRouter.post("/ir-specimen-label/:appointmentId/pdf", chromiumRenderConcurrencyLimiter, asyncRoute(async (req: Request, res: Response) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isSafeInteger(appointmentId) || appointmentId <= 0) throw new HttpError(400, "Appointment identifier is invalid.");
+  const raw = asUnknownRecord(req.body);
+  const specimenText = normalizeSpecimenText(raw.specimenText);
+  const widthMm = requiredDimension(raw.widthMm, 500, "Label width");
+  const heightMm = requiredDimension(raw.heightMm, 1000, "Label height");
+  const result = await pool.query(`
+    select ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, p.arabic_full_name, p.english_full_name
+      from appointments_v2.bookings b
+      join patients p on p.id = b.patient_id
+     where b.id = $1 limit 1`, [appointmentId]);
+  const appointment = result.rows[0];
+  if (!appointment) throw new HttpError(404, "Appointment not found.");
+  const html = buildIrSpecimenLabelHtml({ patientName: appointment.arabic_full_name || appointment.english_full_name || "Patient", accessionNumber: appointment.accession_number, specimenText, printedAt: formatTripoliPrintedAt(new Date()) }, widthMm, heightMm);
+  const pdf = await renderTrustedHtmlPdf(html, "ir-specimen-label");
+  res.setHeader("Cache-Control", "no-store, private");
+  res.type("application/pdf").send(pdf);
+}));
 printingRouter.post("/printer-test/pdf", chromiumRenderConcurrencyLimiter, asyncRoute(async (req: Request, res: Response) => {
   const profile = assertValidRenderProfile(asUnknownRecord(req.body));
   const html = buildPrinterTestHtml({ ...profile, generatedAt: new Date().toISOString() });
@@ -268,5 +305,7 @@ export const __printingRouteTestables = {
   registrationListCompactHeaderTemplate,
   registrationListCompactFooterTemplate,
   finalizedPdfMargins,
+  normalizeSpecimenText,
+  formatTripoliPrintedAt,
   registrationListPdfMargins,
 };

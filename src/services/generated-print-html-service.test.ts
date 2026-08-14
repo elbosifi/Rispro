@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildAccessionLabelHtml, buildPrinterTestHtml, SERVER_PRINT_FONT_FAMILY } from "./generated-print-html-service.js";
+import { buildAccessionLabelHtml, buildIrSpecimenLabelHtml, buildPrinterTestHtml, SERVER_PRINT_FONT_FAMILY } from "./generated-print-html-service.js";
 
 describe("server-owned generated print HTML", () => {
   it("builds an exact-size escaped Arabic label with accession QR content", async () => {
@@ -11,6 +11,12 @@ describe("server-owned generated print HTML", () => {
     assert.match(html, /<svg/);
     assert.match(html, /ACC-0008/);
     assert.doesNotMatch(html, /<أحمد>/);
+  });
+
+  it("builds an exact-size escaped IR specimen label without QR or extra clinical fields", () => {
+    const html = buildIrSpecimenLabelHtml({ patientName: "Patient <unsafe>", accessionNumber: "V2-000123", printedAt: new Date("2026-08-14T21:24:00.000Z"), specimenText: "Liver <lesion> biopsy" }, 50, 30);
+    for (const expected of ["size: 50mm 30mm", SERVER_PRINT_FONT_FAMILY, "Patient &lt;unsafe&gt;", "V2-000123", "14/08/2026 23:24", "Liver &lt;lesion&gt; biopsy"]) assert.match(html, new RegExp(expected));
+    for (const absent of ["<svg", "QR", "MRN", "Procedure date", "Collection time"]) assert.doesNotMatch(html, new RegExp(absent));
   });
 
   it("builds a minimal exact-size printer test with required profile facts", () => {

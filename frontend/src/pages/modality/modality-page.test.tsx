@@ -28,6 +28,7 @@ const createCdRobotDeliveryMock = vi.fn();
 const retryCdRobotDeliveryMock = vi.fn();
 const updateAppointmentStatusMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
+const printIrSpecimenLabelByIdMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
@@ -56,6 +57,7 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/appointment-printing", () => ({
   printAppointmentSlipById: (...args: unknown[]) => printAppointmentSlipByIdMock(...args),
+  printIrSpecimenLabelById: (...args: unknown[]) => printIrSpecimenLabelByIdMock(...args),
 }));
 
 vi.mock("@/lib/protocol-printing", () => ({
@@ -225,7 +227,7 @@ function renderPage(
   rows: AppointmentWithDetails[],
   initialEntry = "/modality",
   cdDestinations: Array<{ key: string; name: string }> = [],
-  options: { role?: string; scanner?: Record<string, unknown> | null } = {},
+  options: { role?: string; scanner?: Record<string, unknown> | null; modalities?: Array<{ id: number; nameAr: string; nameEn: string; code: string; isActive: boolean }> } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -235,7 +237,7 @@ function renderPage(
   });
 
   fetchAppointmentLookupsMock.mockResolvedValue({
-    modalities: [{ id: 1, nameAr: "CT", nameEn: "CT", code: "CT", isActive: true }],
+    modalities: options.modalities ?? [{ id: 1, nameAr: "CT", nameEn: "CT", code: "CT", isActive: true }],
     examTypes: [],
     priorities: [],
     specialReasons: [],
@@ -313,6 +315,37 @@ describe("ModalityPage modality board", () => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
     await user.click(button);
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/modality/document-ingestion?modalityId=1"));
+  });
+
+  it("keeps the specimen label action absent for non-IR modalities", async () => {
+    const user = await openBoard([appointment({ id: 101 })]);
+    await user.click(screen.getByTestId("modality-board-row-101"));
+    expect(within(screen.getByTestId("selected-appointment-drawer")).queryByRole("button", { name: "Print specimen label" })).toBeNull();
+  });
+
+  it("prints a single IR specimen label only after required text is entered", async () => {
+    let resolvePrint!: () => void;
+    printIrSpecimenLabelByIdMock.mockReturnValue(new Promise<void>((resolve) => { resolvePrint = resolve; }));
+    const user = userEvent.setup();
+    renderPage([appointment({ id: 102, modalityId: 2, modalityCode: "IR", modalityNameEn: "Interventional Radiology", accessionNumber: "V2-000102", englishFullName: "IR Patient", mrn: "MRN-IR" })], "/modality", [], { modalities: [{ id: 2, nameAr: "IR", nameEn: "Interventional Radiology", code: "IR", isActive: true }] });
+    await screen.findByRole("option", { name: "Interventional Radiology" });
+    await user.selectOptions(screen.getByRole("combobox"), "2");
+    await user.click(await screen.findByTestId("modality-board-row-102"));
+    const drawer = screen.getByTestId("selected-appointment-drawer");
+    await user.click(within(drawer).getByRole("button", { name: "Print specimen label" }));
+    const dialog = screen.getByRole("heading", { name: "Print specimen label" }).parentElement?.parentElement?.parentElement ?? document.body;
+    expect(within(dialog).getByText("IR Patient")).toBeTruthy();
+    expect(within(dialog).getByText("V2-000102")).toBeTruthy();
+    expect(within(dialog).queryByText("MRN-IR")).toBeNull();
+    const print = within(dialog).getByRole("button", { name: "Print" }) as HTMLButtonElement;
+    expect(print.disabled).toBe(true);
+    await user.type(within(dialog).getByLabelText("Specimen / Site"), "Liver lesion biopsy");
+    expect(print.disabled).toBe(false);
+    await user.click(print);
+    await user.click(print);
+    expect(printIrSpecimenLabelByIdMock).toHaveBeenCalledTimes(1);
+    expect(printIrSpecimenLabelByIdMock).toHaveBeenCalledWith(102, "Liver lesion biopsy", "en");
+    resolvePrint();
   });
 
   it("restores a selected active modality from the worklist URL and rejects an unknown one", async () => {

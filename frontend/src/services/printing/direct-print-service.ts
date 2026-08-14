@@ -56,6 +56,14 @@ async function fetchAccessionLabelPdf(appointmentId: string | number, profile: P
   return blob;
 }
 
+async function fetchIrSpecimenLabelPdf(appointmentId: string | number, specimenText: string, profile: PrinterProfile): Promise<Blob> {
+  const response = await fetch(`/api/printing/ir-specimen-label/${encodeURIComponent(String(appointmentId))}/pdf`, { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ specimenText, widthMm: profile.paperWidthMm, heightMm: profile.paperHeightMm }) });
+  if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "IR specimen-label PDF rendering failed.");
+  const blob = await response.blob();
+  if (!/application\/pdf/i.test(response.headers.get("content-type") || "") || !/pdf/i.test(blob.type)) throw new DirectPrintError("INVALID_PDF", "IR specimen-label rendering did not return a PDF.");
+  return blob;
+}
+
 async function fetchPrinterTestPdf(profile: PrinterProfile): Promise<Blob> {
   const response = await fetch("/api/printing/printer-test/pdf", { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) });
   if (!response.ok) throw new DirectPrintError("DOCUMENT_GENERATION_FAILED", "Printer-test PDF rendering failed.");
@@ -106,11 +114,11 @@ function jobName(request: DirectPrintRequest): string {
   return `RISpro ${request.documentType} - ${identity}`;
 }
 
-async function audit(request: DirectPrintRequest, profile: PrinterProfile | null, result: DirectPrintResult, outcome?: "submitted" | "failed" | "status_unknown", testPrint = false): Promise<void> {
+async function audit(request: DirectPrintRequest, profile: PrinterProfile | null, result: DirectPrintResult, outcome?: "submitted" | "failed" | "status_unknown", testPrint = false, auditMetadata?: { printPurpose: "ir_specimen"; specimenText: string }): Promise<void> {
   const settings = loadQzPrinterSettings();
   const resolvedOutcome = outcome ?? (result.success ? "submitted" : result.errorCode === "PRINT_STATUS_UNKNOWN" ? "status_unknown" : "failed");
   try {
-    await api("/printing/audit", { method: "POST", body: JSON.stringify({ workstationId: settings.workstationId, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, accessionNumber: request.accessionNumber || request.appointmentSnapshot?.accessionNumber, printerName: profile?.printerName || null, paperWidthMm: profile?.paperWidthMm || null, paperHeightMm: profile?.paperHeightMm || null, outcome: resolvedOutcome, failureCode: resolvedOutcome === "submitted" ? null : result.success ? "PRINT_STATUS_UNKNOWN" : result.errorCode, testPrint }) });
+    await api("/printing/audit", { method: "POST", body: JSON.stringify({ workstationId: settings.workstationId, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, accessionNumber: request.accessionNumber || request.appointmentSnapshot?.accessionNumber, printerName: profile?.printerName || null, paperWidthMm: profile?.paperWidthMm || null, paperHeightMm: profile?.paperHeightMm || null, outcome: resolvedOutcome, failureCode: resolvedOutcome === "submitted" ? null : result.success ? "PRINT_STATUS_UNKNOWN" : result.errorCode, testPrint, ...auditMetadata }) });
   } catch (error) { console.error("Unable to record direct-print audit", { error }); }
 }
 
@@ -130,6 +138,7 @@ interface DirectPrintExecutionOptions {
   testPrint?: boolean;
   preservePdfPageGeometry?: boolean;
   diagnostics?: { documentKind: string; rowCount?: number };
+  auditMetadata?: { printPurpose: "ir_specimen"; specimenText: string };
 }
 
 async function executeDirectPrint(request: DirectPrintRequest, options: DirectPrintExecutionOptions = {}): Promise<DirectPrintResult> {
@@ -163,7 +172,7 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
     activeJobs.set(key, "submitted");
     setGlobalPrintStatus({ state: "submitted", printerName: profile.printerName }, key);
     const result: DirectPrintResult = { success: true, printerName: profile.printerName, jobName: name };
-    await audit(request, profile, result, undefined, options.testPrint);
+    await audit(request, profile, result, undefined, options.testPrint, options.auditMetadata);
     return result;
   } catch (error) {
     const result = mapDirectPrintError(error);
@@ -171,15 +180,15 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
       retainLock = true;
       activeJobs.set(key, "status_unknown");
       setGlobalPrintStatus({ state: "status_unknown", printerName: profile.printerName }, key);
-      await audit(request, profile, result, "status_unknown", options.testPrint);
+      await audit(request, profile, result, "status_unknown", options.testPrint, options.auditMetadata);
       // The underlying QZ promise owns the lock after the UI stops waiting.
-      void printStatusSettlement(key, request, profile, options.testPrint === true, nameForSettlement(options, request));
+      void printStatusSettlement(key, request, profile, options.testPrint === true, nameForSettlement(options, request), options.auditMetadata);
       return result;
     }
     activeJobs.set(key, "failed");
     setGlobalPrintStatus({ state: "failed", printerName: profile?.printerName }, key);
     console.error("Direct print failed", { code: result.success ? null : result.errorCode, documentType: request.documentType, documentId: request.documentId, appointmentId: request.appointmentId, technicalError: error instanceof Error ? { name: error.name, message: error.message.slice(0, 500) } : { name: "UnknownError" } });
-    await audit(request, profile, result, undefined, options.testPrint);
+    await audit(request, profile, result, undefined, options.testPrint, options.auditMetadata);
     return result;
   } finally {
     if (!retainLock) { pendingSubmissions.delete(key); activeJobs.delete(key); }
@@ -189,6 +198,12 @@ async function executeDirectPrint(request: DirectPrintRequest, options: DirectPr
 function nameForSettlement(options: DirectPrintExecutionOptions, request: DirectPrintRequest): string { return options.name ?? jobName(request); }
 
 export async function directPrint(request: DirectPrintRequest): Promise<DirectPrintResult> { return executeDirectPrint(request); }
+
+export async function directPrintIrSpecimenLabel(appointmentId: number, accessionNumber: string, specimenText: string): Promise<DirectPrintResult> {
+  const normalizedSpecimenText = specimenText.replace(/\s+/g, " ").trim();
+  const request: DirectPrintRequest = { documentType: "ACCESSION_LABEL", appointmentId, accessionNumber };
+  return executeDirectPrint(request, { key: `ir-specimen-label:${appointmentId}`, name: `RISpro IR specimen label - ${accessionNumber}`, generate: (profile) => fetchIrSpecimenLabelPdf(appointmentId, normalizedSpecimenText, profile), auditMetadata: { printPurpose: "ir_specimen", specimenText: normalizedSpecimenText } });
+}
 
 export async function directPrintRegistrationList(appointmentIds: number[], label: string): Promise<DirectPrintResult> {
   const request: DirectPrintRequest = { documentType: "A4_LANDSCAPE_DOCUMENT" };
@@ -242,11 +257,11 @@ export async function directTestPrint(profile: PrinterProfile): Promise<DirectPr
 }
 
 const pendingSubmissions = new Map<string, Promise<void>>();
-async function printStatusSettlement(key: string, request: DirectPrintRequest, profile: PrinterProfile, testPrint: boolean, submittedJobName: string): Promise<void> {
+async function printStatusSettlement(key: string, request: DirectPrintRequest, profile: PrinterProfile, testPrint: boolean, submittedJobName: string, auditMetadata?: { printPurpose: "ir_specimen"; specimenText: string }): Promise<void> {
   const pending = pendingSubmissions.get(key);
   if (!pending) { activeJobs.delete(key); return; }
-  try { await pending; setGlobalPrintStatus({ state: "submitted", printerName: profile.printerName }, key); await audit(request, profile, { success: true, printerName: profile.printerName, jobName: submittedJobName }, "submitted", testPrint); }
-  catch (error) { setGlobalPrintStatus({ state: "failed", printerName: profile.printerName }, key); await audit(request, profile, mapDirectPrintError(error), "failed", testPrint); }
+  try { await pending; setGlobalPrintStatus({ state: "submitted", printerName: profile.printerName }, key); await audit(request, profile, { success: true, printerName: profile.printerName, jobName: submittedJobName }, "submitted", testPrint, auditMetadata); }
+  catch (error) { setGlobalPrintStatus({ state: "failed", printerName: profile.printerName }, key); await audit(request, profile, mapDirectPrintError(error), "failed", testPrint, auditMetadata); }
   finally { pendingSubmissions.delete(key); activeJobs.delete(key); }
 }
 

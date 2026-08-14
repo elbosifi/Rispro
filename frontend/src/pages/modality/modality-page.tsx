@@ -34,7 +34,7 @@ import {
   Input,
 } from "@/components/shared";
 import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchStatistics, retryCdRobotDelivery, completeAppointment, updateAppointmentStatus, type CdRobotDelivery } from "@/lib/api-hooks";
-import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appointment-printing";
 import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
@@ -523,6 +523,9 @@ export default function ModalityPage() {
   const [cdDestinationKey, setCdDestinationKey] = useState("");
   const [cdReasonCode, setCdReasonCode] = useState("");
   const [cdReasonText, setCdReasonText] = useState("");
+  const [specimenLabelAppointment, setSpecimenLabelAppointment] = useState<AppointmentWithDetails | null>(null);
+  const [specimenLabelText, setSpecimenLabelText] = useState("");
+  const [specimenLabelPrinting, setSpecimenLabelPrinting] = useState(false);
   const [cdError, setCdError] = useState<string | null>(null);
   const [elapsedNow, setElapsedNow] = useState(() => new Date());
 
@@ -682,6 +685,29 @@ export default function ModalityPage() {
   const handlePrint = (appointmentId: number) => {
     void printAppointmentSlipById(appointmentId, language);
   };
+  const openSpecimenLabel = (appointment: AppointmentWithDetails) => {
+    setSpecimenLabelText("");
+    setSpecimenLabelAppointment(appointment);
+    setOpenMoreMenu(null);
+  };
+  const closeSpecimenLabel = () => {
+    if (specimenLabelPrinting) return;
+    setSpecimenLabelAppointment(null);
+    setSpecimenLabelText("");
+  };
+  const submitSpecimenLabel = async () => {
+    if (!specimenLabelAppointment || specimenLabelPrinting) return;
+    const normalizedText = specimenLabelText.replace(/\s+/g, " ").trim();
+    if (!normalizedText) return;
+    setSpecimenLabelPrinting(true);
+    try {
+      await printIrSpecimenLabelById(specimenLabelAppointment.id, normalizedText, language);
+      setSpecimenLabelAppointment(null);
+      setSpecimenLabelText("");
+    } finally {
+      setSpecimenLabelPrinting(false);
+    }
+  };
   const openCd = (appointment: AppointmentWithDetails) => {
     const destinations = cdDestinationsQuery.data?.destinations ?? [];
     if (!destinations.length) return;
@@ -763,6 +789,7 @@ export default function ModalityPage() {
   const modalities = lookups?.modalities ?? [];
   const headerTitle = t(language, "modality.title");
   const currentModality = modalities.find((modality) => String(modality.id) === modalityId);
+  const isIrModality = currentModality?.code?.trim().toUpperCase() === "IR" || currentModality?.nameEn?.trim().toLowerCase() === "interventional radiology";
   const currentModalityLabel = currentModality
     ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
     : "";
@@ -1383,6 +1410,12 @@ export default function ModalityPage() {
             <Printer size={14} />
             <span>{t(language, "common.print")}</span>
           </button>
+          {isIrModality ? (
+            <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} onClick={() => openSpecimenLabel(moreMenuAppointment)}>
+              <Printer size={14} />
+              <span>Print specimen label</span>
+            </button>
+          ) : null}
           {moreMenuAppointment.status === "completed" ? (
             <button
               type="button"
@@ -1402,6 +1435,30 @@ export default function ModalityPage() {
       ) : null}
 
       {cdError ? <div role="alert" className="fixed bottom-4 right-4 z-50 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{cdError}</div> : null}
+      <Dialog open={Boolean(specimenLabelAppointment)} onClose={closeSpecimenLabel}>
+        <DialogContent maxWidth="min(92vw, 420px)">
+          <DialogHeader>
+            <DialogTitle>Print specimen label</DialogTitle>
+            <DialogDescription>The print timestamp is generated automatically when the label is printed.</DialogDescription>
+          </DialogHeader>
+          {specimenLabelAppointment ? (
+            <div className="space-y-4 text-sm">
+              <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div><span className="text-xs text-muted-foreground">Patient</span><p dir="auto" className="font-medium">{chooseLocalized(language, specimenLabelAppointment.arabicFullName, specimenLabelAppointment.englishFullName)}</p></div>
+                <div><span className="text-xs text-muted-foreground">Accession number</span><p className="font-medium">{specimenLabelAppointment.accessionNumber}</p></div>
+              </div>
+              <div>
+                <label htmlFor="ir-specimen-label-text" className="mb-1 block text-sm font-medium">Specimen / Site</label>
+                <Input id="ir-specimen-label-text" autoFocus maxLength={80} value={specimenLabelText} onChange={(event) => setSpecimenLabelText(event.target.value)} />
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="mt-5">
+            <Button type="button" variant="secondary" disabled={specimenLabelPrinting} onClick={closeSpecimenLabel}>Cancel</Button>
+            <Button type="button" disabled={specimenLabelPrinting || !specimenLabelText.replace(/\s+/g, " ").trim()} onClick={() => void submitSpecimenLabel()}>{specimenLabelPrinting ? "Printing..." : "Print"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(documentAppointment)} onClose={() => setDocumentAppointmentId(null)}>
         <DialogContent maxWidth="min(94vw, 760px)" className="!p-5">
           {documentAppointment ? (
@@ -1484,9 +1541,7 @@ export default function ModalityPage() {
                       <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
                     </div>
                   </div>
-                  <Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}>
-                    <Printer size={16} />
-                  </Button>
+                  <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>{isIrModality ? <Button variant="secondary" size="sm" onClick={() => openSpecimenLabel(selectedAppointment)}>Print specimen label</Button> : null}</div>
                 </div>
               </DialogHeader>
 

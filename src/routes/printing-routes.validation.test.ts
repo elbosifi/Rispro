@@ -16,6 +16,7 @@ const valid = { workstationId: "00000000-0000-4000-8000-000000000001", documentT
 describe("printing audit validation", () => {
   it("accepts a submitted client-reported audit", () => assert.equal(__printingRouteTestables.parseAudit(valid).outcome, "submitted"));
   it("accepts a boolean test-print marker without expanding document types", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, testPrint: true }).testPrint, true));
+  it("accepts normalized IR specimen audit metadata", () => assert.deepEqual(__printingRouteTestables.parseAudit({ ...valid, printPurpose: "ir_specimen", specimenText: "Liver\n lesion  biopsy" }).specimenText, "Liver lesion biopsy"));
   it("accepts the physical A4 landscape document type", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210 }).documentType, "A4_LANDSCAPE_DOCUMENT"));
   it("accepts the typed printer-discovery failure code", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, outcome: "failed", failureCode: "PRINTER_DISCOVERY_FAILED" }).failureCode, "PRINTER_DISCOVERY_FAILED"));
   it("rejects arbitrary document types, failure codes, nested values, and dimensions", () => {
@@ -24,6 +25,19 @@ describe("printing audit validation", () => {
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, accessionNumber: { patient: "secret" } }));
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, paperWidthMm: Infinity }));
     assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, testPrint: "true" }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, printPurpose: "other", specimenText: "Liver" }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, printPurpose: "ir_specimen" }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, printPurpose: "ir_specimen", specimenText: " "+" ".repeat(4) }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...valid, printPurpose: "ir_specimen", specimenText: "x".repeat(81) }));
+  });
+});
+
+describe("IR specimen label validation", () => {
+  it("requires, normalizes, and limits specimen text", () => {
+    assert.equal(__printingRouteTestables.normalizeSpecimenText("Liver\n lesion  biopsy"), "Liver lesion biopsy");
+    assert.throws(() => __printingRouteTestables.normalizeSpecimenText(""));
+    assert.throws(() => __printingRouteTestables.normalizeSpecimenText("   \n "));
+    assert.throws(() => __printingRouteTestables.normalizeSpecimenText("x".repeat(81)));
   });
 });
 
@@ -125,6 +139,7 @@ describe("Chromium PDF route concurrency", () => {
       "/registration-list/pdf",
       "/report-center/pdf",
       "/accession-label/:appointmentId/pdf",
+      "/ir-specimen-label/:appointmentId/pdf",
       "/printer-test/pdf",
       "/appointment-slip/:appointmentId/pdf",
     ]) {
