@@ -31,6 +31,7 @@ const printAppointmentSlipByIdMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
 const languageState = vi.hoisted(() => ({ language: "en" as "en" | "ar" }));
 const modalityPageSource = readFileSync(join(process.cwd(), "src/pages/modality/modality-page.tsx"), "utf8");
+const mriPrimaryScreeningBadgesSource = readFileSync(join(process.cwd(), "src/components/appointments/mri-primary-screening-badges.tsx"), "utf8");
 function LocationProbe() { const location = useLocation(); return <span data-testid="location">{location.pathname}{location.search}</span>; }
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -363,6 +364,8 @@ describe("ModalityPage modality board", () => {
     const markArrived = within(scheduledRow).getByRole("button", { name: "Mark arrived" });
     expect(markArrived.textContent).toContain("Mark arrived");
     expect(markArrived.querySelector("svg")).toBeTruthy();
+    expect(within(scheduledRow).queryByRole("button", { name: "Print" })).toBeNull();
+    expect(within(scheduledRow).getByRole("button", { name: "More actions" })).toBeTruthy();
   });
 
   it("shows same-day sibling appointments as compact patient metadata", async () => {
@@ -706,7 +709,9 @@ describe("ModalityPage modality board", () => {
     ]);
     const row = screen.getByTestId("modality-board-row-7");
 
-    await user.click(within(row).getByRole("button", { name: /Print/i }));
+    expect(within(row).queryByRole("button", { name: "Print" })).toBeNull();
+    await user.click(within(row).getByRole("button", { name: /More actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Print" }));
     expect(printAppointmentSlipByIdMock).toHaveBeenCalledWith(7, "en");
 
     await user.click(within(row).getByRole("button", { name: /Complete/i }));
@@ -732,12 +737,10 @@ describe("ModalityPage modality board", () => {
     ]);
 
     const row = screen.getByTestId("modality-board-row-8");
-    const printButton = within(row).getByRole("button", { name: /Print/i });
     const moreButton = within(row).getByRole("button", { name: /More actions/i });
-    expect(printButton.textContent).toContain("Print");
-    expect(printButton.querySelector("svg") || printButton.textContent?.trim()).toBeTruthy();
-    expect(moreButton.textContent).toContain("More");
-    expect(moreButton.querySelector("svg") || moreButton.textContent?.trim()).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Print" })).toBeNull();
+    expect(moreButton.querySelector("svg")).toBeTruthy();
+    expect(moreButton.textContent?.trim()).toBe("");
     expect(within(row).getAllByRole("button").every((button) => Boolean(button.textContent?.trim() || button.querySelector("svg")))).toBe(true);
     expect(within(row).getByRole("button", { name: /Complete/i })).toBeTruthy();
     expect(within(row).queryByRole("button", { name: /Discontinue/i })).toBeNull();
@@ -1094,6 +1097,18 @@ describe("ModalityPage modality board", () => {
     const missing = within(screen.getByTestId("modality-board-row-37")).getByLabelText("Primary MRI screening not recorded — complete screening before MRI examination.");
     expect(missing.textContent).toBe("MR?");
     expect(missing.getAttribute("title")).toBe("Primary MRI screening not recorded — complete screening before MRI examination.");
+    expect(mriPrimaryScreeningBadgesSource).not.toContain('aria-label="Primary MRI screening');
+  });
+
+  it("localizes compact MR screening labels in Arabic", async () => {
+    languageState.language = "ar";
+    await openBoard([
+      appointment({ id: 38, modalitySafetyWorkflowType: "mri_primary_implant_screening", mriPrimaryScreening: null }),
+    ]);
+
+    const tooltip = translate("ar", "appointments.create.safety.compactMissingTooltip");
+    const indicator = within(screen.getByTestId("modality-board-row-38")).getByLabelText(tooltip);
+    expect(indicator.getAttribute("title")).toBe(tooltip);
   });
 
   it("uses language-specific direction spans for Arabic, English, identifiers, and duration", async () => {

@@ -965,7 +965,7 @@ export default function ModalityPage() {
                           <th scope="col" className="w-[118px] px-2 py-2 font-semibold">{chooseLocalized(language, "الوصول", "Accession")}</th>
                           <th scope="col" className="w-[112px] px-2 py-2 font-semibold">{t(language, "modality.documents.column")}</th>
                           <th scope="col" className="w-[92px] px-2 py-2 font-semibold">{chooseLocalized(language, "ملاحظات", "Notes")}</th>
-                          <th scope="col" className="w-[270px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
+                          <th scope="col" className="w-[250px] px-2 py-2 font-semibold">{chooseLocalized(language, "الإجراءات", "Actions")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
@@ -1145,23 +1145,7 @@ export default function ModalityPage() {
                                       </span>
                                       <span>{cdState === "sending" ? t(language, "modality.cd.sending") : cdState === "sent" ? `${t(language, "modality.cd.sent")}${cdSuccessfulCount > 1 ? ` ×${cdSuccessfulCount}` : ""}` : cdState === "failed" ? t(language, "modality.cd.failed") : t(language, "modality.cd")}</span>
                                     </Button>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="sm"
-                                      aria-label={t(language, "common.print")}
-                                      title={t(language, "common.print")}
-                                      className="h-10 min-w-[40px] shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handlePrint(appointment.id);
-                                      }}
-                                    >
-                                      <Printer size={14} />
-                                      <span>{t(language, "common.print")}</span>
-                                    </Button>
-                                  )}
+                                  ) : null}
                                   {canMarkArrived ? (
                                     <Button
                                       type="button"
@@ -1198,21 +1182,18 @@ export default function ModalityPage() {
                                       <span>{chooseLocalized(language, "إكمال", "Complete")}</span>
                                     </Button>
                                   ) : null}
-                                  {canAct || appointment.status === "completed" ? (
-                                    <Button
+                                  <Button
                                       type="button"
                                       variant="secondary"
                                       size="sm"
                                       aria-label={chooseLocalized(language, "إجراءات إضافية", "More actions")}
                                       title={chooseLocalized(language, "إجراءات إضافية", "More actions")}
-                                      className="h-10 min-w-[40px] shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                                      className="h-10 w-10 shrink-0 border border-slate-300 bg-white px-2 text-slate-800 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => handleOpenMoreMenu(event, appointment)}
                                     >
                                       <MoreHorizontal size={14} />
-                                      <span>{chooseLocalized(language, "المزيد", "More")}</span>
                                     </Button>
-                                  ) : null}
                                 </div>
                               </td>
                             </tr>
@@ -1384,12 +1365,10 @@ export default function ModalityPage() {
               <span>{chooseLocalized(language, "انتظار", "Wait")}</span>
             </button>
           ) : null}
-          {moreMenuAppointment.status === "completed" ? (
-            <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} onClick={() => { handlePrint(moreMenuAppointment.id); setOpenMoreMenu(null); }}>
-              <Printer size={14} />
-              <span>{t(language, "common.print")}</span>
-            </button>
-          ) : null}
+          <button type="button" role="menuitem" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-slate-50 ${isArabic ? "flex-row-reverse text-end" : "text-start"}`} onClick={() => { handlePrint(moreMenuAppointment.id); setOpenMoreMenu(null); }}>
+            <Printer size={14} />
+            <span>{t(language, "common.print")}</span>
+          </button>
           {moreMenuAppointment.status === "completed" ? (
             <button
               type="button"
