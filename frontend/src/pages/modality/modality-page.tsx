@@ -1148,9 +1148,14 @@ export default function ModalityPage() {
                                   {canMarkArrived ? (
                                     <Button
                                       type="button"
-                                      variant={appointment.status === "scheduled" ? "primary" : "secondary"}
-                                      size="sm"
-                                      className="h-10 min-w-[40px] shrink-0 px-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+    variant="secondary"
+    size="sm"
+    style={{
+      background: "var(--state-warning-bg)",
+      borderColor: "var(--state-warning-border)",
+      color: "var(--state-warning-text)",
+    }}
+    className="h-10 min-w-[40px] shrink-0 border px-2 font-semibold hover:brightness-95 active:brightness-90 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       aria-label={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
                                       title={chooseLocalized(language, "تسجيل الوصول", "Mark arrived")}
                                       disabled={statusMutation.isPending}
@@ -1166,11 +1171,16 @@ export default function ModalityPage() {
                                   {canCompleteRow ? (
                                     <Button
                                       type="button"
-                                      variant="primary"
-                                      size="sm"
+    variant="secondary"
+    size="sm"
                                       aria-label={chooseLocalized(language, "إكمال", "Complete")}
                                       title={chooseLocalized(language, "إكمال", "Complete")}
-                                      className="h-10 min-w-[40px] shrink-0 px-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+    style={{
+      background: "var(--state-success-text)",
+      borderColor: "var(--state-success-text)",
+      color: "#fff",
+    }}
+    className="h-10 min-w-[40px] shrink-0 border px-2 font-semibold hover:brightness-95 active:brightness-90 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                                       disabled={completeMutation.isPending}
                                       onClick={(event) => {
                                         event.stopPropagation();
