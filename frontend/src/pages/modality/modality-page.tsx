@@ -453,31 +453,6 @@ function hasPrimaryIdentifier(appointment: AppointmentWithDetails): boolean {
   return Boolean(appointment.patientPrimaryIdentifierValue?.trim());
 }
 
-function boardFilterLabel(language: Language, filter: BoardFilter): string {
-  switch (filter) {
-    case "operational":
-      return chooseLocalized(language, "تشغيلي", "Operational");
-    case "ready":
-      return chooseLocalized(language, "جاهز", "Arrived/Ready");
-    case "waiting":
-      return t(language, "status.waiting");
-    case "arrived":
-      return t(language, "status.arrived");
-    case "in-progress":
-      return t(language, "status.in-progress");
-    case "not-arrived":
-      return chooseLocalized(language, "لم يصل", "Not arrived");
-    case "completed":
-      return t(language, "status.completed");
-    case "problem":
-      return chooseLocalized(language, "مشكلة", "Problem");
-    case "all":
-      return chooseLocalized(language, "الكل", "All");
-    default:
-      return "";
-  }
-}
-
 function statusActionLabel(language: Language, action: BoardStatusAction): string {
   switch (action.status) {
     case "discontinued":
@@ -694,10 +669,6 @@ export default function ModalityPage() {
     setConfirmVerified(false);
   };
 
-  const handleClearStatusFilter = () => {
-    setBoardFilter("operational");
-  };
-
   const handleResetView = () => {
     setBoardFilter("operational");
     setDocumentFilter("all");
@@ -796,11 +767,7 @@ export default function ModalityPage() {
   const currentModalityLabel = currentModality
     ? chooseLocalized(language, currentModality.nameAr, currentModality.nameEn) || currentModality.code || `Modality ${currentModality.id}`
     : "";
-  const activeFilterParts = [
-    boardFilter !== "operational" ? boardFilterLabel(language, boardFilter) : "",
-    documentFilter !== "all" ? `${t(language, "modality.documents.filterLabel")}: ${t(language, documentFilter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")}` : "",
-  ].filter(Boolean);
-  const hasActiveFilters = boardFilter !== "operational" || documentFilter !== "all";
+  const hasResettableView = boardFilter !== "operational" || documentFilter !== "all" || date !== todayIsoDateLy() || scope !== "day";
   const lastRefreshedText = dataUpdatedAt > 0
     ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     : EMPTY_VALUE;
@@ -877,69 +844,43 @@ export default function ModalityPage() {
               </Button>
             </div>
           </div>
+          <div className={`mt-3 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-3 ${isArabic ? "flex-row-reverse" : ""}`}>
+            <div className="min-w-[220px] flex-1">
+              <Select
+                label={t(language, "modality.selectModality")}
+                value={modalityId}
+                onChange={handleModalityChange}
+                options={[
+                  { value: "", label: t(language, "modality.selectModality") },
+                  ...modalities.filter((modality) => modality.isActive).map((modality) => ({
+                    value: String(modality.id),
+                    label: chooseLocalized(language, modality.nameAr, modality.nameEn) || modality.code || `Modality ${modality.id}`,
+                  })),
+                ]}
+                required
+              />
+            </div>
+            <div className="w-full min-w-[180px] sm:w-[180px]">
+              <DateInput label={t(language, "modality.date")} value={date} onChange={setDate} disabled={scope === "all"} />
+            </div>
+            <div className="min-w-[220px]">
+              <p className="mb-1.5 text-xs font-mono-data uppercase tracking-[0.08em] text-muted-foreground">{t(language, "modality.scope")}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant={scope === "day" ? "primary" : "secondary"} size="sm" onClick={() => setScope("day")} className="justify-center">{t(language, "modality.scopeToday")}</Button>
+                <Button type="button" variant={scope === "all" ? "primary" : "secondary"} size="sm" onClick={() => setScope("all")} className="justify-center">{t(language, "modality.scopeAll")}</Button>
+              </div>
+            </div>
+          </div>
         </header>
 
         <main className="flex flex-1 flex-col gap-3">
           <section className="flex min-h-0 flex-col gap-3">
-            <Card className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
-              <div className={`grid items-end gap-3 md:grid-cols-[minmax(220px,1fr)_180px_220px] ${isArabic ? "md:[direction:rtl]" : ""}`}>
-                <Select
-                  label={t(language, "modality.selectModality")}
-                  value={modalityId}
-                  onChange={handleModalityChange}
-                  options={[
-                    { value: "", label: t(language, "modality.selectModality") },
-                    ...modalities
-                      .filter((modality) => modality.isActive)
-                      .map((modality) => ({
-                        value: String(modality.id),
-                        label: chooseLocalized(language, modality.nameAr, modality.nameEn) || modality.code || `Modality ${modality.id}`,
-                      })),
-                  ]}
-                  required
-                />
-
-                <DateInput
-                  label={t(language, "modality.date")}
-                  value={date}
-                  onChange={setDate}
-                  disabled={scope === "all"}
-                />
-
-                <div>
-                  <p className="mb-1.5 text-xs font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
-                    {t(language, "modality.scope")}
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      type="button"
-                      variant={scope === "day" ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setScope("day")}
-                      className="justify-center"
-                    >
-                      {t(language, "modality.scopeToday")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={scope === "all" ? "primary" : "secondary"}
-                      size="sm"
-                      onClick={() => setScope("all")}
-                      className="justify-center"
-                    >
-                      {t(language, "modality.scopeAll")}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
             <section
               data-testid="modality-board-section"
               dir={isArabic ? "rtl" : "ltr"}
               className="rounded-xl border border-slate-200/80 bg-white/94"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-start">
+              <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 text-start">
                 <div className="text-start">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{chooseLocalized(language, "لوحة الأجهزة", "Modality board")}</p>
                 </div>
@@ -965,8 +906,8 @@ export default function ModalityPage() {
                     </Button>
                   ))}
                 </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-3 py-1.5" role="group" aria-label={t(language, "modality.documents.filterLabel")}>
+                <div className="h-6 w-px bg-slate-200" aria-hidden="true" />
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t(language, "modality.documents.filterLabel")}>
                 <span className="me-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "modality.documents.filterLabel")}:</span>
                 {(["all", "missing", "uploaded"] as const).map((filter) => (
                   <Button
@@ -982,34 +923,13 @@ export default function ModalityPage() {
                     {t(language, filter === "all" ? "modality.documents.filterAll" : filter === "missing" ? "modality.documents.filterMissing" : "modality.documents.filterUploaded")}
                   </Button>
                 ))}
-              </div>
-
-              {hasActiveFilters ? (
-                <div
-                  data-testid="modality-active-filters"
-                  className={`flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs ${isArabic ? "flex-row-reverse" : ""}`}
-                >
-                  <div className={`flex flex-wrap items-center gap-2 font-medium text-slate-700 ${isArabic ? "flex-row-reverse" : ""}`}>
-                    <span className="uppercase tracking-[0.12em] text-slate-500">{chooseLocalized(language, "تصفية", "Filtered")}:</span>
-                    <span>{activeFilterParts.join(" • ")}</span>
-                  </div>
-                  <div className={`flex flex-wrap items-center gap-1.5 ${isArabic ? "flex-row-reverse" : ""}`}>
-                    {boardFilter !== "operational" ? (
-                      <Button type="button" variant="secondary" size="sm" onClick={handleClearStatusFilter} className="h-7 px-2 text-[11px]">
-                        {chooseLocalized(language, "مسح الحالة", "Clear status")}
-                      </Button>
-                    ) : null}
-                    {documentFilter !== "all" ? (
-                      <Button type="button" variant="secondary" size="sm" onClick={() => setDocumentFilter("all")} className="h-7 px-2 text-[11px]">
-                        {t(language, "modality.documents.clearFilter")}
-                      </Button>
-                    ) : null}
-                    <Button type="button" variant="secondary" size="sm" onClick={handleResetView} className="h-7 px-2 text-[11px]">
-                      {chooseLocalized(language, "إعادة العرض", "Reset view")}
-                    </Button>
-                  </div>
                 </div>
-              ) : null}
+                {hasResettableView ? (
+                  <Button type="button" variant="secondary" size="sm" onClick={handleResetView} className="h-7 px-2 text-[11px]">
+                    {chooseLocalized(language, "إعادة العرض", "Reset view")}
+                  </Button>
+                ) : null}
+              </div>
 
               <div className="border-t border-slate-200">
                 {initialWorklistLoading ? (
@@ -1113,8 +1033,10 @@ export default function ModalityPage() {
                               <td className="px-2 py-1.5">
                                 <p lang="ar" dir="rtl" className="truncate text-sm font-bold leading-5 text-foreground">{appointment.arabicFullName}</p>
                                 {showEnglishName ? <p lang="en" dir="ltr" className="truncate text-xs leading-4 text-slate-600">{englishName}</p> : null}
-                                {appointment.caseCategory ? (
-                                  <div
+                                {appointment.caseCategory || appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
+                                  <div className="mt-0.5 inline-flex max-w-full items-center gap-1.5">
+                                    {appointment.caseCategory ? (
+                                      <div
                                     data-testid="modality-board-case-category"
                                     role="group"
                                     aria-label={chooseLocalized(
@@ -1122,14 +1044,16 @@ export default function ModalityPage() {
                                       `فئة الحالة: ${t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}`,
                                       `Case category: ${t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}`
                                     )}
-                                    className={`mt-0.5 inline-flex max-w-full items-center gap-1 whitespace-nowrap text-[11px] font-medium leading-4 ${appointment.caseCategory === "oncology" ? "text-rose-700" : "text-blue-700"}`}
+                                    className={`inline-flex min-w-0 items-center gap-1 whitespace-nowrap text-[11px] font-medium leading-4 ${appointment.caseCategory === "oncology" ? "text-rose-700" : "text-blue-700"}`}
                                   >
                                     <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${appointment.caseCategory === "oncology" ? "bg-rose-600" : "bg-blue-700"}`} />
                                     <span className="truncate">{t(language, appointment.caseCategory === "oncology" ? "appointments.create.oncology" : "appointments.create.nonOncology")}</span>
                                   </div>
-                                ) : null}
-                                {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
-                                  <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact />
+                                    ) : null}
+                                    {appointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? (
+                                      <MriPrimaryScreeningBadges result={appointment.mriPrimaryScreening?.result ?? null} compact />
+                                    ) : null}
+                                  </div>
                                 ) : null}
                                 {appointment.hasMultipleAppointments && relatedAppointments.length > 0 ? <p dir={isArabic ? "rtl" : "ltr"} className="truncate text-[10px] leading-4 text-slate-500">{chooseLocalized(language, `${relatedAppointments.length} مواعيد مرتبطة`, `${relatedAppointments.length} related`)}</p> : null}
                               </td>
@@ -1153,8 +1077,9 @@ export default function ModalityPage() {
                               </td>
                               <td className="px-2 py-1.5 text-[11px] text-slate-700">
                                 {appointment.protocolAssignmentSummary ? (
-                                  <span className="block truncate" title={protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}>
-                                    {protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}
+                                  <span className="inline-flex max-w-full items-center gap-1 truncate font-semibold text-emerald-700" title={protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber)}>
+                                    <BadgeCheck size={12} className="shrink-0" aria-hidden="true" />
+                                    <span className="truncate">{protocolVersionLabel(appointment.protocolAssignmentSummary.protocolName, appointment.protocolAssignmentSummary.versionNumber, appointment.protocolAssignmentSummary.freeTextProtocol)}</span>
                                   </span>
                                 ) : isProtocolModality(appointment) ? (
                                   <span className="text-[10px] text-muted-foreground">No protocol assigned</span>

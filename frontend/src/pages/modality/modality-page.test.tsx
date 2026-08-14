@@ -641,7 +641,7 @@ describe("ModalityPage modality board", () => {
     expect(modalityPageSource).not.toContain("<MetricCard");
   });
 
-  it("shows active filter strip for completed status and can clear only status", async () => {
+  it("keeps status filtering in the compact toolbar without a redundant active-filter row", async () => {
     const user = await openBoard([
       appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
       appointment({ id: 2, accessionNumber: "ACC-DONE", status: "completed", completedAt: "2026-06-18T10:00:00Z", englishFullName: "Done Patient" }),
@@ -649,35 +649,12 @@ describe("ModalityPage modality board", () => {
 
     await user.click(screen.getByRole("button", { name: /^Completed\s+1$/i }));
 
-    expect(screen.getByTestId("modality-active-filters").textContent).toContain("Completed");
     expect(boardAccessions()).toEqual(["ACC-DONE"]);
-
-    await user.click(screen.getByRole("button", { name: "Clear status" }));
-
     expect(screen.queryByTestId("modality-active-filters")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Operational" }));
+
     expect(boardAccessions()).toEqual(["ACC-WAIT"]);
-  });
-
-  it("does not repeat the selected date in the compact status-filter strip", async () => {
-    const user = await openBoard([
-      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
-    ]);
-
-    await user.clear(screen.getByLabelText("Date"));
-    await user.type(screen.getByLabelText("Date"), "17/06/2026");
-    await user.tab();
-
-    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
-  });
-
-  it("does not repeat all-dates scope in the compact status-filter strip", async () => {
-    const user = await openBoard([
-      appointment({ id: 1, accessionNumber: "ACC-WAIT", status: "waiting", arrivedAt: "2026-06-18T08:10:00Z", englishFullName: "Waiting Patient" }),
-    ]);
-
-    await user.click(screen.getByRole("button", { name: "All Dates" }));
-
-    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
   });
 
   it("reset view returns to operational today scope while preserving selected modality", async () => {
@@ -690,7 +667,6 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByRole("button", { name: /^Completed\s+1$/i }));
     await user.click(screen.getByRole("button", { name: "Reset view" }));
 
-    expect(screen.queryByTestId("modality-active-filters")).toBeNull();
     expect(screen.getByRole("combobox")).toHaveProperty("value", "1");
     expect(screen.getByLabelText("Date")).toHaveProperty("value", "18/06/2026");
     expect(boardAccessions()).toEqual(["ACC-WAIT"]);
