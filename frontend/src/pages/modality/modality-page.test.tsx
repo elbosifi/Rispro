@@ -739,8 +739,8 @@ describe("ModalityPage modality board", () => {
     const row = screen.getByTestId("modality-board-row-8");
     const moreButton = within(row).getByRole("button", { name: /More actions/i });
     expect(within(row).queryByRole("button", { name: "Print" })).toBeNull();
-    expect(moreButton.querySelector("svg")).toBeTruthy();
-    expect(moreButton.textContent?.trim()).toBe("");
+    expect(moreButton.querySelector("svg")).toBeNull();
+    expect(moreButton.textContent?.trim()).toBe("…");
     expect(within(row).getAllByRole("button").every((button) => Boolean(button.textContent?.trim() || button.querySelector("svg")))).toBe(true);
     expect(within(row).getByRole("button", { name: /Complete/i })).toBeTruthy();
     expect(within(row).queryByRole("button", { name: /Discontinue/i })).toBeNull();

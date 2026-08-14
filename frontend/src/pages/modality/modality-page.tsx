@@ -9,7 +9,6 @@ import {
   Clock3,
   ChevronRight,
   Disc3,
-  MoreHorizontal,
   Printer,
   RefreshCw,
   RotateCcw,
@@ -1192,7 +1191,12 @@ export default function ModalityPage() {
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => handleOpenMoreMenu(event, appointment)}
                                     >
-                                      <MoreHorizontal size={14} />
+                                      <span
+                                        aria-hidden="true"
+                                        className="block -translate-y-px text-xl font-semibold leading-none text-slate-800"
+                                      >
+                                        …
+                                      </span>
                                     </Button>
                                 </div>
                               </td>
