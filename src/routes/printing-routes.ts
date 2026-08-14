@@ -117,6 +117,7 @@ function parseAudit(body: unknown) {
   if (!workstationId) throw new HttpError(400, "A valid workstation identifier is required.");
   const appointmentId = raw.appointmentId == null ? null : Number(raw.appointmentId);
   if (appointmentId != null && (!Number.isSafeInteger(appointmentId) || appointmentId <= 0)) throw new HttpError(400, "Appointment identifier is invalid.");
+  const accessionNumber = optionalString(raw.accessionNumber, 100);
   const failureCode = optionalString(raw.failureCode, 80);
   if (failureCode && !FAILURE_CODES.has(failureCode)) throw new HttpError(400, "Print audit failure code is invalid.");
   if (outcome === "submitted" && failureCode) throw new HttpError(400, "Submitted print audits cannot include a failure code.");
@@ -126,8 +127,9 @@ function parseAudit(body: unknown) {
   if (printPurpose !== null && printPurpose !== "ir_specimen") throw new HttpError(400, "Print audit purpose is invalid.");
   const specimenText = raw.specimenText == null ? null : normalizeSpecimenText(raw.specimenText, "Print audit specimen text is invalid.");
   if (printPurpose === "ir_specimen" && !specimenText) throw new HttpError(400, "Print audit specimen text is required.");
+  if (printPurpose === "ir_specimen" && (documentType !== "ACCESSION_LABEL" || appointmentId == null || !accessionNumber)) throw new HttpError(400, "IR specimen print audit identity is invalid.");
   if (printPurpose !== "ir_specimen" && raw.specimenText != null) throw new HttpError(400, "Print audit specimen text is invalid.");
-  return { workstationId, documentType, outcome, documentId: optionalString(raw.documentId, 100, /^(?:[1-9]\d{0,19}|[0-9a-f]{8}-[0-9a-f-]{27})$/i), appointmentId, accessionNumber: optionalString(raw.accessionNumber, 100), printerName: optionalString(raw.printerName, 255), paperWidthMm: dimension(raw.paperWidthMm, 500), paperHeightMm: dimension(raw.paperHeightMm, 1000), failureCode, testPrint: raw.testPrint === true, ...(printPurpose ? { printPurpose, specimenText } : {}) };
+  return { workstationId, documentType, outcome, documentId: optionalString(raw.documentId, 100, /^(?:[1-9]\d{0,19}|[0-9a-f]{8}-[0-9a-f-]{27})$/i), appointmentId, accessionNumber, printerName: optionalString(raw.printerName, 255), paperWidthMm: dimension(raw.paperWidthMm, 500), paperHeightMm: dimension(raw.paperHeightMm, 1000), failureCode, testPrint: raw.testPrint === true, ...(printPurpose ? { printPurpose, specimenText } : {}) };
 }
 
 export const printingRouter = express.Router();

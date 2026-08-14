@@ -42,7 +42,7 @@ export function buildIrSpecimenLabelHtml(data: { patientName: string; accessionN
     : data.printedAt;
   return pageDocument(widthMm, heightMm, `<main data-ir-specimen-label-document="true"><strong dir="auto">${escapeHtml(data.patientName || "Patient")}</strong><span>${escapeHtml(data.accessionNumber)}</span><span>${escapeHtml(printedAt)}</span><p dir="auto">${escapeHtml(data.specimenText)}</p></main>`, `
     main { width: 100%; height: 100%; box-sizing: border-box; padding: 2mm; display: flex; flex-direction: column; gap: .7mm; overflow: hidden; }
-    strong { font-size: clamp(8pt, ${Math.max(8, Math.min(12, heightMm * .38))}pt, 12pt); line-height: 1.15; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    strong { font-size: clamp(8pt, ${Math.max(8, Math.min(12, heightMm * .38))}pt, 12pt); line-height: 1.15; max-height: 2.3em; overflow: hidden; overflow-wrap: anywhere; }
     span { font-size: clamp(6pt, ${Math.max(6, Math.min(8, heightMm * .23))}pt, 8pt); line-height: 1.15; }
     p { margin: .3mm 0 0; font-size: clamp(7pt, ${Math.max(7, Math.min(9, heightMm * .28))}pt, 9pt); line-height: 1.2; overflow: hidden; overflow-wrap: anywhere; }
   `);

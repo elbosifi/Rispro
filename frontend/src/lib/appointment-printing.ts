@@ -67,18 +67,21 @@ export async function printAccessionLabelById(appointmentId: number, language?: 
   }
 }
 
-export async function printIrSpecimenLabelById(appointmentId: number, specimenText: string, language?: Language): Promise<void> {
+export async function printIrSpecimenLabelById(appointmentId: number, specimenText: string, language?: Language): Promise<DirectPrintResult> {
   try {
     const appointment = await getAppointmentById(appointmentId);
     const result = await directPrintIrSpecimenLabel(appointmentId, appointment.accessionNumber, specimenText.replace(/\s+/g, " ").trim());
     if (result.success) {
       pushToast({ type: "success", title: "Label job submitted", message: `Print job sent to ${result.printerName}.` });
-      return;
+      return result;
     }
     showDirectPrintFailure(result, null, language);
+    return result;
   } catch (error) {
     const printLanguage = resolvePrintLanguage(language);
-    pushToast({ type: "error", title: t(printLanguage, "print.failed"), message: error instanceof Error ? error.message : t(printLanguage, "common.validationError") });
+    const message = error instanceof Error ? error.message : t(printLanguage, "common.validationError");
+    pushToast({ type: "error", title: t(printLanguage, "print.failed"), message });
+    return { success: false, errorCode: "PRINT_FAILED", message };
   }
 }
 

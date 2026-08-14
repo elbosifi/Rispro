@@ -19,6 +19,14 @@ describe("server-owned generated print HTML", () => {
     for (const absent of ["<svg", "QR", "MRN", "Procedure date", "Collection time"]) assert.doesNotMatch(html, new RegExp(absent));
   });
 
+  it("wraps a long Arabic IR patient name over at most two prominent lines", () => {
+    const html = buildIrSpecimenLabelHtml({ patientName: "المريض محمد عبد الرحمن أحمد الساعدي الطويل جداً", accessionNumber: "V2-000123", printedAt: "14/08/2026 23:24", specimenText: "Liver lesion biopsy" }, 50, 30);
+    assert.match(html, /المريض محمد عبد الرحمن أحمد الساعدي الطويل جداً/);
+    assert.match(html, /strong \{[^}]*max-height: 2\.3em[^}]*overflow-wrap: anywhere/);
+    assert.doesNotMatch(html, /strong \{[^}]*white-space: nowrap/);
+    assert.doesNotMatch(html, /strong \{[^}]*text-overflow: ellipsis/);
+  });
+
   it("builds a minimal exact-size printer test with required profile facts", () => {
     const html = buildPrinterTestHtml({ printerName: "Label Queue", documentType: "ACCESSION_LABEL", widthMm: 50, heightMm: 30, orientation: "landscape", customPaperSize: true, rasterize: true, generatedAt: "2026-08-07T12:00:00.000Z" });
     for (const expected of ["size: 50mm 30mm", "Label Queue", "ACCESSION_LABEL", "Orientation: landscape", "Custom media: yes", "Rasterize: yes", "2026-08-07T12:00:00.000Z"]) assert.match(html, new RegExp(expected));

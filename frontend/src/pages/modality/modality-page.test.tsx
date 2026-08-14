@@ -324,8 +324,8 @@ describe("ModalityPage modality board", () => {
   });
 
   it("prints a single IR specimen label only after required text is entered", async () => {
-    let resolvePrint!: () => void;
-    printIrSpecimenLabelByIdMock.mockReturnValue(new Promise<void>((resolve) => { resolvePrint = resolve; }));
+    let resolvePrint!: (result: { success: true; printerName: string; jobName: string }) => void;
+    printIrSpecimenLabelByIdMock.mockReturnValue(new Promise<{ success: true; printerName: string; jobName: string }>((resolve) => { resolvePrint = resolve; }));
     const user = userEvent.setup();
     renderPage([appointment({ id: 102, modalityId: 2, modalityCode: "IR", modalityNameEn: "Interventional Radiology", accessionNumber: "V2-000102", englishFullName: "IR Patient", mrn: "MRN-IR" })], "/modality", [], { modalities: [{ id: 2, nameAr: "IR", nameEn: "Interventional Radiology", code: "IR", isActive: true }] });
     await screen.findByRole("option", { name: "Interventional Radiology" });
@@ -345,7 +345,25 @@ describe("ModalityPage modality board", () => {
     await user.click(print);
     expect(printIrSpecimenLabelByIdMock).toHaveBeenCalledTimes(1);
     expect(printIrSpecimenLabelByIdMock).toHaveBeenCalledWith(102, "Liver lesion biopsy", "en");
-    resolvePrint();
+    resolvePrint({ success: true, printerName: "Label Queue", jobName: "test" });
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Print specimen label" })).toBeNull());
+  });
+
+  it("keeps the IR specimen dialog and exact text open after a print failure", async () => {
+    printIrSpecimenLabelByIdMock.mockResolvedValue({ success: false, errorCode: "PRINTER_NOT_CONFIGURED", message: "No label printer." });
+    const user = userEvent.setup();
+    renderPage([appointment({ id: 103, modalityId: 2, modalityCode: "IR", modalityNameEn: "Interventional Radiology", accessionNumber: "V2-000103", englishFullName: "IR Patient" })], "/modality", [], { modalities: [{ id: 2, nameAr: "IR", nameEn: "Interventional Radiology", code: "IR", isActive: true }] });
+    await screen.findByRole("option", { name: "Interventional Radiology" });
+    await user.selectOptions(screen.getByRole("combobox"), "2");
+    await user.click(await screen.findByTestId("modality-board-row-103"));
+    await user.click(within(screen.getByTestId("selected-appointment-drawer")).getByRole("button", { name: "Print specimen label" }));
+    const dialog = screen.getByRole("heading", { name: "Print specimen label" }).parentElement?.parentElement?.parentElement ?? document.body;
+    const text = within(dialog).getByLabelText("Specimen / Site") as HTMLInputElement;
+    await user.type(text, "Liver lesion biopsy");
+    await user.click(within(dialog).getByRole("button", { name: "Print" }));
+    await waitFor(() => expect(printIrSpecimenLabelByIdMock).toHaveBeenCalledWith(103, "Liver lesion biopsy", "en"));
+    expect(screen.getByRole("heading", { name: "Print specimen label" })).toBeTruthy();
+    expect(text.value).toBe("Liver lesion biopsy");
   });
 
   it("restores a selected active modality from the worklist URL and rejects an unknown one", async () => {

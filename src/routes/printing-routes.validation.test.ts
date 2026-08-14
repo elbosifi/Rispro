@@ -17,6 +17,12 @@ describe("printing audit validation", () => {
   it("accepts a submitted client-reported audit", () => assert.equal(__printingRouteTestables.parseAudit(valid).outcome, "submitted"));
   it("accepts a boolean test-print marker without expanding document types", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, testPrint: true }).testPrint, true));
   it("accepts normalized IR specimen audit metadata", () => assert.deepEqual(__printingRouteTestables.parseAudit({ ...valid, printPurpose: "ir_specimen", specimenText: "Liver\n lesion  biopsy" }).specimenText, "Liver lesion biopsy"));
+  it("requires an accession-label appointment identity for IR specimen audits", () => {
+    const irAudit = { ...valid, printPurpose: "ir_specimen", specimenText: "Liver biopsy" };
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...irAudit, appointmentId: null }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...irAudit, accessionNumber: null }));
+    assert.throws(() => __printingRouteTestables.parseAudit({ ...irAudit, documentType: "A4_DOCUMENT" }));
+  });
   it("accepts the physical A4 landscape document type", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, documentType: "A4_LANDSCAPE_DOCUMENT", paperWidthMm: 297, paperHeightMm: 210 }).documentType, "A4_LANDSCAPE_DOCUMENT"));
   it("accepts the typed printer-discovery failure code", () => assert.equal(__printingRouteTestables.parseAudit({ ...valid, outcome: "failed", failureCode: "PRINTER_DISCOVERY_FAILED" }).failureCode, "PRINTER_DISCOVERY_FAILED"));
   it("rejects arbitrary document types, failure codes, nested values, and dimensions", () => {

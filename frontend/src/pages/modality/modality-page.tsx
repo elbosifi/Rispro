@@ -701,9 +701,11 @@ export default function ModalityPage() {
     if (!normalizedText) return;
     setSpecimenLabelPrinting(true);
     try {
-      await printIrSpecimenLabelById(specimenLabelAppointment.id, normalizedText, language);
-      setSpecimenLabelAppointment(null);
-      setSpecimenLabelText("");
+      const result = await printIrSpecimenLabelById(specimenLabelAppointment.id, normalizedText, language);
+      if (result.success) {
+        setSpecimenLabelAppointment(null);
+        setSpecimenLabelText("");
+      }
     } finally {
       setSpecimenLabelPrinting(false);
     }
