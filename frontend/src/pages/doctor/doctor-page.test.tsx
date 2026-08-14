@@ -131,12 +131,21 @@ const dismissReportingBoardNotificationMock = vi.fn();
 const markAllReportingBoardNotificationsReadMock = vi.fn();
 const pushToastMock = vi.fn();
 const printProtocolSheetMock = vi.fn();
+const searchPatientsMock = vi.fn();
+const fetchAppointmentsMock = vi.fn();
+const getAppointmentByIdMock = vi.fn();
+const fetchPatientDirectorySummaryMock = vi.fn();
+const appointmentDetailsReadOnlyMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchCurrentSession: async () => ({ id: 1, username: "e2e_doctor", fullName: "E2E Doctor", role: "doctor" }),
   fetchIntegrationStatus: async () => ({}),
   fetchDoctorMe: () => fetchDoctorMeMock(),
   fetchPageVisibilityMatrix: () => fetchPageVisibilityMatrixMock(),
+  searchPatients: (...args: unknown[]) => searchPatientsMock(...args),
+  fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
+  getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
+  fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
   fetchNoShowSummary: () => fetchNoShowSummaryMock(),
   fetchMyDoctorRoster: (...args: unknown[]) => fetchMyDoctorRosterMock(...args),
   fetchDoctorRosterWeek: (...args: unknown[]) => fetchDoctorRosterWeekMock(...args),
@@ -272,6 +281,17 @@ vi.mock("@/lib/toast", () => ({
 
 vi.mock("@/lib/protocol-printing", () => ({
   printProtocolSheet: (...args: unknown[]) => printProtocolSheetMock(...args),
+}));
+
+vi.mock("@/components/appointments/appointment-information-view", () => ({
+  AppointmentDetailsReadOnly: (props: { appointment: { id: number }; readOnly: boolean }) => {
+    appointmentDetailsReadOnlyMock(props);
+    return <div data-testid="read-only-appointment-details" data-read-only={String(props.readOnly)}>Read-only appointment {props.appointment.id}</div>;
+  },
+}));
+
+vi.mock("@/components/patients/patient-summary-content", () => ({
+  PatientSummaryContent: () => <div data-testid="read-only-patient-summary">Read-only patient summary</div>,
 }));
 
 function CorePlaceholder() {
@@ -525,6 +545,11 @@ describe("Doctor Portal shell", () => {
     markAllReportingBoardNotificationsReadMock.mockReset();
     pushToastMock.mockReset();
     printProtocolSheetMock.mockReset();
+    searchPatientsMock.mockReset();
+    fetchAppointmentsMock.mockReset();
+    getAppointmentByIdMock.mockReset();
+    fetchPatientDirectorySummaryMock.mockReset();
+    appointmentDetailsReadOnlyMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -785,6 +810,10 @@ describe("Doctor Portal shell", () => {
     fetchReportingBoardCasesMock.mockResolvedValue({ cases: [], filters: { dateFrom: "2026-05-15", cutoffDate: "2026-05-15", reportStatus: "required_not_final" } });
     fetchOhifViewerAvailabilityMock.mockResolvedValue({ enabled: false, configured: false, openMode: "new_tab" });
     fetchPageVisibilityMatrixMock.mockResolvedValue(DEFAULT_PAGE_VISIBILITY_MATRIX);
+    searchPatientsMock.mockResolvedValue([]);
+    fetchAppointmentsMock.mockResolvedValue([]);
+    getAppointmentByIdMock.mockResolvedValue(null);
+    fetchPatientDirectorySummaryMock.mockResolvedValue({});
     fetchNoShowSummaryMock.mockResolvedValue({ mode: "manual", pendingCount: 0, lastAutomaticProcessedCount: 0 });
     fetchReportingBoardSavedViewsMock.mockResolvedValue([]);
     fetchMyDoctorReportingWorklistMock.mockResolvedValue({
@@ -826,6 +855,69 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("button", { name: "Open account menu" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Switch workspace: Doctor Workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /My Work/i })).toBeTruthy();
+  });
+
+  it("opens read-only patient details in Doctor Workspace from a patient search result", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    searchPatientsMock.mockResolvedValue([{
+      id: 5,
+      arabicFullName: "Search Patient",
+      englishFullName: "Search Patient English",
+      mrn: "MRN-5",
+      phone1: null,
+      nationalId: null,
+      identifierValue: null,
+      category: "adult",
+    }]);
+
+    renderDoctorPortal("/doctor/my-work");
+
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "se" } });
+    fireEvent.click((await screen.findAllByRole("option", { name: /Search Patient/i }))[0]);
+
+    const drawer = await screen.findByTestId("doctor-read-only-details-drawer");
+    expect(await within(drawer).findByTestId("read-only-patient-summary")).toBeTruthy();
+    expect(within(drawer).queryByRole("tab", { name: "Appointment" })).toBeNull();
+    expect(screen.getAllByRole("banner")[0].textContent).toContain("Doctor Workspace");
+    expect(screen.queryByText("Edit Patient")).toBeNull();
+    expect(screen.queryByText("Create Appointment")).toBeNull();
+  });
+
+  it("opens read-only appointment and patient details in Doctor Workspace from a registration search result", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchPageVisibilityMatrixMock.mockResolvedValue({
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      registrations: [...DEFAULT_PAGE_VISIBILITY_MATRIX.registrations, "doctor"],
+    });
+    const registration = {
+      id: 44,
+      patientId: 5,
+      status: "scheduled",
+      accessionNumber: "V2-000044",
+      arabicFullName: "Registration Patient",
+      englishFullName: "Registration Patient English",
+      appointmentDate: "2027-01-04",
+      modalityNameAr: "CT",
+      modalityNameEn: "CT",
+      examNameAr: "CT Brain",
+      examNameEn: "CT Brain",
+    };
+    fetchAppointmentsMock.mockResolvedValue([registration]);
+    getAppointmentByIdMock.mockResolvedValue(registration);
+
+    renderDoctorPortal("/doctor/my-work");
+
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "re" } });
+    fireEvent.click((await screen.findAllByRole("option", { name: /V2-000044/i }))[0]);
+
+    await waitFor(() => expect(getAppointmentByIdMock).toHaveBeenCalledWith(44));
+    const drawer = await screen.findByTestId("doctor-read-only-details-drawer");
+    expect(within(drawer).getByRole("tab", { name: "Appointment" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(drawer).getByRole("tab", { name: "Patient" })).toBeTruthy();
+    expect(within(drawer).getByTestId("read-only-appointment-details").getAttribute("data-read-only")).toBe("true");
+    expect(appointmentDetailsReadOnlyMock).toHaveBeenCalledWith(expect.objectContaining({ readOnly: true }));
+    expect(screen.getAllByRole("banner")[0].textContent).toContain("Doctor Workspace");
+    expect(screen.queryByTestId("core-page")).toBeNull();
   });
 
   it("opens the Doctor navigation drawer from the shared mobile top-bar menu", async () => {

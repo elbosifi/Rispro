@@ -36,6 +36,7 @@ import { DoctorAvailabilityPage } from "./doctor-availability-page";
 import { DoctorAdminDoctorsPage } from "./doctor-admin-doctors-page";
 import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
 import { DoctorWorklistsPage, MyReportingWorklistCard } from "./doctor-worklists-page";
+import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -43,6 +44,11 @@ type DoctorPortalNavItem = {
   icon: typeof LayoutDashboard;
   management?: boolean;
 };
+
+type DoctorSearchSelection =
+  | { kind: "patient"; patientId: number }
+  | { kind: "registration"; patientId: number; appointmentId: number; patientLabel: string | null }
+  | null;
 
 const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/my-work", label: "My Work", icon: LayoutDashboard },
@@ -434,6 +440,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [searchSelection, setSearchSelection] = useState<DoctorSearchSelection>(null);
   const { data: me, isLoading } = useQuery({
     queryKey: ["doctor", "me"],
     queryFn: fetchDoctorMe,
@@ -510,6 +517,17 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
         onMobileNavToggle={() => setMobileNavOpen(true)}
         canSearchPatients={canSearchPatients}
         canSearchRegistrations={canSearchRegistrations}
+        onPatientSearchSelect={(patientId) => {
+          setSearchSelection({ kind: "patient", patientId });
+        }}
+        onRegistrationSearchSelect={(appointment) => {
+          setSearchSelection({
+            kind: "registration",
+            patientId: appointment.patientId,
+            appointmentId: appointment.id,
+            patientLabel: appointment.englishFullName || appointment.arabicFullName || null,
+          });
+        }}
         canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(me)}
         canAccessCoreWorkspace={me.canAccessCoreWorkspace}
         currentWorkspace="doctor"
@@ -547,6 +565,14 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
         </main>
       </div>
       <DoctorMobileDrawer isOpen={mobileNavOpen} currentPath={location.pathname} navItems={navItems} onNavigate={navigate} onClose={() => setMobileNavOpen(false)} />
+      {searchSelection ? <DoctorReadOnlyDetailsDrawer
+        patientId={searchSelection.patientId}
+        appointmentId={searchSelection.kind === "registration" ? searchSelection.appointmentId : null}
+        initialTab={searchSelection.kind === "registration" ? "appointment" : "patient"}
+        patientLabel={searchSelection.kind === "registration" ? searchSelection.patientLabel : null}
+        placement="viewport"
+        onClose={() => setSearchSelection(null)}
+      /> : null}
     </div>
   );
 }
