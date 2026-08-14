@@ -283,16 +283,28 @@ vi.mock("@/lib/protocol-printing", () => ({
   printProtocolSheet: (...args: unknown[]) => printProtocolSheetMock(...args),
 }));
 
-vi.mock("@/components/appointments/appointment-information-view", () => ({
-  AppointmentDetailsReadOnly: (props: { appointment: { id: number }; readOnly: boolean }) => {
-    appointmentDetailsReadOnlyMock(props);
-    return <div data-testid="read-only-appointment-details" data-read-only={String(props.readOnly)}>Read-only appointment {props.appointment.id}</div>;
-  },
-}));
+vi.mock("@/components/appointments/appointment-information-view", async () => {
+  const { useLanguage } = await vi.importActual<typeof import("@/providers/language-provider")>("@/providers/language-provider");
 
-vi.mock("@/components/patients/patient-summary-content", () => ({
-  PatientSummaryContent: () => <div data-testid="read-only-patient-summary">Read-only patient summary</div>,
-}));
+  return {
+    AppointmentDetailsReadOnly: (props: { appointment: { id: number }; readOnly: boolean }) => {
+      const { language } = useLanguage();
+      appointmentDetailsReadOnlyMock(props);
+      return <div data-testid="read-only-appointment-details" data-read-only={String(props.readOnly)} data-language={language}>Read-only appointment {props.appointment.id}</div>;
+    },
+  };
+});
+
+vi.mock("@/components/patients/patient-summary-content", async () => {
+  const { useLanguage } = await vi.importActual<typeof import("@/providers/language-provider")>("@/providers/language-provider");
+
+  return {
+    PatientSummaryContent: () => {
+      const { language } = useLanguage();
+      return <div data-testid="read-only-patient-summary" data-language={language}>Read-only patient summary</div>;
+    },
+  };
+});
 
 function CorePlaceholder() {
   const location = useLocation();
@@ -858,6 +870,7 @@ describe("Doctor Portal shell", () => {
   });
 
   it("opens read-only patient details in Doctor Workspace from a patient search result", async () => {
+    localStorage.setItem("rispro-language", "ar");
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     searchPatientsMock.mockResolvedValue([{
       id: 5,
@@ -877,13 +890,16 @@ describe("Doctor Portal shell", () => {
 
     const drawer = await screen.findByTestId("doctor-read-only-details-drawer");
     expect(await within(drawer).findByTestId("read-only-patient-summary")).toBeTruthy();
+    expect(within(drawer).getByTestId("read-only-patient-summary").getAttribute("data-language")).toBe("en");
     expect(within(drawer).queryByRole("tab", { name: "Appointment" })).toBeNull();
     expect(screen.getAllByRole("banner")[0].textContent).toContain("Doctor Workspace");
     expect(screen.queryByText("Edit Patient")).toBeNull();
     expect(screen.queryByText("Create Appointment")).toBeNull();
+    expect(localStorage.getItem("rispro-language")).toBe("ar");
   });
 
   it("opens read-only appointment and patient details in Doctor Workspace from a registration search result", async () => {
+    localStorage.setItem("rispro-language", "ar");
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     fetchPageVisibilityMatrixMock.mockResolvedValue({
       ...DEFAULT_PAGE_VISIBILITY_MATRIX,
@@ -915,9 +931,13 @@ describe("Doctor Portal shell", () => {
     expect(within(drawer).getByRole("tab", { name: "Appointment" }).getAttribute("aria-selected")).toBe("true");
     expect(within(drawer).getByRole("tab", { name: "Patient" })).toBeTruthy();
     expect(within(drawer).getByTestId("read-only-appointment-details").getAttribute("data-read-only")).toBe("true");
+    expect(within(drawer).getByTestId("read-only-appointment-details").getAttribute("data-language")).toBe("en");
     expect(appointmentDetailsReadOnlyMock).toHaveBeenCalledWith(expect.objectContaining({ readOnly: true }));
+    fireEvent.click(within(drawer).getByRole("tab", { name: "Patient" }));
+    expect((await within(drawer).findByTestId("read-only-patient-summary")).getAttribute("data-language")).toBe("en");
     expect(screen.getAllByRole("banner")[0].textContent).toContain("Doctor Workspace");
     expect(screen.queryByTestId("core-page")).toBeNull();
+    expect(localStorage.getItem("rispro-language")).toBe("ar");
   });
 
   it("opens the Doctor navigation drawer from the shared mobile top-bar menu", async () => {

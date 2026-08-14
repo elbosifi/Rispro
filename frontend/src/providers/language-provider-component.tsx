@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { t as translate, type Language } from "@/lib/i18n";
 import { LanguageContext, type LanguageContextValue } from "./language-provider";
 
+const englishLanguageValue: LanguageContextValue = {
+  language: "en",
+  isArabic: false,
+  setLanguage: () => undefined,
+  toggleLanguage: () => undefined,
+  t: (key, params) => translate("en", key, params),
+};
+
 function getStoredLanguage(): Language {
   const stored = localStorage.getItem("rispro-language");
   return stored === "en" ? "en" : "ar";
@@ -28,4 +36,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   );
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+}
+
+export function EnglishLanguageScope({ children }: { children: ReactNode }) {
+  return <LanguageContext.Provider value={englishLanguageValue}>{children}</LanguageContext.Provider>;
 }

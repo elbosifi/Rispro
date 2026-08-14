@@ -37,6 +37,7 @@ import { DoctorAdminDoctorsPage } from "./doctor-admin-doctors-page";
 import { DoctorReportingBoardPage } from "./doctor-reporting-board-page";
 import { DoctorWorklistsPage, MyReportingWorklistCard } from "./doctor-worklists-page";
 import { DoctorReadOnlyDetailsDrawer } from "@/components/doctor/protocoling-appointment-details-drawer";
+import { EnglishLanguageScope } from "@/providers/language-provider-component";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -492,7 +493,8 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
   const canSearchRegistrations = canRoleAccessRoute(normalizedMatrix, "registrations", user.role);
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }} lang="en" dir="ltr">
+    <EnglishLanguageScope>
+      <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }} lang="en" dir="ltr">
       <TopBar
         user={user}
         language="en"
@@ -573,6 +575,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
         placement="viewport"
         onClose={() => setSearchSelection(null)}
       /> : null}
-    </div>
+      </div>
+    </EnglishLanguageScope>
   );
 }
