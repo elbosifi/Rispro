@@ -826,7 +826,7 @@ test("dicom helper: replacement identity rejects control characters consistently
   );
 });
 
-test("dicom helper: rewriteDicomFileForRemap preserves study identity and replaces patient identity", async () => {
+test("dicom helper: rewriteDicomFileForRemap preserves source demographics and replaces only PatientID", async () => {
   const stagedFiles = await makeStagedFiles([
     {
       fileName: "image-1.dcm",
@@ -858,9 +858,9 @@ test("dicom helper: rewriteDicomFileForRemap preserves study identity and replac
   assert.notEqual(String(dataset.SeriesInstanceUID || "").trim(), "1.2.840.113619.2.55.3.604688433.1234.1456789012.1.1");
   assert.notEqual(String(dataset.SOPInstanceUID || "").trim(), "1.2.3.4.5.6");
   assert.equal(summary.patientId, "NEWID");
-  assert.equal(summary.patientName, "NEW^PATIENT");
-  assert.equal(summary.patientSex, "F");
-  assert.equal(summary.patientBirthDate, "20000101");
+  assert.equal(summary.patientName, "OLD^PATIENT");
+  assert.equal(summary.patientSex, "M");
+  assert.equal(summary.patientBirthDate, "19900101");
 });
 
 test("PACS send refuses an unverified legacy remap and directs preserved staging to Orthanc recovery", async () => {
@@ -1473,7 +1473,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
   }
 });
 
-test("dicom helper: createModifiedStudyCopy sends Force true with patient identity replacement", async () => {
+test("dicom helper: createModifiedStudyCopy replaces only PatientID", async () => {
   const calls = queueOrthancResults([
     ...stableStudyResponses(),
     orthancResult({ status: 200, ok: true, text: JSON.stringify({ ID: "modified-study-id" }), json: { ID: "modified-study-id" } }),
@@ -1492,9 +1492,6 @@ test("dicom helper: createModifiedStudyCopy sends Force true with patient identi
   assert.deepEqual(calls[3]?.body, {
     Replace: {
       PatientID: "RISPRO-123",
-      PatientName: "Replacement^Patient",
-      PatientSex: "F",
-      PatientBirthDate: "19850123",
     },
     KeepSource: true,
     Force: true,
@@ -1517,20 +1514,24 @@ test("dicom helper: createModifiedStudyCopy rejects long PatientID before Orthan
   assert.equal(calls.some((call) => call.path.endsWith("/modify")), false);
 });
 
-test("dicom helper: createModifiedStudyCopy rejects long PatientName before Orthanc modify", async () => {
-  const calls = queueOrthancResults(stableStudyResponses());
+test("dicom helper: createModifiedStudyCopy does not validate unused replacement demographics", async () => {
+  const calls = queueOrthancResults([
+    ...stableStudyResponses(),
+    orthancResult({ status: 200, ok: true, text: JSON.stringify({ ID: "modified-study-id" }), json: { ID: "modified-study-id" } }),
+  ]);
 
-  await assert.rejects(
-    () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
-      patientId: "RISPRO-123",
-      patientName: `${"N".repeat(65)}`,
-      patientSex: "F",
-      patientBirthDate: "19850123",
-    }),
-    /PatientName is too long for DICOM/
-  );
+  await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+    patientId: "RISPRO-123",
+    patientName: `${"N".repeat(65)}`,
+    patientSex: "unexpected",
+    patientBirthDate: "not-a-dicom-date",
+  });
 
-  assert.equal(calls.some((call) => call.path.endsWith("/modify")), false);
+  assert.deepEqual(calls[3]?.body, {
+    Replace: { PatientID: "RISPRO-123" },
+    KeepSource: true,
+    Force: true,
+  });
 });
 
 test("dicom helper: waitForOrthancStudyStable proceeds immediately for stable studies", async () => {
@@ -1666,9 +1667,9 @@ test("dicom helper: createModifiedStudyCopy treats timeout as success when modif
           MainDicomTags: {},
           PatientMainDicomTags: {
             PatientID: "P1",
-            PatientName: "Test^Patient",
+            PatientName: "Original^Patient",
             PatientSex: "M",
-            PatientBirthDate: "19900101",
+            PatientBirthDate: "19700101",
           },
         },
       });
@@ -1756,7 +1757,7 @@ test("dicom helper: strict recovery timeout accepts only one exact ModifiedFrom 
         throw new HttpError(504, "Orthanc request timed out after 60000ms.");
       }
       const candidateMatch = requestPath.match(/^\/studies\/(candidate-\d+)$/);
-      if (candidateMatch) return orthancResult({ json: { MainDicomTags: {}, PatientMainDicomTags: { PatientID: "P1", PatientName: "Test^Patient", PatientSex: "M", PatientBirthDate: "19900101" } } });
+      if (candidateMatch) return orthancResult({ json: { MainDicomTags: {}, PatientMainDicomTags: { PatientID: "P1", PatientName: "Original^Patient", PatientSex: "M", PatientBirthDate: "19700101" } } });
       const provenanceMatch = requestPath.match(/^\/studies\/(candidate-(\d+))\/metadata\/ModifiedFrom$/);
       if (provenanceMatch) {
         const value = scenario.modifiedFrom[Number(provenanceMatch[2]) - 1]!;
@@ -1864,9 +1865,6 @@ test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when st
     assert.deepEqual(bulkCall?.body, {
       Replace: {
         PatientID: "P1",
-        PatientName: "Test^Patient",
-        PatientSex: "M",
-        PatientBirthDate: "19900101",
       },
       KeepSource: true,
       Force: true,

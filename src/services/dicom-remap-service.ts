@@ -933,6 +933,10 @@ function hasSameReplacementIdentity(
   );
 }
 
+function hasExpectedRemappedPatientId(summary: OrthancPatientSummary, expectedPatientId: string): boolean {
+  return summary.patientId === expectedPatientId;
+}
+
 function readNaturalizedStudySummary(dataset: Record<string, unknown>): OrthancStudySummary {
   return {
     studyInstanceUid: readDicomStringValue(dataset.StudyInstanceUID),
@@ -1190,9 +1194,6 @@ async function rewriteDicomFileForRemap(
   const originalSummary = readNaturalizedStudySummary(dataset);
   const originalSeriesInstanceUid = readDicomStringValue(dataset.SeriesInstanceUID);
   dataset.PatientID = replacement.patientId;
-  dataset.PatientName = replacement.patientName;
-  dataset.PatientSex = replacement.patientSex;
-  dataset.PatientBirthDate = replacement.patientBirthDate;
   let replacementSopInstanceUid: string | null = null;
   if (uidPlan) {
     dataset.StudyInstanceUID = uidPlan.studyInstanceUid;
@@ -1406,7 +1407,7 @@ async function verifyModifiedStudyAfterTimeout(
   for (const candidateId of candidates) {
     try {
       const summary = await readStudySummary(candidateId);
-      if (hasSameReplacementIdentity(summary, replacement)) {
+      if (hasExpectedRemappedPatientId(summary, replacement.patientId)) {
         if (!options.requireExactModifiedFromProvenance) return candidateId;
         const provenance = await readOrthancModifiedFromStudyId(candidateId);
         if (provenance.available && provenance.sourceStudyId === preflight.sourceStudyId) {
@@ -1950,12 +1951,12 @@ function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPati
   const patientSex = normalizePatientSex(String(patient.sex || ""));
   const patientBirthDate = normalizeDicomBirthDate(String(patient.estimated_date_of_birth || ""));
 
-  return validateOrthancReplacementIdentity({
-    patientId,
+  return {
+    patientId: normalizeDicomPatientIdForReplace(patientId),
     patientName,
     patientSex,
     patientBirthDate,
-  });
+  };
 }
 
 async function tryBulkModifiedStudyCopy(
@@ -1963,9 +1964,6 @@ async function tryBulkModifiedStudyCopy(
   modifyPayload: {
     Replace: {
       PatientID: string;
-      PatientName: string;
-      PatientSex: string;
-      PatientBirthDate: string;
     };
     KeepSource: boolean;
     Force: boolean;
@@ -2030,7 +2028,7 @@ async function createModifiedStudyCopy(
   replacement: OrthancPatientSummary,
   options: { stabilityTimeoutMs?: number; requireExactModifiedFromProvenance?: boolean } = {},
 ): Promise<string> {
-  const validatedReplacement = validateOrthancReplacementIdentity(replacement);
+  const validatedPatientId = normalizeDicomPatientIdForReplace(replacement.patientId);
   let preflight: OrthancStudyModifyPreflight;
   let stabilityTimedOut = false;
   try {
@@ -2053,10 +2051,7 @@ async function createModifiedStudyCopy(
   }
   const modifyPayload = {
     Replace: {
-      PatientID: validatedReplacement.patientId,
-      PatientName: validatedReplacement.patientName,
-      PatientSex: validatedReplacement.patientSex,
-      PatientBirthDate: validatedReplacement.patientBirthDate,
+      PatientID: validatedPatientId,
     },
     KeepSource: true,
     Force: true,
@@ -2082,7 +2077,7 @@ async function createModifiedStudyCopy(
       if (!isOrthancTimeoutError(error)) {
         throw error;
       }
-      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, validatedReplacement, options);
+      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, { ...replacement, patientId: validatedPatientId }, options);
       if (verifiedStudyId) {
         return verifiedStudyId;
       }
@@ -3614,9 +3609,6 @@ async function rewriteStagedDicomForPersistedPlan(file: DicomRemapStagedManifest
   const sopUid = plan.sopInstanceUidByFileId[file.id];
   if (!seriesUid || !sopUid) throw new HttpError(409, "DICOM remap UID plan is invalid.", { code: "DICOM_REMAP_UID_PLAN_INVALID" });
   dataset.PatientID = replacement.patientId;
-  dataset.PatientName = replacement.patientName;
-  dataset.PatientSex = replacement.patientSex;
-  dataset.PatientBirthDate = replacement.patientBirthDate;
   dataset.StudyInstanceUID = plan.studyInstanceUid;
   dataset.SeriesInstanceUID = seriesUid;
   dataset.SOPInstanceUID = sopUid;
@@ -4082,7 +4074,7 @@ export async function processClaimedDicomRemapJob({ job, leaseOwner, leaseSecond
       throw orthancVerificationError("Orthanc remapped study could not be read for verification.", { ...verificationDetails, verificationReason: "STUDY_RESPONSE_MALFORMED" });
     });
     if (summary.studyInstanceUid !== planned.plan.studyInstanceUid) throw orthancVerificationError("Orthanc did not preserve the persisted replacement Study UID.", { ...verificationDetails, verificationReason: "STUDY_UID_MISMATCH" });
-    if (!hasSameReplacementIdentity(summary, replacement)) throw new HttpError(502, "Orthanc did not verify replacement identity.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
+    if (!hasExpectedRemappedPatientId(summary, replacement.patientId)) throw new HttpError(502, "Orthanc did not verify replacement PatientID.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
 
     const requiresAcknowledgement = Boolean(finalSelectionCounts.partial || finalSelectionCounts.completenessUncertain);
 
@@ -4610,7 +4602,7 @@ export async function processDicomRemapMultipartJob({
         }
       );
     }
-    if (!hasSameReplacementIdentity(uploadedSummary, replacement)) {
+    if (!hasExpectedRemappedPatientId(uploadedSummary, replacement.patientId)) {
       throw new HttpError(
         502,
         "Orthanc uploaded study identity does not match the selected RISPro patient. Please reset current upload and retry.",
@@ -5584,8 +5576,8 @@ export async function retryFailedDicomRemapWithOrthanc({
     if (!modifiedSummary.studyInstanceUid || modifiedSummary.studyInstanceUid === sourceSummary.studyInstanceUid) {
       throw orthancVerificationError("Orthanc recovery did not create a distinct modified Study Instance UID.", { verificationReason: "STUDY_UID_MISMATCH", expectedCount: selected.sopInstanceUids.size });
     }
-    if (!hasSameReplacementIdentity(modifiedSummary, replacement)) {
-      throw new HttpError(502, "Orthanc recovery did not verify replacement identity.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
+    if (!hasExpectedRemappedPatientId(modifiedSummary, replacement.patientId)) {
+      throw new HttpError(502, "Orthanc recovery did not verify replacement PatientID.", { code: "DICOM_REMAP_IDENTITY_VERIFICATION_FAILED" });
     }
 
     const completed = await queryDicomRemapDb<DicomRemapJobRow>(
@@ -5684,7 +5676,7 @@ export async function confirmDicomRemapAndSend({
     if (!acceptedSops.size) throw new HttpError(409, "No accepted remapped instances are available.");
     const summary = await readStudySummary(initial.modified_orthanc_study_id);
     const replacement = { patientId: initial.replacement_patient_id || "", patientName: initial.replacement_patient_name || "", patientSex: initial.replacement_patient_sex || "", patientBirthDate: initial.replacement_patient_birth_date || "" };
-    if (summary.studyInstanceUid !== plan.studyInstanceUid || !hasSameReplacementIdentity(summary, replacement)) throw new HttpError(409, "The remapped Orthanc study identity could not be verified.");
+    if (summary.studyInstanceUid !== plan.studyInstanceUid || !hasExpectedRemappedPatientId(summary, replacement.patientId)) throw new HttpError(409, "The remapped Orthanc study identity could not be verified.");
     await verifyOrthancStudyAcceptedSopSet(initial.modified_orthanc_study_id, acceptedSops);
     const selectionCounts: DicomRemapSelectionCounts = {
       ...(initial.processing_selection_counts || plan.selectionCounts || { totalStagedFiles: 0, validDicomFiles: 0, selectedStudyFiles: 0, excludedOtherStudyFiles: 0, excludedStudyCount: 0, skippedOrUnparsedFiles: 0 }),
