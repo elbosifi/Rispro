@@ -70,6 +70,11 @@ function normalizeSpecimenText(value: unknown, errorMessage = "Specimen / Site i
   return text;
 }
 
+function isIrSpecimenModality(modalityCode: unknown, modalityNameEn: unknown): boolean {
+  return (typeof modalityCode === "string" && modalityCode.trim().toUpperCase() === "IR")
+    || (typeof modalityNameEn === "string" && modalityNameEn.trim().toLowerCase() === "interventional radiology");
+}
+
 function formatTripoliPrintedAt(value: Date): string {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Tripoli", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(value);
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
@@ -252,12 +257,15 @@ printingRouter.post("/ir-specimen-label/:appointmentId/pdf", chromiumRenderConcu
   const widthMm = requiredDimension(raw.widthMm, 500, "Label width");
   const heightMm = requiredDimension(raw.heightMm, 1000, "Label height");
   const result = await pool.query(`
-    select ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, p.arabic_full_name, p.english_full_name
+    select ('V2-' || lpad(b.id::text, 6, '0')) as accession_number, p.arabic_full_name, p.english_full_name,
+           m.code as modality_code, m.name_en as modality_name_en
       from appointments_v2.bookings b
       join patients p on p.id = b.patient_id
+      join modalities m on m.id = b.modality_id
      where b.id = $1 limit 1`, [appointmentId]);
   const appointment = result.rows[0];
   if (!appointment) throw new HttpError(404, "Appointment not found.");
+  if (!isIrSpecimenModality(appointment.modality_code, appointment.modality_name_en)) throw new HttpError(400, "Specimen labels are only available for Interventional Radiology appointments.");
   const html = buildIrSpecimenLabelHtml({ patientName: appointment.arabic_full_name || appointment.english_full_name || "Patient", accessionNumber: appointment.accession_number, specimenText, printedAt: formatTripoliPrintedAt(new Date()) }, widthMm, heightMm);
   const pdf = await renderTrustedHtmlPdf(html, "ir-specimen-label");
   res.setHeader("Cache-Control", "no-store, private");
@@ -308,6 +316,7 @@ export const __printingRouteTestables = {
   registrationListCompactFooterTemplate,
   finalizedPdfMargins,
   normalizeSpecimenText,
+  isIrSpecimenModality,
   formatTripoliPrintedAt,
   registrationListPdfMargins,
 };

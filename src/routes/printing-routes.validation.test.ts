@@ -45,6 +45,12 @@ describe("IR specimen label validation", () => {
     assert.throws(() => __printingRouteTestables.normalizeSpecimenText("   \n "));
     assert.throws(() => __printingRouteTestables.normalizeSpecimenText("x".repeat(81)));
   });
+
+  it("allows only IR modality code or the narrow Interventional Radiology compatibility name", () => {
+    assert.equal(__printingRouteTestables.isIrSpecimenModality(" ir ", "CT"), true);
+    assert.equal(__printingRouteTestables.isIrSpecimenModality("", " Interventional Radiology "), true);
+    assert.equal(__printingRouteTestables.isIrSpecimenModality("CT", "Computed Tomography"), false);
+  });
 });
 
 describe("generated printer-test profile validation", () => {
