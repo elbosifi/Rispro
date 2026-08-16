@@ -6,6 +6,7 @@ import { HttpError } from "../utils/http-error.js";
 import {
   createAuthoritativeOrthancClient,
   type OrthancChangesPage,
+  type OrthancStudiesIndexPage,
   type OrthancStudyDetails,
 } from "./authoritative-orthanc-service.js";
 import { buildPatientNameSearchSql, preparePatientSearch } from "./patient-search-query.js";
@@ -13,7 +14,9 @@ import { buildPatientNameSearchSql, preparePatientSearch } from "./patient-searc
 const SYNC_LOCK_KEY = 712364092;
 const DEFAULT_SYNC_INTERVAL_MS = 60_000;
 const FULL_RECONCILIATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const HISTORICAL_PACS_INDEX_FRESHNESS_MS = 5 * 60 * 1000;
 const STUDY_BATCH_SIZE = 50;
+const FULL_STUDY_PAGE_SIZE = 1000;
 const CHANGE_BATCH_SIZE = 500;
 
 type Queryable = Pick<PoolClient, "query"> | typeof pool;
@@ -66,6 +69,7 @@ export interface HistoricalPacsDiscoveryResult {
   exactStudies: OrthancStudyDetails[];
   candidates: HistoricalPacsCandidate[];
   indexStatus: HistoricalPacsIndexStatus;
+  lastSuccessAt: string | null;
   knownPatientIds: string[];
 }
 
@@ -106,7 +110,7 @@ interface NameMatchRow {
 }
 
 interface HistoricalPacsSyncClient {
-  listStudyIds(): Promise<string[]>;
+  listStudiesForIndexPage(since: number, limit?: number): Promise<OrthancStudiesIndexPage>;
   getStudyForIndex(id: string): Promise<OrthancStudyDetails | null>;
   getChanges(since: number, limit?: number): Promise<OrthancChangesPage>;
 }
@@ -122,20 +126,25 @@ export function dicomPatientNameVariants(value: string | null | undefined): stri
     variants.push(components.join(" "));
     if (components.length > 1) variants.push([...components.slice(1), components[0]!].join(" "));
   }
-  return unique(variants).slice(0, 2);
+  return unique(variants);
 }
 
 function indexedNames(patientName: string | null): Record<string, string> {
   const variants = dicomPatientNameVariants(patientName);
-  const primary = variants[0] || "";
-  const reordered = variants[1] || primary;
+  const latinIndex = variants.findIndex((variant) => /[A-Za-z]/.test(variant));
+  const primaryIndex = latinIndex >= 0 ? latinIndex : 0;
+  const primary = variants[primaryIndex] || "";
+  const reordered = variants[primaryIndex + 1] || primary;
+  const arabicIndex = variants.findIndex((variant) => /[\u0600-\u06ff]/.test(variant));
+  const arabicPrimary = variants[arabicIndex >= 0 ? arabicIndex : primaryIndex] || primary;
+  const arabicReordered = variants[(arabicIndex >= 0 ? arabicIndex : primaryIndex) + 1] || arabicPrimary;
   return {
     normalizedNamePrimary: primary.toLowerCase().replace(/\s+/g, " ").trim(),
     normalizedNameReordered: reordered.toLowerCase().replace(/\s+/g, " ").trim(),
-    normalizedArabicNamePrimary: normalizeArabicName(primary),
-    normalizedArabicNameReordered: normalizeArabicName(reordered),
-    normalizedArabicCompactPrimary: normalizeArabicNameCompact(primary),
-    normalizedArabicCompactReordered: normalizeArabicNameCompact(reordered),
+    normalizedArabicNamePrimary: normalizeArabicName(arabicPrimary),
+    normalizedArabicNameReordered: normalizeArabicName(arabicReordered),
+    normalizedArabicCompactPrimary: normalizeArabicNameCompact(arabicPrimary),
+    normalizedArabicCompactReordered: normalizeArabicNameCompact(arabicReordered),
   };
 }
 
@@ -160,7 +169,7 @@ function toOrthancStudy(study: HistoricalPacsStudy): OrthancStudyDetails {
   return { ...study };
 }
 
-export async function upsertHistoricalPacsStudies(studies: OrthancStudyDetails[], db: Queryable = pool): Promise<number> {
+export async function upsertHistoricalPacsStudies(studies: OrthancStudyDetails[], db: Queryable = pool, synchronizedAt: string | null = null): Promise<number> {
   if (!studies.length) return 0;
   const rows = studies.map((study) => ({
     orthancStudyId: study.orthancStudyId,
@@ -194,7 +203,7 @@ export async function upsertHistoricalPacsStudies(studies: OrthancStudyDetails[]
         x."studyDescription", x."modalitiesInStudy", x."seriesCount", x."instanceCount",
         x."normalizedNamePrimary", x."normalizedNameReordered",
         x."normalizedArabicNamePrimary", x."normalizedArabicNameReordered",
-        x."normalizedArabicCompactPrimary", x."normalizedArabicCompactReordered", now()
+        x."normalizedArabicCompactPrimary", x."normalizedArabicCompactReordered", coalesce($2::timestamptz, clock_timestamp())
       from jsonb_to_recordset($1::jsonb) as x(
         "orthancStudyId" text, "studyInstanceUid" text, "accessionNumber" text, "patientId" text,
         "patientNameRaw" text, "patientBirthDate" text, "patientSex" text, "studyDate" text,
@@ -221,9 +230,9 @@ export async function upsertHistoricalPacsStudies(studies: OrthancStudyDetails[]
         normalized_arabic_name_reordered = excluded.normalized_arabic_name_reordered,
         normalized_arabic_compact_primary = excluded.normalized_arabic_compact_primary,
         normalized_arabic_compact_reordered = excluded.normalized_arabic_compact_reordered,
-        synchronized_at = now()
+        synchronized_at = coalesce($2::timestamptz, clock_timestamp())
     `,
-    [JSON.stringify(rows)],
+    [JSON.stringify(rows), synchronizedAt],
   );
   return result.rowCount || 0;
 }
@@ -372,6 +381,18 @@ async function loadStudiesForPatientIds(patientIds: string[]): Promise<Map<strin
   return grouped;
 }
 
+async function loadStudiesForStudyInstanceUids(studyInstanceUids: string[]): Promise<HistoricalPacsStudy[]> {
+  const uids = unique(studyInstanceUids);
+  if (!uids.length) return [];
+  const result = await pool.query<IndexedStudyRow>(
+    `select orthanc_study_id,study_instance_uid,accession_number,patient_id,patient_name_raw,patient_birth_date,patient_sex,study_date,study_description,modalities_in_study,series_count,instance_count
+     from historical_pacs_studies where study_instance_uid = any($1::text[])
+     order by study_date desc nulls last, orthanc_study_id`,
+    [uids],
+  );
+  return result.rows.map(mapStudy);
+}
+
 async function exactCandidates(profile: PatientIdentityProfile): Promise<HistoricalPacsCandidate[]> {
   if (!profile.identifiers.length) return [];
   const studiesById = await loadStudiesForPatientIds(profile.identifiers);
@@ -398,18 +419,25 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
     const current = strongest.get(match.patient_id);
     if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && Number(match.name_similarity) > Number(current.name_similarity))) strongest.set(match.patient_id, match);
   }
-  const ordered = [...strongest.values()].sort((a, b) => a.match_rank - b.match_rank || Number(b.name_similarity) - Number(a.name_similarity) || b.phonetic_match_count - a.phonetic_match_count).slice(0, 20);
-  const studiesById = await loadStudiesForPatientIds(ordered.map((row) => row.patient_id));
+  const ordered = [...strongest.values()].sort((a, b) => a.match_rank - b.match_rank || Number(b.name_similarity) - Number(a.name_similarity) || b.phonetic_match_count - a.phonetic_match_count);
+  const eligible = ordered.filter((row) => {
+    const pacsDob = normalizedDicomDate(row.patient_birth_date);
+    const risproDob = normalizedDicomDate(profile.birthDate);
+    const pacsSex = normalizedSex(row.patient_sex);
+    const risproSex = normalizedSex(profile.sex);
+    if (profile.birthDateReliable && pacsDob && risproDob && pacsDob !== risproDob) return false;
+    if (pacsSex && risproSex && pacsSex !== risproSex) return false;
+    return true;
+  }).slice(0, 20);
+  const studiesById = await loadStudiesForPatientIds(eligible.map((row) => row.patient_id));
   const candidates: HistoricalPacsCandidate[] = [];
-  for (const row of ordered) {
+  for (const row of eligible) {
     const studies = studiesById.get(row.patient_id) || [];
     if (!studies.length) continue;
     const pacsDob = normalizedDicomDate(row.patient_birth_date);
     const risproDob = normalizedDicomDate(profile.birthDate);
     const pacsSex = normalizedSex(row.patient_sex);
     const risproSex = normalizedSex(profile.sex);
-    if (profile.birthDateReliable && pacsDob && risproDob && pacsDob !== risproDob) continue;
-    if (pacsSex && risproSex && pacsSex !== risproSex) continue;
     const reasons = matchReasons(row);
     const exactDob = Boolean(profile.birthDateReliable && pacsDob && risproDob && pacsDob === risproDob);
     const compatibleSex = Boolean(pacsSex && risproSex && pacsSex === risproSex);
@@ -442,22 +470,34 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
   return candidates;
 }
 
-export async function getHistoricalPacsIndexStatus(): Promise<HistoricalPacsIndexStatus> {
-  const result = await pool.query<{ last_full_sync_at: string | null; last_error: string | null; study_count: number }>(
-    `select state.last_full_sync_at::text,state.last_error,(select count(*)::int from historical_pacs_studies) study_count from historical_pacs_sync_state state where singleton_key=true`,
+export interface HistoricalPacsIndexState { status: HistoricalPacsIndexStatus; lastSuccessAt: string | null }
+
+export async function getHistoricalPacsIndexState(): Promise<HistoricalPacsIndexState> {
+  const result = await pool.query<{ last_full_sync_at: string | null; last_success_at: string | null; last_error: string | null; study_count: number; is_fresh: boolean }>(
+    `select state.last_full_sync_at::text,state.last_success_at::text,state.last_error,
+       state.last_success_at >= clock_timestamp() - ($1::bigint * interval '1 millisecond') is_fresh,
+       (select count(*)::int from historical_pacs_studies) study_count
+     from historical_pacs_sync_state state where singleton_key=true`,
+    [HISTORICAL_PACS_INDEX_FRESHNESS_MS],
   );
   const row = result.rows[0];
-  if (!row?.last_full_sync_at) return row?.last_error && Number(row.study_count) === 0 ? "unavailable" : "uninitialized";
-  return row.last_error ? "stale" : "ready";
+  if (!row?.last_full_sync_at) return { status: row?.last_error && Number(row.study_count) === 0 ? "unavailable" : "uninitialized", lastSuccessAt: row?.last_success_at ?? null };
+  if (row.last_error) return { status: Number(row.study_count) === 0 ? "unavailable" : "stale", lastSuccessAt: row.last_success_at };
+  return { status: row.is_fresh ? "ready" : "stale", lastSuccessAt: row.last_success_at };
 }
 
-export async function discoverHistoricalPacsForPatient(patientId: number): Promise<HistoricalPacsDiscoveryResult> {
+export async function getHistoricalPacsIndexStatus(): Promise<HistoricalPacsIndexStatus> { return (await getHistoricalPacsIndexState()).status; }
+
+export async function discoverHistoricalPacsForPatient(patientId: number, studyInstanceUids: string[] = []): Promise<HistoricalPacsDiscoveryResult> {
   const profile = await loadPatientProfile(patientId);
-  const [exact, fuzzy, indexStatus] = await Promise.all([exactCandidates(profile), fuzzyCandidates(profile), getHistoricalPacsIndexStatus()]);
+  const [exact, uidStudies, fuzzy, indexState] = await Promise.all([exactCandidates(profile), loadStudiesForStudyInstanceUids(studyInstanceUids), fuzzyCandidates(profile), getHistoricalPacsIndexState()]);
+  const reconciliationStudies = new Map<string, OrthancStudyDetails>();
+  for (const study of [...exact.flatMap((candidate) => candidate.studies), ...uidStudies]) reconciliationStudies.set(study.orthancStudyId, toOrthancStudy(study));
   return {
-    exactStudies: exact.flatMap((candidate) => candidate.studies.map(toOrthancStudy)),
-    candidates: [...exact, ...fuzzy],
-    indexStatus,
+    exactStudies: [...reconciliationStudies.values()],
+    candidates: fuzzy,
+    indexStatus: indexState.status,
+    lastSuccessAt: indexState.lastSuccessAt,
     knownPatientIds: profile.identifiers,
   };
 }
@@ -500,16 +540,21 @@ async function readChangesTail(client: HistoricalPacsSyncClient): Promise<number
 }
 
 export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncClient, db: Queryable = pool): Promise<{ indexed: number; removed: number; lastSequence: number }> {
-  const startedAt = new Date().toISOString();
+  const marker = await db.query<{ reconciliation_marker: string }>(`select clock_timestamp()::text reconciliation_marker`);
+  const reconciliationMarker = marker.rows[0]?.reconciliation_marker;
+  if (!reconciliationMarker) throw new Error("Could not establish the historical PACS reconciliation marker.");
   const state = await db.query<{ last_change_sequence: string | null }>(`select last_change_sequence::text from historical_pacs_sync_state where singleton_key=true`);
   const lastSequence = state.rows[0]?.last_change_sequence == null ? await readChangesTail(client) : Number(state.rows[0].last_change_sequence);
-  const ids = await client.listStudyIds();
   let indexed = 0;
-  for (let offset = 0; offset < ids.length; offset += STUDY_BATCH_SIZE) {
-    const details = (await Promise.all(ids.slice(offset, offset + STUDY_BATCH_SIZE).map((id) => client.getStudyForIndex(id)))).filter((study): study is OrthancStudyDetails => study !== null);
-    indexed += await upsertHistoricalPacsStudies(details, db);
+  let since = 0;
+  for (;;) {
+    const page = await client.listStudiesForIndexPage(since, FULL_STUDY_PAGE_SIZE);
+    indexed += await upsertHistoricalPacsStudies(page.studies, db, reconciliationMarker);
+    if (page.resourceCount < FULL_STUDY_PAGE_SIZE) break;
+    if (page.resourceCount <= 0) throw new Error("Authoritative Orthanc study inventory cursor did not advance.");
+    since += page.resourceCount;
   }
-  const removed = await db.query(`delete from historical_pacs_studies where synchronized_at < $1::timestamptz`, [startedAt]);
+  const removed = await db.query(`delete from historical_pacs_studies where synchronized_at < $1::timestamptz`, [reconciliationMarker]);
   await db.query(
     `update historical_pacs_sync_state set last_change_sequence=$1,last_full_sync_at=now(),last_success_at=now(),last_attempt_at=now(),last_error=null,updated_at=now() where singleton_key=true`,
     [lastSequence],

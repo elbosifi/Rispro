@@ -338,13 +338,17 @@ test("reads study inventory, index metadata, and change pages without Orthanc wr
   service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
     const parsed = new URL(String(url));
     calls.push({ path: parsed.pathname, search: parsed.search, method: init?.method || "GET" });
-    if (parsed.pathname === "/studies") return json(["study-1"]);
+    if (parsed.pathname === "/studies") return json(parsed.searchParams.has("expand") ? [{ ID: "study-1", ...study(), Series: ["series-1", "series-2"], PatientMainDicomTags: { PatientID: "OLD-1", PatientName: "ALSIFI^SERAJ^ALI", PatientBirthDate: "19800102", PatientSex: "M" }, RequestedTags: { ModalitiesInStudy: "CT\\SR", NumberOfStudyRelatedInstances: "9" } }] : ["study-1"]);
     if (parsed.pathname === "/studies/study-1") return json({ ...study(), Series: ["series-1", "series-2"], PatientMainDicomTags: { PatientID: "OLD-1", PatientName: "ALSIFI^SERAJ^ALI", PatientBirthDate: "19800102", PatientSex: "M" }, RequestedTags: { ModalitiesInStudy: "CT\\SR" } });
     if (parsed.pathname === "/changes") return json({ Changes: [{ Seq: 12, ChangeType: "StableStudy", ResourceType: "Study", ID: "study-1" }], Last: 12, Done: true });
     throw new Error(`Unexpected ${parsed.pathname}`);
   });
   const client = new service.AuthoritativeOrthancClient(enabled);
   assert.deepEqual(await client.listStudyIds(), ["study-1"]);
+  const page = await client.listStudiesForIndexPage(0, 1000);
+  assert.equal(page.resourceCount, 1);
+  assert.equal(page.studies[0]?.orthancStudyId, "study-1");
+  assert.equal(page.studies[0]?.instanceCount, 5);
   const indexed = await client.getStudyForIndex("study-1");
   assert.equal(indexed?.patientName, "ALSIFI^SERAJ^ALI");
   assert.deepEqual(indexed?.modalitiesInStudy, ["CT", "SR"]);
@@ -352,6 +356,30 @@ test("reads study inventory, index metadata, and change pages without Orthanc wr
   assert.deepEqual(await client.getChanges(10, 100), { changes: [{ sequence: 12, changeType: "StableStudy", resourceType: "Study", resourceId: "study-1" }], lastSequence: 12, done: true });
   assert.ok(calls.every((call) => call.method === "GET"));
   assert.equal(calls.find((call) => call.path === "/changes")?.search, "?since=10&limit=100");
+  const expanded = calls.find((call) => call.path === "/studies" && call.search.includes("expand"));
+  assert.ok(expanded?.search.includes("since=0"));
+  assert.ok(expanded?.search.includes("limit=1000"));
+  assert.ok(expanded?.search.includes("requestedTags="));
+});
+
+test("paginates expanded study inventory without per-study detail requests for normal studies", async () => {
+  const calls: URL[] = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url) => {
+    const parsed = new URL(String(url));
+    calls.push(parsed);
+    if (parsed.pathname !== "/studies") throw new Error(`Unexpected ${parsed.pathname}`);
+    const since = Number(parsed.searchParams.get("since"));
+    return json(since === 0
+      ? [{ ID: "study-1", ...study({ StudyInstanceUID: "1.2.3.1" }) }, { ID: "study-2", ...study({ StudyInstanceUID: "1.2.3.2" }) }]
+      : [{ ID: "study-3", ...study({ StudyInstanceUID: "1.2.3.3" }) }]);
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  const first = await client.listStudiesForIndexPage(0, 2);
+  const second = await client.listStudiesForIndexPage(first.resourceCount, 2);
+  assert.deepEqual([...first.studies, ...second.studies].map((item) => item.orthancStudyId), ["study-1", "study-2", "study-3"]);
+  assert.deepEqual(calls.map((call) => call.pathname), ["/studies", "/studies"]);
+  assert.deepEqual(calls.map((call) => call.searchParams.get("since")), ["0", "2"]);
+  assert.ok(calls.every((call) => call.searchParams.has("expand") && call.searchParams.get("limit") === "2"));
 });
 
 test("resolves transferred series, direct studies, and unavailable resources read-only", async () => {

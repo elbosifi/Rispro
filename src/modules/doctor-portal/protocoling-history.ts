@@ -1,7 +1,7 @@
 import type { OrthancStudyDetails } from "../../services/authoritative-orthanc-service.js";
 import type { ProtocolingPatientHistoryItem } from "./protocoling-types.js";
 
-export type RisproHistoryRow = Omit<ProtocolingPatientHistoryItem, "orthancStudyId" | "source" | "modalities"> & { modalityCode: string | null };
+export type RisproHistoryRow = Omit<ProtocolingPatientHistoryItem, "orthancStudyId" | "source" | "modalities" | "identityDiscrepancy"> & { modalityCode: string | null };
 const clean = (value: string | null | undefined) => value?.trim() || null;
 const modalities = (...values: Array<string | null | undefined>) => [...new Set(values.flatMap((value) => (value || "").split("\\").map((entry) => entry.trim().toUpperCase() === "MR" ? "MRI" : entry.trim().toUpperCase()).filter(Boolean)))];
 const studyDate = (value: string | null) => {
@@ -13,18 +13,39 @@ const studyDate = (value: string | null) => {
   return date.getUTCFullYear() === Number(year) && date.getUTCMonth() === Number(month) - 1 && date.getUTCDate() === Number(day) ? `${year}-${month}-${day}` : null;
 };
 
-export function reconcileProtocolingPatientHistory(rispro: RisproHistoryRow[], pacs: OrthancStudyDetails[], currentAccessionNumber: string | null): ProtocolingPatientHistoryItem[] {
+export function reconcileProtocolingPatientHistory(rispro: RisproHistoryRow[], pacs: OrthancStudyDetails[], currentAccessionNumber: string | null, currentStudyInstanceUid: string | null = null, knownPatientIds: string[] = []): ProtocolingPatientHistoryItem[] {
   const current = clean(currentAccessionNumber);
-  const usablePacs = pacs.filter((study) => clean(study.accessionNumber) !== current);
-  const counts = new Map<string, number>();
-  for (const study of usablePacs) { const accession = clean(study.accessionNumber); if (accession) counts.set(accession, (counts.get(accession) || 0) + 1); }
+  const currentUid = clean(currentStudyInstanceUid);
+  const usablePacs = pacs.filter((study) => {
+    const uid = clean(study.studyInstanceUid);
+    if (currentUid && uid) return uid !== currentUid;
+    return clean(study.accessionNumber) !== current;
+  });
+  const accessionCounts = new Map<string, number>();
+  const uidCounts = new Map<string, number>();
+  for (const study of usablePacs) {
+    const accession = clean(study.accessionNumber);
+    const uid = clean(study.studyInstanceUid);
+    if (accession) accessionCounts.set(accession, (accessionCounts.get(accession) || 0) + 1);
+    if (uid) uidCounts.set(uid, (uidCounts.get(uid) || 0) + 1);
+  }
+  const patientIds = new Set(knownPatientIds.map((value) => clean(value)?.toUpperCase()).filter((value): value is string => Boolean(value)));
   const consumed = new Set<string>();
   const items: ProtocolingPatientHistoryItem[] = rispro.map((row) => {
     const accession = clean(row.accessionNumber);
-    const match = accession && counts.get(accession) === 1 ? usablePacs.find((study) => clean(study.accessionNumber) === accession) : undefined;
+    const uid = clean(row.studyInstanceUid);
+    let match = uid && uidCounts.get(uid) === 1
+      ? usablePacs.find((study) => !consumed.has(study.orthancStudyId) && clean(study.studyInstanceUid) === uid)
+      : undefined;
+    if (!match && accession && accessionCounts.get(accession) === 1) {
+      match = usablePacs.find((study) => !consumed.has(study.orthancStudyId)
+        && clean(study.accessionNumber) === accession
+        && (!uid || !clean(study.studyInstanceUid)));
+    }
     if (match) consumed.add(match.orthancStudyId);
-    return { appointmentId: row.appointmentId, orthancStudyId: match?.orthancStudyId ?? null, accessionNumber: accession, date: row.date, time: row.time, modalities: modalities(row.modalityCode, ...(match?.modalitiesInStudy || [])), description: row.description, appointmentStatus: row.appointmentStatus, reportAvailable: row.reportAvailable, source: match ? "rispro_pacs" as const : "rispro_only" as const };
+    const matchedPatientId = clean(match?.patientId)?.toUpperCase() || null;
+    return { appointmentId: row.appointmentId, orthancStudyId: match?.orthancStudyId ?? null, studyInstanceUid: uid ?? clean(match?.studyInstanceUid), accessionNumber: accession, date: row.date, time: row.time, modalities: modalities(row.modalityCode, ...(match?.modalitiesInStudy || [])), description: row.description, appointmentStatus: row.appointmentStatus, reportAvailable: row.reportAvailable, source: match ? "rispro_pacs" as const : "rispro_only" as const, identityDiscrepancy: match && matchedPatientId && patientIds.size > 0 && !patientIds.has(matchedPatientId) ? "patient_id_mismatch" : null };
   });
-  for (const study of usablePacs) if (!consumed.has(study.orthancStudyId)) items.push({ appointmentId: null, orthancStudyId: study.orthancStudyId, accessionNumber: clean(study.accessionNumber), date: studyDate(study.studyDate), time: null, modalities: modalities(...study.modalitiesInStudy), description: clean(study.studyDescription), appointmentStatus: null, reportAvailable: false, source: "pacs_only" });
+  for (const study of usablePacs) if (!consumed.has(study.orthancStudyId)) items.push({ appointmentId: null, orthancStudyId: study.orthancStudyId, studyInstanceUid: clean(study.studyInstanceUid), accessionNumber: clean(study.accessionNumber), date: studyDate(study.studyDate), time: null, modalities: modalities(...study.modalitiesInStudy), description: clean(study.studyDescription), appointmentStatus: null, reportAvailable: false, source: "pacs_only", identityDiscrepancy: null });
   return items.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || "").localeCompare(a.time || "") || `${a.accessionNumber || ""}\u0000${a.orthancStudyId || ""}`.localeCompare(`${b.accessionNumber || ""}\u0000${b.orthancStudyId || ""}`));
 }

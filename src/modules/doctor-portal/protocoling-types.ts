@@ -120,6 +120,7 @@ export interface ProtocolDocumentAnnotation {
 
 export type ProtocolingHistorySource = "rispro_pacs" | "rispro_only" | "pacs_only";
 export type ProtocolingHistoryPacsStatus = "available" | "unavailable" | "patient_id_unavailable";
-export interface ProtocolingPatientHistoryItem { appointmentId: number | null; orthancStudyId: string | null; accessionNumber: string | null; date: string | null; time: string | null; modalities: string[]; description: string | null; appointmentStatus: string | null; reportAvailable: boolean; source: ProtocolingHistorySource; }
-export interface ProtocolingPatientHistoryResponse { items: ProtocolingPatientHistoryItem[]; pacsStatus: ProtocolingHistoryPacsStatus; historicalPacsIndexStatus: HistoricalPacsIndexStatus; historicalCandidates: HistoricalPacsCandidate[]; }
+export type ProtocolingHistoryIdentityDiscrepancy = "patient_id_mismatch";
+export interface ProtocolingPatientHistoryItem { appointmentId: number | null; orthancStudyId: string | null; studyInstanceUid: string | null; accessionNumber: string | null; date: string | null; time: string | null; modalities: string[]; description: string | null; appointmentStatus: string | null; reportAvailable: boolean; source: ProtocolingHistorySource; identityDiscrepancy: ProtocolingHistoryIdentityDiscrepancy | null; }
+export interface ProtocolingPatientHistoryResponse { items: ProtocolingPatientHistoryItem[]; pacsStatus: ProtocolingHistoryPacsStatus; historicalPacsIndexStatus: HistoricalPacsIndexStatus; historicalPacsLastSuccessAt: string | null; historicalCandidates: HistoricalPacsCandidate[]; }
 import type { HistoricalPacsCandidate, HistoricalPacsIndexStatus } from "../../services/historical-pacs-index-service.js";

@@ -1478,7 +1478,10 @@ export async function fetchProtocolingPatientHistory(appointmentId: number): Pro
 }
 
 export async function searchProtocolingHistoricalPacsPatientId(appointmentId: number, patientId: string): Promise<HistoricalPacsCandidate[]> {
-  const raw = await api<{ candidates: HistoricalPacsCandidate[] }>(`/doctor/protocoling/appointments/${appointmentId}/history/old-patient-id?patientId=${encodeURIComponent(patientId.trim())}`);
+  const raw = await api<{ candidates: HistoricalPacsCandidate[] }>(`/doctor/protocoling/appointments/${appointmentId}/history/old-patient-id`, {
+    method: "POST",
+    body: JSON.stringify({ patientId: patientId.trim() }),
+  });
   return raw.candidates;
 }
 

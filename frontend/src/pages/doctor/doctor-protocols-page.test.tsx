@@ -273,6 +273,7 @@ describe("Doctor protocoling request documents", () => {
     const panel = screen.getByRole("heading", { name: "Patient history" }).closest("aside")!;
     const history = within(panel);
     expect(await history.findByText("Possible historical PACS matches")).toBeTruthy();
+    expect(history.getByText("Search old PACS Patient ID")).toBeTruthy();
     expect(history.getByText("Non-authoritative candidate")).toBeTruthy();
     expect(history.queryByRole("button", { name: /Attach|Migrate|Merge/i })).toBeNull();
     await userEvent.type(history.getByRole("textbox", { name: "Old PACS Patient ID" }), "OLD-77");

@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { pool } from "../db/pool.js";
 import type { OrthancStudyDetails } from "./authoritative-orthanc-service.js";
+import { reconcileProtocolingPatientHistory } from "../modules/doctor-portal/protocoling-history.js";
 import {
   dicomPatientNameVariants,
   discoverHistoricalPacsForPatient,
+  getHistoricalPacsIndexState,
+  HISTORICAL_PACS_INDEX_FRESHNESS_MS,
   lookupHistoricalPacsByPatientId,
   reconcileHistoricalPacsIndex,
   runHistoricalPacsSyncCycle,
@@ -62,9 +65,16 @@ test("historical PACS index discovery and synchronization", async (t) => {
         study({ orthancStudyId: "fuzzy-study", patientId: "LEGACY-FUZZY", patientName: "MOHAMED^SALEM" }),
       ]);
       const result = await discoverHistoricalPacsForPatient(patientId);
-      assert.equal(result.candidates[0]?.classification, "exact");
-      assert.equal(result.candidates[0]?.historicalPatientId, "LEGACY-EXACT");
       assert.equal(result.exactStudies[0]?.orthancStudyId, "exact-study");
+      assert.equal(result.candidates.some((candidate) => candidate.historicalPatientId === "LEGACY-EXACT"), false);
+      assert.ok(result.candidates.some((candidate) => candidate.historicalPatientId === "LEGACY-FUZZY"));
+      const exactStudy = result.exactStudies[0]!;
+      const history = reconcileProtocolingPatientHistory([{
+        appointmentId: 7, studyInstanceUid: exactStudy.studyInstanceUid, accessionNumber: exactStudy.accessionNumber,
+        date: "2025-01-01", time: "09:00:00", modalityCode: "CT", description: "Exam",
+        appointmentStatus: "completed", reportAvailable: true,
+      }], result.exactStudies, null, null, result.knownPatientIds);
+      assert.equal(history.find((item) => item.appointmentId === 7)?.source, "rispro_pacs");
       const manual = await lookupHistoricalPacsByPatientId("LEGACY-EXACT");
       assert.equal(manual.length, 1);
       assert.equal(manual[0]?.reasons[0], "exact_patient_id");
@@ -91,6 +101,25 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
+  await t.test("indexed StudyInstanceUID reconciles a study while surfacing a different PACS PatientID", async () => {
+    const patientId = await createPatient({ englishName: "UID Match Patient", identifier: "CURRENT-PID" });
+    const indexed = study({ orthancStudyId: "uid-patient-mismatch", studyInstanceUid: "1.2.840.uid-mismatch", accessionNumber: "PACS-OTHER", patientId: "OTHER-PID", patientName: "UNRELATED^NAME" });
+    try {
+      await upsertHistoricalPacsStudies([indexed]);
+      const discovery = await discoverHistoricalPacsForPatient(patientId, [indexed.studyInstanceUid!]);
+      const history = reconcileProtocolingPatientHistory([{
+        appointmentId: 8, studyInstanceUid: indexed.studyInstanceUid, accessionNumber: "RISPRO-ACCESSION",
+        date: "2025-01-01", time: "10:00:00", modalityCode: "CT", description: "Exam",
+        appointmentStatus: "completed", reportAvailable: false,
+      }], discovery.exactStudies, null, null, discovery.knownPatientIds);
+      assert.equal(history[0]?.source, "rispro_pacs");
+      assert.equal(history[0]?.identityDiscrepancy, "patient_id_mismatch");
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id='uid-patient-mismatch'`);
+      await removePatient(patientId);
+    }
+  });
+
   await t.test("Arabic normalization and one-character spelling variation reuse PostgreSQL name semantics", async () => {
     const patientId = await createPatient({ englishName: "Unrelated Latin Name", arabicName: "خالد علي" });
     const orthancStudyId = `arabic-${suffix()}`;
@@ -108,6 +137,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
 
   await t.test("DICOM Family^Given^Middle produces both family-first and human-order variants", async () => {
     assert.deepEqual(dicomPatientNameVariants("ALSIFI^SERAJ^ALI"), ["ALSIFI SERAJ ALI", "SERAJ ALI ALSIFI"]);
+    assert.deepEqual(dicomPatientNameVariants("السيفي^سراج^علي=ALSIFI^SERAJ^ALI"), ["السيفي سراج علي", "سراج علي السيفي", "ALSIFI SERAJ ALI", "SERAJ ALI ALSIFI"]);
     const patientId = await createPatient({ englishName: "Seraj Ali Alsifi" });
     const orthancStudyId = `pn-${suffix()}`;
     try {
@@ -137,6 +167,24 @@ test("historical PACS index discovery and synchronization", async (t) => {
       assert.equal(result.candidates.some((item) => item.historicalPatientId === "SEX-NO"), false);
     } finally {
       await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('dob-compatible','dob-mismatch','sex-mismatch')`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("hard demographic rejection occurs before the final 20-candidate limit", async () => {
+    const patientId = await createPatient({ englishName: "Kareem Ali", sex: "M" });
+    const incompatibleIds = Array.from({ length: 21 }, (_, index) => `AA-INCOMPATIBLE-${String(index).padStart(2, "0")}`);
+    try {
+      await upsertHistoricalPacsStudies([
+        ...incompatibleIds.map((legacyId, index) => study({ orthancStudyId: `limit-incompatible-${index}`, patientId: legacyId, patientName: "KAREEM^ALI", patientSex: "F" })),
+        study({ orthancStudyId: "limit-compatible", patientId: "ZZ-COMPATIBLE", patientName: "KARIM^ALI", patientSex: "M" }),
+      ]);
+      const result = await discoverHistoricalPacsForPatient(patientId);
+      assert.ok(result.candidates.some((candidate) => candidate.historicalPatientId === "ZZ-COMPATIBLE"), JSON.stringify(result.candidates));
+      assert.equal(result.candidates.some((candidate) => incompatibleIds.includes(candidate.historicalPatientId)), false);
+      assert.ok(result.candidates.length <= 20);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id like 'limit-incompatible-%' or orthanc_study_id='limit-compatible'`);
       await removePatient(patientId);
     }
   });
@@ -175,7 +223,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
     }
   });
 
-  await t.test("upsert is idempotent and successful full reconciliation removes stale indexed studies", async () => {
+  await t.test("upsert is idempotent and a DB-clock reconciliation marker retains refreshed rows while removing stale rows", async (subtest) => {
     const retained = study({ orthancStudyId: "sync-retained", patientId: "SYNC-1", patientName: "SYNC^PATIENT" });
     await upsertHistoricalPacsStudies([retained]);
     await upsertHistoricalPacsStudies([{ ...retained, studyDescription: "Updated" }]);
@@ -186,13 +234,47 @@ test("historical PACS index discovery and synchronization", async (t) => {
     await pool.query(`update historical_pacs_sync_state set last_change_sequence=null,last_full_sync_at=null where singleton_key=true`);
     const client = {
       async getChanges() { return { changes: [], lastSequence: 77, done: true }; },
-      async listStudyIds() { return ["sync-retained"]; },
+      async listStudiesForIndexPage() { return { studies: [retained], resourceCount: 1 }; },
       async getStudyForIndex(id: string) { return id === "sync-retained" ? retained : null; },
     };
-    const result = await reconcileHistoricalPacsIndex(client);
-    assert.equal(result.removed, 1);
-    assert.equal(Number((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id='sync-stale'`)).rows[0]?.count), 0);
-    await pool.query(`delete from historical_pacs_studies where orthanc_study_id='sync-retained'`);
+    subtest.mock.timers.enable({ apis: ["Date"], now: Date.parse("2099-01-01T00:00:00Z") });
+    try {
+      const result = await reconcileHistoricalPacsIndex(client);
+      assert.equal(result.removed, 1);
+      assert.equal(Number((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id='sync-retained'`)).rows[0]?.count), 1);
+      assert.equal(Number((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id='sync-stale'`)).rows[0]?.count), 0);
+    } finally {
+      subtest.mock.timers.reset();
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id='sync-retained'`);
+    }
+  });
+
+  await t.test("an interrupted full scan never removes existing indexed rows", async () => {
+    await upsertHistoricalPacsStudies([study({ orthancStudyId: "interrupted-retained", patientId: "INT-1", patientName: "INTERRUPTED^PATIENT" })]);
+    await pool.query(`update historical_pacs_studies set synchronized_at=now()-interval '1 day' where orthanc_study_id='interrupted-retained'`);
+    let page = 0;
+    const client = {
+      async getChanges() { return { changes: [], lastSequence: 78, done: true }; },
+      async listStudiesForIndexPage() { page += 1; if (page === 1) return { studies: [], resourceCount: 1000 }; throw new Error("scan interrupted"); },
+      async getStudyForIndex() { return null; },
+    };
+    await assert.rejects(() => reconcileHistoricalPacsIndex(client), /scan interrupted/);
+    assert.equal(Number((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id='interrupted-retained'`)).rows[0]?.count), 1);
+    await pool.query(`delete from historical_pacs_studies where orthanc_study_id='interrupted-retained'`);
+  });
+
+  await t.test("index freshness distinguishes recent success, aged success, and explicit failure", async () => {
+    await pool.query(`update historical_pacs_sync_state set last_full_sync_at=now(),last_success_at=now(),last_error=null where singleton_key=true`);
+    let state = await getHistoricalPacsIndexState();
+    assert.equal(state.status, "ready");
+    assert.ok(state.lastSuccessAt);
+    await pool.query(`update historical_pacs_sync_state set last_success_at=now()-($1::bigint * interval '1 millisecond')-interval '1 second' where singleton_key=true`, [HISTORICAL_PACS_INDEX_FRESHNESS_MS]);
+    state = await getHistoricalPacsIndexState();
+    assert.equal(state.status, "stale");
+    await pool.query(`update historical_pacs_sync_state set last_success_at=now(),last_error='Orthanc unavailable' where singleton_key=true`);
+    state = await getHistoricalPacsIndexState();
+    assert.equal(state.status, "unavailable");
+    await readyIndex();
   });
 
   await t.test("incremental stable and deleted study changes update the index idempotently", async () => {
@@ -204,7 +286,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
         { sequence: 11, changeType: "StableStudy", resourceType: "Study", resourceId: "incremental-new" },
         { sequence: 12, changeType: "Deleted", resourceType: "Study", resourceId: "incremental-delete" },
       ], lastSequence: 12, done: true }; },
-      async listStudyIds() { return []; },
+      async listStudiesForIndexPage() { return { studies: [], resourceCount: 0 }; },
       async getStudyForIndex(id: string) { return id === "incremental-new" ? incoming : null; },
     };
     const result = await runHistoricalPacsSyncCycle(async () => client);

@@ -18,6 +18,7 @@ export type OrthancSystemInfo = { name: string | null; version: string | null; a
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
 export type OrthancChange = { sequence: number; changeType: string; resourceType: string | null; resourceId: string | null };
 export type OrthancChangesPage = { changes: OrthancChange[]; lastSequence: number; done: boolean };
+export type OrthancStudiesIndexPage = { studies: OrthancStudyDetails[]; resourceCount: number };
 export type OrthancTransferredStudySummary = Pick<OrthancStudyDetails, "orthancStudyId" | "patientId" | "patientName" | "accessionNumber" | "studyDate" | "studyDescription" | "modalitiesInStudy">;
 export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; study: OrthancStudyDetails | null; reason?: string };
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
@@ -168,6 +169,27 @@ export class AuthoritativeOrthancClient {
     const payload = await this.request("/studies");
     if (!Array.isArray(payload)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study list.", { code: "orthanc_invalid_response" });
     return payload.filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+  }
+  async listStudiesForIndexPage(since: number, limit = 1000): Promise<OrthancStudiesIndexPage> {
+    const safeSince = Number.isSafeInteger(since) && since >= 0 ? since : 0;
+    const safeLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    const requestedTags = [
+      "PatientName", "PatientID", "PatientBirthDate", "PatientSex",
+      "StudyInstanceUID", "AccessionNumber", "StudyDate", "StudyDescription",
+      "ModalitiesInStudy", "NumberOfStudyRelatedSeries", "NumberOfStudyRelatedInstances",
+    ].join(";");
+    const payload = await this.request(`/studies?expand&since=${safeSince}&limit=${safeLimit}&requestedTags=${encodeURIComponent(requestedTags)}`);
+    if (!Array.isArray(payload)) throw new HttpError(502, "Authoritative Orthanc returned an invalid expanded study list.", { code: "orthanc_invalid_response" });
+    const studies = await Promise.all(payload.map(async (value) => {
+      const row = record(value);
+      const id = first(row.ID, row.Id, row.id);
+      if (!id) throw new HttpError(502, "Authoritative Orthanc returned an expanded study without an ID.", { code: "orthanc_invalid_response" });
+      const hasExpandedMetadata = Object.keys(record(row.MainDicomTags)).length > 0
+        || Object.keys(record(row.PatientMainDicomTags)).length > 0
+        || Object.keys(record(row.RequestedTags)).length > 0;
+      return hasExpandedMetadata ? studyDetails(row, id) : this.getStudyForIndex(id);
+    }));
+    return { studies: studies.filter((study): study is OrthancStudyDetails => study !== null), resourceCount: payload.length };
   }
   async getChanges(since: number, limit = 200): Promise<OrthancChangesPage> {
     const safeSince = Number.isSafeInteger(since) && since >= 0 ? since : 0;

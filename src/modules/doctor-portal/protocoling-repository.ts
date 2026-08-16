@@ -479,6 +479,7 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
       select
         b.id as appointment_id,
         ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
+        b.study_instance_uid,
         b.booking_date::text as appointment_date,
         b.booking_time::text as appointment_time,
         m.code as modality_code,
@@ -499,6 +500,7 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
   const rispro = result.rows.map((value) => ({
     appointmentId: Number(value.appointment_id),
     accessionNumber: stringOrNull(value.accession_number),
+    studyInstanceUid: stringOrNull(value.study_instance_uid),
     date: stringOrNull(value.appointment_date),
     time: stringOrNull(value.appointment_time),
     modalityCode: stringOrNull(value.modality_code),
@@ -507,18 +509,19 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
     reportAvailable: Boolean(value.report_available),
   }));
   try {
-    const discovery = await discoverHistoricalPacsForPatient(current.patientId);
+    const discovery = await discoverHistoricalPacsForPatient(current.patientId, rispro.map((row) => row.studyInstanceUid).filter((value): value is string => Boolean(value)));
     const pacsStatus = discovery.knownPatientIds.length === 0
       ? "patient_id_unavailable" as const
       : discovery.indexStatus === "ready" ? "available" as const : "unavailable" as const;
     return {
-      items: reconcileProtocolingPatientHistory(rispro, discovery.exactStudies, current.accessionNumber),
+      items: reconcileProtocolingPatientHistory(rispro, discovery.exactStudies, current.accessionNumber, current.studyInstanceUid, discovery.knownPatientIds),
       pacsStatus,
       historicalPacsIndexStatus: discovery.indexStatus,
+      historicalPacsLastSuccessAt: discovery.lastSuccessAt,
       historicalCandidates: discovery.candidates,
     };
   } catch {
-    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber), pacsStatus: "unavailable" as const, historicalPacsIndexStatus: "unavailable" as const, historicalCandidates: [] };
+    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber, current.studyInstanceUid), pacsStatus: "unavailable" as const, historicalPacsIndexStatus: "unavailable" as const, historicalPacsLastSuccessAt: null, historicalCandidates: [] };
   }
 }
 

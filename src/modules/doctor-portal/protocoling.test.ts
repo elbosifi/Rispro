@@ -173,4 +173,12 @@ describe("Doctor Portal protocoling worklist backend", () => {
     assert.match(repo, /Select a saved protocol or enter a free-text protocol/);
     assert.match(repo, /getProtocolingPatientHistory/);
   });
+
+  it("keeps old PACS PatientID lookup authenticated and sends the exact identifier in a POST body", () => {
+    const routes = readFileSync(`${root}/src/modules/doctor-portal/protocoling-routes.ts`, "utf8");
+    const client = readFileSync(`${root}/frontend/src/lib/api/doctor-portal-reporting.ts`, "utf8");
+    assert.match(routes, /router\.post\(\s*"\/appointments\/:appointmentId\/history\/old-patient-id"[\s\S]*?requireProtocolingAccess\(req\)[\s\S]*?asUnknownRecord\(req\.body\)\.patientId/);
+    assert.doesNotMatch(routes, /old-patient-id[\s\S]{0,400}req\.query\.patientId/);
+    assert.match(client, /history\/old-patient-id`, \{\s*method: "POST",\s*body: JSON\.stringify\(\{ patientId: patientId\.trim\(\) \}\)/);
+  });
 });
