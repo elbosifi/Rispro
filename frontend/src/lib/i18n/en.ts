@@ -1125,6 +1125,8 @@ export const en = {
   "patients.directory.warning.missingName": "Missing name",
   "patients.directory.warning.noAppointment": "No appointments",
   "patients.directory.warning.possibleDuplicate": "Possible duplicate",
+  "patients.directory.warning.duplicateMatchOne": "{field} {value} is also used by 1 other patient record.",
+  "patients.directory.warning.duplicateMatchMany": "{field} {value} is also used by {count} other patient records.",
   "patients.directory.warning.incomplete": "Incomplete data",
   "patients.directory.drawer.title": "Patient Profile",
   "patients.directory.drawer.demographics": "Demographics",

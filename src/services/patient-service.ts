@@ -1349,6 +1349,10 @@ interface PatientDirectorySummaryOutput {
     incompleteData: boolean;
     possibleDuplicate: boolean;
     duplicateReasons: string[];
+    duplicateCounts: {
+      phone1: number;
+      nationalId: number;
+    };
   };
   lastAppointment: {
     id: number;
@@ -1386,8 +1390,9 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
     exam_type_name: string;
   };
 
-  type DuplicateCheckRow = {
-    is_dupe: boolean;
+  type DuplicateCountRow = {
+    phone_match_count: number;
+    national_id_match_count: number;
   };
 
   const [lastApptResult, nextApptResult, recentApptsResult, duplicateResult, noShow] = await Promise.all([
@@ -1442,17 +1447,17 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
       `,
       [cleanPatientId]
     ),
-    pool.query<DuplicateCheckRow>(
+    pool.query<DuplicateCountRow>(
       `
-        select exists (
-          select 1
-          from patients p2
-          where p2.id != $1
-            and (
-              ($2::text is not null and $2 <> '' and p2.phone_1 = $2)
-              or ($3::text is not null and $3 <> '' and p2.national_id = $3)
-            )
-        ) as is_dupe
+        select
+          count(*) filter (
+            where $2::text is not null and $2 <> '' and p2.phone_1 = $2
+          )::int as phone_match_count,
+          count(*) filter (
+            where $3::text is not null and $3 <> '' and p2.national_id = $3
+          )::int as national_id_match_count
+        from patients p2
+        where p2.id <> $1
       `,
       [cleanPatientId, patient.phone_1 || null, patient.national_id || null]
     ),
@@ -1470,7 +1475,12 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
         }
       : null;
 
-  const duplicateReasons = Boolean(duplicateResult.rows[0]?.is_dupe) ? ["phone_or_id_match"] : [];
+  const duplicateCounts = {
+    phone1: Number(duplicateResult.rows[0]?.phone_match_count ?? 0),
+    nationalId: Number(duplicateResult.rows[0]?.national_id_match_count ?? 0)
+  };
+  const possibleDuplicate = duplicateCounts.phone1 > 0 || duplicateCounts.nationalId > 0;
+  const duplicateReasons = possibleDuplicate ? ["phone_or_id_match"] : [];
   const missingPhone = !patient.phone_1;
   const missingDob = !patient.estimated_date_of_birth;
   const missingSex = !patient.sex;
@@ -1518,8 +1528,9 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
       missingSex,
       missingName,
       incompleteData: missingPhone || missingDob || missingSex || missingName,
-      possibleDuplicate: duplicateReasons.length > 0,
-      duplicateReasons
+      possibleDuplicate,
+      duplicateReasons,
+      duplicateCounts
     },
     lastAppointment: toAppointmentSummary(lastApptResult.rows[0]),
     nextAppointment: toAppointmentSummary(nextApptResult.rows[0]),

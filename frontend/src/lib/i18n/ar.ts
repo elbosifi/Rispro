@@ -1166,6 +1166,8 @@ export const ar = {  "brand.hospitalName": "المركز الوطني للأور
   "patients.directory.warning.missingName": "الاسم ناقص",
   "patients.directory.warning.noAppointment": "لا توجد مواعيد",
   "patients.directory.warning.possibleDuplicate": "احتمال التكرار",
+  "patients.directory.warning.duplicateMatchOne": "{field} {value} مستخدم أيضًا في سجل مريض آخر واحد.",
+  "patients.directory.warning.duplicateMatchMany": "{field} {value} مستخدم أيضًا في {count} سجلات مرضى أخرى.",
   "patients.directory.warning.incomplete": "بيانات ناقصة",
   "patients.directory.drawer.title": "ملف المريض",
   "patients.directory.drawer.demographics": "البيانات الشخصية",

@@ -126,6 +126,7 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
     recentAppointments: RawRecord[];
     noShow?: RawRecord;
   }>(`/patients/${patientId}/directory-summary`);
+  const duplicateCounts = raw.warnings?.duplicateCounts as RawRecord | undefined;
 
   return {
     demographics: {
@@ -172,7 +173,11 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
       missingName: Boolean(raw.warnings?.missingName),
       incompleteData: Boolean(raw.warnings?.incompleteData),
       possibleDuplicate: Boolean(raw.warnings?.possibleDuplicate),
-      duplicateReasons: (raw.warnings?.duplicateReasons as string[]) || []
+      duplicateReasons: (raw.warnings?.duplicateReasons as string[]) || [],
+      duplicateCounts: {
+        phone1: Number(duplicateCounts?.phone1 ?? 0),
+        nationalId: Number(duplicateCounts?.nationalId ?? 0)
+      }
     },
     lastAppointment: raw.lastAppointment as PatientDirectorySummary["lastAppointment"],
     nextAppointment: raw.nextAppointment as PatientDirectorySummary["nextAppointment"],

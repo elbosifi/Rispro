@@ -76,13 +76,17 @@ export function PatientSummaryContent({
   const demographics = summary.demographics;
   const contact = summary.contact;
   const estimated = demographics.demographicsEstimated || summary.warnings.incompleteData;
+  const duplicateCounts = summary.warnings.duplicateCounts ?? {
+    phone1: 0,
+    nationalId: 0
+  };
+  const hasDetailedDuplicate = duplicateCounts.phone1 > 0 || duplicateCounts.nationalId > 0;
   const warnings = [
     summary.warnings.missingPhone ? t(language, "patients.directory.warning.missingPhone") : null,
     summary.warnings.missingDob ? t(language, "patients.directory.warning.missingDob") : null,
     summary.warnings.missingSex ? t(language, "patients.directory.warning.missingSex") : null,
     summary.warnings.missingName ? t(language, "patients.directory.warning.missingName") : null,
     summary.warnings.incompleteData ? t(language, "patients.directory.warning.incomplete") : null,
-    summary.warnings.possibleDuplicate ? t(language, "patients.directory.warning.possibleDuplicate") : null,
   ].filter((label): label is string => Boolean(label));
   const noShowRows = [
     { label: t(language, "patients.noShowRestriction.count"), value: <Value value={summary.noShow.noShowCount} dir="ltr" /> },
@@ -136,7 +140,7 @@ export function PatientSummaryContent({
 
       {summary.noShow.bookingRestricted || variant === "drawer" ? <DisclosureSection title={t(language, "patients.noShowRestriction.title")} defaultOpen={variant === "drawer" && summary.noShow.bookingRestricted}><div className="space-y-3"><DefinitionRows rows={noShowRows} />{summary.noShow.lastAuthorizationReason ? <div className="rounded-lg bg-muted/20 p-2 text-sm"><p className="text-muted-foreground">{t(language, "patients.noShowRestriction.lastAuthorizationReason")}</p><p className="mt-1">{summary.noShow.lastAuthorizationReason}</p></div> : null}{summary.noShow.bookingRestricted && canAuthorizeNoShow && onAuthorizeNoShow ? <Button size="sm" variant="outline" onClick={onAuthorizeNoShow} disabled={authorizeNoShowPending}>{t(language, "patients.noShowRestriction.authorize")}</Button> : null}</div></DisclosureSection> : null}
 
-      {warnings.length > 0 ? <section aria-labelledby={`${variant}-patient-warnings-heading`}><h3 id={`${variant}-patient-warnings-heading`} className="mb-2 text-sm font-semibold text-foreground">{t(language, "patients.directory.drawer.warnings")}</h3><div className="flex flex-wrap gap-2">{warnings.map((warning) => <WarningBadge key={warning} label={warning} />)}</div></section> : null}
+      {warnings.length > 0 || summary.warnings.possibleDuplicate ? <section aria-labelledby={`${variant}-patient-warnings-heading`}><h3 id={`${variant}-patient-warnings-heading`} className="mb-2 text-sm font-semibold text-foreground">{t(language, "patients.directory.drawer.warnings")}</h3><div className="space-y-2">{warnings.length > 0 ? <div className="flex flex-wrap gap-2">{warnings.map((warning) => <WarningBadge key={warning} label={warning} />)}</div> : null}{summary.warnings.possibleDuplicate && hasDetailedDuplicate ? <div className="rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"><div className="flex items-center gap-1 font-semibold"><AlertTriangle size={12} aria-hidden="true" />{t(language, "patients.directory.warning.possibleDuplicate")}</div><div className="mt-1 space-y-1">{duplicateCounts.phone1 > 0 ? <p>{t(language, duplicateCounts.phone1 === 1 ? "patients.directory.warning.duplicateMatchOne" : "patients.directory.warning.duplicateMatchMany", { field: t(language, "patients.phone"), value: summary.contact.phone1 ?? "", count: duplicateCounts.phone1 })}</p> : null}{duplicateCounts.nationalId > 0 ? <p>{t(language, duplicateCounts.nationalId === 1 ? "patients.directory.warning.duplicateMatchOne" : "patients.directory.warning.duplicateMatchMany", { field: t(language, "patients.nationalId"), value: summary.identifiers.nationalId ?? "", count: duplicateCounts.nationalId })}</p> : null}</div></div> : summary.warnings.possibleDuplicate ? <WarningBadge label={t(language, "patients.directory.warning.possibleDuplicate")} /> : null}</div></section> : null}
     </div>
   );
 }

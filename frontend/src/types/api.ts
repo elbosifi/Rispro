@@ -1438,6 +1438,10 @@ export interface PatientDirectorySummary {
     incompleteData: boolean;
     possibleDuplicate: boolean;
     duplicateReasons: string[];
+    duplicateCounts?: {
+      phone1: number;
+      nationalId: number;
+    };
   };
   lastAppointment: {
     id: number;

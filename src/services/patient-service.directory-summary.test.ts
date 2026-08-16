@@ -129,9 +129,9 @@ test("patient directory summary composes patient details and appointments withou
       };
     }
 
-    if (normalizedSql.includes("select exists") && normalizedSql.includes("p2.phone_1 = $2")) {
+    if (normalizedSql.includes("phone_match_count") && normalizedSql.includes("national_id_match_count") && normalizedSql.includes("p2.phone_1 = $2")) {
       assert.deepEqual(params, [17, "0911111111", "NAT-17"]);
-      return { rows: [{ is_dupe: true }] };
+      return { rows: [{ phone_match_count: 2, national_id_match_count: 1 }] };
     }
 
     throw new Error(`Unexpected query: ${normalizedSql}`);
@@ -192,6 +192,10 @@ test("patient directory summary composes patient details and appointments withou
     assert.equal(summary.warnings.incompleteData, false);
     assert.equal(summary.warnings.possibleDuplicate, true);
     assert.deepEqual(summary.warnings.duplicateReasons, ["phone_or_id_match"]);
+    assert.deepEqual(summary.warnings.duplicateCounts, {
+      phone1: 2,
+      nationalId: 1
+    });
     assert.deepEqual(summary.lastAppointment, {
       id: 101,
       date: "2026-04-20",

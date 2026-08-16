@@ -42,5 +42,27 @@ describe("PatientSummaryContent", () => {
     expect(screen.getByText("N4609871")).toBeTruthy();
     expect(screen.queryAllByText("N4609871")).toHaveLength(1);
     expect(screen.getByText("More demographics")).toBeTruthy();
+    expect(screen.queryByText("Possible duplicate")).toBeNull();
+  });
+
+  it("shows field-specific duplicate counts for phone and National ID", () => {
+    const duplicateSummary: PatientDirectorySummary = {
+      ...summary,
+      warnings: {
+        ...summary.warnings,
+        possibleDuplicate: true,
+        duplicateReasons: ["phone_or_id_match"],
+        duplicateCounts: {
+          phone1: 2,
+          nationalId: 1
+        }
+      }
+    };
+
+    render(<LanguageProvider><PatientSummaryContent summary={duplicateSummary} variant="embedded" /></LanguageProvider>);
+
+    expect(screen.getByText("Possible duplicate")).toBeTruthy();
+    expect(screen.getByText(/Phone 0943855646 is also used by 2 other patient records\./)).toBeTruthy();
+    expect(screen.getByText(/National ID N4609871 is also used by 1 other patient record\./)).toBeTruthy();
   });
 });
