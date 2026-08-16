@@ -85,4 +85,31 @@ describe("QzTrayPrintingSection", () => {
     fireEvent.click(enabledTestButton!);
     await waitFor(() => expect(mockDirectTestPrint).toHaveBeenCalledWith(expect.objectContaining({ printerName: "RISPRO A4" })));
   });
+
+  it("saves accession-label printer compensation margins without changing its other print settings", async () => {
+    const original = mockSettings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!;
+    render(<QzTrayPrintingSection />);
+    await waitFor(() => expect(mockConnectQzTray).toHaveBeenCalledTimes(1));
+
+    expect((screen.getByLabelText("Accession label top margin") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("Accession label right margin") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("Accession label bottom margin") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("Accession label left margin") as HTMLInputElement).value).toBe("0");
+
+    fireEvent.change(screen.getByLabelText("Accession label left margin"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Accession label top margin"), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(mockSaveQzPrinterSettings).toHaveBeenCalledWith(expect.objectContaining({
+      profiles: expect.arrayContaining([expect.objectContaining({
+        documentType: "ACCESSION_LABEL",
+        marginsMm: { top: 1.5, right: 0, bottom: 0, left: 4 },
+        paperWidthMm: original.paperWidthMm,
+        paperHeightMm: original.paperHeightMm,
+        orientation: original.orientation,
+        scaleContent: original.scaleContent,
+        rasterize: original.rasterize,
+      })]),
+    }));
+  });
 });

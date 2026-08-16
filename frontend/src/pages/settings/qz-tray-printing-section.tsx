@@ -89,6 +89,8 @@ export default function QzTrayPrintingSection() {
 
       {settings.profiles.map((profile) => {
         const standardPaper = profile.documentType === "A4_DOCUMENT" || profile.documentType === "A4_LANDSCAPE_DOCUMENT" || profile.documentType === "A5_DOCUMENT";
+        const margins = profile.marginsMm ?? { top: 0, right: 0, bottom: 0, left: 0 };
+        const updateMargin = (side: keyof typeof margins, value: number) => updateProfile(profile.documentType, { marginsMm: { ...margins, [side]: value } });
         return (
           <section key={profile.documentType} className="rounded-xl border border-border p-4">
             <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">{PROFILE_LABELS[profile.documentType]}</h4><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile.enabled} onChange={(event) => updateProfile(profile.documentType, { enabled: event.target.checked })} />Enabled</label></div>
@@ -105,6 +107,17 @@ export default function QzTrayPrintingSection() {
               <label className="flex items-center gap-2 self-end pb-2 text-sm" title="Rasterize only when the printer driver requires it."><input type="checkbox" checked={profile.rasterize} onChange={(event) => updateProfile(profile.documentType, { rasterize: event.target.checked })} />Rasterize PDF for this driver</label>
               <div className="self-end"><Button type="button" size="sm" variant="secondary" onClick={() => void runTest(profile)} disabled={testing != null || !profile.enabled}>{testing === profile.documentType ? <Loader2 size={14} className="animate-spin" /> : null}Test print</Button></div>
             </div>
+            {profile.documentType === "ACCESSION_LABEL" ? <div className="mt-4 border-t border-border pt-4">
+              <h5 className="font-medium">Printer compensation margins (mm)</h5>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="Accession label top margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperHeightMm - margins.bottom - 0.01} step="0.5" value={margins.top} onChange={(event) => updateMargin("top", Number(event.target.value))} /></Field>
+                <Field label="Accession label right margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperWidthMm - margins.left - 0.01} step="0.5" value={margins.right} onChange={(event) => updateMargin("right", Number(event.target.value))} /></Field>
+                <Field label="Accession label bottom margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperHeightMm - margins.top - 0.01} step="0.5" value={margins.bottom} onChange={(event) => updateMargin("bottom", Number(event.target.value))} /></Field>
+                <Field label="Accession label left margin"><input className="input-premium h-10 w-full" type="number" min="0" max={profile.paperWidthMm - margins.right - 0.01} step="0.5" value={margins.left} onChange={(event) => updateMargin("left", Number(event.target.value))} /></Field>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">Printer compensation only. Label content already has a built-in 2 mm inset. Normally leave these values at 0.</p>
+              <p className="mt-1 text-xs text-muted-foreground">If the beginning of text is clipped at the left physical edge, increase Left gradually.</p>
+            </div> : null}
           </section>
         );
       })}

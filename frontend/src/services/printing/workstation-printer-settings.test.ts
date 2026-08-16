@@ -41,6 +41,21 @@ describe("workstation printer settings", () => {
     });
   });
 
+  it("persists accession-label printer compensation margins with its physical dimensions", () => {
+    const settings = createDefaultQzPrinterSettings();
+    const labelProfile = settings.profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")!;
+    const { paperWidthMm, paperHeightMm } = labelProfile;
+    labelProfile.marginsMm = { top: 1, right: 0, bottom: 0, left: 4 };
+
+    saveQzPrinterSettings(settings);
+
+    expect(loadQzPrinterSettings().profiles.find((profile) => profile.documentType === "ACCESSION_LABEL")).toMatchObject({
+      marginsMm: { top: 1, right: 0, bottom: 0, left: 4 },
+      paperWidthMm,
+      paperHeightMm,
+    });
+  });
+
   it("keeps a missing legacy A4 landscape mapping empty and preserves an explicitly saved landscape queue", () => {
     const portrait = { ...createDefaultQzPrinterSettings().profiles[0], printerName: "Shared A4", printerTray: "Tray 2", copies: 3, scaleContent: false, rasterize: true, marginsMm: { top: 2, right: 3, bottom: 4, left: 5 }, enabled: false };
     const migrated = normalizeQzPrinterSettings({ profiles: [portrait] });
