@@ -188,6 +188,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
         study({ orthancStudyId: "sex-mismatch", patientId: "SEX-NO", patientName: "KAREEM^ALI", patientBirthDate: "19850403", patientSex: "F" }),
       ]);
       const result = await discoverHistoricalPacsForPatient(patientId);
+      assert.deepEqual(result.candidates.filter((item) => item.historicalPatientId.startsWith("DOB-")).map((item) => item.historicalPatientId), ["DOB-YES", "DOB-NEAR", "DOB-FAR"]);
       const compatible = result.candidates.find((item) => item.historicalPatientId === "DOB-YES");
       assert.equal(compatible?.classification, "strong_demographic");
       assert.ok(compatible?.reasons.includes("exact_dob"));
@@ -201,6 +202,80 @@ test("historical PACS index discovery and synchronization", async (t) => {
       assert.equal(result.candidates.some((item) => item.historicalPatientId === "SEX-NO"), false);
     } finally {
       await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('dob-compatible','dob-near','dob-far','sex-mismatch')`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("calendar-year boundary and leap-day clamping are deterministic", async () => {
+    const boundaryPatient = await createPatient({ englishName: "Calendar Boundary", dob: "1980-01-01", estimated: false });
+    const leapPatient = await createPatient({ englishName: "Leap Boundary", dob: "1980-02-29", estimated: false });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "calendar-exact", patientId: "CAL-EXACT", patientName: "CALENDAR^BOUNDARY", patientBirthDate: "19800101", patientSex: null }),
+        study({ orthancStudyId: "calendar-within", patientId: "CAL-WITHIN", patientName: "CALENDAR^BOUNDARY", patientBirthDate: "19850101", patientSex: null }),
+        study({ orthancStudyId: "calendar-outside", patientId: "CAL-OUTSIDE", patientName: "CALENDAR^BOUNDARY", patientBirthDate: "19850102", patientSex: null }),
+        study({ orthancStudyId: "leap-within", patientId: "LEAP-WITHIN", patientName: "LEAP^BOUNDARY", patientBirthDate: "19850228", patientSex: null }),
+        study({ orthancStudyId: "leap-outside", patientId: "LEAP-OUTSIDE", patientName: "LEAP^BOUNDARY", patientBirthDate: "19850301", patientSex: null }),
+      ]);
+      const boundary = await discoverHistoricalPacsForPatient(boundaryPatient);
+      assert.ok(boundary.candidates.find((item) => item.historicalPatientId === "CAL-EXACT")?.reasons.includes("exact_dob"));
+      assert.equal(boundary.candidates.find((item) => item.historicalPatientId === "CAL-EXACT")?.reasons.includes("age_within_5_years"), false);
+      assert.ok(boundary.candidates.find((item) => item.historicalPatientId === "CAL-WITHIN")?.reasons.includes("age_within_5_years"));
+      assert.equal(boundary.candidates.find((item) => item.historicalPatientId === "CAL-OUTSIDE")?.reasons.includes("age_within_5_years"), false);
+      const leap = await discoverHistoricalPacsForPatient(leapPatient);
+      assert.ok(leap.candidates.find((item) => item.historicalPatientId === "LEAP-WITHIN")?.reasons.includes("age_within_5_years"));
+      assert.equal(leap.candidates.find((item) => item.historicalPatientId === "LEAP-OUTSIDE")?.reasons.includes("age_within_5_years"), false);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('calendar-exact','calendar-within','calendar-outside','leap-within','leap-outside')`);
+      await removePatient(boundaryPatient);
+      await removePatient(leapPatient);
+    }
+  });
+
+  await t.test("compatible sex breaks otherwise identical name ties without rejecting missing sex", async () => {
+    const patientId = await createPatient({ englishName: "Sex Ranking", dob: null, sex: "M" });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "sex-rank-missing", patientId: "AA-SEX-MISSING", patientName: "SEX^RANKING", patientSex: null }),
+        study({ orthancStudyId: "sex-rank-compatible", patientId: "ZZ-SEX-COMPATIBLE", patientName: "SEX^RANKING", patientSex: "M" }),
+      ]);
+      const ranked = (await discoverHistoricalPacsForPatient(patientId)).candidates.filter((item) => item.historicalPatientId.includes("SEX-"));
+      assert.deepEqual(ranked.map((item) => item.historicalPatientId), ["ZZ-SEX-COMPATIBLE", "AA-SEX-MISSING"]);
+      assert.ok(ranked[0]?.reasons.includes("compatible_sex"));
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('sex-rank-missing','sex-rank-compatible')`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("materially stronger name evidence remains ahead of demographic bonuses", async () => {
+    const patientId = await createPatient({ englishName: "Muhammad Ali", dob: "1980-01-01", estimated: false, sex: "M" });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "name-primary-strong", patientId: "ZZ-NAME-STRONG", patientName: "MUHAMMAD^ALI", patientBirthDate: null, patientSex: null }),
+        study({ orthancStudyId: "name-primary-demographic", patientId: "AA-NAME-DEMOGRAPHIC", patientName: "MOHAMED^ALI", patientBirthDate: "19800101", patientSex: "M" }),
+      ]);
+      const ranked = (await discoverHistoricalPacsForPatient(patientId)).candidates.filter((item) => item.historicalPatientId.includes("NAME-"));
+      assert.deepEqual(ranked.map((item) => item.historicalPatientId), ["ZZ-NAME-STRONG", "AA-NAME-DEMOGRAPHIC"]);
+      assert.ok(ranked[0]!.matchRank < ranked[1]!.matchRank || ranked[0]!.nameSimilarity > ranked[1]!.nameSimilarity);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('name-primary-strong','name-primary-demographic')`);
+      await removePatient(patientId);
+    }
+  });
+
+  await t.test("estimated RISpro DOB contributes no demographic ordering bonus", async () => {
+    const patientId = await createPatient({ englishName: "Estimated Ranking", dob: "1980-01-01", estimated: true });
+    try {
+      await upsertHistoricalPacsStudies([
+        study({ orthancStudyId: "estimated-rank-far", patientId: "AA-EST-FAR", patientName: "ESTIMATED^RANKING", patientBirthDate: "19600101", patientSex: null }),
+        study({ orthancStudyId: "estimated-rank-exact", patientId: "ZZ-EST-EXACT", patientName: "ESTIMATED^RANKING", patientBirthDate: "19800101", patientSex: null }),
+      ]);
+      const ranked = (await discoverHistoricalPacsForPatient(patientId)).candidates.filter((item) => item.historicalPatientId.includes("EST-"));
+      assert.deepEqual(ranked.map((item) => item.historicalPatientId), ["AA-EST-FAR", "ZZ-EST-EXACT"]);
+      assert.ok(ranked.every((item) => !item.reasons.includes("exact_dob") && !item.reasons.includes("age_within_5_years")));
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id in ('estimated-rank-far','estimated-rank-exact')`);
       await removePatient(patientId);
     }
   });

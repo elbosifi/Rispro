@@ -388,9 +388,30 @@ function matchReasons(row: NameMatchRow): MatchReason[] {
 
 function birthDatesWithinFiveYears(left: string | null, right: string | null): boolean {
   if (!left || !right || left === right) return false;
-  const leftTime = Date.parse(`${left}T00:00:00Z`);
-  const rightTime = Date.parse(`${right}T00:00:00Z`);
-  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && Math.abs(leftTime - rightTime) <= 5 * 365.25 * 24 * 60 * 60 * 1000;
+  const earlier = left < right ? left : right;
+  const later = left < right ? right : left;
+  const match = earlier.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(later)) return false;
+  const targetYear = Number(match[1]) + 5;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = targetYear % 4 === 0 && (targetYear % 100 !== 0 || targetYear % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  if (!daysInMonth || day < 1) return false;
+  const boundary = `${String(targetYear).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(Math.min(day, daysInMonth)).padStart(2, "0")}`;
+  return later <= boundary;
+}
+
+function demographicEvidenceScore(row: NameMatchRow, profile: PatientIdentityProfile): { score: number; exactDob: boolean; ageWithinFiveYears: boolean; compatibleSex: boolean; sexConflict: boolean } {
+  const pacsDob = normalizedDicomDate(row.patient_birth_date);
+  const risproDob = normalizedDicomDate(profile.birthDate);
+  const pacsSex = normalizedSex(row.patient_sex);
+  const risproSex = normalizedSex(profile.sex);
+  const exactDob = Boolean(profile.birthDateReliable && pacsDob && risproDob && pacsDob === risproDob);
+  const ageWithinFiveYears = Boolean(profile.birthDateReliable && birthDatesWithinFiveYears(pacsDob, risproDob));
+  const compatibleSex = Boolean(pacsSex && risproSex && pacsSex === risproSex);
+  const sexConflict = Boolean(pacsSex && risproSex && pacsSex !== risproSex);
+  return { score: (exactDob ? 3 : ageWithinFiveYears ? 2 : 0) + (compatibleSex ? 1 : 0), exactDob, ageWithinFiveYears, compatibleSex, sexConflict };
 }
 
 async function loadStudiesForPatientIds(patientIds: string[]): Promise<Map<string, HistoricalPacsStudy[]>> {
@@ -449,36 +470,31 @@ async function fuzzyCandidates(profile: PatientIdentityProfile): Promise<Histori
     const current = strongest.get(match.patient_id);
     if (!current || match.match_rank < current.match_rank || (match.match_rank === current.match_rank && (Number(match.name_similarity) > Number(current.name_similarity) || (Number(match.name_similarity) === Number(current.name_similarity) && (match.phonetic_match_count > current.phonetic_match_count || (match.phonetic_match_count === current.phonetic_match_count && match.soundex_match_count > current.soundex_match_count)))))) strongest.set(match.patient_id, match);
   }
-  const ordered = [...strongest.values()].sort((a, b) => a.match_rank - b.match_rank || Number(b.name_similarity) - Number(a.name_similarity) || b.phonetic_match_count - a.phonetic_match_count || b.soundex_match_count - a.soundex_match_count);
-  const eligible = ordered.filter((row) => {
-    const pacsSex = normalizedSex(row.patient_sex);
-    const risproSex = normalizedSex(profile.sex);
-    if (pacsSex && risproSex && pacsSex !== risproSex) return false;
-    return true;
-  }).slice(0, 20);
-  const studiesById = await loadStudiesForPatientIds(eligible.map((row) => row.patient_id));
+  const eligible = [...strongest.values()]
+    .map((row) => ({ row, demographics: demographicEvidenceScore(row, profile) }))
+    .filter((candidate) => !candidate.demographics.sexConflict)
+    .sort((a, b) => a.row.match_rank - b.row.match_rank
+      || Number(b.row.name_similarity) - Number(a.row.name_similarity)
+      || b.row.phonetic_match_count - a.row.phonetic_match_count
+      || b.row.soundex_match_count - a.row.soundex_match_count
+      || b.demographics.score - a.demographics.score)
+    .slice(0, 20);
+  const studiesById = await loadStudiesForPatientIds(eligible.map((candidate) => candidate.row.patient_id));
   const candidates: HistoricalPacsCandidate[] = [];
-  for (const row of eligible) {
+  for (const { row, demographics } of eligible) {
     const studies = studiesById.get(row.patient_id) || [];
     if (!studies.length) continue;
-    const pacsDob = normalizedDicomDate(row.patient_birth_date);
-    const risproDob = normalizedDicomDate(profile.birthDate);
-    const pacsSex = normalizedSex(row.patient_sex);
-    const risproSex = normalizedSex(profile.sex);
     const reasons = matchReasons(row);
-    const exactDob = Boolean(profile.birthDateReliable && pacsDob && risproDob && pacsDob === risproDob);
-    const ageWithinFiveYears = Boolean(profile.birthDateReliable && birthDatesWithinFiveYears(pacsDob, risproDob));
-    const compatibleSex = Boolean(pacsSex && risproSex && pacsSex === risproSex);
-    if (exactDob) reasons.push("exact_dob");
-    if (ageWithinFiveYears) reasons.push("age_within_5_years");
-    if (compatibleSex) reasons.push("compatible_sex");
+    if (demographics.exactDob) reasons.push("exact_dob");
+    if (demographics.ageWithinFiveYears) reasons.push("age_within_5_years");
+    if (demographics.compatibleSex) reasons.push("compatible_sex");
     const veryStrongName = row.match_rank <= 4 || (row.match_rank <= 9 && Number(row.name_similarity) >= 0.75);
     candidates.push({
       historicalPatientId: row.patient_id,
       patientName: row.patient_name_raw,
       patientBirthDate: row.patient_birth_date,
       patientSex: row.patient_sex,
-      classification: veryStrongName && exactDob ? "strong_demographic" : "possible",
+      classification: veryStrongName && demographics.exactDob ? "strong_demographic" : "possible",
       reasons,
       authoritative: false,
       matchRank: row.match_rank,
