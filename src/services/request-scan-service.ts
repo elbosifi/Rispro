@@ -457,9 +457,27 @@ async function reconcileCheckpointedRequestScanArchive(
   return { outcome: recovered, recoveredFrom: recoveryPath };
 }
 
+async function archiveInboxForCheckpointedRequestScanJob(job: RequestScanJob, settings: RequestScanSettings): Promise<RequestScanInbox> {
+  if (job.workflow_source !== "modality") return inboxForJob(settings, job);
+  const checkpoints = await loadRequestScanJobAppointments(job.id);
+  const appointmentIds = checkpoints.map((checkpoint) => checkpoint.appointment_id);
+  if (!appointmentIds.length) throw new RequestScanProcessingError("The checkpointed Request Scan appointment links are missing. Manual review is required.", "internal_processing");
+  const { rows } = await pool.query<{ appointment_id: number; modality_id: number; modality_code: string }>(
+    `select b.id as appointment_id,b.modality_id,m.code as modality_code
+     from appointments_v2.bookings b join modalities m on m.id=b.modality_id
+     where b.id=any($1::bigint[])`,
+    [appointmentIds],
+  );
+  if (rows.length !== appointmentIds.length) throw new RequestScanProcessingError("A checkpointed Request Scan appointment no longer has an archive modality. Manual review is required.", "internal_processing");
+  const modalities = new Map(rows.map((row) => [Number(row.modality_id), sanitizeRequestScanModalityCode(row.modality_code)]));
+  if (modalities.size !== 1) throw new RequestScanProcessingError("The matched appointments have different archive modalities. Assign the document manually.", "identifier_conflict");
+  const [modalityId, modalityCode] = modalities.entries().next().value as [number, string];
+  return buildRequestScanInbox(settings, { id: modalityId, code: modalityCode });
+}
+
 async function archiveCheckpointedRequestScanJob(job: RequestScanJob, lease: RequestScanLease, settings: RequestScanSettings, dependencies: RequestScanServiceDependencies, created: boolean): Promise<RequestScanJob> {
   const checkpoint = dependencies.updateCheckpoint ?? updateRequestScanCheckpoint;
-  const folder = destination(inboxForJob(settings, job).processedSubfolder, !created);
+  const folder = destination((await archiveInboxForCheckpointedRequestScanJob(job, settings)).processedSubfolder, !created);
   const intended = job.intended_destination_path || requestScanArchivePath(folder, Number(job.id), job.filename);
   if (!job.intended_destination_path) job = await checkpoint(job.id, lease, { intended_destination_path: intended });
   await assertRequestScanLeaseOwned(job.id, lease);
@@ -699,10 +717,6 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
 
     if (!appointments.length) throw new HttpError(422, "No valid appointment identifier could be confirmed. Assign the document manually.");
     appointments.sort((a, b) => Number(a.id) - Number(b.id));
-    if (inbox.workflowSource === "modality") {
-      const modalityCheck = await pool.query<{ id: number }>("select id from appointments_v2.bookings where id=any($1::bigint[]) and modality_id=$2", [appointments.map((value) => Number(value.id)), inbox.modalityId]);
-      if (modalityCheck.rows.length !== appointments.length) throw new RequestScanProcessingError(`The scanned appointment modality does not match the ${inbox.modalityCode} ingestion folder.`, "modality_mismatch");
-    }
     const appointment = appointments[0]!;
     const appointmentCheckpoints: RequestScanJobAppointmentCheckpoint[] = appointments.map((value) => {
       const sources = appointmentSources.get(Number(value.id)) ?? new Set(["checkpoint" as const]);
@@ -710,6 +724,7 @@ export async function processClaimedRequestScanJob(claimed: ClaimedRequestScanJo
       return { appointment_id: Number(value.id), patient_id: Number(value.patient_id), identifier_source };
     });
     await checkpointRequestScanJobAppointments(job.id, lease, appointmentCheckpoints);
+    await archiveInboxForCheckpointedRequestScanJob(job, settings);
     if (!job.identifier_verified_at) job = await (dependencies.updateCheckpoint ?? updateRequestScanCheckpoint)(job.id, lease, { appointment_id: appointment.id, barcode_value: appointment.accession_number, identifier_verified_at: new Date().toISOString(), identifier_strategy: identifierStrategy });
     await stage({ stage: "checking_duplicate" });
     const modalityWorkflow = inbox.workflowSource === "modality";
@@ -956,8 +971,7 @@ export async function manuallyAssignRequestScan(id: number, appointmentId: numbe
     const job = jobResult.rows[0];
     if (!job || job.status !== "failed" || job.dismissed_at) throw new HttpError(409, "Restore this dismissed request scan before manual assignment.");
     if (job.attachment_completed_at || job.document_id) throw new HttpError(409, "This document is already attached and cannot be assigned again.");
-    const context = job as RequestScanJob & { workflow_source?: "reception" | "modality"; modality_id?: number | null };
-    const eligible = await client.query<EligibleAppointment>(`select b.id,b.patient_id,b.modality_id,('V2-' || lpad(b.id::text,6,'0')) as accession_number from appointments_v2.bookings b where b.id=$1 and b.status not in ('cancelled','discontinued','voided') and ($2::text <> 'modality' or b.modality_id=$3)`, [appointmentId, context.workflow_source ?? "reception", context.modality_id ?? null]);
+    const eligible = await client.query<EligibleAppointment>(`select b.id,b.patient_id,b.modality_id,('V2-' || lpad(b.id::text,6,'0')) as accession_number from appointments_v2.bookings b where b.id=$1 and b.status not in ('cancelled','discontinued','voided')`, [appointmentId]);
     if (!eligible.rows[0]) throw new HttpError(404, "No eligible appointment matches this selection.");
     const appointment = eligible.rows[0];
     const { rows } = await client.query<RequestScanJob>(`update request_scan_jobs set status='pending',processing_stage='queued',manual_assignment_requested_at=coalesce(manual_assignment_requested_at,now()),manual_assignment_requested_by=coalesce(manual_assignment_requested_by,$2),manual_assignment_confirmed_at=now(),manual_assignment_appointment_id=$3,appointment_id=$3,error_message=null,failure_category=null,completed_at=null,dismissed_at=null,dismissed_by=null,dismiss_reason=null,updated_at=now() where id=$1 returning *`, [id, userId, appointment.id]);

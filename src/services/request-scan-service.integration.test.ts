@@ -226,40 +226,40 @@ test("Failed-file identity verification requires both exact size and SHA-256", a
   }
 });
 
-test("modality ingestion attaches clinical documents, rejects modality mismatches, and permits multiple files per appointment", async (t) => {
+test("modality ingestion archives clinical documents under the matched appointment modality", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const ct = await createBooking("scheduled");
-  const mri = await createBooking("scheduled");
+  const us = await createBooking("scheduled");
   const ctCode = `CT${suffix().slice(-6)}`;
+  const usCode = `US${suffix().slice(-6)}`;
   await pool.query("update modalities set code=$2 where id=$1", [ct.modalityId, ctCode]);
+  await pool.query("update modalities set code=$2 where id=$1", [us.modalityId, usCode]);
   const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
   const firstId = await createModalityJob(ct.modalityId, ctCode, "ct-first.jpg");
   const secondId = await createModalityJob(ct.modalityId, ctCode, "ct-second.jpg");
-  const mismatchId = await createModalityJob(ct.modalityId, ctCode, "ct-mismatch.jpg");
-  const documentsBeforeMismatch = await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1", [mri.id]);
-  const linksBeforeMismatch = await pool.query<{ count: number }>("select count(*)::int count from document_appointment_links where appointment_id=$1", [mri.id]);
+  const crossModalityId = await createModalityJob(ct.modalityId, ctCode, "ct-to-us.jpg");
 
   const first = await processRequestScanJob(firstId, settings, dependencies({ ok: true, accession: ct.accession }, { uploads }));
   const second = await processRequestScanJob(secondId, settings, dependencies({ ok: true, accession: ct.accession }, { uploads }));
-  const mismatch = await processRequestScanJob(mismatchId, settings, dependencies({ ok: true, accession: mri.accession }, { uploads }));
+  const crossModality = await processRequestScanJob(crossModalityId, settings, dependencies({ ok: true, accession: us.accession }, { uploads }));
 
   assert.equal(first.status, "processed");
   assert.equal(second.status, "processed");
-  assert.equal(uploads.length, 2);
+  assert.match(first.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${ctCode}[\\\\/]Processed`));
+  assert.equal(uploads.length, 3);
   assert.equal((uploads[0]!.payload as DocumentUploadPayload).documentType, "clinical_document");
   assert.equal((uploads[0]!.payload as DocumentUploadPayload).source, "modality_scan_automation");
   assert.equal((await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [ct.id])).rows[0]!.count, 2);
-  assert.equal(mismatch.status, "failed");
-  assert.equal(mismatch.failure_category, "modality_mismatch");
-  assert.match(mismatch.source_relative_path, /Failed/);
-  assert.match(mismatch.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${ctCode}[\\\\/]Failed`));
-  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1", [mri.id])).rows[0]!.count, documentsBeforeMismatch.rows[0]!.count);
-  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from document_appointment_links where appointment_id=$1", [mri.id])).rows[0]!.count, linksBeforeMismatch.rows[0]!.count);
-  assert.equal((await pool.query("select 1 from request_scan_job_appointments where request_scan_job_id=$1", [mismatchId])).rowCount, 0);
+  assert.equal(crossModality.status, "processed");
+  assert.notEqual(crossModality.failure_category, "modality_mismatch");
+  assert.equal(Number(crossModality.modality_id), ct.modalityId);
+  assert.match(crossModality.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed`));
+  assert.equal((await pool.query<{ count: number }>("select count(*)::int count from documents where v2_booking_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [us.id])).rows[0]!.count, 1);
+  assert.equal((await pool.query("select 1 from request_scan_job_appointments where request_scan_job_id=$1 and appointment_id=$2", [crossModalityId, us.id])).rowCount, 1);
   const ctJobs = await listRequestScanJobs("all", undefined, "modality", ct.modalityId);
-  assert.ok([firstId, secondId, mismatchId].every((id) => ctJobs.some((job) => Number(job.id) === id)));
+  assert.ok([firstId, secondId, crossModalityId].every((id) => ctJobs.some((job) => Number(job.id) === id)));
   assert.ok(ctJobs.every((job) => job.workflow_source === "modality" && Number(job.modality_id) === ct.modalityId));
-  assert.ok(!(await listRequestScanJobs("all", undefined, "reception")).some((job) => [firstId, secondId, mismatchId].includes(Number(job.id))));
+  assert.ok(!(await listRequestScanJobs("all", undefined, "reception")).some((job) => [firstId, secondId, crossModalityId].includes(Number(job.id))));
 });
 
 function fingerprintedRequestScanDependencies(accession: string, content: string, options: { failAllMoves?: boolean; recognitionCalls?: string[] } = {}): RequestScanServiceDependencies {
@@ -409,11 +409,13 @@ test("modality fingerprint reuse requires the matching SHA-256 and byte size", a
 
 test("concurrent identical modality jobs create one document and an archive retry stays archive-only", async (t) => {
   if (!(await ensureDatabase(t))) return;
-  const booking = await createBooking(); const code = `DC${suffix().slice(-6)}`;
+  const sourceCt = await createBooking(); const booking = await createBooking();
+  const ctCode = `CT${suffix().slice(-6)}`; const usCode = `US${suffix().slice(-6)}`;
   const filename = `concurrent-${suffix()}.pdf`;
-  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, code]);
-  const firstId = await createModalityJob(booking.modalityId, code, filename);
-  const secondId = await createModalityJob(booking.modalityId, code, filename, `ModalityDocuments\\${code}\\Incoming\\parallel\\${filename}`);
+  await pool.query("update modalities set code=$2 where id=$1", [sourceCt.modalityId, ctCode]);
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, usCode]);
+  const firstId = await createModalityJob(sourceCt.modalityId, ctCode, filename);
+  const secondId = await createModalityJob(sourceCt.modalityId, ctCode, filename, `ModalityDocuments\\${ctCode}\\Incoming\\parallel\\${filename}`);
   const settingsWithRoot = { ...settings, modalityDocumentsRootSubfolder: "ModalityDocuments" };
   const recognitionCalls: string[] = [];
   const [first, second] = await Promise.all([
@@ -421,6 +423,8 @@ test("concurrent identical modality jobs create one document and an archive retr
     processRequestScanJob(secondId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "concurrent-content", { recognitionCalls })),
   ]);
   assert.deepEqual([first.status, second.status].sort(), ["duplicate", "processed"]);
+  assert.ok([first, second].some((job) => new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed`).test(job.source_relative_path)));
+  assert.ok([first, second].some((job) => new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed[\\\\/]Duplicates`).test(job.source_relative_path)));
   assert.equal((await pool.query("select id from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId])).rowCount, 1);
   const stored = await pool.query<DocumentRow>("select * from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId]);
   const storedPath = resolveStoredPath(stored.rows[0].stored_path);
@@ -428,12 +432,13 @@ test("concurrent identical modality jobs create one document and an archive retr
   assert.equal((await fs.readdir(path.dirname(storedPath))).filter((name) => name.endsWith(`-${filename}`)).length, 1);
   assert.equal((await pool.query("select id from clinical_document_exports where appointment_id=$1", [booking.id])).rowCount, 1);
 
-  const failedId = await createModalityJob(booking.modalityId, code, filename);
+  const failedId = await createModalityJob(sourceCt.modalityId, ctCode, filename);
   const failed = await processRequestScanJob(failedId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "concurrent-content", { failAllMoves: true, recognitionCalls }));
   assert.equal(failed.status, "failed"); assert.equal(failed.attachment_created, false);
   await retryRequestScanJob(failedId, { readSettings: async () => settingsWithRoot, moveFile: async () => { throw new Error("duplicate archive retry must not return to Incoming"); } });
   const resumed = await processRequestScanJob(failedId, settingsWithRoot, modalityDuplicateDependencies(booking.accession, "different-content", { recognitionCalls }));
   assert.equal(resumed.status, "duplicate");
+  assert.match(resumed.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed[\\\\/]Duplicates`));
   assert.equal(recognitionCalls.length, 3);
   assert.equal((await pool.query("select id from documents where patient_id=$1 and document_type='clinical_document' and source='modality_scan_automation'", [booking.patientId])).rowCount, 1);
 });
@@ -553,6 +558,29 @@ test("same-patient multi-appointment identifiers create one document and link ev
   assert.equal(new Set(jobLinks.rows.map((row) => Number(row.patient_id))).size, 1);
   assert.equal((await getRequestScanJob(jobId)).matchedAppointments?.length, 2);
   await fs.rm(storedPath, { force: true });
+});
+
+test("modality ingestion fails before attachment when same-patient matches span archive modalities", async (t) => {
+  if (!(await ensureDatabase(t))) return;
+  const sourceCt = await createBooking();
+  const first = await createBooking();
+  const second = await createBookingForSamePatient(first.id);
+  const otherModality = await createBooking();
+  const ctCode = `CT${suffix().slice(-6)}`;
+  const usCode = `US${suffix().slice(-6)}`;
+  const mriCode = `MRI${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [sourceCt.modalityId, ctCode]);
+  await pool.query("update modalities set code=$2 where id=$1", [first.modalityId, usCode]);
+  await pool.query("update appointments_v2.bookings set modality_id=$2 where id=$1", [second.id, otherModality.modalityId]);
+  await pool.query("update modalities set code=$2 where id=$1", [otherModality.modalityId, mriCode]);
+  const jobId = await createModalityJob(sourceCt.modalityId, ctCode, "cross-archive-conflict.jpg");
+
+  const failed = await processRequestScanJob(jobId, settings, dependencies({ ok: true, accessions: [first.accession, second.accession], qrTokens: [] }));
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.failure_category, "identifier_conflict");
+  assert.match(failed.error_message || "", /different archive modalities/);
+  assert.equal(failed.document_id, null);
+  assert.match(failed.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${ctCode}[\\\\/]Failed`));
 });
 
 test("different-patient and unresolved internal identifiers fail before attachment", async (t) => {
@@ -1159,34 +1187,36 @@ test("unexpected Request Scan failures retain safe database diagnostics", async 
   assert.doesNotMatch(JSON.stringify(failureDiagnostics), /John Doe|sensitive|source\.pdf/i);
 });
 
-test("manual assignment rejects a different-modality appointment without mutating the modality job", async (t) => {
+test("manual assignment accepts a different-modality appointment and archives there", async (t) => {
   if (!(await ensureDatabase(t))) return;
   const ct = await createBooking();
-  const mri = await createBooking();
+  const us = await createBooking();
   const ctCode = `CT${suffix().slice(-6)}`;
+  const usCode = `US${suffix().slice(-6)}`;
   await pool.query("update modalities set code=$2 where id=$1", [ct.modalityId, ctCode]);
+  await pool.query("update modalities set code=$2 where id=$1", [us.modalityId, usCode]);
   const jobId = await createModalityJob(ct.modalityId, ctCode, "ct-manual-mismatch.jpg");
   await pool.query("update request_scan_jobs set status='failed',failure_category='recognition',error_message='Manual review required',completed_at=now() where id=$1", [jobId]);
-  const before = await getRequestScanJob(jobId);
 
-  await assert.rejects(
-    () => manuallyAssignRequestScan(jobId, mri.id, ct.userId, settings, dependencies({ ok: false, reason: "no_barcode" })),
-    /No eligible appointment matches this selection/,
-  );
-
-  const after = await getRequestScanJob(jobId);
-  assert.equal(after.status, before.status);
-  assert.equal(after.failure_category, before.failure_category);
-  assert.equal(after.error_message, before.error_message);
-  assert.equal(after.appointment_id, null);
-  assert.equal(after.manual_assignment_appointment_id, null);
-  assert.equal(after.manual_assignment_requested_at, null);
+  const assigned = await manuallyAssignRequestScan(jobId, us.id, ct.userId, settings);
+  const processed = await processRequestScanJob(jobId, settings, dependencies({ ok: false, reason: "no_barcode" }));
+  assert.equal(assigned.status, "pending");
+  assert.equal(processed.status, "processed");
+  assert.equal(Number(processed.appointment_id), us.id);
+  assert.equal(Number(processed.modality_id), ct.modalityId);
+  assert.match(processed.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed`));
+  assert.equal((await pool.query("select 1 from documents where id=$1 and v2_booking_id=$2 and document_type='clinical_document' and source='modality_scan_automation'", [processed.document_id, us.id])).rowCount, 1);
 });
 
 test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint without attaching again", async (t) => {
   if (!(await ensureDatabase(t))) return;
+  const sourceCt = await createBooking();
   const booking = await createBooking();
-  const jobId = await createJob();
+  const ctCode = `CT${suffix().slice(-6)}`;
+  const usCode = `US${suffix().slice(-6)}`;
+  await pool.query("update modalities set code=$2 where id=$1", [sourceCt.modalityId, ctCode]);
+  await pool.query("update modalities set code=$2 where id=$1", [booking.modalityId, usCode]);
+  const jobId = await createModalityJob(sourceCt.modalityId, ctCode, `retry-${suffix()}.jpg`);
   const uploads: Array<{ payload: unknown; userId: string | number | null }> = [];
   const first = dependencies({ ok: true, accession: booking.accession }, { failAllMoves: true, uploads });
 
@@ -1194,6 +1224,7 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(failed.status, "failed");
   assert.equal(uploads.length, 1);
   assert.ok(failed.attachment_completed_at); assert.ok(failed.document_id);
+  assert.match(failed.intended_destination_path || "", new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed`));
   const originalError = failed.error_message;
   const originalCategory = failed.failure_category;
   const originalUpdatedAt = failed.updated_at;
@@ -1224,6 +1255,8 @@ test("after attachment succeeds and SMB moves fail, retry resumes the checkpoint
   assert.equal(resumed.status, "processed");
   assert.equal(uploads.length, 1);
   assert.equal(recognitionCalls.length, 0);
+  assert.match(resumed.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${usCode}[\\\\/]Processed`));
+  assert.doesNotMatch(resumed.source_relative_path, new RegExp(`ModalityDocuments[\\\\/]${ctCode}[\\\\/]Processed`));
   assert.equal((await pool.query("select count(*)::int as count from documents where id=$1", [failed.document_id])).rows[0].count, 1);
   assert.equal((await pool.query("select 1 from document_appointment_links where document_id=$1 and appointment_id=$2", [failed.document_id, booking.id])).rowCount, 1);
 });
