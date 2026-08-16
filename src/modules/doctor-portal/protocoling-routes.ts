@@ -13,6 +13,7 @@ import {
   getProtocolingSonicDicomRedirect,
   getProtocolingHistorySonicDicomRedirect,
   getProtocolingPatientHistory,
+  searchProtocolingHistoricalPacsPatientId,
   listProtocolDocumentAnnotations,
   createProtocolDocumentAnnotation,
   updateProtocolDocumentAnnotation,
@@ -146,6 +147,17 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     await requireProtocolingAccess(req);
     res.json(await getProtocolingPatientHistory(positiveInteger(req.params.appointmentId, "appointmentId")));
+  })
+);
+
+router.get(
+  "/appointments/:appointmentId/history/old-patient-id",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    await requireProtocolingAccess(req);
+    res.json(await searchProtocolingHistoricalPacsPatientId(
+      positiveInteger(req.params.appointmentId, "appointmentId"),
+      asString(req.query.patientId),
+    ));
   })
 );
 

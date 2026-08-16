@@ -23,6 +23,7 @@ import {
   fetchDoctorProtocolingAppointments,
   fetchRequestDocumentProtocolPolicy,
   fetchProtocolingPatientHistory,
+  searchProtocolingHistoricalPacsPatientId,
   fetchProtocolLibraryAnatomyRegions,
   fetchProtocolLibraryCtPhasePresets,
   fetchProtocolLibraryMriSequencePresets,
@@ -54,11 +55,11 @@ import {
   type ProtocolLibraryProtocolPayload,
   type ProtocolAnatomyRegionPayload,
 } from "@/lib/api-hooks";
-import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
+import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, HistoricalPacsCandidate, ImagingScanner, MriSequencePreset, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
 import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { formatDateLy } from "@/lib/date-format";
-import { Badge } from "@/components/shared";
+import { Badge, Button, Input } from "@/components/shared";
 import { MriPrimaryScreeningBadges } from "@/components/appointments/mri-primary-screening-badges";
 import { rescheduleV2Booking, useV2ExamTypes } from "@/v2/appointments/api";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
@@ -78,6 +79,28 @@ function addDays(isoDate: string, days: number): string {
 
 function protocolingPatientName(appointment: DoctorProtocolingAppointment): string {
   return appointment.patientEnglishName || appointment.patientArabicName || appointment.patientMrn || `Patient ${appointment.patientId}`;
+}
+
+function HistoricalPacsCandidates({ candidates }: { candidates: HistoricalPacsCandidate[] }) {
+  if (!candidates.length) return <p className="text-xs text-muted-foreground">No historical PACS candidates found.</p>;
+  return <div className="space-y-2">{candidates.map((candidate) => {
+    const label = candidate.classification === "exact" ? "Exact Patient ID" : candidate.classification === "strong_demographic" ? "Strong demographic match" : candidate.classification === "ambiguous" ? "Ambiguous candidate" : "Possible match";
+    return <details key={candidate.historicalPatientId} className="rounded-lg border border-amber-300 bg-amber-50/60 p-2 text-xs">
+      <summary className="cursor-pointer list-none font-semibold text-amber-950">
+        <span className="me-2 rounded-full border border-amber-400 px-1.5 py-0.5 text-[10px] uppercase">{candidate.authoritative ? "Exact known identity" : "Non-authoritative candidate"}</span>
+        {candidate.patientName || "Name unavailable"} · Patient ID {candidate.historicalPatientId}
+      </summary>
+      <div className="mt-2 space-y-1 text-amber-950/80">
+        <p>{label} · {candidate.studyCount} {candidate.studyCount === 1 ? "study" : "studies"}</p>
+        <p>DOB: {candidate.patientBirthDate || "Unavailable"} · Sex: {candidate.patientSex || "Unavailable"}</p>
+        <p>Reasons: {candidate.reasons.join(", ").replaceAll("_", " ")}</p>
+        <div className="mt-2 space-y-1 border-t border-amber-200 pt-2">{candidate.studies.map((study) => <div key={study.orthancStudyId} className="rounded border border-amber-200 bg-white/70 p-2">
+          <p className="font-medium">{study.studyDate || "Unknown date"} · {study.studyDescription || "Study"}</p>
+          <p>{study.modalitiesInStudy.join(", ") || "Modality unavailable"}{study.accessionNumber ? ` · Accession ${study.accessionNumber}` : ""}</p>
+        </div>)}</div>
+      </div>
+    </details>;
+  })}</div>;
 }
 
 type LibrarySection = "protocols" | "anatomy" | "scanners" | "ctPhases" | "mriSequences";
@@ -1256,6 +1279,7 @@ function ProtocolAssignmentModal({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(5);
   const [selectedHistoryModalities, setSelectedHistoryModalities] = useState<string[]>([]);
+  const [oldPacsPatientId, setOldPacsPatientId] = useState("");
   const [annotationDirty, setAnnotationDirty] = useState(false);
   const [documentExpanded, setDocumentExpanded] = useState(false);
   const [additionalInstructionsOpen, setAdditionalInstructionsOpen] = useState(Boolean(existing?.scannerId || existing?.protocolNotes || existing?.contrastNotes));
@@ -1341,6 +1365,9 @@ function ProtocolAssignmentModal({
     queryKey: ["doctor", "protocoling", "history", appointment.patientId, appointment.appointmentId],
     queryFn: () => fetchProtocolingPatientHistory(appointment.appointmentId),
     enabled: historyOpen,
+  });
+  const oldPacsPatientIdMutation = useMutation({
+    mutationFn: () => searchProtocolingHistoricalPacsPatientId(appointment.appointmentId, oldPacsPatientId),
   });
   const historyItems = historyQuery.data?.items ?? [];
   const historyModalities = useMemo(() => [...new Set(historyItems.flatMap((item) => item.modalities))].sort(), [historyItems]);
@@ -1495,6 +1522,18 @@ function ProtocolAssignmentModal({
                   <div className="mt-3 space-y-2">{filteredHistory.slice(0, historyLimit).map((history) => { const firstModality = history.modalities[0]; const accent = firstModality === "CT" ? "border-l-sky-200" : firstModality === "MRI" ? "border-l-violet-200" : firstModality === "US" ? "border-l-emerald-200" : "border-l-slate-200"; const sourceClass = history.source === "rispro_pacs" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : history.source === "rispro_only" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700"; const sourceLabel = history.source === "rispro_pacs" ? "PACS" : history.source === "rispro_only" ? "Not in PACS" : "PACS only"; const showSource = historyQuery.data?.pacsStatus === "available" || history.source !== "rispro_only"; const hasPacsStudy = history.source === "rispro_pacs" || history.source === "pacs_only"; return <div key={`${history.appointmentId ?? "pacs"}-${history.orthancStudyId ?? history.accessionNumber}`} className={`rounded-lg border border-border border-l-2 p-2 text-xs ${accent}`}><p className="font-semibold">{history.date ? formatDateLy(history.date) : "Unknown date"} · {history.description ?? "Study"}</p>{history.accessionNumber ? <p className="mt-1 text-muted-foreground">Accession: {history.accessionNumber}</p> : null}<div className="mt-2 flex flex-wrap gap-1">{history.modalities.map((modality) => <span key={modality} className={`rounded-full border px-1.5 py-0.5 text-[10px] ${modality === "CT" ? "border-sky-200 bg-sky-50 text-sky-700" : modality === "MRI" ? "border-violet-200 bg-violet-50 text-violet-700" : modality === "US" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{modality}</span>)}{showSource ? <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${sourceClass}`}>{sourceLabel}</span> : null}</div><div className="mt-2 flex flex-wrap gap-1">{hasPacsStudy && history.accessionNumber ? <a href={history.appointmentId ? `/api/doctor/protocoling/appointments/${history.appointmentId}/open-sonicdicom?scope=study` : `/api/doctor/protocoling/history/open-sonicdicom?accession=${encodeURIComponent(history.accessionNumber)}`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">SonicDICOM</a> : null}{hasPacsStudy && history.accessionNumber ? <a href={buildRadiantPacsTagUrl("00080050", history.accessionNumber)} className="rounded border px-1.5 py-1 font-semibold">RadiAnt</a> : null}{history.appointmentId && history.reportAvailable ? <a href={`/api/doctor/protocoling/appointments/${history.appointmentId}/open-report`} target="_blank" rel="noopener noreferrer" className="rounded border px-1.5 py-1 font-semibold">Open report</a> : null}</div></div>; })}</div>
                 </>}
                 {filteredHistory.length > historyLimit ? <button type="button" className="mt-3 text-xs font-semibold text-accent" onClick={() => setHistoryLimit((current) => current + 10)}>Show more</button> : null}
+                <section className="mt-4 border-t border-border pt-3" aria-label="Possible historical PACS matches">
+                  <h5 className="text-sm font-semibold">Possible historical PACS matches</h5>
+                  <p className="mt-1 text-xs text-muted-foreground">These are discovery candidates only. They are not attached to this RISpro patient and no PACS data is changed.</p>
+                  {historyQuery.data?.historicalPacsIndexStatus === "stale" || historyQuery.data?.historicalPacsIndexStatus === "unavailable" ? <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">The local PACS index is not current. Existing candidates are shown, but absence is not proof that a study is missing from PACS.</p> : null}
+                  <div className="mt-3"><HistoricalPacsCandidates candidates={historyQuery.data?.historicalCandidates ?? []} /></div>
+                  <form className="mt-3 flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (oldPacsPatientId.trim()) oldPacsPatientIdMutation.mutate(); }}>
+                    <label className="min-w-0 flex-1 text-xs font-semibold">Add/Search old Patient ID<Input aria-label="Old PACS Patient ID" className="mt-1 w-full" value={oldPacsPatientId} onChange={(event) => setOldPacsPatientId(event.target.value)} maxLength={256} /></label>
+                    <Button type="submit" variant="outline" size="sm" disabled={!oldPacsPatientId.trim() || oldPacsPatientIdMutation.isPending}>{oldPacsPatientIdMutation.isPending ? "Searching..." : "Search"}</Button>
+                  </form>
+                  {oldPacsPatientIdMutation.isError ? <p className="mt-2 text-xs text-red-700">Unable to search the local PACS index.</p> : null}
+                  {oldPacsPatientIdMutation.isSuccess ? <div className="mt-3"><HistoricalPacsCandidates candidates={oldPacsPatientIdMutation.data} /></div> : null}
+                </section>
                </aside> : <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}>
                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {existing && <div className="mb-3 rounded-lg border p-2" style={{ borderColor: "var(--border)" }}><p className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Current assignment</p><p className="mt-1 text-sm font-semibold">{existing.freeTextProtocol ? "Free-text protocol" : `${existing.protocolName ?? "Saved protocol"} v${existing.versionNumber ?? "-"}`}{existing.scannerName ? ` · ${existing.scannerName}` : ""}</p></div>}

@@ -16,6 +16,8 @@ export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinica
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
+export type OrthancChange = { sequence: number; changeType: string; resourceType: string | null; resourceId: string | null };
+export type OrthancChangesPage = { changes: OrthancChange[]; lastSequence: number; done: boolean };
 export type OrthancTransferredStudySummary = Pick<OrthancStudyDetails, "orthancStudyId" | "patientId" | "patientName" | "accessionNumber" | "studyDate" | "studyDescription" | "modalitiesInStudy">;
 export type OrthancStudyMatchResult = { status: "matched" | "not_found" | "ambiguous"; matchKey: "study_instance_uid" | "accession_number"; study: OrthancStudyDetails | null; reason?: string };
 export type OrthancStudyQuery = { studyInstanceUid?: string | null; accessionNumber?: string | null; expectedPatientIds?: string[]; expectedModalityCode?: string | null; expectedStudyDate?: string | null };
@@ -46,6 +48,27 @@ function first(...values: unknown[]): string | null { for (const value of values
 function tags(payload: unknown) { const row = record(payload); return { ...row, ...record(row.MainDicomTags), ...record(row.PatientMainDicomTags), ...record(row.Tags), ...record(row.NormalizedTags) }; }
 function count(value: unknown) { const parsed = Number(first(value) ?? 0); return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0; }
 function optionalNonNegativeNumber(value: unknown): number | null { const raw = first(value); if (raw == null) return null; const parsed = Number(raw); return Number.isFinite(parsed) && parsed >= 0 ? parsed : null; }
+function studyDetails(payload: unknown, orthancStudyId: string, statistics: unknown = {}): OrthancStudyDetails {
+  const detailRow = record(payload);
+  const row = { ...detailRow, ...record(statistics) };
+  const dicom = tags(row);
+  const requestedTags = record(detailRow.RequestedTags);
+  const series = Array.isArray(detailRow.Series) ? detailRow.Series : [];
+  return {
+    orthancStudyId,
+    studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"], requestedTags.StudyInstanceUID),
+    accessionNumber: first(dicom.AccessionNumber, dicom["00080050"], requestedTags.AccessionNumber),
+    patientId: first(dicom.PatientID, dicom["00100020"], requestedTags.PatientID),
+    patientName: first(dicom.PatientName, dicom["00100010"], requestedTags.PatientName),
+    patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"], requestedTags.PatientBirthDate),
+    patientSex: first(dicom.PatientSex, dicom["00100040"], requestedTags.PatientSex),
+    studyDate: first(dicom.StudyDate, dicom["00080020"], requestedTags.StudyDate),
+    studyDescription: first(dicom.StudyDescription, dicom["00081030"], requestedTags.StudyDescription),
+    modalitiesInStudy: (first(requestedTags.ModalitiesInStudy, requestedTags["00080061"], dicom.ModalitiesInStudy, dicom["00080061"], dicom.Modality, dicom["00080060"]) || "").split("\\").filter(Boolean),
+    seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"] ?? series.length),
+    instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"] ?? requestedTags.NumberOfStudyRelatedInstances),
+  };
+}
 function routeSlug(value: string): string { return value.trim().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, ""); }
 function routeKeyHash(value: string): string { return createHash("sha256").update(value).digest("hex").slice(0, 10); }
 export function buildAuthoritativeOrthancRouteAliases(destinationKeys: string[]): Array<{ destinationKey: string; alias: string }> {
@@ -141,6 +164,26 @@ export class AuthoritativeOrthancClient {
     } catch (error) { if ((error as Error).name === "AbortError") throw new HttpError(502, "Authoritative Orthanc request timed out.", { code: "orthanc_timeout" }); if (error instanceof HttpError) throw error; if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|ENOTFOUND/i.test(String(error))) throw new HttpError(502, "Authoritative Orthanc is unavailable.", { code: "orthanc_unavailable" }); throw error; } finally { clearTimeout(timeout); }
   }
   async getSystem(): Promise<OrthancSystemInfo> { const row = record(await this.request("/system")); const version = first(row.Version, row.version); if (!version && !first(row.Name, row.name)) throw new HttpError(502, "Authoritative Orthanc returned an invalid system response."); return { name: first(row.Name, row.name, this.settings.displayName), version, apiVersion: first(row.ApiVersion, row.API_VERSION, row.apiVersion) }; }
+  async listStudyIds(): Promise<string[]> {
+    const payload = await this.request("/studies");
+    if (!Array.isArray(payload)) throw new HttpError(502, "Authoritative Orthanc returned an invalid study list.", { code: "orthanc_invalid_response" });
+    return payload.filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+  }
+  async getChanges(since: number, limit = 200): Promise<OrthancChangesPage> {
+    const safeSince = Number.isSafeInteger(since) && since >= 0 ? since : 0;
+    const safeLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    const payload = record(await this.request(`/changes?since=${safeSince}&limit=${safeLimit}`));
+    if (!Array.isArray(payload.Changes)) throw new HttpError(502, "Authoritative Orthanc returned an invalid changes page.", { code: "orthanc_invalid_response" });
+    const changes = payload.Changes.map(record).map((change) => ({
+      sequence: Number(change.Seq),
+      changeType: text(change.ChangeType),
+      resourceType: first(change.ResourceType),
+      resourceId: first(change.ID),
+    })).filter((change) => Number.isSafeInteger(change.sequence) && change.sequence >= 0);
+    const lastSequence = Number(payload.Last);
+    if (!Number.isSafeInteger(lastSequence) || lastSequence < 0) throw new HttpError(502, "Authoritative Orthanc returned an invalid changes cursor.", { code: "orthanc_invalid_response" });
+    return { changes, lastSequence, done: payload.Done === true };
+  }
   async listRemoteModalityKeys(): Promise<string[]> { const payload = await this.request("/modalities", {}, { allowDisabled: true }); return Array.isArray(payload) ? payload.map(text).filter(Boolean) : Object.keys(record(payload)); }
   async upsertRemoteModality(key: string, modality: { aet: string; host: string; port: number }): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ AET: modality.aet, Host: modality.host, Port: modality.port }) }); }
   async deleteRemoteModality(key: string): Promise<void> { if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) throw new HttpError(400, "Invalid Authoritative Orthanc modality alias."); await this.request(`/modalities/${encodeURIComponent(key)}`, { method: "DELETE" }, { allowDisabled: true, acceptableStatuses: [404] }); }
@@ -175,7 +218,13 @@ export class AuthoritativeOrthancClient {
     if (detail.instanceCount < 1) throw new HttpError(409, "Study has no instances in Authoritative Orthanc.", { code: "study_empty" });
     return detail;
   }
-  async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); const detailRow = record(detail); const row = { ...detailRow, ...record(statistics) }; const dicom = tags(row); const requestedTags = record(detailRow.RequestedTags); return { orthancStudyId, studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"]), accessionNumber: first(dicom.AccessionNumber, dicom["00080050"]), patientId: first(dicom.PatientID, dicom["00100020"]), patientName: first(dicom.PatientName, dicom["00100010"]), patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"]), patientSex: first(dicom.PatientSex, dicom["00100040"]), studyDate: first(dicom.StudyDate, dicom["00080020"]), studyDescription: first(dicom.StudyDescription, dicom["00081030"]), modalitiesInStudy: (first(dicom.ModalitiesInStudy, dicom["00080061"], requestedTags.ModalitiesInStudy, requestedTags["00080061"], dicom.Modality, dicom["00080060"]) || "").split("\\").filter(Boolean), seriesCount: count(row.SeriesCount ?? row.CountSeries ?? dicom.NumberOfStudyRelatedSeries ?? dicom["00201206"]), instanceCount: count(row.InstanceCount ?? row.CountInstances ?? dicom.NumberOfStudyRelatedInstances ?? dicom["00201208"]) }; }
+  async getStudyForIndex(orthancStudyId: string): Promise<OrthancStudyDetails | null> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID.");
+    const detail = await this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`, {}, { acceptableStatuses: [404] });
+    if (!detail) return null;
+    return studyDetails(detail, orthancStudyId);
+  }
+  async getStudy(orthancStudyId: string): Promise<OrthancStudyDetails> { if (!/^[A-Za-z0-9_-]{1,256}$/.test(orthancStudyId)) throw new HttpError(400, "Invalid Orthanc study ID."); const [detail, statistics] = await Promise.all([this.request(`/studies/${encodeURIComponent(orthancStudyId)}?requestedTags=ModalitiesInStudy`), this.request(`/studies/${encodeURIComponent(orthancStudyId)}/statistics`).catch(() => ({}))]); return studyDetails(detail, orthancStudyId, statistics); }
   async listStudiesByPatientId(patientId: string): Promise<OrthancStudyDetails[]> {
     const requestedPatientId = text(patientId);
     if (!requestedPatientId) throw new HttpError(400, "DICOM Patient ID is required.");

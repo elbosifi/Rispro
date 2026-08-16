@@ -5,7 +5,7 @@ import { buildSonicDicomReportBrowserUrl, buildSonicDicomStaffViewerUrl, checkSo
 import { readSonicDicomReportSettings } from "../../services/sonicdicom-report-settings.js";
 import { scheduleBookingWorklistSync } from "../../services/dicom-service.js";
 import { PROTOCOLING_MODALITY_SQL, protocolingModalityAppliesSql } from "../../services/protocoling-modality.js";
-import { createAuthoritativeOrthancClient } from "../../services/authoritative-orthanc-service.js";
+import { discoverHistoricalPacsForPatient, lookupHistoricalPacsByPatientId } from "../../services/historical-pacs-index-service.js";
 import { reconcileProtocolingPatientHistory } from "./protocoling-history.js";
 import {
   assertRequestDocumentProtocolEligibility,
@@ -506,13 +506,25 @@ export async function getProtocolingPatientHistory(appointmentId: number) {
     appointmentStatus: String(value.appointment_status),
     reportAvailable: Boolean(value.report_available),
   }));
-  if (!current.patientDicomId?.trim()) return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber), pacsStatus: "patient_id_unavailable" as const };
   try {
-    const pacs = await (await createAuthoritativeOrthancClient()).listStudiesByPatientId(current.patientDicomId);
-    return { items: reconcileProtocolingPatientHistory(rispro, pacs, current.accessionNumber), pacsStatus: "available" as const };
+    const discovery = await discoverHistoricalPacsForPatient(current.patientId);
+    const pacsStatus = discovery.knownPatientIds.length === 0
+      ? "patient_id_unavailable" as const
+      : discovery.indexStatus === "ready" ? "available" as const : "unavailable" as const;
+    return {
+      items: reconcileProtocolingPatientHistory(rispro, discovery.exactStudies, current.accessionNumber),
+      pacsStatus,
+      historicalPacsIndexStatus: discovery.indexStatus,
+      historicalCandidates: discovery.candidates,
+    };
   } catch {
-    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber), pacsStatus: "unavailable" as const };
+    return { items: reconcileProtocolingPatientHistory(rispro, [], current.accessionNumber), pacsStatus: "unavailable" as const, historicalPacsIndexStatus: "unavailable" as const, historicalCandidates: [] };
   }
+}
+
+export async function searchProtocolingHistoricalPacsPatientId(appointmentId: number, oldPatientId: string) {
+  if (!(await getProtocolingAppointment(appointmentId))) throw new HttpError(404, "Appointment not found.");
+  return { candidates: await lookupHistoricalPacsByPatientId(oldPatientId) };
 }
 
 async function assertProtocolingDocument(documentId: number): Promise<void> {

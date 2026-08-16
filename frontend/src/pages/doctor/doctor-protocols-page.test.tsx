@@ -35,7 +35,7 @@ const appointment: DoctorProtocolingAppointment = {
   assignment: null,
 };
 
-const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
+const { mockCreateAssignment, mockFetchAppointments, mockFetchAppointmentDetail, mockFetchProtocolPolicy, mockFetchProtocolingPatientHistory, mockSearchHistoricalPacsPatientId, mockGetAppointmentById, mockPatientSummary, mockRescheduleBooking, mockUpdateReportRequirement } = vi.hoisted(() => ({ mockCreateAssignment: vi.fn(), mockFetchAppointments: vi.fn(), mockFetchAppointmentDetail: vi.fn(), mockFetchProtocolPolicy: vi.fn(), mockFetchProtocolingPatientHistory: vi.fn(), mockSearchHistoricalPacsPatientId: vi.fn(), mockGetAppointmentById: vi.fn(), mockPatientSummary: vi.fn(), mockRescheduleBooking: vi.fn(), mockUpdateReportRequirement: vi.fn() }));
 
 vi.mock("@/lib/api-hooks", () => ({
   activateProtocolLibraryVersion: vi.fn(), cancelDoctorProtocolAssignment: vi.fn(), createDoctorProtocolAssignment: mockCreateAssignment,
@@ -47,6 +47,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorProtocolingAppointments: mockFetchAppointments,
   fetchRequestDocumentProtocolPolicy: mockFetchProtocolPolicy,
   fetchProtocolingPatientHistory: mockFetchProtocolingPatientHistory,
+  searchProtocolingHistoricalPacsPatientId: mockSearchHistoricalPacsPatientId,
   getAppointmentById: mockGetAppointmentById,
   fetchProtocolLibraryAnatomyRegions: vi.fn(async () => []), fetchProtocolLibraryCtPhasePresets: vi.fn(async () => []),
   fetchProtocolLibraryMriSequencePresets: vi.fn(async () => []), fetchProtocolLibraryVersionDetail: vi.fn(async () => null),
@@ -98,7 +99,9 @@ describe("Doctor protocoling request documents", () => {
     mockFetchAppointmentDetail.mockResolvedValue({ appointment, assignmentDetail: null });
     mockFetchProtocolPolicy.mockResolvedValue({ requireRequestDocumentForProtocolQueue: false, protocolQueueAppliesToAppointment: null, hasQualifyingRequestDocument: null });
     mockFetchProtocolingPatientHistory.mockClear();
-    mockFetchProtocolingPatientHistory.mockResolvedValue({ items: [], pacsStatus: "available" });
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ items: [], pacsStatus: "available", historicalPacsIndexStatus: "ready", historicalCandidates: [] });
+    mockSearchHistoricalPacsPatientId.mockReset();
+    mockSearchHistoricalPacsPatientId.mockResolvedValue([]);
     mockGetAppointmentById.mockResolvedValue(appointment);
     mockPatientSummary.mockReturnValue({ data: { id: 9 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateAssignment.mockReset();
@@ -254,6 +257,28 @@ describe("Doctor protocoling request documents", () => {
     expect(history.getByText("PACS history could not be checked because Patient ID is unavailable.")).toBeTruthy();
     expect(within(row).queryByRole("link", { name: "SonicDICOM" })).toBeNull();
     expect(within(row).queryByRole("link", { name: "RadiAnt" })).toBeNull();
+  });
+
+  it("labels historical candidates as non-authoritative and performs exact old Patient ID lookup", async () => {
+    const candidate = {
+      historicalPatientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M",
+      classification: "possible", reasons: ["fuzzy_english_name"], authoritative: false, matchRank: 9, nameSimilarity: 0.74,
+      phoneticMatchCount: 2, studyCount: 1, studies: [{ orthancStudyId: "old-study", studyInstanceUid: "1.2.3", accessionNumber: "OLD-ACC", patientId: "OLD-77", patientName: "ALSIFI^SERAJ^ALI", patientBirthDate: "19800102", patientSex: "M", studyDate: "20240102", studyDescription: "Historical CT", modalitiesInStudy: ["CT"], seriesCount: 2, instanceCount: 20 }],
+    } as const;
+    mockFetchProtocolingPatientHistory.mockResolvedValue({ pacsStatus: "available", items: [], historicalPacsIndexStatus: "ready", historicalCandidates: [candidate] });
+    mockSearchHistoricalPacsPatientId.mockResolvedValue([{ ...candidate, classification: "exact", reasons: ["exact_patient_id"] }]);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
+    const panel = screen.getByRole("heading", { name: "Patient history" }).closest("aside")!;
+    const history = within(panel);
+    expect(await history.findByText("Possible historical PACS matches")).toBeTruthy();
+    expect(history.getByText("Non-authoritative candidate")).toBeTruthy();
+    expect(history.queryByRole("button", { name: /Attach|Migrate|Merge/i })).toBeNull();
+    await userEvent.type(history.getByRole("textbox", { name: "Old PACS Patient ID" }), "OLD-77");
+    await userEvent.click(history.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(mockSearchHistoricalPacsPatientId).toHaveBeenCalledWith(42, "OLD-77"));
+    expect((await history.findAllByText(/Patient ID OLD-77/)).length).toBeGreaterThanOrEqual(2);
   });
 
   it("shows the request-document queue policy only when enabled", async () => {

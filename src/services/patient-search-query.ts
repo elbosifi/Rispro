@@ -166,10 +166,18 @@ export const PATIENT_SEARCH_CANDIDATE_IDS_CTE = String.raw`
         && patient_english_name_dmetaphone_tokens($6)
   )`;
 
-export const PATIENT_SEARCH_PHONETIC_LATERALS = String.raw`
+export interface PatientNameSearchSqlFields {
+  rawArabic: string;
+  arabic: string;
+  arabicCompact: string;
+  english: string;
+}
+
+export function buildPatientNameSearchSql(fields: PatientNameSearchSqlFields) {
+  const phoneticLaterals = String.raw`
   cross join lateral (
     select
-      regexp_split_to_array(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ') as patient_tokens,
+      regexp_split_to_array(coalesce(${fields.english}, ''), ' ') as patient_tokens,
       regexp_split_to_array($6, ' ') as query_tokens
   ) as phonetic_names
   cross join lateral (
@@ -205,55 +213,40 @@ export const PATIENT_SEARCH_PHONETIC_LATERALS = String.raw`
       end
     ) as token_position(token_index)
   ) as phonetic_match`;
-
-export const PATIENT_SEARCH_MATCH_SQL = String.raw`
-  $1 = ''
-  or p.mrn ilike $2
-  or p.national_id ilike $2
-  or p.identifier_value ilike $2
-  or exists (
-    select 1
-    from patient_identifiers pi
-    where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
-  )
-  or p.phone_1 ilike $2
-  or p.phone_2 ilike $2
-  or p.arabic_full_name ilike $2
-  or p.normalized_arabic_name ilike $3
+  const matchSql = String.raw`
+  ${fields.rawArabic} ilike $2
+  or ${fields.arabic} ilike $3
   or (
     $13 <> ''
-    and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) <> ''
-    and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) ilike $14
+    and ${fields.arabicCompact} <> ''
+    and ${fields.arabicCompact} ilike $14
   )
-  or lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ilike $17
+  or ${fields.english} ilike $17
   or (
     $11 <> ''
     and (
-      lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11
-      or p.normalized_arabic_name ~* $12
+      ${fields.english} ~* $11
+      or ${fields.arabic} ~* $12
     )
   )
-  or ($5 <> '' and p.normalized_arabic_name % $5 and similarity(p.normalized_arabic_name, $5) >= $15)
+  or ($5 <> '' and ${fields.arabic} % $5 and similarity(${fields.arabic}, $5) >= $15)
   or (
     $13 <> ''
-    and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) % $13
-    and similarity(
-      coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')),
-      $13
-    ) >= $15
+    and ${fields.arabicCompact} % $13
+    and similarity(${fields.arabicCompact}, $13) >= $15
   )
   or (
     $6 <> ''
-    and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) % $6
-    and similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) >= $16
+    and ${fields.english} % $6
+    and similarity(${fields.english}, $6) >= $16
   )
   or (
     $18::boolean
-    and strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) >= $19::real
+    and strict_word_similarity($6, ${fields.english}) >= $19::real
   )
   or (
     $20::boolean
-    and strict_word_similarity($5, p.normalized_arabic_name) >= $21::real
+    and strict_word_similarity($5, ${fields.arabic}) >= $21::real
   )
   or (
     $6 <> ''
@@ -262,6 +255,77 @@ export const PATIENT_SEARCH_MATCH_SQL = String.raw`
       else greatest(2, ceil(cardinality(phonetic_names.query_tokens) * 0.6)::int)
     end
   )`;
+  const rankSql = String.raw`
+  case
+    when ${fields.arabic} = $5 then 2
+    when $13 <> ''
+      and ${fields.arabicCompact} <> ''
+      and ${fields.arabicCompact} = $13 then 3
+    when ${fields.english} = $6 then 4
+    when split_part(${fields.arabic}, ' ', 1) = $5 then 5
+    when split_part(${fields.english}, ' ', 1) = $6 then 5
+    when ${fields.arabic} like $7 then 5
+    when ${fields.english} like $8 then 5
+    when split_part(${fields.arabic}, ' ', 1) like $7 then 6
+    when split_part(${fields.english}, ' ', 1) like $8 then 6
+    when $11 <> '' and ${fields.english} ~* $11 then 7
+    when $12 <> '' and ${fields.arabic} ~* $12 then 7
+    when $20::boolean
+      and strict_word_similarity($5, ${fields.arabic}) >= $21::real then 8
+    when (
+      ($5 <> '' and ${fields.arabic} % $5 and similarity(${fields.arabic}, $5) >= $15)
+      or (
+        $13 <> ''
+        and ${fields.arabicCompact} % $13
+        and similarity(${fields.arabicCompact}, $13) >= $15
+      )
+      or (
+        $6 <> ''
+        and ${fields.english} % $6
+        and similarity(${fields.english}, $6) >= $16
+      )
+      or (
+        $18::boolean
+        and strict_word_similarity($6, ${fields.english}) >= $19::real
+      )
+    ) then 9
+    when $6 <> '' and phonetic_match.matching_token_count > 0 then 10
+    when ${fields.arabic} like $9 then 11
+    when ${fields.english} like $10 then 11
+    else 12
+  end`;
+  const similaritySql = String.raw`
+  greatest(
+    case when $5 <> '' then similarity(${fields.arabic}, $5) else 0 end,
+    case when $13 <> '' then similarity(${fields.arabicCompact}, $13) else 0 end,
+    case when $6 <> '' then similarity(${fields.english}, $6) else 0 end,
+    case when $18::boolean then strict_word_similarity($6, ${fields.english}) else 0 end,
+    case when $20::boolean then strict_word_similarity($5, ${fields.arabic}) else 0 end
+  )`;
+  return { phoneticLaterals, matchSql, rankSql, similaritySql };
+}
+
+const canonicalPatientNameSearch = buildPatientNameSearchSql({
+  rawArabic: "p.arabic_full_name",
+  arabic: "p.normalized_arabic_name",
+  arabicCompact: "coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\\s+', '', 'g'))",
+  english: "lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g'))",
+});
+
+export const PATIENT_SEARCH_PHONETIC_LATERALS = canonicalPatientNameSearch.phoneticLaterals;
+
+export const PATIENT_SEARCH_MATCH_SQL = String.raw`
+  $1 = ''
+  or p.mrn ilike $2
+  or p.national_id ilike $2
+  or p.identifier_value ilike $2
+  or exists (
+    select 1 from patient_identifiers pi
+    where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
+  )
+  or p.phone_1 ilike $2
+  or p.phone_2 ilike $2
+  or ${canonicalPatientNameSearch.matchSql}`;
 
 export const PATIENT_SEARCH_RANK_SQL = String.raw`
   case
@@ -272,53 +336,10 @@ export const PATIENT_SEARCH_RANK_SQL = String.raw`
       or p.phone_1 ilike $2
       or p.phone_2 ilike $2
       or exists (
-        select 1
-        from patient_identifiers pi
+        select 1 from patient_identifiers pi
         where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
       ) then 1
-    when p.normalized_arabic_name = $5 then 2
-    when $13 <> ''
-      and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) <> ''
-      and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) = $13 then 3
-    when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 4
-    when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 5
-    when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 5
-    when p.normalized_arabic_name like $7 then 5
-    when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 5
-    when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 6
-    when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 6
-    when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 7
-    when $12 <> '' and p.normalized_arabic_name ~* $12 then 7
-    when $20::boolean
-      and strict_word_similarity($5, p.normalized_arabic_name) >= $21::real then 8
-    when (
-      ($5 <> '' and p.normalized_arabic_name % $5 and similarity(p.normalized_arabic_name, $5) >= $15)
-      or (
-        $13 <> ''
-        and coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')) % $13
-        and similarity(coalesce(p.normalized_arabic_name_compact, regexp_replace(p.normalized_arabic_name, '\s+', '', 'g')), $13) >= $15
-      )
-      or (
-        $6 <> ''
-        and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) % $6
-        and similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) >= $16
-      )
-      or (
-        $18::boolean
-        and strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) >= $19::real
-      )
-    ) then 9
-    when $6 <> '' and phonetic_match.matching_token_count > 0 then 10
-    when p.normalized_arabic_name like $9 then 11
-    when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 11
-    else 12
+    else ${canonicalPatientNameSearch.rankSql}
   end`;
 
-export const PATIENT_SEARCH_SIMILARITY_SQL = String.raw`
-  greatest(
-    case when $5 <> '' then similarity(p.normalized_arabic_name, $5) else 0 end,
-    case when $13 <> '' then similarity(coalesce(p.normalized_arabic_name_compact, ''), $13) else 0 end,
-    case when $6 <> '' then similarity(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), $6) else 0 end,
-    case when $18::boolean then strict_word_similarity($6, lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g'))) else 0 end,
-    case when $20::boolean then strict_word_similarity($5, p.normalized_arabic_name) else 0 end
-  )`;
+export const PATIENT_SEARCH_SIMILARITY_SQL = canonicalPatientNameSearch.similaritySql;

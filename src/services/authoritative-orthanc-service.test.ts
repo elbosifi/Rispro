@@ -333,6 +333,27 @@ test("finds studies by exact PatientID read-only and excludes mismatched metadat
   await assert.rejects(() => new service.AuthoritativeOrthancClient(enabled).listStudiesByPatientId(" "), /Patient ID is required/);
 });
 
+test("reads study inventory, index metadata, and change pages without Orthanc writes", async () => {
+  const calls: Array<{ path: string; search: string; method: string }> = [];
+  service.__setAuthoritativeOrthancFetchForTests(async (url, init) => {
+    const parsed = new URL(String(url));
+    calls.push({ path: parsed.pathname, search: parsed.search, method: init?.method || "GET" });
+    if (parsed.pathname === "/studies") return json(["study-1"]);
+    if (parsed.pathname === "/studies/study-1") return json({ ...study(), Series: ["series-1", "series-2"], PatientMainDicomTags: { PatientID: "OLD-1", PatientName: "ALSIFI^SERAJ^ALI", PatientBirthDate: "19800102", PatientSex: "M" }, RequestedTags: { ModalitiesInStudy: "CT\\SR" } });
+    if (parsed.pathname === "/changes") return json({ Changes: [{ Seq: 12, ChangeType: "StableStudy", ResourceType: "Study", ID: "study-1" }], Last: 12, Done: true });
+    throw new Error(`Unexpected ${parsed.pathname}`);
+  });
+  const client = new service.AuthoritativeOrthancClient(enabled);
+  assert.deepEqual(await client.listStudyIds(), ["study-1"]);
+  const indexed = await client.getStudyForIndex("study-1");
+  assert.equal(indexed?.patientName, "ALSIFI^SERAJ^ALI");
+  assert.deepEqual(indexed?.modalitiesInStudy, ["CT", "SR"]);
+  assert.equal(indexed?.seriesCount, 2);
+  assert.deepEqual(await client.getChanges(10, 100), { changes: [{ sequence: 12, changeType: "StableStudy", resourceType: "Study", resourceId: "study-1" }], lastSequence: 12, done: true });
+  assert.ok(calls.every((call) => call.method === "GET"));
+  assert.equal(calls.find((call) => call.path === "/changes")?.search, "?since=10&limit=100");
+});
+
 test("resolves transferred series, direct studies, and unavailable resources read-only", async () => {
   for (const [resource, expected, responses] of [
     ["series-1", "study-1", { "/series/series-1/study": json({ ID: "study-1", MainDicomTags: { PatientName: "Sample Patient", PatientID: "P-1042", AccessionNumber: "ACC-1042", StudyDescription: "CT chest", ModalitiesInStudy: "CT" } }) }],
