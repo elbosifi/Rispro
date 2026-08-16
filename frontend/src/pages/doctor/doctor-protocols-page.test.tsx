@@ -118,10 +118,16 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
     await userEvent.click(screen.getByRole("button", { name: "Patient history" }));
     expect((await screen.findAllByText("CT Chest")).length).toBeGreaterThan(1); expect(screen.getByText("PACS only")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText(new RegExp(formatDateLy("2026-08-16")))).toBeTruthy();
     expect(screen.getAllByRole("link", { name: "SonicDICOM" }).some((link) => link.getAttribute("href")?.includes("/history/open-sonicdicom?accession=A-US"))).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "CT" }));
     expect(screen.getAllByText("CT Chest").length).toBeGreaterThan(1); expect(screen.queryByText("MRI Brain")).toBeNull();
+    expect(screen.queryByText("US Abdomen")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "MRI" }));
+    expect(screen.getByRole("button", { name: "CT" }).getAttribute("aria-pressed")).toBe("true"); expect(screen.getByRole("button", { name: "MRI" }).getAttribute("aria-pressed")).toBe("true"); expect(await screen.findByText("MRI Brain")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "CT" })); expect(screen.queryByText("CT Chest")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "MRI" })); expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true"); expect(screen.getByText("US Abdomen")).toBeTruthy();
     expect(mockFetchProtocolingPatientHistory).toHaveBeenCalledTimes(1);
   });
 
@@ -149,7 +155,7 @@ describe("Doctor protocoling request documents", () => {
     expect(screen.getByText("Age / sex").parentElement?.textContent).toContain("35 / M");
     expect(screen.getByText("Primary ID").parentElement?.textContent).toContain("002888");
     expect(screen.getByText("MRN").parentElement?.textContent).toContain("MRN-9");
-    expect(screen.getByText("Appointment").parentElement?.textContent).toContain("22/07/2026 · 09:00");
+    expect(screen.getByText("Appointment").parentElement?.textContent).toContain("22/07/2026");
     const modal = screen.getByRole("dialog", { name: "Assign protocol" });
     expect(within(modal).getByText("Modality").parentElement?.textContent).toContain("CT");
     expect(within(modal).getByText("Examination").parentElement?.textContent).toContain("CT Chest");

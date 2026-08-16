@@ -31,3 +31,10 @@ test("normalizes modalities, validates PACS dates, and orders mixed history chro
   assert.equal(items.find((item) => item.accessionNumber === "BAD")?.date, null); assert.equal(items.find((item) => item.accessionNumber === "BAD2")?.date, null); assert.equal(items.find((item) => item.accessionNumber === "BAD3")?.date, null);
   assert.equal(items[0]?.appointmentId, 8);
 });
+
+test("accepts only complete DICOM or ISO PACS StudyDate formats", () => {
+  const items = reconcileProtocolingPatientHistory([], [pacs("DICOM", "20260816"), pacs("ISO", "2026-08-16"), pacs("MIXED1", "2026-0816"), pacs("MIXED2", "202608-16"), pacs("BAD", "20261340"), pacs("BADISO", "2026-13-40"), pacs("TEXT", "UNKNOWN")], "CURRENT");
+  const date = (accession: string) => items.find((item) => item.accessionNumber === accession)?.date;
+  assert.equal(date("DICOM"), "2026-08-16"); assert.equal(date("ISO"), "2026-08-16");
+  for (const accession of ["MIXED1", "MIXED2", "BAD", "BADISO", "TEXT"]) assert.equal(date(accession), null);
+});

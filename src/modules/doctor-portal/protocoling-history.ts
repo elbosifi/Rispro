@@ -6,7 +6,7 @@ const clean = (value: string | null | undefined) => value?.trim() || null;
 const modalities = (...values: Array<string | null | undefined>) => [...new Set(values.flatMap((value) => (value || "").split("\\").map((entry) => entry.trim().toUpperCase() === "MR" ? "MRI" : entry.trim().toUpperCase()).filter(Boolean)))];
 const studyDate = (value: string | null) => {
   const raw = clean(value);
-  const match = raw?.match(/^(\d{4})(?:-?)(\d{2})(?:-?)(\d{2})$/);
+  const match = raw?.match(/^\d{8}$/) ? [raw, raw!.slice(0, 4), raw!.slice(4, 6), raw!.slice(6, 8)] : raw?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
   const [, year, month, day] = match;
   const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
